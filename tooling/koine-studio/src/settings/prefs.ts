@@ -21,7 +21,6 @@ import {
     type Settings,
 } from "@/settings/persistence";
 import type { McpEndpoint } from "@/host/types";
-import { DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX } from "@/diagrams/diagramContract";
 import { setTheme } from "@/settings/theme";
 import {
     row,
@@ -29,12 +28,13 @@ import {
     toggle,
     select,
     metricInput,
-    langPicker,
 } from "@/settings/prefsControls";
 import { createScopeKit } from "@/settings/prefsSections/scopeKit";
 import type { SectionCtx } from "@/settings/prefsSections/types";
 import { buildAppearanceSection } from "@/settings/prefsSections/appearance";
 import { buildAboutSection } from "@/settings/prefsSections/about";
+import { buildEditorSection } from "@/settings/prefsSections/editor";
+import { buildOutputSection } from "@/settings/prefsSections/output";
 import { createJsonView } from "@/editor/editor";
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
 import {
@@ -100,22 +100,8 @@ export interface PrefsCallbacks {
     onKeybindingsChanged?(): void;
 }
 
-const FONT_MIN = 10;
-const FONT_MAX = 22;
-const FONT_STEP = 0.5;
-
-const LINE_HEIGHT_MIN = 1.2;
-const LINE_HEIGHT_MAX = 2.4;
-const LINE_HEIGHT_STEP = 0.1;
-
-// Indent width + assistant temperature bounds (#750); mirror the load-time clamps in persistence.ts.
-const TAB_MIN = 1;
-const TAB_MAX = 8;
-
-// Default domain-canvas zoom control step (#762). The min/max mirror the diagram zoom band exported by
-// persistence (DIAGRAM_ZOOM_MIN/MAX = 10/800), so the control and the load-time clamp agree.
-const CANVAS_ZOOM_STEP = 10;
-
+// Assistant temperature bounds (#750); mirrors the load-time clamp in persistence.ts. (Editor's own
+// font/line-height/tab-size/canvas-zoom bounds moved with it into prefsSections/editor.ts, #987 task 4.)
 const TEMP_MIN = 0;
 const TEMP_MAX = 2;
 const TEMP_STEP = 0.1;
@@ -235,9 +221,10 @@ export function mountPreferencesPane(
     const sectionCtx: SectionCtx = { commit, onChange: cb.onChange };
 
     // --- control factories ----------------------------------------------------
-    // row, panel, toggle, select, metricInput, and langPicker are the pure, callback-driven control
-    // factories hoisted to module scope in @/settings/prefsControls (#987 task 1) — they don't close
-    // over `cb`/`commit`, so they're imported above rather than defined here.
+    // row, panel, toggle, select, and metricInput are the pure, callback-driven control factories
+    // hoisted to module scope in @/settings/prefsControls (#987 task 1) — they don't close over
+    // `cb`/`commit`, so they're imported above rather than defined here. `langPicker` is likewise a pure
+    // factory there, imported directly by prefsSections/output.ts (#987 task 4) rather than here.
 
     // The segmented radio group (the User/Workspace scope toggles) is likewise the shared,
     // keyboard-navigable `segmented()` helper from @/settings/prefsControls, so settingsPage.tsx can
@@ -247,10 +234,10 @@ export function mountPreferencesPane(
     // The four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be overridden per
     // workspace. The shared machinery (the User/Workspace segmented toggle, the scoped-commit routing,
     // and the scoped row layout) lives in @/settings/prefsSections/scopeKit (#987 task 2) — one kit
-    // instance is built here and reused at its three call sites below (Editor's wordWrapRow /
-    // formatOnSaveRow, Output's outputScope, Advanced's traceRow). `deps.commit` is this module's own
-    // `commit` (the User-scope path); `deps.onChange` is the Workspace-scope path and the segmented
-    // toggle's own scope-flip handler.
+    // instance is built here and passed as a dependency to its three call sites (Editor's wordWrapRow /
+    // formatOnSaveRow, Output's outputScope — both now in prefsSections/, #987 task 4 — and Advanced's
+    // traceRow, still inline below). `deps.commit` is this module's own `commit` (the User-scope path);
+    // `deps.onChange` is the Workspace-scope path and the segmented toggle's own scope-flip handler.
     const scopeKit = createScopeKit({
         workspaceKey: () => cb.workspaceKey?.() ?? null,
         commit,
@@ -264,150 +251,11 @@ export function mountPreferencesPane(
     const appearance = buildAppearanceSection(sectionCtx);
 
     // --- Editor ---------------------------------------------------------------
+    // Construction + control wiring extracted into prefsSections/editor.ts (#987 task 4), following the
+    // pattern Appearance set (task 3). Takes the shared scopeKit as a dependency for its two workspace-
+    // scopable rows (word wrap, format on save).
 
-    const fontInput = metricInput(
-        FONT_MIN,
-        FONT_MAX,
-        FONT_STEP,
-        () => loadSettings().fontSize,
-        (v) => commit({ fontSize: v }),
-    );
-
-    const lineHeightInput = metricInput(
-        LINE_HEIGHT_MIN,
-        LINE_HEIGHT_MAX,
-        LINE_HEIGHT_STEP,
-        () => loadSettings().lineHeight,
-        (v) => commit({ lineHeight: v }),
-    );
-
-    // Indent width in spaces (#750), clamped 1..8; the editor re-applies it live via setTabSize (onChange).
-    const tabSizeInput = metricInput(
-        TAB_MIN,
-        TAB_MAX,
-        1,
-        () => loadSettings().tabSize,
-        (v) => commit({ tabSize: v }),
-    );
-
-    // Default domain-canvas zoom (#762): the zoom a freshly-opened diagram canvas uses when nothing
-    // per-diagram is saved. Clamped to the diagram zoom band (10–800); applied to the NEXT opened canvas
-    // via setDefaultCanvasZoom in ide.tsx's onChange (a live canvas keeps its current zoom until re-rendered).
-    const defaultCanvasZoomInput = metricInput(
-        DIAGRAM_ZOOM_MIN,
-        DIAGRAM_ZOOM_MAX,
-        CANVAS_ZOOM_STEP,
-        () => loadSettings().defaultCanvasZoom,
-        (v) => commit({ defaultCanvasZoom: v }),
-    );
-
-    // A live type specimen: a short Koine snippet that renders at the current font size, line height,
-    // and word-wrap so the numeric inputs above have something tangible to read against. It updates on
-    // every keystroke — visual only; the real editor re-skins through onChange like every other field.
-    const specimenCode = document.createElement("pre");
-    specimenCode.className = "koi-editor-specimen-code";
-    specimenCode.setAttribute("aria-hidden", "true");
-    specimenCode.innerHTML =
-        '<span class="tk-c">// A value object is immutable and compared by its fields</span>\n' +
-        '<span class="tk-k">value</span> <span class="tk-t">Money</span> {\n' +
-        '  amount: <span class="tk-t">Decimal</span>\n' +
-        '  currency: <span class="tk-t">Currency</span>\n' +
-        "}";
-
-    const specimenLabel = document.createElement("span");
-    specimenLabel.className = "koi-editor-specimen-label";
-    specimenLabel.textContent = "Preview";
-
-    const specimen = document.createElement("figure");
-    specimen.className = "koi-editor-specimen";
-    specimen.append(specimenLabel, specimenCode);
-
-    // Read a metric input's current value, clamped into range, falling back to the persisted setting
-    // for an empty or non-numeric field so a mid-edit blank never blanks the preview.
-    function specimenMetric(
-        input: HTMLInputElement,
-        min: number,
-        max: number,
-        fallback: number,
-    ): number {
-        const raw = Number(input.value.trim());
-        if (input.value.trim() === "" || !Number.isFinite(raw)) return fallback;
-        return Math.min(Math.max(raw, min), max);
-    }
-    function refreshSpecimen(): void {
-        const s = loadSettings();
-        specimenCode.style.fontSize = `${specimenMetric(fontInput, FONT_MIN, FONT_MAX, s.fontSize)}px`;
-        specimenCode.style.lineHeight = String(
-            specimenMetric(
-                lineHeightInput,
-                LINE_HEIGHT_MIN,
-                LINE_HEIGHT_MAX,
-                s.lineHeight,
-            ),
-        );
-    }
-    fontInput.addEventListener("input", refreshSpecimen);
-    lineHeightInput.addEventListener("input", refreshSpecimen);
-
-    // Word wrap + Format on save are workspace-scopable: each pairs its toggle with a User/Workspace
-    // scope control (scopedRow). The toggle is built inside makeControl so its onChange routes through
-    // the row's scopedCommit (User → global blob; Workspace → the override store).
-    const wordWrapRow = scopeKit.scopedRow(
-        "wordWrap",
-        "Word wrap",
-        "Wrap long lines instead of scrolling sideways.",
-        (scopedCommit) => {
-            const t = toggle("Word wrap", (on) => {
-                scopedCommit(on);
-                specimenCode.classList.toggle("is-wrapped", on); // the preview wraps / scrolls just like the editor
-            });
-            // Mirror the specimen whenever populate() (or a scope flip) re-sets the toggle value.
-            return {
-                el: t.el,
-                set: (on) => {
-                    t.set(on);
-                    specimenCode.classList.toggle("is-wrapped", on);
-                },
-            };
-        },
-    );
-    const formatOnSaveRow = scopeKit.scopedRow(
-        "formatOnSave",
-        "Format on save",
-        "Run the Koine formatter when you press save.",
-        (scopedCommit) => toggle("Format on save", (on) => scopedCommit(on)),
-    );
-    const autoSave = toggle("Auto-save", (on) => commit({ autoSave: on }));
-    const minimap = toggle("Minimap", (on) => commit({ enableMinimap: on }));
-
-    const editorPanel = panel(
-        "editor",
-        specimen,
-        row("Font size", "Editor text size, in pixels.", fontInput),
-        row("Line height", "Vertical spacing between lines.", lineHeightInput),
-        row(
-            "Tab size",
-            "Number of spaces per indent level (1–8).",
-            tabSizeInput,
-        ),
-        wordWrapRow,
-        formatOnSaveRow,
-        row(
-            "Auto-save",
-            "Save edits automatically after a short pause in typing.",
-            autoSave.el,
-        ),
-        row(
-            "Minimap",
-            "Show a document overview rail on the editor’s right edge.",
-            minimap.el,
-        ),
-        row(
-            "Default canvas zoom",
-            "Initial zoom (%) for a freshly-opened domain diagram canvas (10–800).",
-            defaultCanvasZoomInput,
-        ),
-    );
+    const editor = buildEditorSection(sectionCtx, { scopeKit });
 
     // --- Keyboard -------------------------------------------------------------
     // One row per rebindable editor command (KEYBINDINGS). Each row records a new combo (a document-level
@@ -732,40 +580,11 @@ export function mountPreferencesPane(
     }
 
     // --- Output ---------------------------------------------------------------
+    // Construction + control wiring extracted into prefsSections/output.ts (#987 task 4), following the
+    // pattern Appearance set (task 3). Takes the shared scopeKit as a dependency for its one workspace-
+    // scopable field (previewTarget).
 
-    // previewTarget is workspace-scopable. Route the picker's commit through the shared scope binding
-    // (User → global blob; Workspace → the override store) and surface its User/Workspace toggle in the
-    // output block's heading row.
-    const outputScope = scopeKit.makeScopeBinding(
-        "previewTarget",
-        "Output language",
-        (t) => outputLang.set(t),
-    );
-    const outputLang = langPicker((target) => outputScope.scopedCommit(target));
-
-    // Output lays the picker out full-width under its own heading (not a narrow label/control row) so
-    // the four language cards have room to breathe and the caption can say what actually changes.
-    const outputText = document.createElement("div");
-    outputText.className = "koi-set-text";
-    const outputLabel = document.createElement("span");
-    outputLabel.className = "koi-set-label";
-    outputLabel.textContent = "Output language";
-    const outputDesc = document.createElement("span");
-    outputDesc.className = "koi-set-desc";
-    outputDesc.textContent =
-        "The language the Generated preview emits. Your .koi source stays the same — switch any time.";
-    outputText.append(outputLabel, outputDesc);
-
-    // The heading row carries the caption on the left and the User/Workspace scope toggle on the right.
-    const outputHead = document.createElement("div");
-    outputHead.className = "koi-output-head";
-    outputHead.append(outputText, outputScope.seg);
-
-    const outputBlock = document.createElement("div");
-    outputBlock.className = "koi-output-block";
-    outputBlock.append(outputHead, outputLang.el);
-
-    const outputPanel = panel("output", outputBlock);
+    const output = buildOutputSection(sectionCtx, { scopeKit });
 
     // --- Assistant (AI) -------------------------------------------------------
 
@@ -1402,7 +1221,7 @@ export function mountPreferencesPane(
             id: "editor",
             label: "Editor",
             icon: ICON.editor,
-            panel: editorPanel,
+            panel: editor.panel,
         },
         {
             id: "keyboard",
@@ -1414,7 +1233,7 @@ export function mountPreferencesPane(
             id: "output",
             label: "Output",
             icon: ICON.output,
-            panel: outputPanel,
+            panel: output.panel,
         },
         {
             id: "assistant",
@@ -1500,17 +1319,12 @@ export function mountPreferencesPane(
 
     function populate(s: Settings): void {
         appearance.populate(s);
-        fontInput.value = String(s.fontSize);
-        lineHeightInput.value = String(s.lineHeight);
-        tabSizeInput.value = String(s.tabSize);
-        autoSave.set(s.autoSave);
-        minimap.set(s.enableMinimap);
-        defaultCanvasZoomInput.value = String(s.defaultCanvasZoom);
-        refreshSpecimen();
-        // Rebuild the language cards from the live EMIT_TARGETS first: the picker was constructed during
-        // init() (before the backend seed), so a backend-seeded target only appears once this re-renders
-        // on open (issue #282). The scoped sync below then sets its selection to the effective target.
-        outputLang.refresh();
+        editor.populate(s);
+        // output.populate(s) rebuilds the language cards from the live EMIT_TARGETS first: the picker was
+        // constructed during init() (before the backend seed), so a backend-seeded target only appears
+        // once this re-renders on open (issue #282). The scoped sync below then sets its selection to the
+        // effective target — do not let scopeKit.syncAll run ahead of this call.
+        output.populate(s);
         aiProviderSelect.value = s.aiProvider;
         aiBaseUrlInput.value = s.aiBaseUrl;
         aiKeyInput.value = s.aiApiKey;
@@ -1534,7 +1348,7 @@ export function mountPreferencesPane(
         // The four workspace-scopable rows (previewTarget, formatOnSave, wordWrap, lspTrace): reflect each
         // row's scope (User/Workspace) from the override store and set its value control to the EFFECTIVE
         // value, so a Workspace row shows its override while a User row shows the user value. Runs after
-        // outputLang.refresh() so the picker's cards exist before its selection is set.
+        // output.populate(s) (outputLang.refresh()) so the picker's cards exist before its selection is set.
         scopeKit.syncAll(s);
         shellArgsControl.set(s.terminalShellArgs);
         // Repaint the Keyboard panel from the current overrides (and cancel any armed recording / open
