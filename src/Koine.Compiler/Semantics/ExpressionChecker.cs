@@ -97,6 +97,7 @@ internal sealed class ExpressionChecker
                 CheckArithmeticNullSafety(b, scope);
                 CheckValueObjectScalarArithmetic(b, scope);
                 CheckValueObjectTypeMismatch(b, scope);
+                CheckEntityOperandArithmetic(b, scope);
                 break;
 
             case CoalesceExpr co:
@@ -411,15 +412,71 @@ internal sealed class ExpressionChecker
     /// silently pick the WRONG declaration. Returns <c>null</c> when <paramref name="t"/> doesn't resolve
     /// to a value object in scope (including when it doesn't resolve to any declared type at all).
     /// </summary>
-    private ValueObjectDecl? ResolveValueObject(TypeRef t)
+    private ValueObjectDecl? ResolveValueObject(TypeRef t) => ResolveDecl(t) as ValueObjectDecl;
+
+    /// <summary>
+    /// Resolves <paramref name="t"/> to its declaration the same context-aware way
+    /// <see cref="ResolveValueObject"/> and every other lookup in this file do (<c>t.Qualifier ??
+    /// _resolver.Context</c> + <see cref="ModelIndex.TryGetDeclIn"/>, falling back to the global
+    /// <see cref="ModelIndex.TryGetDecl"/>, R13.2). Returns <c>null</c> when <paramref name="t"/>
+    /// doesn't resolve to any declared type at all (e.g. an Id-convention synthetic type).
+    /// </summary>
+    private TypeDecl? ResolveDecl(TypeRef t)
     {
         var context = t.Qualifier ?? _resolver.Context;
         if (context is not null && _index.TryGetDeclIn(context, t.Name, out TypeDecl decl))
         {
-            return decl as ValueObjectDecl;
+            return decl;
         }
 
-        return _index.TryGetDecl(t.Name, out decl) ? decl as ValueObjectDecl : null;
+        return _index.TryGetDecl(t.Name, out decl) ? decl : null;
+    }
+
+    /// <summary>
+    /// #1290: an entity's (or aggregate's) <c>+</c>/<c>-</c> has no lowering in ANY target — unlike a
+    /// value object/quantity, which at least supports same-declared-type addition/subtraction in some
+    /// cases (<see cref="CheckValueObjectTypeMismatch"/>), an entity NEVER has a generated arithmetic
+    /// operator, regardless of what the other operand is. <see cref="TypeResolver.IsValueLike"/> returns
+    /// <c>false</c> for <see cref="TypeKind.Entity"/>/<see cref="TypeKind.Aggregate"/>, so
+    /// <see cref="CheckValueObjectTypeMismatch"/> bails out entirely as soon as either operand is an
+    /// entity — entity-typed fields are legal Koine syntax (an entity may own value objects, enums,
+    /// primitives, and child entities of its own aggregate as fields, per
+    /// <c>ReferenceDisciplineAnalyzer.CheckEntityReferences</c>), so a <c>derived</c> member referencing
+    /// such a field via <c>+</c>/<c>-</c> previously compiled with zero diagnostics and failed downstream
+    /// with a real C# CS0019 (this issue's own repro) or a Rust E0308. Reject it here, target-agnostically,
+    /// before any emitter ever sees the expression — unconditionally of the other operand's type: unlike
+    /// <see cref="CheckValueObjectTypeMismatch"/>'s same-declared-type early return, entity-vs-entity of
+    /// the SAME type is ALSO rejected, since entities have no <c>+</c>/<c>-</c> operator regardless of a
+    /// type match. <c>==</c>/<c>!=</c> (identity comparison) is untouched — this check only looks at
+    /// <see cref="BinaryOp.Add"/>/<see cref="BinaryOp.Sub"/>.
+    ///
+    /// Both operands are resolved via <see cref="ResolveDecl"/> — the SAME context-aware resolution
+    /// <see cref="ResolveValueObject"/> and #1266/#1284 already established.
+    /// </summary>
+    private void CheckEntityOperandArithmetic(BinaryExpr b, TypeScope scope)
+    {
+        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub))
+        {
+            return;
+        }
+
+        TypeRef? left = _resolver.Infer(b.Left, scope);
+        TypeRef? right = _resolver.Infer(b.Right, scope);
+        if (left is null || right is null)
+        {
+            return;
+        }
+
+        bool leftIsEntity = ResolveDecl(left) is EntityDecl or AggregateDecl;
+        bool rightIsEntity = ResolveDecl(right) is EntityDecl or AggregateDecl;
+        if (!leftIsEntity && !rightIsEntity)
+        {
+            return;
+        }
+
+        var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+        Report(DiagnosticCodes.EntityOperandArithmetic,
+            $"cannot {verb} '{left.Name}' and '{right.Name}'; an entity has no generated '+'/'-' operator", b);
     }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
