@@ -219,6 +219,29 @@ public sealed partial class RustEmitter
     private void WriteDerived(StringBuilder sb, Member m, RustExpressionTranslator translator, RustTypeMapper typeMapper)
     {
         var field = RustNaming.Field(m.Name);
+
+        // A bare conditional/let/guard body (no arithmetic operator at all) has its own recursive
+        // owned-value dispatch — a leaf place a branch would otherwise move out of `&self` must be
+        // cloned, which neither this method's own clone/`to_string` cases below (they only recognize a
+        // bare `IdentifierExpr`/`MemberAccessExpr` initializer) nor a plain `Translate` provide (#1282,
+        // generalizing #1268's quantity-guard fix). Every other initializer shape keeps its existing
+        // rendering unchanged.
+        if (m.Initializer is ConditionalExpr or LetExpr or GuardExpr)
+        {
+            var ownedBody = translator.TranslateOwned(m.Initializer!, EnumExpectedRef(m, typeMapper));
+            if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } ownedWrap)
+            {
+                ownedBody = $"{ownedWrap}({ownedBody})";
+            }
+
+            WriteDoc(sb, m.Doc, Indent);
+            sb.Append(Indent).Append("pub fn ").Append(field).Append("(&self) -> ").Append(typeMapper.Map(m.Type))
+              .Append(" {\n");
+            sb.Append(Indent).Append(Indent).Append(ownedBody).Append('\n');
+            sb.Append(Indent).Append("}\n");
+            return;
+        }
+
         var body = RustExpressionTranslator.StripOuterParens(
             translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Property, EnumExpectedRef(m, typeMapper)));
 

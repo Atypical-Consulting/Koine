@@ -542,4 +542,55 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1282, Task 2 — a bare conditional (no arithmetic operator at all) used directly as a
+    /// derived member's body has no ownership handling in <c>WriteDerived</c>: its clone check only
+    /// recognizes <c>m.Initializer is IdentifierExpr or MemberAccessExpr</c>, never a
+    /// <c>ConditionalExpr</c>, so <c>combined: Weight = if flag then a else b</c> emits the bare,
+    /// un-cloned <c>if self.flag { self.a } else { self.b }</c> and fails a real <c>cargo check</c>
+    /// E0507 — for both a <c>quantity</c> and a plain (non-quantity) value object.
+    /// </summary>
+    [Fact]
+    public void Bare_conditional_derived_member_body_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    flag: Bool\n" +
+            "    bareConditional: Weight = if flag then a else b\n" +
+            "  }\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value PlainMix {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    bareConditional: Money = if flag then a else b\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): a bare conditional derived-member body must
+        // clone a non-Copy branch, never leave it as a bare, un-borrowed place.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

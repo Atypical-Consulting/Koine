@@ -740,10 +740,25 @@ internal sealed class RustExpressionTranslator
     /// <summary>
     /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position: a non-Copy
     /// place (a field/local such as the entity <c>id</c>, or a <c>.field()</c> accessor result) is cloned
-    /// so the value is moved out by value rather than borrowed from <c>&amp;self</c>.
+    /// so the value is moved out by value rather than borrowed from <c>&amp;self</c>. A bare
+    /// conditional/let/guard (no arithmetic operator at all) routes through <see cref="WriteOwnedOperand"/>
+    /// instead, so a leaf place a branch would otherwise move out of <c>&amp;self</c> is cloned too
+    /// (#1282) — the non-compound cases below are unchanged.
     /// </summary>
     public string TranslateOwned(Expr expr, string? expectedEnum = null)
     {
+        if (expr is ConditionalExpr or LetExpr or GuardExpr)
+        {
+            var prevMode = _mode;
+            _mode = NameMode.Property;
+            _expectedEnum = expectedEnum;
+            var ownedSb = new StringBuilder();
+            WriteOwnedOperand(expr, ownedSb);
+            _expectedEnum = null;
+            _mode = prevMode;
+            return ownedSb.ToString();
+        }
+
         var rendered = Translate(expr, expectedEnum);
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
 
