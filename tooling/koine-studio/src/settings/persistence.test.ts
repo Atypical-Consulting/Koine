@@ -6,6 +6,7 @@ import {
   DEFAULT_SETTINGS,
   isStartupView,
   initSecrets,
+  whenSecretsReady,
   saveApiKey,
   clearApiKey,
   loadChat,
@@ -29,6 +30,8 @@ import {
   loadDiagramPositions,
   saveDiagramPositions,
   clearDiagramPositions,
+  loadDiagramAnnotations,
+  saveDiagramAnnotations,
   loadActiveContext,
   saveActiveContext,
   getRecentFolders,
@@ -52,6 +55,7 @@ import type { DeckState } from '@/store/slices/uiChrome';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 import type { ChatMessage } from '@/ai/ai';
+import type { DiagramGroup, DiagramNote } from '@/diagrams/diagramContract';
 
 describe('MCP settings', () => {
   beforeEach(() => localStorage.clear());
@@ -314,6 +318,14 @@ describe('API key secret', () => {
     await clearApiKey();
   });
 
+  // MUST run before any other test in this file calls initSecrets(): secretsReady is a module-level
+  // singleton (the mutable state issue #988 wants isolated) with no reset hook, so once populated by any
+  // earlier test it stays populated for the rest of this file's run. Placed first in this describe (the
+  // only describe in the file that touches initSecrets) so it observes the true pre-init state.
+  test('whenSecretsReady() resolves immediately when initSecrets() has never been called', async () => {
+    await expect(whenSecretsReady()).resolves.toBeUndefined();
+  });
+
   test('is never written to the plaintext settings blob, yet surfaces via loadSettings', async () => {
     await saveApiKey('sk-must-not-leak');
     patchSettings({ theme: 'light' }); // force a saveSettings write
@@ -323,13 +335,34 @@ describe('API key secret', () => {
     expect(loadSettings().aiApiKey).toBe('sk-must-not-leak');
   });
 
-  test('migrates a legacy plaintext key into the encrypted store and scrubs the blob', async () => {
-    localStorage.setItem('koine.studio.settings', JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-legacy' }));
-    await initSecrets();
-    expect(loadSettings().aiApiKey).toBe('sk-legacy');
-    const raw = localStorage.getItem('koine.studio.settings') ?? '';
-    expect(raw).not.toContain('sk-legacy');
-    expect(JSON.parse(raw).aiApiKey).toBeUndefined();
+  test('initSecrets(): whenSecretsReady() resolves post-init and aiApiKey reflects the vault; a second (and third) call returns the SAME promise and the legacy migration runs exactly once', async () => {
+    // Seed a legacy plaintext key to be migrated on the FIRST initSecrets() call.
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-legacy-once' }));
+
+    const first = initSecrets();
+    const second = initSecrets(); // called again before `first` settles
+    expect(second).toBe(first); // same in-flight promise — no duplicate migration kicked off
+
+    await first;
+
+    await expect(whenSecretsReady()).resolves.toBeUndefined();
+    expect(loadSettings().aiApiKey).toBe('sk-legacy-once');
+
+    // The migration ran: the vault has the key, the plaintext blob is scrubbed.
+    const rawAfterFirst = localStorage.getItem('koine.studio.settings') ?? '';
+    expect(rawAfterFirst).not.toContain('sk-legacy-once');
+    expect(JSON.parse(rawAfterFirst).aiApiKey).toBeUndefined();
+
+    // A THIRD call, made after resolution, must also return the very same promise and must NOT re-run
+    // the migration: re-seed a DIFFERENT legacy key and confirm it survives untouched (proves "exactly
+    // once", not "once per call").
+    localStorage.setItem('koine.studio.settings', JSON.stringify({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-should-stay-put' }));
+    const third = initSecrets();
+    expect(third).toBe(first);
+    await third;
+
+    expect(loadSettings().aiApiKey).toBe('sk-legacy-once'); // cache unchanged by the third call
+    expect(localStorage.getItem('koine.studio.settings')).toContain('sk-should-stay-put'); // blob NOT scrubbed this time
   });
 
   test('clearApiKey forgets the secret', async () => {
@@ -846,6 +879,60 @@ describe('diagram node positions (authoring canvas)', () => {
     saveDiagramPositions('ws:koi-domain-diagram', { 'A.B': { x: 1, y: 1 } });
     clearDiagramPositions('ws:koi-domain-diagram');
     expect(loadDiagramPositions('ws:koi-domain-diagram')).toEqual({});
+  });
+});
+
+describe('diagram canvas annotations (#255)', () => {
+  // Today loadDiagramAnnotations/saveDiagramAnnotations are only exercised transitively via the
+  // diagrams/layoutStore suites (createBrowserLayoutStore round-trips through them). These tests pin
+  // the pair directly, keyed exactly like diagram positions above.
+  beforeEach(() => localStorage.clear());
+
+  test('an absent key loads as empty notes/groups', () => {
+    expect(loadDiagramAnnotations('never-saved:koi-domain-diagram')).toEqual({ notes: [], groups: [] });
+  });
+
+  test('malformed JSON loads as empty notes/groups', () => {
+    localStorage.setItem('koine.studio.diagramAnnotations.bad', '{not json');
+    expect(loadDiagramAnnotations('bad')).toEqual({ notes: [], groups: [] });
+  });
+
+  test('save/load round-trips notes and groups through the shared sanitizers', () => {
+    const notes: DiagramNote[] = [{ id: 'n1', text: 'hello', x: 5, y: 6, width: 140, height: 70 }];
+    const groups: DiagramGroup[] = [{ id: 'g1', label: 'Core', members: ['Ordering.Order'], color: 'violet' }];
+    saveDiagramAnnotations('ws:koi-domain-diagram', { notes, groups });
+    expect(loadDiagramAnnotations('ws:koi-domain-diagram')).toEqual({ notes, groups });
+
+    // The read path runs every entry through sanitizeNotes/sanitizeGroups (not a bare JSON.parse): a
+    // hand-edited blob with one malformed note/group entry has just that entry dropped, not the whole
+    // blob rejected — proves the round-trip goes through the shared sanitizers, not ad-hoc parsing.
+    localStorage.setItem(
+      'koine.studio.diagramAnnotations.mixed',
+      JSON.stringify({
+        notes: [
+          { id: 'good', text: 'ok', x: 1, y: 2, width: 3, height: 4 },
+          { id: 'bad', text: 'oops' }, // missing x/y/width/height
+        ],
+        groups: [
+          { id: 'g-good', label: 'Core', members: ['A.B'] },
+          { id: '', label: 'no-id', members: [] }, // blank id — dropped
+        ],
+      }),
+    );
+    expect(loadDiagramAnnotations('mixed')).toEqual({
+      notes: [{ id: 'good', text: 'ok', x: 1, y: 2, width: 3, height: 4 }],
+      groups: [{ id: 'g-good', label: 'Core', members: ['A.B'] }],
+    });
+  });
+
+  test('annotations are isolated per diagram key — two keys never bleed into each other', () => {
+    const notesA: DiagramNote[] = [{ id: 'a', text: 'A note', x: 0, y: 0, width: 10, height: 10 }];
+    const notesB: DiagramNote[] = [{ id: 'b', text: 'B note', x: 1, y: 1, width: 20, height: 20 }];
+    const groupsA: DiagramGroup[] = [{ id: 'ga', label: 'Group A', members: ['A.B'] }];
+    saveDiagramAnnotations('ws-a:koi-domain-diagram', { notes: notesA, groups: groupsA });
+    saveDiagramAnnotations('ws-b:koi-domain-diagram', { notes: notesB, groups: [] });
+    expect(loadDiagramAnnotations('ws-a:koi-domain-diagram')).toEqual({ notes: notesA, groups: groupsA });
+    expect(loadDiagramAnnotations('ws-b:koi-domain-diagram')).toEqual({ notes: notesB, groups: [] });
   });
 });
 
