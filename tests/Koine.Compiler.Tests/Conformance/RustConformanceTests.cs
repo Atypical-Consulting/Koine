@@ -305,6 +305,83 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1268 — the same E0507 class reproduces on the <c>-</c> half of the guard, on the RIGHT
+    /// (argument) operand rather than the left (receiver), and for a <c>let…in</c> operand whose body is
+    /// a bare non-Copy place — the #1068 guard's original repro (<c>base + base</c>) never exercised any
+    /// of these shapes. <c>WriteQuantityOperand</c> routes both operands identically and
+    /// <c>WriteOwnedOperand</c> recurses into a <c>let</c> binding's body, so all three must compile via a
+    /// real <c>cargo check</c>.
+    /// </summary>
+    [Fact]
+    public void Quantity_subtraction_with_conditional_right_operand_and_let_operand_emit_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    flag: Bool\n" +
+            "    subRight: Weight = a - (if flag then a else b)\n" +
+            "    letOperand: Weight = (let x = a in x) - b\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ let x = self.a; ");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1268 — a <c>when</c>-guarded conditional operand (<c>GuardExpr</c> wrapping a
+    /// <c>ConditionalExpr</c>) is a distinct AST shape from a bare conditional; <c>WriteOwnedOperand</c>
+    /// must unwrap the guard rather than falling through to the un-cloning default path.
+    /// </summary>
+    [Fact]
+    public void Quantity_addition_with_guarded_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    c: Weight\n" +
+            "    flag: Bool\n" +
+            "    otherCond: Bool\n" +
+            "    combined: Weight = ((if flag then a else b) when otherCond) + c\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1084, sibling of #1068's Add/Sub fix: a <c>quantity</c> value object's scalar
     /// <c>* scalar</c>/<c>/ scalar</c> — <c>scaled: Weight = base * 2</c> / <c>halved: Weight = base / 2</c>
     /// — must get real <c>impl std::ops::Mul</c>/<c>Div</c> so the native operator the translator lowers
