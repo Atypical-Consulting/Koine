@@ -607,6 +607,24 @@ describe('renderContextMapGraph', () => {
     expect(container.textContent).toContain('sentinel');
   });
 
+  test('onAfterRender is NOT invoked for the initial render — only for a LATER view refresh (#1210)', async () => {
+    // applyInitialZoom()'s fit()/zoomTo() path fires the same SCALE/TRANSLATE/SCALE_AND_TRANSLATE events
+    // onAfterRender listens for; the hook's listeners must be registered AFTER that call so the documented
+    // contract ("NOT called for the initial render") holds, not just for the caller's own idempotent
+    // re-application masking a double-fire.
+    const graph: DiagramGraph = { nodes: [ctx('A'), ctx('B')], edges: [] };
+    const container = makeContainer();
+    let calls = 0;
+    const handle = await renderContextMapGraph(container, graph, () => true, { onAfterRender: () => calls++ });
+    try {
+      expect(calls, 'must not fire during the initial render').toBe(0);
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click();
+      expect(calls, 'must fire on a later, real view refresh').toBeGreaterThan(0);
+    } finally {
+      handle?.dispose();
+    }
+  });
+
   test('lays contexts out left→right by dependency rank: an upstream source sits left of its downstream target (#1209)', async () => {
     const graph: DiagramGraph = {
       nodes: [ctx('Sales'), ctx('Shipping')],
