@@ -272,6 +272,82 @@ describe('Transcript (#990)', () => {
     });
   });
 
+  // Settled tool cards move from the host's ephemeral snapshot into the chat slice, attached to
+  // their committed message (#1133): each assistant message with toolCalls renders its own cards
+  // (not just the trailing one), and a card's expanded state — hoisted here because a native
+  // <details>'s `open` is DOM state, lost on any remount — survives the commit remount by keying
+  // on an identity that's stable across a card's live→settled transition.
+  describe('settled tool cards attached to their message (#1133)', () => {
+    const settledCall = (id: number): import('@/store/slices/chat').ChatToolCall => ({
+      id,
+      name: 'koine_compile',
+      args: '{}',
+      state: 'ok',
+      summary: 'ok',
+      result: 'compiled',
+      durationMs: 10,
+    });
+
+    test('every assistant message with toolCalls renders its cards above its own bubble, not just the trailing one', () => {
+      const store = createAppStore();
+      store.getState().appendChatMessage({ role: 'user', content: 'q1' });
+      store.getState().appendChatMessage({ role: 'assistant', content: 'reply1', toolCalls: [settledCall(1)] });
+      store.getState().appendChatMessage({ role: 'user', content: 'q2' });
+      store.getState().appendChatMessage({ role: 'assistant', content: 'reply2', toolCalls: [settledCall(2)] });
+      const { container } = mount(store);
+
+      const allCards = cards(container);
+      expect(allCards.length).toBe(2);
+      const children = [...transcript(container).children];
+      const allBubbles = bubbles(container);
+      // Each card sits directly above ITS OWN reply bubble (reply1's card before reply1, not just
+      // the last message's).
+      expect(children.indexOf(allCards[0])).toBeLessThan(children.indexOf(allBubbles[1]));
+      expect(children.indexOf(allCards[1])).toBeLessThan(children.indexOf(allBubbles[3]));
+    });
+
+    test('expanding a live card, then committing the turn, keeps it open across the remount', () => {
+      const store = createAppStore();
+      store.getState().appendChatMessage({ role: 'user', content: 'q' });
+      store.getState().startChatTurn();
+      store.getState().startToolCall({ id: 1, name: 'koine_compile', args: '{}' });
+      store.getState().completeToolCall({ id: 1, state: 'ok', summary: 'ok', result: 'compiled', durationMs: 10 });
+      const { container } = mount(store);
+
+      const before = cards(container)[0] as HTMLDetailsElement;
+      act(() => {
+        before.open = true;
+        before.dispatchEvent(new Event('toggle'));
+      });
+      expect(before.open).toBe(true);
+
+      act(() => store.getState().commitChatTurn({ role: 'assistant', content: 'done' }));
+
+      const after = cards(container)[0] as HTMLDetailsElement;
+      expect(after.open).toBe(true);
+    });
+
+    test('a workspace-key change renders cards collapsed (no cross-workspace open-state reuse)', () => {
+      const store = createAppStore();
+      store.getState().hydrateChat('ws-A', [{ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] }]);
+      const { container } = mount(store);
+
+      const before = cards(container)[0] as HTMLDetailsElement;
+      act(() => {
+        before.open = true;
+        before.dispatchEvent(new Event('toggle'));
+      });
+      expect(before.open).toBe(true);
+
+      act(() =>
+        store.getState().hydrateChat('ws-B', [{ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] }]),
+      );
+
+      const after = cards(container)[0] as HTMLDetailsElement;
+      expect(after.open).toBe(false);
+    });
+  });
+
   describe('ephemeral notices', () => {
     test('the no-key note: koi-msg-note bubble whose Open Settings link-button routes to onOpenPrefs', () => {
       const onOpenPrefs = vi.fn();

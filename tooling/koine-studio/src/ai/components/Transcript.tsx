@@ -79,13 +79,6 @@ export interface TranscriptProps {
    */
   mechanism?: TurnMechanism | null;
   /**
-   * The TRAILING turn's settled tool cards, host-kept so they outlive the ephemeral `chat.turn`
-   * (which finish/commit clears): the imperative transcript kept a turn's cards above its reply
-   * bubble after the turn ended, and this renders them in exactly that spot. Never persisted — a
-   * replay renders none, and the host drops them when the conversation moves on.
-   */
-  settledToolCalls?: readonly ChatToolCall[] | null;
-  /**
    * Extra content rendered at the END of the transcript scroller — the host mounts the change-set
    * review here (#990 Task 6) so a long per-file diff scrolls with the conversation, as the
    * imperative panel's in-bubble change set did.
@@ -212,8 +205,12 @@ function AssistantBubble({
  * never rides colour alone, WCAG 2.1 AA 1.4.1), the tool name, the summary chip, and the formatted
  * duration; the expandable `<dl>` body (pretty-printed Arguments, the clamped Result) lands once the
  * call settles. Keyed by call id in the parent, so the END state PATCHES the START's element.
+ *
+ * Controlled (#1133): `open`/`onToggle` are backed by {@link Transcript}'s hoisted expansion state
+ * rather than the element's own DOM state, so an expanded card survives the remount a turn commit
+ * (or a workspace swap) causes when the card moves between parents.
  */
-function ToolCard({ call }: { call: ChatToolCall }) {
+function ToolCard({ call, open, onToggle }: { call: ChatToolCall; open: boolean; onToggle: (open: boolean) => void }) {
   const pending = call.state === 'pending';
   const raw = call.result ?? '';
   const truncated = raw.length > TOOL_RESULT_CLAMP;
@@ -221,7 +218,12 @@ function ToolCard({ call }: { call: ChatToolCall }) {
   // streamed batch/ephemeral prop, and every settled card would otherwise re-parse + re-stringify.
   const args = useMemo(() => prettyToolArgs(call.args), [call.args]);
   return (
-    <details class="koi-assistant-tool" data-state={call.state}>
+    <details
+      class="koi-assistant-tool"
+      data-state={call.state}
+      open={open}
+      onToggle={(e) => onToggle((e.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary>
         <span class="koi-tool-glyph" aria-hidden="true">
           {pending ? '…' : call.state === 'ok' ? '✓' : '✕'}
@@ -258,7 +260,6 @@ export function Transcript({
   notice,
   stoppedPartial,
   mechanism,
-  settledToolCalls,
   children,
 }: TranscriptProps) {
   const messages = useAppStore(store, (s) => s.chat.messages);
@@ -269,6 +270,23 @@ export function Transcript({
   // per-bubble state (a resolved Apply candidate, an open tool card) for another's.
   const workspaceKey = useAppStore(store, (s) => s.chat.workspaceKey);
   const scroller = useRef<HTMLDivElement>(null);
+  // Tool-card expansion, hoisted OUT of the <details> element's own DOM state (#1133): a card moves
+  // between parents at turn commit (live → settled) and at a workspace swap, and a native <details>'s
+  // `open` is lost on any remount. Identities are `workspaceKey`-prefixed, so a swap simply never
+  // matches a prior entry — stale entries are unreachable and harmless.
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(() => new Set());
+  const toggleCard = (id: string, open: boolean) => {
+    setExpandedCards((prev) => {
+      if (prev.has(id) === open) return prev;
+      const next = new Set(prev);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+  const toolCard = (id: string, c: ChatToolCall) => (
+    <ToolCard key={id} call={c} open={expandedCards.has(id)} onToggle={(open) => toggleCard(id, open)} />
+  );
 
   // The live turn renders only while streaming — finish/abort clear `chat.turn`, but gating on the
   // status too keeps a stray ephemeral turn from ghosting a bubble after the lifecycle settles.
@@ -295,11 +313,10 @@ export function Transcript({
       )}
       {messages.map((m, i) => (
         <Fragment key={`${workspaceKey}:m${i}`}>
-          {/* The finished trailing turn's tool cards sit ABOVE its reply bubble, exactly where they
-              streamed (the imperative insertBefore contract survives the turn's completion). */}
-          {i === last &&
-            m.role === 'assistant' &&
-            settledToolCalls?.map((c) => <ToolCard key={`st${c.id}`} call={c} />)}
+          {/* Each assistant message's settled tool cards sit ABOVE its own reply bubble, exactly
+              where they streamed (the imperative insertBefore contract survives the turn's
+              completion) — every such message, not just the trailing one (#1133). */}
+          {m.role === 'assistant' && m.toolCalls?.map((c) => toolCard(`${workspaceKey}:m${i}:t${c.id}`, c))}
           {m.role === 'assistant' ? (
             <AssistantBubble
               content={m.content}
@@ -317,10 +334,11 @@ export function Transcript({
       ))}
       {streaming && (
         <>
-          {/* Tool cards sit ABOVE the streaming bubble (the imperative insertBefore contract). */}
-          {turn.toolCalls.map((c) => (
-            <ToolCard key={`t${c.id}`} call={c} />
-          ))}
+          {/* Tool cards sit ABOVE the streaming bubble (the imperative insertBefore contract). Live
+              cards use `messages.length` as their index (#1133) — the index the pending assistant
+              message will occupy once committed, since the user turn is already appended by then —
+              so a card's identity never changes across the live→settled transition. */}
+          {turn.toolCalls.map((c) => toolCard(`${workspaceKey}:m${messages.length}:t${c.id}`, c))}
           {/* The live reply streams as PLAIN TEXT ('…' until the first delta); markdown renders only
               once the turn commits to `messages`. */}
           <div key="stream" class="koi-msg koi-msg-assistant">
