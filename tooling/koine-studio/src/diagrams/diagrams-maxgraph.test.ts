@@ -65,6 +65,17 @@ function makeContainer(): HTMLElement {
   return c;
 }
 
+/** A node's laid-out x offset, read off its rendered HTML label (the `koi-node`'s wrapping `margin-left`,
+ *  which mirrors the cell's real geometry x — scaled by the label overlay's `scale(0.1)` transform). Used
+ *  where a render function's handle doesn't expose the maxGraph model directly (#1209). */
+function nodeXOffset(container: HTMLElement, qualifiedName: string): number {
+  const label = container.querySelector<HTMLElement>(`.koi-node[data-qname="${qualifiedName}"]`);
+  const wrapper = label?.closest<HTMLElement>('div[style*="margin-left"]');
+  const match = wrapper?.getAttribute('style')?.match(/margin-left:\s*(-?[\d.]+)px/);
+  if (!match) throw new Error(`no margin-left offset found for ${qualifiedName}`);
+  return Number(match[1]);
+}
+
 function node(over: Partial<DiagramNode> & { id: string; qualifiedName: string }): DiagramNode {
   return {
     id: over.id,
@@ -290,6 +301,25 @@ describe('edges', () => {
       expect(edge!.value).toMatchObject({ backingMember: 'Ordering.Order.lines' });
       // the two multiplicity labels are child cells of the edge
       expect(edge!.getChildCount()).toBe(2);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test("a bounded-context container's inner layout ranks members left→right: the owner sits west of the part it composes (#1209)", () => {
+    const merged: DiagramGraph = {
+      nodes: [cls('Ordering.Order'), cls('Ordering.Line')],
+      edges: [{ from: 'Ordering.Order', to: 'Ordering.Line', label: 'contains', arrowKind: 'composition', backingMember: 'Ordering.Order.lines' }],
+    };
+    const container = makeContainer();
+    const handle = buildCanvas(mx, container, merged);
+    try {
+      // 'Order' is the pure-upstream root of this inner HierarchicalLayout (no incoming edge); 'Line' is
+      // the downstream part. Both cells share the container's local coordinate space, so their geometry
+      // x values are directly comparable.
+      const owner = handle.cells.get('Ordering.Order')!.getGeometry()!;
+      const part = handle.cells.get('Ordering.Line')!.getGeometry()!;
+      expect(owner.x).toBeLessThan(part.x);
     } finally {
       handle.dispose();
     }
@@ -575,6 +605,23 @@ describe('renderContextMapGraph', () => {
     expect(handle).toBeNull();
     expect(container.querySelector('.koi-ctxmap-graph')).toBeNull();
     expect(container.textContent).toContain('sentinel');
+  });
+
+  test('lays contexts out left→right by dependency rank: an upstream source sits left of its downstream target (#1209)', async () => {
+    const graph: DiagramGraph = {
+      nodes: [ctx('Sales'), ctx('Shipping')],
+      edges: [{ from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' }],
+    };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true);
+    try {
+      // Sales is the pure-upstream source (no incoming edge); Shipping is the downstream target — the
+      // relation must read left→right, not right→left (HierarchicalLayout's orientation pins root
+      // position, not flow direction; 'east' pinned the root at the RIGHT, mirroring the reading order).
+      expect(nodeXOffset(container, 'Sales')).toBeLessThan(nodeXOffset(container, 'Shipping'));
+    } finally {
+      handle?.dispose();
+    }
   });
 });
 
@@ -1199,6 +1246,20 @@ describe('buildEventFlowCanvas', () => {
     try {
       expect(handle.cells.size).toBe(0);
       expect(handle.containers.size).toBe(0);
+    } finally {
+      handle.dispose();
+    }
+  });
+
+  test('lays the flow out left→right: command → event → policy reads as a causal chain (#1209)', () => {
+    const container = makeContainer();
+    const handle = buildEventFlowCanvas(mx, container, EVENT_FLOW);
+    try {
+      const cmd = handle.cells.get('cmd')!.getGeometry()!;
+      const evt = handle.cells.get('evt')!.getGeometry()!;
+      const pol = handle.cells.get('pol')!.getGeometry()!;
+      expect(cmd.x).toBeLessThan(evt.x);
+      expect(evt.x).toBeLessThan(pol.x);
     } finally {
       handle.dispose();
     }
