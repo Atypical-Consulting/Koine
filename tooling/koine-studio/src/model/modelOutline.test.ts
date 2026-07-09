@@ -92,4 +92,15 @@ describe('constructForKind', () => {
   ])('constructForKind(%j) === %j', (kind, expected) => {
     expect(constructForKind(kind)).toEqual(expected);
   });
+
+  // The hyphenated spelling is theoretical (the backend only ever emits the space-separated
+  // `'integration event'`), but once the table lookups fold through the canonical
+  // `normalizeDddKind`, this spelling resolves to the real construct instead of the generic
+  // `'Type'` fallback — closing the same class of gap #1162 already closed in `inspector.ts`.
+  test("constructForKind('integration-event') resolves the real construct, not the 'Type' fallback", () => {
+    expect(constructForKind('integration-event')).toEqual({
+      slug: 'integration-event',
+      label: 'Integration Event',
+    });
+  });
 });
