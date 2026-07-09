@@ -3,6 +3,9 @@ import type { RightStripView } from '@atypical/koine-ui';
 // TYPE-ONLY: persistence.ts imports runtime from this slice, so a value import would cycle; a type
 // import is erased at build time and safe.
 import type { ThemeName } from '@/settings/persistence';
+// TYPE-ONLY, and settingsTypes.ts is itself import-free: settingsPage.tsx also imports from here, so
+// this is the single shared definition of the two unions below rather than a second inlined copy (#1094).
+import type { SettingsEditorMode, SettingsJsonScope } from '@/settings/settingsTypes';
 
 export type CenterView = 'visual' | 'technical' | 'output' | 'docs';
 // Code is authoring-only now: the editor + the scenario runner. The compiler-PRODUCED artifacts
@@ -106,15 +109,6 @@ export function isValidDeckState(v: unknown): v is DeckState {
 /** Which top-level navigator the left rail shows (#453): the strategic/tactical Domain pane or the
  *  workspace Files tree. */
 export type RailAxis = 'domain' | 'files';
-
-/** The Settings page's editor representation (#983): the two-pane Visual form or the raw settings.json.
- *  Inlined here (not imported from settingsPage) so the slice stays free of a settingsPage dependency —
- *  it's structurally identical to settingsPage's `SettingsEditorMode`. */
-export type SettingsEditorMode = 'visual' | 'json';
-
-/** Which settings document the Settings JSON editor targets (#983): the user document or the
- *  workspace-scoped overrides. Inlined for the same no-cycle reason as {@link SettingsEditorMode}. */
-export type SettingsJsonScope = 'user' | 'workspace';
 
 /** The Context Map's rendered view (#983): the interactive graph or the dense per-relation table. */
 export type ContextMapView = 'graph' | 'table';
