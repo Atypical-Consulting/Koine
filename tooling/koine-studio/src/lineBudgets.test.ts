@@ -123,7 +123,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/settings/prefs.ts', maxLines: 2250 },
   // Frozen 2026-07-02 at 1745 LOC, ceil(1745 × 1.02) = 1780. #986 ratchets this down as it decomposes
   // editor.ts. Freezing prevents further regrowth; it does not mandate the split — #986 owns that.
-  { file: 'src/editor/editor.ts', maxLines: 1780 },
+  // Lowered 1780 → 953: #986 split editor.ts's 38-export grab-bag into four sibling modules behind
+  // facade re-exports — cmTheme.ts (the shared highlight/theme leaf), outputView.ts (the read-only
+  // output/JSON viewers), settingsJsonEditor.ts (the editable settings.json editor), and
+  // lspExtensions.ts (hover/inlay-hints/semantic-tokens + the LSP provider function types). editor.ts
+  // now holds only the `.koi` editor core (createKoineEditor + its language/completions/touch theme)
+  // plus the facade re-exports; end-state 938 LOC + ~15 lines headroom.
+  { file: 'src/editor/editor.ts', maxLines: 953 },
   // Frozen 2026-07-02 at 1354 LOC, ceil(1354 × 1.02) = 1382. #990 ratchets this down as it decomposes
   // aiPanel.ts. Freezing prevents further regrowth; it does not mandate the split — #990 owns that.
   // Raised 1382 → 1424: #984 Task 4 rewires the change-set sub-panel onto the chat slice's state
