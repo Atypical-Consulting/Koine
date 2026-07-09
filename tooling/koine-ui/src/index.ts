@@ -55,3 +55,10 @@ export * from './domIds';
 // See host/store.ts's module doc for the full rationale and koine-studio's zustandToReadableStore
 // adapter for how the real Zustand store satisfies this contract.
 export { useReadableStore, type ReadableStore } from './host/store';
+
+// --- Store-coupled components via the ReadableStore<T> host-adapter contract (issue #944) ---
+// Moved from koine-studio's src/shell/HistoryControls.tsx and src/diagnostics/WorkspaceProblemsBadge.tsx —
+// the two prototype targets for the host-adapter seam. Each depends on `ReadableStore<T>` (above) for its
+// slice of host state instead of Koine Studio's concrete `StoreApi<AppState>`.
+export { HistoryControls, type HistoryControlsSlice } from './components/HistoryControls';
+export { WorkspaceProblemsBadge, type WorkspaceProblemsSlice } from './components/WorkspaceProblemsBadge';

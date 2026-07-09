@@ -896,3 +896,71 @@
   margin-bottom: var(--koi-space-1);
   color: var(--koi-fg);
 }
+
+/* ---------------------------------------------------------------------------------------------------
+ * HistoryControls + WorkspaceProblemsBadge (ported from Koine Studio's src/styles/layout/_toolbar.scss
+ * and src/styles/components/_statusbar.scss — issue #944, "second tranche" host-adapter prototype).
+ * COPIED, not moved, same rationale as the rest of this file: `.tb-group`/`.icon-btn`/`.sb-item` are
+ * shared with several other Studio toolbar/status-bar items that are NOT migrating (e.g. `.iconset`'s
+ * New/Open buttons, `#sb-compiling-host`'s CompilingIndicator), so Studio's own SCSS partials stay
+ * untouched and authoritative for those.
+ * --------------------------------------------------------------------------------------------------- */
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-0-5);
+  padding: var(--koi-space-0-5);
+  background: color-mix(in srgb, var(--koi-paper) 55%, transparent);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  color: var(--koi-muted);
+  border: 1px solid transparent;
+  border-radius: var(--koi-radius-sm);
+  font-family: var(--koi-font-body);
+  font-size: 0.95rem;
+  font-style: normal;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--koi-dur-fast) ease,
+    color var(--koi-dur-fast) ease,
+    border-color var(--koi-dur-fast) ease;
+}
+.icon-btn:hover {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+  border-color: var(--koi-line);
+}
+.icon-btn[hidden] {
+  display: none;
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+.sb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  padding: 0 var(--koi-space-2);
+}
+
+/* Shares the diagnostics strip's error/warn hues so the two read consistently. */
+.koi-problems-badge[data-kind='error'] {
+  color: var(--koi-error);
+}
+.koi-problems-badge[data-kind='warn'] {
+  color: var(--koi-hl-number);
+}
