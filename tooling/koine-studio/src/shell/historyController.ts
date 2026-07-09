@@ -115,12 +115,17 @@ export function createHistoryController(deps: HistoryControllerDeps): HistoryCon
       for (const [uri, doc] of Object.entries(snap.docs)) {
         const buf = bufs.get(uri);
         if (!buf) continue; // file no longer open (shouldn't happen: structural ops reset history)
-        if (buf.text !== doc.text) {
-          buf.text = doc.text;
+        const textChanged = buf.text !== doc.text;
+        if (textChanged) {
           if (uri === active) deps.editor.setDoc(doc.text);
           else deps.lsp.syncDoc(uri, doc.text);
         }
-        buf.dirty = doc.dirty;
+        // Write text+dirty back through the slice's immutable upsertBuffer (never mutate `buf` in
+        // place) — skip the call entirely when neither field actually changed, so an untouched
+        // buffer doesn't churn a needless new Map.
+        if (textChanged || buf.dirty !== doc.dirty) {
+          deps.writeBuffer(uri, doc.text, doc.dirty);
+        }
       }
       if (snap.activeUri !== active && bufs.has(snap.activeUri)) {
         deps.activateFile(snap.activeUri);
