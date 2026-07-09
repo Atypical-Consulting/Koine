@@ -19,22 +19,22 @@ import {
     clearKeybindingOverrides,
     DEFAULT_SETTINGS,
     type Settings,
-    type StartupView,
 } from "@/settings/persistence";
 import type { McpEndpoint } from "@/host/types";
 import { DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX } from "@/diagrams/diagramContract";
 import { setTheme } from "@/settings/theme";
-import { createAboutPanel } from "@/settings/about";
 import {
     row,
     panel,
     toggle,
     select,
     metricInput,
-    accentPicker,
     langPicker,
 } from "@/settings/prefsControls";
 import { createScopeKit } from "@/settings/prefsSections/scopeKit";
+import type { SectionCtx } from "@/settings/prefsSections/types";
+import { buildAppearanceSection } from "@/settings/prefsSections/appearance";
+import { buildAboutSection } from "@/settings/prefsSections/about";
 import { createJsonView } from "@/editor/editor";
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
 import {
@@ -203,11 +203,13 @@ export { wrapIndex } from "@/shared/wrapIndex";
 import { wrapIndex } from "@/shared/wrapIndex";
 
 // segmented() and stringListInput() now live in @/settings/prefsControls (hoisted out to module scope,
-// #987 task 1) alongside the other pure control factories; imported for use below AND re-exported so
-// callers importing from this module (e.g. prefs.test.ts, settingsPage.tsx) keep working without an
-// import-path change.
+// #987 task 1) alongside the other pure control factories; re-exported so callers importing from this
+// module (e.g. prefs.test.ts, settingsPage.tsx) keep working without an import-path change. `segmented`
+// itself is no longer called directly in THIS module (its one call site, Theme, moved into
+// prefsSections/appearance.ts, #987 task 3) — kept as a pure re-export, not a local import, so it
+// doesn't trip noUnusedLocals; `stringListInput` is still used below (Advanced's shellArgsControl).
 export { segmented, stringListInput } from "@/settings/prefsControls";
-import { segmented, stringListInput } from "@/settings/prefsControls";
+import { stringListInput } from "@/settings/prefsControls";
 
 /**
  * Build the two-pane preference form (category rail + control pane) and append it into `container` — no
@@ -225,12 +227,19 @@ export function mountPreferencesPane(
         cb.onChange(patchSettings(patch));
     }
 
-    // --- control factories ----------------------------------------------------
-    // row, panel, toggle, select, metricInput, accentPicker, and langPicker are the pure, callback-driven
-    // control factories hoisted to module scope in @/settings/prefsControls (#987 task 1) — they don't
-    // close over `cb`/`commit`, so they're imported above rather than defined here.
+    // The ctx every extracted section module (prefsSections/*) gets: `commit` is this module's own
+    // single-field-patch path; `onChange` is the raw report path a control that bypasses patchSettings
+    // still needs (Appearance's Theme — see prefsSections/appearance.ts). Built once and passed to each
+    // section builder below; later tasks (Editor, Keyboard, Output, Assistant, MCP, Advanced) reuse the
+    // same ctx at their own call sites.
+    const sectionCtx: SectionCtx = { commit, onChange: cb.onChange };
 
-    // The segmented radio group (Theme, the User/Workspace scope toggles) is likewise the shared,
+    // --- control factories ----------------------------------------------------
+    // row, panel, toggle, select, metricInput, and langPicker are the pure, callback-driven control
+    // factories hoisted to module scope in @/settings/prefsControls (#987 task 1) — they don't close
+    // over `cb`/`commit`, so they're imported above rather than defined here.
+
+    // The segmented radio group (the User/Workspace scope toggles) is likewise the shared,
     // keyboard-navigable `segmented()` helper from @/settings/prefsControls, so settingsPage.tsx can
     // reuse it too.
 
@@ -249,95 +258,10 @@ export function mountPreferencesPane(
     });
 
     // --- Appearance -----------------------------------------------------------
+    // Construction + control wiring extracted into prefsSections/appearance.ts (#987 task 3 — the first
+    // section module, setting the pattern later tasks copy).
 
-    const themeSeg = segmented<Settings["theme"]>(
-        "Theme",
-        [
-            { value: "dark", label: "Dark" },
-            { value: "light", label: "Light" },
-        ],
-        (theme) => {
-            setTheme(theme); // persists + applies live + notifies theme listeners
-            cb.onChange(loadSettings());
-        },
-    );
-
-    // Appearance fields just commit; the live re-skin happens in onChange via applyAppearance (the one
-    // place that defines how a Settings object maps to the DOM), so there is a single apply path.
-    const accent = accentPicker((name) => commit({ accent: name }));
-    const reduceMotion = toggle("Reduce motion", (on) =>
-        commit({ reduceMotion: on }),
-    );
-
-    // The name attributed to review comments authored from Studio (#479). Committed trimmed; a blank value
-    // is stored as-is and resolves to the 'You' fallback at comment-creation time (resolveReviewAuthor).
-    const displayNameInput = document.createElement("input");
-    displayNameInput.type = "text";
-    displayNameInput.className = "koi-text";
-    displayNameInput.spellcheck = false;
-    displayNameInput.autocomplete = "off";
-    displayNameInput.placeholder = "You";
-    displayNameInput.addEventListener("change", () => {
-        commit({ displayName: displayNameInput.value.trim() });
-    });
-
-    // Editor font-stack override (#750). A blank value falls back to the theme's default mono font, applied
-    // live via applyAppearance (onChange) like the other appearance fields. Committed trimmed.
-    const fontFamilyInput = document.createElement("input");
-    fontFamilyInput.type = "text";
-    fontFamilyInput.className = "koi-text";
-    fontFamilyInput.spellcheck = false;
-    fontFamilyInput.autocomplete = "off";
-    fontFamilyInput.placeholder = "Theme default (monospace)";
-    fontFamilyInput.addEventListener("change", () => {
-        commit({ fontFamily: fontFamilyInput.value.trim() });
-    });
-
-    // “On startup” (#770): which view to open on a cold boot (no explicit hash / share link). The
-    // default ‘home’ preserves the #766 always-Home behaviour; ‘lastWorkspace’ opts in to auto-resume.
-    // Applying on the next cold load only — no live re-route needed.
-    const startupViewSelect = select<StartupView>([
-        { value: "home", label: "Home screen" },
-        { value: "lastWorkspace", label: "Last workspace" },
-    ]);
-    startupViewSelect.addEventListener("change", () => {
-        const value = startupViewSelect.value as StartupView;
-        commit({ startupView: value });
-    });
-
-    const appearancePanel = panel(
-        "appearance",
-        row(
-            "Theme",
-            "Light or dark surfaces across the whole studio.",
-            themeSeg.el,
-        ),
-        row(
-            "Accent",
-            "The highlight colour for selections, focus, and actions.",
-            accent.el,
-        ),
-        row(
-            "Reduce motion",
-            "Collapse animations and transitions.",
-            reduceMotion.el,
-        ),
-        row(
-            "Editor font",
-            "A CSS font-family for the editor. Blank uses the theme’s default monospace font.",
-            fontFamilyInput,
-        ),
-        row(
-            "Display name",
-            'The name your review comments are attributed to. Leave blank to show as "You".',
-            displayNameInput,
-        ),
-        row(
-            "On startup",
-            'Which view to open when Studio starts. "Last workspace" re-opens the editor automatically if a prior workspace exists.',
-            startupViewSelect,
-        ),
-    );
+    const appearance = buildAppearanceSection(sectionCtx);
 
     // --- Editor ---------------------------------------------------------------
 
@@ -1460,9 +1384,10 @@ export function mountPreferencesPane(
     );
 
     // --- About ----------------------------------------------------------------
+    // Construction extracted into prefsSections/about.ts (#987 task 3); `about.refresh()` is still
+    // called from applyOpenState below, at the same point the inline call used to run.
 
-    const about = createAboutPanel();
-    const aboutPanel = panel("about", about.el);
+    const about = buildAboutSection();
 
     // --- assemble the two-pane layout -----------------------------------------
 
@@ -1471,7 +1396,7 @@ export function mountPreferencesPane(
             id: "appearance",
             label: "Appearance",
             icon: ICON.appearance,
-            panel: appearancePanel,
+            panel: appearance.panel,
         },
         {
             id: "editor",
@@ -1504,7 +1429,7 @@ export function mountPreferencesPane(
             icon: ICON.advanced,
             panel: advancedPanel,
         },
-        { id: "about", label: "About", icon: ICON.about, panel: aboutPanel },
+        { id: "about", label: "About", icon: ICON.about, panel: about.panel },
     ] as const;
 
     const nav = document.createElement("nav");
@@ -1574,12 +1499,7 @@ export function mountPreferencesPane(
     // --- populate every control from the current Settings ---------------------
 
     function populate(s: Settings): void {
-        themeSeg.set(s.theme);
-        accent.set(s.accent);
-        reduceMotion.set(s.reduceMotion);
-        displayNameInput.value = s.displayName;
-        fontFamilyInput.value = s.fontFamily;
-        startupViewSelect.value = s.startupView;
+        appearance.populate(s);
         fontInput.value = String(s.fontSize);
         lineHeightInput.value = String(s.lineHeight);
         tabSizeInput.value = String(s.tabSize);
