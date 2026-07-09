@@ -593,4 +593,46 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1282, Task 3 — a probe (confirmed with a real <c>cargo check</c>, not just static reading)
+    /// for the plausible-but-unverified <c>CoalesceExpr</c>-arm gap flagged in this issue's brainstorm:
+    /// <c>WriteOperandValue</c>, like the general arithmetic path and a bare conditional return, only
+    /// recognizes a bare place — not a conditional — as needing ownership treatment, so
+    /// <c>maybeA ?? (if flag then a else b)</c> fails the same E0507 class on the coalesce's right arm.
+    /// </summary>
+    [Fact]
+    public void Coalesce_right_arm_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    maybeA: Weight?\n" +
+            "    flag: Bool\n" +
+            "    coalesced: Weight = maybeA ?? (if flag then a else b)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the coalesce's right (default) arm's conditional
+        // branches must be cloned, never left as a bare, un-borrowed place.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

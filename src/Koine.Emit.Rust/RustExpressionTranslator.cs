@@ -402,11 +402,22 @@ internal sealed class RustExpressionTranslator
         }
     }
 
-    /// <summary>Writes an expression as an owned value (used for coalesce arms): cloned when it is a place.</summary>
+    /// <summary>
+    /// Writes an expression as an owned value (used for coalesce arms): cloned when it is a place. A
+    /// compound (conditional/let/guard) arm routes through <see cref="WriteOwnedOperand"/> instead, so a
+    /// leaf place a branch would otherwise move out of <c>&amp;self</c> is cloned too (#1282) — the
+    /// non-compound case below is unchanged.
+    /// </summary>
     private void WriteOperandValue(Expr expr, StringBuilder sb)
     {
+        if (expr is ConditionalExpr or LetExpr or GuardExpr)
+        {
+            WriteOwnedOperand(expr, sb);
+            return;
+        }
+
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
-        var clone = IsNonCopyPlace(expr, type) || (expr is MemberAccessExpr && type is { } t && !_typeMapper.IsCopy(t));
+        var clone = IsNonCopyPlace(expr, type);
         Write(expr, sb, null);
         if (clone)
         {
