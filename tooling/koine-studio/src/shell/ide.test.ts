@@ -59,6 +59,37 @@ vi.mock('@/settings/persistence', async () => {
 });
 const { peekLegacyScratch, clearLegacyScratch } = storeSeam;
 
+// Capture the deps bag init() hands createWorkspaceController, so a test can fire the REACTIVE
+// callbacks the workspace controller owns (onWorkspaceEmptied) exactly as production does — there is no
+// DOM affordance that deletes the last buffer without also driving the explorer's menu + confirm. The
+// mock delegates fully to the real controller, so every other test boots unchanged.
+const wsControllerSeam = vi.hoisted(() => ({ deps: null as { onWorkspaceEmptied(): void } | null }));
+vi.mock('@/shell/workspaceController', async () => {
+  const actual = await vi.importActual<typeof import('@/shell/workspaceController')>('@/shell/workspaceController');
+  return {
+    ...actual,
+    createWorkspaceController: (deps: Parameters<typeof actual.createWorkspaceController>[0]) => {
+      wsControllerSeam.deps = deps;
+      return actual.createWorkspaceController(deps);
+    },
+  };
+});
+
+// Same trick for the command surface: the palette's "Open folder…" entry and its mod+Shift+O chord both
+// dispatch through the `openFolder` thunk init() passes here. Driving the real chord would fan out to
+// every prior boot's window keydown listener (happy-dom shares `window`), so capture the thunk instead.
+const cmdWiringSeam = vi.hoisted(() => ({ deps: null as { openFolder(): void } | null }));
+vi.mock('@/shell/commandWiring', async () => {
+  const actual = await vi.importActual<typeof import('@/shell/commandWiring')>('@/shell/commandWiring');
+  return {
+    ...actual,
+    createCommandWiring: (deps: Parameters<typeof actual.createCommandWiring>[0]) => {
+      cmdWiringSeam.deps = deps;
+      return actual.createCommandWiring(deps);
+    },
+  };
+});
+
 // #731: capture the `onOpenPrefs` callback ide.ts wires into the (lazily-created) Assistant panel, so a
 // test can invoke it and assert it routes to the Settings overlay. A partial mock: every other aiPanel
 // export is preserved, and createAssistantChat returns a minimal stub (the panel is created lazily on
@@ -746,6 +777,46 @@ describe('ide init() — the workspace-open lock covers the toolbar entry points
     release();
     await settleBoot();
     expect(platform.defaultWorkspaceSeed).not.toBeNull();
+  });
+
+  test('the palette / mod+Shift+O Open-folder thunk defers to an in-flight shared import', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+    const pickFolder = vi.fn(async (): Promise<string | null> => null);
+    platform.pickFolder = pickFolder;
+
+    await boot({ platform });
+
+    // The exact thunk init() handed createCommandWiring, which the palette entry and chord dispatch to.
+    cmdWiringSeam.deps!.openFolder();
+    await settleBoot();
+    expect(pickFolder).not.toHaveBeenCalled();
+
+    release();
+    await settleBoot();
+    expect(pickFolder).toHaveBeenCalledOnce();
+  });
+
+  // The fourth wrapped entry point. It fires reactively (the last buffer was deleted), so unlike the
+  // toolbar paths it has no click to gate on — without this, a later refactor could unwrap it and the
+  // suite would stay green while the clobber returned.
+  test('the reactive onWorkspaceEmptied reset defers to an in-flight shared import', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+
+    await boot({ platform }); // parked mid-import, holding the lock
+    expect(platform.defaultWorkspaceSeed).toBeNull();
+
+    // Fire the exact callback ide.tsx handed the workspace controller.
+    wsControllerSeam.deps!.onWorkspaceEmptied();
+    await settleBoot();
+    expect(platform.defaultWorkspaceSeed).toBeNull(); // the blank reset waited its turn
+
+    release();
+    await settleBoot();
+    expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
   });
 
   // The other half of the invariant. The closures handed to createLifecycleBoot must stay UNWRAPPED:
