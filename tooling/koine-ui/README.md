@@ -112,7 +112,7 @@ without this package depending on that store):
 | Component | What it does |
 | --- | --- |
 | `HistoryControls` | The top-bar Undo/Redo button pair; disabled state driven by `ReadableStore<HistoryControlsSlice>` (`{ canUndo, canRedo }`). |
-| `WorkspaceProblemsBadge` | The status-bar workspace-wide problems rollup; driven by `ReadableStore<WorkspaceProblemsSlice>` (`{ errors, warnings, fileCount }` — already classified, so this package never needs Koine Studio's `LspDiagnostic` type). |
+| `WorkspaceProblemsBadge` | The status-bar workspace-wide problems rollup; driven by `ReadableStore<WorkspaceProblemsSlice>` (`{ kind, parts, fileCount }` — already classified AND formatted, so this package never needs Koine Studio's `LspDiagnostic` type or re-derives its pluralisation wording). |
 
 ### The host-adapter pattern — when to reach for it, and how
 

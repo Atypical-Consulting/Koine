@@ -20,7 +20,7 @@ const meta = {
   component: WorkspaceProblemsBadge,
   parameters: { layout: 'centered' },
   args: {
-    store: readableStoreOf({ errors: 0, warnings: 0, fileCount: 0 }),
+    store: readableStoreOf({ kind: 'clean', parts: [], fileCount: 0 }),
   },
 } satisfies Meta<typeof WorkspaceProblemsBadge>;
 
@@ -33,6 +33,6 @@ export const Clean: Story = {};
 /** Errors and warnings spread across two files: the badge summarises them with the affected-file count. */
 export const WithProblems: Story = {
   args: {
-    store: readableStoreOf({ errors: 1, warnings: 1, fileCount: 2 }),
+    store: readableStoreOf({ kind: 'error', parts: ['1 error', '1 warning'], fileCount: 2 }),
   },
 };

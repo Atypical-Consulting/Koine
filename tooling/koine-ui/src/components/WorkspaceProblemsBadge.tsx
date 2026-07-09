@@ -1,17 +1,20 @@
 import { useReadableStore, type ReadableStore } from '../host/store';
 
 /**
- * The already-classified slice `WorkspaceProblemsBadge` needs — plain counts, not raw diagnostics.
- * Deliberately NOT Koine Studio's `LspDiagnostic[]`/`diagnosticsByUri` shape: severity classification
- * (which severity numbers count as an error vs. a warning) is Koine Studio domain logic that stays owned
- * by `@/lsp/severity` + `@/diagnostics/diagnosticsSummary` — the single home issue #193 gave it, so it
- * can't drift across the strip/status-pill/badge call sites. The host's adapter selector calls that
- * classifier and hands this component only the resulting numbers; this component's only job is
- * formatting them, exactly the same pluralisation/join it always did.
+ * The already-classified AND already-formatted slice `WorkspaceProblemsBadge` needs — not raw
+ * diagnostics. Deliberately NOT Koine Studio's `LspDiagnostic[]`/`diagnosticsByUri` shape: severity
+ * classification (which severity numbers count as an error vs. a warning) AND the count-string wording
+ * (pluralisation, separator) are Koine Studio domain logic that stay owned by `@/lsp/severity` +
+ * `@/diagnostics/diagnosticsSummary` — the single home issue #193 gave them, so they can't drift across
+ * the strip/status-pill/badge call sites. The host's adapter selector calls that classifier and forwards
+ * its `kind`/`parts` output UNCHANGED; this component only decides whether/how to render them, never
+ * re-derives them.
  */
 export interface WorkspaceProblemsSlice {
-  errors: number;
-  warnings: number;
+  /** `clean` when there are no errors or warnings anywhere in the workspace. */
+  kind: 'clean' | 'warn' | 'error';
+  /** Pre-formatted, pre-pluralised count fragments (e.g. `['2 errors', '1 warning']`), empty when clean. */
+  parts: string[];
   /** Count of files that currently have at least one diagnostic (error or warning). */
   fileCount: number;
 }
@@ -26,19 +29,15 @@ export interface WorkspaceProblemsSlice {
 //
 // Moved from `koine-studio/src/diagnostics/WorkspaceProblemsBadge.tsx` (issue #944, second-tranche
 // extraction): the original read the raw `diagnosticsByUri` map and called `diagnosticsSummary` itself;
-// this version takes the already-summarised `{ errors, warnings, fileCount }` numbers instead, so the
-// component never imports Zustand, `AppState`, or Koine Studio's `LspDiagnostic` type. The host computes
-// those numbers in its `zustandToReadableStore` selector (reusing the same `diagnosticsSummary`
-// classifier the strip/status-pill still use directly), and the host adapter's shallow-equal check keeps
-// the "re-render only when the counts actually change" property the original's reference-stable
-// `diagnosticsByUri` selector had.
+// this version takes its already-summarised `{ kind, parts, fileCount }` output instead, so the component
+// never imports Zustand, `AppState`, or Koine Studio's `LspDiagnostic` type, AND never re-derives
+// classification/pluralisation wording that could drift from the diagnostics strip / status pill. The
+// host computes that summary in its `zustandToReadableStore` selector (reusing `diagnosticsSummary`
+// directly), and the host adapter's equality check keeps the "re-render only when the summary actually
+// changes" property the original's reference-stable `diagnosticsByUri` selector had.
 export function WorkspaceProblemsBadge(props: { store: ReadableStore<WorkspaceProblemsSlice> }) {
-  const { errors, warnings, fileCount } = useReadableStore(props.store);
-  if (!errors && !warnings) return null;
-  const kind = errors ? 'error' : 'warn';
-  const parts: string[] = [];
-  if (errors) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-  if (warnings) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+  const { kind, parts, fileCount } = useReadableStore(props.store);
+  if (kind === 'clean') return null;
   return (
     <span class="sb-item koi-problems-badge" data-role="workspace-problems" data-kind={kind}>
       {`${parts.join(' · ')} in ${fileCount} file${fileCount === 1 ? '' : 's'}`}

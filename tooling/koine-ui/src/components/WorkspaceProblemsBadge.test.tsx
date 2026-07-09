@@ -7,7 +7,7 @@ import type { ReadableStore } from '../host/store';
 // A plain ReadableStore<WorkspaceProblemsSlice> test double — koine-ui is store-free, so this mocks the
 // contract directly instead of pulling in koine-studio's real Zustand store + diagnosticsSummary (which
 // the ORIGINAL koine-studio-side test exercised via createAppStore() + setDiagnostics()). The host
-// adapter (readableStoreAdapter.test.ts) covers the classification wiring separately.
+// adapter (readableStores.test.ts) covers the classification/formatting wiring separately.
 function createMockProblemsStore(
   initial: WorkspaceProblemsSlice,
 ): ReadableStore<WorkspaceProblemsSlice> & { set(next: WorkspaceProblemsSlice): void } {
@@ -30,16 +30,16 @@ const badge = (c: Element) => c.querySelector('[data-role="workspace-problems"]'
 
 describe('WorkspaceProblemsBadge', () => {
   test('renders nothing when the whole workspace is clean', () => {
-    const store = createMockProblemsStore({ errors: 0, warnings: 0, fileCount: 0 });
+    const store = createMockProblemsStore({ kind: 'clean', parts: [], fileCount: 0 });
     const { container } = render(<WorkspaceProblemsBadge store={store} />);
     expect(badge(container)).toBeNull();
   });
 
-  test('summarises errors/warnings across ALL files and counts the affected files', () => {
-    const store = createMockProblemsStore({ errors: 0, warnings: 0, fileCount: 0 });
+  test('renders the host-provided kind/parts across ALL files and the affected-file count', () => {
+    const store = createMockProblemsStore({ kind: 'clean', parts: [], fileCount: 0 });
     const { container } = render(<WorkspaceProblemsBadge store={store} />);
 
-    act(() => store.set({ errors: 1, warnings: 1, fileCount: 2 }));
+    act(() => store.set({ kind: 'error', parts: ['1 error', '1 warning'], fileCount: 2 }));
 
     const el = badge(container)!;
     expect(el).not.toBeNull();
@@ -50,21 +50,21 @@ describe('WorkspaceProblemsBadge', () => {
   });
 
   test('uses the singular "file" for a single affected file, and clears when diagnostics go away', () => {
-    const store = createMockProblemsStore({ errors: 0, warnings: 0, fileCount: 0 });
+    const store = createMockProblemsStore({ kind: 'clean', parts: [], fileCount: 0 });
     const { container } = render(<WorkspaceProblemsBadge store={store} />);
 
-    act(() => store.set({ errors: 0, warnings: 2, fileCount: 1 }));
+    act(() => store.set({ kind: 'warn', parts: ['2 warnings'], fileCount: 1 }));
     const el = badge(container)!;
     expect(el.getAttribute('data-kind')).toBe('warn');
     expect(el.textContent).toContain('2 warnings');
     expect(el.textContent).toContain('in 1 file');
 
-    act(() => store.set({ errors: 0, warnings: 0, fileCount: 0 }));
+    act(() => store.set({ kind: 'clean', parts: [], fileCount: 0 }));
     expect(badge(container)).toBeNull();
   });
 
   test('has no accessibility violations', async () => {
-    const store = createMockProblemsStore({ errors: 1, warnings: 1, fileCount: 1 });
+    const store = createMockProblemsStore({ kind: 'error', parts: ['1 error', '1 warning'], fileCount: 1 });
     const { container } = render(<WorkspaceProblemsBadge store={store} />);
     expect(await axe(container)).toHaveNoViolations();
   });

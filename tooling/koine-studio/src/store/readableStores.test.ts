@@ -38,10 +38,10 @@ describe('createHistoryControlsStore', () => {
 });
 
 describe('createWorkspaceProblemsStore', () => {
-  test('getState() summarises errors/warnings across all files via diagnosticsSummary', () => {
+  test('getState() forwards diagnosticsSummary’s kind/parts across all files unchanged', () => {
     const store = createAppStore();
     const readable = createWorkspaceProblemsStore(store);
-    expect(readable.getState()).toEqual({ errors: 0, warnings: 0, fileCount: 0 });
+    expect(readable.getState()).toEqual({ kind: 'clean', parts: [], fileCount: 0 });
 
     store.getState().setDiagnostics('file:///a.koi', [
       { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, message: 'boom', severity: 1 },
@@ -50,7 +50,7 @@ describe('createWorkspaceProblemsStore', () => {
       { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, message: 'careful', severity: 2 },
     ]);
 
-    expect(readable.getState()).toEqual({ errors: 1, warnings: 1, fileCount: 2 });
+    expect(readable.getState()).toEqual({ kind: 'error', parts: ['1 error', '1 warning'], fileCount: 2 });
   });
 
   test('notifies on a diagnostics push and not on an unrelated store write', () => {
@@ -66,5 +66,23 @@ describe('createWorkspaceProblemsStore', () => {
       { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, message: 'boom', severity: 1 },
     ]);
     expect(calls).toBe(1);
+  });
+
+  // Pins the fix for a real bug: `parts` is a freshly built array on every selector call, so a naive
+  // shallow/Object.is equality check would treat two content-identical arrays as different and notify on
+  // every unrelated write once any diagnostic exists. `createWorkspaceProblemsStore` uses a dedicated
+  // element-wise equality (`problemsSliceEqual`) specifically to avoid that regression.
+  test('does NOT notify on an unrelated write once diagnostics exist (parts array content-equality)', () => {
+    const store = createAppStore();
+    store.getState().setDiagnostics('file:///a.koi', [
+      { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, message: 'boom', severity: 1 },
+    ]);
+    const readable = createWorkspaceProblemsStore(store);
+    let calls = 0;
+    readable.subscribe(() => calls++);
+
+    store.getState().setNavAltitude('tactical'); // unrelated slice; diagnostics unchanged
+
+    expect(calls).toBe(0);
   });
 });
