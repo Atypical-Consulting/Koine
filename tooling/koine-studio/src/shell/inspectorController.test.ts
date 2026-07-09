@@ -17,9 +17,10 @@ import {
 import { createElement, render } from 'preact';
 import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
-import type { StoreApi } from 'zustand/vanilla';
-import { createAppStore, type AppState } from '@/store/index';
-import { createCountingStore } from '@/store/testing';
+import { createAppStore } from '@/store/index';
+import { createCountingStore, createRecordingStore } from '@/store/testing';
+import { centerDeckInitialChrome } from '@/shell/inspector/centerDeckController';
+import type { DeckState } from '@/store/slices/uiChrome';
 import { ALL_CONTEXTS } from '@/model/activeContext';
 import { domById } from '@/shared/domById';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
@@ -2213,56 +2214,35 @@ describe('createInspectorController — persistence round-trips (#983)', () => {
   });
 });
 
-// One ordered log entry per `subscribe(...)` REGISTRATION (any module wiring a listener) and per actual
-// store WRITE (any `setState` call OR an action's internal `set(...)` — both funnel through the same
-// zustand notify loop, so a plain sentinel listener registered via the RAW subscribe sees every one of
-// them without needing to intercept `setState` itself, and gets the changed top-level keys for free from
-// zustand's own `(state, previousState)` callback args). The sentinel is wired before `store.subscribe` is
-// wrapped, so it never logs itself as a 'subscribe' entry — only genuine, facade-driven registrations do.
-type RecordEntry = { kind: 'write'; changedKeys: string[] } | { kind: 'subscribe' };
-
-function createRecordingStore(): { store: StoreApi<AppState>; log: RecordEntry[] } {
-  const store = createAppStore();
-  const log: RecordEntry[] = [];
-  const rawSubscribe = store.subscribe.bind(store);
-  rawSubscribe((state, prev) => {
-    const s = state as unknown as Record<string, unknown>;
-    const p = prev as unknown as Record<string, unknown>;
-    const changedKeys = Object.keys(s).filter((k) => s[k] !== p[k]);
-    log.push({ kind: 'write', changedKeys });
-  });
-  store.subscribe = ((listener: Parameters<StoreApi<AppState>['subscribe']>[0]) => {
-    log.push({ kind: 'subscribe' });
-    return rawSubscribe(listener);
-  }) as StoreApi<AppState>['subscribe'];
-  return { store, log };
-}
-
-// The construction-time reset's OWN fields (#1260): the facade's `navAltitude`, the docViews-staleness
-// reset `invalidate()` drives, and centerDeckController's 7-field chrome reset folded into the SAME atomic
-// `setState` (`centerDeckInitialChrome`). Deliberately narrower than "every key any module ever seeds
-// before its own subscription" — sibling seed-then-subscribe patterns for UNRELATED slices (rail axis,
-// right/left rail collapse, the narrow-viewport diag default, the Context Map Graph/Table toggle) are
-// each-module-local, pre-existing, and disjoint from this reset; they are not what this issue's report
-// found torn, so a write to one of THOSE keys after the first subscribe is not a regression this test
-// should catch.
-const RESET_KEYS = ['navAltitude', 'deck', 'center', 'tech', 'output', 'docs', 'bottom', 'right', 'docViews'];
-
 describe('createInspectorController — construction-time reset is atomic (#1260)', () => {
-  test('no write to a construction-reset field is recorded after the first subscribe registration', () => {
-    const { store, log } = createRecordingStore();
+  test('the construction reset has already fully landed by the time the first subscriber registers', () => {
+    // A NON-default restored deck: `createUiChromeSlice`'s own initial state already happens to equal
+    // `centerDeckInitialChrome(DEFAULT_DECK_STATE)` field-for-field, so booting with the default deck could
+    // never distinguish "not yet reset" from "already reset" — it would pass by coincidence either way.
+    // primary: 'technical' (not the 'visual' default) makes the reset's effect actually observable.
+    const restoredDeck: DeckState = { mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.5, flipped: false };
+    const { store, subscribeSnapshots } = createRecordingStore();
 
     // The synchronous constructor ONLY — never init(), which legitimately writes (surface loaders, deck
     // persistence) after subscribing; that's normal steady-state operation, not the boot-time reset this
     // guards.
-    const ctl = createInspectorController(makeDeps(makeLsp(), { store }));
+    const ctl = createInspectorController(makeDeps(makeLsp(), { store, loadWorkspaceDeck: () => restoredDeck }));
 
-    const firstSubscribeIndex = log.findIndex((entry) => entry.kind === 'subscribe');
-    expect(firstSubscribeIndex).toBeGreaterThanOrEqual(0); // sanity: the constructor does register subscriptions
-    const resetKeyWritesAfterFirstSubscribe = log
-      .slice(firstSubscribeIndex + 1)
-      .filter((entry) => entry.kind === 'write' && entry.changedKeys.some((k) => RESET_KEYS.includes(k)));
-    expect(resetKeyWritesAfterFirstSubscribe).toEqual([]);
+    expect(subscribeSnapshots.length).toBeGreaterThan(0); // sanity: the constructor does register subscriptions
+    const atFirstSubscribe = subscribeSnapshots[0];
+    expect(atFirstSubscribe.navAltitude).toBe('strategic');
+    expect({
+      deck: atFirstSubscribe.deck,
+      center: atFirstSubscribe.center,
+      tech: atFirstSubscribe.tech,
+      output: atFirstSubscribe.output,
+      docs: atFirstSubscribe.docs,
+      bottom: atFirstSubscribe.bottom,
+      right: atFirstSubscribe.right,
+    }).toEqual(centerDeckInitialChrome(restoredDeck));
+    // invalidate() genuinely ran too (not just the chrome literals): every docViews token bumped off its
+    // fresh-store 0.
+    expect(atFirstSubscribe.docViews.model.token).toBeGreaterThan(0);
 
     ctl.dispose();
   });

@@ -36,3 +36,21 @@ export function createCountingStore(): { store: StoreApi<AppState>; active(): nu
   }) as StoreApi<AppState>['subscribe'];
   return { store, active: () => count };
 }
+
+/**
+ * A test-only wrapper over {@link createAppStore} that snapshots `store.getState()` at the moment of
+ * every `subscribe(...)` registration (#1260). The payoff is an "is this write already applied by the
+ * time a subscriber exists" assertion — the ORDERING question a construction-time reset atomicity guard
+ * needs — without relying on before/after value inequality (which a reset that happens to re-apply a
+ * field's already-current value would hide even when the write genuinely runs too late).
+ */
+export function createRecordingStore(): { store: StoreApi<AppState>; subscribeSnapshots: AppState[] } {
+  const store = createAppStore();
+  const subscribeSnapshots: AppState[] = [];
+  const rawSubscribe = store.subscribe.bind(store);
+  store.subscribe = ((listener: Parameters<StoreApi<AppState>['subscribe']>[0]) => {
+    subscribeSnapshots.push(store.getState());
+    return rawSubscribe(listener);
+  }) as StoreApi<AppState>['subscribe'];
+  return { store, subscribeSnapshots };
+}

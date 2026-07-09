@@ -1,11 +1,12 @@
 // The center/deck + chrome orchestration — extracted from inspectorController (Task 4 of #985's
 // decomposition, the last of the four). Owns: the CENTER "Deck" surfaces (Canvas / Code / Output / Docs)
-// and their tab-level chrome (applyCenterChrome/syncCenterChrome/visibleCenters), the center/deck restore
-// + persistence (#980's captured center-persist subscription, #983's deck persistence), the rail-axis
-// switch (Domain vs Files, #453), the right-edge tool-window stripe (#500) + its collapse/expand/notify
-// chrome, the left navigator morph-collapse (#730), the bottom strip's tabs/collapse/edge-resizer (#983,
-// #475's narrow-viewport default), the viewport-resize cross handler's #475 re-evaluation, and the
-// DeckStage/DeckSpine mount (moved out of the facade's `init()`).
+// and their tab-level chrome (applyCenterChrome/syncCenterChrome/visibleCenters), the center-pane
+// persistence (#980's captured center-persist subscription, #983's deck persistence) — but NOT the deck's
+// initial restore, which moved to the facade (#1260, see `centerDeckInitialChrome` and the construction-
+// reset block below) — the rail-axis switch (Domain vs Files, #453), the right-edge tool-window stripe
+// (#500) + its collapse/expand/notify chrome, the left navigator morph-collapse (#730), the bottom strip's
+// tabs/collapse/edge-resizer (#983, #475's narrow-viewport default), the viewport-resize cross handler's
+// #475 re-evaluation, and the DeckStage/DeckSpine mount (moved out of the facade's `init()`).
 //
 // Deliberately standalone, like Tasks 1-3's sibling modules: this module never imports
 // `@/shell/inspectorController` (the facade wires it in, never the reverse) and never imports the other
