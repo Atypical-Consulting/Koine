@@ -2,12 +2,18 @@ import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { ExplorerPanel } from '@/shell/ExplorerPanel';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
+import { createAppStore } from '@/store/index';
 
 // The workspace explorer's static keyed-tree render (#989 task 2). Fixtures mirror
 // ExplorerPanel.test.tsx (proven a11y-clean): a two-context tree (a nested `orders/order.koi` plus a
 // top-level `shared.koi`) for the single-root stories, and a disjoint second root for the multi-root
 // story. No story wires keyboard nav, drag-and-drop, inline create/rename or the context menu — those
 // land in later #989 tasks; New file/New folder/the empty-state "New file" button are inert placeholders.
+//
+// The filter query + collapsed-directories set live in the app store as of #989 task 7 (see
+// ExplorerPanel.tsx's file-header note); `store` is a required-in-spirit, injectable prop (defaults to the
+// singleton `appStore`, but every story here injects its own, mirroring GlossaryPanel.stories.tsx) so a
+// story's filter/collapse interaction never leaks into a sibling story.
 
 function sampleTree(): FsEntry[] {
   return [
@@ -99,6 +105,7 @@ const meta = {
   component: ExplorerPanel,
   parameters: { layout: 'padded' },
   args: {
+    store: createAppStore(),
     cb,
     groups: [group()],
   },
@@ -109,32 +116,46 @@ type Story = StoryObj<typeof meta>;
 
 /** A single workspace root: a collapsible folder plus a top-level `.koi` file, with the active/dirty
  *  file and an error badge shown. */
-export const SingleRoot: Story = {};
+export const SingleRoot: Story = {
+  render: (args) => <ExplorerPanel {...args} store={createAppStore()} />,
+};
 
 /** Two workspace roots — a labeled `.explorer-group-header` (folder name + Remove) per root. Both roots'
  *  rows live under the SAME shared `ul[role="tree"]`, each inside its own `.explorer-group[data-root]`. */
 export const MultiRoot: Story = {
   args: { groups: [group('/home/me/sales'), secondGroup()] },
+  render: (args) => <ExplorerPanel {...args} store={createAppStore()} />,
 };
 
 /** A folder inside a folder (two directory levels deep): `orders/2024/order.koi`. Proves the recursive
  *  `.explorer-children[role=group]` nesting (#989 task-2a) holds at every depth, not just one level. */
 export const NestedSubdirectories: Story = {
   args: { groups: [nestedGroup()] },
+  render: (args) => <ExplorerPanel {...args} store={createAppStore()} />,
 };
 
-/** The debounced filter pre-seeded (via `initialFilterText`, a test/story-only seam) to "order" — only
- *  the matching file (and its ancestor folder) render, with the match highlighted and the count chip lit. */
+/** The debounced filter pre-seeded (via the injected store's `explorerFilter`, #989 task 7) to "order" —
+ *  only the matching file (and its ancestor folder) render, with the match highlighted and the count chip
+ *  lit. */
 export const Filtered: Story = {
-  args: { initialFilterText: 'order' },
+  render: (args) => {
+    const store = createAppStore();
+    store.getState().setExplorerFilter('order');
+    return <ExplorerPanel {...args} store={store} />;
+  },
 };
 
 /** A filter matching nothing: the no-match empty state replaces the tree entirely. */
 export const NoMatch: Story = {
-  args: { initialFilterText: 'zzz-nope' },
+  render: (args) => {
+    const store = createAppStore();
+    store.getState().setExplorerFilter('zzz-nope');
+    return <ExplorerPanel {...args} store={store} />;
+  },
 };
 
 /** No workspace open: the empty-workspace state (with its "New file" affordance) replaces the tree. */
 export const EmptyWorkspace: Story = {
   args: { groups: [] },
+  render: (args) => <ExplorerPanel {...args} store={createAppStore()} />,
 };

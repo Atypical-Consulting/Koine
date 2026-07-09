@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
+import type { StoreApi } from 'zustand/vanilla';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
 import { analyze, flattenVisible, indexEntries, invalidSegment, parentDirOf, parentMapOf } from '@/shell/explorerModel';
 import { ExplorerItem, INVALID_NAME_TITLE, ItemIcon } from '@/shell/ExplorerItem';
 import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
+import { appStore, type AppState } from '@/store/index';
+import { useAppStore } from '@/store/hooks';
 import {
   createFloatingMenu,
   createModal,
@@ -47,8 +50,21 @@ import {
 //
 // NOT in this task: the "…" per-row context-menu trigger, and the ADR-0009 active-context is-scoped/dim
 // emphasis (explorerModel.ts's public `analyze()` doesn't carry that scope match — only the private
-// analyze() inside explorer.ts does). `filterText` and the collapsed-directories set are component-LOCAL
-// `useState` here; task 7 lifts them into the app store.
+// analyze() inside explorer.ts does).
+//
+// STORE-BACKED FILTER + COLLAPSED STATE (#989 task 7): the filter query and the collapsed-directories set
+// live in the app's Zustand `uiChrome` slice (`explorerFilter`/`explorerCollapsed` +
+// `setExplorerFilter`/`toggleExplorerCollapsed`/`setExplorerCollapsedMany`/`expandExplorerTokens`) —
+// exactly the same rationale, and the same shape, as `outlineFilter` (the syntax-outline panel's
+// precedent): a workspace reload unmounts + remounts `ExplorerPanel`, which would otherwise wipe a
+// component-local query/collapsed-set mid-task. `store` is injectable (defaults to the singleton
+// `appStore`) so tests/stories can isolate their own state, mirroring `GlossaryPanel`'s `{ store }` prop.
+// The store field is a plain `readonly string[]` (a serializable-shaped value, not a `Set`); this
+// component converts it to a `Set` locally (`collapsed`, via `useMemo`) wherever `Set` operations are more
+// convenient — the store itself never holds a `Set`. The debounced `filterText` (trimmed + lowercased,
+// used for matching/highlighting) stays local `useState`, now keyed off the store's `explorerFilter`
+// instead of a local `filterInput` — only the raw, as-typed query needs to survive a remount; the debounced
+// derived value is cheap to recompute fresh on mount.
 //
 // CONTEXT MENUS + DELETE CONFIRM (#989 task 4): right-click a row, the `ContextMenu` key on a focused
 // row, or right-click the tree's empty background all open a `createFloatingMenu` (row: New File/New
@@ -95,10 +111,10 @@ import {
 export interface ExplorerPanelProps {
   cb: ExplorerCallbacks;
   groups: ExplorerRootGroup[];
-  /** Seed the filter field (tests/stories only) — the field is otherwise local state. */
-  initialFilterText?: string;
-  /** Seed the collapsed-directories set (tests/stories only). */
-  initialCollapsed?: readonly string[];
+  /** The app store the filter query + collapsed-directories set are read from/written to (#989 task 7) —
+   *  defaults to the singleton `appStore`. Tests/stories inject their own `createAppStore()` so state
+   *  doesn't leak between cases (mirrors `GlossaryPanel`'s `{ store }` prop). */
+  store?: StoreApi<AppState>;
 }
 
 // The one inline-edit session that can be open at a time (#989 task 5) — replaces task 4's placeholder
@@ -173,9 +189,26 @@ function buildConfirmHandle(): ConfirmHandle {
 
 export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const { cb, groups } = props;
-  const [filterInput, setFilterInput] = useState(props.initialFilterText ?? '');
-  const [filterText, setFilterText] = useState(() => (props.initialFilterText ?? '').trim().toLowerCase());
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set(props.initialCollapsed ?? []));
+  const store = props.store ?? appStore;
+  // The filter query + collapsed-directories set (#989 task 7) — read from / written to the injected
+  // store's `uiChrome` slice (see the file-header note above). `useAppStore(store, selector)` subscribes
+  // this component to exactly these slices, so an unrelated store change never re-renders this panel.
+  const explorerFilter = useAppStore(store, (s) => s.explorerFilter);
+  const setExplorerFilter = useAppStore(store, (s) => s.setExplorerFilter);
+  const explorerCollapsedTokens = useAppStore(store, (s) => s.explorerCollapsed);
+  const toggleExplorerCollapsed = useAppStore(store, (s) => s.toggleExplorerCollapsed);
+  const setExplorerCollapsedMany = useAppStore(store, (s) => s.setExplorerCollapsedMany);
+  const expandExplorerTokens = useAppStore(store, (s) => s.expandExplorerTokens);
+  // The `Set` view of the store's collapsed-tokens array — `Set` operations (`.has()`) are far more
+  // convenient than `Array.prototype.includes()` throughout the rest of this component; the store itself
+  // stays a plain, serializable `readonly string[]` (see the file-header note above).
+  const collapsed = useMemo(() => new Set(explorerCollapsedTokens), [explorerCollapsedTokens]);
+  // The debounced, trimmed+lowercased filter text used for matching/highlighting — still local state (only
+  // the raw `explorerFilter` needs to survive a remount; this derived value is cheap to recompute fresh).
+  // Lazily seeded from whatever `explorerFilter` already holds at mount time (e.g. a value the store
+  // retained across a remount), so a seeded filter takes effect immediately rather than waiting out the
+  // debounce below.
+  const [filterText, setFilterText] = useState(() => explorerFilter.trim().toLowerCase());
   // The lone WAI-ARIA roving tab stop's token (#989 task 3) — `null` until the tree has been focused at
   // least once, in which case the first visible row is the default tab stop (see `effectiveFocusedToken`).
   const [focusedToken, setFocusedToken] = useState<string | null>(null);
@@ -198,11 +231,13 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   }, [editing]);
 
   // Debounce the filter — 110ms, mirroring explorer.ts's `setTimeout(applyFilter, 110)` — so each
-  // keystroke doesn't re-derive visibility/highlighting for the whole tree.
+  // keystroke doesn't re-derive visibility/highlighting for the whole tree. Keyed off the store's
+  // `explorerFilter` (#989 task 7) rather than a local `filterInput` — the raw query itself now lives in
+  // the store (see the file-header note above).
   useEffect(() => {
-    const id = setTimeout(() => setFilterText(filterInput.trim().toLowerCase()), 110);
+    const id = setTimeout(() => setFilterText(explorerFilter.trim().toLowerCase()), 110);
     return () => clearTimeout(id);
-  }, [filterInput]);
+  }, [explorerFilter]);
 
   // The row/root context menu and the delete-confirm dialog (#989 task 4) — the SAME imperative
   // `createFloatingMenu`/`createModal` overlay primitives explorer.ts uses, not a JSX reimplementation.
@@ -242,21 +277,16 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
 
   // Prune stale collapsed tokens (a folder deleted/renamed/moved away since the last render) so the set
   // can't grow unbounded or wrongly re-collapse a brand-new folder that reuses an old token — ported from
-  // explorer.ts's renderRoots(). Returns the SAME Set reference when nothing changed, so this never
-  // triggers a needless extra render.
+  // explorer.ts's renderRoots(). Writes back through `setExplorerCollapsedMany` (#989 task 7) ONLY when the
+  // pruned intersection actually differs in size from the current store value — calling the setter
+  // unconditionally would re-`set()` the store (a fresh array reference) on every render even when nothing
+  // was pruned, which would re-trigger this very effect (its own dependency) and loop forever.
   useEffect(() => {
-    setCollapsed((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const t of prev) {
-        if (!analysis.liveDirs.has(t)) {
-          next.delete(t);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [analysis.liveDirs]);
+    const pruned = explorerCollapsedTokens.filter((t) => analysis.liveDirs.has(t));
+    if (pruned.length !== explorerCollapsedTokens.length) {
+      setExplorerCollapsedMany(pruned);
+    }
+  }, [analysis.liveDirs, explorerCollapsedTokens, setExplorerCollapsedMany]);
 
   // The ordered, flattened visible rows — the SAME data this render walks (via `analysis.visible` inside
   // `renderEntry`) to decide what to show, reused as-is for keyboard-nav ordering (`navTokens` below) so
@@ -265,14 +295,9 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const totalRows = flatRows.length;
   const showEmpty = totalRows === 0;
 
-  const toggleDir = (token: string): void => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(token)) next.delete(token);
-      else next.add(token);
-      return next;
-    });
-  };
+  // Ports directly to the store's `toggleExplorerCollapsed` action (#989 task 7) — the exact toggle
+  // semantic a directory row's click always had (add if absent, remove if present).
+  const toggleDir = (token: string): void => toggleExplorerCollapsed(token);
 
   // --- keyboard navigation (#989 task 3) --------------------------------------------------------------
   // `navTokens` is `flatRows`' token order — the exact visible-row sequence ArrowUp/Down walk. `rowByToken`
@@ -391,13 +416,9 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     if (editing) return;
     // Force-expand a directory target so its create row (rendered as its first child, see
     // `renderEntry`) is actually visible — mirrors explorer.ts's `setExpanded(dirLi, true)`.
+    // `expandExplorerTokens` is a no-op when `parentDirToken` isn't in the set (#989 task 7).
     if (!rootTokens.has(parentDirToken)) {
-      setCollapsed((prev) => {
-        if (!prev.has(parentDirToken)) return prev;
-        const next = new Set(prev);
-        next.delete(parentDirToken);
-        return next;
-      });
+      expandExplorerTokens([parentDirToken]);
     }
     setEditing({ kind: 'create', parent: parentDirToken, entryKind: kind });
     setEditValue('');
@@ -580,35 +601,32 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
       activeIndex: () => idx,
       focusIndex: (i) => focusToken(navTokens[i] ?? null),
       // ArrowRight: open a closed directory in place (focus stays on it), or step into an already-open
-      // one's next visible row. Always reports the key consumed — a file has nothing to expand.
+      // one's next visible row. Always reports the key consumed — a file has nothing to expand. `!open`
+      // (not filtering) implies `collapsed.has(t)`, so `expandExplorerTokens([t])` (#989 task 7) always
+      // removes a token that's actually present here.
       expand: (i) => {
         const t = navTokens[i];
         const row = rowByToken.get(t);
         if (row?.kind === 'dir') {
           const open = filtering || !collapsed.has(t);
           if (!open) {
-            setCollapsed((prev) => {
-              const next = new Set(prev);
-              next.delete(t);
-              return next;
-            });
+            expandExplorerTokens([t]);
           } else if (i < navTokens.length - 1) {
             focusToken(navTokens[i + 1]);
           }
         }
         return true;
       },
-      // ArrowLeft: collapse an open directory in place, else ascend to the parent row.
+      // ArrowLeft: collapse an open directory in place, else ascend to the parent row. While filtering,
+      // `open` can be true even when `t` is ALREADY in the collapsed set (filtering force-expands
+      // regardless) — guard with `!collapsed.has(t)` before calling `toggleExplorerCollapsed` (#989 task 7)
+      // so this only ever ADDS the token, never wrongly flips an already-collapsed one back open.
       collapse: (i) => {
         const t = navTokens[i];
         const row = rowByToken.get(t);
         const open = row?.kind === 'dir' && (filtering || !collapsed.has(t));
         if (open) {
-          setCollapsed((prev) => {
-            const next = new Set(prev);
-            next.add(t);
-            return next;
-          });
+          if (!collapsed.has(t)) toggleExplorerCollapsed(t);
         } else {
           const parent = parentMap.get(t) ?? null;
           if (parent != null) focusToken(parent);
@@ -630,16 +648,18 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   };
 
   const collapseAllDirs = (): void => {
-    const all = new Set<string>();
+    const all: string[] = [];
     const walk = (e: FsEntry): void => {
       if (e.kind !== 'dir') return;
-      all.add(e.token);
+      all.push(e.token);
       for (const c of e.children ?? []) walk(c);
     };
     for (const g of groups) for (const e of g.entries) walk(e);
-    setCollapsed(all);
+    // REPLACES the whole set wholesale (#989 task 7) — every directory token at once, not a per-token
+    // toggle.
+    setExplorerCollapsedMany(all);
   };
-  const expandAllDirs = (): void => setCollapsed(new Set());
+  const expandAllDirs = (): void => setExplorerCollapsedMany([]);
 
   const filtering = filterText !== '';
 
@@ -878,14 +898,14 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
             placeholder="Filter files…"
             aria-label="Filter workspace files"
             spellcheck={false}
-            value={filterInput}
-            onInput={(e) => setFilterInput((e.currentTarget as HTMLInputElement).value)}
+            value={explorerFilter}
+            onInput={(e) => setExplorerFilter((e.currentTarget as HTMLInputElement).value)}
             onKeyDown={(e) => {
               // Escape clears immediately, bypassing the debounce (matches explorer.ts).
-              if (e.key === 'Escape' && filterInput) {
+              if (e.key === 'Escape' && explorerFilter) {
                 e.preventDefault();
                 e.stopPropagation();
-                setFilterInput('');
+                setExplorerFilter('');
                 setFilterText('');
               }
             }}
@@ -922,7 +942,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
       {showEmpty && editing?.kind !== 'create' ? (
         <div class="explorer-empty">
           {filterText ? (
-            `No files match “${filterInput.trim()}”.`
+            `No files match “${explorerFilter.trim()}”.`
           ) : (
             <>
               <p class="explorer-empty-line">This folder is empty.</p>

@@ -96,6 +96,56 @@ describe('uiChrome slice', () => {
   });
 });
 
+describe('uiChrome explorerFilter / explorerCollapsed (#989 task 7)', () => {
+  test('explorerFilter defaults to empty and is set independently (it survives panel remounts)', () => {
+    const s = make();
+    expect(s.getState().explorerFilter).toBe('');
+    s.getState().setExplorerFilter('order');
+    expect(s.getState().explorerFilter).toBe('order');
+    s.getState().setExplorerFilter('');
+    expect(s.getState().explorerFilter).toBe('');
+  });
+
+  test('explorerCollapsed defaults to an empty array', () => {
+    const s = make();
+    expect(s.getState().explorerCollapsed).toEqual([]);
+  });
+
+  test('toggleExplorerCollapsed adds an absent token and removes a present one', () => {
+    const s = make();
+    s.getState().toggleExplorerCollapsed('ROOT/orders');
+    expect(s.getState().explorerCollapsed).toEqual(['ROOT/orders']);
+    s.getState().toggleExplorerCollapsed('ROOT/billing');
+    expect(s.getState().explorerCollapsed).toEqual(['ROOT/orders', 'ROOT/billing']);
+    s.getState().toggleExplorerCollapsed('ROOT/orders');
+    expect(s.getState().explorerCollapsed).toEqual(['ROOT/billing']);
+  });
+
+  test('setExplorerCollapsedMany REPLACES the whole set wholesale (used by Collapse all)', () => {
+    const s = make();
+    s.getState().toggleExplorerCollapsed('ROOT/stale');
+    s.getState().setExplorerCollapsedMany(['ROOT/orders', 'ROOT/billing']);
+    expect(s.getState().explorerCollapsed).toEqual(['ROOT/orders', 'ROOT/billing']);
+    // A second call with fewer tokens really replaces, not merges.
+    s.getState().setExplorerCollapsedMany(['ROOT/orders']);
+    expect(s.getState().explorerCollapsed).toEqual(['ROOT/orders']);
+  });
+
+  test('setExplorerCollapsedMany([]) clears the set (used by Expand all)', () => {
+    const s = make();
+    s.getState().setExplorerCollapsedMany(['ROOT/orders', 'ROOT/billing']);
+    s.getState().setExplorerCollapsedMany([]);
+    expect(s.getState().explorerCollapsed).toEqual([]);
+  });
+
+  test('expandExplorerTokens removes exactly the given tokens, leaving the rest collapsed', () => {
+    const s = make();
+    s.getState().setExplorerCollapsedMany(['ROOT/orders', 'ROOT/billing', 'ROOT/archive']);
+    s.getState().expandExplorerTokens(['ROOT/billing', 'ROOT/not-collapsed']);
+    expect(s.getState().explorerCollapsed).toEqual(['ROOT/orders', 'ROOT/archive']);
+  });
+});
+
 describe('uiChrome railAxis / diagCollapsed / contextMapView (#983)', () => {
   test('railAxis defaults to domain and setRailAxis switches it', () => {
     const s = make();
