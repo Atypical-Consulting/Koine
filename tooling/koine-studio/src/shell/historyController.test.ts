@@ -208,4 +208,23 @@ describe('historyController', () => {
     expect(h.writeBuffer).toHaveBeenCalledWith('a', 'A0', false);
     expect(h.buffers.get('a')!.dirty).toBe(false);
   });
+
+  // Regression: `restore` must call `writeBuffer` BEFORE `editor.setDoc` for the active buffer.
+  // `editor.setDoc` dispatches synchronously and reenters onChange -> workspace.syncBuffer while
+  // `isRestoring` is still true (mirrored here via the `onSetDoc` hook); that reentrant sync must see
+  // the buffer ALREADY at its restored text — exactly like the old in-place `buf.text = …` write that
+  // ran before `setDoc` — or it mistakes the restore for a real edit and churns an extra, wrongly
+  // dirty store transition before the real `writeBuffer` call corrects it.
+  test('writeBuffer runs before editor.setDoc, so a reentrant onChange never sees stale text', () => {
+    const h = setup();
+    h.edit('a', 'A1');
+    h.ctrl.noteEdit({ immediate: true });
+    let sawRestoredTextInReentrantOnChange = false;
+    h.hooks.onSetDoc = () => {
+      sawRestoredTextInReentrantOnChange = h.buffers.get('a')!.text === 'A0';
+    };
+    h.ctrl.undo();
+    expect(h.setDoc).toHaveBeenCalledWith('A0'); // sanity: setDoc did fire
+    expect(sawRestoredTextInReentrantOnChange).toBe(true);
+  });
 });

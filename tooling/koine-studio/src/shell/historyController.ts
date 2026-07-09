@@ -117,15 +117,20 @@ export function createHistoryController(deps: HistoryControllerDeps): HistoryCon
         const buf = bufs.get(uri);
         if (!buf) continue; // file no longer open (shouldn't happen: structural ops reset history)
         const textChanged = buf.text !== doc.text;
+        // Write text+dirty back through the slice's immutable upsertBuffer BEFORE firing the
+        // editor/LSP side effects below (never mutate `buf` in place) — skip the call entirely when
+        // neither field actually changed, so an untouched buffer doesn't churn a needless new Map.
+        // Ordering matters: `editor.setDoc` dispatches synchronously and reenters onChange →
+        // workspace.syncBuffer while `restoring` is still true; that reentrant sync must see the
+        // buffer ALREADY at its restored text (exactly like the old in-place `buf.text = …` write
+        // that ran before `setDoc`), or it mistakes the restore for a real edit and churns an extra
+        // store transition with the wrong (dirty: true) flag before this call corrects it.
+        if (textChanged || buf.dirty !== doc.dirty) {
+          deps.writeBuffer(uri, doc.text, doc.dirty);
+        }
         if (textChanged) {
           if (uri === active) deps.editor.setDoc(doc.text);
           else deps.lsp.syncDoc(uri, doc.text);
-        }
-        // Write text+dirty back through the slice's immutable upsertBuffer (never mutate `buf` in
-        // place) — skip the call entirely when neither field actually changed, so an untouched
-        // buffer doesn't churn a needless new Map.
-        if (textChanged || buf.dirty !== doc.dirty) {
-          deps.writeBuffer(uri, doc.text, doc.dirty);
         }
       }
       if (snap.activeUri !== active && bufs.has(snap.activeUri)) {

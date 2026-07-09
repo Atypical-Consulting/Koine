@@ -2240,7 +2240,17 @@ describe('createWorkspaceController — seq seams (#982)', () => {
   // COMPILE error, not just a review-time convention. Before the facade type is tightened this
   // `@ts-expect-error` has nothing to suppress, so `tsc --noEmit` reports it as an unused directive
   // (TS2578) — that failure IS the red state the tightening flips.
-  test('type guard: workspace.buffers.get(uri) is read-only through the facade', async () => {
+  //
+  // COMPILE-TIME-ONLY guard, not a runtime one: vitest transpiles this file (oxc/esbuild) without
+  // type-checking, so `buf.text = 'mutated'` below actually EXECUTES at runtime regardless of the
+  // `@ts-expect-error` directive — no store Buffer is ever `Object.freeze`d, so nothing throws. The
+  // real guard is `npx tsc --noEmit` (a separate CI/local step): with the facade typed
+  // `ReadonlyMap<string, Readonly<Buffer>>`, the assignment is a compile error, which
+  // `@ts-expect-error` correctly suppresses — remove that directive and `tsc --noEmit` fails with
+  // "Cannot assign to 'text' because it is a read-only property". This test's only job is to keep
+  // that assignment PRESENT in the checked source tree so `tsc --noEmit` keeps exercising it; it
+  // asserts nothing about runtime behavior.
+  test('type guard: workspace.buffers.get(uri) is read-only through the facade (tsc --noEmit only)', async () => {
     const store = createAppStore();
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'context A {}\n');
@@ -2249,11 +2259,8 @@ describe('createWorkspaceController — seq seams (#982)', () => {
 
     const buf = ws.buffers.get(uriOf('a.koi'))!;
     // @ts-expect-error — Buffer fields must be immutable through the WorkspaceController facade;
-    // any in-place write here must fail to compile.
+    // any in-place write here must fail `tsc --noEmit` (it does NOT fail at vitest runtime — see
+    // the test-level comment above).
     buf.text = 'mutated';
-
-    // Runtime side: the assignment above (if it were ever allowed to compile) must not have
-    // actually happened through the guarded path — no assertion needed beyond the type error itself.
-    expect(true).toBe(true);
   });
 });
