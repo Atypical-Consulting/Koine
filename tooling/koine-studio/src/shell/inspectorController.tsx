@@ -60,6 +60,7 @@ import { createDocsStore } from '@/docs/docsStore';
 import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
 import {
   ALL_CONTEXTS,
+  contextOf,
   fileContextFollow,
   isAllContexts,
   listContexts,
@@ -1162,12 +1163,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   };
 
   // A model node's bounded context: the segment before the first dot of its qualified name (the model
-  // graph names a context child `Context.X`), or the active scope when the name is unqualified.
+  // graph names a context child `Context.X`), or the active scope when the name is unqualified — the
+  // shared `contextOf` helper (@/model/activeContext) owns the split; this just supplies the fallback.
   function nodeContext(node: ModelNode): string {
-    const dot = node.qualifiedName.indexOf('.');
-    if (dot > 0) return node.qualifiedName.slice(0, dot);
     const scope = activeContext.get();
-    return isAllContexts(scope) ? '' : scope;
+    return contextOf(node.qualifiedName, isAllContexts(scope) ? '' : scope);
   }
   const inspectorHandlers: InspectorHandlers = {
     onGoto: (range) => editor.gotoRange(range.start, range.end),

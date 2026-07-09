@@ -24,11 +24,14 @@ export function isAllContexts(scope: ContextScope): boolean {
 
 /**
  * The bounded context a qualified name belongs to: the segment before the first dot (`Sales.Order` →
- * `Sales`), or the whole name when there's no dot (a context node keyed by its own bare name).
+ * `Sales`). An unqualified name (no dot) has no context to slice off, so the caller decides what that
+ * means via `fallback`: the scoping helpers below want the identity (a context node keyed by its own
+ * bare name, so it maps to itself), while a UI caller resolving a model node's context (e.g. the
+ * inspector's `nodeContext`) wants the currently active scope instead — pass it as `fallback`.
  */
-function contextOf(qualifiedName: string): string {
+export function contextOf(qualifiedName: string, fallback: string = qualifiedName): string {
   const dot = qualifiedName.indexOf('.');
-  return dot < 0 ? qualifiedName : qualifiedName.slice(0, dot);
+  return dot < 0 ? fallback : qualifiedName.slice(0, dot);
 }
 
 /**
