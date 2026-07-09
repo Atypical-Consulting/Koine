@@ -21,8 +21,11 @@ export interface Buffer {
 
 export interface WorkspaceSlice {
   /** Every open buffer keyed by its file:// uri — the single canonical representation (#982, was a
-   *  Record projection of the controller's Map). Immutable: every action produces a NEW Map. */
-  buffers: ReadonlyMap<string, Buffer>;
+   *  Record projection of the controller's Map). Immutable: every action produces a NEW Map.
+   *  Readonly<Buffer> (#1010, shallow but sufficient — every field is a primitive): a Buffer read off
+   *  this map can never be mutated in place, from ANY consumer (facade or direct store access alike) —
+   *  every write must go through one of the actions below. */
+  buffers: ReadonlyMap<string, Readonly<Buffer>>;
   /** The uri the editor currently shows / all LSP requests target ('' before any file opens). */
   activeUri: string;
   /** Every workspace root in add order; the first is the primary ({@link folderRootToken}). */
