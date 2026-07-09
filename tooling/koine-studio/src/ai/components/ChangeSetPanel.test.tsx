@@ -143,6 +143,37 @@ describe('ChangeSetPanel (#990)', () => {
     expect(checkboxes(container).every((cb) => !cb.disabled)).toBe(true);
   });
 
+  // #1136: the live region derives ENTIRELY from `chat.changeSet.phase` — no host-owned `attempt`
+  // side-channel. `beginChangeSetApply`'s `note` (the host's in-flight wording, e.g. a drift-skip
+  // announcement) must render live while applying, before any settle.
+  test('applying: the live region renders phase.note (#1136 — no attempt prop involved)', () => {
+    const store = reviewingStore();
+    const { container } = mount(store);
+    act(() =>
+      store.getState().beginChangeSetApply('Applying 1 clean file. Skipped 1 that changed since it was proposed.'),
+    );
+
+    expect(status(container).textContent).toBe(
+      'Applying 1 clean file. Skipped 1 that changed since it was proposed.',
+    );
+  });
+
+  test('applied: the live region renders phase.note when the host supplied one, and the terminal label uses phase.appliedCount (#1136)', () => {
+    const store = reviewingStore();
+    const { container } = mount(store);
+    act(() => {
+      store.getState().beginChangeSetApply();
+      store
+        .getState()
+        .resolveChangeSetApply({ failed: [], note: 'Applied 2 files. Skipped 1 that changed since it was proposed.' });
+    });
+
+    expect(applyBtn(container).textContent).toBe('Applied 2 files ✓');
+    expect(status(container).textContent).toBe(
+      'Applied 2 files. Skipped 1 that changed since it was proposed.',
+    );
+  });
+
   test('reviewing with a note (#633): the note lands in the live region and Apply is RE-ENABLED for retry', () => {
     const store = reviewingStore();
     const { container } = mount(store);

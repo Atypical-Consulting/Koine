@@ -23,23 +23,6 @@ import type { ChangeSetFileState } from '@/store/slices/chat';
 // `beginChangeSetApply`, the write, `resolveChangeSetApply`/`rejectChangeSetApply` — belongs to the
 // host (Task 6), never to this component.
 
-/**
- * The host's per-apply-attempt outcome (#473/#633), which the slice's phase deliberately doesn't
- * carry: the live-region wording counts the files actually WRITTEN this attempt (the clean subset at
- * CLICK time — `phase.appliedCount` counts the accepted, non-drift-skipped rows at settle time, so a
- * mid-apply accept toggle can still skew it), and the drift/partial/reject messages name the exact
- * skips/failures. Keyed by the set id so a stale attempt from a replaced set is ignored without the
- * host having to clear it.
- */
-export interface ChangeSetAttempt {
-  /** The id of the set this attempt belongs to; ignored unless it matches the rendered set. */
-  readonly forId: number;
-  /** The live-region message for this attempt, or null to fall back to the phase wording. */
-  readonly note: string | null;
-  /** The clean-count actually written, overriding `phase.appliedCount` in the terminal label. */
-  readonly appliedCount: number | null;
-}
-
 export interface ChangeSetPanelProps {
   /** The app store carrying the chat slice (#984); tests and stories inject their own createAppStore(). */
   store: StoreApi<AppState>;
@@ -50,8 +33,6 @@ export interface ChangeSetPanelProps {
   onApply: (accepted: readonly ChangeSetFileState[]) => void;
   /** Discard clicked: the host dispatches `discardChangeSet` plus any teardown it owns. */
   onDiscard: () => void;
-  /** The host's per-attempt outcome for the CURRENT set, or null/absent for the phase-derived wording. */
-  attempt?: ChangeSetAttempt | null;
 }
 
 /**
@@ -94,8 +75,8 @@ function lineDiff(oldText: string, newText: string): string {
 
 /**
  * Pluralize the panel's file counts exactly as the imperative panel did. Exported as the ONE
- * `files(n)` helper — the host's per-attempt wording (aiPanel.ts) feeds the same live region this
- * panel renders, so the two surfaces must never drift apart on the word for "N files".
+ * `files(n)` helper — the host (aiPanel.ts) still composes the phase `note` wording this panel
+ * renders (#1136), so the two surfaces must never drift apart on the word for "N files".
  */
 export const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
 
@@ -138,41 +119,34 @@ function ChangeSetFileRow({
   );
 }
 
-export function ChangeSetPanel({ store, onApply, onDiscard, attempt }: ChangeSetPanelProps) {
+export function ChangeSetPanel({ store, onApply, onDiscard }: ChangeSetPanelProps) {
   const changeSet = useAppStore(store, (s) => s.chat.changeSet);
   if (!changeSet) return null;
 
   const { phase, diagnostics } = changeSet;
-  // Honor the host's per-attempt outcome only for the set it was made against — a stale attempt from
-  // a replaced set must not word the fresh review.
-  const at = attempt && attempt.forId === changeSet.id ? attempt : null;
   // Terminal phases lock the review: a checkbox toggle after "Applied ✓" must not re-enable Apply and
   // let the same change set be written to disk a second time; a superseded set can never be applied.
   const terminal = phase.kind === 'applied' || phase.kind === 'invalidated';
   const accepted = changeSet.files.filter((f) => f.accepted);
   const n = accepted.length;
 
-  // The terminal label counts the files actually WRITTEN this attempt (drift skips excluded) when the
-  // host reported it, falling back to the slice's accepted-at-settle count.
-  const appliedN = phase.kind === 'applied' ? (at?.appliedCount ?? phase.appliedCount) : 0;
+  // The terminal label counts the files actually WRITTEN (#1136: the slice's begin-time cleanCount
+  // snapshot, immune to a mid-apply checkbox toggle — see beginChangeSetApply).
+  const appliedN = phase.kind === 'applied' ? phase.appliedCount : 0;
   const applyLabel = phase.kind === 'applied' ? `Applied ${appliedN} ${files(appliedN)} ✓` : `Apply ${n} ${files(n)}`;
   // Reviewing: openable whenever at least one file is accepted (a reviewing note — an apply failure,
   // #633 — leaves Apply RE-ENABLED for retry). Applying keeps the in-flight lock; terminal stays shut.
   const applyDisabled = phase.kind !== 'reviewing' || n === 0;
 
-  // The polite live region (WCAG 2.1 AA 4.1.3). The superseded notice always wins (#684: a late apply
-  // settle on a retired set must not overwrite it); otherwise the host's per-attempt wording (drift
-  // skips, partial failures, the clean-count "Applied N.") takes precedence over the phase-derived
-  // fallbacks — the apply-failure note while reviewing (#633) and the settled count once applied.
+  // The polite live region (WCAG 2.1 AA 4.1.3), derived ENTIRELY from the slice phase (#1136 — no
+  // host-owned side-channel). The superseded notice always wins (#684: a late apply settle on a
+  // retired set must not overwrite it); otherwise the phase's own `note` (the host's wording for the
+  // in-flight/applied/reviewing-failure cases) takes precedence, falling back to the settled-count
+  // wording once applied.
   const statusText =
     phase.kind === 'invalidated'
       ? `This change set was ${phase.reason} by a newer turn and can no longer be applied.`
-      : (at?.note ??
-        (phase.kind === 'reviewing'
-          ? (phase.note ?? '')
-          : phase.kind === 'applied'
-            ? `Applied ${appliedN} ${files(appliedN)}.`
-            : ''));
+      : (phase.note ?? (phase.kind === 'applied' ? `Applied ${appliedN} ${files(appliedN)}.` : ''));
 
   return (
     <div

@@ -66,8 +66,12 @@ export interface ChatStreamingTurn {
 
 export type ChangeSetPhase =
   | { kind: 'reviewing'; note?: string } // note carries the #633 apply-failure / partial-failure message
-  | { kind: 'applying' }
-  | { kind: 'applied'; appliedCount: number } // terminal
+  // #1136: cleanCount snapshots the accepted-and-not-drifted rows AT BEGIN — the host marks drift
+  // before dispatching, so this is the exact set about to be written; resolveChangeSetApply reports
+  // it as-is, so a mid-apply checkbox toggle can never skew the terminal "Applied N" count. note
+  // carries the host's in-flight wording (the "Applying N clean files. Skipped M…" text).
+  | { kind: 'applying'; note?: string; cleanCount: number }
+  | { kind: 'applied'; appliedCount: number; note?: string } // terminal; note is the host's wording (falls back to "Applied N files." when absent)
   | { kind: 'invalidated'; reason: string }; // terminal (#473/#684)
 
 export interface ChatChangeSetState {
@@ -178,17 +182,29 @@ export interface ChatSlice {
   setChangeSetFileAccepted(key: string, accepted: boolean): void;
   /** Set `drifted: true` on the files named by KEY — sticky (never unsets) and idempotent (#473). */
   markChangeSetDrift(keys: readonly string[]): void;
-  /** reviewing → applying; no-op unless reviewing with at least one accepted file. */
-  beginChangeSetApply(): void;
   /**
-   * Settle an apply: no failures → terminal `applied` counting the files actually WRITTEN (accepted
-   * minus the drift-skipped rows — the host marks drift before beginChangeSetApply, #473); any
-   * failures → back to `reviewing` with a note naming them so retry stays open (no false Applied).
-   * No-op unless applying — in particular after invalidation (#684).
+   * reviewing → applying; no-op unless reviewing with at least one accepted file. Snapshots
+   * `cleanCount` from the accepted-and-not-drifted rows AT THIS MOMENT (#1136) — the host marks
+   * drift before calling this, so the snapshot is exactly the set about to be written, immune to any
+   * checkbox toggle for the rest of the apply. `note` carries the host's in-flight wording.
    */
-  resolveChangeSetApply(result: { failed: readonly string[] }): void;
+  beginChangeSetApply(note?: string): void;
+  /**
+   * Settle an apply: no failures → terminal `applied` reporting the begin-time `cleanCount` snapshot
+   * (#1136 — truthful and immune to a mid-apply checkbox toggle) with the host's `note`; any failures
+   * → back to `reviewing` with `note` (falling back to a `Failed to apply: …` listing when omitted)
+   * so retry stays open (no false Applied). No-op unless applying — in particular after invalidation
+   * (#684).
+   */
+  resolveChangeSetApply(result: { failed: readonly string[]; note?: string }): void;
   /** applying → reviewing with the error note (#633: the in-flight lock must never stay stuck); no-op unless applying (#684). */
   rejectChangeSetApply(error: string): void;
+  /**
+   * Set `note` on a `reviewing` phase without any transition (#1136) — for the all-drifted apply
+   * click that writes nothing (so `beginChangeSetApply` is never dispatched) yet still needs to word
+   * the live region. No-op on `applying`/terminal phases and on a null change set.
+   */
+  noteChangeSetReview(note: string): void;
   /** reviewing | applying → invalidated; NO-OP on terminal `applied` (the "Applied ✓" survives) and on null. */
   invalidateChangeSet(reason: string): void;
   /** Drop the change set entirely. */
@@ -329,27 +345,37 @@ export function createChatSlice(
         files: cs.files.map((f) => (keys.includes(f.key) ? { ...f, drifted: true } : f)),
       });
     },
-    beginChangeSetApply: () => {
+    beginChangeSetApply: (note) => {
       const cs = get().chat.changeSet;
       if (!cs || cs.phase.kind !== 'reviewing') return;
       if (!cs.files.some((f) => f.accepted)) return;
-      setChangeSet({ ...cs, phase: { kind: 'applying' } });
+      // Snapshot the clean set NOW (#1136): the host marks drift before calling this, so
+      // accepted-and-not-drifted at this instant is exactly what's about to be written — immune to
+      // any checkbox toggle for the rest of this apply.
+      const cleanCount = cs.files.filter((f) => f.accepted && !f.drifted).length;
+      setChangeSet({ ...cs, phase: { kind: 'applying', cleanCount, note } });
     },
-    resolveChangeSetApply: ({ failed }) => {
+    resolveChangeSetApply: ({ failed, note }) => {
       const cs = get().chat.changeSet;
       if (!cs || cs.phase.kind !== 'applying') return;
       const phase: ChangeSetPhase =
         failed.length === 0
-          ? // Truthful count: what was actually written — a drifted row was skipped by the host's
-            // apply (never written), so it must not inflate the terminal "Applied N" (#473).
-            { kind: 'applied', appliedCount: cs.files.filter((f) => f.accepted && !f.drifted).length }
-          : { kind: 'reviewing', note: `Failed to apply: ${failed.join(', ')}` };
+          ? // Truthful count: the begin-time snapshot of what was about to be written — a mid-apply
+            // checkbox toggle must not skew it (#1136; strictly better than recounting accepted rows
+            // at settle time, which the toggle could skew).
+            { kind: 'applied', appliedCount: cs.phase.cleanCount, note }
+          : { kind: 'reviewing', note: note ?? `Failed to apply: ${failed.join(', ')}` };
       setChangeSet({ ...cs, phase });
     },
     rejectChangeSetApply: (error) => {
       const cs = get().chat.changeSet;
       if (!cs || cs.phase.kind !== 'applying') return;
       setChangeSet({ ...cs, phase: { kind: 'reviewing', note: error } });
+    },
+    noteChangeSetReview: (note) => {
+      const cs = get().chat.changeSet;
+      if (!cs || cs.phase.kind !== 'reviewing') return;
+      setChangeSet({ ...cs, phase: { kind: 'reviewing', note } });
     },
     invalidateChangeSet: (reason) => {
       const cs = get().chat.changeSet;
