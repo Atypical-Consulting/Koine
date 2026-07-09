@@ -7,8 +7,9 @@ export interface HistorySnapshot {
 }
 
 export interface HistoryControllerDeps {
-  /** The live open buffer set (workspaceController.buffers). */
-  buffers(): Map<string, Buffer>;
+  /** The live open buffer set (workspaceController.buffers). Read-only (#1010): writes go through
+   *  {@link writeBuffer}, never an in-place mutation of a Buffer read off this map. */
+  buffers(): ReadonlyMap<string, Readonly<Buffer>>;
   /** The uri shown in the editor right now. */
   activeUri(): string;
   /** The editor handle — swap the active buffer's doc. */

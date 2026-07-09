@@ -12,7 +12,12 @@
 // (showDiagnostics / dropDiagnostics / renameDiagnostics / clearDiagnostics) are spies — the
 // controller calls them but does not own the cache (it lives in editorSession).
 import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
-import { createWorkspaceController, type WorkspaceControllerDeps } from '@/shell/workspaceController';
+import {
+  createWorkspaceController,
+  type Buffer,
+  type WorkspaceController,
+  type WorkspaceControllerDeps,
+} from '@/shell/workspaceController';
 import { createAppStore } from '@/store/index';
 import { pathToFileUri } from '@/shell/ideUtils';
 import { newFileKey } from '@/ai/editSession';
@@ -314,6 +319,20 @@ function makeDeps(
     onWorkspaceEmptied: vi.fn(),
     ...overrides,
   };
+}
+
+// Test-only helper: `ws.buffers` is read-only (#1010) — write a buffer's fields the same way
+// production code must (ide.tsx's `writeBuffer` wiring), through the store's `upsertBuffer`, never by
+// mutating the Map's Buffer objects in place. `deps` is the same object passed to
+// `createWorkspaceController`, so its `store` is the one `ws` actually reads/writes.
+function writeBuffer(
+  deps: WorkspaceControllerDeps,
+  ws: WorkspaceController,
+  uri: string,
+  patch: Partial<Pick<Buffer, 'text' | 'dirty'>>,
+): void {
+  const buf = ws.buffers.get(uri);
+  if (buf) deps.store.getState().upsertBuffer({ ...buf, ...patch });
 }
 
 beforeEach(() => {
@@ -827,14 +846,15 @@ describe('createWorkspaceController — saveAllDirty', () => {
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
     const setStatus = vi.fn();
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { setStatus }));
+    const deps = makeDeps(platform, lsp, editor, { setStatus });
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
 
     // Dirty b and c (a stays clean); make c's write fail.
     const bUri = uriOf('b.koi');
     const cUri = uriOf('c.koi');
-    ws.buffers.get(bUri)!.dirty = true;
-    ws.buffers.get(cUri)!.dirty = true;
+    writeBuffer(deps, ws, bUri, { dirty: true });
+    writeBuffer(deps, ws, cUri, { dirty: true });
     platform.failWrites.add('c.koi');
 
     await ws.saveAllDirty();
@@ -862,9 +882,10 @@ describe('createWorkspaceController — saveAllDirty', () => {
           res([{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } }, newText: 'GARBLED' }])),
       ),
     );
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { getFormatOnSave: () => true }));
+    const deps = makeDeps(platform, lsp, editor, { getFormatOnSave: () => true });
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
-    ws.buffers.get(ws.activeUri())!.dirty = true;
+    writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
 
     const save = ws.saveAllDirty();
     ws.activateFile(uriOf('b.koi')); // switch while the format request is in flight
@@ -882,9 +903,10 @@ describe('createWorkspaceController — saveAllDirty', () => {
     const editor = makeEditor(trace);
     let releaseFormat!: () => void;
     lsp.format.mockReturnValue(new Promise<TextEdit[]>((res) => (releaseFormat = () => res([]))));
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { getFormatOnSave: () => true }));
+    const deps = makeDeps(platform, lsp, editor, { getFormatOnSave: () => true });
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
-    ws.buffers.get(ws.activeUri())!.dirty = true;
+    writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
 
     const first = ws.saveAllDirty();
     const second = ws.saveAllDirty();
@@ -951,10 +973,11 @@ describe('createWorkspaceController — saveAllDirty', () => {
       if (path === `${ROOT}/a.koi`) await aGate;
       return origWrite(path, contents);
     };
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
     const cUri = uriOf('c.koi');
-    ws.buffers.get(uriOf('b.koi'))!.dirty = true;
+    writeBuffer(deps, ws, uriOf('b.koi'), { dirty: true });
     editor.setDoc('context A { edited }\n');
     ws.syncActiveBuffer('context A { edited }\n'); // dirties the active buffer, a.koi
 
@@ -978,9 +1001,10 @@ describe('createWorkspaceController — saveAllDirty', () => {
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
-    ws.buffers.get(uriOf('b.koi'))!.dirty = true;
+    writeBuffer(deps, ws, uriOf('b.koi'), { dirty: true });
 
     await ws.saveAllDirty();
 
@@ -999,12 +1023,13 @@ describe('createWorkspaceController — saveAllDirty', () => {
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
     const aUri = ws.activeUri(); // a.koi stays active throughout — no switch occurs
     const bUri = uriOf('b.koi');
-    ws.buffers.get(aUri)!.dirty = true;
-    ws.buffers.get(bUri)!.dirty = true;
+    writeBuffer(deps, ws, aUri, { dirty: true });
+    writeBuffer(deps, ws, bUri, { dirty: true });
     platform.failWrites.add('a.koi'); // the ACTIVE buffer's own write fails; b's write succeeds
 
     await ws.saveAllDirty();
@@ -1033,10 +1058,11 @@ describe('createWorkspaceController — saveAllDirty', () => {
       if (path === `${ROOT}/b.koi`) await bGate;
       return origWrite(path, contents);
     };
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
     const bUri = uriOf('b.koi');
-    ws.buffers.get(bUri)!.dirty = true; // b is dirty in the background; a (active) stays clean
+    writeBuffer(deps, ws, bUri, { dirty: true }); // b is dirty in the background; a (active) stays clean
 
     const save = ws.saveAllDirty(); // writes b.koi (gated)
     ws.activateFile(bUri); // switch to b while its write is in flight
@@ -1061,11 +1087,12 @@ describe('createWorkspaceController — saveAllDirty', () => {
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
     const aUri = ws.activeUri(); // a.koi — active, and itself part of this pass
-    ws.buffers.get(aUri)!.dirty = true;
-    ws.buffers.get(uriOf('b.koi'))!.dirty = true;
+    writeBuffer(deps, ws, aUri, { dirty: true });
+    writeBuffer(deps, ws, uriOf('b.koi'), { dirty: true });
 
     await ws.saveAllDirty();
 
@@ -1089,13 +1116,14 @@ describe('createWorkspaceController — saveAllDirty', () => {
       if (path === `${ROOT}/b.koi`) await bGate;
       return origWrite(path, contents);
     };
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
     const aUri = uriOf('a.koi');
     const bUri = uriOf('b.koi');
     ws.activateFile(bUri); // b.koi is active at request time
-    ws.buffers.get(aUri)!.dirty = true; // background — writes and confirms fast (not gated)
-    ws.buffers.get(bUri)!.dirty = true; // active — its write is gated
+    writeBuffer(deps, ws, aUri, { dirty: true }); // background — writes and confirms fast (not gated)
+    writeBuffer(deps, ws, bUri, { dirty: true }); // active — its write is gated
 
     const save = ws.saveAllDirty(); // writes a.koi (confirmed), then b.koi (gated)
     ws.activateFile(aUri); // switch to a.koi — already CONFIRMED saved this pass — while b's write is in flight
@@ -1355,11 +1383,12 @@ describe('createWorkspaceController — anyDirty', () => {
     const trace: string[] = [];
     const lsp = makeLsp(trace);
     const editor = makeEditor(trace);
-    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    const deps = makeDeps(platform, lsp, editor);
+    const ws = createWorkspaceController(deps);
     await ws.openFolderPath(ROOT, { recent: false });
 
     expect(ws.anyDirty()).toBe(false);
-    ws.buffers.get(ws.activeUri())!.dirty = true;
+    writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
     expect(ws.anyDirty()).toBe(true);
   });
 });
@@ -1489,13 +1518,12 @@ describe('createWorkspaceController — idle auto-save', () => {
       const trace: string[] = [];
       const lsp = makeLsp(trace);
       const editor = makeEditor(trace);
-      const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+      const deps = makeDeps(platform, lsp, editor);
+      const ws = createWorkspaceController(deps);
       await ws.openFolderPath(ROOT, { recent: false });
 
       // a.koi is the active buffer and clean; dirty the non-active b.koi only.
-      const b = ws.buffers.get(uriOf('b.koi'))!;
-      b.dirty = true;
-      b.text = 'context B { value V {} }\n';
+      writeBuffer(deps, ws, uriOf('b.koi'), { dirty: true, text: 'context B { value V {} }\n' });
 
       ws.setAutoSave(true);
       ws.scheduleAutoSave();
@@ -1526,9 +1554,10 @@ describe('createWorkspaceController — idle auto-save', () => {
       lsp.format.mockImplementation(async () => (order.push('format'), []));
       const origWrite = platform.writeTextFile.bind(platform);
       platform.writeTextFile = vi.fn((path: string, contents: string) => (order.push('write'), origWrite(path, contents)));
-      const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { getFormatOnSave: () => true }));
+      const deps = makeDeps(platform, lsp, editor, { getFormatOnSave: () => true });
+      const ws = createWorkspaceController(deps);
       await ws.openFolderPath(ROOT, { recent: false });
-      ws.buffers.get(ws.activeUri())!.dirty = true;
+      writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
 
       ws.setAutoSave(true);
       ws.scheduleAutoSave();
@@ -1549,9 +1578,10 @@ describe('createWorkspaceController — idle auto-save', () => {
       const trace: string[] = [];
       const lsp = makeLsp(trace);
       const editor = makeEditor(trace);
-      const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+      const deps = makeDeps(platform, lsp, editor);
+      const ws = createWorkspaceController(deps);
       await ws.openFolderPath(ROOT, { recent: false });
-      ws.buffers.get(ws.activeUri())!.dirty = true;
+      writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
 
       ws.scheduleAutoSave(); // auto-save never enabled
       await vi.advanceTimersByTimeAsync(5000);
@@ -1571,9 +1601,10 @@ describe('createWorkspaceController — idle auto-save', () => {
       const trace: string[] = [];
       const lsp = makeLsp(trace);
       const editor = makeEditor(trace);
-      const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+      const deps = makeDeps(platform, lsp, editor);
+      const ws = createWorkspaceController(deps);
       await ws.openFolderPath(ROOT, { recent: false });
-      ws.buffers.get(ws.activeUri())!.dirty = true;
+      writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
       ws.setAutoSave(true);
 
       ws.scheduleAutoSave();
@@ -1597,9 +1628,10 @@ describe('createWorkspaceController — idle auto-save', () => {
       const trace: string[] = [];
       const lsp = makeLsp(trace);
       const editor = makeEditor(trace);
-      const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+      const deps = makeDeps(platform, lsp, editor);
+      const ws = createWorkspaceController(deps);
       await ws.openFolderPath(ROOT, { recent: false });
-      ws.buffers.get(ws.activeUri())!.dirty = true;
+      writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
       ws.setAutoSave(true);
       ws.scheduleAutoSave();
 
@@ -1646,9 +1678,10 @@ describe('createWorkspaceController — idle auto-save', () => {
       const lsp = makeLsp(trace);
       const editor = makeEditor(trace);
       // format-on-save on so a stale fire would run lsp.format() against the new active buffer.
-      const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { getFormatOnSave: () => true }));
+      const deps = makeDeps(platform, lsp, editor, { getFormatOnSave: () => true });
+      const ws = createWorkspaceController(deps);
       await ws.openFolderPath(ROOT, { recent: false });
-      ws.buffers.get(ws.activeUri())!.dirty = true;
+      writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
       ws.setAutoSave(true);
       ws.scheduleAutoSave(); // armed against this workspace
 
@@ -1670,9 +1703,10 @@ describe('createWorkspaceController — idle auto-save', () => {
       const trace: string[] = [];
       const lsp = makeLsp(trace);
       const editor = makeEditor(trace);
-      const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+      const deps = makeDeps(platform, lsp, editor);
+      const ws = createWorkspaceController(deps);
       await ws.openFolderPath(ROOT, { recent: false });
-      ws.buffers.get(ws.activeUri())!.dirty = true;
+      writeBuffer(deps, ws, ws.activeUri(), { dirty: true });
       ws.setAutoSave(true);
       ws.scheduleAutoSave(); // armed
 
@@ -2199,5 +2233,27 @@ describe('createWorkspaceController — seq seams (#982)', () => {
     seq = store.getState().saveSeq;
     await ws.applyFileEdit(uriOf('a.koi'), 'context A { v3 }\n');
     expect(store.getState().saveSeq).toBe(seq + 1);
+  });
+
+  // Type-level regression for #1010: `WorkspaceController.buffers` must be a
+  // `ReadonlyMap<string, Readonly<Buffer>>` so an in-place write onto a store-owned Buffer is a
+  // COMPILE error, not just a review-time convention. Before the facade type is tightened this
+  // `@ts-expect-error` has nothing to suppress, so `tsc --noEmit` reports it as an unused directive
+  // (TS2578) — that failure IS the red state the tightening flips.
+  test('type guard: workspace.buffers.get(uri) is read-only through the facade', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+
+    const buf = ws.buffers.get(uriOf('a.koi'))!;
+    // @ts-expect-error — Buffer fields must be immutable through the WorkspaceController facade;
+    // any in-place write here must fail to compile.
+    buf.text = 'mutated';
+
+    // Runtime side: the assignment above (if it were ever allowed to compile) must not have
+    // actually happened through the guarded path — no assertion needed beyond the type error itself.
+    expect(true).toBe(true);
   });
 });
