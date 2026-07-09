@@ -358,6 +358,47 @@ public class R9ValueObjectTests
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
     }
 
+    [Fact]
+    public void Quantity_type_mismatch_is_rejected_before_reaching_any_code_emitter()
+    {
+        // #1266: the check lives in Semantics/ (KoineCompiler.Compile validates BEFORE ever calling
+        // IEmitter.Emit), so it must reject the mismatched model for every code emitter identically —
+        // pinning that ordering so it can't silently regress into a Rust-only (or any single-target)
+        // fix that leaves the other four targets to fail downstream on their own toolchains.
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  enum VolumeUnit { Liters }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  quantity Volume {\n" +
+            "    amount: Decimal\n" +
+            "    unit: VolumeUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    w: Weight\n" +
+            "    v: Volume\n" +
+            "    bad: Weight = w + v\n" +
+            "  }\n" +
+            "}\n";
+
+        var compiler = new KoineCompiler();
+        AssertRejected(compiler.Compile(src, new CSharpEmitter()));
+        AssertRejected(compiler.Compile(src, new TypeScriptEmitter()));
+        AssertRejected(compiler.Compile(src, new PythonEmitter()));
+        AssertRejected(compiler.Compile(src, new PhpEmitter()));
+        AssertRejected(compiler.Compile(src, new RustEmitter()));
+
+        static void AssertRejected(CompileResult result)
+        {
+            result.Success.ShouldBeFalse();
+            result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
+            result.Files.ShouldBeEmpty();
+        }
+    }
+
     // ======================================================================
     // Regressions found by the R9 review
     // ======================================================================
