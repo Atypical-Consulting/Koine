@@ -127,7 +127,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/shell/inspectorController.tsx', maxLines: 2570 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
-  { file: 'src/settings/prefs.ts', maxLines: 2250 },
+  // Lowered 2250 → 517: #987's seven-task split carved every category out into prefsSections/ (Appearance,
+  // About, Editor, Keyboard, Output, Assistant, MCP, Advanced) plus the shared prefsControls.ts factories
+  // and prefsSections/{scopeKit,types}.ts. prefs.ts is now a thin assembler — ctx/scopeKit construction,
+  // the 8 section builder calls, the category rail/tab wiring, and populate/applyOpenState/refresh/
+  // suspend/destroy/onReset. End-state 506 LOC, ceil(506 × 1.02) = 517.
+  { file: 'src/settings/prefs.ts', maxLines: 517 },
   // Frozen 2026-07-02 at 1745 LOC, ceil(1745 × 1.02) = 1780. #986 ratchets this down as it decomposes
   // editor.ts. Freezing prevents further regrowth; it does not mandate the split — #986 owns that.
   // Lowered 1780 → 953: #986 split editor.ts's 38-export grab-bag into four sibling modules behind
@@ -238,7 +243,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // #988 split: internal localStorage read/write guards (present/absent key checks, JSON parse/
   // stringify with corrupt-data fallback, best-effort write swallowing quota/security errors)
   // extracted to storage.ts. Measured 40 LOC, +15% headroom = 46.
-  { file: 'src/settings/storage.ts', maxLines: 46 },
+  // Raised 46 → 66: #1241 added removeKey (the shared home for what used to be six independent
+  // guarded-remove call sites across diagramState.ts/workspaceState.ts/settingsStore.ts) and widened
+  // the header comment now that readJsonObject/patchJsonBlob genuinely serve all three sibling
+  // domain modules. Measured 57 LOC, +15% headroom = 66.
+  { file: 'src/settings/storage.ts', maxLines: 66 },
   // #988 split: the API-key secret cache singleton (secretCache) plus its lifecycle
   // (initSecrets/whenSecretsReady/saveApiKey/clearApiKey/getCachedApiKey) extracted to secrets.ts —
   // the one piece of mutable module state in the settings layer, now isolated from the rest of the
