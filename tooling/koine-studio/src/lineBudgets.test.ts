@@ -77,7 +77,14 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // `revertCommitFromLauncher`, the reveal-in-file-manager thunk, and the five CommandWiringDeps seam
   // registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath). A
   // code-review DRY pass collapsed three near-identical activate helpers into one. Measured post-merge + 2.
-  { file: 'src/shell/ide.tsx', maxLines: 1459 },
+  // Raised 1459 → 1463: #1010 wires `writeBuffer` into `createHistoryController({ ... })` — the
+  // historyController.restore write path now goes through the workspace slice's `upsertBuffer` instead of
+  // mutating a store-owned Buffer in place, ~6 LOC of composition-root wiring. Measured end-state.
+  // Raised 1463 → 1470: #1231 swaps the `writeBuffer` dep for the batched `writeBuffers` — the
+  // composition-root wiring now maps N patches to their live buffers and drops any whose uri closed
+  // since the snapshot, then fires ONE `appStore.getState().upsertBuffers(...)` call instead of per-buffer
+  // `upsertBuffer` calls, ~7 LOC net. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1470 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -125,10 +132,33 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/shell/inspectorController.tsx', maxLines: 2581 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
-  { file: 'src/settings/prefs.ts', maxLines: 2250 },
+  // Lowered 2250 → 517: #987's seven-task split carved every category out into prefsSections/ (Appearance,
+  // About, Editor, Keyboard, Output, Assistant, MCP, Advanced) plus the shared prefsControls.ts factories
+  // and prefsSections/{scopeKit,types}.ts. prefs.ts is now a thin assembler — ctx/scopeKit construction,
+  // the 8 section builder calls, the category rail/tab wiring, and populate/applyOpenState/refresh/
+  // suspend/destroy/onReset. End-state 506 LOC, ceil(506 × 1.02) = 517.
+  { file: 'src/settings/prefs.ts', maxLines: 517 },
   // Frozen 2026-07-02 at 1745 LOC, ceil(1745 × 1.02) = 1780. #986 ratchets this down as it decomposes
   // editor.ts. Freezing prevents further regrowth; it does not mandate the split — #986 owns that.
-  { file: 'src/editor/editor.ts', maxLines: 1780 },
+  // Lowered 1780 → 953: #986 split editor.ts's 38-export grab-bag into four sibling modules behind
+  // facade re-exports — cmTheme.ts (the shared highlight/theme leaf), outputView.ts (the read-only
+  // output/JSON viewers), settingsJsonEditor.ts (the editable settings.json editor), and
+  // lspExtensions.ts (hover/inlay-hints/semantic-tokens + the LSP provider function types). editor.ts
+  // now holds only the `.koi` editor core (createKoineEditor + its language/completions/touch theme)
+  // plus the facade re-exports; end-state 938 LOC + ~15 lines headroom.
+  { file: 'src/editor/editor.ts', maxLines: 953 },
+  // Frozen 2026-07-09 at 113 LOC, ceil(113 × 1.02) = 116. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/cmTheme.ts', maxLines: 116 },
+  // Frozen 2026-07-09 at 130 LOC, ceil(130 × 1.02) = 133. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/outputView.ts', maxLines: 133 },
+  // Frozen 2026-07-09 at 176 LOC, ceil(176 × 1.02) = 180. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/settingsJsonEditor.ts', maxLines: 180 },
+  // Frozen 2026-07-09 at 534 LOC, ceil(534 × 1.02) = 545. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/lspExtensions.ts', maxLines: 545 },
   // Frozen 2026-07-02 at 1354 LOC, ceil(1354 × 1.02) = 1382. #990 ratchets this down as it decomposes
   // aiPanel.ts. Freezing prevents further regrowth; it does not mandate the split — #990 owns that.
   // Raised 1382 → 1424: #984 Task 4 rewires the change-set sub-panel onto the chat slice's state
@@ -210,7 +240,35 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1038 → 1099: #1005's Home resume card needs a persisted last-session snapshot — a new
   // LastSession interface plus its guarded getLastSession/setLastSession accessors (~60 LOC of genuine
   // new API, not regrowth). Ratchet to the real end-state (1077) plus the standard +2% headroom.
-  { file: 'src/settings/persistence.ts', maxLines: 1099 },
+  // Lowered 1099 → 40: #988 completed the decomposition (Tasks 1-5) — persistence.ts is now a pure
+  // re-export barrel (27 LOC) over five domain modules split out below (storage / secrets /
+  // settingsStore / workspaceState / diagramState), each carrying its own ratchet so none of them can
+  // silently regrow into a new monolith. Real end-state (27) plus headroom for a doc-comment tweak.
+  { file: 'src/settings/persistence.ts', maxLines: 40 },
+  // #988 split: internal localStorage read/write guards (present/absent key checks, JSON parse/
+  // stringify with corrupt-data fallback, best-effort write swallowing quota/security errors)
+  // extracted to storage.ts. Measured 40 LOC, +15% headroom = 46.
+  // Raised 46 → 66: #1241 added removeKey (the shared home for what used to be six independent
+  // guarded-remove call sites across diagramState.ts/workspaceState.ts/settingsStore.ts) and widened
+  // the header comment now that readJsonObject/patchJsonBlob genuinely serve all three sibling
+  // domain modules. Measured 57 LOC, +15% headroom = 66.
+  { file: 'src/settings/storage.ts', maxLines: 66 },
+  // #988 split: the API-key secret cache singleton (secretCache) plus its lifecycle
+  // (initSecrets/whenSecretsReady/saveApiKey/clearApiKey/getCachedApiKey) extracted to secrets.ts —
+  // the one piece of mutable module state in the settings layer, now isolated from the rest of the
+  // barrel. Measured 74 LOC, +15% headroom = 86.
+  { file: 'src/settings/secrets.ts', maxLines: 86 },
+  // #988 split: the Settings model (types, defaults, coercion, load/save/patch), the workspace-override
+  // store, and the keybinding-override store extracted to settingsStore.ts. Measured 488 LOC, +15%
+  // headroom = 562.
+  { file: 'src/settings/settingsStore.ts', maxLines: 562 },
+  // #988 split: the recent-folders list, legacy scratch migration, workspace center/deck, last-opened-
+  // workspace pointer, last-session resume snapshot, active-context scope, and per-workspace chat
+  // transcript extracted to workspaceState.ts. Measured 392 LOC, +15% headroom = 451.
+  { file: 'src/settings/workspaceState.ts', maxLines: 451 },
+  // #988 split: diagram canvas zoom, node positions, and canvas-only annotations extracted to
+  // diagramState.ts. Measured 124 LOC, +15% headroom = 143.
+  { file: 'src/settings/diagramState.ts', maxLines: 143 },
   // Raised 908 → 1012: #1005 Home redesign — imperative-DOM growth; will tighten to real end-state LOC.
   // The full-bleed shell (top bar + brand + split grid), the multi-target emit caption and the
   // relocated colophon all add real imperative construction to welcome.ts; ceil(992 × 1.02) = 1012.

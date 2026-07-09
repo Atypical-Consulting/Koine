@@ -108,6 +108,35 @@ describe('workspace slice — owner API (#982)', () => {
     expect(s.getState().buffers).toBe(ref);
   });
 
+  test('upsertBuffers inserts many buffers in ONE set()/subscriber notification', () => {
+    const s = make();
+    let notifications = 0;
+    const unsubscribe = s.subscribe(() => {
+      notifications++;
+    });
+    s.getState().upsertBuffers([buf('file://a', { text: 'a1' }), buf('file://b', { text: 'b1' })]);
+    unsubscribe();
+    expect(notifications).toBe(1);
+    const after = s.getState().buffers;
+    expect(after.get('file://a')!.text).toBe('a1');
+    expect(after.get('file://b')!.text).toBe('b1');
+    expect(after.size).toBe(2);
+  });
+
+  test('upsertBuffers([]) is a true no-op — same Map reference, zero notifications', () => {
+    const s = make();
+    s.getState().upsertBuffer(buf('file://a'));
+    const ref = s.getState().buffers;
+    let notifications = 0;
+    const unsubscribe = s.subscribe(() => {
+      notifications++;
+    });
+    s.getState().upsertBuffers([]);
+    unsubscribe();
+    expect(notifications).toBe(0);
+    expect(s.getState().buffers).toBe(ref);
+  });
+
   test('setRoots sets folderRootToken to roots[0] ?? "" atomically', () => {
     const s = make();
     s.getState().setRoots(['mem://x', 'mem://y']);

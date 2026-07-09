@@ -133,6 +133,22 @@ public class PhpNamingTests
         PhpNaming.ConstName("OrderStatus").ShouldBe("ORDER_STATUS");
     }
 
+    /// <summary>
+    /// A digit immediately before an uppercase letter never starts a new word in the underlying
+    /// (private) <c>ToSnakeCase</c> — unlike <see cref="RouteDerivation.Kebab"/>, which does split
+    /// there. Regression test for #1239's code review: the shared
+    /// <see cref="IdentifierWords.Split"/> extraction initially and silently imported <c>Kebab</c>'s
+    /// digit-boundary rule into this method, which never had it. Exercised via <c>ConstName</c> since
+    /// <c>ToSnakeCase</c> itself is private.
+    /// </summary>
+    [Theory]
+    [InlineData("V2Import", "V2IMPORT")]
+    [InlineData("Order2Ship", "ORDER2SHIP")]
+    public void ConstName_does_not_split_after_a_digit(string input, string expected)
+    {
+        PhpNaming.ConstName(input).ShouldBe(expected);
+    }
+
     // =========================================================================
     // Namespace — Koine\<Context> shape with PascalCase segments
     // =========================================================================

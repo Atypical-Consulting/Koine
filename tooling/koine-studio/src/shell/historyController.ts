@@ -7,14 +7,19 @@ export interface HistorySnapshot {
 }
 
 export interface HistoryControllerDeps {
-  /** The live open buffer set (workspaceController.buffers). */
-  buffers(): Map<string, Buffer>;
+  /** The live open buffer set (workspaceController.buffers). Read-only (#1010): writes go through
+   *  {@link writeBuffers}, never an in-place mutation of a Buffer read off this map. */
+  buffers(): ReadonlyMap<string, Readonly<Buffer>>;
   /** The uri shown in the editor right now. */
   activeUri(): string;
   /** The editor handle — swap the active buffer's doc. */
   editor: { getDoc(): string; setDoc(doc: string): void };
   /** The LSP client — push a restored NON-active buffer to the server. */
   lsp: { syncDoc(uri: string, text: string): void };
+  /** Write every restored buffer's text+dirty through the workspace slice's batched `upsertBuffers` in
+   *  ONE store transition — never mutate the Map's objects in place, and never one call per buffer
+   *  (#1231: a multi-file restore must fire a single store transition, not N). */
+  writeBuffers(patches: Array<{ uri: string; text: string; dirty: boolean }>): void;
   /** Switch the editor to a file (workspaceController.activateFile) so a restore reveals the change. */
   activateFile(uri: string): void;
   /** Re-derive every view from the restored code (ide.tsx wires onDocEdited + renderTree). */
@@ -109,15 +114,31 @@ export function createHistoryController(deps: HistoryControllerDeps): HistoryCon
     try {
       const bufs = deps.buffers();
       const active = deps.activeUri();
+      // Pass 1: build the WHOLE patch list and the matching effect list without firing anything yet,
+      // so pass 2 can write every changed buffer through ONE batched store transition (#1231) before
+      // ANY editor/LSP side effect runs for ANY buffer — preserving the write-before-side-effect
+      // ordering #1010's code review established (a reentrant onChange → workspace.syncBuffer must
+      // never observe a buffer that's still mid-restore).
+      const patches: Array<{ uri: string; text: string; dirty: boolean }> = [];
+      const effects: Array<{ uri: string; text: string; isActive: boolean }> = [];
       for (const [uri, doc] of Object.entries(snap.docs)) {
         const buf = bufs.get(uri);
         if (!buf) continue; // file no longer open (shouldn't happen: structural ops reset history)
-        if (buf.text !== doc.text) {
-          buf.text = doc.text;
-          if (uri === active) deps.editor.setDoc(doc.text);
-          else deps.lsp.syncDoc(uri, doc.text);
+        const textChanged = buf.text !== doc.text;
+        // Skip the patch entirely when neither field actually changed, so an untouched buffer doesn't
+        // churn a needless entry in the batched write.
+        if (textChanged || buf.dirty !== doc.dirty) {
+          patches.push({ uri, text: doc.text, dirty: doc.dirty });
         }
-        buf.dirty = doc.dirty;
+        if (textChanged) {
+          effects.push({ uri, text: doc.text, isActive: uri === active });
+        }
+      }
+      // Pass 2: ONE batched write for every changed buffer, then fire each buffer's editor/LSP effect.
+      deps.writeBuffers(patches);
+      for (const eff of effects) {
+        if (eff.isActive) deps.editor.setDoc(eff.text);
+        else deps.lsp.syncDoc(eff.uri, eff.text);
       }
       if (snap.activeUri !== active && bufs.has(snap.activeUri)) {
         deps.activateFile(snap.activeUri);

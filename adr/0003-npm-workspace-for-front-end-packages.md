@@ -1,12 +1,13 @@
-# 0003. npm workspace root for the front-end packages
+---
+id: 3
+title: npm workspace root for the front-end packages
+status: accepted
+date: 2026-07-02
+---
 
-Date: 2026-07-02
+# npm workspace root for the front-end packages
 
-## Status
-
-Accepted
-
-## Context
+## Context and Problem Statement
 
 Issue #905 extracts Koine Studio's (`tooling/koine-studio`) reusable design-system UI — `--koi-*`
 tokens, framework-free DOM primitives, store-free presentational Preact components — into a new,
@@ -38,14 +39,20 @@ records since they affect the whole front-end, not just this one package:
    (`"postinstall": "npm run build --workspace=@atypical/koine-ui"`) builds it automatically after
    every `npm install`/`npm ci` anywhere in the workspace.
 
-npm workspaces has no built-in sparse/per-member install: `npm ci` always resolves the union of all
-workspace members' dependencies against the single root lockfile, regardless of which member's
-script you intend to run afterward. Tried a narrower `npm ci --workspace=website` as an alternative
-for `website.yml`'s CI job (which doesn't use `koine-ui` yet — see Consequences); it still installed
-`koine-studio`'s full devDependency tree (Storybook, Playwright, Tauri CLI, CodeMirror, maxGraph),
-confirming this is inherent to vanilla npm workspaces, not a flag away.
+## Considered Options
 
-## Decision
+* A narrower `npm ci --workspace=website` for CI jobs that don't need `koine-ui` yet.
+* npm workspaces with every install (local and CI) running at the workspace root.
+
+## Decision Outcome
+
+Chosen option: "npm workspaces with every install at the workspace root", because npm workspaces has
+no built-in sparse/per-member install: `npm ci` always resolves the union of all workspace members'
+dependencies against the single root lockfile, regardless of which member's script you intend to run
+afterward. The narrower `npm ci --workspace=website` alternative was tried for `website.yml`'s CI job
+(which doesn't use `koine-ui` yet — see Consequences); it still installed `koine-studio`'s full
+devDependency tree (Storybook, Playwright, Tauri CLI, CodeMirror, maxGraph), confirming this is
+inherent to vanilla npm workspaces, not a flag away.
 
 1. **Root `package.json`** with `"workspaces": ["tooling/*", "website"]`. `tooling/koine-jetbrains`
    (Gradle, no `package.json`) is silently skipped by the glob, as npm workspaces does for any
@@ -71,7 +78,7 @@ confirming this is inherent to vanilla npm workspaces, not a flag away.
   `website/` or never touches the front-end at all — now installs the union of all 4 workspace
   members' dependencies and triggers a `koine-ui` production build via `postinstall`. This is a
   real, accepted cost of the single-lockfile model; it was not achievable to narrow away with
-  vanilla npm (see Context).
+  vanilla npm (see Context and Problem Statement).
 - `website.yml`'s CI job depends on `@atypical/koine-ui` in `website/package.json` (added so the
   Astro playground *can* import components directly later — issue #905's scope keeps the embedding
   path unchanged for now, so nothing in `website/src` imports it yet) — its `npm ci` step is

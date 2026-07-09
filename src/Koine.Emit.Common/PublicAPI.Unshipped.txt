@@ -10,8 +10,24 @@ Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.Alias = 2 -> Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.Generate = 0 -> Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.ParamProvidesIdDirectly = 1 -> Koine.Compiler.FactoryIdSource
+Koine.Compiler.IdentifierWords
 Koine.Compiler.MarkdownDoc
+Koine.Compiler.RouteDerivation
+Koine.Compiler.RouteInfo
+Koine.Compiler.RouteInfo.OperationId.get -> string!
+Koine.Compiler.RouteInfo.OperationId.init -> void
+Koine.Compiler.RouteInfo.RequestShape.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
+Koine.Compiler.RouteInfo.RequestShape.init -> void
+Koine.Compiler.RouteInfo.ResponseShape.get -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.RouteInfo.ResponseShape.init -> void
+Koine.Compiler.RouteInfo.Route.get -> string!
+Koine.Compiler.RouteInfo.Route.init -> void
+Koine.Compiler.RouteInfo.RouteInfo() -> void
+Koine.Compiler.RouteInfo.RouteInfo(string! Verb, string! Route, string! OperationId, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, Koine.Compiler.Ast.TypeRef? ResponseShape) -> void
+Koine.Compiler.RouteInfo.Verb.get -> string!
+Koine.Compiler.RouteInfo.Verb.init -> void
 static Koine.Compiler.FactoryIdBinding.ResolveFactoryId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory, System.Func<string!, string!>! emitParamName) -> Koine.Compiler.FactoryIdBinding
+static Koine.Compiler.IdentifierWords.Split(string! name, bool splitAfterDigit) -> System.Collections.Generic.IReadOnlyList<string!>!
 static Koine.Compiler.MarkdownDoc.Cell(string? doc) -> string!
 static Koine.Compiler.MarkdownDoc.EnumValues(Koine.Compiler.Ast.EnumDecl! en) -> string!
 static Koine.Compiler.MarkdownDoc.EscapeMarkdown(string! s) -> string!
@@ -21,6 +37,9 @@ static Koine.Compiler.MarkdownDoc.Tag(int? since, string? deprecated) -> string!
 static Koine.Compiler.MarkdownDoc.Tag(Koine.Compiler.Ast.TypeDecl! t) -> string!
 static Koine.Compiler.MarkdownDoc.WriteFields(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! members) -> void
 static Koine.Compiler.MarkdownDoc.WriteRules(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! invariants) -> void
+static Koine.Compiler.RouteDerivation.ForCommand(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.CommandDecl! command) -> Koine.Compiler.RouteInfo
+static Koine.Compiler.RouteDerivation.ForQuery(Koine.Compiler.Ast.QueryDecl! query) -> Koine.Compiler.RouteInfo
+static Koine.Compiler.RouteDerivation.Kebab(string! name) -> string!
 Koine.Compiler.FactoryIdBinding.Deconstruct(out Koine.Compiler.FactoryIdSource Source, out string? AliasFrom) -> void
 Koine.Compiler.FactoryIdBinding.Equals(Koine.Compiler.FactoryIdBinding other) -> bool
 override Koine.Compiler.FactoryIdBinding.GetHashCode() -> int
@@ -28,3 +47,10 @@ static Koine.Compiler.FactoryIdBinding.operator !=(Koine.Compiler.FactoryIdBindi
 static Koine.Compiler.FactoryIdBinding.operator ==(Koine.Compiler.FactoryIdBinding left, Koine.Compiler.FactoryIdBinding right) -> bool
 ~override Koine.Compiler.FactoryIdBinding.Equals(object obj) -> bool
 ~override Koine.Compiler.FactoryIdBinding.ToString() -> string
+Koine.Compiler.RouteInfo.Deconstruct(out string! Verb, out string! Route, out string! OperationId, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, out Koine.Compiler.Ast.TypeRef? ResponseShape) -> void
+Koine.Compiler.RouteInfo.Equals(Koine.Compiler.RouteInfo other) -> bool
+override Koine.Compiler.RouteInfo.GetHashCode() -> int
+static Koine.Compiler.RouteInfo.operator !=(Koine.Compiler.RouteInfo left, Koine.Compiler.RouteInfo right) -> bool
+static Koine.Compiler.RouteInfo.operator ==(Koine.Compiler.RouteInfo left, Koine.Compiler.RouteInfo right) -> bool
+~override Koine.Compiler.RouteInfo.Equals(object obj) -> bool
+~override Koine.Compiler.RouteInfo.ToString() -> string

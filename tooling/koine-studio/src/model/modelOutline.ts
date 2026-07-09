@@ -10,19 +10,23 @@
 // top-level value object would be missed — the glossary lists them all.
 import type { GlossaryEntry, GlossaryModel } from '@/lsp/lsp';
 import { groupByContext } from '@/model/glossary';
+import { normalizeDddKind } from '@/model/dddKind';
 
 /**
- * The DDD construct buckets, in the display order the navigator renders them. Each maps the glossary
- * `kind` strings (see `GlossaryModelBuilder.KindOf`) that fold into it — e.g. both `value` and the
- * `quantity` special-case are Value Objects. `context` entries are headers, never buckets.
+ * The DDD construct buckets, in the display order the navigator renders them. Each maps the
+ * normalized glossary `kind` slugs (see `normalizeDddKind`, {@link constructForKind}) that fold
+ * into it. The backend's raw alias spellings (`quantity`, `'integration event'`) are folded to
+ * their canonical slug (`value`, `integration-event`) *before* these tables are consulted — see
+ * `src/model/dddKind.ts` (#1162) — so this table only ever lists normalized slugs, never the raw
+ * backend spellings. `context` entries are headers, never buckets.
  */
 export const CONSTRUCTS: ReadonlyArray<{ label: string; kinds: ReadonlyArray<string> }> = [
   { label: 'Aggregates', kinds: ['aggregate'] },
   { label: 'Entities', kinds: ['entity'] },
-  { label: 'Value Objects', kinds: ['value', 'quantity'] },
+  { label: 'Value Objects', kinds: ['value'] },
   { label: 'Enumerations', kinds: ['enum'] },
   { label: 'Domain Events', kinds: ['event'] },
-  { label: 'Integration Events', kinds: ['integration event'] },
+  { label: 'Integration Events', kinds: ['integration-event'] },
   { label: 'Types', kinds: ['type'] },
   // Behavioural & lifecycle constructs (#453). The glossary (`KindOf`) does not surface these kinds as
   // outline rows yet, and the structured model graph only emits `states` today (Phase 2 brings the rest),
@@ -89,7 +93,7 @@ export function groupByConstruct(model: GlossaryModel): ContextGroup[] {
         contextEntry ??= e;
         continue;
       }
-      const label = LABEL_OF_KIND.get(e.kind) ?? 'Types';
+      const label = LABEL_OF_KIND.get(normalizeDddKind(e.kind)) ?? 'Types';
       let bucket = constructs.find((c) => c.label === label);
       if (!bucket) {
         bucket = { label, entries: [] };
@@ -141,16 +145,17 @@ export function constructSlug(label: string): string {
   return CONSTRUCT_SLUG[label] ?? 'type';
 }
 
-/** The singular DDD-construct label for a glossary `kind` — for one element's type tooltip (e.g. `value`
- * → "Value Object"), distinct from {@link CONSTRUCTS}' plural section headings ("Value Objects"). */
+/** The singular DDD-construct label for a normalized glossary `kind` slug (see `normalizeDddKind`) —
+ * for one element's type tooltip (e.g. `value` → "Value Object"), distinct from {@link CONSTRUCTS}'
+ * plural section headings ("Value Objects"). Keyed by normalized slug only — never the backend's raw
+ * alias spellings (`quantity`, `'integration event'`); see {@link constructForKind}. */
 const SINGULAR_LABEL_OF_KIND: Record<string, string> = {
   aggregate: 'Aggregate',
   entity: 'Entity',
   value: 'Value Object',
-  quantity: 'Value Object',
   enum: 'Enumeration',
   event: 'Domain Event',
-  'integration event': 'Integration Event',
+  'integration-event': 'Integration Event',
   type: 'Type',
   // Behavioural & lifecycle kinds (#453). `states` is the model graph's state-machine kind (NOT
   // "state-machine"); the rest are Phase-2 and not emitted yet, but resolve a singular label now.
@@ -168,11 +173,15 @@ const SINGULAR_LABEL_OF_KIND: Record<string, string> = {
 /**
  * Resolve a glossary `kind` to its Explorer icon `slug` + singular type `label` — the single source the
  * top-bar breadcrumb shares with the navigator, so the same DDD concept wears the same glyph in both.
+ * Folds `kind` through the canonical {@link normalizeDddKind} (#1162) before either table lookup, so
+ * `CONSTRUCTS`/`SINGULAR_LABEL_OF_KIND` only need to know normalized slugs, never the backend's raw
+ * alias spellings (`quantity`, `'integration event'`).
  */
 export function constructForKind(kind: string): { slug: string; label: string } {
+  const k = normalizeDddKind(kind);
   return {
-    slug: constructSlug(LABEL_OF_KIND.get(kind) ?? 'Types'),
-    label: SINGULAR_LABEL_OF_KIND[kind] ?? 'Type',
+    slug: constructSlug(LABEL_OF_KIND.get(k) ?? 'Types'),
+    label: SINGULAR_LABEL_OF_KIND[k] ?? 'Type',
   };
 }
 
