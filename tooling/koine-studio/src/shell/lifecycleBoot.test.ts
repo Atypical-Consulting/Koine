@@ -483,6 +483,96 @@ describe('lifecycleBoot', () => {
     });
   });
 
+  // Regression (#1088): #1046's lock serialized the shared-import branches against a Home action, but
+  // only the fallback-restore branch re-checked its preconditions once its queued turn came. In the
+  // REVERSE ordering — the Home pick reaches the lock first, because the shared branch is still parked
+  // behind lsp.start() — the import ran unconditionally when its turn finally came, silently discarding
+  // the workspace the user had just created. Serialization alone is not enough: a queued op must
+  // re-validate the state it queued against.
+  describe('shared-import re-check after waiting in the queue (#1088)', () => {
+    // A boot whose lsp.start() stays pending until `connect()` is called — the multi-second connect
+    // window during which Home stays interactive, and the only window in which a Home pick can beat
+    // the shared-import branch to the lock.
+    function makeConnectingDeps(over: Partial<LifecycleBootDeps> = {}): { deps: LifecycleBootDeps; connect: () => void } {
+      let connect!: () => void;
+      const startPromise = new Promise<void>((resolve) => {
+        connect = resolve;
+      });
+      // `hasOpenWorkspace()` is a live read of the real workspace, so model it as one: newModel() opens
+      // a workspace, and every later read observes that. A frozen `() => false` would hide the bug.
+      let workspaceOpen = false;
+      const deps = makeDeps({
+        lsp: {
+          onServerRestart: vi.fn(),
+          start: vi.fn(() => startPromise),
+          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+        },
+        hasOpenWorkspace: vi.fn(() => workspaceOpen),
+        newModel: vi.fn(async () => {
+          workspaceOpen = true;
+        }),
+        ...over,
+      });
+      return { deps, connect };
+    }
+
+    it('skips a queued shared-WORKSPACE import when a Home pick opened a workspace while connecting', async () => {
+      const { deps, connect } = makeConnectingDeps({
+        shared: { kind: 'workspace', files: [{ relPath: 'a.koi', text: 'x' }] } as never,
+      });
+      createLifecycleBoot(deps);
+      await flush(); // the boot ladder is parked on the still-connecting lsp.start()
+
+      // The user goes Home and picks "New model": it takes the lock first and runs to completion.
+      takeStartIntentMock.mockReturnValue({ kind: 'new' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+      expect(deps.newModel).toHaveBeenCalledOnce();
+
+      connect(); // the server is finally up — the shared-import branch now gets its turn
+      await flush();
+
+      // It must NOT import on top of the workspace the user just created…
+      expect(deps.importSharedWorkspace).not.toHaveBeenCalled();
+      // …and must not fall through to the default workspace either, which would clobber it just the same.
+      expect(deps.openHostDefaultWorkspaceFlow).not.toHaveBeenCalled();
+      // The link was still consumed by this boot, so a reload must not silently re-import it.
+      expect(clearModelHash).toHaveBeenCalled();
+    });
+
+    it('skips a queued shared-SINGLE open when a Home pick opened a workspace while connecting', async () => {
+      const { deps, connect } = makeConnectingDeps({ shared: { kind: 'single', text: 'context X {}' } as never });
+      createLifecycleBoot(deps);
+      await flush();
+
+      takeStartIntentMock.mockReturnValue({ kind: 'new' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+      expect(deps.newModel).toHaveBeenCalledOnce();
+
+      connect();
+      await flush();
+
+      expect(deps.openWorkspaceWith1File).not.toHaveBeenCalled();
+      expect(clearModelHash).toHaveBeenCalled();
+    });
+
+    // The complement: with nothing else opened while connecting, the import still runs. This is what
+    // keeps the recheck a guard rather than a regression — the common, non-racing boot is unchanged.
+    it('still imports the shared workspace when no other op opened one while connecting', async () => {
+      const { deps, connect } = makeConnectingDeps({
+        shared: { kind: 'workspace', files: [{ relPath: 'a.koi', text: 'x' }] } as never,
+      });
+      createLifecycleBoot(deps);
+      await flush();
+
+      connect();
+      await flush();
+
+      expect(deps.importSharedWorkspace).toHaveBeenCalledWith([{ relPath: 'a.koi', text: 'x' }], undefined);
+    });
+  });
+
   it('teardown disposes every controller in the preserved order, then the route-intent sub', () => {
     const deps = makeDeps();
     const order = (deps as unknown as { _order: string[] })._order;

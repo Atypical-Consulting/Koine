@@ -211,6 +211,16 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       // Isolated try/finally per branch: an open failure must not masquerade as a connection failure.
       if (shared?.kind === 'workspace') {
         await withWorkspaceOpLock(async () => {
+          // Re-checked HERE, once this op's turn in the queue actually comes — not before queueing
+          // (#1088). Serializing alone isn't enough: the shared branch waits out lsp.start() before it
+          // ever reaches the lock, so a Home pick taken during that connect window acquires the lock
+          // FIRST and opens its own workspace. Importing on top of it would silently discard the
+          // workspace the user just asked for — the same clobber #1046 fixed, in the reverse ordering.
+          // The hash is still cleared: this boot consumed the link, so a reload must not re-import it.
+          if (deps.hasOpenWorkspace()) {
+            clearModelHash();
+            return;
+          }
           let opened = false;
           try {
             opened = await deps.importSharedWorkspace(shared.files, shared.active);
@@ -227,6 +237,11 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
         });
       } else if (shared?.kind === 'single') {
         await withWorkspaceOpLock(async () => {
+          // Same queued-turn recheck as the workspace branch above (#1088).
+          if (deps.hasOpenWorkspace()) {
+            clearModelHash();
+            return;
+          }
           try {
             await deps.openWorkspaceWith1File(shared.text);
           } catch (e) {
