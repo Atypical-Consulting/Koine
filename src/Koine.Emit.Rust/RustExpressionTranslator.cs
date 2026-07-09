@@ -255,13 +255,10 @@ internal sealed class RustExpressionTranslator
         TypeRef? coerceRight = leftType?.Name == "Decimal" && rightType?.Name == "Int" ? Decimal() : null;
 
         // Value-object arithmetic (e.g. Money * quantity) consumes `self` via std::ops, so a non-Copy
-        // place operand must be cloned; comparisons borrow and need no clone.
-        var cloneLeft = isArithmetic && IsNonCopyPlace(bin.Left, leftType);
-        var cloneRight = isArithmetic && IsNonCopyPlace(bin.Right, rightType);
-
-        WriteOperand(bin.Left, sb, EnumTypeName(bin.Right), coerceLeft, cloneLeft);
+        // operand must evaluate to an owned value; comparisons borrow and need no clone.
+        WriteArithmeticOperand(bin.Left, sb, EnumTypeName(bin.Right), coerceLeft, isArithmetic, leftType);
         sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
-        WriteOperand(bin.Right, sb, EnumTypeName(bin.Left), coerceRight, cloneRight);
+        WriteArithmeticOperand(bin.Right, sb, EnumTypeName(bin.Left), coerceRight, isArithmetic, rightType);
 
         if (parenthesize)
         {
@@ -314,21 +311,47 @@ internal sealed class RustExpressionTranslator
     }
 
     /// <summary>
+    /// Writes an operand of the general (non-quantity) arithmetic path — the sibling of
+    /// <see cref="WriteQuantityOperand"/> for <c>+</c>/<c>-</c>/<c>*</c>/<c>/</c> on plain value objects
+    /// (and a quantity's <c>*</c>/<c>/</c>, which never goes through the quantity guard). A simple place
+    /// is written bare-or-cloned exactly as before; a compound expression (e.g. a conditional) must
+    /// itself evaluate to an owned value before the operator can consume it, so it is parenthesized and
+    /// its leaf places are cloned via <see cref="WriteOwnedOperand"/> (#1282, generalizing #1268).
+    /// Comparisons/logical operators (<paramref name="isArithmetic"/> false) borrow and are left as the
+    /// pre-existing un-cloned rendering.
+    /// </summary>
+    private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
+    {
+        if (isArithmetic && expr is ConditionalExpr or LetExpr or GuardExpr)
+        {
+            sb.Append('(');
+            WriteOwnedOperand(expr, sb, coerceTo);
+            sb.Append(')');
+            return;
+        }
+
+        var clone = isArithmetic && IsNonCopyPlace(expr, type);
+        WriteOperand(expr, sb, enumHint, coerceTo, clone);
+    }
+
+    /// <summary>
     /// Writes an expression so it evaluates to an owned value, recursing into a conditional's branches
     /// (including nested conditionals) so a leaf place a branch would otherwise move out of
     /// <c>&amp;self</c> is cloned instead — the block-expression dual of <see cref="WriteOperandValue"/>
-    /// (#1268).
+    /// (#1268). Shared by the quantity <c>+</c>/<c>-</c> guard, the general arithmetic path (#1282), a
+    /// bare conditional/let derived-member body (<see cref="RustExpressionTranslator.TranslateOwned"/>,
+    /// #1282), and a <c>CoalesceExpr</c> arm (<see cref="WriteOperandValue"/>, #1282).
     /// </summary>
-    private void WriteOwnedOperand(Expr expr, StringBuilder sb)
+    private void WriteOwnedOperand(Expr expr, StringBuilder sb, TypeRef? coerceTo = null)
     {
         if (expr is ConditionalExpr cond)
         {
             var condBuf = new StringBuilder();
             Write(cond.Condition, condBuf, null);
             sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
-            WriteOwnedOperand(cond.Then, sb);
+            WriteOwnedOperand(cond.Then, sb, coerceTo);
             sb.Append(" } else { ");
-            WriteOwnedOperand(cond.Else, sb);
+            WriteOwnedOperand(cond.Else, sb, coerceTo);
             sb.Append(" }");
             return;
         }
@@ -337,7 +360,7 @@ internal sealed class RustExpressionTranslator
         {
             List<string> pushed = WriteLetBindings(let.Bindings, sb, cloneNonCopyPlaces: true);
             var bodyBuf = new StringBuilder();
-            WriteOwnedOperand(let.Body, bodyBuf);
+            WriteOwnedOperand(let.Body, bodyBuf, coerceTo);
             sb.Append(StripOuterParens(bodyBuf.ToString()));
             sb.Append(" }");
             PopLocals(pushed);
@@ -348,15 +371,32 @@ internal sealed class RustExpressionTranslator
         {
             // `when` is a semantic-only disambiguation with no runtime Rust representation (mirrors
             // Write's GuardExpr case) — the owned-value treatment belongs to the guarded body.
-            WriteOwnedOperand(g.Body, sb);
+            WriteOwnedOperand(g.Body, sb, coerceTo);
             return;
         }
 
+        WriteOwnedLeaf(expr, sb, coerceTo);
+    }
+
+    /// <summary>
+    /// Writes a leaf (non-conditional/let/guard) expression as an owned value — the base case
+    /// <see cref="WriteOwnedOperand"/> recurses down to. A <c>String</c>-typed leaf is normalized via
+    /// <c>.to_string()</c> (correct whether it renders as an owned <c>String</c> place or a borrowed
+    /// <c>&amp;str</c> accessor result — <c>.clone()</c> on the latter would stay a <c>&amp;str</c> and
+    /// mistype the position); any other non-<c>Copy</c> place is cloned.
+    /// </summary>
+    private void WriteOwnedLeaf(Expr expr, StringBuilder sb, TypeRef? coerceTo)
+    {
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
-        var bodyOnlyBuf = new StringBuilder();
-        Write(expr, bodyOnlyBuf, null);
-        sb.Append(StripOuterParens(bodyOnlyBuf.ToString()));
-        if (IsNonCopyPlace(expr, type))
+        var bodyBuf = new StringBuilder();
+        Write(expr, bodyBuf, coerceTo);
+        sb.Append(StripOuterParens(bodyBuf.ToString()));
+
+        if (type is { Name: "String", IsOptional: false })
+        {
+            sb.Append(".to_string()");
+        }
+        else if (IsNonCopyPlace(expr, type))
         {
             sb.Append(".clone()");
         }

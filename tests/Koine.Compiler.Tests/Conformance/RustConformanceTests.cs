@@ -493,4 +493,53 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1282, Task 1 — the general (non-quantity) arithmetic path's operand-cloning check
+    /// (<c>IsNonCopyPlace</c>-gated <c>cloneLeft</c>/<c>cloneRight</c>) only recognizes a bare place, not
+    /// a conditional, so a plain (non-quantity) value object's <c>+</c> with a conditional operand fails
+    /// the same E0507 class the quantity guard (#1268) fixed for <c>+</c>/<c>-</c>.
+    /// <para>
+    /// Uses <c>+</c> rather than <c>*</c>/<c>/</c>: <c>ValueObjectArithmeticWalker</c> (which decides
+    /// whether a VO needs a generated <c>Add</c>/<c>Sub</c> impl) resolves an operand's full inferred
+    /// type, so it recognizes a compound (conditional) operand fine. <c>ScalarOpWalker</c> (which decides
+    /// whether a VO needs a generated <c>Mul</c>/<c>Div</c> impl for a scalar factor) is deliberately
+    /// shallow — it only classifies a bare identifier/literal operand — so a <c>Money * (if …)</c>-shaped
+    /// case never gets its <c>impl std::ops::Mul</c> generated at all and fails with an unrelated,
+    /// pre-existing E0369 ("cannot multiply") regardless of this fix. Confirmed with a real
+    /// <c>cargo check</c> and filed separately (issue tracker) rather than folded into this fix, which is
+    /// scoped to the clone/borrow (E0507) defect, not scalar-factor demand-detection.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void General_arithmetic_path_with_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    combined: Money = (if flag then a else b) + a\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): a conditional branch that yields a non-Copy
+        // field must be cloned, never emitted as a bare, un-borrowed place headed into the if/else.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
