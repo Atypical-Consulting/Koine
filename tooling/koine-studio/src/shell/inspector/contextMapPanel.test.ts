@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createContextMapPanel, type ContextMapPanelLsp } from '@/shell/inspector/contextMapPanel';
 import { createAppStore } from '@/store/index';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
-import type { ContextMapResult } from '@/lsp/lsp';
+import type { ContextMapResult, DiagramNode } from '@/lsp/lsp';
+import type { ContextMapEdge } from '@/diagrams/contextMapGraph';
 
 function makeHost(): HTMLElement {
   const el = document.createElement('div');
@@ -305,6 +306,42 @@ describe('createContextMapPanel — context-node click navigation (#290)', () =>
     onNavigate.gotoSourceSpan.mockClear();
     hooks!.onContextClick!({ ...spanned, sourceSpan: null });
     expect(onNavigate.gotoSourceSpan).not.toHaveBeenCalled();
+
+    panel.dispose();
+  });
+});
+
+describe('createContextMapPanel — hover tooltip composition (#1211)', () => {
+  test('composes kind + direction + shared types + ACL for a relation edge; a context node gets none', async () => {
+    let hooks: maxgraphRenderer.ContextMapGraphHooks | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(async (_stage, _graph, _isCurrent, h) => {
+      hooks = h;
+      return { dispose: vi.fn() };
+    });
+
+    const panel = createContextMapPanel({ store: createAppStore(), host: makeHost(), lsp: makeLsp(), onNavigate: makeOnNavigate() });
+    await panel.load();
+    await flush();
+    expect(hooks?.tooltip).toBeDefined();
+
+    const edge: ContextMapEdge = {
+      from: 'Gateway',
+      to: 'Payment',
+      label: 'AntiCorruptionLayer',
+      arrowKind: 'association',
+      bidirectional: false,
+      sharedTypes: ['Money'],
+      acl: [{ upstreamContext: 'Gateway', upstreamType: 'GatewayResult', localContext: 'Payment', localType: 'PaymentReceipt' }],
+    };
+    expect(hooks!.tooltip!(edge)).toBe(
+      'AntiCorruptionLayer: Gateway → Payment\nShared: Money\nACL: Gateway.GatewayResult → Payment.PaymentReceipt',
+    );
+
+    const contextNode: DiagramNode = {
+      id: 'Gateway', label: 'Gateway', kind: 'context', qualifiedName: 'Gateway', sourceSpan: null, stereotype: null, members: [],
+    };
+    expect(hooks!.tooltip!(contextNode)).toBeNull();
 
     panel.dispose();
   });

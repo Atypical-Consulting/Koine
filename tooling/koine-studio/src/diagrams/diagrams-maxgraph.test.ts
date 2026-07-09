@@ -36,7 +36,8 @@ import {
 } from '@/diagrams/diagramContract';
 import { loadDiagramAnnotations, loadDiagramPositions, loadDiagramZoom, saveDiagramPositions, saveDiagramZoom } from '@/settings/persistence';
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
-import type { Diagram, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
+import type { Diagram, DiagramEdge, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
+import type { ContextMapEdge } from '@/diagrams/contextMapGraph';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
 // Shim it so the graph constructs with a sane size, and assert on the MODEL (never on pixels).
@@ -637,6 +638,42 @@ describe('renderContextMapGraph', () => {
       // relation must read left→right, not right→left (HierarchicalLayout's orientation pins root
       // position, not flow direction; 'east' pinned the root at the RIGHT, mirroring the reading order).
       expect(nodeXOffset(container, 'Sales')).toBeLessThan(nodeXOffset(container, 'Shipping'));
+    } finally {
+      handle?.dispose();
+    }
+  });
+
+  test('wires the hover tooltip onto the TooltipHandler plugin — not just the bare edge label (#1211)', async () => {
+    // This fails on the pre-fix wiring: assigning getTooltipForCell onto `handle.graph` (Graph has no such
+    // property) is silently never read, so the plugin falls through to its default — convertValueToString,
+    // i.e. the edge's bare label/kind — instead of the hook's composed kind + direction + Shared + ACL text.
+    const edge: ContextMapEdge = {
+      from: 'Gateway',
+      to: 'Payment',
+      label: 'AntiCorruptionLayer',
+      arrowKind: 'association',
+      bidirectional: false,
+      sharedTypes: ['Money'],
+      acl: [{ upstreamContext: 'Gateway', upstreamType: 'GatewayResult', localContext: 'Payment', localType: 'PaymentReceipt' }],
+    };
+    const tooltip = (value: DiagramNode | DiagramEdge): string | null => {
+      if (!('from' in value && 'to' in value)) return null;
+      const e = value as ContextMapEdge;
+      const lines = [`${e.label}: ${e.from} → ${e.to}`, `Shared: ${e.sharedTypes.join(', ')}`, `ACL: ${e.acl[0].upstreamContext}.${e.acl[0].upstreamType} → ${e.acl[0].localContext}.${e.acl[0].localType}`];
+      return lines.join('\n');
+    };
+    const graph: DiagramGraph = { nodes: [ctx('Gateway'), ctx('Payment')], edges: [edge] };
+    const container = makeContainer();
+    const handle = await renderContextMapGraph(container, graph, () => true, { tooltip });
+    try {
+      const tooltipHandler = handle!.graph!.getPlugin<mx.TooltipHandler>('TooltipHandler')!;
+      const edgeCell = handle!.graph!.getDefaultParent().getChildEdges()[0];
+      expect(tooltipHandler.getTooltipForCell(edgeCell)).toBe(tooltip(edge));
+
+      // A context-node cell carries no `from`/`to` — contextMapTooltip (and this hook) return null for it,
+      // so the plugin must render no tooltip rather than falling back to the bare node label.
+      const contextNodeCell = handle!.graph!.getDefaultParent().getChildVertices()[0];
+      expect(tooltipHandler.getTooltipForCell(contextNodeCell)).toBe('');
     } finally {
       handle?.dispose();
     }

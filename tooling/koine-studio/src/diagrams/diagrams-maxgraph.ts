@@ -1435,8 +1435,12 @@ export interface ContextMapGraphHooks {
   onAfterRender?(): void;
 }
 
-/** A teardown handle for a mounted context-map graph. */
+/** A teardown handle for a mounted context-map graph. `graph` is exposed (optional: existing mocks in
+ *  other suites return `{ dispose }` only) so a test can reach the real `TooltipHandler` plugin and
+ *  assert the hover wiring end-to-end, not just the composer in isolation — production callers only
+ *  ever use `dispose()`. */
 export interface ContextMapGraphHandle {
+  graph?: MxGraph;
   dispose(): void;
 }
 
@@ -1550,7 +1554,7 @@ export async function renderContextMapGraph(
         view.addListener(evt, rerunAfterRender);
       }
     }
-    return { dispose };
+    return { graph: handle.graph, dispose };
   }
   dispose();
   return null;
