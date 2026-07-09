@@ -8,7 +8,6 @@
 // into an in-memory cache, so the synchronous Settings API can keep exposing it without leaking it
 // to disk in the clear.
 
-import { loadSecret, saveSecret } from '@/ai/secrets';
 import type { ChatMessage } from '@/ai/ai';
 import {
   clampZoomPercent,
@@ -21,6 +20,12 @@ import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
 import { DEFAULT_DECK_STATE, isValidCenter, isValidDeckState, type CenterView, type DeckState } from '@/store/slices/uiChrome';
 import { readRaw, writeRaw } from '@/shell/storage';
+import { readJsonObject, patchJsonBlob, SETTINGS_KEY } from './storage';
+import { getCachedApiKey } from './secrets';
+
+// Re-exported so the barrel's public surface (initSecrets/whenSecretsReady/saveApiKey/clearApiKey) is
+// unchanged; getCachedApiKey is intentionally NOT re-exported (barrel-private, see settings/secrets.ts).
+export { initSecrets, whenSecretsReady, saveApiKey, clearApiKey } from './secrets';
 
 // --- settings model ----------------------------------------------------------
 
@@ -153,8 +158,8 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 // --- storage keys ------------------------------------------------------------
+// SETTINGS_KEY lives in ./storage (shared with the guarded JSON-object helpers there); imported above.
 
-const SETTINGS_KEY = 'koine.studio.settings';
 const RECENT_KEY = 'koine.studio.recentFolders';
 const SCRATCH_KEY = 'koine.studio.scratch';
 const WORKSPACE_CENTER_KEY = 'koine.studio.workspaceCenter';
@@ -201,13 +206,6 @@ export const WORKSPACE_SCOPED_KEYS: readonly (keyof Settings)[] = [
   'lspTrace',
 ];
 
-/** The secret kept out of the plaintext blob and in the encrypted store; also its key name there. */
-const API_KEY_SECRET = 'aiApiKey';
-
-// The decrypted API key, populated once by initSecrets() and updated by saveApiKey()/clearApiKey().
-// loadSettings() reads from here so the secret never round-trips through localStorage.
-let secretCache = '';
-
 // Editor font-size bounds — must match the Settings input range (prefs.ts) so a stored
 // value can never drive the editor outside what the UI itself permits.
 const FONT_MIN = 10;
@@ -237,42 +235,6 @@ export const ACCENT_NAMES: readonly AccentName[] = ['blue', 'teal', 'violet', 'a
 // The canonical MCP-client roster, used to validate a stored mcpClient. The recipe UI (mcp.ts)
 // owns the per-client copy; this layer only owns the set of valid ids.
 const MCP_CLIENT_IDS: readonly McpClientId[] = ['claude-desktop', 'lm-studio', 'cursor', 'vscode', 'generic'];
-
-// --- guarded JSON-object blob helpers ----------------------------------------
-// The shared read/parse/guard prologue and the guarded read-modify-write behind the override
-// stores (workspace overrides and keybinding remaps), so the two can't drift. Both treat anything
-// but a plain non-null, non-array object as "no blob" ({}), exactly like every other guarded read.
-
-/**
- * Read a key as a JSON object, guarded: returns the parsed value only when it is a non-null,
- * non-array object, else {} — an absent key, malformed JSON, or a primitive/array all fall back.
- */
-function readJsonObject(storageKey: string): Record<string, unknown> {
-  const raw = readRaw(storageKey);
-  if (raw === null) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return parsed as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Set (or clear) a single field in the JSON-object blob at `storageKey`, then write it back.
- * A `null` value DELETES the field; any other value sets it. Reads the current blob via
- * {@link readJsonObject} (so a corrupt/array blob starts fresh) and persists best-effort.
- */
-function patchJsonBlob(storageKey: string, field: string, value: unknown | null): void {
-  const blob = readJsonObject(storageKey);
-  if (value === null) {
-    delete blob[field];
-  } else {
-    blob[field] = value;
-  }
-  writeRaw(storageKey, JSON.stringify(blob));
-}
 
 // --- settings ----------------------------------------------------------------
 
@@ -363,10 +325,10 @@ function coerceShellArgs(v: unknown): string[] {
 export function loadSettings(): Settings {
   const raw = readRaw(SETTINGS_KEY);
   // Even with no stored blob, surface the cached secret so the key survives a fresh settings object.
-  if (raw === null) return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
+  if (raw === null) return { ...DEFAULT_SETTINGS, aiApiKey: getCachedApiKey() };
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (parsed === null || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
+    if (parsed === null || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS, aiApiKey: getCachedApiKey() };
     return {
       theme: coerceTheme(parsed.theme),
       accent: coerceAccent(parsed.accent),
@@ -386,7 +348,7 @@ export function loadSettings(): Settings {
       aiBaseUrl:
         typeof parsed.aiBaseUrl === 'string' && parsed.aiBaseUrl.length > 0 ? parsed.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl,
       // The API key is never stored in this blob; it comes from the encrypted in-memory cache.
-      aiApiKey: secretCache,
+      aiApiKey: getCachedApiKey(),
       aiModel: typeof parsed.aiModel === 'string' && parsed.aiModel.length > 0 ? parsed.aiModel : DEFAULT_SETTINGS.aiModel,
       aiModelOpenai: typeof parsed.aiModelOpenai === 'string' ? parsed.aiModelOpenai : DEFAULT_SETTINGS.aiModelOpenai,
       aiAgenticTools:
@@ -409,7 +371,7 @@ export function loadSettings(): Settings {
       startupView: coerceStartupView(parsed.startupView),
     };
   } catch {
-    return { ...DEFAULT_SETTINGS, aiApiKey: secretCache };
+    return { ...DEFAULT_SETTINGS, aiApiKey: getCachedApiKey() };
   }
 }
 
@@ -427,58 +389,6 @@ export function patchSettings(p: Partial<Settings>): Settings {
   const merged: Settings = { ...loadSettings(), ...p };
   saveSettings(merged);
   return merged;
-}
-
-// --- secret API key (encrypted in IndexedDB, cached in memory) ----------------
-
-// Memoized so repeated calls (and whenSecretsReady) share one decrypt, and so callers can await the
-// exact moment secretCache is populated rather than racing the fire-and-forget boot call.
-let secretsReady: Promise<void> | null = null;
-
-/**
- * Decrypt the stored API key into the in-memory cache, run once at boot before any AI request.
- * Also performs a one-time migration: a key left in the legacy plaintext settings blob is moved
- * into the encrypted store and scrubbed from the blob. Idempotent — the first call does the work.
- */
-export function initSecrets(): Promise<void> {
-  if (!secretsReady) secretsReady = doInitSecrets();
-  return secretsReady;
-}
-
-/** Resolves once the secret cache has been populated (or immediately if never initialized). */
-export function whenSecretsReady(): Promise<void> {
-  return secretsReady ?? Promise.resolve();
-}
-
-async function doInitSecrets(): Promise<void> {
-  const raw = readRaw(SETTINGS_KEY);
-  if (raw !== null) {
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const legacy = typeof parsed?.aiApiKey === 'string' ? parsed.aiApiKey : '';
-      if (legacy.length > 0) {
-        await saveSecret(API_KEY_SECRET, legacy);
-        // Rewrite the blob without the secret (loadSettings injects secretCache below).
-        delete parsed.aiApiKey;
-        writeRaw(SETTINGS_KEY, JSON.stringify(parsed));
-      }
-    } catch {
-      // malformed blob — nothing to migrate
-    }
-  }
-  secretCache = await loadSecret(API_KEY_SECRET);
-}
-
-/** Update and persist the secret API key (encrypted). An empty value clears it. */
-export async function saveApiKey(value: string): Promise<void> {
-  secretCache = value;
-  await saveSecret(API_KEY_SECRET, value);
-}
-
-/** Forget the secret API key (memory + encrypted store). */
-export async function clearApiKey(): Promise<void> {
-  secretCache = '';
-  await saveSecret(API_KEY_SECRET, '');
 }
 
 // --- recent folders ----------------------------------------------------------
