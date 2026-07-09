@@ -117,7 +117,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // a stale term). #1188 (ADR 0009) focuses the active context's NODE on the Context Map centre — the
   // `emphasiseContextMapScope` helper (a `.koi-svg-node[data-qname]` mark mirroring applySelectionHighlight)
   // called from paintContextMap and the scope fan-out. Combined measured end-state 2568 + 2; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2570 },
+  // Raised 2570 → 2581: #484 (follow-up on #460's review) de-dupes the per-edit `glossaryModel()`/`model()`
+  // fetch — the Domain navigator's reload used to re-fetch both endpoints ensureModelIndex() was already
+  // fetching. Adds the shared `fetchGlossaryModel`/`fetchStructuredModel` in-flight-promise memoizer next to
+  // `ensureModelIndex` and seeds the navigator's `reload()` from it, ~11 LOC net. Measured end-state; #985
+  // owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2581 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   { file: 'src/settings/prefs.ts', maxLines: 2250 },
