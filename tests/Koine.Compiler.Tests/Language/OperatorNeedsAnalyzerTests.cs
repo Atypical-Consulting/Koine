@@ -188,6 +188,43 @@ public class OperatorNeedsAnalyzerTests
     }
 
     /// <summary>
+    /// Sibling of <see cref="Scalar_multiply_and_divide_needs_recognize_a_conditional_value_object_operand"/>
+    /// for the OTHER compound shape the fix's design explicitly calls out: a <c>let</c>-bound operand.
+    /// <c>TypeResolver.TypeOf</c> follows a <c>let</c> binding through to its bound value's type (the same
+    /// mechanism <see cref="ValueObjectArithmeticWalker"/> already relies on for <c>+</c>/<c>-</c>), so this
+    /// pins that the fix's full-type-resolution approach genuinely generalizes rather than only covering
+    /// the one shape (<c>ConditionalExpr</c>) the original bug report happened to use.
+    /// </summary>
+    [Fact]
+    public void Scalar_multiply_and_divide_needs_recognize_a_let_bound_value_object_operand()
+    {
+        const string source = """
+            context Shop {
+              value Price {
+                amount: Decimal
+              }
+              value Mix {
+                a: Price
+                scaledLet: Price = (let x = a in x) * 2
+                dividedLet: Price = (let x = a in x) / 4
+              }
+            }
+            """;
+
+        CompileResult result = new KoineCompiler().Compile(source, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        KoineModel model = result.Model!;
+        ModelIndex index = new SemanticModel(model).Index;
+
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+
+        needs["Price"].MultiplyFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+        needs["Price"].DivideFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+    }
+
+    /// <summary>
     /// <see cref="OperatorNeedsAnalyzer.BuildOperatorNeeds"/> is cached per (model, index) so that the
     /// four public projections and <see cref="OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds"/> share
     /// one site enumeration across separate calls, not just within one (#836) — a repeat call with the
