@@ -60,10 +60,6 @@ export default tseslint.config(
   // still add innerHTML while listed; that's the accepted cost of a zero-rewrite adoption, à la #757's
   // freeze-then-shrink direction.)
   {
-    files: ['src/shell/explorer.ts'], // retired by #989 (file explorer → store-bound Preact tree)
-    rules: { 'no-restricted-syntax': 'off' },
-  },
-  {
     // retired by #991 (self-contained panels → Preact: welcome/home, about, generate-project wizard)
     files: ['src/welcome/welcome.ts', 'src/settings/about.ts', 'src/export/generateProjectWizard.ts'],
     rules: { 'no-restricted-syntax': 'off' },

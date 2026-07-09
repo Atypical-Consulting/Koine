@@ -3,8 +3,30 @@
 // blur semantics (and its window.prompt/confirm) — the repo default is happy-dom, so this file pins
 // jsdom per-file. (The browser fs tests stay on the happy-dom default.)
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { render as unmountPreact } from 'preact';
 import type { FsEntry } from '@/host';
 import { createExplorer, type ExplorerCallbacks } from '@/shell/explorer';
+import { appStore } from '@/store/index';
+import { installExplorerSyncRendering } from '../test-setup';
+
+// This file drives the facade with a raw stimulus (row.click() / input.dispatchEvent(...) / ex.render())
+// immediately followed by a DOM assertion, with no `act()` wrapper and no awaited tick — see
+// `test-setup.ts`'s own "SYNC RENDERING" comment for what this installs and why it's opt-in (installing
+// it unconditionally for every test file in the project breaks OTHER suites that rely on Preact's normal
+// deferred effect timing).
+installExplorerSyncRendering();
+
+// Properly unmount whatever a PREVIOUS test mounted (rather than just wiping innerHTML, which detaches
+// the DOM but leaves the Preact component tree "live" and still subscribed to the singleton appStore —
+// since #989 task 8's facade shares that store by default across the many independent createExplorer(cb)
+// calls this file makes, and never calls ex.dispose() itself except in the one dedicated dispose() test).
+// A stale, still-subscribed tree reacting to a LATER test's store write (e.g. its own collapsed-token
+// pruning effect, re-evaluated against ITS OWN frozen `groups`) can otherwise clobber the state the
+// CURRENT test just wrote — `render(null, child)` is the same unmount idiom the rest of the codebase uses
+// (see statusBar.tsx's dispose()) and is a no-op for a host that was never mounted or already disposed.
+function unmountAll(): void {
+  for (const child of Array.from(document.body.children)) unmountPreact(null, child);
+}
 
 // A small two-context tree: one folder with a nested .koi file plus a top-level .koi file.
 function sampleTree(): FsEntry[] {
@@ -40,7 +62,14 @@ function makeCallbacks(): ExplorerCallbacks {
 
 describe('explorer', () => {
   beforeEach(() => {
+    unmountAll();
     document.body.innerHTML = '';
+    // The facade (#989 task 8) mounts ExplorerPanel against the (by default singleton) appStore for its
+    // filter/collapsed chrome state (#989 task 7) — every `createExplorer(cb)` call below omits the
+    // `store` param, so without this reset, explorerFilter/explorerCollapsed would leak across the many
+    // independent createExplorer() calls this file makes. No assertion below changes; this only resets
+    // state a prior test's facade instance wrote into the shared singleton.
+    appStore.setState({ explorerFilter: '', explorerCollapsed: [] });
   });
   afterEach(() => {
     vi.useRealTimers(); // filter tests opt into fake timers to flush the input debounce
@@ -465,6 +494,15 @@ describe('explorer', () => {
     row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
     const input = row.querySelector<HTMLInputElement>('.explorer-rename')!;
     input.value = 'ren'; // half-typed, not yet committed
+    // The rename `<input>` is a genuinely CONTROLLED Preact input (#989 task 5) — unlike the retired
+    // imperative widget's raw, uncontrolled `<input>`, a value set WITHOUT firing its own `input` event
+    // is transient: Preact's controlled-input sync (preact/src/diff/index.js, the `value` special case)
+    // reconciles the live DOM `.value` back to the controlled prop (`editValue` state, still 'shared.koi'
+    // here) on the very next re-render, exactly as a real browser + React/Preact controlled input would.
+    // Fire the `input` event so `onEditInput` updates `editValue` to 'ren' and it survives the re-render
+    // below — mirrors ExplorerPanel.test.tsx's own inline-edit tests (#989 task 5), which always pair a
+    // raw `.value =` with a dispatched `input` event for exactly this reason.
+    input.dispatchEvent(new Event('input', { bubbles: true }));
 
     // A diagnostics push re-renders mid-edit; it must be deferred, not tear the input down.
     ex.render(sampleTree(), 'ROOT');
@@ -684,7 +722,15 @@ describe('explorer', () => {
     row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
     const input = row.querySelector<HTMLInputElement>('.explorer-rename')!;
     input.value = 'bad/name';
-    input.dispatchEvent(new Event('blur')); // Tab/click away with an invalid name
+    // The real `.blur()` method, not a synthetic `new Event('blur')`: ExplorerPanel's `onBlur` prop is a
+    // plain Preact vnode prop, but the app aliases `react`/`react-dom` to `preact/compat` (for zustand's
+    // React-hook entry) — loading `preact/compat` ANYWHERE installs its onBlur→'focusout' remap globally
+    // (React's own blur-delegation strategy) via a `preact` `options` hook, so it applies here too even
+    // though this file never imports `react`/`preact/compat` itself. jsdom's real `.blur()` dispatches
+    // BOTH 'blur' AND a bubbling 'focusout' (mirroring real browsers), satisfying either listener
+    // strategy; a bare synthetic 'blur' Event no longer reaches the handler. See ExplorerPanel.test.tsx's
+    // identical note (#989 task 7) for the same fix applied there first.
+    input.blur();
 
     expect(cb.onRename).not.toHaveBeenCalled();
     expect(ex.el.querySelector('.explorer-rename')).toBeNull(); // input discarded, label restored
@@ -990,7 +1036,11 @@ describe('explorer', () => {
 
 describe('explorer — active-context scope emphasis (ADR 0009 / #1188)', () => {
   beforeEach(() => {
+    unmountAll();
     document.body.innerHTML = '';
+    // See the top describe block's identical reset above: every createExplorer(cb) call here also omits
+    // the `store` param, sharing the singleton appStore.
+    appStore.setState({ explorerFilter: '', explorerCollapsed: [] });
   });
 
   // Two context files (distinct stems), a non-`.koi` file, and a folder — so the tests can prove the

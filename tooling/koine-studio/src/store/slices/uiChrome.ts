@@ -189,6 +189,17 @@ export interface UiChromeSlice {
    *  controller unmounts + remounts the outline panel on every model reload, which would otherwise wipe a
    *  component-local query mid-task; here it survives the remount. */
   outlineFilter: string;
+  /** The workspace file Explorer's type-to-filter query (#989 task 7) — the SAME rationale as
+   *  {@link outlineFilter}: `ExplorerPanel` is remounted on a workspace reload, which would otherwise wipe
+   *  a component-local query mid-task; here it survives the remount. Runtime-only (not persisted), like
+   *  `outlineFilter`. */
+  explorerFilter: string;
+  /** The set of collapsed directory tokens in the workspace Explorer (#989 task 7), as a plain array (not
+   *  a `Set`) so the store stays a serializable-shaped value — `ExplorerPanel` converts to/from a `Set`
+   *  locally wherever `Set` operations are more convenient. Lifted into the store for the same reason as
+   *  {@link explorerFilter}: it must survive an `ExplorerPanel` remount. Runtime-only (not persisted) — the
+   *  collapsed set is not restored across a page reload, only across a same-session panel remount. */
+  explorerCollapsed: readonly string[];
   /** The Deck v2 center layout. The legacy `center` field mirrors `deck.primary`. */
   deck: DeckState;
   /** Whether the transient, gear-launched Settings overlay (#482) is showing OVER the deck. Orthogonal
@@ -218,6 +229,18 @@ export interface UiChromeSlice {
   setLeftCollapsed(v: boolean): void;
   toggleLeftCollapsed(): void;
   setOutlineFilter(q: string): void;
+  /** Replace the Explorer filter text wholesale (#989 task 7) — mirrors {@link setOutlineFilter}. */
+  setExplorerFilter(q: string): void;
+  /** Flip one token's membership in the Explorer's collapsed-directories set (#989 task 7): adds it if
+   *  absent, removes it if present. What a directory row's click toggles. */
+  toggleExplorerCollapsed(token: string): void;
+  /** REPLACE the whole Explorer collapsed-directories set with exactly `tokens` (#989 task 7) — used by
+   *  "Collapse all" (sets every directory token at once) and by collapsed-set pruning against a fresh
+   *  `liveDirs` (a directory deleted/renamed/moved away must drop out, not linger forever). */
+  setExplorerCollapsedMany(tokens: readonly string[]): void;
+  /** REMOVE exactly `tokens` from the Explorer's collapsed-directories set (#989 task 7) — used by
+   *  "Expand all" (removes every directory token) and by reveal-by-context ancestor expansion. */
+  expandExplorerTokens(tokens: readonly string[]): void;
   setMobileZone(z: MobileZone): void;
   setRailAxis(v: RailAxis): void;
   /** Record an EXPLICIT collapse choice for the bottom strip: sets BOTH the runtime flag and the
@@ -281,6 +304,8 @@ export function createUiChromeSlice(
     rightCollapsed: false,
     leftCollapsed: false,
     outlineFilter: '',
+    explorerFilter: '',
+    explorerCollapsed: [],
     mobileZone: DEFAULT_MOBILE_ZONE,
     railAxis: DEFAULT_RAIL_AXIS,
     diagCollapsed: false,
@@ -333,6 +358,16 @@ export function createUiChromeSlice(
     setLeftCollapsed: (v) => set({ leftCollapsed: v }),
     toggleLeftCollapsed: () => set({ leftCollapsed: !get().leftCollapsed }),
     setOutlineFilter: (q) => set({ outlineFilter: q }),
+    setExplorerFilter: (q) => set({ explorerFilter: q }),
+    toggleExplorerCollapsed: (token) => {
+      const cur = get().explorerCollapsed;
+      set({ explorerCollapsed: cur.includes(token) ? cur.filter((t) => t !== token) : [...cur, token] });
+    },
+    setExplorerCollapsedMany: (tokens) => set({ explorerCollapsed: [...tokens] }),
+    expandExplorerTokens: (tokens) => {
+      const drop = new Set(tokens);
+      set({ explorerCollapsed: get().explorerCollapsed.filter((t) => !drop.has(t)) });
+    },
     setMobileZone: (z) => set({ mobileZone: z }),
     setRailAxis: (v) => set({ railAxis: v }),
     // The explicit chevron choice: runtime AND preference move together, so the persistence subscriber
