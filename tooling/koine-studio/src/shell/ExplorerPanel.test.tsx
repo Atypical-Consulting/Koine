@@ -1306,4 +1306,110 @@ describe('ExplorerPanel', () => {
       expect((dirtyCb.onMove as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ROOT/orders');
     });
   });
+
+  // ADR-0009 (#1188) active-context scope emphasis — the #989 gap this task fills in. Mirrors
+  // explorer.test.ts's own "explorer — active-context scope emphasis (ADR 0009 / #1188)" describe
+  // block (~lines 991-1069) scenario-for-scenario, driven through the `activeContext` prop instead of
+  // the old imperative `Explorer.setActiveContext()` call — this is the parity gate the eventual
+  // facade swap (task 8) depends on: once explorer.ts becomes a thin wrapper around `ExplorerPanel`,
+  // that OLD suite's assertions run against THIS component, so every scenario there needs an
+  // equivalent here today.
+  describe('active-context scope emphasis (ADR 0009 / #1188)', () => {
+    // Two context files (distinct stems), a non-`.koi` file, and a folder — same shape as
+    // explorer.test.ts's own scopeTree(), so the two suites stay easy to cross-reference.
+    function scopeTree(): FsEntry[] {
+      return [
+        { token: 'ROOT/Billing.koi', name: 'Billing.koi', relPath: 'Billing.koi', kind: 'file' },
+        { token: 'ROOT/Ordering.koi', name: 'Ordering.koi', relPath: 'Ordering.koi', kind: 'file' },
+        { token: 'ROOT/README.md', name: 'README.md', relPath: 'README.md', kind: 'file' },
+        { token: 'ROOT/sub', name: 'sub', relPath: 'sub', kind: 'dir', children: [] },
+      ];
+    }
+    function scopeGroup(): ExplorerRootGroup {
+      return { root: 'ROOT', entries: scopeTree() };
+    }
+    function rowByName(container: Element, name: string): HTMLElement {
+      return Array.from(container.querySelectorAll<HTMLElement>('.explorer-row')).find(
+        (r) => r.querySelector('.explorer-name')?.textContent === name,
+      )!;
+    }
+
+    it("emphasises the active context's .koi and de-emphasises the other contexts' .koi — never hiding", () => {
+      const store = createAppStore();
+      const { container } = render(
+        <ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} activeContext="Billing" />,
+      );
+
+      expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+      expect(rowByName(container, 'Billing.koi').classList.contains('dim')).toBe(false);
+      expect(rowByName(container, 'Ordering.koi').classList.contains('dim')).toBe(true);
+      // Non-`.koi` files and folders stay neutral — the emphasis is on the context axis only.
+      expect(rowByName(container, 'README.md').classList.contains('dim')).toBe(false);
+      expect(rowByName(container, 'README.md').classList.contains('is-scoped')).toBe(false);
+      expect(rowByName(container, 'sub').classList.contains('dim')).toBe(false);
+      expect(rowByName(container, 'sub').classList.contains('is-scoped')).toBe(false);
+      // Nothing is hidden — every row still renders (the whole-tree overview survives).
+      expect(container.querySelectorAll('.explorer-row')).toHaveLength(4);
+    });
+
+    it('matches the context stem case-insensitively', () => {
+      const store = createAppStore();
+      const { container } = render(
+        <ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} activeContext="BILLING" />,
+      );
+      expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+    });
+
+    it('clears the emphasis for the All-contexts view (null)', () => {
+      const store = createAppStore();
+      const { container, rerender } = render(
+        <ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} activeContext="Billing" />,
+      );
+      expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+
+      act(() =>
+        rerender(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} activeContext={null} />),
+      );
+      expect(container.querySelector('.explorer-row.is-scoped')).toBeNull();
+      expect(container.querySelector('.explorer-row.dim')).toBeNull();
+    });
+
+    it('defaults to no emphasis when activeContext is omitted', () => {
+      const store = createAppStore();
+      const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} />);
+      expect(container.querySelector('.explorer-row.is-scoped')).toBeNull();
+      expect(container.querySelector('.explorer-row.dim')).toBeNull();
+    });
+
+    it('a scope naming no .koi emphasises nothing — a no-op, not a whole-tree dim', () => {
+      const store = createAppStore();
+      const { container } = render(
+        <ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} activeContext="Shipping" />,
+      );
+      expect(container.querySelector('.explorer-row.is-scoped')).toBeNull();
+      expect(container.querySelector('.explorer-row.dim')).toBeNull();
+    });
+
+    it('never dims the active (open) file, even when it is out of scope', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/Ordering.koi' });
+      const { container } = render(
+        <ExplorerPanel store={store} cb={cb} groups={[scopeGroup()]} activeContext="Billing" />,
+      );
+      // Ordering.koi is the OPEN file but a different context — it stays legible (aria-current highlight).
+      expect(rowByName(container, 'Ordering.koi').classList.contains('dim')).toBe(false);
+      expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+    });
+
+    it('survives a re-render (the emphasis is derived fresh from props every render)', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(
+        <ExplorerPanel store={store} cb={cb} groups={[scopeGroup()]} activeContext="Billing" />,
+      );
+      act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[scopeGroup()]} activeContext="Billing" />));
+      expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
+      expect(rowByName(container, 'Ordering.koi').classList.contains('dim')).toBe(true);
+    });
+  });
 });

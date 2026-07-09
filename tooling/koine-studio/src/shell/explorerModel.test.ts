@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { FsEntry } from '@/host';
 import type { ExplorerRootGroup } from '@/shell/explorer';
-import { analyze, findFileForContext, flattenVisible, parentMapOf } from '@/shell/explorerModel';
+import { analyze, findFileForContext, flattenVisible, koiStem, parentMapOf, scopeMatchOf } from '@/shell/explorerModel';
 
 // A two-context tree: `orders/` holds a nested `order.koi` plus a plain `notes.txt`; `shared.koi`
 // sits at the top level. Mirrors explorer.test.ts's sampleTree shape (folders-first, alpha).
@@ -255,5 +255,35 @@ describe('findFileForContext', () => {
   test('searches across every group', () => {
     const hit = findFileForContext([group(), secondGroup()], 'invoice');
     expect(hit).toEqual({ token: 'ROOT2/billing/invoice.koi', ancestors: ['ROOT2/billing'] });
+  });
+});
+
+// ADR-0009 (#1188) active-context scope emphasis's pure computations (#989 gap-fill) — ported from
+// explorer.ts's private `koiStem`/`analyze()`'s `scopeMatch`. `ExplorerPanel`/`ExplorerPanel.test.tsx`
+// cover the per-row `is-scoped`/`dim` class application end-to-end; these unit tests pin the two
+// helpers directly.
+describe('koiStem', () => {
+  test('strips the .koi extension and lowercases', () => {
+    expect(koiStem('Billing.koi')).toBe('billing');
+  });
+
+  test('returns null for a non-.koi file', () => {
+    expect(koiStem('notes.txt')).toBeNull();
+    expect(koiStem('README')).toBeNull();
+  });
+});
+
+describe('scopeMatchOf', () => {
+  test('true when some file across every group has a matching .koi stem', () => {
+    expect(scopeMatchOf([group()], 'order')).toBe(true);
+    expect(scopeMatchOf([group(), secondGroup()], 'invoice')).toBe(true);
+  });
+
+  test('false when no file matches — the no-op case', () => {
+    expect(scopeMatchOf([group()], 'shipping')).toBe(false);
+  });
+
+  test('a non-.koi file never matches, even by its literal name', () => {
+    expect(scopeMatchOf([group()], 'notes.txt')).toBe(false);
   });
 });

@@ -3,7 +3,16 @@ import type { ComponentChildren, JSX } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
-import { analyze, flattenVisible, indexEntries, invalidSegment, parentDirOf, parentMapOf } from '@/shell/explorerModel';
+import {
+  analyze,
+  flattenVisible,
+  indexEntries,
+  invalidSegment,
+  koiStem,
+  parentDirOf,
+  parentMapOf,
+  scopeMatchOf,
+} from '@/shell/explorerModel';
 import { ExplorerItem, INVALID_NAME_TITLE, ItemIcon } from '@/shell/ExplorerItem';
 import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 import { appStore, type AppState } from '@/store/index';
@@ -48,9 +57,20 @@ import {
 // to the one handler on `ul[role="tree"]`, which is what makes the old "double-fire through nested
 // treeitem ancestors" bug (and its `stopPropagation` workaround) structurally impossible here.
 //
-// NOT in this task: the "…" per-row context-menu trigger, and the ADR-0009 active-context is-scoped/dim
-// emphasis (explorerModel.ts's public `analyze()` doesn't carry that scope match — only the private
-// analyze() inside explorer.ts does).
+// NOT in this task: the "…" per-row context-menu trigger.
+//
+// ACTIVE-CONTEXT SCOPE EMPHASIS (ADR 0009 / #1188, #989 gap-fill): the `activeContext` prop (default
+// `null`) drives a per-FILE-row `is-scoped`/`dim` class exactly as explorer.ts's `setActiveContext` +
+// its private `analyze()`'s `scopeMatch` + `buildItem`'s emphasis application do — ported here as pure
+// helpers in explorerModel.ts (`koiStem`, `scopeMatchOf`) rather than widening that module's own
+// `analyze()` (whose current `ExplorerAnalysis` shape the other #989 tasks above already depend on).
+// `normalizedContext` (below) mirrors `setActiveContext`'s own normalization (trim + lowercase, empty
+// string → `null`) so a caller can pass the raw, as-typed scope value. `scopeMatch` gates the whole
+// thing: a scope naming no present `.koi` file is a genuine no-op (nothing dimmed), not a whole-tree
+// dim. Per row (`renderEntry` below): directories and non-`.koi` files never get either class; the
+// `.koi` file whose stem equals the active scope gets `is-scoped`; every OTHER context's `.koi` file
+// gets `dim` UNLESS it's the currently active/open file (`active`, already computed per-row below for
+// `ExplorerItem`'s own `active` prop) — the open file is never dimmed, matching explorer.ts exactly.
 //
 // STORE-BACKED FILTER + COLLAPSED STATE (#989 task 7): the filter query and the collapsed-directories set
 // live in the app's Zustand `uiChrome` slice (`explorerFilter`/`explorerCollapsed` +
@@ -115,6 +135,13 @@ export interface ExplorerPanelProps {
    *  defaults to the singleton `appStore`. Tests/stories inject their own `createAppStore()` so state
    *  doesn't leak between cases (mirrors `GlossaryPanel`'s `{ store }` prop). */
   store?: StoreApi<AppState>;
+  /**
+   * The active bounded-context scope (ADR 0009 / #1188) — see the file-header note above. Accepted in
+   * any case/with surrounding whitespace (normalized internally, mirroring explorer.ts's
+   * `setActiveContext`); pass `null` (the default) for the *All contexts* view, which clears all
+   * emphasis.
+   */
+  activeContext?: string | null;
 }
 
 // The one inline-edit session that can be open at a time (#989 task 5) — replaces task 4's placeholder
@@ -188,8 +215,19 @@ function buildConfirmHandle(): ConfirmHandle {
 }
 
 export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
-  const { cb, groups } = props;
+  const { cb, groups, activeContext = null } = props;
   const store = props.store ?? appStore;
+  // ADR-0009 scope emphasis (see the file-header note above): normalize the raw prop exactly as
+  // explorer.ts's `setActiveContext` does (trim + lowercase, empty string → `null`), then gate the
+  // whole feature on `scopeMatchOf` so a scope naming no present `.koi` file is a genuine no-op.
+  const normalizedContext = useMemo(() => {
+    const trimmed = activeContext?.trim().toLowerCase() ?? '';
+    return trimmed === '' ? null : trimmed;
+  }, [activeContext]);
+  const scopeMatch = useMemo(
+    () => normalizedContext !== null && scopeMatchOf(groups, normalizedContext),
+    [groups, normalizedContext],
+  );
   // The filter query + collapsed-directories set (#989 task 7) — read from / written to the injected
   // store's `uiChrome` slice (see the file-header note above). `useAppStore(store, selector)` subscribes
   // this component to exactly these slices, so an unrelated store change never re-renders this panel.
@@ -715,6 +753,17 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     const dirty = !isDir && cb.isDirty(entry.token);
     const diag = isDir ? { errors: 0, warnings: 0 } : cb.diagCounts(entry.token);
 
+    // ADR-0009 scope emphasis (see the file-header note above) — files only, and only once a scope is
+    // active AND actually names some present `.koi` file (`scopeMatch`). `active` (just computed above)
+    // doubles as the "is this the currently open file" check `currentAnalysis.active?.token === entry.token`
+    // performed in explorer.ts — a file is never dimmed while it's the open buffer, even out of scope.
+    let scopeClass: 'is-scoped' | 'dim' | undefined;
+    if (!isDir && normalizedContext !== null && scopeMatch) {
+      const stem = koiStem(entry.name);
+      if (stem === normalizedContext) scopeClass = 'is-scoped';
+      else if (stem !== null && !active) scopeClass = 'dim';
+    }
+
     // Only compute (and pass) children when this directory is actually expanded — a collapsed directory
     // simply doesn't render its subtree at all (the JS/Preact equivalent of the original's CSS
     // `display:none`), rather than building it and hiding it. A create targeting THIS directory (#989
@@ -785,6 +834,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         renaming={renaming}
         dragging={dragging}
         dropTarget={isDropTarget}
+        scopeClass={scopeClass}
         onToggle={() => toggleDir(entry.token)}
         onOpen={() => cb.onOpenFile(entry.token)}
         onContextMenu={(e) => {

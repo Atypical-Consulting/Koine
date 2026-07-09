@@ -112,6 +112,16 @@ export interface ExplorerItemProps {
    */
   dropTarget?: boolean;
   /**
+   * ADR-0009 (#1188) active-context scope emphasis — files only, `undefined` for a neutral row
+   * (directories, non-`.koi` files, or no active scope). `'is-scoped'` marks the `.koi` file whose
+   * stem names the active bounded context; `'dim'` de-emphasises every OTHER context's `.koi` file.
+   * `ExplorerPanel` alone computes which (if either) applies — including the "never dim the active/
+   * open file" and "a scope naming no present file is a no-op" rules — this component only adds the
+   * given class to `.explorer-row` (ported from explorer.ts's `buildItem`'s
+   * `row.classList.add('is-scoped' | 'dim')`).
+   */
+  scopeClass?: 'is-scoped' | 'dim';
+  /**
    * Native drag events forwarded straight through to `.explorer-row` — `ExplorerPanel` alone owns
    * drop-validity/ancestry (`parentMapOf`) and the in-flight `drag`/`dropMark` state (#989 task 6); this
    * component has no drag logic of its own beyond making the row draggable and calling these back.
@@ -159,6 +169,7 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
     renaming,
     dragging,
     dropTarget,
+    scopeClass,
     onDragStart,
     onDragEnd,
     onDragOver,
@@ -199,7 +210,7 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
       class={dragging ? 'is-dragging' : undefined}
     >
       <div
-        class={dropTarget ? 'explorer-row is-drop-target' : 'explorer-row'}
+        class={rowClassName(dropTarget, scopeClass)}
         aria-current={isActiveFile ? 'true' : undefined}
         style={{ '--depth': String(level - 1) }}
         draggable
@@ -268,6 +279,16 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
       )}
     </li>
   );
+}
+
+// `.explorer-row`'s class list: the base class plus whichever of `.is-drop-target` (#989 task 6) /
+// `.is-scoped/.dim` (ADR-0009 scope emphasis) apply — the two are independent (a row can in principle
+// be both a drop target and scope-emphasised) so they're combined rather than treated as exclusive.
+function rowClassName(dropTarget: boolean | undefined, scopeClass: 'is-scoped' | 'dim' | undefined): string {
+  let cls = 'explorer-row';
+  if (dropTarget) cls += ' is-drop-target';
+  if (scopeClass) cls += ` ${scopeClass}`;
+  return cls;
 }
 
 // Wrap the filter match in <mark>, mirroring explorer.ts's fillName() — the FIRST case-insensitive

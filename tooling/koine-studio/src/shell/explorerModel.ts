@@ -185,6 +185,36 @@ export function invalidSegment(name: string): boolean {
 }
 
 /**
+ * The bounded-context name a source file denotes — its `.koi` stem, lowercased — or `null` for a
+ * non-`.koi` file. Ported verbatim from `explorer.ts`'s private `koiStem` (ADR 0009 / #1188): one
+ * `.koi` file is one bounded context (the stem convention {@link findFileForContext} also uses), so
+ * the stem is what the active-context scope emphasis ({@link scopeMatchOf}, and `ExplorerPanel`'s
+ * own per-row `is-scoped`/`dim` decision) matches against. Exported so both stay in lockstep with
+ * ONE definition instead of drifting.
+ */
+export function koiStem(name: string): string | null {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.koi') ? lower.slice(0, -'.koi'.length) : null;
+}
+
+/**
+ * Whether SOME file across `groups` has a `.koi` stem equal to `activeContext` — ported from
+ * `explorer.ts`'s private `analyze()`'s `scopeMatch` computation (ADR 0009 / #1188), as a small
+ * SEPARATE pure helper rather than widening this module's own {@link analyze}'s return shape (six
+ * other #989 tasks already depend on its current `ExplorerAnalysis` contract).
+ *
+ * This gates the whole active-context scope emphasis: a scope naming no present `.koi` file must be
+ * a genuine no-op (nothing dimmed), not a whole-tree dim — so a caller (`ExplorerPanel`) only applies
+ * `is-scoped`/`dim` to any row when this returns `true`. `activeContext` is expected already
+ * normalized (trimmed + lowercased) by the caller, mirroring `explorer.ts`'s `setActiveContext`.
+ */
+export function scopeMatchOf(groups: readonly ExplorerRootGroup[], activeContext: string): boolean {
+  const matches = (e: FsEntry): boolean =>
+    (e.kind === 'file' && koiStem(e.name) === activeContext) || (e.children ?? []).some(matches);
+  return groups.some((g) => g.entries.some(matches));
+}
+
+/**
  * Find the file backing a bounded context by matching its STEM (the basename minus the `.koi`
  * extension) case-insensitively — the "Reveal in Files" (#453) convention that one `.koi` file is
  * one bounded context. Ported from `explorer.ts`'s `findFileForContext` (formerly around
