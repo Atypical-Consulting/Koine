@@ -51,17 +51,10 @@ import type {
 } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs } from '@/model/modelTables';
-import { coverage, type GlossaryHandlers } from '@/model/glossary';
+import { type GlossaryHandlers } from '@/model/glossary';
 import { createDocsStore } from '@/docs/docsStore';
 import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
-import {
-  ALL_CONTEXTS,
-  fileContextFollow,
-  isAllContexts,
-  listContexts,
-  scopeDocsFiles,
-  type ContextScope,
-} from '@/model/activeContext';
+import { ALL_CONTEXTS, isAllContexts, scopeDocsFiles, type ContextScope } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
@@ -96,10 +89,12 @@ import {
   type OutputScaffold,
 } from '@/shell/outputRail';
 import { createContextMapPanel } from '@/shell/inspector/contextMapPanel';
-
-// LSP SymbolKind for a namespace — the kind the language service tags each top-level `context`
-// document symbol with. Used by followActiveFileContext to read a file's bounded context(s).
-const SYMBOL_KIND_NAMESPACE = 3;
+import {
+  createActiveContextController,
+  scopeLabel,
+  type ActiveContextController,
+  type ActiveContextHandle,
+} from '@/shell/inspector/activeContextController';
 
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
@@ -250,12 +245,11 @@ export interface SelectionHandle {
   set(element: SelectedElement | null): void;
 }
 
-/** A thin read/write shim over the app store's `activeContext` slice (#146) — ide.ts reads the active
- *  scope through it for the diagram add-type path. The store is the single source of truth. */
-export interface ActiveContextHandle {
-  get(): ContextScope;
-  set(scope: ContextScope): void;
-}
+// ActiveContextHandle (#146) — the app store's `activeContext` slice's thin read/write shim — is now
+// defined in inspector/activeContextController.ts (the module that owns the slice's read/write path);
+// re-exported here for API stability (ide.ts reads the active scope through it for the diagram add-type
+// path).
+export type { ActiveContextHandle };
 
 export interface InspectorController {
   /** The shared "selected element" handle (#142) — ide.ts's diagram write-path sets it; the inspector reads it. */
@@ -492,8 +486,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // no-churn guard so re-selecting the same pane doesn't touch storage. The center tabs (Visual / Code /
   // Documentation) are the only switcher now, so what they land on is what a reload restores.
   let persistedCenter: CenterView = initialCenter;
-  // Captured + unsubscribed on dispose (like unsubscribeActiveContext / unsubscribeDirtyCount) so a
-  // deferred center change can't persist on behalf of a torn-down session after dispose().
+  // Captured + unsubscribed on dispose (like unsubscribeDirtyCount, and activeContextCtrl's own
+  // subscription) so a deferred center change can't persist on behalf of a torn-down session after
+  // dispose().
   const unsubscribeCenterPersist = appStore.subscribe((s, prev) => {
     if (s.center === prev.center) return;
     // Never persist a TRANSIENT view (e.g. the gear-launched Settings page): a reload must not restore it
@@ -507,160 +502,18 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   });
 
   // --- bounded-context switcher (#146) ---------------------------------------
-  // A thin handle over the app store's `activeContext` slice — the store is the single source of truth,
-  // so writers set it here and every scoped surface (the diagram, the glossary, and the bottom
-  // Events/Relationships tables) reads the same value back.
-  const activeContext: ActiveContextHandle = {
-    get: () => appStore.getState().activeContext,
-    set: (scope) => appStore.getState().setActiveContext(scope),
-  };
-  /** The per-workspace storage key for the active scope (folder identity, or 'scratch'). */
-  function contextWorkspaceKey(): string {
-    return deps.folderRootToken() || 'scratch';
-  }
-
-  /** The human label for a scope: the context name, or "All contexts" for the unscoped sentinel. */
-  function scopeLabel(scope: ContextScope): string {
-    return isAllContexts(scope) ? 'All contexts' : scope;
-  }
-
-  /** Mirror the active scope onto the status-bar readout. The top-bar selector reflects the scope on its
-   *  own (the breadcrumb subscribes to the activeContext slice), so this only feeds the persistent
-   *  status-bar "Context: X" — the readout that used to sit (redundantly) in the toolbar. */
-  function syncContextStatusBar(): void {
-    sbContextEl.textContent = `Context: ${scopeLabel(activeContext.get())}`;
-  }
-
-  // The single choke point for every scope change (the <select>, a restored value's validation, and
-  // the select-outside-scope path all route through here): update the store's `activeContext` slice,
-  // optionally persist it for this workspace, sync the control, and re-render the scoped surfaces.
-  // `persist` is the user's
-  // intent flag — only a deliberate switcher choice persists; non-deliberate changes (following a
-  // selection, or falling back off a vanished context) are view-only so they never overwrite the
-  // user's last explicit choice in storage.
-  function applyScope(scope: ContextScope, persist: boolean): void {
-    // Write the app store's `activeContext` slice (the single source of truth): every scoped render
-    // path reads it back — the diagram, the glossary, and the bottom Events/Relationships tables.
-    // The status-bar readout + the scoped-surface re-filter are NOT driven here — the `activeContext`
-    // subscription below (in createInspectorController) owns them, firing on the slice write this performs.
-    // That's what keeps EVERY writer of the slice in lockstep: this dropdown path AND the Domain
-    // navigator's drill (#453), which calls setActiveContext directly and so used to skip those two
-    // imperative side-effects entirely (#531). Persisting stays here — only a deliberate switcher choice
-    // persists; non-deliberate changes (following a selection, or falling back off a vanished context)
-    // are view-only so they never overwrite the user's last explicit choice in storage.
-    activeContext.set(scope);
-    if (persist) deps.saveActiveContext(contextWorkspaceKey(), scope);
-  }
-
-  /** A deliberate scope change from the switcher — persisted so a reload restores it. */
-  function setActiveContext(scope: ContextScope): void {
-    applyScope(scope, true);
-  }
-
-  // --- status-bar scope picker (#146) ----------------------------------------
-  // The status-bar "Context" segment is the CANONICAL scope control: PR #1180 removed the dead top-bar
-  // breadcrumb <select> and #923 left only this readout, so clicking the segment is now how you change the
-  // global bounded-context scope without drilling the left Domain navigator. Clicking it opens a small menu
-  // of the model's contexts (read from the store's `contexts` list refreshContextList keeps current) plus
-  // an "All contexts" option, and routes a pick through setActiveContext — the SAME persist=true choke
-  // point the navigator drill uses — so an explicit pick behaves identically and survives a reload. Built
-  // on the shared createFloatingMenu engine (#547): it inherits the keyboard nav, outside-click/Escape
-  // dismissal, focus-return, and aria-expanded toggling every other Studio popup menu has.
-  const scopeMenu = createFloatingMenu({
-    menuClass: 'koi-scope-menu',
-    itemClass: 'koi-scope-menu-item',
-    ariaLabel: 'Bounded context scope',
-  });
-  /** The menu rows: "All contexts" then one per model context (store order), the ACTIVE scope marked with
-   *  a leading ✓ — a non-colour indicator, so the current scope reads without relying on hue (WCAG AA). */
-  function scopeMenuItems(): FloatingMenuItem[] {
-    const active = activeContext.get();
-    const scopes: ContextScope[] = [ALL_CONTEXTS, ...appStore.getState().contexts];
-    return scopes.map((scope) => ({
-      id: `scope:${scope}`,
-      label: `${scope === active ? '✓ ' : ''}${scopeLabel(scope)}`,
-      run: () => setActiveContext(scope),
-    }));
-  }
-  /** Toggle the scope menu under the Context segment. The segment lives in the BOTTOM status bar, so the
-   *  menu is anchored to open UPWARD: we hand the engine the segment's TOP-left as the anchor point and the
-   *  `.koi-scope-menu` CSS lifts it by its own height (a downward menu would fall off-screen). */
-  function toggleScopeMenu(): void {
-    const rect = sbContextEl.getBoundingClientRect();
-    scopeMenu.toggle({ items: scopeMenuItems(), trigger: sbContextEl, at: { x: rect.left, y: rect.top } });
-  }
-  sbContextEl.addEventListener('click', toggleScopeMenu);
-
-  // Adopt the current model's contexts as the scope options (the Domain navigator + construct palette
-  // read them from the store). "All contexts" is the unscoped sentinel.
-  function setContextOptions(list: string[]): void {
-    appStore.getState().setContexts(list); // mirror into the store so the construct palette can react
-    // Fall back to "All contexts" ONLY when we positively know the model's contexts (a non-empty list)
-    // and the active scope isn't among them — a genuine rename/removal. An EMPTY list is a transient or
-    // cold state (the LSP still warming up right after open, or a momentarily-unparseable model mid-edit),
-    // so preserve the scope rather than clobber it. The fallback is view-only (not persisted), so the
-    // user's last explicit choice survives in storage and a reload restores it once the context is back.
-    const scope = activeContext.get();
-    if (list.length > 0 && !isAllContexts(scope) && !list.includes(scope)) {
-      applyScope(ALL_CONTEXTS, false);
-    } else {
-      syncContextStatusBar();
-    }
-  }
-
-  // Refresh the switcher's context list from the workspace model (best-effort; empties on failure).
-  // The glossary model lists every declared type with its owning context, so it's the most complete
-  // source for "every context that has anything in it".
-  async function refreshContextList(): Promise<void> {
-    try {
-      const model = await lsp.glossaryModel();
-      if (disposed) return; // torn down mid-fetch (#1002/#1037) — no write into the dead host
-      setContextOptions(listContexts(model));
-      // Publish glossary documentation coverage for the status-bar docs ring (#923) — the model is
-      // already in hand here, and this runs on folder open + every (debounced) edit, so the ring tracks
-      // the live glossary. coverage() returns { documented, total, pct }; the ring needs the raw counts.
-      const cov = coverage(model.entries);
-      appStore.getState().setDocsCoverage({ documented: cov.documented, total: cov.total });
-    } catch (e) {
-      if (disposed) return;
-      // Best-effort: empty the picker, but log so a failing glossary model isn't a silent dead end.
-      console.warn('Context list refresh failed; clearing the context picker.', e);
-      setContextOptions([]);
-      appStore.getState().setDocsCoverage({ documented: 0, total: 0 });
-    }
-  }
-
-  // Restore the persisted scope for the just-opened workspace, before the first scoped render. The
-  // control catches up when refreshContextList rebuilds the options (the slice value is what the render
-  // paths read, so the initial render is already scoped regardless of the dropdown's paint timing).
-  function restoreActiveContext(): void {
-    const stored = deps.loadActiveContext(contextWorkspaceKey());
-    const scope = stored && stored.length > 0 ? stored : ALL_CONTEXTS;
-    // Set the store's scope so every scoped surface's first paint is already scoped.
-    activeContext.set(scope);
-    syncContextStatusBar();
-  }
-
-  // When the active .koi file changes, follow the bounded-context switcher to that file's context so
-  // the top bar — and every scoped surface — reflects the file you're now editing. The file's primary
-  // context is its first top-level document symbol. View-only (applyScope persist=false): navigating
-  // between files shouldn't overwrite the user's deliberately chosen, persisted scope. A response for a
-  // file the user has already switched away from is dropped; a file with no determinable context leaves
-  // the scope untouched.
-  async function followActiveFileContext(): Promise<void> {
-    const uri = deps.activeUri();
-    let contexts: string[];
-    try {
-      const symbols = await lsp.documentSymbols();
-      // Top-level document symbols are the file's `context` declarations (SymbolKind 3 = Namespace).
-      contexts = symbols.filter((s) => s.kind === SYMBOL_KIND_NAMESPACE).map((s) => s.name);
-    } catch {
-      return;
-    }
-    if (deps.activeUri() !== uri) return; // the user switched files while the symbols were in flight
-    const next = fileContextFollow(contexts, activeContext.get());
-    if (next !== undefined) applyScope(next, false);
-  }
+  // Extracted to its own module (inspector/activeContextController.ts, #985 Task 2): the scope handle,
+  // the per-workspace persist/restore, the status-bar readout sync, the model's context-list refresh (+
+  // the docs-coverage ring it ships alongside), and the file-follow behaviour all live there now. This
+  // facade only wires the injected deps + the `rerenderScopedSurfaces` hook below (its BODY — the actual
+  // model/diagram/Files-tree/bottom-table re-filter — stays here until Task 3 rehomes those loaders) and
+  // still owns the status-bar scope-PICKER MENU (a UI concern, not the scope-change choke point itself).
+  //
+  // Forward-declared so `rerenderScopedSurfaces` (passed to the controller as its `hooks` callback) can
+  // read the just-changed scope back off the controller's handle: the two are mutually referential by
+  // construction — the controller needs the hook to be constructed, the hook needs the controller to read
+  // the scope — so the binding exists first and is assigned once the controller is built.
+  let activeContextCtrl: ActiveContextController;
 
   // Re-render the scoped, model-derived surfaces after a scope change. Scope is applied at paint time
   // from the `activeContext` slice and the model itself is unchanged (scope is a pure filter), so the
@@ -681,7 +534,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // The Files tree obeys the scope by EMPHASIS (ADR 0009): mark the active context's `.koi` and
     // de-emphasise the other contexts' files — never hidden, so every file op keeps working. The
     // strategic Domain navigator's own store subscription handles its active-context marker.
-    const scope = activeContext.get();
+    const scope = activeContextCtrl.handle.get();
     deps.scopeFiles(isAllContexts(scope) ? null : scope);
     // The diagram only re-scopes when the visual center is showing it — including as the SECONDARY
     // pane of a 2-up / in overview, so visibleCenters, not just the deck primary.
@@ -692,20 +545,50 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // subscription now (inspector/contextMapPanel.tsx) — it fires independently off the same store write.
   }
 
-  // The store's `activeContext` slice is the single source of truth for the active scope: ANY writer —
-  // the toolbar dropdown (via applyScope) OR the Domain navigator's drill (#453), which calls
-  // setActiveContext directly — must drive the status-bar readout AND the scoped-surface re-filter.
-  // Subscribing here (rather than running those two only inside applyScope) is what keeps the navigator
-  // drill and the dropdown in lockstep (#531): before, the drill wrote the slice but skipped applyScope's
-  // two imperative side-effects, so the status bar read "All contexts" and the canvas stayed unfiltered
-  // while the dropdown already showed the drilled context. Guarded on a real value change so an unrelated
-  // slice write (setCenter / setSelection / …) is ignored; captured + unsubscribed on dispose (like the
-  // dirty-count subscription) so a deferred change can't repaint a torn-down host.
-  const unsubscribeActiveContext = appStore.subscribe((s, prev) => {
-    if (s.activeContext === prev.activeContext) return;
-    syncContextStatusBar();
-    rerenderScopedSurfaces();
+  activeContextCtrl = createActiveContextController({
+    store: appStore,
+    lsp,
+    activeUri: deps.activeUri,
+    folderRootToken: deps.folderRootToken,
+    saveActiveContext: deps.saveActiveContext,
+    loadActiveContext: deps.loadActiveContext,
+    statusBarEl: sbContextEl,
+    hooks: { rerenderScopedSurfaces },
   });
+
+  // --- status-bar scope picker (#146) ----------------------------------------
+  // The status-bar "Context" segment is the CANONICAL scope control: PR #1180 removed the dead top-bar
+  // breadcrumb <select> and #923 left only this readout, so clicking the segment is now how you change the
+  // global bounded-context scope without drilling the left Domain navigator. Clicking it opens a small menu
+  // of the model's contexts (read from the store's `contexts` list refreshContextList keeps current) plus
+  // an "All contexts" option, and routes a pick through setActiveContext — the SAME persist=true choke
+  // point the navigator drill uses — so an explicit pick behaves identically and survives a reload. Built
+  // on the shared createFloatingMenu engine (#547): it inherits the keyboard nav, outside-click/Escape
+  // dismissal, focus-return, and aria-expanded toggling every other Studio popup menu has.
+  const scopeMenu = createFloatingMenu({
+    menuClass: 'koi-scope-menu',
+    itemClass: 'koi-scope-menu-item',
+    ariaLabel: 'Bounded context scope',
+  });
+  /** The menu rows: "All contexts" then one per model context (store order), the ACTIVE scope marked with
+   *  a leading ✓ — a non-colour indicator, so the current scope reads without relying on hue (WCAG AA). */
+  function scopeMenuItems(): FloatingMenuItem[] {
+    const active = activeContextCtrl.handle.get();
+    const scopes: ContextScope[] = [ALL_CONTEXTS, ...appStore.getState().contexts];
+    return scopes.map((scope) => ({
+      id: `scope:${scope}`,
+      label: `${scope === active ? '✓ ' : ''}${scopeLabel(scope)}`,
+      run: () => activeContextCtrl.setActiveContext(scope),
+    }));
+  }
+  /** Toggle the scope menu under the Context segment. The segment lives in the BOTTOM status bar, so the
+   *  menu is anchored to open UPWARD: we hand the engine the segment's TOP-left as the anchor point and the
+   *  `.koi-scope-menu` CSS lifts it by its own height (a downward menu would fall off-screen). */
+  function toggleScopeMenu(): void {
+    const rect = sbContextEl.getBoundingClientRect();
+    scopeMenu.toggle({ items: scopeMenuItems(), trigger: sbContextEl, at: { x: rect.left, y: rect.top } });
+  }
+  sbContextEl.addEventListener('click', toggleScopeMenu);
 
   // --- doc-view cache + assistant domain index -------------------------------
 
@@ -1164,7 +1047,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function nodeContext(node: ModelNode): string {
     const dot = node.qualifiedName.indexOf('.');
     if (dot > 0) return node.qualifiedName.slice(0, dot);
-    const scope = activeContext.get();
+    const scope = activeContextCtrl.handle.get();
     return isAllContexts(scope) ? '' : scope;
   }
   const inspectorHandlers: InspectorHandlers = {
@@ -1315,13 +1198,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     const sel = state.selection;
     // Jump-to-source works across scope, but a selection landing OUTSIDE the active context would
     // otherwise leave the scoped surfaces showing a different context than the inspector. Follow it:
-    // switch the scope to the selected element's context (#146). View-only (persist=false) — a
+    // switch the scope to the selected element's context (#146). View-only — a direct handle.set() never
+    // persists (activeContextController's own choke point is what persists a DELIBERATE pick) — a
     // read-only inspect shouldn't overwrite the user's deliberately chosen, persisted scope. In-scope
-    // selections and the unscoped ("All contexts") view leave the scope untouched. applyScope re-renders
-    // the scoped surfaces, which also refreshes the inspector/cross-highlight for the Model tab — the
-    // explicit calls below cover the cross-highlight when another view is active.
-    if (sel && !isAllContexts(activeContext.get()) && sel.context !== activeContext.get()) {
-      applyScope(sel.context, false);
+    // selections and the unscoped ("All contexts") view leave the scope untouched. The write re-renders
+    // the scoped surfaces (via activeContextController's own store subscription, #531), which also
+    // refreshes the inspector/cross-highlight for the Model tab — the explicit calls below cover the
+    // cross-highlight when another view is active.
+    if (sel && !isAllContexts(activeContextCtrl.handle.get()) && sel.context !== activeContextCtrl.handle.get()) {
+      activeContextCtrl.handle.set(sel.context);
     }
     // The Properties panel subscribes to the store's `selection` slice and re-renders on its own; the
     // explicit repaint keeps the right-rail update synchronous for callers that read it immediately
@@ -1370,11 +1255,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       if (seq !== diagramsSeq) return;
       // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
       // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
-      const files = scopeDocsFiles(res.files, activeContext.get());
+      const files = scopeDocsFiles(res.files, activeContextCtrl.handle.get());
       // Scope persisted node positions to this workspace so a folder restores its own manual layout, and
       // inject the matching layout store: a committable koine.layout.json at the folder root when one is
       // open, else browser storage (web/scratch mode).
-      setDiagramPersistScope(contextWorkspaceKey());
+      setDiagramPersistScope(activeContextCtrl.contextWorkspaceKey());
       setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
       // renderDiagrams itself suspends again internally (a dynamic import, a layout-store load) before it
       // mounts into diagramsView — its own `isCurrent` gate must also see `disposed`, not just the local
@@ -1665,7 +1550,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // keep the switcher's options in step — debounced, and regardless of which view is active.
     clearTimeout(editDebounce);
     editDebounce = setTimeout(() => {
-      void refreshContextList();
+      void activeContextCtrl.refreshContextList();
       refreshActiveSurfaces();
     }, 350);
   }
@@ -1789,8 +1674,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // click, the palette command, or a selection auto-activating Properties all route
   // through the slice, so re-running applyRightCollapsed here is the single reconciliation point. Persist
   // only on an actual collapse transition (not on every view switch that also repaints). Captured +
-  // disposed (like unsubscribeActiveContext / unsubscribeDirtyCount) so a deferred slice change can't
-  // fire applyRightCollapsed into a torn-down host's captured DOM after dispose().
+  // disposed (like unsubscribeDirtyCount, and activeContextCtrl's own subscription) so a deferred slice
+  // change can't fire applyRightCollapsed into a torn-down host's captured DOM after dispose().
   const unsubscribeRightCollapsed = appStore.subscribe((s, prev) => {
     if (s.right !== prev.right || s.rightCollapsed !== prev.rightCollapsed) {
       applyRightCollapsed(s.rightCollapsed);
@@ -1972,7 +1857,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // scope by EMPHASIS, never hiding). Split out so the scope-change fan-out can refresh the emphasis
   // without a re-emit. `null` for the *All contexts* case leaves every group plain.
   function paintOutputRail(): void {
-    const ac = activeContext.get();
+    const ac = activeContextCtrl.handle.get();
     const emphasis = isAllContexts(ac) ? null : ac;
     renderOutputRail(outputScaffold, outputFiles, selectedOutputPath, targetLabel(currentTarget), showOutputFile, emphasis);
   }
@@ -2186,7 +2071,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     store: appStore,
     host: contextMapView,
     lsp,
-    onNavigate: { setActiveContext, gotoSourceSpan: deps.gotoSourceSpan },
+    onNavigate: { setActiveContext: activeContextCtrl.setActiveContext, gotoSourceSpan: deps.gotoSourceSpan },
   });
 
   // Events + Relationships are Preact panels mounted into their hosts; each subscribes to the store's
@@ -2295,9 +2180,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Drop the Syntax Tree caret-sync subscription (#890) too — its callback re-renders the panel, which
     // must not fire into a torn-down host after dispose.
     unsubscribeCursor();
-    // Drop the activeContext subscription (#531) too — its callback re-renders scoped surfaces, which
-    // would throw into a torn-down host if a deferred slice change fired after dispose.
-    unsubscribeActiveContext();
+    // Drop activeContextController's store subscription (#531) too — its callback re-renders scoped
+    // surfaces, which would throw into a torn-down host if a deferred slice change fired after dispose.
+    activeContextCtrl.dispose();
     // Drop the right-strip collapse subscription (#500) — its callback mutates the captured #split /
     // .rstrip-btn nodes and persists, which must not fire into a torn-down host after dispose.
     unsubscribeRightCollapsed();
@@ -2342,7 +2227,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   return {
     selection,
-    activeContext,
+    activeContext: activeContextCtrl.handle,
     selectCenter,
     showSettings,
     setAxis,
@@ -2363,9 +2248,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     refreshSourceControl,
     onThemeChanged,
     refreshActiveSurfaces,
-    refreshContextList,
-    restoreActiveContext,
-    followActiveFileContext,
+    refreshContextList: activeContextCtrl.refreshContextList,
+    restoreActiveContext: activeContextCtrl.restoreActiveContext,
+    followActiveFileContext: activeContextCtrl.followActiveFileContext,
     ensureModelIndex,
     getCachedDomainIndex,
     init,
