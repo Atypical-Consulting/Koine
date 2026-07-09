@@ -91,7 +91,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // growth is the comments recording WHY the lifecycleBoot closures beneath them must stay unwrapped
   // (the FIFO queue has no re-entrancy detection, so self-locking deadlocks the boot). ~18 LOC net,
   // measured end-state — the lock has to live here, above every consumer, so this cannot be extracted.
-  { file: 'src/shell/ide.tsx', maxLines: 1488 },
+  // Raised 1488 → 1489: #1274 wraps the fifth bypass #1088 missed — `saveProjectToDisk`'s own
+  // reopen-from-disk — in the same shared `workspaceOpLock.run(...)`, +1 LOC (the wrap plus its
+  // one-line justification comment). Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1489 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.

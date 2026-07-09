@@ -75,10 +75,11 @@ vi.mock('@/shell/workspaceController', async () => {
   };
 });
 
-// Same trick for the command surface: the palette's "Open folder…" entry and its mod+Shift+O chord both
-// dispatch through the `openFolder` thunk init() passes here. Driving the real chord would fan out to
-// every prior boot's window keydown listener (happy-dom shares `window`), so capture the thunk instead.
-const cmdWiringSeam = vi.hoisted(() => ({ deps: null as { openFolder(): void } | null }));
+// Same trick for the command surface: the palette's "Open folder…" entry and its mod+Shift+O chord, and
+// the Save-to-disk command, both dispatch through thunks init() passes here. Driving the real chord
+// would fan out to every prior boot's window keydown listener (happy-dom shares `window`), so capture
+// the thunks instead.
+const cmdWiringSeam = vi.hoisted(() => ({ deps: null as { openFolder(): void; saveProjectToDisk(): void } | null }));
 vi.mock('@/shell/commandWiring', async () => {
   const actual = await vi.importActual<typeof import('@/shell/commandWiring')>('@/shell/commandWiring');
   return {
@@ -817,6 +818,35 @@ describe('ide init() — the workspace-open lock covers the toolbar entry points
     release();
     await settleBoot();
     expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
+  });
+
+  // The fifth wrapped entry point (#1274): Save-to-disk's own reopen-from-disk
+  // (platform.saveProjectToRoot → workspace.openFolderPath) is the same class of workspace-replacing
+  // operation as the other four — #1088 missed it because its `files.length === 0` guard makes it
+  // unreachable during the connect window #1088 was scoped to, but not once buffers exist post-boot.
+  test('the Save-to-disk thunk defers to an in-flight shared import instead of racing it', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+
+    await boot({ platform });
+
+    // The exact thunk init() handed createCommandWiring, which the palette / launcher command dispatches to.
+    cmdWiringSeam.deps!.saveProjectToDisk();
+    await settleBoot();
+    expect(platform.saveProjectToRoot).not.toHaveBeenCalled();
+
+    release();
+    await settleBoot();
+    // The queued save now runs against the just-imported workspace (non-empty, so the files.length === 0
+    // guard doesn't swallow it) — confirm the name prompt to reach the actual reopen-from-disk call.
+    const input = document.querySelector('.koi-prompt-input') as HTMLInputElement;
+    input.value = 'my-project';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    (document.querySelector('.koi-confirm-btn-primary') as HTMLButtonElement).click();
+    await settleBoot();
+
+    expect(platform.saveProjectToRoot).toHaveBeenCalledOnce();
   });
 
   // The other half of the invariant. The closures handed to createLifecycleBoot must stay UNWRAPPED:
