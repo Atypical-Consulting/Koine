@@ -127,6 +127,8 @@
   --koi-hl-sem-enum-member: #fc9867;
   --koi-hl-sem-property: #83e8c4;
   --koi-hl-sem-parameter: #ff9d8a;
+  /* launcher fuzzy-match highlight (issue #1161) — authoritative def in koine-ui/src/tokens.css */
+  --koi-hl-match: #5aa9ff;
 
   /* ---- DDD concept palette (Explorer icons + diagram nodes) ---- */
   --koi-ddd-aggregate: #8b87f5;         /* indigo — the boundary owner */
@@ -179,4 +181,6 @@ html[data-theme='light'] {
   --koi-hl-sem-enum-member: #a64d00;
   --koi-hl-sem-property: #0f7a5f;
   --koi-hl-sem-parameter: #a83232;
+  /* launcher fuzzy-match highlight (issue #1161) — authoritative def in koine-ui/src/tokens.css */
+  --koi-hl-match: #175ab0;
 }

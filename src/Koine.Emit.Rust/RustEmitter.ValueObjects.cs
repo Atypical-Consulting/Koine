@@ -56,40 +56,48 @@ public sealed partial class RustEmitter
 
         sb.Append("}\n");
 
-        // Demand-driven / quantity operators.
+        // Demand-driven / quantity operators. This value object's full operator demand, resolved once
+        // from the analyzer's single-pass model (#1126): scalar multiply/divide factors, the `sum`-fold
+        // `IsSummable` flag, the plain binary `+`/`-` ops, and the precomputed `NeedsAdd` union. `null` =
+        // this VO needs no generated arithmetic (absent from the unified map, exactly as it was absent
+        // from all four separate maps before). Read null-safely below, mirroring CSharpEmitter/PhpEmitter.
+        var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+
         if (vo.IsQuantity)
         {
             WriteQuantityOps(sb, name, stored);
         }
-        else
-        {
-            // This value object's full operator demand, resolved once from the analyzer's single-pass
-            // model (#1126): scalar multiply/divide factors, the `sum`-fold `IsSummable` flag, the plain
-            // binary `+`/`-` ops, and the precomputed `NeedsAdd` union. `null` = this VO needs no
-            // generated arithmetic (absent from the unified map, exactly as it was absent from all four
-            // separate maps before). Read null-safely below, mirroring CSharpEmitter/PhpEmitter.
-            var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
 
-            IReadOnlySet<string>? scalars = needs?.MultiplyFactors;
-            if (scalars is { Count: > 0 }
-                && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
-            {
-                WriteScalarOp(sb, name, stored, scalars, "*");
-            }
-            // `Div` is the division dual of `Mul` (#879, follow-up to the C# emitter's #832):
-            // demand-generated only where the model actually divides this value object by a scalar
-            // (fee / 2), never emitted unconditionally.
-            IReadOnlySet<string>? divScalars = needs?.DivideFactors;
-            if (divScalars is { Count: > 0 }
-                && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
-            {
-                WriteScalarOp(sb, name, stored, divScalars, "/");
-            }
+        // A quantity's scalar Mul/Div (`base * 2`, `fee / 2`) has no unit to check — unlike its Add/Sub,
+        // which route through the unit-checked inherent methods `WriteQuantityOps` emits above — so a
+        // quantity shares the exact same demand-driven `impl std::ops::Mul`/`Div` a plain VO gets below
+        // (#1084, sibling of #1068's Add/Sub fix). Before #1084, `RustExpressionTranslator.WriteBinary`
+        // still lowered a quantity's `* scalar`/`/ scalar` to the native operator with no backing impl —
+        // a real `cargo check` E0369.
+        IReadOnlySet<string>? scalars = needs?.MultiplyFactors;
+        if (scalars is { Count: > 0 }
+            && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
+        {
+            WriteScalarOp(sb, name, stored, scalars, "*");
+        }
+        // `Div` is the division dual of `Mul` (#879, follow-up to the C# emitter's #832):
+        // demand-generated only where the model actually divides this value object by a scalar
+        // (fee / 2), never emitted unconditionally.
+        IReadOnlySet<string>? divScalars = needs?.DivideFactors;
+        if (divScalars is { Count: > 0 }
+            && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
+        {
+            WriteScalarOp(sb, name, stored, divScalars, "/");
+        }
+
+        if (!vo.IsQuantity)
+        {
             // `Add` is demand-generated when the VO is folded with `sum` OR appears in a plain
             // `base + base` (#887) — the analyzer precombines both into `NeedsAdd`; `Sub` is
             // demand-generated for a plain `base - base` (#887 — never generated for plain VOs before).
             // The call-site lowering in RustExpressionTranslator already emits the native `+`/`-`, i.e.
-            // `std::ops::Add`/`std::ops::Sub`; this writes the impls.
+            // `std::ops::Add`/`std::ops::Sub`; this writes the impls. A quantity never reaches here — its
+            // Add/Sub are the unit-checked inherent methods `WriteQuantityOps` already emitted above.
             bool needsAdd = needs?.NeedsAdd ?? false;
             bool needsSub = needs?.BinaryOps.Contains(BinaryOp.Sub) ?? false;
             if (needsAdd)
