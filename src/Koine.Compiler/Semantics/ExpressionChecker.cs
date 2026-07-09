@@ -96,6 +96,7 @@ internal sealed class ExpressionChecker
                 CheckComparison(b, scope, expected);
                 CheckArithmeticNullSafety(b, scope);
                 CheckValueObjectScalarArithmetic(b, scope);
+                CheckQuantityTypeMismatch(b, scope);
                 break;
 
             case CoalesceExpr co:
@@ -316,6 +317,39 @@ internal sealed class ExpressionChecker
         var names = v.Members.Select(m => m.Name).ToList();
         return v.Members.Any(m => !MemberAnalysis.IsDerived(m, names) && TypeResolver.IsNumeric(m.Type));
     }
+
+    /// <summary>
+    /// #1266: a <c>quantity</c> value object's <c>+</c>/<c>-</c> lowers to its unit-checked
+    /// <c>add</c>/<c>sub</c> method (#1068), which only ever accepts another instance of its OWN
+    /// declared type. Nothing previously checked that both operands of a binary <c>+</c>/<c>-</c> are
+    /// the SAME quantity type, so e.g. <c>Weight + Volume</c> compiled with zero diagnostics and only
+    /// failed downstream in a target's own toolchain (a real Rust cargo check E0308). Reject it here,
+    /// target-agnostically, before any emitter ever sees the expression.
+    /// </summary>
+    private void CheckQuantityTypeMismatch(BinaryExpr b, TypeScope scope)
+    {
+        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub))
+        {
+            return;
+        }
+
+        TypeRef? left = _resolver.Infer(b.Left, scope);
+        TypeRef? right = _resolver.Infer(b.Right, scope);
+        if (left is null || right is null || left.Name == right.Name)
+        {
+            return;
+        }
+
+        if (IsQuantity(left) && IsQuantity(right))
+        {
+            var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+            Report(DiagnosticCodes.QuantityTypeMismatch,
+                $"cannot {verb} quantities '{left.Name}' and '{right.Name}'; quantities must be the same type", b);
+        }
+    }
+
+    private bool IsQuantity(TypeRef t) =>
+        _index.TryGetDecl(t.Name, out TypeDecl decl) && decl is ValueObjectDecl { IsQuantity: true };
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
     {

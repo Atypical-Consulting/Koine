@@ -276,6 +276,89 @@ public class R9ValueObjectTests
     }
 
     // ======================================================================
+    // #1266: a binary +/- across two DIFFERENT quantity types must be
+    // rejected at semantic-validation time, not left to crash a downstream
+    // emitter target (e.g. Rust cargo check E0308) with zero diagnostics.
+    // ======================================================================
+
+    [Fact]
+    public void Quantity_addition_across_different_quantity_types_is_rejected()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  enum VolumeUnit { Liters }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  quantity Volume {\n" +
+            "    amount: Decimal\n" +
+            "    unit: VolumeUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    w: Weight\n" +
+            "    v: Volume\n" +
+            "    bad: Weight = w + v\n" +
+            "  }\n" +
+            "}\n";
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeFalse();
+
+        var diag = result.Diagnostics.Single(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
+        diag.Message.ShouldContain("Weight");
+        diag.Message.ShouldContain("Volume");
+        diag.Line.ShouldBe(15); // the `bad: Weight = w + v` line
+    }
+
+    [Fact]
+    public void Quantity_subtraction_across_different_quantity_types_is_rejected()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  enum VolumeUnit { Liters }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  quantity Volume {\n" +
+            "    amount: Decimal\n" +
+            "    unit: VolumeUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    w: Weight\n" +
+            "    v: Volume\n" +
+            "    bad: Weight = w - v\n" +
+            "  }\n" +
+            "}\n";
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
+    }
+
+    [Fact]
+    public void Quantity_addition_of_the_same_type_is_not_flagged_by_the_type_mismatch_check()
+    {
+        // #1068's legitimate same-type case must remain untouched by the new check.
+        const string src = """
+            context C {
+              enum MassUnit { Gram, Kilogram }
+              quantity Weight {
+                amount: Decimal
+                unit:   MassUnit
+              }
+              value Box {
+                base: Weight
+                combined: Weight = base + base
+                diff:     Weight = base - base
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
+    }
+
+    // ======================================================================
     // Regressions found by the R9 review
     // ======================================================================
 
