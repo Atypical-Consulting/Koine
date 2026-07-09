@@ -6,7 +6,7 @@ import type { Command } from '@atypical/koine-ui';
 import type { ModelIndex } from '@/model/modelIndex';
 import type { GlossaryEntry } from '@/lsp/lsp';
 import type { GitLogEntry } from '@/host/types';
-import { buildCatalog, type LauncherSources } from '@/launcher/buildCatalog';
+import { buildCatalog, normalizeKind, type LauncherSources } from '@/launcher/buildCatalog';
 
 // Hand-built fixtures standing in for the real model index / git store / command registry — the
 // whole point of `LauncherSources` is that buildCatalog never has to know these are fakes.
@@ -91,6 +91,22 @@ const sourcesNoGit: LauncherSources = {
   gitLog: () => null,
   canUseGit: false,
 };
+
+// Characterization safety net (issue #1162): pins normalizeKind's CURRENT behaviour — including its
+// passthrough fallback — before it's extracted into the shared `@/model/dddKind` normalizer, so the
+// refactor can't silently change what an unrouted kind resolves to.
+describe('normalizeKind — characterization (pins current behaviour before the #1162 dedup refactor)', () => {
+  test.each([
+    ['aggregate', 'aggregate'],
+    ['value', 'value'],
+    ['quantity', 'value'],
+    ['integration event', 'integration-event'],
+    ['service', 'service'],
+    ['weird', 'weird'],
+  ])('normalizeKind(%s) === %s', (input, expected) => {
+    expect(normalizeKind(input)).toBe(expected);
+  });
+});
 
 describe('buildCatalog — symbols', () => {
   test('maps aggregate/value/enum glossary entries to symbol entries carrying the DDD chip kind + qualifiedName', async () => {

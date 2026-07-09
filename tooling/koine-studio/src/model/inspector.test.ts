@@ -39,6 +39,22 @@ const fullElement: InspectorElement = {
 
 const noop: InspectorHandlers = { onGoto: () => {} };
 
+// Characterization safety net (issue #1162): pins constructKey's CURRENT behaviour — including its
+// palette-or-'type' fallback — via the rendered root's dataset.kind, before it's rewritten to delegate
+// to the shared `@/model/dddKind` normalizer.
+describe('renderInspector dataset.kind (constructKey) — characterization (pins current behaviour before the #1162 dedup refactor)', () => {
+  test.each([
+    ['aggregate', 'aggregate'],
+    ['quantity', 'value'],
+    ['integration event', 'integration-event'],
+    ['service', 'type'],
+    ['unknown-kind', 'type'],
+  ])('renderInspector(kind: %s).dataset.kind === %s', (kind, expected) => {
+    const el = renderInspector({ ...fullElement, kind }, noop);
+    expect(el.dataset.kind).toBe(expected);
+  });
+});
+
 describe('renderInspector', () => {
   test('renders an empty state when nothing is selected', () => {
     const el = renderInspector(null, noop);
