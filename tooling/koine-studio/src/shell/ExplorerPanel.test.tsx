@@ -522,9 +522,10 @@ describe('ExplorerPanel', () => {
     });
 
     // F2/Delete/ContextMenu are panel-specific keys the shared router doesn't own; the explorer opts them
-    // out of default browser handling (matching explorer.ts) even though their actual actions (rename /
-    // delete-confirm / context menu) aren't wired up until #989 tasks 5/4.
-    it('recognizes F2 / Delete / ContextMenu as consumed panel-specific keys (stubbed pending #989 tasks 4/5)', () => {
+    // out of default browser handling (matching explorer.ts) regardless of whether an action is wired up.
+    // Delete/ContextMenu ARE fully wired as of #989 task 4 (see the "context menus + delete confirm"
+    // describe block below for their actual behavior); F2 stays a stub pending #989 task 5.
+    it('recognizes F2 / Delete / ContextMenu as consumed panel-specific keys', () => {
       const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
       act(() => file.focus());
@@ -534,6 +535,190 @@ describe('ExplorerPanel', () => {
         act(() => { file.dispatchEvent(ev); });
         expect(ev.defaultPrevented).toBe(true);
       }
+    });
+  });
+
+  // --- context menus + delete confirm (#989 task 4): right-click a row, the ContextMenu key, or a
+  // right-click on the tree's empty background all open a `createFloatingMenu` (the SAME imperative
+  // `@atypical/koine-ui` overlay explorer.ts uses, not a JSX reimplementation — see ExplorerPanel.tsx's
+  // file-header note). Delete (menu item OR the Delete key) runs a `createModal`-based in-pane confirm.
+  // These tests are apples-to-apples with explorer.test.ts's own parity assertions (same
+  // `.explorer-menu[role="menu"]` / `.explorer-menu-item` / `.explorer-confirm-btn(-danger)` /
+  // `.koi-modal-backdrop` queries) — see explorer.test.ts around lines 223-310, 354-369, 405-415.
+  // New File/New Folder/Rename don't have an inline-edit UI yet (#989 task 5), so these only assert the
+  // ROUTING target via `data-pending-edit` (see ExplorerPanel.tsx's `pendingEdit` doc comment) rather than
+  // any rendered input.
+  describe('context menus + delete confirm', () => {
+    // `container` is typed `Element` by @testing-library/preact's RenderResult (not `HTMLElement`), so
+    // these helpers accept that wider type — matching how the file's other tests call
+    // `container.querySelectorAll<HTMLElement>(...)` directly rather than narrowing `container` itself.
+    function fileRow(container: Element, name: string): HTMLElement {
+      return Array.from(container.querySelectorAll<HTMLElement>('li[data-kind="file"] > .explorer-row')).find(
+        (r) => r.querySelector('.explorer-name')?.textContent === name,
+      )!;
+    }
+    function dirRow(container: Element): HTMLElement {
+      return container.querySelector<HTMLElement>('li[data-kind="dir"] > .explorer-row')!;
+    }
+    function pendingEditOf(container: Element): string | null {
+      return container.querySelector('.explorer')!.getAttribute('data-pending-edit');
+    }
+    // Clicking a menu item may call `setPendingEdit` (New File/New Folder/Rename), so route every click
+    // through `act()` to flush that re-render before the caller reads `data-pending-edit`.
+    function clickMenuItem(label: string): void {
+      const item = Array.from(document.querySelectorAll<HTMLElement>('.explorer-menu-item')).find(
+        (b) => b.textContent === label,
+      )!;
+      act(() => item.click());
+    }
+    // The confirm dialog is the shared createModal chrome: a .koi-modal-backdrop that is hidden when
+    // closed. It's shown iff the backdrop is present and not hidden (mirrors explorer.test.ts's helper).
+    function confirmShown(): boolean {
+      const bd = document.querySelector<HTMLElement>('.koi-modal-backdrop');
+      return !!bd && !bd.hidden;
+    }
+    // confirmDelete is `async` (mirroring explorer.ts's own await-based confirmDelete/openConfirm), so
+    // cb.onDelete fires on a microtask after the OK button's click handler resolves the promise, not
+    // synchronously within the click itself — let a pending microtask settle before asserting on it.
+    function flush(): Promise<void> {
+      return new Promise((r) => setTimeout(r, 0));
+    }
+
+    it('shows the row action menu with the expected labels on right-click', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      dirRow(container).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+
+      const menu = document.querySelector('.explorer-menu[role="menu"]');
+      expect(menu).not.toBeNull();
+      const labels = Array.from(menu!.querySelectorAll('.explorer-menu-item')).map((b) => b.textContent);
+      expect(labels).toEqual(['New File', 'New Folder', 'Rename', 'Duplicate', 'Delete']);
+    });
+
+    it('New File from a nested file row targets its containing directory (menu)', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      fileRow(container, 'order.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('New File');
+      expect(pendingEditOf(container)).toBe('new-file:ROOT/orders');
+    });
+
+    it('New File from a top-level file row falls back to the root token (menu)', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('New File');
+      expect(pendingEditOf(container)).toBe('new-file:ROOT');
+    });
+
+    it('New Folder from a directory row targets that directory (menu)', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      dirRow(container).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('New Folder');
+      expect(pendingEditOf(container)).toBe('new-folder:ROOT/orders');
+    });
+
+    it("Rename identifies the right-clicked entry's own token (menu)", () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('Rename');
+      expect(pendingEditOf(container)).toBe('rename:ROOT/shared.koi');
+    });
+
+    it('Duplicate invokes cb.onDuplicate with the right-clicked entry (menu)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('Duplicate');
+      expect(cb.onDuplicate).toHaveBeenCalledTimes(1);
+      expect((cb.onDuplicate as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+    });
+
+    it('Delete (menu) opens the confirm dialog before deleting, then deletes on confirm', async () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('Delete');
+
+      expect(confirmShown()).toBe(true);
+      expect(cb.onDelete).not.toHaveBeenCalled(); // not until confirmed
+
+      act(() => {
+        document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
+      });
+      await flush();
+      expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+      expect(confirmShown()).toBe(false); // dialog dismissed
+    });
+
+    it('Delete key opens the confirm dialog before deleting, then deletes on confirm', async () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => {
+        file.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+      });
+
+      expect(confirmShown()).toBe(true);
+      expect(cb.onDelete).not.toHaveBeenCalled();
+
+      act(() => {
+        document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
+      });
+      await flush();
+      expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+      expect(confirmShown()).toBe(false);
+    });
+
+    it('cancels the delete confirm without deleting (Cancel button)', async () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('Delete');
+
+      const cancelBtn = Array.from(document.querySelectorAll<HTMLElement>('.explorer-confirm-btn')).find(
+        (b) => b.textContent === 'Cancel',
+      )!;
+      act(() => cancelBtn.click());
+      await flush();
+      expect(cb.onDelete).not.toHaveBeenCalled();
+      expect(confirmShown()).toBe(false);
+    });
+
+    it('cancels the delete confirm without deleting (Escape)', async () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
+      clickMenuItem('Delete');
+      expect(confirmShown()).toBe(true);
+
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      });
+      await flush();
+      expect(cb.onDelete).not.toHaveBeenCalled();
+      expect(confirmShown()).toBe(false);
+    });
+
+    it('right-clicking empty tree space opens the root menu (New File / New Folder only) targeting the primary root', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
+      tree.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 1, clientY: 1 }));
+
+      const labels = Array.from(document.querySelectorAll('.explorer-menu-item')).map((b) => b.textContent);
+      expect(labels).toEqual(['New File', 'New Folder']);
+
+      clickMenuItem('New File');
+      expect(pendingEditOf(container)).toBe('new-file:ROOT');
+    });
+
+    it('root menu targets the FIRST group root in a multi-root workspace', () => {
+      const { container } = render(
+        <ExplorerPanel cb={makeCallbacks()} groups={[group('/home/me/sales'), secondGroup()]} />,
+      );
+      const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
+      tree.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 1, clientY: 1 }));
+
+      clickMenuItem('New File');
+      expect(pendingEditOf(container)).toBe('new-file:/home/me/sales');
     });
   });
 });

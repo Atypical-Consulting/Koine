@@ -9,9 +9,14 @@ import type { FsEntry } from '@/host';
 // tasks; a directory click (this component's only click affordance today) simply toggles expansion via
 // `onToggle`, and a file click opens it via `onOpen`. As of task 3, `tabIndex` is a pure function of the
 // `focused` prop (`ExplorerPanel`'s roving-tabindex state) rather than a fixed -1 — see `focused` below.
-// The actual keydown ROUTING (ArrowUp/Down/Left/Right, Enter, F2/Delete/ContextMenu stubs) lives entirely
-// in `ExplorerPanel`'s single delegated `onKeyDown` on `ul[role="tree"]`, not here — this component owns
-// no keyboard handling of its own.
+// The actual keydown ROUTING (ArrowUp/Down/Left/Right, Enter, F2/Delete/ContextMenu) lives entirely in
+// `ExplorerPanel`'s single delegated `onKeyDown` on `ul[role="tree"]`, not here — this component owns no
+// keyboard handling of its own. As of task 4, right-click DOES get a per-row listener here (`onContextMenu`,
+// wired straight to `.explorer-row`) rather than a delegated one: unlike a nested `<li role="treeitem">`,
+// `.explorer-row` elements are never nested inside one another (a directory's children live in a sibling
+// `.explorer-children` list, not inside its own `.explorer-row`), so there is no ancestor-bubbling
+// double-fire risk to design around here — `ExplorerPanel` still owns a SEPARATE delegated `contextmenu`
+// listener on the tree itself, purely to catch a right-click on empty background (see its `onTreeContextMenu`).
 //
 // RECURSIVE NESTING (the task-2a fix): a directory's rendered children are passed in as `children` —
 // already-built `<ExplorerItem>` elements for its immediate entries, recursively built the same way one
@@ -51,6 +56,12 @@ export interface ExplorerItemProps {
   /** Files only — open the buffer. */
   onOpen: () => void;
   /**
+   * Right-click anywhere in this row (name, icon, twisty) — opens the SAME row action menu the
+   * `ContextMenu` key opens (#989 task 4). `ExplorerPanel` owns the actual menu; this only forwards the
+   * native event so it can call `preventDefault()` and read the click coordinates.
+   */
+  onContextMenu: (ev: JSX.TargetedMouseEvent<HTMLDivElement>) => void;
+  /**
    * Directories only — this directory's already-rendered child rows (recursive `ExplorerItem`s), or
    * `undefined` when collapsed / not a directory. When provided (even an empty array, for an expanded-but-
    * empty directory), wrapped in a nested `<ul class="explorer-children" role="group">`.
@@ -65,8 +76,23 @@ export interface ExplorerItemProps {
 }
 
 export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
-  const { token, kind, name, level, expanded, active, dirty, errors, warnings, filterText, onToggle, onOpen, children, focused } =
-    props;
+  const {
+    token,
+    kind,
+    name,
+    level,
+    expanded,
+    active,
+    dirty,
+    errors,
+    warnings,
+    filterText,
+    onToggle,
+    onOpen,
+    onContextMenu,
+    children,
+    focused,
+  } = props;
   const isDir = kind === 'dir';
   const isActiveFile = !isDir && active;
   const hasBadge = !isDir && (errors > 0 || warnings > 0);
@@ -86,6 +112,7 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
         aria-current={isActiveFile ? 'true' : undefined}
         style={{ '--depth': String(level - 1) }}
         onClick={isDir ? onToggle : onOpen}
+        onContextMenu={onContextMenu}
       >
         <span
           class="explorer-twisty"

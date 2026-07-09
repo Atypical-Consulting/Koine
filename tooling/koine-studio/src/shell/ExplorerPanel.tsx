@@ -2,9 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
-import { analyze, flattenVisible, parentMapOf } from '@/shell/explorerModel';
+import { analyze, flattenVisible, indexEntries, parentDirOf, parentMapOf } from '@/shell/explorerModel';
 import { ExplorerItem } from '@/shell/ExplorerItem';
 import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
+import {
+  createFloatingMenu,
+  createModal,
+  type FloatingMenu,
+  type FloatingMenuItem,
+  type ModalHandle,
+} from '@atypical/koine-ui';
 
 // The workspace explorer as a keyed Preact component tree (#989 task 2, corrected in the task-2a
 // follow-up). This is the Preact counterpart of `createExplorer()` in explorer.ts, which stays untouched
@@ -40,11 +47,22 @@ import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 //
 // NOT in this task: drag-and-drop move, inline create/rename inputs, the "…" per-row context-menu
 // trigger, and the ADR-0009 active-context is-scoped/dim emphasis (explorerModel.ts's public `analyze()`
-// doesn't carry that scope match — only the private analyze() inside explorer.ts does). F2/Delete/
-// ContextMenu are recognized (and `preventDefault`ed) by `onTreeKeyDown` but their actual actions are
-// stubs — see the TODOs there — pending #989 tasks 5/4 respectively. Those land in later #989 tasks.
-// `filterText` and the collapsed-directories set are component-LOCAL `useState` here; task 7 lifts them
-// into the app store.
+// doesn't carry that scope match — only the private analyze() inside explorer.ts does). `filterText` and
+// the collapsed-directories set are component-LOCAL `useState` here; task 7 lifts them into the app store.
+//
+// CONTEXT MENUS + DELETE CONFIRM (#989 task 4): right-click a row, the `ContextMenu` key on a focused
+// row, or right-click the tree's empty background all open a `createFloatingMenu` (row: New File/New
+// Folder/Rename/Duplicate/Delete; background: New File/New Folder only) — see `openRowMenu`/
+// `openRootMenu` below. Delete (menu item OR the `Delete` key) runs `confirmDelete`, a `createModal`-based
+// in-pane confirm. BOTH overlays are the SAME imperative `@atypical/koine-ui` primitives explorer.ts uses
+// (`createFloatingMenu`/`createModal`), NOT reimplemented as JSX — they mount on `document.body`, built
+// once per `ExplorerPanel` instance in the mount effect below and torn down on unmount, so a re-render can
+// never touch (or need to defer for) them; there is no `interactionOpen()`/`pendingRender`/
+// `flushPendingRender()` machinery here, unlike explorer.ts. New File/New Folder/Rename don't have an
+// inline-edit UI yet (that's #989 task 5) — their menu items call `beginCreate`/`startRename`, which for
+// now only record the routing target into `pendingEdit` (a deliberately minimal placeholder — see its
+// doc comment) rather than opening any input.
+// F2 is still recognized-but-stubbed pending #989 task 5.
 export interface ExplorerPanelProps {
   cb: ExplorerCallbacks;
   groups: ExplorerRootGroup[];
@@ -52,6 +70,74 @@ export interface ExplorerPanelProps {
   initialFilterText?: string;
   /** Seed the collapsed-directories set (tests/stories only). */
   initialCollapsed?: readonly string[];
+}
+
+// See `pendingEdit`'s doc comment (inside ExplorerPanel) for why this exists and how temporary it is.
+interface PendingEdit {
+  kind: 'new-file' | 'new-folder' | 'rename';
+  /** The New File/Folder parent dir token, or the renamed entry's own token. */
+  target: string;
+}
+
+// The delete-confirm dialog's imperative handle — one `createModal()` instance reused across every
+// delete (its title/message/OK-label are rewritten per call), mirroring explorer.ts's
+// ensureConfirmModal()/confirmModal/confirmTitleEl/confirmMsgEl/confirmOkBtn/confirmResolve exactly,
+// just bundled into one object instead of five module-scoped `let`s (there's one of these per
+// `ExplorerPanel` instance, not one for the whole module). `.explorer-confirm-btn` /
+// `.explorer-confirm-btn-danger` are preserved verbatim — explorer.test.ts's parity assertions and this
+// panel's own tests both query them.
+interface ConfirmHandle {
+  modal: ModalHandle;
+  titleEl: HTMLElement | null;
+  msgEl: HTMLParagraphElement;
+  okBtn: HTMLButtonElement;
+  /** The in-flight `openConfirm()` caller's resolver, or `null` when no confirm is pending. */
+  resolve: ((ok: boolean) => void) | null;
+}
+
+// Build the confirm-dialog chrome once atop the shared `createModal()` engine — same engine, same
+// `.explorer-confirm-btn`/`.explorer-confirm-btn-danger` classes, same Cancel/OK wiring and dismissal
+// semantics (Esc / backdrop / ✕ all resolve `false` via `onClose`) as explorer.ts's
+// ensureConfirmModal()/settleConfirm()/resolveConfirm(). No `flushPendingRender()` call anywhere here —
+// that machinery doesn't exist in this component (see the file-header note on why).
+function buildConfirmHandle(): ConfirmHandle {
+  const modal = createModal({ title: 'Confirm', ariaLabel: 'Confirm' });
+  const titleEl = modal.backdrop.querySelector<HTMLElement>('.koi-modal-title');
+  const msgEl = document.createElement('p');
+  msgEl.className = 'explorer-confirm-msg';
+  modal.body.appendChild(msgEl);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'explorer-confirm-btn';
+  cancelBtn.textContent = 'Cancel';
+  const okBtn = document.createElement('button');
+  okBtn.type = 'button';
+  okBtn.className = 'explorer-confirm-btn explorer-confirm-btn-danger';
+  modal.footer.append(cancelBtn, okBtn);
+
+  const handle: ConfirmHandle = { modal, titleEl, msgEl, okBtn, resolve: null };
+  const settle = (ok: boolean): void => {
+    const resolve = handle.resolve;
+    handle.resolve = null;
+    resolve?.(ok);
+  };
+  cancelBtn.addEventListener('click', () => {
+    settle(false);
+    modal.close();
+  });
+  okBtn.addEventListener('click', () => {
+    settle(true);
+    modal.close();
+  });
+  // Esc / backdrop / ✕ all route through createModal's own dismissal paths → its onClose hook: resolve
+  // false (a no-op if Cancel/OK already settled the promise, since `handle.resolve` is already null).
+  modal.onClose(() => settle(false));
+  // The danger action gets default focus on open (createModal itself focuses the ✕ close button), so a
+  // reflexive Enter still lands on OK — matching explorer.ts's own confirmOkBtn?.focus() right after
+  // modal.open(). Registered once here (rather than at every call site) so it always applies.
+  modal.onOpen(() => okBtn.focus());
+  return handle;
 }
 
 export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
@@ -64,12 +150,52 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const [focusedToken, setFocusedToken] = useState<string | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
 
+  // PLACEHOLDER routing target for New File/New Folder/Rename menu actions (#989 task 4). Task 5 owns the
+  // real inline-edit design (an actual `<input>` + commit/cancel) and will replace or extend this — this
+  // only exists so `beginCreate`/`startRename` have somewhere obvious to record WHAT they were asked to
+  // act on (the New File/Folder parent dir token, or the renamed entry's own token), so ExplorerPanel's
+  // own tests can assert a menu item routed to the right target without asserting any input renders (none
+  // does yet). Exposed on the root `.explorer` element via `data-pending-edit` (`"<kind>:<target>"`)
+  // purely for that test observability.
+  const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null);
+
   // Debounce the filter — 110ms, mirroring explorer.ts's `setTimeout(applyFilter, 110)` — so each
   // keystroke doesn't re-derive visibility/highlighting for the whole tree.
   useEffect(() => {
     const id = setTimeout(() => setFilterText(filterInput.trim().toLowerCase()), 110);
     return () => clearTimeout(id);
   }, [filterInput]);
+
+  // The row/root context menu and the delete-confirm dialog (#989 task 4) — the SAME imperative
+  // `createFloatingMenu`/`createModal` overlay primitives explorer.ts uses, not a JSX reimplementation.
+  // Both mount on `document.body`, OUTSIDE this component's own tree, so a Preact re-render can never
+  // touch (or need to defer for) them — hence no `interactionOpen()`/`pendingRender`/
+  // `flushPendingRender()` plumbing here, unlike explorer.ts. Built once per `ExplorerPanel` instance in
+  // this mount effect and torn down on unmount: the floating menu's own `close(false)` already removes
+  // its DOM node, but `createModal`'s backdrop has no such teardown of its own (it only hides on close),
+  // so the cleanup below removes it explicitly — otherwise a remounted panel (e.g. across tests, or a
+  // Storybook control change) would leave a stale, empty `.koi-modal-backdrop` sitting in `document.body`
+  // forever, and a later `document.querySelector('.explorer-confirm-btn-danger')` could resolve to the
+  // WRONG (stale) instance's button instead of the live one.
+  const ctxMenuRef = useRef<FloatingMenu | null>(null);
+  const confirmRef = useRef<ConfirmHandle | null>(null);
+  useEffect(() => {
+    ctxMenuRef.current = createFloatingMenu({
+      menuClass: 'explorer-menu',
+      itemClass: 'explorer-menu-item',
+      markTriggerExpanded: false,
+      guardTriggerSubtree: false,
+      refocusTriggerOnActivate: true,
+    });
+    confirmRef.current = buildConfirmHandle();
+    return () => {
+      ctxMenuRef.current?.close(false);
+      ctxMenuRef.current = null;
+      confirmRef.current?.modal.close();
+      confirmRef.current?.modal.backdrop.remove();
+      confirmRef.current = null;
+    };
+  }, []);
 
   // matchCount (the filter-count chip) — the visibility SET itself comes from the per-group
   // flattenVisible() calls below, not from this pass, so this analyze() call exists for matchCount +
@@ -145,6 +271,84 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     findRowEl(token)?.focus();
   };
 
+  // --- context menus + delete confirm (#989 task 4) ----------------------------------------------------
+  // token → FsEntry + token → parentDir, for the keyboard-triggered (Delete key / ContextMenu key) paths
+  // below — a right-click's own `renderEntry` closure already has both for free (see `parentDirOf` usage
+  // there), but the roving-tabindex row order (`navTokens`/`rowByToken`) only carries a bare token.
+  const entryIndex = useMemo(() => indexEntries(groups), [groups]);
+  // The PRIMARY root token (the first group's): the root-menu New File/New Folder target, mirroring
+  // explorer.ts's `rootToken` (always `groups[0]?.root` there too).
+  const primaryRoot = groups[0]?.root ?? '';
+
+  // New File/New Folder/Rename menu actions (#989 task 4): no inline-edit UI exists yet (#989 task 5), so
+  // these only record the routing target `pendingEdit` carries — see its doc comment above.
+  const beginCreate = (parentDirToken: string, kind: 'file' | 'dir'): void => {
+    setPendingEdit({ kind: kind === 'dir' ? 'new-folder' : 'new-file', target: parentDirToken });
+  };
+  const startRename = (token: string): void => {
+    setPendingEdit({ kind: 'rename', target: token });
+  };
+
+  // The shared confirm dialog (#989 task 4), ported from explorer.ts's openConfirm()/confirmDelete():
+  // resolves true on the danger OK button, false on Cancel/Escape/backdrop-click (createModal's own
+  // onClose hook covers all three dismissal paths uniformly via `buildConfirmHandle`'s wiring above).
+  const openConfirm = (title: string, message: string, confirmLabel: string): Promise<boolean> => {
+    const handle = confirmRef.current;
+    if (!handle) return Promise.resolve(false);
+    handle.resolve?.(false); // settle any stale promise defensively before reusing the dialog
+    if (handle.titleEl) handle.titleEl.textContent = title;
+    handle.msgEl.textContent = message;
+    handle.okBtn.textContent = confirmLabel;
+    return new Promise<boolean>((resolve) => {
+      handle.resolve = resolve;
+      handle.modal.open();
+    });
+  };
+  const confirmDelete = async (entry: FsEntry): Promise<void> => {
+    const what = entry.kind === 'dir' ? 'folder and everything in it' : 'file';
+    const ok = await openConfirm(`Delete ${entry.name}?`, `This removes the ${what}. It can’t be undone.`, 'Delete');
+    if (ok) cb.onDelete(entry);
+  };
+
+  // Open the row action menu for `entry` at viewport coords (x, y) — the New File/New Folder target is
+  // `parentDirOf(entry, parentDir)`, where `parentDir` is `entry`'s own containing-directory token (the
+  // owning group's root for a top-level entry), resolved via `entryIndex.parentDirs`.
+  const openRowMenu = (entry: FsEntry, x: number, y: number): void => {
+    const menu = ctxMenuRef.current;
+    if (!menu) return;
+    const parent = parentDirOf(entry, entryIndex.parentDirs.get(entry.token) ?? primaryRoot);
+    const items: FloatingMenuItem[] = [
+      { id: 'new-file', label: 'New File', run: () => beginCreate(parent, 'file') },
+      { id: 'new-folder', label: 'New Folder', run: () => beginCreate(parent, 'dir') },
+      { id: 'rename', label: 'Rename', run: () => startRename(entry.token) },
+      { id: 'duplicate', label: 'Duplicate', run: () => cb.onDuplicate(entry) },
+      { id: 'delete', label: 'Delete', run: () => void confirmDelete(entry) },
+    ];
+    menu.open({ trigger: document.activeElement as HTMLElement | null, at: { x, y }, items });
+  };
+
+  // Open the empty-space (background) menu at viewport coords (x, y), targeting the PRIMARY root —
+  // mirrors explorer.ts's openRootMenu.
+  const openRootMenu = (x: number, y: number): void => {
+    const menu = ctxMenuRef.current;
+    if (!menu) return;
+    const items: FloatingMenuItem[] = [
+      { id: 'new-file', label: 'New File', run: () => beginCreate(primaryRoot, 'file') },
+      { id: 'new-folder', label: 'New Folder', run: () => beginCreate(primaryRoot, 'dir') },
+    ];
+    menu.open({ trigger: document.activeElement as HTMLElement | null, at: { x, y }, items });
+  };
+
+  // Delegated `contextmenu` fallback on the shared tree: fires ONLY for a right-click that lands outside
+  // every row's own `.explorer-row` (i.e. the tree's empty background, or a multi-root group header) —
+  // mirrors explorer.ts's tree-level `contextmenu` listener, which guards itself the same way so it never
+  // double-opens a menu for a click a row's own `onContextMenu` (wired in ExplorerItem) already handled.
+  const onTreeContextMenu = (ev: JSX.TargetedMouseEvent<HTMLUListElement>): void => {
+    if ((ev.target as HTMLElement | null)?.closest('.explorer-row')) return;
+    ev.preventDefault();
+    openRootMenu(ev.clientX, ev.clientY);
+  };
+
   // One delegated `onKeyDown` on the shared `ul[role="tree"]` (NOT one listener per row) — routes
   // ArrowUp/Down/Left/Right/Enter through the shared `handleTreeKeydown` router (rovingTreeNav.ts, #1105),
   // exactly as explorer.ts's old per-row `rowNav`/`onRowKeydown` did, minus the `stopPropagation()` that
@@ -158,22 +362,29 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     const idx = token != null ? navTokens.indexOf(token) : -1;
 
     // Panel-specific keys the shared router doesn't own (matches explorer.ts's onRowKeydown switch).
-    // Recognized + preventDefault'ed here so #989 tasks 4 (Delete/ContextMenu) and 5 (F2) have an obvious
-    // slot to fill in without restructuring this handler — there's no rename UI, delete-confirm flow or
-    // context menu wired up yet, so each action is a stub.
+    // F2 stays a stub pending #989 task 5 (no inline-rename UI exists yet); Delete/ContextMenu are wired
+    // (#989 task 4) to the same confirmDelete/openRowMenu the row's right-click and menu items use.
     switch (ev.key) {
       case 'F2':
         ev.preventDefault();
         // TODO(#989 task 5): start inline rename for `token`.
         return;
-      case 'Delete':
+      case 'Delete': {
         ev.preventDefault();
-        // TODO(#989 task 4): open the delete-confirm flow for `token`.
+        const entry = token != null ? entryIndex.entries.get(token) : undefined;
+        if (entry) void confirmDelete(entry);
         return;
-      case 'ContextMenu':
+      }
+      case 'ContextMenu': {
         ev.preventDefault();
-        // TODO(#989 task 4): open the same context menu a right-click on this row would.
+        const entry = token != null ? entryIndex.entries.get(token) : undefined;
+        const li = token != null ? findRowEl(token) : null;
+        if (entry && li) {
+          const r = li.getBoundingClientRect();
+          openRowMenu(entry, r.left, r.bottom);
+        }
         return;
+      }
     }
 
     const nav: RovingTreeNav<string> = {
@@ -250,6 +461,11 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   // `analysis.visible` (from explorerModel.ts's `analyze()`) exactly as task 2 wired it — only the
   // render SHAPE changed here, not the visibility rule. Returns null when a filter is active and neither
   // this entry nor any descendant matches (mirrors explorer.ts's `buildItem()` early return).
+  //
+  // The row's right-click New File/New Folder target (#989 task 4) is resolved via `openRowMenu` →
+  // `entryIndex.parentDirs`, not threaded down through this recursion as an extra parameter — `entryIndex`
+  // already carries the exact same `parentDir` explorer.ts's `buildItem(entry, level, parentDir)` threads,
+  // for every entry, so there is no need for a second, redundant way to get there.
   const renderEntry = (entry: FsEntry, level: number): JSX.Element | null => {
     if (filtering && !analysis.visible.has(entry.token)) return null;
     const isDir = entry.kind === 'dir';
@@ -279,6 +495,10 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         focused={entry.token === effectiveFocusedToken}
         onToggle={() => toggleDir(entry.token)}
         onOpen={() => cb.onOpenFile(entry.token)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          openRowMenu(entry, e.clientX, e.clientY);
+        }}
       >
         {childNodes}
       </ExplorerItem>
@@ -360,7 +580,12 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const matchCount = analysis.matchCount;
 
   return (
-    <div class="explorer">
+    <div
+      class="explorer"
+      // See `pendingEdit`'s doc comment above — test-only observability for the New File/New
+      // Folder/Rename menu stubs, not part of Task 5's eventual real inline-edit design.
+      data-pending-edit={pendingEdit ? `${pendingEdit.kind}:${pendingEdit.target}` : undefined}
+    >
       <div class="explorer-head">
         <div class="explorer-filter-row">
           <input
@@ -430,7 +655,14 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         // requires (one delegated `onKeyDown` on `ul[role="tree"]`, so arrow-key nav can cross group
         // boundaries — see `onTreeKeyDown` above) and what explorer.test.ts's structural assertions pin (a
         // lone `ul[role="tree"]` queried singular throughout).
-        <ul class="explorer-tree" role="tree" aria-label="Workspace files" ref={treeRef} onKeyDown={onTreeKeyDown}>
+        <ul
+          class="explorer-tree"
+          role="tree"
+          aria-label="Workspace files"
+          ref={treeRef}
+          onKeyDown={onTreeKeyDown}
+          onContextMenu={onTreeContextMenu}
+        >
           {groups.length <= 1 ? renderGroupRows(groups[0], 1) : groups.map(renderGroupWrapper)}
         </ul>
       )}

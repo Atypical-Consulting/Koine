@@ -135,6 +135,45 @@ export function parentMapOf(groups: readonly ExplorerRootGroup[]): Map<string, s
 }
 
 /**
+ * The directory a New File/New Folder (or a Rename lookup) targets for `entry`, given its containing
+ * directory token `parentDir` — ported verbatim from `explorer.ts`'s `parentDirOf` (#989 task 4): the
+ * entry itself when it IS a directory (a "New File" inside a right-clicked folder lands in that folder),
+ * otherwise `parentDir` (a right-clicked file's New File/Folder lands beside it, in its container).
+ * `parentDir` is normally resolved via {@link indexEntries}'s `parentDirs` map (or, for a row a caller
+ * is already walking, the same value `indexEntries` would have computed at that point in the walk).
+ */
+export function parentDirOf(entry: FsEntry, parentDir: string): string {
+  return entry.kind === 'dir' ? entry.token : parentDir;
+}
+
+/**
+ * `entries`: token → FsEntry. `parentDirs`: token → the exact `parentDir` `explorer.ts`'s `buildItem`
+ * threads down to that entry — the owning GROUP's root for a top-level entry, the containing directory's
+ * token otherwise. Unlike {@link parentMapOf} (null at the top level, for ancestry/ArrowLeft-ascend),
+ * `parentDirs` is never null, because it feeds {@link parentDirOf} directly (which needs a real token to
+ * fall back to for a top-level FILE row).
+ *
+ * Powers the keyboard-triggered (#989 task 4) Delete-confirm and ContextMenu-key row-menu flows in
+ * `ExplorerPanel`: the roving-tabindex row order only carries a bare token, not the full entry object a
+ * right-click's own closure already has for free, so those two paths look both up here instead.
+ */
+export interface ExplorerEntryIndex {
+  entries: Map<string, FsEntry>;
+  parentDirs: Map<string, string>;
+}
+export function indexEntries(groups: readonly ExplorerRootGroup[]): ExplorerEntryIndex {
+  const entries = new Map<string, FsEntry>();
+  const parentDirs = new Map<string, string>();
+  const walk = (e: FsEntry, parentDir: string): void => {
+    entries.set(e.token, e);
+    parentDirs.set(e.token, parentDir);
+    for (const c of e.children ?? []) walk(c, e.token);
+  };
+  for (const g of groups) for (const e of g.entries) walk(e, g.root);
+  return { entries, parentDirs };
+}
+
+/**
  * Find the file backing a bounded context by matching its STEM (the basename minus the `.koi`
  * extension) case-insensitively — the "Reveal in Files" (#453) convention that one `.koi` file is
  * one bounded context. Ported from `explorer.ts`'s `findFileForContext` (formerly around
