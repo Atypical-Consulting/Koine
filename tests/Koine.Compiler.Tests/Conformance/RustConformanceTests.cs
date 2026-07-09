@@ -500,15 +500,17 @@ public class RustConformanceTests
     /// a conditional, so a plain (non-quantity) value object's <c>+</c> with a conditional operand fails
     /// the same E0507 class the quantity guard (#1268) fixed for <c>+</c>/<c>-</c>.
     /// <para>
-    /// Uses <c>+</c> rather than <c>*</c>/<c>/</c>: <c>ValueObjectArithmeticWalker</c> (which decides
-    /// whether a VO needs a generated <c>Add</c>/<c>Sub</c> impl) resolves an operand's full inferred
-    /// type, so it recognizes a compound (conditional) operand fine. <c>ScalarOpWalker</c> (which decides
-    /// whether a VO needs a generated <c>Mul</c>/<c>Div</c> impl for a scalar factor) is deliberately
-    /// shallow — it only classifies a bare identifier/literal operand — so a <c>Money * (if …)</c>-shaped
-    /// case never gets its <c>impl std::ops::Mul</c> generated at all and fails with an unrelated,
-    /// pre-existing E0369 ("cannot multiply") regardless of this fix. Confirmed with a real
-    /// <c>cargo check</c> and filed separately (issue tracker) rather than folded into this fix, which is
-    /// scoped to the clone/borrow (E0507) defect, not scalar-factor demand-detection.
+    /// Uses <c>+</c> rather than <c>*</c>/<c>/</c>: at the time this test was written,
+    /// <c>ValueObjectArithmeticWalker</c> (which decides whether a VO needs a generated <c>Add</c>/<c>Sub</c>
+    /// impl) already resolved an operand's full inferred type, so it recognized a compound (conditional)
+    /// operand fine — but <c>ScalarOpWalker</c> (which decides whether a VO needs a generated
+    /// <c>Mul</c>/<c>Div</c> impl for a scalar factor) was deliberately shallow, classifying only a bare
+    /// identifier/literal operand, so a <c>Money * (if …)</c>-shaped case never got its
+    /// <c>impl std::ops::Mul</c> generated at all — an unrelated, pre-existing E0369 ("cannot multiply")
+    /// regardless of this fix. That gap was filed as #1289 and is now fixed (see
+    /// <see cref="Plain_value_object_scalar_multiply_with_conditional_operand_emits_compiling_rust"/>);
+    /// this test still uses <c>+</c> since it targets the clone/borrow (E0507) defect specifically, not
+    /// scalar-factor demand-detection.
     /// </para>
     /// </summary>
     [Fact]
@@ -709,6 +711,114 @@ public class RustConformanceTests
         rust.ShouldContain("\"normal \".to_string() + &self.minutes.to_string()");
         rust.ShouldNotContain("self.hours.to_string().to_string()");
         rust.ShouldNotContain("self.minutes.to_string().to_string()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1289 — this issue's own minimal repro: a <c>quantity</c>'s scalar <c>*</c> by a compound
+    /// (conditional) operand must get a real <c>impl std::ops::Mul</c>. Before the fix,
+    /// <c>ScalarOpWalker.InferOperand</c> classified only a bare identifier/literal operand, so a
+    /// conditional operand was invisible to the demand analysis and the impl was never generated at
+    /// all — a real <c>cargo check</c> E0369 ("cannot multiply `Weight` by `{integer}`"), even though
+    /// the emitter still lowered the <c>*</c> to the native Rust operator unconditionally.
+    /// </summary>
+    [Fact]
+    public void Quantity_scalar_multiply_with_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    flag: Bool\n" +
+            "    scaledConditional: Weight = (if flag then a else b) * 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the native `*` must resolve to a real impl.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Mul<i64> for Weight");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1289 — the <c>/</c> (Div) sibling of
+    /// <see cref="Quantity_scalar_multiply_with_conditional_operand_emits_compiling_rust"/>: a
+    /// quantity's scalar <c>/</c> by a compound (conditional) operand must also get a real
+    /// <c>impl std::ops::Div</c>.
+    /// </summary>
+    [Fact]
+    public void Quantity_scalar_divide_with_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    flag: Bool\n" +
+            "    dividedConditional: Weight = (if flag then a else b) / 4\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the native `/` must resolve to a real impl.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Div<i64> for Weight");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1289 — <c>ScalarOpWalker</c> is shared across quantity and plain (non-quantity) value
+    /// objects, so the same compound-operand gap applies to a plain VO's scalar <c>*</c> too. This is
+    /// the exact shape <see cref="General_arithmetic_path_with_conditional_operand_emits_compiling_rust"/>'s
+    /// doc comment called out as a separate, pre-existing E0369 filed as this issue.
+    /// </summary>
+    [Fact]
+    public void Plain_value_object_scalar_multiply_with_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    scaledConditional: Money = (if flag then a else b) * 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the native `*` must resolve to a real impl.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Mul<i64> for Money");
 
         var r = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
