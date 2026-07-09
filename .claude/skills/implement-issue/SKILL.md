@@ -76,24 +76,14 @@ Resume-safe: re-running mid-flight is fine. A task is "done" when **all** its st
 
 ## Step 1 — Preconditions
 
-**Load the repo profile first.** This skill reads every repo-specific fact from the committed file
-**`.claude/skills/repo-profile.md`**: commit identity, build/test/format commands and CI gates, conflict
-hot-spots, architecture grain. Read it directly — `cat .claude/skills/repo-profile.md` — and the steps
-below cite its sections. Only if that file is **missing** (or the user asks to refresh it) run
-**`get-repo-profile`** to generate it first, then read it. Throughout, **`git <commit-identity>`** stands
-for the author line from the profile's *Commit identity* (its `-c user.email=… -c user.name="…"` flags) —
-substitute it in every commit/merge command. If you genuinely can't get a profile, say so in the report
-rather than guessing repo specifics.
+**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](_shared/preconditions.md)
+to load the repo profile, verify authentication, and prepare the commit identity shorthand.
 
-```bash
-gh api user --jq .login                       # prints a login, or 401 → not authed
-gh repo view --json nameWithOwner --jq .nameWithOwner   # confirm it's the repo the profile names
-```
+Throughout this skill, **`git <commit-identity>`** stands for the author line from the profile's
+*Commit identity* — substitute it in every commit/merge command.
 
-If auth fails, stop and tell the user to run `! gh auth login -h github.com` in the prompt, then re-check.
-
-Resolve the **issue number** from the user's request — a number (`21`), an issue URL, or a link to the
-plan comment (`…/issues/21#issuecomment-12345`). The locator snippets in
+Then, resolve the **issue number** from the user's request — a number (`21`), an issue URL, or a link
+to the plan comment (`…/issues/21#issuecomment-12345`). The locator snippets in
 `references/github-mechanics.md` handle all three.
 
 ## Step 2 — Read the plan
