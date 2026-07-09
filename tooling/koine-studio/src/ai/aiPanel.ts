@@ -51,7 +51,7 @@ import { buildDisplayIndex } from '@/ai/assistantTools';
 import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 import { appStore, type AppState } from '@/store/index';
-import type { ChangeSetFileState, ChatToolCall } from '@/store/slices/chat';
+import type { ChangeSetFileState } from '@/store/slices/chat';
 import type { StoreApi } from 'zustand/vanilla';
 
 /**
@@ -201,9 +201,6 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
   let notice: TranscriptNotice | null = null;
   let stoppedPartial = false;
   let mechanismView: TurnMechanism | null = null;
-  // The trailing turn's settled tool cards: snapshotted off the ephemeral chat.turn at commit time so
-  // they stay visible above the reply after the turn ends (as the imperative transcript kept them).
-  let toolCardsView: readonly ChatToolCall[] | null = null;
   // The live apply-gate (#444): registered per generative turn BEFORE the reply commits, so the
   // committed bubble's `getApplyCandidate` call resolves with THIS turn's validated (possibly
   // repaired, #257) candidate instead of re-running the legacy re-validation.
@@ -269,12 +266,13 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
 
   // Drop the trailing-turn ephemera (the notice/error bubble, the "Stopped." marker, the mechanism
   // chip/counter, the live gate) — called whenever the transcript moves on: a new send, a workspace
-  // swap, Clear conversation. The caller re-renders.
+  // swap, Clear conversation. The caller re-renders. Tool cards are NOT ephemera (#1133): they live
+  // on their committed message in the chat slice, so a failed follow-up's rollback — which pops only
+  // the trailing user message — leaves a previous turn's cards untouched without any help from here.
   function clearTurnEphemera(): void {
     notice = null;
     stoppedPartial = false;
     mechanismView = null;
-    toolCardsView = null;
     liveGate = null;
   }
 
@@ -294,7 +292,6 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         notice,
         stoppedPartial,
         mechanism: mechanismView,
-        settledToolCalls: toolCardsView,
         onApplyChangeSet: applyChangeSet,
         onDiscardChangeSet: () => store.getState().discardChangeSet(),
         onSend: (draft) => void send(draft, undefined, { fromInput: true }),
@@ -665,19 +662,16 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     store.getState().startChatTurn();
     const workspaceKey = opts.getWorkspaceKey();
     // Commit a finished assistant turn to history + storage under the captured key, carrying the apply
-    // opt-out so a replay of an explanatory turn stays apply-free. Clearing the ephemeral turn keeps
-    // the committed bubble from double-rendering next to the stale streaming one while the busy window
-    // stays open (the repair loop below still runs under it).
+    // opt-out so a replay of an explanatory turn stays apply-free. `commitChatTurn` (#1133) appends the
+    // message — carrying the live turn's settled tool cards, if any — AND clears the ephemeral turn in
+    // ONE store transition, so no subscriber ever sees the committed bubble without its cards, nor the
+    // stale live cards still hanging around next to it while the busy window stays open (the repair
+    // loop below still runs under it).
     const commitAssistantTurn = (content: string): void => {
       const turn: ChatMessage = { role: 'assistant', content };
       if (!offerApply) turn.offerApply = false;
-      // The turn's tool cards outlive the ephemeral chat.turn: snapshot them before it is dropped, so
-      // they stay above the committed reply (imperative contract) until the conversation moves on.
-      const calls = chat().turn?.toolCalls ?? [];
-      toolCardsView = calls.length ? calls : null;
-      store.getState().appendChatMessage(turn);
+      store.getState().commitChatTurn(turn);
       saveChat(workspaceKey, [...chat().messages]);
-      store.getState().clearStreamingTurn();
       rerender();
     };
     let full = '';
