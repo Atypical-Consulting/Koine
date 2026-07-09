@@ -493,4 +493,226 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1282, Task 1 — the general (non-quantity) arithmetic path's operand-cloning check
+    /// (<c>IsNonCopyPlace</c>-gated <c>cloneLeft</c>/<c>cloneRight</c>) only recognizes a bare place, not
+    /// a conditional, so a plain (non-quantity) value object's <c>+</c> with a conditional operand fails
+    /// the same E0507 class the quantity guard (#1268) fixed for <c>+</c>/<c>-</c>.
+    /// <para>
+    /// Uses <c>+</c> rather than <c>*</c>/<c>/</c>: <c>ValueObjectArithmeticWalker</c> (which decides
+    /// whether a VO needs a generated <c>Add</c>/<c>Sub</c> impl) resolves an operand's full inferred
+    /// type, so it recognizes a compound (conditional) operand fine. <c>ScalarOpWalker</c> (which decides
+    /// whether a VO needs a generated <c>Mul</c>/<c>Div</c> impl for a scalar factor) is deliberately
+    /// shallow — it only classifies a bare identifier/literal operand — so a <c>Money * (if …)</c>-shaped
+    /// case never gets its <c>impl std::ops::Mul</c> generated at all and fails with an unrelated,
+    /// pre-existing E0369 ("cannot multiply") regardless of this fix. Confirmed with a real
+    /// <c>cargo check</c> and filed separately (issue tracker) rather than folded into this fix, which is
+    /// scoped to the clone/borrow (E0507) defect, not scalar-factor demand-detection.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void General_arithmetic_path_with_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    combined: Money = (if flag then a else b) + a\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): a conditional branch that yields a non-Copy
+        // field must be cloned, never emitted as a bare, un-borrowed place headed into the if/else.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1282, Task 2 — a bare conditional (no arithmetic operator at all) used directly as a
+    /// derived member's body has no ownership handling in <c>WriteDerived</c>: its clone check only
+    /// recognizes <c>m.Initializer is IdentifierExpr or MemberAccessExpr</c>, never a
+    /// <c>ConditionalExpr</c>, so <c>combined: Weight = if flag then a else b</c> emits the bare,
+    /// un-cloned <c>if self.flag { self.a } else { self.b }</c> and fails a real <c>cargo check</c>
+    /// E0507 — for both a <c>quantity</c> and a plain (non-quantity) value object.
+    /// </summary>
+    [Fact]
+    public void Bare_conditional_derived_member_body_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    flag: Bool\n" +
+            "    bareConditional: Weight = if flag then a else b\n" +
+            "  }\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value PlainMix {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    bareConditional: Money = if flag then a else b\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): a bare conditional derived-member body must
+        // clone a non-Copy branch, never leave it as a bare, un-borrowed place.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1282, Task 3 — a probe (confirmed with a real <c>cargo check</c>, not just static reading)
+    /// for the plausible-but-unverified <c>CoalesceExpr</c>-arm gap flagged in this issue's brainstorm:
+    /// <c>WriteOperandValue</c>, like the general arithmetic path and a bare conditional return, only
+    /// recognizes a bare place — not a conditional — as needing ownership treatment, so
+    /// <c>maybeA ?? (if flag then a else b)</c> fails the same E0507 class on the coalesce's right arm.
+    /// </summary>
+    [Fact]
+    public void Coalesce_right_arm_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    maybeA: Weight?\n" +
+            "    flag: Bool\n" +
+            "    coalesced: Weight = maybeA ?? (if flag then a else b)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the coalesce's right (default) arm's conditional
+        // branches must be cloned, never left as a bare, un-borrowed place.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1282 code-review finding — a let-binding's own VALUE (not just the let's body) can be a
+    /// bare compound expression (a conditional): <c>let picked = (if flag then a else b) in picked</c>
+    /// used as a bare derived-member body. <c>WriteLetBindings</c>'s <c>cloneNonCopyPlaces</c> path
+    /// previously rendered a binding's value with plain <c>Write</c> and only cloned it when it was a
+    /// bare place, never recursing into a compound value the way the let's body already did — so the
+    /// conditional's branches inside the binding's value were left un-cloned and failed a real
+    /// <c>cargo check</c> E0507, independently confirmed by three finder agents during code review.
+    /// </summary>
+    [Fact]
+    public void Let_binding_value_is_conditional_derived_member_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    combined: Money = let picked = (if flag then a else b) in picked\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the let-binding's own conditional value must
+        // clone its non-Copy branches, never leave them as bare, un-borrowed places.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1282 code-review finding — a <c>String</c>-typed conditional branch that is itself a
+    /// concatenation (not a bare place) must NOT get an appended <c>.to_string()</c>: the concatenation
+    /// already renders as an owned <c>String</c> via <c>WriteStringOwned</c>, and appending a suffix
+    /// after <c>StripOuterParens</c> removes its enclosing parens binds the suffix to the
+    /// concatenation's LAST operand instead of the whole expression (e.g.
+    /// <c>"URGENT ".to_string() + &amp;self.hours.to_string().to_string()</c> — a misassociated,
+    /// redundant double <c>.to_string()</c> on <c>hours</c> alone). Confirmed via a real <c>cargo
+    /// check</c> comparison against `main`'s pre-fix rendering during code review.
+    /// </summary>
+    [Fact]
+    public void String_typed_conditional_branch_that_is_a_concatenation_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Announcement {\n" +
+            "    hours: Int\n" +
+            "    minutes: Int\n" +
+            "    urgent: Bool\n" +
+            "    display: String = if urgent then \"URGENT \" + hours else \"normal \" + minutes\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): each concatenated branch renders exactly one
+        // `.to_string()` on the Int operand, never a misassociated double.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("\"URGENT \".to_string() + &self.hours.to_string()");
+        rust.ShouldContain("\"normal \".to_string() + &self.minutes.to_string()");
+        rust.ShouldNotContain("self.hours.to_string().to_string()");
+        rust.ShouldNotContain("self.minutes.to_string().to_string()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
