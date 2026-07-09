@@ -14,6 +14,7 @@ import type { DiagramNode, GlossaryEntry, ModelMember, Range, SourceSpan } from 
 import type { WorkspaceEdit } from '@/lsp/protocol';
 import type { ChangeEntry } from '@/host/gitHistory';
 import { railHint, renderRailEmpty } from '@/model/railEmpty';
+import { normalizeDddKind } from '@/model/dddKind';
 
 /**
  * The language's built-in scalar/collection types — the always-available options for a property's
@@ -252,25 +253,21 @@ function formatHistoryDate(date: string): string {
   return m ? m[1] : date;
 }
 
+/** The DDD kinds (after `normalizeDddKind`) the shared `--koi-ddd-*` palette and Explorer icons have
+ * an accent for. Anything else (including the still-unrouted service/repository/command/query) falls
+ * back to the generic `type` accent. */
+const PALETTE = new Set(['aggregate', 'entity', 'enum', 'event', 'value', 'integration-event']);
+
 /**
  * Normalize a glossary construct kind to the key the shared DDD palette (`--koi-ddd-*`) and the
  * Explorer icons use, so the inspector's accent matches them. Unknown kinds fall back to `type`.
+ * Folds the backend's `quantity`/`integration event` spellings via the canonical `@/model/dddKind`
+ * alias fold (issue #1162) — the same one `src/launcher/buildCatalog.ts`'s `normalizeKind` delegates
+ * to, so the two call sites can no longer drift.
  */
 function constructKey(kind: string): string {
-  switch (kind) {
-    case 'aggregate':
-    case 'entity':
-    case 'enum':
-    case 'event':
-      return kind;
-    case 'value':
-    case 'quantity':
-      return 'value';
-    case 'integration event':
-      return 'integration-event';
-    default:
-      return 'type';
-  }
+  const k = normalizeDddKind(kind);
+  return PALETTE.has(k) ? k : 'type';
 }
 
 function renderHeader(element: InspectorElement, handlers: InspectorHandlers): HTMLElement {

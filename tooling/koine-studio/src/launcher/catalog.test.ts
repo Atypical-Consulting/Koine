@@ -66,6 +66,14 @@ describe('KIND', () => {
       code: 'IE', word: 'integration event', token: '--koi-ddd-integration-event',
     });
   });
+
+  // Guard (issue #1162): the token must be DERIVED from its slug, not a hand-typed literal that can
+  // desync from the key it lives under.
+  test('every token equals --koi-ddd-<slug> for its own key — never a hand-typed mismatch', () => {
+    for (const [slug, meta] of Object.entries(KIND)) {
+      expect(meta!.token).toBe(`--koi-ddd-${slug}`);
+    }
+  });
 });
 
 describe('parseMode', () => {
