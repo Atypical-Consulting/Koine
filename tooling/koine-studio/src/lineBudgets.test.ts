@@ -205,7 +205,31 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1038 → 1099: #1005's Home resume card needs a persisted last-session snapshot — a new
   // LastSession interface plus its guarded getLastSession/setLastSession accessors (~60 LOC of genuine
   // new API, not regrowth). Ratchet to the real end-state (1077) plus the standard +2% headroom.
-  { file: 'src/settings/persistence.ts', maxLines: 1099 },
+  // Lowered 1099 → 40: #988 completed the decomposition (Tasks 1-5) — persistence.ts is now a pure
+  // re-export barrel (27 LOC) over five domain modules split out below (storage / secrets /
+  // settingsStore / workspaceState / diagramState), each carrying its own ratchet so none of them can
+  // silently regrow into a new monolith. Real end-state (27) plus headroom for a doc-comment tweak.
+  { file: 'src/settings/persistence.ts', maxLines: 40 },
+  // #988 split: internal localStorage read/write guards (present/absent key checks, JSON parse/
+  // stringify with corrupt-data fallback, best-effort write swallowing quota/security errors)
+  // extracted to storage.ts. Measured 40 LOC, +15% headroom = 46.
+  { file: 'src/settings/storage.ts', maxLines: 46 },
+  // #988 split: the API-key secret cache singleton (secretCache) plus its lifecycle
+  // (initSecrets/whenSecretsReady/saveApiKey/clearApiKey/getCachedApiKey) extracted to secrets.ts —
+  // the one piece of mutable module state in the settings layer, now isolated from the rest of the
+  // barrel. Measured 74 LOC, +15% headroom = 86.
+  { file: 'src/settings/secrets.ts', maxLines: 86 },
+  // #988 split: the Settings model (types, defaults, coercion, load/save/patch), the workspace-override
+  // store, and the keybinding-override store extracted to settingsStore.ts. Measured 488 LOC, +15%
+  // headroom = 562.
+  { file: 'src/settings/settingsStore.ts', maxLines: 562 },
+  // #988 split: the recent-folders list, legacy scratch migration, workspace center/deck, last-opened-
+  // workspace pointer, last-session resume snapshot, active-context scope, and per-workspace chat
+  // transcript extracted to workspaceState.ts. Measured 392 LOC, +15% headroom = 451.
+  { file: 'src/settings/workspaceState.ts', maxLines: 451 },
+  // #988 split: diagram canvas zoom, node positions, and canvas-only annotations extracted to
+  // diagramState.ts. Measured 124 LOC, +15% headroom = 143.
+  { file: 'src/settings/diagramState.ts', maxLines: 143 },
   // Raised 908 → 1012: #1005 Home redesign — imperative-DOM growth; will tighten to real end-state LOC.
   // The full-bleed shell (top bar + brand + split grid), the multi-target emit caption and the
   // relocated colophon all add real imperative construction to welcome.ts; ceil(992 × 1.02) = 1012.
