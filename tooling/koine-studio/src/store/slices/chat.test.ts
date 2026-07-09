@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { createAppStore } from '@/store/index';
-import type { ChatMessage } from '@/ai/ai';
+import type { ChatMessage, ChatToolCall } from '@/ai/ai';
 import type { StagedEdit } from '@/ai/editSession';
 
 const user = (content: string): ChatMessage => ({ role: 'user', content });
@@ -298,26 +298,78 @@ describe('streaming turn', () => {
     expect(s.getState().chat.turn).toBeNull();
   });
 
-  test('clearStreamingTurn drops the live turn but KEEPS the streaming status (#990 Task 6)', () => {
-    const s = createAppStore();
-    s.getState().startChatTurn();
-    s.getState().appendStreamingText('committed elsewhere');
-    s.getState().clearStreamingTurn();
-    expect(s.getState().chat.turn).toBeNull();
-    // The busy window stays open: the send effect's post-turn work (the repair loop) still runs
-    // under it, so hydrateChat stays a no-op and a second start can't seed a new turn mid-window.
-    expect(s.getState().chat.status).toBe('streaming');
-    s.getState().startChatTurn();
-    expect(s.getState().chat.turn).toBeNull();
-    s.getState().hydrateChat('elsewhere', []);
-    expect(s.getState().chat.workspaceKey).not.toBe('elsewhere');
+});
+
+// commitChatTurn (#1133): the settled tool cards move from the host's ephemeral snapshot closure
+// into the chat slice, attached to the committed ChatMessage — so a card the user expanded survives
+// the commit remount, and a failed follow-up's rollback (which pops only the trailing USER message)
+// leaves the previous assistant message's cards untouched.
+describe('commitChatTurn (#1133)', () => {
+  const toolCall = (id: number): ChatToolCall => ({
+    id,
+    name: 'koine_compile',
+    args: '{}',
+    state: 'ok',
+    summary: 'ok',
+    result: 'compiled',
+    durationMs: 10,
   });
 
-  test('clearStreamingTurn is a no-op when no turn is live', () => {
+  test('appends the message carrying the live turn toolCalls and clears the turn in ONE dispatch', () => {
     const s = createAppStore();
-    s.getState().clearStreamingTurn(); // idle: must not throw
+    s.getState().startChatTurn();
+    s.getState().startToolCall({ id: 1, name: 'koine_compile', args: '{}' });
+    s.getState().completeToolCall({ id: 1, state: 'ok', summary: 'ok', result: 'compiled', durationMs: 10 });
+
+    const fn = vi.fn();
+    s.subscribe((state) => fn(state.chat));
+    s.getState().commitChatTurn({ role: 'assistant', content: 'done' });
+
+    // Exactly one notification: a subscriber can never observe the committed message without its
+    // cards, nor the cards without the message — the two changes land in the same store transition.
+    expect(fn).toHaveBeenCalledTimes(1);
+    const chat = fn.mock.calls[0][0];
+    expect(chat.messages).toEqual([{ role: 'assistant', content: 'done', toolCalls: [toolCall(1)] }]);
+    expect(chat.turn).toBeNull();
+  });
+
+  test('a message committed with no tool calls gets no toolCalls field', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().commitChatTurn({ role: 'assistant', content: 'plain reply' });
+    expect(s.getState().chat.messages).toEqual([{ role: 'assistant', content: 'plain reply' }]);
+    expect('toolCalls' in s.getState().chat.messages[0]).toBe(false);
+  });
+
+  test('abortChatTurn({rollbackUserTurn:true}) after a committed tool-call turn pops only the user message', () => {
+    const s = createAppStore();
+    s.getState().appendChatMessage(user('earlier question'));
+    s.getState().startChatTurn();
+    s.getState().startToolCall({ id: 1, name: 'koine_compile', args: '{}' });
+    s.getState().completeToolCall({ id: 1, state: 'ok', summary: 'ok', result: 'compiled', durationMs: 10 });
+    s.getState().commitChatTurn({ role: 'assistant', content: 'earlier reply' });
+
+    // A follow-up send: append the new user turn, then roll it back (simulating a failed request).
+    s.getState().appendChatMessage(user('follow-up that fails'));
+    s.getState().startChatTurn();
+    s.getState().abortChatTurn({ rollbackUserTurn: true });
+
+    expect(s.getState().chat.messages).toEqual([
+      user('earlier question'),
+      { role: 'assistant', content: 'earlier reply', toolCalls: [toolCall(1)] },
+    ]);
+  });
+
+  test('commitChatTurn KEEPS the streaming status (#990 Task 6): the busy window stays open for the post-turn repair loop', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    s.getState().commitChatTurn({ role: 'assistant', content: 'done' });
     expect(s.getState().chat.turn).toBeNull();
-    expect(s.getState().chat.status).toBe('idle');
+    expect(s.getState().chat.status).toBe('streaming');
+    // hydrateChat stays a no-op mid-window, same invariant as before commitChatTurn replaced the
+    // appendChatMessage + clearStreamingTurn pair.
+    s.getState().hydrateChat('elsewhere', []);
+    expect(s.getState().chat.workspaceKey).not.toBe('elsewhere');
   });
 });
 

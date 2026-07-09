@@ -1,6 +1,6 @@
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
-import type { ChangeSetFileState, ChatToolCall } from '@/store/slices/chat';
+import type { ChangeSetFileState } from '@/store/slices/chat';
 import { Transcript, type TranscriptNotice, type TurnMechanism } from '@/ai/components/Transcript';
 import { ChangeSetPanel } from '@/ai/components/ChangeSetPanel';
 import { Composer, type ComposerQuickAction } from '@/ai/components/Composer';
@@ -30,8 +30,6 @@ export interface AssistantChatProps {
   stoppedPartial?: boolean;
   /** The trailing turn's grammar-constraint treatment (chip / repair counter / invalid notice). */
   mechanism?: TurnMechanism | null;
-  /** The trailing turn's settled tool cards (they outlive the ephemeral chat.turn). */
-  settledToolCalls?: readonly ChatToolCall[] | null;
   /** Apply clicked on the change-set review: the host's drift-check + apply flow (#473/#633). */
   onApplyChangeSet: (accepted: readonly ChangeSetFileState[]) => void;
   /** Discard clicked on the change-set review. */
@@ -59,7 +57,6 @@ export function AssistantChat(p: AssistantChatProps) {
         notice={p.notice}
         stoppedPartial={p.stoppedPartial}
         mechanism={p.mechanism}
-        settledToolCalls={p.settledToolCalls}
       >
         <ChangeSetPanel store={p.store} onApply={p.onApplyChangeSet} onDiscard={p.onDiscardChangeSet} />
       </Transcript>

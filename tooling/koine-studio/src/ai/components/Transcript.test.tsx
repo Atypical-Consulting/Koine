@@ -12,6 +12,7 @@ import { fireEvent } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { createAppStore, type AppState } from '@/store/index';
 import type { StoreApi } from 'zustand/vanilla';
+import type { ChatToolCall } from '@/ai/ai';
 import { Transcript, TOOL_RESULT_CLAMP, type TranscriptProps } from '@/ai/components/Transcript';
 
 /** A store whose chat slice holds a finished user → assistant exchange. */
@@ -269,6 +270,108 @@ describe('Transcript (#990)', () => {
       expect(streamAfter).toBe(streamBefore);
       const children = [...transcript(container).children];
       expect(children.indexOf(all[1])).toBeLessThan(children.indexOf(streamAfter));
+    });
+  });
+
+  // Settled tool cards move from the host's ephemeral snapshot into the chat slice, attached to
+  // their committed message (#1133): each assistant message with toolCalls renders its own cards
+  // (not just the trailing one), and a card's expanded state — hoisted here because a native
+  // <details>'s `open` is DOM state, lost on any remount — survives the commit remount by keying
+  // on an identity that's stable across a card's live→settled transition.
+  describe('settled tool cards attached to their message (#1133)', () => {
+    const settledCall = (id: number): ChatToolCall => ({
+      id,
+      name: 'koine_compile',
+      args: '{}',
+      state: 'ok',
+      summary: 'ok',
+      result: 'compiled',
+      durationMs: 10,
+    });
+
+    test('every assistant message with toolCalls renders its cards above its own bubble, not just the trailing one', () => {
+      const store = createAppStore();
+      store.getState().appendChatMessage({ role: 'user', content: 'q1' });
+      store.getState().appendChatMessage({ role: 'assistant', content: 'reply1', toolCalls: [settledCall(1)] });
+      store.getState().appendChatMessage({ role: 'user', content: 'q2' });
+      store.getState().appendChatMessage({ role: 'assistant', content: 'reply2', toolCalls: [settledCall(2)] });
+      const { container } = mount(store);
+
+      const allCards = cards(container);
+      expect(allCards.length).toBe(2);
+      const children = [...transcript(container).children];
+      const allBubbles = bubbles(container);
+      // Each card sits directly above ITS OWN reply bubble (reply1's card before reply1, not just
+      // the last message's).
+      expect(children.indexOf(allCards[0])).toBeLessThan(children.indexOf(allBubbles[1]));
+      expect(children.indexOf(allCards[1])).toBeLessThan(children.indexOf(allBubbles[3]));
+    });
+
+    test('expanding a live card, then committing the turn, keeps it open across the remount', () => {
+      const store = createAppStore();
+      store.getState().appendChatMessage({ role: 'user', content: 'q' });
+      store.getState().startChatTurn();
+      store.getState().startToolCall({ id: 1, name: 'koine_compile', args: '{}' });
+      store.getState().completeToolCall({ id: 1, state: 'ok', summary: 'ok', result: 'compiled', durationMs: 10 });
+      const { container } = mount(store);
+
+      const before = cards(container)[0] as HTMLDetailsElement;
+      act(() => {
+        before.open = true;
+        before.dispatchEvent(new Event('toggle'));
+      });
+      expect(before.open).toBe(true);
+
+      act(() => store.getState().commitChatTurn({ role: 'assistant', content: 'done' }));
+
+      const after = cards(container)[0] as HTMLDetailsElement;
+      expect(after.open).toBe(true);
+    });
+
+    test('a workspace-key change renders cards collapsed (no cross-workspace open-state reuse)', () => {
+      const store = createAppStore();
+      store.getState().hydrateChat('ws-A', [{ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] }]);
+      const { container } = mount(store);
+
+      const before = cards(container)[0] as HTMLDetailsElement;
+      act(() => {
+        before.open = true;
+        before.dispatchEvent(new Event('toggle'));
+      });
+      expect(before.open).toBe(true);
+
+      act(() =>
+        store.getState().hydrateChat('ws-B', [{ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] }]),
+      );
+
+      const after = cards(container)[0] as HTMLDetailsElement;
+      expect(after.open).toBe(false);
+    });
+
+    // Code-review finding (#1133): "Clear conversation" empties `messages` WITHOUT changing
+    // `workspaceKey` (unlike a workspace swap), so a brand-new conversation's card at the same
+    // index/call-id would otherwise collide with a stale identity left over from before the clear.
+    test('clearing the conversation resets card expansion (no stale-identity reuse in the next conversation)', () => {
+      const store = createAppStore();
+      store.getState().appendChatMessage({ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] });
+      const { container } = mount(store);
+
+      const before = cards(container)[0] as HTMLDetailsElement;
+      act(() => {
+        before.open = true;
+        before.dispatchEvent(new Event('toggle'));
+      });
+      expect(before.open).toBe(true);
+
+      act(() => store.getState().clearChatTranscript());
+      // The next conversation's first assistant reply lands at the SAME message index with the SAME
+      // tool-call id — an identity collision with the stale (pre-clear) entry, absent a reset.
+      act(() =>
+        store.getState().appendChatMessage({ role: 'assistant', content: 'new reply', toolCalls: [settledCall(1)] }),
+      );
+
+      const after = cards(container)[0] as HTMLDetailsElement;
+      expect(after.open).toBe(false);
     });
   });
 

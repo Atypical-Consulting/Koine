@@ -727,6 +727,50 @@ describe('tool-call cards (panel integration)', () => {
     await vi.waitFor(() => expect(container.querySelector('.koi-msg-error')).not.toBeNull());
     expect(container.querySelector('.koi-assistant-tool')).toBeNull();
   });
+
+  // #1133: the settled cards now live on the COMMITTED message, not a host-side snapshot closure —
+  // so a failed follow-up's rollback (which pops only the trailing USER message) leaves a PRIOR
+  // turn's cards untouched, and a stop-mid-stream partial commits its cards along with it.
+  test('a failed follow-up send rollback leaves the PREVIOUS turn cards in the DOM, no dangling user bubble', async () => {
+    vi.mocked(runAssistant).mockImplementationOnce(async (req: any) => {
+      req.onToolCallStart?.({ id: 1, name: 'koine_compile', argsJson: '{}' });
+      req.onToolCallEnd?.({ id: 1, name: 'koine_compile', ok: true, summary: 'ok', resultText: 'compiled', durationMs: 5 });
+      req.onText('First reply.');
+      return 'First reply.';
+    });
+    const container = document.createElement('div');
+    createAssistantChat(opts(container));
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-tool[data-state="ok"]')).not.toBeNull());
+    await vi.waitFor(() => expect(container.textContent).toContain('First reply.'));
+
+    vi.mocked(runAssistant).mockRejectedValueOnce(new Error('network boom'));
+    typeSend(container, 'a follow-up that fails');
+    await vi.waitFor(() => expect(container.querySelector('.koi-msg-error')).not.toBeNull());
+
+    // The FIRST turn's card is still there — rollback pops only the just-sent user message.
+    expect(container.querySelector('.koi-assistant-tool[data-state="ok"]')).not.toBeNull();
+    const userBubbles = [...container.querySelectorAll('.koi-msg-user')].map((el) => el.textContent);
+    expect(userBubbles).not.toContain('a follow-up that fails');
+  });
+
+  test('stop-mid-stream with a usable partial commits it WITH its cards (rendered from the message)', async () => {
+    const container = document.createElement('div');
+    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{}' });
+      req.onToolCallEnd?.({ id: 1, name: 'koine_validate', ok: true, summary: 'ok', resultText: 'validated', durationMs: 5 });
+      req.onText('Partial reply.');
+      container.querySelector<HTMLButtonElement>('.koi-assistant-stop')!.click(); // user Stops
+      throw new DOMException('aborted', 'AbortError'); // the fetch rejects on abort
+    });
+    createAssistantChat(opts(container));
+    fire(container);
+
+    await vi.waitFor(() => expect(container.querySelector('.koi-assistant-stopped')).not.toBeNull());
+    expect(container.querySelector('.koi-assistant-tool[data-state="ok"]')).not.toBeNull();
+    expect(container.textContent).toContain('Partial reply.');
+  });
 });
 
 // --- multi-file change set (#... agentic edits): the per-file review/apply panel ----------------

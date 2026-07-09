@@ -81,6 +81,7 @@ public static class DiagnosticCodes
     public const string ValueObjectScalarArithmetic = "KOI0215";
     public const string ValueObjectScalarArithmeticNoNumericField = "KOI0216";
     public const string NumericNarrowingConversion = "KOI0217";
+    public const string QuantityTypeMismatch = "KOI0218";
 
     // ---- Determinism / value rules (KOI0300–0399) -------------------------
     public const string NowAsStoredDefault = "KOI0301";
@@ -277,6 +278,7 @@ public static class DiagnosticCodes
             [ValueObjectScalarArithmetic] = D(ValueObjectScalarArithmetic, "A scalar was added to or subtracted from a value object, or a scalar was divided by a value object; a value object scales with '*'/'/', not '+'/'-', and never divides a scalar.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [ValueObjectScalarArithmeticNoNumericField] = D(ValueObjectScalarArithmeticNoNumericField, "A value object with no numeric (Int/Decimal) stored field was multiplied or divided by a scalar; there is no field to scale, so no target emits a scalar operator for it.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [NumericNarrowingConversion] = D(NumericNarrowingConversion, "A member's initializer — derived (computed) or a stored constant default — infers to a wider numeric type (Decimal) than its narrower declared type (Int); no target implicitly narrows Decimal to Int (C#'s CS0266 analogue) — declare the member Decimal, or keep the initializer integral.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
+            [QuantityTypeMismatch] = D(QuantityTypeMismatch, "A binary '+' or '-' combines two quantity value objects of different declared types; quantities only add/subtract with another quantity of their OWN type (their unit-checked add/sub only accepts that type) — no target can lower a cross-type quantity operation.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
 
             // ---- Determinism / value rules -----------------------------------
             [NowAsStoredDefault] = D(NowAsStoredDefault, "'now' cannot be used as a stored (constructor) default.", DiagnosticCategory.Determinism, DiagnosticSeverity.Error),
