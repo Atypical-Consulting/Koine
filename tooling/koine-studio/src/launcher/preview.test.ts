@@ -316,6 +316,14 @@ describe('previewFor — dispatch', () => {
   });
 });
 
+// A launcher module's VALUE import is allowed from another `@/launcher/` module, or from the
+// canonical, pure, DOM-free `@/model/dddKind` alias fold (issue #1162) — sanctioned because it carries
+// no DOM/LSP/host dependency, unlike the other model/lsp/host seams this guard otherwise restricts to
+// type-only imports. (Mirrors the identical helper in buildCatalog.test.ts — both files independently
+// scan every src/launcher/*.ts file, so both need the same allow-list.)
+const isAllowedLauncherValueImport = (line: string): boolean =>
+  /from ['"]@\/launcher\//.test(line) || /from ['"]@\/model\/dddKind['"]/.test(line);
+
 describe('preview.ts — module import discipline', () => {
   test('imports only types from the lsp/host/model client modules — value-imports stay inside @/launcher/', () => {
     const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'preview.ts'), 'utf8');
@@ -328,16 +336,13 @@ describe('preview.ts — module import discipline', () => {
   test('every .ts file under src/launcher only ever value-imports from other launcher modules, the pure dddKind fold, or vitest', () => {
     const dir = dirname(fileURLToPath(import.meta.url));
     const files = readdirSync(dir).filter((f) => /\.ts$/.test(f) && !/\.test\.ts$/.test(f));
-    // The canonical, pure, DOM-free `@/model/dddKind` alias fold (issue #1162) is a sanctioned VALUE
-    // import from outside `@/launcher/` — it carries no DOM/LSP/host dependency, unlike the other
-    // model/lsp/host seams this guard otherwise restricts to type-only imports.
     for (const file of files) {
       const full = join(dir, file);
       if (statSync(full).isDirectory()) continue;
       const src = readFileSync(full, 'utf8');
       const valueImports = src.split('\n').filter((l) => /^import (?!type )/.test(l));
       for (const line of valueImports) {
-        expect(/from ['"]@\/launcher\//.test(line) || /from ['"]@\/model\/dddKind['"]/.test(line)).toBe(true);
+        expect(isAllowedLauncherValueImport(line)).toBe(true);
       }
     }
   });

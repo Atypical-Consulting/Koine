@@ -133,7 +133,13 @@ const KIND_META: Partial<Record<ConceptSlug, Omit<KindMeta, 'token'>>> = {
  * it's supposed to color.
  */
 export const KIND: Partial<Record<ConceptSlug, KindMeta>> = Object.fromEntries(
-  Object.entries(KIND_META).map(([slug, meta]) => [slug, { ...meta, token: `--koi-ddd-${slug}` }]),
+  // The explicit `[ConceptSlug, KindMeta]` return annotation (not just the outer `as` below) makes
+  // TypeScript check `{ ...meta, token: ... }` against `KindMeta`'s exact shape — so a dropped/renamed
+  // field here is a compile error, not just a runtime one caught by catalog.test.ts's guard.
+  Object.entries(KIND_META).map(([slug, meta]): [ConceptSlug, KindMeta] => [
+    slug as ConceptSlug,
+    { ...meta, token: `--koi-ddd-${slug}` },
+  ]),
 ) as Partial<Record<ConceptSlug, KindMeta>>;
 
 /**

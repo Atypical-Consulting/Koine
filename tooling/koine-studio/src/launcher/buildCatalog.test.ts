@@ -92,10 +92,11 @@ const sourcesNoGit: LauncherSources = {
   canUseGit: false,
 };
 
-// Characterization safety net (issue #1162): pins normalizeKind's CURRENT behaviour — including its
-// passthrough fallback — before it's extracted into the shared `@/model/dddKind` normalizer, so the
-// refactor can't silently change what an unrouted kind resolves to.
-describe('normalizeKind — characterization (pins current behaviour before the #1162 dedup refactor)', () => {
+// Characterization safety net (issue #1162): pins `normalizeKind`'s behaviour — including its
+// passthrough fallback — on the PUBLIC exported symbol `preview.ts` and consumers actually import, so
+// a future edit that breaks its delegation to the shared `@/model/dddKind` normalizer (dddKind.test.ts)
+// gets caught here too, independent of the internal implementation.
+describe('normalizeKind — characterization (pins the public re-export behaviour, issue #1162)', () => {
   test.each([
     ['aggregate', 'aggregate'],
     ['value', 'value'],

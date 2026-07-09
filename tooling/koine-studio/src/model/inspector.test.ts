@@ -39,10 +39,10 @@ const fullElement: InspectorElement = {
 
 const noop: InspectorHandlers = { onGoto: () => {} };
 
-// Characterization safety net (issue #1162): pins constructKey's CURRENT behaviour — including its
-// palette-or-'type' fallback — via the rendered root's dataset.kind, before it's rewritten to delegate
-// to the shared `@/model/dddKind` normalizer.
-describe('renderInspector dataset.kind (constructKey) — characterization (pins current behaviour before the #1162 dedup refactor)', () => {
+// Characterization safety net (issue #1162): pins constructKey's end-to-end DOM behaviour — including
+// its palette-or-'type' fallback — via the rendered root's dataset.kind. Exercises paths dddKind.test.ts's
+// cross-check doesn't cover (e.g. `service`/an unknown kind falling back to `type`).
+describe('renderInspector dataset.kind (constructKey) — characterization (issue #1162)', () => {
   test.each([
     ['aggregate', 'aggregate'],
     ['quantity', 'value'],
