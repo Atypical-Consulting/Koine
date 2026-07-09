@@ -57,20 +57,11 @@ Create a task per item and complete in order. For a batch of ideas, run steps 2-
 
 ## Step 1 — Preconditions
 
-**Load the repo profile first.** Every repo-specific fact — label taxonomy, issue-template defaults,
-architecture grain — lives in the committed file **`.claude/skills/repo-profile.md`**, not inline. Read it
-directly — `cat .claude/skills/repo-profile.md` — and the steps below cite its sections (*Labels*, *Issue
-templates*, *Architecture grain*). Only if that file is **missing** (or the user asks to refresh it) run
-**`get-repo-profile`** to generate it first, then read it. If you genuinely can't get one, say so in the
-report rather than inventing repo specifics.
+**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](_shared/preconditions.md)
+to load the repo profile, verify authentication, and prepare the commit identity shorthand.
 
-```bash
-gh api user --jq .login      # must print a login; if 401, the token is invalid
-```
-
-If this fails with an auth error, stop and tell the user to run `! gh auth login -h github.com` in the
-prompt (the `!` prefix runs it in this session so the token lands in your environment). Re-check before
-continuing. Confirm the working directory is the repo you mean to file in (`gh` targets its `origin`).
+Then, read the profile's **`Labels`**, **`Issue templates`**, and **`Architecture grain`** sections
+from `.claude/skills/repo-profile.md` — the steps below cite them.
 
 ## Step 2 — Capture the idea(s)
 
