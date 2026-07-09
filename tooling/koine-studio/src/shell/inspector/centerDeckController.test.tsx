@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createElement, render } from 'preact';
 import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import {
+  centerDeckInitialChrome,
   createCenterDeckController,
   type CenterDeckControllerDeps,
   type CenterDeckControllerHooks,
@@ -154,6 +155,34 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   document.body.innerHTML = '';
+});
+
+describe('centerDeckInitialChrome — the pure construction-reset factory (#1260)', () => {
+  test('returns the 7-field reset for a restored 2-up deck, primary as the center', () => {
+    const deck: DeckState = { mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.5, flipped: false };
+
+    expect(centerDeckInitialChrome(deck)).toEqual({
+      deck,
+      center: 'technical',
+      tech: 'editor',
+      output: 'generated',
+      docs: 'glossary',
+      bottom: 'problems',
+      right: 'props',
+    });
+  });
+
+  test('returns the 7-field reset for DEFAULT_DECK_STATE', () => {
+    expect(centerDeckInitialChrome(DEFAULT_DECK_STATE)).toEqual({
+      deck: DEFAULT_DECK_STATE,
+      center: DEFAULT_DECK_STATE.primary,
+      tech: 'editor',
+      output: 'generated',
+      docs: 'glossary',
+      bottom: 'problems',
+      right: 'props',
+    });
+  });
 });
 
 describe('createCenterDeckController — (a) center-persist guard (mirror-free, #980/#985 Task 4)', () => {

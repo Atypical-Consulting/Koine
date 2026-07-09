@@ -48,6 +48,7 @@ import {
   type OutputTab,
   type RightView,
   type TechView,
+  type UiChromeSlice,
 } from '@/store/slices/uiChrome';
 import type { SourceControlFocus } from '@/model/SourceControlPanel';
 import { DeckSpineConnected } from '@/shell/deck/DeckSpine';
@@ -166,6 +167,24 @@ export interface CenterDeckController {
   dispose(): void;
 }
 
+/** The pure chrome reset this controller applies at construction: every sub-view lands back on its
+ *  default landing tab for the given (restored or default) deck. Extracted from the constructor's own
+ *  `setState` call (#1260) so the facade can compute it and fold it into ITS OWN construction-time write —
+ *  landing both in one atomic `setState` rather than two separate notifications. */
+export function centerDeckInitialChrome(
+  deck: DeckState,
+): Pick<UiChromeSlice, 'deck' | 'center' | 'tech' | 'output' | 'docs' | 'bottom' | 'right'> {
+  return {
+    deck,
+    center: deck.primary,
+    tech: 'editor',
+    output: 'generated',
+    docs: 'glossary',
+    bottom: 'problems',
+    right: 'props',
+  };
+}
+
 export function createCenterDeckController(options: CenterDeckControllerOptions): CenterDeckController {
   const { store, editor, deps, hooks } = options;
 
@@ -225,15 +244,7 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   // singleton reused across workspace reopens — so without this reset a prior session's tab choices would
   // leak into a freshly-booted controller (mirrors the facade's own `navAltitude`/docViews resets, which
   // stay facade-owned since they're Domain-navigator/loader concerns, not center/deck chrome).
-  store.setState({
-    deck: initialDeck,
-    center: initialDeck.primary,
-    tech: 'editor',
-    output: 'generated',
-    docs: 'glossary',
-    bottom: 'problems',
-    right: 'props',
-  });
+  store.setState(centerDeckInitialChrome(initialDeck));
 
   // Persist the active center pane across reloads: on a real, valid center change, write it through.
   // #985 Task 4 deletes the closure-mirror `persistedCenter` guard (#980) that used to sit alongside this
