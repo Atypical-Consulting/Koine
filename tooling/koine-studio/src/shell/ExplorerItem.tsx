@@ -122,6 +122,13 @@ export interface ExplorerItemProps {
    */
   scopeClass?: 'is-scoped' | 'dim';
   /**
+   * Whether this row is the target of the most recent "Reveal in Files" request (#453, #989 task 8) —
+   * adds `.is-revealed` to `.explorer-row` (ported from explorer.ts's `revealByContext`'s
+   * `row.classList.add('is-revealed')`). `ExplorerPanel` alone tracks which (at most one) row this is;
+   * this component only adds the class. Defaults to `false`.
+   */
+  revealed?: boolean;
+  /**
    * Native drag events forwarded straight through to `.explorer-row` — `ExplorerPanel` alone owns
    * drop-validity/ancestry (`parentMapOf`) and the in-flight `drag`/`dropMark` state (#989 task 6); this
    * component has no drag logic of its own beyond making the row draggable and calling these back.
@@ -170,6 +177,7 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
     dragging,
     dropTarget,
     scopeClass,
+    revealed,
     onDragStart,
     onDragEnd,
     onDragOver,
@@ -210,7 +218,7 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
       class={dragging ? 'is-dragging' : undefined}
     >
       <div
-        class={rowClassName(dropTarget, scopeClass)}
+        class={rowClassName(dropTarget, scopeClass, revealed)}
         aria-current={isActiveFile ? 'true' : undefined}
         style={{ '--depth': String(level - 1) }}
         draggable
@@ -282,12 +290,18 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
 }
 
 // `.explorer-row`'s class list: the base class plus whichever of `.is-drop-target` (#989 task 6) /
-// `.is-scoped/.dim` (ADR-0009 scope emphasis) apply — the two are independent (a row can in principle
-// be both a drop target and scope-emphasised) so they're combined rather than treated as exclusive.
-function rowClassName(dropTarget: boolean | undefined, scopeClass: 'is-scoped' | 'dim' | undefined): string {
+// `.is-scoped/.dim` (ADR-0009 scope emphasis) / `.is-revealed` (#989 task 8) apply — all independent
+// (a row can in principle be a drop target AND scope-emphasised AND the reveal target) so they're
+// combined rather than treated as exclusive.
+function rowClassName(
+  dropTarget: boolean | undefined,
+  scopeClass: 'is-scoped' | 'dim' | undefined,
+  revealed: boolean | undefined,
+): string {
   let cls = 'explorer-row';
   if (dropTarget) cls += ' is-drop-target';
   if (scopeClass) cls += ` ${scopeClass}`;
+  if (revealed) cls += ' is-revealed';
   return cls;
 }
 

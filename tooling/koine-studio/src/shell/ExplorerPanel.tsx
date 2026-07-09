@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
 import {
   analyze,
+  findFileForContext,
   flattenVisible,
   indexEntries,
   invalidSegment,
@@ -142,6 +143,15 @@ export interface ExplorerPanelProps {
    * emphasis.
    */
   activeContext?: string | null;
+  /**
+   * A "Reveal in Files" request (#453, #989 task 8) — bump `seq` (even for a repeat `context`) to
+   * re-trigger the reveal effect below; a plain string wouldn't detect revealing the SAME context
+   * twice in a row. `createExplorer()`'s facade is the sole producer: it resolves `context` via
+   * `explorerModel.findFileForContext` BEFORE bumping, so a miss (no matching `.koi`) never reaches
+   * here — a silent no-op, mirroring explorer.ts's old `revealByContext`. `null`/omitted (the default)
+   * is "no pending reveal".
+   */
+  reveal?: { context: string; seq: number } | null;
 }
 
 // The one inline-edit session that can be open at a time (#989 task 5) — replaces task 4's placeholder
@@ -215,7 +225,7 @@ function buildConfirmHandle(): ConfirmHandle {
 }
 
 export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
-  const { cb, groups, activeContext = null } = props;
+  const { cb, groups, activeContext = null, reveal = null } = props;
   const store = props.store ?? appStore;
   // ADR-0009 scope emphasis (see the file-header note above): normalize the raw prop exactly as
   // explorer.ts's `setActiveContext` does (trim + lowercase, empty string → `null`), then gate the
@@ -247,6 +257,9 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   // retained across a remount), so a seeded filter takes effect immediately rather than waiting out the
   // debounce below.
   const [filterText, setFilterText] = useState(() => explorerFilter.trim().toLowerCase());
+  // Hoisted above its first (#989 task 8) use — the reveal effects below need it, and the pre-existing
+  // uses further down (renderEntry et al.) are unaffected by the earlier position.
+  const filtering = filterText !== '';
   // The lone WAI-ARIA roving tab stop's token (#989 task 3) — `null` until the tree has been focused at
   // least once, in which case the first visible row is the default tab stop (see `effectiveFocusedToken`).
   const [focusedToken, setFocusedToken] = useState<string | null>(null);
@@ -371,6 +384,60 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     if (token == null) return;
     findRowEl(token)?.focus();
   };
+
+  // --- reveal (#989 task 8) ------------------------------------------------------------------------------
+  // Two independent reveal mechanisms, both ported from explorer.ts's `renderRoots()`/`revealByContext()`:
+  //
+  // 1. AUTO-REVEAL ON ACTIVE CHANGE: when the open/active file CHANGES (not on every re-render — an
+  //    unrelated diagnostics push must not re-fight a folder the user just collapsed), expand its ancestor
+  //    directories so it stays visible. `revealedActiveRef` tracks the last token this already fired for —
+  //    a REF (not state), exactly mirroring explorer.ts's module-scoped `revealedActive`, so recording it
+  //    doesn't itself trigger a re-render.
+  // 2. REVEAL BY CONTEXT ("Reveal in Files", #453): the `reveal` prop (`{ context, seq }`) is bumped by
+  //    `createExplorer()`'s facade once it has confirmed (via `findFileForContext`) that `context` resolves
+  //    to a real `.koi` file — a miss never reaches here. Re-derives the ancestors/token here (rather than
+  //    threading them through the prop) so this component stays the single owner of the tree-walk. Unlike
+  //    the auto-reveal above, `revealedToken` IS plain state — it drives the `is-revealed` row class, so a
+  //    change here must re-render.
+  //
+  // Both use `useLayoutEffect` (not `useEffect`): `explorer.tsx`'s facade — and its `explorer.test.ts`
+  // parity suite — fires a raw `row.click()` / `ex.render(...)` / `ex.revealByContext(...)` and asserts on
+  // the DOM synchronously, with no `act()` wrapper and no awaited tick. `useLayoutEffect` callbacks run
+  // synchronously as part of the SAME commit that triggered them (unlike `useEffect`, whose flush is
+  // deferred to `options.requestAnimationFrame`), so the expand/reveal is visible by the time the
+  // triggering call returns — see explorer.tsx's sync-render note for the other half of this contract
+  // (the state-driven re-render itself must also run synchronously, not just the effect reacting to it).
+  const revealedActiveRef = useRef<string | null>(null);
+  const activeToken = analysis.active?.token ?? null;
+  useLayoutEffect(() => {
+    if (filtering || activeToken == null) {
+      revealedActiveRef.current = null;
+      return;
+    }
+    if (activeToken === revealedActiveRef.current) return; // unchanged — don't re-fight a manual collapse
+    revealedActiveRef.current = activeToken;
+    const ancestors = analysis.active?.ancestors ?? [];
+    if (ancestors.length) expandExplorerTokens(ancestors);
+    findRowEl(activeToken)?.scrollIntoView?.({ block: 'nearest' });
+    // Deliberately gated on the TOKEN only (see the comment above): re-firing whenever
+    // `analysis`/`expandExplorerTokens` identity changes (without the active token itself changing) would
+    // re-fight a manual collapse made after the file was already revealed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeToken, filtering]);
+
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!reveal) return;
+    const found = findFileForContext(groups, reveal.context);
+    if (!found) return; // best-effort: no matching .koi → silent no-op (mirrors explorer.ts)
+    if (found.ancestors.length) expandExplorerTokens(found.ancestors);
+    setRevealedToken(found.token);
+    findRowEl(found.token)?.scrollIntoView?.({ block: 'nearest' });
+    // Deliberately gated on `reveal`'s IDENTITY only: createExplorer() bumps `seq` on every
+    // revealByContext() call (even a repeat context), which is what should re-trigger this — not an
+    // unrelated `groups` change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal]);
 
   // --- context menus + delete confirm (#989 task 4) ----------------------------------------------------
   // token → FsEntry + token → parentDir, for the keyboard-triggered (Delete key / ContextMenu key) paths
@@ -699,8 +766,6 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   };
   const expandAllDirs = (): void => setExplorerCollapsedMany([]);
 
-  const filtering = filterText !== '';
-
   // The transient inline-create row (#989 task 5) — ported from explorer.ts's `beginCreate`'s DOM-build
   // (`<li class="explorer-create-li"><div class="explorer-row explorer-create">…`), as JSX instead of
   // imperative element construction. A stable literal key: at most ONE of these is ever rendered at a
@@ -835,6 +900,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         dragging={dragging}
         dropTarget={isDropTarget}
         scopeClass={scopeClass}
+        revealed={entry.token === revealedToken}
         onToggle={() => toggleDir(entry.token)}
         onOpen={() => cb.onOpenFile(entry.token)}
         onContextMenu={(e) => {

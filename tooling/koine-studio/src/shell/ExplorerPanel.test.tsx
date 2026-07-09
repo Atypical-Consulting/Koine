@@ -1412,4 +1412,87 @@ describe('ExplorerPanel', () => {
       expect(rowByName(container, 'Ordering.koi').classList.contains('dim')).toBe(true);
     });
   });
+
+  // "Reveal in Files" (#453) + auto-reveal-on-active-change — the #989 task 8 gap this fills in ahead of
+  // the facade swap. Mirrors explorer.test.ts's own "reveal active" / "reveal by context" its (~lines
+  // 786-832) scenario-for-scenario, driven through the `reveal`/`activeContext`(via `cb.isActive`) props
+  // instead of the old imperative `Explorer.revealByContext()`/auto-reveal-in-renderRoots() — the parity
+  // gate `explorer.tsx`'s facade (task 8) depends on.
+  describe('reveal (#989 task 8)', () => {
+    function dirRow(container: Element): HTMLElement {
+      return container.querySelector<HTMLElement>('li[data-kind="dir"] > .explorer-row')!;
+    }
+    function fileRow(container: Element, name: string): HTMLElement {
+      return Array.from(container.querySelectorAll<HTMLElement>('.explorer-row')).find(
+        (r) => r.querySelector('.explorer-name')?.textContent === name,
+      )!;
+    }
+
+    it('revealByContext (the `reveal` prop) expands the ancestor folder and marks the matching .koi file is-revealed', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+
+      // Collapse orders/ so the target is hidden.
+      act(() => dirRow(container).click());
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
+
+      // The 'order' bounded context lives in orders/order.koi — reveal it by context name (case-
+      // insensitive stem match): the ancestor folder re-expands and the file row is marked revealed.
+      act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
+      expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
+    });
+
+    it('is a silent no-op for a context with no matching .koi file', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+
+      expect(() =>
+        act(() =>
+          rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'Nonexistent', seq: 1 }} />),
+        ),
+      ).not.toThrow();
+      expect(container.querySelector('.explorer-row.is-revealed')).toBeNull();
+    });
+
+    it('re-triggers on the SAME context via a `seq` bump (a plain string would miss a repeat)', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(
+        <ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />,
+      );
+      expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
+
+      // The user manually collapses orders/ again after the reveal...
+      act(() => dirRow(container).click());
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
+
+      // ...and the SAME context is revealed again (seq bumped) — it must re-expand, not no-op as an
+      // unchanged `context` string would.
+      act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 2 }} />));
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('auto-reveal fires only when the active file token changes, and respects a later manual collapse', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+
+      act(() => dirRow(container).click()); // collapse orders/
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
+
+      // order.koi becomes active — a re-render auto-reveals it by re-expanding orders/.
+      const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/orders/order.koi' });
+      act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
+
+      // The user collapses again; a re-render with the SAME active file must not fight them (the effect
+      // only fires when the active TOKEN changes, not on every re-render).
+      act(() => dirRow(container).click());
+      act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
+    });
+  });
 });

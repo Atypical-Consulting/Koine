@@ -176,16 +176,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // tool-call start, commit, abort — with their ordering comments), and the `files(n)` pluralizer
   // moved to its single home in ChangeSetPanel.tsx. Measured end-state, no headroom.
   { file: 'src/ai/aiPanel.ts', maxLines: 953 },
-  // Frozen 2026-07-02 at 1301 LOC (grown from the audit's 1284 @ fc83bcf5), ceil(1301 × 1.02) = 1328.
-  // #989 ratchets this down as it decomposes explorer.ts. Freezing prevents further regrowth; it does
-  // not mandate the split — #989 owns that.
-  // Raised 1328 → 1387: #1188 (ADR 0009) makes the Files tree obey the active-context scope by emphasis —
-  // the `setActiveContext` public API + its Explorer-interface JSDoc, the render-pass `activeContext`
-  // field, the `scopeMatch` analysis flag (so a scope naming no `.koi` is a no-op), the buildItem
-  // emphasis branch, the boot-flash guard in setActiveContext, and the `koiStem` stem→context helper,
-  // ~59 LOC (comment-heavy, matching the file's house style). Measured end-state, no headroom; #989 owns
-  // the split.
-  { file: 'src/shell/explorer.ts', maxLines: 1387 },
+  // Lowered 1387 → 261: #989 task 8 (the final task of the arc) retired the entire imperative tree-build/
+  // diff/interaction-defer implementation this ceiling used to track — `createExplorer()` is now a thin
+  // facade (a per-instance vanilla-zustand props store + a small mount wrapper) over the keyed Preact
+  // `ExplorerPanel` (#989 tasks 1-7 own the actual widget logic now, tested via ExplorerPanel.test.tsx).
+  // Renamed .ts → .tsx (the mount wrapper is a JSX-authored Preact component). 255 LOC, ceil(255 × 1.02)
+  // = 261. This ratchet is now a plain god-file guard again, not an in-progress-decomposition tracker.
+  { file: 'src/shell/explorer.tsx', maxLines: 261 },
   // #982 decomposed workspaceController.ts into a thin facade + three sibling modules
   // (workspaceBuffers / workspaceMutations / workspaceSave). The facade measured 775 LOC post-split.
   // Raised 791 → 849: #1005 re-homes its Home resume/recents capture onto the facade after the #982 merge
