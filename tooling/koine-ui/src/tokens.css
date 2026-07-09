@@ -134,6 +134,11 @@
   --koi-hl-sem-enum-member: #fc9867;
   --koi-hl-sem-property: #83e8c4;
   --koi-hl-sem-parameter: #ff9d8a;
+
+  /* launcher fuzzy-match highlight (issue #1161): equals --koi-accent in dark theme (unchanged look,
+     ~7:1 on --koi-paper-2) but overridden darker in light theme below, since --koi-accent itself is
+     sub-AA (3.71:1) on the launcher row surface. */
+  --koi-hl-match: #5aa9ff;
 }
 
 /* --- light theme override ---
@@ -180,6 +185,12 @@ html[data-theme='light'] {
   --koi-hl-sem-enum-member: #a64d00;
   --koi-hl-sem-property: #0f7a5f;
   --koi-hl-sem-parameter: #a83232;
+
+  /* launcher fuzzy-match highlight (issue #1161): --koi-accent (#2f7fe0) on the launcher row
+     surfaces measures only ~3.71:1 — under WCAG 2.1 AA (4.5:1, SC 1.4.3). This darker blue clears
+     ~6.2:1 on the resting --koi-paper-2 and ~5.2:1 on the worst-case selected-row tint
+     (color-mix(--koi-accent 15%, transparent) composited over --koi-paper-2). */
+  --koi-hl-match: #175ab0;
 }
 
 /* The dark theme is the :root default; data-theme='dark' needs no override block. */
