@@ -121,13 +121,13 @@ export function createWorkspaceSave(ctx: WorkspaceModuleCtx) {
         return;
       }
 
-      // Write every dirty buffer (mirrors dirty.ts's saveAllDirtyBuffers, but through slice actions so
+      // Write every dirty buffer (mirrors the old dirty.ts save-all helper, but through slice actions so
       // the cleared dirty flags publish to the UI): a failed write leaves that buffer dirty and is
       // reported; a keystroke landing mid-write keeps its buffer dirty (markSaved only when the buffer
       // still holds exactly what hit disk). Snapshot the SET of dirty uris, then re-read each buffer's
       // LIVE text at write time — a keystroke on a not-yet-written buffer during an earlier buffer's write
       // replaces its object in the store, so reading from a frozen buffer snapshot would persist stale
-      // text (the old in-place saveAllDirtyBuffers read the latest text at write time).
+      // text (the old in-place helper read the latest text at write time).
       const dirtyUris = [...st().buffers.values()].filter((b) => b.dirty).map((b) => b.uri);
       let failures = 0;
       let writes = 0;

@@ -897,7 +897,7 @@ describe('createWorkspaceController — saveAllDirty', () => {
 
   // Regression (#982): buffers are now REPLACED per edit (immutable), so a save-all loop that snapshots
   // the buffer OBJECTS up front would write stale text for a buffer edited mid-save. It must re-read each
-  // buffer's LIVE text at write time (as the old in-place saveAllDirtyBuffers did).
+  // buffer's LIVE text at write time (as the old in-place dirty.ts save-all helper did).
   test('persists each buffer’s LATEST text — a keystroke on a not-yet-written buffer during an earlier write is not lost', async () => {
     const platform = new FakePlatform();
     platform.files.set('a.koi', 'A0\n');
