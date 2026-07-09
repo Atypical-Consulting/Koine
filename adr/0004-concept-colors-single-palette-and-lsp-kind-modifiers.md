@@ -1,14 +1,13 @@
-# 0004. Concept Colors — single palette + LSP kind modifiers
+---
+id: 4
+title: Concept Colors — single palette + LSP kind modifiers
+status: proposed
+date: 2026-07-02
+---
 
-Date: 2026-07-02
+# Concept Colors — single palette + LSP kind modifiers
 
-## Status
-
-Proposed
-
-<!-- One of: Proposed | Accepted | Rejected | Deprecated | Superseded by [NNNN](NNNN-xxx.md) -->
-
-## Context
+## Context and Problem Statement
 
 Koine's whole promise is *one ubiquitous language* — yet the **color** of a DDD concept changes
 depending on which surface you look at. An inventory of the codebase found two disjoint color systems
@@ -37,7 +36,21 @@ regress generic LSP clients (any theme with no Koine knowledge, Rider via LSP4IJ
 render domain names with the base `type` color. And per the strictly-layered pipeline, a color is a
 *presentation* concern that must never leak into `src/Koine.Compiler` / `Ast/`.
 
-## Decision
+## Considered Options
+
+* Custom token *types* per kind (a distinct semantic-token type per DDD concept).
+* Editor-local re-classification (each client re-derives the DDD kind itself).
+* Adopting classic Event-Storming sticky colors as the palette.
+* Concept Colors — one DDD concept, one color, everywhere, driven by LSP semantic-token modifiers.
+
+## Decision Outcome
+
+Chosen option: "Concept Colors", because the alternatives each cost more than they bought: **custom
+token *types* per kind** would make generic clients drop domain names to *no* styling — a regression
+outside our tools; **editor-local re-classification** duplicates compiler knowledge in every client
+and drifts, violating the layered pipeline; **adopting classic Event-Storming sticky colors as the
+palette** covers only ~6 kinds, is tuned for paper not text-on-dark, and would repaint an
+explorer/canvas users already know.
 
 We will adopt **Concept Colors** — *one DDD concept, one color, everywhere* — realized as follows:
 
@@ -71,12 +84,6 @@ We will adopt **Concept Colors** — *one DDD concept, one color, everywhere* �
    `--koi-hl-sem-enum` hue yields to `--koi-ddd-enum`. A documentation page (`guides/concept-colors`)
    names the principle, renders the palette *from the JSON* (so it can never drift), and carries the
    Event-Storming ↔ Koine mapping table for orientation.
-
-Alternatives rejected: **custom token *types* per kind** (generic clients would drop domain names to
-*no* styling — a regression outside our tools); **editor-local re-classification** (duplicates
-compiler knowledge in every client and drifts, violating the layered pipeline); **adopting classic
-Event-Storming sticky colors as the palette** (covers only ~6 kinds, tuned for paper not text-on-dark,
-and would repaint an explorer/canvas users already know).
 
 ## Consequences
 

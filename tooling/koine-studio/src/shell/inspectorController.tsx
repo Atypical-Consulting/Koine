@@ -47,7 +47,7 @@ import type {
   AggregateMemberKind,
   DiagramNodeNavigateDetail,
 } from '@/diagrams/diagramContract';
-import { ALL_CONTEXTS, isAllContexts, type ContextScope } from '@/model/activeContext';
+import { ALL_CONTEXTS, contextOf, isAllContexts, type ContextScope } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
@@ -694,12 +694,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   };
 
   // A model node's bounded context: the segment before the first dot of its qualified name (the model
-  // graph names a context child `Context.X`), or the active scope when the name is unqualified.
+  // graph names a context child `Context.X`), or the active scope when the name is unqualified — the
+  // shared `contextOf` helper (@/model/activeContext) owns the split; this just supplies the fallback.
   function nodeContext(node: ModelNode): string {
-    const dot = node.qualifiedName.indexOf('.');
-    if (dot > 0) return node.qualifiedName.slice(0, dot);
     const scope = activeContextCtrl.handle.get();
-    return isAllContexts(scope) ? '' : scope;
+    return contextOf(node.qualifiedName, isAllContexts(scope) ? '' : scope);
   }
   const inspectorHandlers: InspectorHandlers = {
     onGoto: (range) => editor.gotoRange(range.start, range.end),
@@ -740,6 +739,31 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let modelIndex: ModelIndex | null = null;
   let indexPromise: Promise<ModelIndex> | null = null;
 
+  // Shared in-flight fetch of `glossaryModel()`/`model()` (#484 follow-up on #460's review): loadModel()
+  // below reloads the Domain navigator AND calls ensureModelIndex() in the same tick, and each used to
+  // issue its OWN request for these same two endpoints — doubling them on every edit. Memoizing the
+  // in-flight promise here means whichever caller asks first kicks off the one lsp call and the other
+  // awaits that same promise, so the request count halves WITHOUT delaying either caller — both still
+  // kick off their fetch immediately, in parallel with everything else loadModel does.
+  let glossaryFetch: Promise<GlossaryModel> | null = null;
+  function fetchGlossaryModel(): Promise<GlossaryModel> {
+    glossaryFetch ??= lsp.glossaryModel().finally(() => {
+      glossaryFetch = null;
+    });
+    return glossaryFetch;
+  }
+  let structuredModelFetch: Promise<ModelNode | null> | null = null;
+  function fetchStructuredModel(): Promise<ModelNode | null> {
+    structuredModelFetch ??= lsp
+      .model()
+      .then((m): ModelNode | null => m ?? null)
+      .catch(() => null)
+      .finally(() => {
+        structuredModelFetch = null;
+      });
+    return structuredModelFetch;
+  }
+
   /**
    * Build (or reuse) the joined model index. `livingDocs` (diagram nodes) and the structured `model`
    * (the #91 field source for elements with no class node) are both best-effort — a glossary-only
@@ -748,11 +772,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureModelIndex(): Promise<ModelIndex> {
     if (modelIndex) return Promise.resolve(modelIndex);
     indexPromise ??= Promise.all([
-      lsp.glossaryModel(),
+      fetchGlossaryModel(),
       lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
-      lsp.model().catch(() => undefined),
+      fetchStructuredModel(),
     ])
-      .then(([glossary, docs, model]) => (modelIndex = buildModelIndex(glossary, docs, model)))
+      .then(([glossary, docs, model]) => (modelIndex = buildModelIndex(glossary, docs, model ?? undefined)))
       .finally(() => {
         indexPromise = null;
       });
@@ -813,10 +837,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // promptly. Its Context Map / Glossary doorways route to the same focuses the docs footer used.
   function ensureDomainNavigator(): void {
     const hadIndex = modelIndex != null;
+    // The reload below is SEEDED with the same shared fetchGlossaryModel()/fetchStructuredModel() promises
+    // ensureModelIndex() is about to start (#484) — both calls land on the same in-flight fetch, so the
+    // navigator's own doFetch reuses it instead of re-issuing glossaryModel()/model(), halving the
+    // per-edit request count with no change to when the rail paints.
     if (!domainNavigator) {
       domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
     } else if (!hadIndex) {
-      domainNavigator.reload();
+      domainNavigator.reload({ glossaryModel: fetchGlossaryModel(), model: fetchStructuredModel() });
     }
   }
 
@@ -835,6 +863,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function invalidateModelDerivedCaches(): void {
     modelIndex = null;
     indexPromise = null;
+    // Drop the shared glossary/model in-flight fetch too (#484): without this, a fetch already in flight
+    // when THIS edit lands would still be reused by fetchGlossaryModel()/fetchStructuredModel() on the
+    // next loadModel() (they only start a new lsp call when the memo is null) — seeding the Domain
+    // navigator and model index with the PRIOR edit's data instead of this one's, on a slow LSP /
+    // fast-typing overlap. Dropping the reference doesn't cancel the in-flight promise (JS can't cancel
+    // promises) — its `.finally()` still runs, harmlessly, on an already-null var — it just forces the
+    // next caller to kick off a fresh request for the current model.
+    glossaryFetch = null;
+    structuredModelFetch = null;
     cachedDomainIndex = null;
   }
 

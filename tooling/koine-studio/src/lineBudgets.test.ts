@@ -133,7 +133,15 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // joined model index (ensureModelIndex/buildDomainIndex/getCachedDomainIndex), applySelectionHighlight
   // (left shallow for #992), renderCanvasPalette, and dispose() (sub-modules torn down before the deck
   // Preact trees unmount). Measured end-state (1234), ceil(1234 × 1.02) = 1259.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 1259 },
+  // Raised 1259 → 1295: #484 (domain-navigator code-health cleanups) landed on `main` while #985 was in
+  // flight, adding the shared `fetchGlossaryModel`/`fetchStructuredModel` in-flight-promise memoizer to
+  // what was then still the monolithic inspectorController.tsx, alongside `ensureModelIndex` — both of
+  // which stay facade-owned per #985's own Task 5 sweep (a selection concern, not a loader concern), so
+  // the memoizer and its `invalidateDocViews()`-clearing fix (ported onto the facade's own
+  // `invalidateModelDerivedCaches()`, the hook `surfaceLoaders.tsx`'s `invalidateDocViews()` already
+  // calls) land HERE, not on surfaceLoaders.tsx. Also folds in #484's unified `contextOf(name, fallback)`
+  // helper into `nodeContext()`. Measured end-state (1269), ceil(1269 × 1.02) = 1295.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 1295 },
   // Frozen 2026-07-09 at 281 LOC, ceil(281 × 1.02) = 287. #985 Task 1's new sibling — the Context Map
   // panel (maxGraph handle lifecycle, Graph/Table toggle, hover tooltip, ADR 0009 scope-focus repaint)
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
@@ -147,11 +155,14 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Control, Events/Relationships, Compatibility check) consolidated onto the docViews slice and
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
   { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 894 },
-  // Frozen 2026-07-09 at 721 LOC, ceil(721 × 1.02) = 736. #985 Task 4's new sibling — the deck/chrome
-  // orchestration (center/deck/facet tabs, right-rail stripe, rail-axis switch, left morph-collapse,
-  // bottom-strip tabs/collapse/resizer) extracted from inspectorController.tsx. Guards it from regrowing
-  // unguarded — see #981/#757.
-  { file: 'src/shell/inspector/centerDeckController.tsx', maxLines: 736 },
+  // Lowered 736 → 731: the #985 whole-branch code-review's dead-code finding — `ensureTerminal`/
+  // `ensureReview` were declared on `CenterDeckControllerDeps` and passed in by the facade, but never
+  // actually called (the real Terminal/Review dispatch lives entirely in the injected
+  // `ensureBottomLoaded` hook) — removed. Frozen 2026-07-09 at 721 LOC originally (#985 Task 4's new
+  // sibling — the deck/chrome orchestration: center/deck/facet tabs, right-rail stripe, rail-axis switch,
+  // left morph-collapse, bottom-strip tabs/collapse/resizer — extracted from inspectorController.tsx).
+  // Measured end-state (716), ceil(716 × 1.02) = 731. Guards it from regrowing unguarded — see #981/#757.
+  { file: 'src/shell/inspector/centerDeckController.tsx', maxLines: 731 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   // Lowered 2250 → 517: #987's seven-task split carved every category out into prefsSections/ (Appearance,

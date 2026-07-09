@@ -1,12 +1,13 @@
-# 0006. Transport/presentation as opt-in C# layers inside the csharp target
+---
+id: 6
+title: Transport/presentation as opt-in C# layers inside the csharp target
+status: proposed
+date: 2026-07-05
+---
 
-Date: 2026-07-05
+# Transport/presentation as opt-in C# layers inside the csharp target
 
-## Status
-
-Proposed
-
-## Context
+## Context and Problem Statement
 
 Koine emits a domain + application + infrastructure C# core (value objects, entities, aggregates,
 invariants, CQRS handlers/validators, the `Add<Context>Application` DI extension, and — since issue
@@ -34,14 +35,21 @@ is not *whether* to generate it but *how override-friendly* the generated code i
 The remaining question the audit surfaced is *where* these capabilities live in Koine's target model:
 a new `--target`, or a new layer inside the existing `csharp` target. The endpoint/hub code must
 reference the exact C# types the `csharp` target already emits (per-command request records,
-handlers, validators, query handlers, `I<Service>` impls, the DI extension). A separate `--target`
-emits into a disjoint compilation with no shared namespace, forcing duplication or cross-assembly
+handlers, validators, query handlers, `I<Service>` impls, the DI extension).
+
+## Considered Options
+
+* A new `--target` for the transport/presentation surface.
+* A new layer inside the existing `csharp` target (alongside `domain`/`application`/`infrastructure`).
+
+## Decision Outcome
+
+Chosen option: "A new layer inside the existing `csharp` target", because a separate `--target` emits
+into a disjoint compilation with no shared namespace, forcing duplication or cross-assembly
 references Koine does not model — whereas the layered machinery (`--layers
 domain,application,infrastructure`) already treats presentation as a natural layer above
 `application`, and `Infrastructure` is the standing precedent for a C# layer that emits runnable,
 domain-referencing code.
-
-## Decision
 
 We will add transport/presentation capabilities as **opt-in C# layers inside the `csharp` target,
 not as new `--target`s**, and govern them by the following rules.

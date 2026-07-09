@@ -1,12 +1,13 @@
-# 0005. ESLint flat-config gate for the front-end safety conventions
+---
+id: 5
+title: ESLint flat-config gate for the front-end safety conventions
+status: proposed
+date: 2026-07-02
+---
 
-Date: 2026-07-02
+# ESLint flat-config gate for the front-end safety conventions
 
-## Status
-
-Proposed
-
-## Context
+## Context and Problem Statement
 
 The Studio front end (`tooling/koine-studio`, Preact + TS-strict + Zustand) and the shared UI package
 (`tooling/koine-ui`) hold four load-bearing safety conventions that TypeScript's type-checker cannot see:
@@ -24,7 +25,18 @@ ungated week risks the first silent regression. This is the repo's first lint in
 repo-level (root `devDependencies`) front-end tooling, and it wires a new cross-cutting step into CI — a
 process decision worth recording, the front-end analogue of the existing `dotnet format` gate on the C# side.
 
-## Decision
+## Considered Options
+
+* No ESLint (status quo) — hold the conventions by review vigilance and a hand-run grep census.
+* The `recommendedTypeChecked` preset — measured at ~1,300 findings on the current codebase.
+* A narrow, flat-config gate covering only the four load-bearing conventions.
+
+## Decision Outcome
+
+Chosen option: "A narrow, flat-config gate covering only the four load-bearing conventions", because
+`recommendedTypeChecked` measured ~1,300 findings (a follow-up ratchet, not a zero-rewrite adoption),
+and every ungated week under the status quo risks the first silent regression of a convention review
+alone had been holding.
 
 We will adopt a **narrow, flat-config ESLint gate** over both front-end packages:
 
@@ -34,8 +46,8 @@ We will adopt a **narrow, flat-config ESLint gate** over both front-end packages
 - Only the rules that encode the four conventions — `@typescript-eslint/no-floating-promises` /
   `no-misused-promises`, `react-hooks/rules-of-hooks` / `exhaustive-deps`, `no-restricted-properties`
   (getElementById), and `no-restricted-syntax` (the `innerHTML` / `outerHTML` / `insertAdjacentHTML`
-  HTML-injection sinks) — **not** the `recommendedTypeChecked` preset (measured ~1,300 findings; a
-  follow-up ratchet). tsc + review stay authoritative for style; no Prettier.
+  HTML-injection sinks) — **not** the `recommendedTypeChecked` preset. tsc + review stay authoritative
+  for style; no Prettier.
 - Everything staged so adoption needs **zero mass rewrites**: rules are `error` where prod is already green,
   `off` in tests/stories (a documented follow-up for the ~93 test floating-promises), and the `innerHTML`
   ban carries a two-tier allow-list — permanent imperative islands (CodeMirror, maxGraph, the host seam) off
