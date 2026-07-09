@@ -149,6 +149,45 @@ public class OperatorNeedsAnalyzerTests
     }
 
     /// <summary>
+    /// Regression for #1289: <c>ScalarOpWalker.InferOperand</c> used to classify ONLY a bare
+    /// <see cref="IdentifierExpr"/>/<see cref="LiteralExpr"/> operand, so a compound operand — here a
+    /// bare <c>ConditionalExpr</c> over a value-object type — was invisible to it and the multiply/divide
+    /// need was never recorded, even though the emitter still lowered the operator unconditionally
+    /// (a real Rust `cargo check` E0369). <see cref="ValueObjectArithmeticWalker"/> (the sibling
+    /// <c>+</c>/<c>-</c> walker) already resolves the operand's full inferred type and has no such gap.
+    /// </summary>
+    [Fact]
+    public void Scalar_multiply_and_divide_needs_recognize_a_conditional_value_object_operand()
+    {
+        const string source = """
+            context Shop {
+              value Price {
+                amount: Decimal
+              }
+              value Mix {
+                a: Price
+                b: Price
+                flag: Bool
+                scaledConditional: Price = (if flag then a else b) * 2
+                dividedConditional: Price = (if flag then a else b) / 4
+              }
+            }
+            """;
+
+        CompileResult result = new KoineCompiler().Compile(source, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        KoineModel model = result.Model!;
+        ModelIndex index = new SemanticModel(model).Index;
+
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+
+        needs["Price"].MultiplyFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+        needs["Price"].DivideFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+    }
+
+    /// <summary>
     /// <see cref="OperatorNeedsAnalyzer.BuildOperatorNeeds"/> is cached per (model, index) so that the
     /// four public projections and <see cref="OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds"/> share
     /// one site enumeration across separate calls, not just within one (#836) — a repeat call with the
