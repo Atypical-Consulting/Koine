@@ -124,7 +124,34 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // a stale term). #1188 (ADR 0009) focuses the active context's NODE on the Context Map centre — the
   // `emphasiseContextMapScope` helper (a `.koi-svg-node[data-qname]` mark mirroring applySelectionHighlight)
   // called from paintContextMap and the scope fan-out. Combined measured end-state 2568 + 2; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2570 },
+  // Lowered 2570 → 1259: #985's four-task decomposition is complete. Task 1 extracted contextMapPanel.tsx,
+  // Task 2 activeContextController.ts, Task 3 surfaceLoaders.tsx, Task 4 centerDeckController.tsx (each
+  // ratcheted below as its own row); this Task 5 sweep confirmed (via `tsc --noEmit`'s noUnusedLocals/
+  // noUnusedParameters) the facade holds nothing dead — it retains only the public exports, the deps
+  // partitioning/wiring that constructs the four sub-modules and injects their cross-module hooks, the
+  // selection handle + its store subscription (#980), renderSelectedInspector + the #221 mobile sheet, the
+  // joined model index (ensureModelIndex/buildDomainIndex/getCachedDomainIndex), applySelectionHighlight
+  // (left shallow for #992), renderCanvasPalette, and dispose() (sub-modules torn down before the deck
+  // Preact trees unmount). Measured end-state (1234), ceil(1234 × 1.02) = 1259.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 1259 },
+  // Frozen 2026-07-09 at 281 LOC, ceil(281 × 1.02) = 287. #985 Task 1's new sibling — the Context Map
+  // panel (maxGraph handle lifecycle, Graph/Table toggle, hover tooltip, ADR 0009 scope-focus repaint)
+  // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
+  { file: 'src/shell/inspector/contextMapPanel.tsx', maxLines: 287 },
+  // Frozen 2026-07-09 at 254 LOC, ceil(254 × 1.02) = 260. #985 Task 2's new sibling — the #146
+  // bounded-context scope switcher (handle, per-workspace persist/restore, status-bar sync, context-list
+  // refresh) extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
+  { file: 'src/shell/inspector/activeContextController.ts', maxLines: 260 },
+  // Frozen 2026-07-09 at 876 LOC, ceil(876 × 1.02) = 894. #985 Task 3's new sibling — the eleven lazy
+  // surface loaders (Generated preview, diagrams, glossary, left-rail model, ADR/Notes docs, Source
+  // Control, Events/Relationships, Compatibility check) consolidated onto the docViews slice and
+  // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
+  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 894 },
+  // Frozen 2026-07-09 at 721 LOC, ceil(721 × 1.02) = 736. #985 Task 4's new sibling — the deck/chrome
+  // orchestration (center/deck/facet tabs, right-rail stripe, rail-axis switch, left morph-collapse,
+  // bottom-strip tabs/collapse/resizer) extracted from inspectorController.tsx. Guards it from regrowing
+  // unguarded — see #981/#757.
+  { file: 'src/shell/inspector/centerDeckController.tsx', maxLines: 736 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   // Lowered 2250 → 517: #987's seven-task split carved every category out into prefsSections/ (Appearance,
