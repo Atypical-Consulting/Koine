@@ -45,8 +45,11 @@ export function useReadableStore<T>(store: ReadableStore<T>): T {
   useEffect(() => {
     // The store (or its slice) may have changed between the render above and this effect committing —
     // resync before subscribing so that window can't drop an update.
-    setState(store.getState());
-    return store.subscribe(setState);
+    setState(() => store.getState());
+    // Wrap in a thunk (`() => next`), not `setState` directly: `T` is generic and unconstrained, so a
+    // future ReadableStore<SomeFunctionType> would otherwise have its VALUE misread as a `useState`
+    // updater function (`(prevState) => newState`) instead of the new state itself.
+    return store.subscribe((next) => setState(() => next));
   }, [store]);
   return state;
 }

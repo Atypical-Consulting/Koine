@@ -1,5 +1,12 @@
 import type { StoreApi } from 'zustand/vanilla';
+import { shallow } from 'zustand/shallow';
 import type { ReadableStore } from '@atypical/koine-ui';
+
+// Re-exported so call sites (readableStores.ts) reach for the equality helper via this adapter module
+// rather than importing `zustand/shallow` directly — keeps "which equality am I using" a one-import
+// question. It's zustand's own `shallow` (a general structural-equality check that also handles
+// Maps/Sets/iterables, not just plain objects), not a hand-rolled reimplementation.
+export { shallow as shallowEqual };
 
 /**
  * Adapts a Koine Studio Zustand `StoreApi<S>` + selector into the generic `ReadableStore<T>` contract
@@ -15,9 +22,9 @@ import type { ReadableStore } from '@atypical/koine-ui';
  *
  * `isEqual` defaults to `Object.is` (Zustand's own selector-equality default, and correct whenever the
  * selector returns a value that's reference-stable across unrelated writes — e.g. picking a single
- * immutable field straight off the state). Pass {@link shallowEqual} when the selector builds a fresh
- * object each call (e.g. `HistoryControls`'s `{ canUndo, canRedo }` slice) so two structurally-equal
- * calls don't spuriously notify.
+ * immutable field straight off the state). Pass {@link shallowEqual} (zustand's `shallow`) when the
+ * selector builds a fresh object each call (e.g. `HistoryControls`'s `{ canUndo, canRedo }` slice) so two
+ * structurally-equal calls don't spuriously notify.
  */
 export function zustandToReadableStore<S, T>(
   store: StoreApi<S>,
@@ -36,19 +43,4 @@ export function zustandToReadableStore<S, T>(
       });
     },
   };
-}
-
-/**
- * Shallow (one-level, own-enumerable-keys) equality for plain object slices — pass to
- * {@link zustandToReadableStore} when the selector returns a freshly built object each call (so its
- * identity is never stable) but its top-level fields are primitives that compare correctly with
- * `Object.is` (numbers, strings, booleans — NOT nested objects/arrays, which would still be compared by
- * reference).
- */
-export function shallowEqual<T extends Record<string, unknown>>(a: T, b: T): boolean {
-  if (Object.is(a, b)) return true;
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => Object.is(a[key], b[key]));
 }

@@ -94,21 +94,6 @@ describe('zustandToReadableStore', () => {
   });
 });
 
-describe('shallowEqual', () => {
-  test('returns true for the same reference', () => {
-    const obj = { a: 1 };
-    expect(shallowEqual(obj, obj)).toBe(true);
-  });
-
-  test('returns true for two different objects with equal own-enumerable primitive fields', () => {
-    expect(shallowEqual({ a: 1, b: 'x' }, { a: 1, b: 'x' })).toBe(true);
-  });
-
-  test('returns false when a field differs', () => {
-    expect(shallowEqual({ a: 1 }, { a: 2 })).toBe(false);
-  });
-
-  test('returns false when key counts differ', () => {
-    expect(shallowEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
-  });
-});
+// `shallowEqual` is a re-export of zustand's own `shallow` (see readableStoreAdapter.ts) — its own
+// behavior is zustand's to test; the coverage above pins that THIS adapter wires it in correctly as an
+// `isEqual` implementation, which is the part actually owned here.

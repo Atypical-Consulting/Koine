@@ -18,6 +18,14 @@ export function createHistoryControlsStore(store: StoreApi<AppState>) {
  * `ReadableStore<WorkspaceProblemsSlice>`, classifying via the shared `diagnosticsSummary` (issue #193's
  * single home for that classification) so the badge's counts can never drift from the diagnostics strip
  * or status pill.
+ *
+ * Known tradeoff: `zustandToReadableStore`'s listener re-runs this selector (flatten + classify) on
+ * EVERY app-store write, not just diagnostics ones — the ORIGINAL component selected the raw
+ * `diagnosticsByUri` reference (near-zero cost) and only classified inside the render body, so it only
+ * paid this cost on an actual diagnostics change. `shallowEqual` still prevents an unrelated write from
+ * causing a re-render, but not the recomputation itself. Acceptable for this prototype's scale (a
+ * per-write linear scan over the workspace's diagnostics); reconsider (e.g. gate the selector on a
+ * cheap upstream reference check first) if a next-tranche panel's classification gets more expensive.
  */
 export function createWorkspaceProblemsStore(store: StoreApi<AppState>) {
   return zustandToReadableStore(
