@@ -10,22 +10,14 @@ import {
     loadSettings,
     patchSettings,
     saveSettings,
-    saveApiKey,
     clearApiKey,
-    whenSecretsReady,
     clearKeybindingOverrides,
     DEFAULT_SETTINGS,
     type Settings,
 } from "@/settings/persistence";
 import type { McpEndpoint } from "@/host/types";
 import { setTheme } from "@/settings/theme";
-import {
-    row,
-    panel,
-    toggle,
-    select,
-    metricInput,
-} from "@/settings/prefsControls";
+import { row, panel, select } from "@/settings/prefsControls";
 import { createScopeKit } from "@/settings/prefsSections/scopeKit";
 import type { SectionCtx } from "@/settings/prefsSections/types";
 import { buildAppearanceSection } from "@/settings/prefsSections/appearance";
@@ -33,8 +25,8 @@ import { buildAboutSection } from "@/settings/prefsSections/about";
 import { buildEditorSection } from "@/settings/prefsSections/editor";
 import { buildKeyboardSection } from "@/settings/prefsSections/keyboard";
 import { buildOutputSection } from "@/settings/prefsSections/output";
-import { createJsonView } from "@/editor/editor";
-import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
+import { buildAssistantSection } from "@/settings/prefsSections/assistant";
+import { buildMcpSection } from "@/settings/prefsSections/mcp";
 
 export interface PrefsCallbacks {
     /** Fired after every committed change with the merged, persisted Settings. */
@@ -92,17 +84,9 @@ export interface PrefsCallbacks {
     onKeybindingsChanged?(): void;
 }
 
-// Assistant temperature bounds (#750); mirrors the load-time clamp in persistence.ts. (Editor's own
-// font/line-height/tab-size/canvas-zoom bounds moved with it into prefsSections/editor.ts, #987 task 4.)
-const TEMP_MIN = 0;
-const TEMP_MAX = 2;
-const TEMP_STEP = 0.1;
-
-// MCP sidecar loopback-port bounds (#735 follow-up): a TCP port; 0 = OS-assigned. Mirror the load-time
-// clamp in persistence.ts (coerceMcpPort) so what the input accepts == what survives a reload.
-const MCP_PORT_MIN = 0;
-const MCP_PORT_MAX = 65535;
-const MCP_PORT_STEP = 1;
+// (Editor's own font/line-height/tab-size/canvas-zoom bounds moved with it into prefsSections/editor.ts,
+// #987 task 4; Assistant's temperature bounds and MCP's port bounds moved with THEM into
+// prefsSections/assistant.ts and prefsSections/mcp.ts respectively, #987 task 6.)
 
 // Category rail icons, drawn in the studio's 16×16 line-icon idiom (stroke = currentColor).
 const ICON = {
@@ -210,10 +194,13 @@ export function mountPreferencesPane(
     const sectionCtx: SectionCtx = { commit, onChange: cb.onChange };
 
     // --- control factories ----------------------------------------------------
-    // row, panel, toggle, select, and metricInput are the pure, callback-driven control factories
-    // hoisted to module scope in @/settings/prefsControls (#987 task 1) — they don't close over
-    // `cb`/`commit`, so they're imported above rather than defined here. `langPicker` is likewise a pure
-    // factory there, imported directly by prefsSections/output.ts (#987 task 4) rather than here.
+    // row, panel, and select are the pure, callback-driven control factories hoisted to module scope in
+    // @/settings/prefsControls (#987 task 1) that this module still uses directly (Advanced's traceRow /
+    // advancedPanel) — they don't close over `cb`/`commit`, so they're imported above rather than defined
+    // here. `toggle` and `metricInput` were used the same way but their only remaining call sites moved
+    // with Assistant/MCP into prefsSections/{assistant,mcp}.ts (#987 task 6), so they're no longer
+    // imported here. `langPicker` is likewise a pure factory there, imported directly by
+    // prefsSections/output.ts (#987 task 4) rather than here.
 
     // The segmented radio group (the User/Workspace scope toggles) is likewise the shared,
     // keyboard-navigable `segmented()` helper from @/settings/prefsControls, so settingsPage.tsx can
@@ -266,504 +253,24 @@ export function mountPreferencesPane(
     const output = buildOutputSection(sectionCtx, { scopeKit });
 
     // --- Assistant (AI) -------------------------------------------------------
+    // Construction + control wiring — including the Compiler-tools/grammar mutual exclusion (#447) and
+    // the on-open secret back-fill (backfillSecret) — extracted whole into prefsSections/assistant.ts
+    // (#987 task 6).
 
-    const aiProviderSelect = select([
-        { value: "anthropic", label: "Anthropic (Claude)" },
-        { value: "openai", label: "OpenAI-compatible" },
-    ] as const);
+    const assistant = buildAssistantSection(sectionCtx);
 
-    const aiBaseUrlInput = document.createElement("input");
-    aiBaseUrlInput.type = "text";
-    aiBaseUrlInput.className = "koi-text";
-    aiBaseUrlInput.spellcheck = false;
-    aiBaseUrlInput.placeholder = "https://api.openai.com/v1";
-    aiBaseUrlInput.setAttribute("list", "koi-ai-base-presets");
-    const presets = document.createElement("datalist");
-    presets.id = "koi-ai-base-presets";
-    for (const url of [
-        "https://api.openai.com/v1",
-        "http://localhost:11434/v1",
-        "http://localhost:1234/v1",
-    ]) {
-        const opt = document.createElement("option");
-        opt.value = url;
-        presets.appendChild(opt);
-    }
+    // --- MCP server (Settings → MCP) -------------------------------------------
+    // Construction + control wiring — including the sidecar start/stop lifecycle, the copy-confirmation
+    // timers, the CodeMirror recipe view, and the mcpGen supersession counter — extracted whole into
+    // prefsSections/mcp.ts (#987 task 6, the other section with an async lifecycle alongside Assistant).
+    // mcp does take sectionCtx (its mcpEnableToggle/applyMcpEnabled/applyMcpPort commits route through
+    // ctx.commit), plus its own narrow deps for the three MCP-shaped PrefsCallbacks members.
 
-    const aiKeyInput = document.createElement("input");
-    aiKeyInput.type = "password";
-    aiKeyInput.className = "koi-text";
-    aiKeyInput.autocomplete = "off";
-    aiKeyInput.placeholder = "sk-…  (blank for local Ollama / LM Studio)";
-
-    const aiModelInput = document.createElement("input");
-    aiModelInput.type = "text";
-    aiModelInput.className = "koi-text";
-    aiModelInput.spellcheck = false;
-    aiModelInput.placeholder = "claude-opus-4-8";
-
-    // #447: Compiler tools and grammar-constraint are mutually exclusive — a GBNF that only accepts `.koi`
-    // can't also emit the tool-call JSON the agentic loop needs, so with both on the grammar would
-    // silently disable the tools. Enabling one CLEARS the other (grammar is the default winner); the
-    // losing toggle is greyed by syncAiExclusivity() so the broken pairing can never be set.
-    const aiAgenticTools = toggle("Compiler tools", (on) => {
-        if (on) aiConstrainGrammar.set(false); // tools win this turn → reflect grammar going off
-        commit(
-            on
-                ? { aiAgenticTools: true, aiConstrainGrammar: false }
-                : { aiAgenticTools: false },
-        );
-        syncAiExclusivity();
+    const mcp = buildMcpSection(sectionCtx, {
+        mcpEndpoint: cb.mcpEndpoint,
+        mcpStop: cb.mcpStop,
+        mcpHostable: cb.mcpHostable,
     });
-    const aiInlineCompletions = toggle("AI inline completions", (on) =>
-        commit({ aiInlineCompletions: on }),
-    );
-    const aiConstrainGrammar = toggle(
-        "Constrain AI output to the Koine grammar",
-        (on) => {
-            if (on) aiAgenticTools.set(false); // grammar wins this turn → reflect tools going off
-            commit(
-                on
-                    ? { aiConstrainGrammar: true, aiAgenticTools: false }
-                    : { aiConstrainGrammar: false },
-            );
-            syncAiExclusivity();
-        },
-    );
-
-    // Reflect the mutual exclusion in the UI: whichever of the two is on disables (greys) the other, so
-    // it can't be turned on alongside. Reads the live aria-checked state so it stays correct after each
-    // toggle and on open. A function declaration (hoisted) so the toggle closures above can call it.
-    function syncAiExclusivity(): void {
-        const toolsOn =
-            aiAgenticTools.el.getAttribute("aria-checked") === "true";
-        const grammarOn =
-            aiConstrainGrammar.el.getAttribute("aria-checked") === "true";
-        aiAgenticTools.setDisabled(grammarOn);
-        aiConstrainGrammar.setDisabled(toolsOn);
-    }
-
-    // Assistant sampling temperature (#750), clamped 0..2; sent on every assistant request (getTemperature).
-    const temperatureInput = metricInput(
-        TEMP_MIN,
-        TEMP_MAX,
-        TEMP_STEP,
-        () => loadSettings().aiTemperature,
-        (v) => commit({ aiTemperature: v }),
-    );
-    const temperatureRow = row(
-        "Temperature",
-        "Assistant sampling temperature (0–2). Lower is steadier; higher is more varied.",
-        temperatureInput,
-    );
-
-    const baseUrlRow = row(
-        "Base URL",
-        "Endpoint for the OpenAI-compatible provider.",
-        aiBaseUrlInput,
-    );
-    const agenticToolsRow = row(
-        "Compiler tools",
-        "Let the model validate, compile and format your model mid-chat. Off keeps replies streaming — some local servers (LM Studio) stop streaming when tools are offered. Mutually exclusive with grammar-constraint below — turn that off to use tools.",
-        aiAgenticTools.el,
-    );
-    const inlineCompletionsRow = row(
-        "AI inline completions",
-        "Predict the next line as ghost text while you type; Tab accepts, Esc dismisses. Off by default — it sends the surrounding buffer to the provider above on each idle pause, so it spends tokens and no-ops without a configured provider.",
-        aiInlineCompletions.el,
-    );
-    const constrainGrammarRow = row(
-        "Constrain AI output to the Koine grammar",
-        "Guarantee the assistant's generated .koi parses: grammar-capable local models are constrained to the Koine grammar, while other providers validate-and-repair the model before Apply is enabled. Mutually exclusive with Compiler tools — grammar wins, since a grammar-constrained model can't also call tools.",
-        aiConstrainGrammar.el,
-    );
-    function syncProviderFields(): void {
-        const isOpenai = aiProviderSelect.value === "openai";
-        baseUrlRow.hidden = !isOpenai;
-        // Compiler tool-use is supported on BOTH providers now (the Anthropic adapter advertises the
-        // koine tools too — see runAnthropic in ai.ts), so the opt-in applies regardless of provider.
-        agenticToolsRow.hidden = false;
-        aiModelInput.placeholder = isOpenai
-            ? "gpt-4o  ·  qwen2.5-coder  ·  …"
-            : "claude-opus-4-8";
-    }
-
-    aiProviderSelect.addEventListener("change", () => {
-        const aiProvider =
-            aiProviderSelect.value === "openai" ? "openai" : "anthropic";
-        const merged = patchSettings({ aiProvider });
-        // Swap the model field to the model remembered for the now-selected provider, so a Claude id is
-        // never left sitting in front of an OpenAI endpoint (and vice-versa).
-        aiModelInput.value =
-            aiProvider === "openai" ? merged.aiModelOpenai : merged.aiModel;
-        syncProviderFields();
-        cb.onChange(merged);
-    });
-    aiBaseUrlInput.addEventListener("change", () => {
-        const url = aiBaseUrlInput.value.trim();
-        commit({ aiBaseUrl: url || "https://api.openai.com/v1" });
-    });
-    // The key is a secret: it goes through the encrypted store, not the plaintext settings blob.
-    aiKeyInput.addEventListener("change", () => {
-        void saveApiKey(aiKeyInput.value.trim()).then(() =>
-            cb.onChange(loadSettings()),
-        );
-    });
-    aiModelInput.addEventListener("change", () => {
-        const model = aiModelInput.value.trim();
-        commit(
-            aiProviderSelect.value === "openai"
-                ? { aiModelOpenai: model }
-                : { aiModel: model },
-        );
-    });
-
-    const assistantPanel = panel(
-        "assistant",
-        row("Provider", "Which API the assistant talks to.", aiProviderSelect),
-        baseUrlRow,
-        row(
-            "API key",
-            "Encrypted in this browser and never leaves this device — sent only to the provider you choose.",
-            aiKeyInput,
-        ),
-        row("Model", "The model id the assistant requests.", aiModelInput),
-        temperatureRow,
-        agenticToolsRow,
-        inlineCompletionsRow,
-        constrainGrammarRow,
-        presets,
-    );
-
-    // --- MCP server (Settings → MCP) ------------------------------------------
-    // The desktop shell hosts a `koine mcp --http` sidecar; this panel toggles it on/off, shows the
-    // right copy-paste recipe per client, and self-probes the endpoint to confirm an LLM can reach
-    // Koine's tools. The web build can't host a server, so the toggle is disabled and only the recipes
-    // (pointing at the `koine mcp --http` CLI) are shown.
-
-    // URL shown inside HTTP recipes before a live endpoint resolves (or on the web build).
-    const MCP_URL_PLACEHOLDER = "http://127.0.0.1:PORT/mcp";
-
-    const mcpEnableToggle = toggle(
-        "Enable MCP server",
-        (on) => void applyMcpEnabled(on),
-    );
-    const mcpEnableRow = row(
-        "Enable MCP server",
-        "Serve Koine’s compiler tools to an external MCP client (LM Studio, Claude Desktop…).",
-        mcpEnableToggle.el,
-    );
-
-    // A browser tab can't host a server — surfaced as a caption when !mcpHostable.
-    const mcpWebHint = document.createElement("p");
-    mcpWebHint.className = "koi-mcp-note";
-    mcpWebHint.textContent =
-        "A browser tab can’t host a server. Run `koine mcp --http` from the CLI, then use the recipe below.";
-    mcpWebHint.hidden = true;
-
-    // Endpoint URL (read-only) + Copy mcp.json — the quick path for a URL client.
-    const mcpUrlInput = document.createElement("input");
-    mcpUrlInput.type = "text";
-    mcpUrlInput.className = "koi-text";
-    mcpUrlInput.readOnly = true;
-    mcpUrlInput.spellcheck = false;
-    mcpUrlInput.placeholder = "starting…";
-    // This input is appended directly (not via row(), which assigns id/name elsewhere), so give it a
-    // stable id/name (Chrome form-field id/name check; the aria-label stays the accessible name).
-    mcpUrlInput.id = "koi-mcp-url";
-    mcpUrlInput.name = "koi-mcp-url";
-    mcpUrlInput.setAttribute("aria-label", "Koine MCP endpoint URL");
-
-    const mcpCopyBtn = document.createElement("button");
-    mcpCopyBtn.type = "button";
-    mcpCopyBtn.className = "koi-set-action";
-    mcpCopyBtn.textContent = "Copy mcp.json";
-    let mcpCopyTimer: ReturnType<typeof setTimeout> | undefined;
-    mcpCopyBtn.addEventListener("click", () => {
-        const url = mcpUrlInput.value.trim();
-        if (!url) return;
-        navigator.clipboard
-            .writeText(mcpJsonSnippet(url))
-            .then(() => (mcpCopyBtn.textContent = "Copied ✓"))
-            .catch(() => (mcpCopyBtn.textContent = "Copy failed"))
-            .finally(() => {
-                clearTimeout(mcpCopyTimer);
-                mcpCopyTimer = setTimeout(
-                    () => (mcpCopyBtn.textContent = "Copy mcp.json"),
-                    1600,
-                );
-            });
-    });
-
-    const mcpControl = document.createElement("div");
-    mcpControl.className = "koi-mcp-control";
-    mcpControl.append(mcpUrlInput, mcpCopyBtn);
-    const mcpEndpointRow = row(
-        "Endpoint",
-        "The loopback URL a URL-based client connects to.",
-        mcpControl,
-    );
-
-    // Fixed loopback port (#735 follow-up). A clamped numeric input (0..65535; 0 = OS-assigned). On change it
-    // persists mcpPort and restarts the sidecar via the SAME stop→start path the enable toggle uses, so a
-    // running server rebinds to the new port and the endpoint/recipe repaint (with a busy-port fallback warning).
-    const mcpPortInput = metricInput(
-        MCP_PORT_MIN,
-        MCP_PORT_MAX,
-        MCP_PORT_STEP,
-        () => loadSettings().mcpPort,
-        (v) => void applyMcpPort(v),
-    );
-    const mcpPortRow = row(
-        "Port",
-        "Fixed loopback port for the MCP server (0 = pick automatically). Default 56463.",
-        mcpPortInput,
-    );
-
-    // Per-client recipe picker.
-    const mcpClientSelect = select(
-        MCP_CLIENTS.map((c) => ({ value: c.id, label: c.label })),
-    );
-    mcpClientSelect.addEventListener("change", () => {
-        commit({ mcpClient: mcpClientSelect.value as Settings["mcpClient"] });
-        renderRecipe();
-    });
-    const mcpClientRow = row(
-        "Client",
-        "Pick your MCP client for its exact setup snippet.",
-        mcpClientSelect,
-    );
-
-    // The recipe body: a heading + Copy, the snippet, the config hint, and an optional caveat.
-    // The snippet is a read-only CodeMirror JSON view (createJsonView) so it's syntax-highlighted like
-    // every other code surface in Studio; Copy reads its text back verbatim via getText(). tabIndex
-    // keeps the box keyboard-focusable/scrollable (CodeMirror's read-only content isn't in the tab
-    // order); the accessible name lives on the view's role=textbox content, so the wrapper doesn't
-    // repeat it.
-    const mcpSnippet = document.createElement("div");
-    mcpSnippet.className = "koi-mcp-snippet";
-    mcpSnippet.tabIndex = 0;
-    const mcpSnippetView = createJsonView(mcpSnippet);
-
-    const mcpRecipeCopy = document.createElement("button");
-    mcpRecipeCopy.type = "button";
-    mcpRecipeCopy.className = "koi-set-action";
-    mcpRecipeCopy.textContent = "Copy";
-    let mcpRecipeTimer: ReturnType<typeof setTimeout> | undefined;
-    mcpRecipeCopy.addEventListener("click", () => {
-        navigator.clipboard
-            .writeText(mcpSnippetView.getText())
-            .then(() => (mcpRecipeCopy.textContent = "Copied ✓"))
-            .catch(() => (mcpRecipeCopy.textContent = "Copy failed"))
-            .finally(() => {
-                clearTimeout(mcpRecipeTimer);
-                mcpRecipeTimer = setTimeout(
-                    () => (mcpRecipeCopy.textContent = "Copy"),
-                    1600,
-                );
-            });
-    });
-
-    const mcpRecipeHead = document.createElement("div");
-    mcpRecipeHead.className = "koi-mcp-recipe-head";
-    const mcpRecipeTitle = document.createElement("span");
-    mcpRecipeTitle.className = "koi-set-label";
-    mcpRecipeTitle.textContent = "Configuration";
-    mcpRecipeHead.append(mcpRecipeTitle, mcpRecipeCopy);
-
-    const mcpRecipeHint = document.createElement("p");
-    mcpRecipeHint.className = "koi-mcp-hint";
-    const mcpRecipeNote = document.createElement("p");
-    mcpRecipeNote.className = "koi-mcp-note";
-
-    const mcpRecipe = document.createElement("div");
-    mcpRecipe.className = "koi-mcp-recipe";
-    mcpRecipe.append(mcpRecipeHead, mcpSnippet, mcpRecipeHint, mcpRecipeNote);
-
-    function renderRecipe(): void {
-        const client =
-            MCP_CLIENTS.find((c) => c.id === mcpClientSelect.value) ??
-            MCP_CLIENTS[0];
-        const url = mcpUrlInput.value.trim() || MCP_URL_PLACEHOLDER;
-        mcpSnippetView.setContent(client.snippet(url));
-        mcpRecipeHint.textContent = client.configHint;
-        mcpRecipeNote.textContent = client.note ?? "";
-        mcpRecipeNote.hidden = !client.note;
-    }
-
-    // Connection test: Studio probes the endpoint as a minimal MCP client and reports the tool count.
-    const mcpTestBtn = document.createElement("button");
-    mcpTestBtn.type = "button";
-    mcpTestBtn.className = "koi-set-action";
-    mcpTestBtn.textContent = "Test connection";
-
-    const mcpStatus = document.createElement("span");
-    mcpStatus.className = "koi-mcp-status";
-    mcpStatus.setAttribute("role", "status");
-    mcpStatus.setAttribute("aria-live", "polite");
-
-    type McpStatusKind = "idle" | "off" | "checking" | "ok" | "fail" | "warn";
-    const STATUS_LABEL: Record<McpStatusKind, string> = {
-        idle: "Not checked",
-        off: "Server off",
-        checking: "Checking…",
-        ok: "Connected",
-        fail: "Not reachable",
-        warn: "Port fallback",
-    };
-    function setMcpStatus(kind: McpStatusKind, text?: string): void {
-        mcpStatus.dataset.state = kind;
-        mcpStatus.textContent = text ?? STATUS_LABEL[kind];
-    }
-
-    const mcpTestControl = document.createElement("div");
-    mcpTestControl.className = "koi-mcp-control";
-    mcpTestControl.append(mcpTestBtn, mcpStatus);
-    const mcpTestRow = row(
-        "Connection",
-        "Confirm an LLM can reach Koine’s tools at this URL.",
-        mcpTestControl,
-    );
-
-    // Monotonic token bumped by every enable/disable/reset/open. A slow async result (endpoint launch,
-    // probe) checks its captured token before writing the UI and drops itself if a newer action has
-    // since superseded it — so a late enable can't re-show a URL for a server the user just disabled,
-    // and a probe can't overwrite "Server off" after a disable.
-    let mcpGen = 0;
-
-    mcpTestBtn.addEventListener("click", () => void runMcpTest());
-    async function runMcpTest(): Promise<void> {
-        if (!loadSettings().mcpEnabled) return setMcpStatus("off");
-        const url = mcpUrlInput.value.trim();
-        if (!url) return setMcpStatus("fail", "No endpoint");
-        const gen = ++mcpGen;
-        setMcpStatus("checking");
-        const result = await probeMcp(url);
-        if (gen !== mcpGen) return; // a newer toggle/test ran while we probed — don't clobber its status
-        if (result.ok)
-            setMcpStatus("ok", `Connected ✓ — ${result.tools.length} tools`);
-        else setMcpStatus("fail");
-    }
-
-    // Resolve (and on the desktop, lazily launch) the MCP sidecar endpoint, or null if it can't be
-    // brought up. DOM-free so callers can guard the write against a newer action via mcpGen.
-    async function resolveMcpEndpoint(): Promise<McpEndpoint | null> {
-        if (!cb.mcpEndpoint) return null;
-        try {
-            return (await cb.mcpEndpoint()) ?? null;
-        } catch {
-            return null;
-        }
-    }
-
-    // The port number the server actually bound, parsed from its loopback URL (falls back to the raw URL).
-    function portFromUrl(url: string): string {
-        try {
-            return new URL(url).port || url;
-        } catch {
-            return url;
-        }
-    }
-
-    // The busy-port fallback warning shown in the status span: the CONFIGURED port was busy, so the host
-    // bound the ACTUAL (OS-assigned) one — copied client configs still pointing at the configured port
-    // won't reach the server. Requested port = the persisted mcpPort setting; actual = parsed from the URL.
-    function fallbackWarning(url: string): string {
-        const requested = loadSettings().mcpPort;
-        return `Port ${requested} was busy — serving on ${portFromUrl(url)}. Update any copied client configs.`;
-    }
-
-    // Paint the "server off" state: no endpoint, the recipe on its placeholder URL, status off.
-    function showMcpOff(): void {
-        mcpUrlInput.value = "";
-        renderRecipe();
-        setMcpStatus("off");
-    }
-
-    // Apply an enable/(re)start result to the UI: reveal the URL + recipe, surface a busy-port fallback as a
-    // warning (requested vs actual port), or surface a start failure (a null endpoint means the sidecar
-    // never came up) instead of a benign "Not checked".
-    function showMcpStarted(endpoint: McpEndpoint | null): void {
-        mcpUrlInput.value = endpoint?.url ?? "";
-        renderRecipe();
-        if (!endpoint) setMcpStatus("fail", "Server didn’t start");
-        else if (endpoint.fallback) setMcpStatus("warn", fallbackWarning(endpoint.url));
-        else setMcpStatus("idle");
-    }
-
-    // Toggle the sidecar: start + reveal the endpoint on enable, stop + clear it on disable.
-    async function applyMcpEnabled(on: boolean): Promise<void> {
-        const gen = ++mcpGen;
-        commit({ mcpEnabled: on });
-        if (on) {
-            const endpoint = await resolveMcpEndpoint();
-            if (gen !== mcpGen) return; // superseded by a newer toggle/reset — drop this stale result
-            showMcpStarted(endpoint);
-        } else {
-            await cb.mcpStop?.();
-            if (gen !== mcpGen) return;
-            showMcpOff();
-        }
-        syncMcpUi(on);
-    }
-
-    // Persist a new port and, when a server is actually running here, rebind it: stop the sidecar then
-    // (re)start it through the SAME startMcpSidecarIfEnabled path the enable toggle uses (#735), so the
-    // endpoint/recipe repaint on the new port (and a busy port surfaces the fallback warning). Guarded by
-    // mcpGen so a stale restart can't repaint over a newer toggle/reset. When MCP is disabled (or the host
-    // can't serve one) there is nothing running, so the change just persists silently.
-    async function applyMcpPort(port: number): Promise<void> {
-        commit({ mcpPort: port });
-        const s = loadSettings();
-        if (!(s.mcpEnabled && cb.mcpHostable !== false)) return;
-        const gen = ++mcpGen;
-        await cb.mcpStop?.();
-        if (gen !== mcpGen) return;
-        const endpoint = await startMcpSidecarIfEnabled(cb, s);
-        if (gen !== mcpGen) return;
-        showMcpStarted(endpoint);
-    }
-
-    // Reflect enabled state + host capability: the endpoint and test rows only matter when a server is
-    // actually running here; the recipes are always useful, so they stay visible.
-    function syncMcpUi(enabled: boolean = loadSettings().mcpEnabled): void {
-        const hostable = cb.mcpHostable !== false;
-        mcpEnableToggle.el.disabled = !hostable;
-        mcpWebHint.hidden = hostable;
-        mcpEndpointRow.hidden = !hostable || !enabled;
-        mcpPortRow.hidden = !hostable || !enabled;
-        mcpTestRow.hidden = !hostable || !enabled;
-    }
-
-    // The Settings "on show" sidecar (re)start: (re)spawn the desktop sidecar when enabled and reflect the
-    // endpoint in THIS pane's MCP panel. The launch itself is the shared, DOM-free startMcpSidecarIfEnabled
-    // (so the JSON representation, which mounts no pane, fires the same concern); here we add the panel UI,
-    // guarded by mcpGen so a stale resolve can't repaint after a newer toggle/reset/close superseded it.
-    // The bare mount never calls this, so the opt-in server is never spawned before Settings is shown.
-    function startMcpSidecar(): void {
-        const s = loadSettings();
-        if (s.mcpEnabled && cb.mcpHostable !== false) {
-            const gen = ++mcpGen;
-            void startMcpSidecarIfEnabled(cb, s).then((endpoint) => {
-                if (gen === mcpGen) showMcpStarted(endpoint);
-            });
-        } else {
-            ++mcpGen;
-            showMcpOff();
-        }
-        syncMcpUi(s.mcpEnabled);
-    }
-
-    const mcpPanel = panel(
-        "mcp",
-        mcpEnableRow,
-        mcpWebHint,
-        mcpEndpointRow,
-        mcpPortRow,
-        mcpClientRow,
-        mcpRecipe,
-        mcpTestRow,
-    );
 
     // --- Workspace root (shown only when the host can save projects) ----------
 
@@ -862,9 +369,10 @@ export function mountPreferencesPane(
         setTheme(fresh.theme); // theme has its own live-apply path (not covered by applyAppearance)
         populate(fresh); // also repaints the Keyboard panel to the freshly-cleared defaults
         void cb.mcpStop?.(); // defaults disable MCP — stop any running sidecar and reflect it
-        ++mcpGen; // supersede any in-flight enable/probe so it can't repaint the panel after reset
-        showMcpOff();
-        syncMcpUi(false);
+        // showMcpOff() bumps mcp's own mcpGen internally, so it supersedes any in-flight enable/probe
+        // and can't repaint the panel after reset.
+        mcp.showMcpOff();
+        mcp.syncMcpUi(false);
         cb.onChange(fresh); // re-skins accent/motion/editor metrics + soft-wrap via the app's onChange
         cb.onKeybindingsChanged?.(); // live-apply the restored default keymap to the editor
     });
@@ -918,9 +426,9 @@ export function mountPreferencesPane(
             id: "assistant",
             label: "Assistant",
             icon: ICON.assistant,
-            panel: assistantPanel,
+            panel: assistant.panel,
         },
-        { id: "mcp", label: "MCP", icon: ICON.mcp, panel: mcpPanel },
+        { id: "mcp", label: "MCP", icon: ICON.mcp, panel: mcp.panel },
         {
             id: "advanced",
             label: "Advanced",
@@ -1003,26 +511,8 @@ export function mountPreferencesPane(
         // once this re-renders on open (issue #282). The scoped sync below then sets its selection to the
         // effective target — do not let scopeKit.syncAll run ahead of this call.
         output.populate(s);
-        aiProviderSelect.value = s.aiProvider;
-        aiBaseUrlInput.value = s.aiBaseUrl;
-        aiKeyInput.value = s.aiApiKey;
-        aiModelInput.value =
-            s.aiProvider === "openai" ? s.aiModelOpenai : s.aiModel;
-        temperatureInput.value = String(s.aiTemperature);
-        // #447: Compiler-tools and grammar-constraint are mutually exclusive. A legacy persisted state with
-        // BOTH on is the silently-broken combination → normalize to grammar-wins (tools off) and persist
-        // the correction, so the panel never even shows the broken pairing.
-        const bothAiOn = s.aiAgenticTools && s.aiConstrainGrammar;
-        if (bothAiOn) patchSettings({ aiAgenticTools: false });
-        aiAgenticTools.set(bothAiOn ? false : s.aiAgenticTools);
-        aiInlineCompletions.set(s.aiInlineCompletions);
-        aiConstrainGrammar.set(s.aiConstrainGrammar);
-        syncAiExclusivity();
-        mcpEnableToggle.set(s.mcpEnabled);
-        mcpPortInput.value = String(s.mcpPort);
-        mcpClientSelect.value = s.mcpClient;
-        renderRecipe();
-        syncProviderFields();
+        assistant.populate(s);
+        mcp.populate(s);
         // The four workspace-scopable rows (previewTarget, formatOnSave, wordWrap, lspTrace): reflect each
         // row's scope (User/Workspace) from the override store and set its value control to the EFFECTIVE
         // value, so a Workspace row shows its override while a User row shows the user value. Runs after
@@ -1048,11 +538,8 @@ export function mountPreferencesPane(
         void refreshWsRootValue();
         // On a very fast first paint the secret may still be decrypting; back-fill the key once it lands,
         // but never clobber a value the user has already started typing.
-        void whenSecretsReady().then(() => {
-            if (aiKeyInput.value === "")
-                aiKeyInput.value = loadSettings().aiApiKey;
-        });
-        syncMcpUi(s.mcpEnabled); // reflect enabled/host visibility; the actual (re)start is startMcpSidecar
+        assistant.backfillSecret();
+        mcp.syncMcpUi(s.mcpEnabled); // reflect enabled/host visibility; the actual (re)start is startMcpSidecar
         selectCategory(activeIndex, focusTab); // keep the last-open category across opens
     }
 
@@ -1081,11 +568,8 @@ export function mountPreferencesPane(
     // and remove the form root from its container.
     function destroy(): void {
         suspend();
-        ++mcpGen;
-        clearTimeout(mcpCopyTimer);
-        clearTimeout(mcpRecipeTimer);
+        mcp.destroy();
         clearTimeout(disarmTimer);
-        mcpSnippetView.destroy();
         layout.remove();
     }
 
@@ -1094,8 +578,7 @@ export function mountPreferencesPane(
     // (that would steal it from the surrounding page). Baseline the MCP panel to "server off" (renders the
     // placeholder recipe) until the surface is shown and startMcpSidecar runs.
     applyOpenState({ focusTab: false });
-    ++mcpGen;
-    showMcpOff();
+    mcp.showMcpOff();
 
-    return { destroy, refresh, startMcpSidecar, suspend };
+    return { destroy, refresh, startMcpSidecar: mcp.startMcpSidecar, suspend };
 }
