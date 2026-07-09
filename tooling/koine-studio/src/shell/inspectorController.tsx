@@ -20,8 +20,7 @@
 // does not own — rename / structured-edit / save-description / span navigation / the assistant
 // lifecycle). ide.ts wires those and calls the `select*` / `invalidate*` / `load*` methods + `init()`
 // from the palette, the toolbar buttons, and the boot ladder.
-import { render, type VNode } from 'preact';
-import { renderMarkdown } from '@/editor/editor';
+import { render } from 'preact';
 import type { KoineEditor, OutputView } from '@/editor/editor';
 import type {
   CheckResult,
@@ -39,55 +38,36 @@ import type {
 } from '@/lsp/lsp';
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
-import { renderDiagrams } from '@/diagrams/diagrams';
 import { domById, domQueryAll } from '@/shared/domById';
 import { DATA_AXIS, DATA_LAXIS, DATA_RVIEW, LEFT_RAIL_IDS, RSTRIP_BTN_CLASS, axisButtonsSelector, createFloatingMenu, lstripAxisButtonsSelector, type FloatingMenuItem } from '@atypical/koine-ui';
-import { NODE_NAVIGATE_EVENT, setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
+import { NODE_NAVIGATE_EVENT } from '@/diagrams/diagramContract';
 import type {
   AddNodeKind,
   CanvasAnnotationKind,
   AggregateMemberKind,
   DiagramNodeNavigateDetail,
 } from '@/diagrams/diagramContract';
-import { createLayoutStore } from '@/diagrams/layoutStore';
-import { mergeDiagramGraphs } from '@/model/modelTables';
-import { type GlossaryHandlers } from '@/model/glossary';
-import { createDocsStore } from '@/docs/docsStore';
-import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
-import { ALL_CONTEXTS, isAllContexts, scopeDocsFiles, type ContextScope } from '@/model/activeContext';
+import { ALL_CONTEXTS, isAllContexts, type ContextScope } from '@/model/activeContext';
 import type { SelectedElement } from '@/model/selection';
 import { type ModelOutlineHandlers } from '@/model/modelOutline';
 import { mountDomainNavigator, type DomainNavigatorHandle, type TacticalHandlers } from '@/model/domainNavigator';
 import { type InspectorElement, type InspectorHandlers } from '@/model/inspector';
 import { buildModelIndex, lookupElement, resolveInspectableQn, type ModelIndex } from '@/model/modelIndex';
 import { PropertiesPanel } from '@/model/PropertiesPanel';
-import { SourceControlPanel, type SourceControlFocus } from '@/model/SourceControlPanel';
+import type { SourceControlFocus } from '@/model/SourceControlPanel';
 import { SyntaxTreePanel } from '@/model/SyntaxTreePanel';
-import { EventsPanel } from '@/model/EventsPanel';
-import { RelationshipsPanel } from '@/model/RelationshipsPanel';
-import { GlossaryPanel } from '@/model/GlossaryPanel';
-import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { CanvasPalette } from '@/diagrams/CanvasPalette';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
-import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { readRaw, writeRaw } from '@/shell/storage';
 import { DEFAULT_CENTER, DEFAULT_DECK_STATE, isValidCenter, type DeckState, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
-import { currentTheme } from '@/settings/theme';
-import { fileUriToPath, renderCheckMarkdown } from '@/shell/ideUtils';
+import { fileUriToPath } from '@/shell/ideUtils';
 import { DeckSpineConnected } from '@/shell/deck/DeckSpine';
 import { DeckStage } from '@/shell/deck/DeckStage';
-import {
-  ensureOutputScaffold,
-  renderOutputCrumb,
-  renderOutputRail,
-  type OutputRailFile,
-  type OutputScaffold,
-} from '@/shell/outputRail';
 import { createContextMapPanel } from '@/shell/inspector/contextMapPanel';
 import {
   createActiveContextController,
@@ -95,6 +75,7 @@ import {
   type ActiveContextController,
   type ActiveContextHandle,
 } from '@/shell/inspector/activeContextController';
+import { createSurfaceLoaders } from '@/shell/inspector/surfaceLoaders';
 
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
@@ -335,35 +316,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let disposed = false;
 
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via domById()) ---
-  // The Generated preview is a per-file rail beside a single-file viewer (concept-7 "Flush"): the rail
-  // groups files by bounded context and tints them by DDD stereotype; the crumb carries a Copy button for
-  // the SELECTED file. The scaffold is built inside #view-preview (idempotent — ide.tsx built the same one
-  // to mount the CodeMirror OutputView into `.out-code`).
-  const outputScaffold: OutputScaffold = ensureOutputScaffold(domById('view-preview'));
-  // The rail files (with contents) + the selected path; `lastPreview` mirrors the selected file for Copy.
-  let outputFiles: (OutputRailFile & { contents: string })[] = [];
-  let selectedOutputPath: string | null = null;
-  let lastPreview = '';
-  let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.className = 'out-copy';
-  copyBtn.textContent = 'Copy';
-  copyBtn.dataset.tip = 'Copy this file';
-  copyBtn.disabled = true;
-  copyBtn.addEventListener('click', () => {
-    if (!lastPreview) return;
-    void navigator.clipboard
-      .writeText(lastPreview)
-      .then(() => (copyBtn.textContent = 'Copied ✓'))
-      .catch(() => (copyBtn.textContent = 'Copy failed'))
-      .finally(() => {
-        clearTimeout(copyResetTimer);
-        copyResetTimer = setTimeout(() => (copyBtn.textContent = 'Copy'), 1600);
-      });
-  });
-  outputScaffold.crumb.appendChild(copyBtn);
-
+  // The Generated preview host (#view-preview): a per-file rail beside a single-file viewer (concept-7
+  // "Flush"), owned by surfaceLoaders.tsx now (Task 3) — this facade only keeps the lookup it already
+  // needed for chrome purposes (see `previewEl` below) and hands the SAME node to the loaders as a host.
+  //
   // Left-rail host: the Domain axis's strategic/tactical navigator (#453). mountDomainNavigator owns this
   // node — it self-fetches its strategic data and reads the store for altitude + scope — so loadModel
   // mounts it once and thereafter just reloads it. (The former Overview counts surface was removed with
@@ -486,9 +442,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // no-churn guard so re-selecting the same pane doesn't touch storage. The center tabs (Visual / Code /
   // Documentation) are the only switcher now, so what they land on is what a reload restores.
   let persistedCenter: CenterView = initialCenter;
-  // Captured + unsubscribed on dispose (like unsubscribeDirtyCount, and activeContextCtrl's own
-  // subscription) so a deferred center change can't persist on behalf of a torn-down session after
-  // dispose().
+  // Captured + unsubscribed on dispose (like activeContextCtrl's own subscription, and surfaceLoaders'
+  // dirty-count subscription) so a deferred center change can't persist on behalf of a torn-down session
+  // after dispose().
   const unsubscribeCenterPersist = appStore.subscribe((s, prev) => {
     if (s.center === prev.center) return;
     // Never persist a TRANSIENT view (e.g. the gear-launched Settings page): a reload must not restore it
@@ -505,15 +461,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // Extracted to its own module (inspector/activeContextController.ts, #985 Task 2): the scope handle,
   // the per-workspace persist/restore, the status-bar readout sync, the model's context-list refresh (+
   // the docs-coverage ring it ships alongside), and the file-follow behaviour all live there now. This
-  // facade only wires the injected deps + the `rerenderScopedSurfaces` hook below (its BODY — the actual
-  // model/diagram/Files-tree/bottom-table re-filter — stays here until Task 3 rehomes those loaders) and
-  // still owns the status-bar scope-PICKER MENU (a UI concern, not the scope-change choke point itself).
+  // facade only wires the injected deps + the `rerenderScopedSurfaces` hook below (its BODY calls into
+  // surfaceLoaders.tsx, #985 Task 3, now that the loaders it re-filters live there) and still owns the
+  // status-bar scope-PICKER MENU (a UI concern, not the scope-change choke point itself).
   //
   // Forward-declared so `rerenderScopedSurfaces` (passed to the controller as its `hooks` callback) can
   // read the just-changed scope back off the controller's handle: the two are mutually referential by
   // construction — the controller needs the hook to be constructed, the hook needs the controller to read
-  // the scope — so the binding exists first and is assigned once the controller is built.
+  // the scope — so the binding exists first and is assigned once the controller is built. `loaders` is
+  // forward-declared for the same reason (`rerenderScopedSurfaces` calls into it, but it isn't constructed
+  // until every piece IT needs — the Domain navigator handlers, the model index, the chrome functions — is
+  // defined, further down); it's only ever CALLED after both are assigned.
   let activeContextCtrl: ActiveContextController;
+  let loaders: ReturnType<typeof createSurfaceLoaders>;
 
   // Re-render the scoped, model-derived surfaces after a scope change. Scope is applied at paint time
   // from the `activeContext` slice and the model itself is unchanged (scope is a pure filter), so the
@@ -530,7 +490,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     inv('diagrams');
     inv('glossary');
     // The left-rail Explorer + Overview are always visible, so re-scope them immediately.
-    void loadModel();
+    void loaders.loadModel();
     // The Files tree obeys the scope by EMPHASIS (ADR 0009): mark the active context's `.koi` and
     // de-emphasise the other contexts' files — never hidden, so every file op keeps working. The
     // strategic Domain navigator's own store subscription handles its active-context marker.
@@ -538,9 +498,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     deps.scopeFiles(isAllContexts(scope) ? null : scope);
     // The diagram only re-scopes when the visual center is showing it — including as the SECONDARY
     // pane of a 2-up / in overview, so visibleCenters, not just the deck primary.
-    if (visibleCenters().includes('visual')) void loadDiagrams();
-    invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
-    if (outputFiles.length) paintOutputRail(); // refresh the Output rail's scope emphasis (ADR 0009)
+    if (visibleCenters().includes('visual')) void loaders.loadDiagrams();
+    loaders.invalidateBottomPanels(); // the Events/Relationships/Context Map tables are graph-derived too
+    loaders.refreshOutputRailScope(); // refresh the Output rail's scope emphasis (ADR 0009), no re-emit
     // The Context Map's own ADR 0009 scope-focus repaint is driven by contextMapPanel's OWN `activeContext`
     // subscription now (inspector/contextMapPanel.tsx) — it fires independently off the same store write.
   }
@@ -662,163 +622,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     return cachedDomainIndex.value;
   }
 
-  // Write a status/empty/error message imperatively into a host that may currently hold a Preact tree
-  // (the model / glossary / Events / Relationships panels mount via render()). Unmounting any prior tree
-  // FIRST (render(null, view)) is load-bearing: a Preact-rendered host and a raw innerHTML write
-  // otherwise fight over the same node — so folding the unmount in here makes every docMessage call site
-  // safe by construction, and the explicit render(null, host) dance disappears from the loaders. It's a
-  // harmless no-op for hosts that never held a Preact tree (checkView / contextMapView / the docs host).
-  function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
-    render(null, view);
-    // Build the node with textContent rather than interpolating into innerHTML — `text` often carries
-    // an error string (String(e)) that can embed host paths or user-influenced file/folder names, so
-    // raw interpolation would be an HTML-injection sink.
-    view.innerHTML = '';
-    const p = document.createElement('p');
-    p.className = kind === 'error' ? 'doc-error' : 'muted';
-    p.textContent = text;
-    view.appendChild(p);
-  }
-
-  // The Preact counterpart to docMessage: paint a panel into a host that may currently hold the raw
-  // docMessage <p> (the 'Loading…' line is written via innerHTML, which the reconciler can't see). A
-  // bare render(vnode, host) would diff against Preact's OWN tree — already emptied by docMessage's
-  // render(null) — so it has no record of the raw <p> and APPENDS the panel beside it (the bug: the
-  // loading line and the loaded panel both showed at once). Dropping any prior Preact tree (render(null))
-  // AND any raw write (innerHTML = '') FIRST makes the fresh render replace the loading line, not stack
-  // on it — the symmetric inverse of docMessage's own render(null)+innerHTML dance.
-  function renderPanel(view: HTMLElement, vnode: VNode): void {
-    render(null, view);
-    view.innerHTML = '';
-    render(vnode, view);
-  }
-
-  // --- glossary (the ubiquitous-language editor, #67) ------------------------
-  // Now a Preact panel (#193): the GlossaryPanel subscribes to the store's `activeContext` slice and
-  // re-scopes the model on its own, so a scope change re-renders the glossary without a refetch. The
-  // controller still owns the LSP fetch, under the docViews slice's stale-token discipline ('glossary'
-  // is the matching key — this is the glossary view): a token captured before the await is compared to
-  // the slice's current one after, so an edit mid-fetch discards the superseded result and the panel is
-  // marked loaded only for the token it fetched. The status/empty/error states write the host
-  // imperatively via docMessage, which unmounts any prior Preact tree first — so the reconciler and the
-  // imperative write never fight over the same node (the prior-tasks hazard).
-  // The last-rendered glossary model + the pending scroll-to-term (#1165), so a launcher "Open glossary"
-  // can re-scroll an ALREADY-loaded glossary (no refetch) as well as a freshly-loaded one.
-  let lastGlossaryModel: GlossaryModel | null = null;
-  let glossaryScrollTerm: string | undefined;
-  let glossaryScrollNonce = 0;
-  function renderGlossaryPanel(model: GlossaryModel): void {
-    renderPanel(
-      glossaryView,
-      <GlossaryPanel
-        store={appStore}
-        model={model}
-        handlers={glossaryHandlers}
-        scrollToTerm={glossaryScrollTerm}
-        scrollNonce={glossaryScrollNonce}
-      />,
-    );
-    // One-shot: renderPanel REMOUNTS GlossaryPanel (its per-instance nonce guard resets), so a term left
-    // set here would re-scroll on EVERY later reload (a model edit, a scope change). Clear it now that this
-    // render has consumed it — only a fresh selectDocsTab(term) sets it again.
-    glossaryScrollTerm = undefined;
-  }
-  async function loadGlossary(): Promise<void> {
-    await guardedLoad({
-      store: appStore,
-      key: 'glossary',
-      isDisposed: () => disposed,
-      loading: () => docMessage(glossaryView, 'Loading glossary…'),
-      fetch: () => lsp.glossaryModel(),
-      render: (model) => {
-        lastGlossaryModel = model;
-        if (!model.entries.length) {
-          docMessage(glossaryView, 'No concepts yet — declare some types, or fix syntax errors to populate the glossary.');
-        } else {
-          renderGlossaryPanel(model);
-        }
-      },
-      onError: (e) => docMessage(glossaryView, 'Glossary request failed: ' + String(e), 'error'),
-    });
-  }
-
-  // Wires the pure (testable) glossary view to the editor + LSP: jump-to-source (here) and
-  // persist-a-description (ide.ts's write path, injected).
-  const glossaryHandlers: GlossaryHandlers = {
-    onGoto: (range) => editor.gotoRange(range.start, range.end),
-    // Persisting is ide.ts's write path; a failure is surfaced HERE, in the glossary pane (its
-    // original error home), so the boundary stays clean without losing the message.
-    onSave: (entry, text) =>
-      void deps
-        .onSaveGlossaryDescription(entry, text)
-        .catch((e) => docMessage(glossaryView, 'Saving description failed: ' + String(e), 'error')),
-  };
-
-  // --- Decisions (ADR) & Notes documentation surfaces (#174, #193) ----------
-  // Two independent folder-derived pages (split from the former combined "Decisions & Notes" panel):
-  // each is NOT invalidated by `.koi` edits, lazily loads on its first tab open, and reloads only on a
-  // workspace folder change (the <DocsPanelHost> contract). The mount nodes are captured here so the
-  // lazy first-load and in-panel create/save reloads paint into the same node without re-fetching.
-  let adrMount: HTMLElement | null = null;
-  let notesMount: HTMLElement | null = null;
-  let adrLoaded = false;
-  let notesLoaded = false;
-
   // --- Source Control (git) right-rail panel (#272) -------------------------
   // Folder-derived like the docs pages: lazily mounted on the first Source-Control tab open, re-fetched
   // on every re-open (a `refreshNonce` bump — Preact reuses the mounted instance, so the commit-message
   // draft survives the in-place refresh), and re-mounted against the new folder on a workspace switch.
-  // The panel self-gates on `platform.canUseGit` and catches a non-repo `gitStatus` reject, so the
-  // controller can mount it unconditionally and let it paint the right empty state.
+  // The panel self-gates on `platform.canUseGit` and catches a non-repo `gitStatus` reject, so it can be
+  // mounted unconditionally and paint the right empty state. The panel's own lifecycle (loaded flag,
+  // refresh nonce, the render + the dirty-count subscription) moved to surfaceLoaders.tsx (#985 Task 3);
+  // this facade keeps only the host lookup it also needs for the `rightViews` chrome record below.
   const sourceControlRightView = domById('rview-source-control');
-  let sourceControlLoaded = false;
-  let sourceControlRefresh = 0;
-  // A pending launcher focus (#1165): the specific file diff / commit to reveal on the next Source-Control
-  // open. `sourceControlFocusNonce` bumps only when a NEW focus is requested, so the panel applies it once.
-  let sourceControlFocus: SourceControlFocus | undefined;
-  let sourceControlFocusNonce = 0;
-  // Paint the panel with the live commit-guard inputs (#470): the current unsaved-buffer count and a
-  // Save-all action, both read fresh at paint time. Splitting this out lets a dirty-count change re-paint
-  // the panel WITHOUT bumping the refresh nonce (just the prop update — no git re-fetch), while
-  // loadSourceControl bumps the nonce for a genuine re-fetch.
-  function renderSourceControl(): void {
-    render(
-      <SourceControlPanel
-        git={platform}
-        folderToken={deps.folderRootToken()}
-        refreshNonce={sourceControlRefresh}
-        dirtyCount={appStore.getState().dirtyCount()}
-        onSaveAll={() => deps.saveAllDirty()}
-        focus={sourceControlFocus}
-        focusNonce={sourceControlFocusNonce}
-      />,
-      sourceControlRightView,
-    );
-  }
-  function loadSourceControl(): void {
-    if (sourceControlLoaded) sourceControlRefresh += 1; // a re-open re-fetches; first mount loads on its own
-    sourceControlLoaded = true;
-    renderSourceControl();
-  }
-  // #470: re-fetch git status when a save lands while the SC tab is open — reuses the nonce bump so the
-  // in-place refresh preserves the commit-message draft. A no-op when the panel isn't mounted or isn't
-  // the active right view (the next open re-fetches anyway).
-  function refreshSourceControl(): void {
-    if (!sourceControlLoaded) return;
-    if (appStore.getState().right !== 'source-control') return;
-    loadSourceControl();
-  }
-  // #470: keep the panel's `dirtyCount` prop live so the commit guard sees buffers dirtied AFTER it last
-  // mounted. A dirty-count change re-paints the panel in place (no nonce bump → no git re-fetch), only
-  // while the SC tab is the active right view; closed/unmounted → nothing to repaint. The unsubscribe is
-  // captured and called on dispose() so a deferred dirty-count change can't repaint a torn-down host.
-  let lastDirtyCount = appStore.getState().dirtyCount();
-  const unsubscribeDirtyCount = appStore.subscribe((s) => {
-    const dc = s.dirtyCount();
-    if (dc === lastDirtyCount) return;
-    lastDirtyCount = dc;
-    if (sourceControlLoaded && s.right === 'source-control') renderSourceControl();
-  });
 
   // --- Syntax Tree (raw parse tree) right-rail panel (#890) ------------------
   // Model-derived + self-fetching, mirroring Source Control: lazily mounted on first open, re-fetched on
@@ -859,8 +671,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // mirror a caret move into the panel (a fresh `caret` prop — same `revision`, so NO re-fetch) so it
   // re-highlights the deepest containing node. DEBOUNCED because caret moves are frequent and this is a
   // secondary affordance; when the view isn't active we skip the work (the next open re-renders with the
-  // then-current caret). Captured + unsubscribed on dispose (like unsubscribeDirtyCount) so a deferred
-  // re-render can't fire into a torn-down host; the timer is likewise cleared on dispose.
+  // then-current caret). Captured + unsubscribed on dispose (like surfaceLoaders' own dirty-count
+  // subscription) so a deferred re-render can't fire into a torn-down host; the timer is likewise cleared
+  // on dispose.
   let caretSyncTimer: ReturnType<typeof setTimeout> | undefined;
   const unsubscribeCursor = appStore.subscribe((s, prev) => {
     if (s.cursor === prev.cursor) return; // an unrelated slice write
@@ -872,86 +685,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       renderSyntaxTree();
     }, 120);
   });
-  const docsFail = (verb: string) => (e: unknown) => deps.setStatus(`Could not ${verb}: ${String(e)}`, 'error');
-
-  // One handlers object the two pages share: each create resets only its OWN page's loaded flag and
-  // repaints just that page (saves are in-place and need no reload). renderAdrPanel uses only the ADR
-  // handlers and renderNotesPanel only the note ones, so the unused half is never invoked.
-  function docsHandlers(store: ReturnType<typeof createDocsStore>): DocsPanelHandlers {
-    return {
-      onCreateAdr: (title) =>
-        void store.createAdr(title).then(() => { adrLoaded = false; void loadAdr(); }).catch(docsFail('create the ADR')),
-      onSaveAdr: (file, adr) => void store.saveAdr(file.token, adr).catch(docsFail('save the ADR')),
-      onCreateNote: (title) =>
-        void store.createNote(title).then(() => { notesLoaded = false; void loadNotes(); }).catch(docsFail('create the note')),
-      onReadNote: (file) => store.readNote(file.token),
-      onSaveNote: (file, md) => void store.saveNote(file.token, md).catch(docsFail('save the note')),
-    };
-  }
-
-  async function loadAdr(host?: HTMLElement): Promise<void> {
-    const target = host ?? adrMount;
-    if (!target) return; // the host hasn't mounted yet
-    const store = createDocsStore(platform, deps.folderRootToken());
-    docMessage(target, 'Loading decisions…');
-    try {
-      const adrs = await store.listAdrs();
-      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
-      target.replaceChildren(renderAdrPanel({ canWrite: store.canWrite, adrs, notes: [], renderMarkdown }, docsHandlers(store)));
-      adrLoaded = true;
-    } catch (e) {
-      if (disposed) return;
-      docMessage(target, 'Decisions request failed: ' + String(e), 'error');
-    }
-  }
-
-  async function loadNotes(host?: HTMLElement): Promise<void> {
-    const target = host ?? notesMount;
-    if (!target) return; // the host hasn't mounted yet
-    const store = createDocsStore(platform, deps.folderRootToken());
-    docMessage(target, 'Loading notes…');
-    try {
-      const notes = await store.listNotes();
-      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
-      target.replaceChildren(renderNotesPanel({ canWrite: store.canWrite, adrs: [], notes, renderMarkdown }, docsHandlers(store)));
-      notesLoaded = true;
-    } catch (e) {
-      if (disposed) return;
-      docMessage(target, 'Notes request failed: ' + String(e), 'error');
-    }
-  }
-
-  // Mount each folder-derived page into its view. On mount the host hands us the node (captured for the
-  // lazy first-load + in-panel reloads) WITHOUT fetching — the lazy tab-open path owns that first paint,
-  // keeping the fetch off the construction frame. A real folder-token change re-runs the fetch in place.
-  render(
-    <DocsPanelHost
-      store={appStore}
-      onMount={(host) => {
-        adrMount = host;
-      }}
-      load={(host) => {
-        adrMount = host;
-        adrLoaded = false;
-        void loadAdr(host);
-      }}
-    />,
-    adrView,
-  );
-  render(
-    <DocsPanelHost
-      store={appStore}
-      onMount={(host) => {
-        notesMount = host;
-      }}
-      load={(host) => {
-        notesMount = host;
-        notesLoaded = false;
-        void loadNotes(host);
-      }}
-    />,
-    notesView,
-  );
 
   // --- the DDD workspace (#142): outline / inspector / cross-highlight -------
   // A thin handle over the app store's `selection` slice (the single source of truth): the outline,
@@ -1147,44 +880,44 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     );
   }
 
-  // Repaint the Domain axis's strategic/tactical navigator (#453) and the model-index-derived chrome
-  // (breadcrumb, palette, inspector). The navigator OWNS #rail-domain-pane: it self-fetches its strategic
-  // data and reads the store for altitude + scope, so loadModel mounts it once and thereafter just reloads
-  // it. The inspector resolves any selection against the whole model, so it tracks the model index here.
-  async function loadModel(): Promise<void> {
-    // Capture the 'model' stale-token before the await; markLoaded only takes if it's still current
-    // after, so an edit mid-fetch leaves the surface stale for the next show (the slice discipline).
-    const token = appStore.getState().currentToken('model');
-    // The navigator's strategic data is scope-INDEPENDENT and it repaints from its own cache on
-    // activeContext/outlineFilter store changes — so only re-fetch when the MODEL actually changed, not on
-    // a pure scope/filter re-render (rerenderScopedSurfaces keeps the model index, so a null index is the
-    // reliable "the model was (re)loaded" signal — an edit nulls it via invalidateDocViews). Captured
-    // BEFORE ensureModelIndex() rebuilds it.
+  // The three hooks surfaceLoaders.tsx's loadModel calls (#985 Task 3) — the model-index FETCH + its
+  // docViews token bookkeeping now live there; these three facade-private pieces (the Domain navigator
+  // mount, the palette/inspector/cross-highlight repaint, and the caches an edit must drop) stay here,
+  // reached only through the injected hook.
+
+  // Mount the Domain navigator once (it paints its own loading placeholder + empty state, and surfaces a
+  // fetch failure in the pane itself); a reload re-fetches its strategic data. The navigator's strategic
+  // data is scope-INDEPENDENT and it repaints from its own cache on activeContext/outlineFilter store
+  // changes — so only re-fetch when the MODEL actually changed, not on a pure scope/filter re-render
+  // (rerenderScopedSurfaces keeps the model index, so a null index is the reliable "the model was
+  // (re)loaded" signal — an edit nulls it via invalidateModelDerivedCaches below). Kicking the mount off
+  // BEFORE loadModel awaits the model index runs the navigator's own fetch in parallel, so the rail paints
+  // promptly. Its Context Map / Glossary doorways route to the same focuses the docs footer used.
+  function ensureDomainNavigator(): void {
     const hadIndex = modelIndex != null;
-    // Mount the navigator once (it paints a loading placeholder + its own empty state, and surfaces a
-    // fetch failure in the pane itself); a reload re-fetches its strategic data. Kicking this off before
-    // the await runs its fetch in parallel with the model index build, so the rail paints promptly. Its
-    // Context Map / Glossary doorways route to the same focuses the docs footer used.
     if (!domainNavigator) {
       domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
     } else if (!hadIndex) {
       domainNavigator.reload();
     }
-    try {
-      await ensureModelIndex();
-      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
-      // The model index just (re)built — the canvas palette reads it to gate its aggregate-scoped buttons
-      // (#254), so re-render it.
-      renderCanvasPalette();
-      renderSelectedInspector();
-      applySelectionHighlight();
-      appStore.getState().markLoaded('model', token);
-    } catch (e) {
-      if (disposed) return;
-      // The navigator owns #rail-domain-pane and surfaces its own fetch failure there; a failing model
-      // index (the inspector/breadcrumb source) is reported on the status pill instead.
-      deps.setStatus('Model request failed: ' + String(e), 'error');
-    }
+  }
+
+  // The model index just (re)built — the canvas palette reads it to gate its aggregate-scoped buttons
+  // (#254), the Properties inspector resolves the selection through it, and the diagram/outline
+  // cross-highlight needs the fresh resolution too, so re-render all three.
+  function onModelIndexRebuilt(): void {
+    renderCanvasPalette();
+    renderSelectedInspector();
+    applySelectionHighlight();
+  }
+
+  // Drop the facade's OWN model-derived caches — the joined model index, its in-flight builder, and the
+  // assistant's domain index — so the next model load / getCachedDomainIndex call rebuilds against the
+  // current model. Called from surfaceLoaders' invalidateDocViews() on every model edit.
+  function invalidateModelDerivedCaches(): void {
+    modelIndex = null;
+    indexPromise = null;
+    cachedDomainIndex = null;
   }
 
   // The inspector + cross-highlight track the app store's `selection` slice for the app's lifetime (a
@@ -1237,65 +970,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     renderCanvasPalette();
     applySelectionHighlight();
   });
-
-  // --- live diagrams ---------------------------------------------------------
-  // Fetch the DocsEmitter output (Mermaid-in-Markdown) and render it. The loaded/stale GATE is the
-  // docViews slice's 'diagrams' key — markLoaded only takes if the captured token is still current. A
-  // local monotonic `diagramsSeq` is kept ALONGSIDE it because a theme flip / refresh re-renders the
-  // diagram WITHOUT bumping the slice token (those aren't model edits): the seq drops the result of a
-  // render a newer call superseded, and is the live cancellation predicate threaded into renderDiagrams.
-  let diagramsSeq = 0;
-  async function loadDiagrams(): Promise<void> {
-    const seq = ++diagramsSeq;
-    const token = appStore.getState().currentToken('diagrams');
-    docMessage(diagramsView, 'Rendering diagrams…');
-    try {
-      const res = await lsp.livingDocs();
-      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
-      if (seq !== diagramsSeq) return;
-      // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
-      // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
-      const files = scopeDocsFiles(res.files, activeContextCtrl.handle.get());
-      // Scope persisted node positions to this workspace so a folder restores its own manual layout, and
-      // inject the matching layout store: a committable koine.layout.json at the folder root when one is
-      // open, else browser storage (web/scratch mode).
-      setDiagramPersistScope(activeContextCtrl.contextWorkspaceKey());
-      setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
-      // renderDiagrams itself suspends again internally (a dynamic import, a layout-store load) before it
-      // mounts into diagramsView — its own `isCurrent` gate must also see `disposed`, not just the local
-      // seq, or a resolving mount still lands in the torn-down host (#1002).
-      await renderDiagrams(diagramsView, files, currentTheme(), () => !disposed && seq === diagramsSeq);
-      if (disposed) return; // the render above can itself suspend — re-check before markLoaded
-      if (seq === diagramsSeq) appStore.getState().markLoaded('diagrams', token);
-    } catch (e) {
-      if (disposed) return;
-      if (seq === diagramsSeq) docMessage(diagramsView, 'Diagrams request failed: ' + String(e), 'error');
-    }
-  }
-
-  // Mark the folder-derived Decisions + Notes pages stale on a workspace folder switch (the model-derived
-  // views are dropped by invalidateDocViews; these two only change with the folder).
-  function invalidateDocsPanel(): void {
-    adrLoaded = false;
-    notesLoaded = false;
-    // Source Control is folder-derived too — drop its loaded gate so the next open re-mounts it against
-    // the new folder, and re-mount immediately when it's the open right-rail view (its `gitStatus` is for
-    // the new workspace's repository). This runs on a folder open / root-set change; a `.koi` save's
-    // refresh is covered by the refresh-on-reopen (selectRightView) plus the panel's own Refresh button.
-    sourceControlLoaded = false;
-    if (appStore.getState().right === 'source-control') loadSourceControl();
-  }
-
-  // Diagrams are rendered with a theme-matched Mermaid palette; re-render on a theme flip. Mark the
-  // cached diagram stale (so a not-visible one re-renders themed on its next visit) and re-render
-  // immediately when the visual center is showing.
-  function onThemeChanged(): void {
-    // A theme flip re-themes ONLY the diagram (not a model edit), so mark just the 'diagrams' key stale —
-    // a single-key invalidate that leaves every other surface fresh. A visible SECONDARY canvas (2-up /
-    // overview) must re-theme too, so visibleCenters, not just the deck primary.
-    appStore.getState().invalidate('diagrams');
-    if (visibleCenters().includes('visual')) void loadDiagrams();
-  }
 
   // --- center (Visual / Code / Documentation) + right rail + region focus ----
   // The active center / tech / docs view now lives in the uiChrome slice (#193) — there are no
@@ -1405,7 +1079,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // and all four in overview), plus the model-derived facet of each. Self-gating loaders make repeat
   // calls cheap. Triggered by the deck/facet subscription on any center change.
   function ensureVisibleLoaded(): void {
-    if (visibleCenters().includes('visual') && appStore.getState().isStale('diagrams')) void loadDiagrams();
+    if (visibleCenters().includes('visual') && appStore.getState().isStale('diagrams')) void loaders.loadDiagrams();
     ensureTechLoaded();
     ensureOutputLoaded();
     ensureDocsLoaded();
@@ -1449,23 +1123,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureDocsLoaded(): void {
     if (!visibleCenters().includes('docs')) return;
     const docs = activeDocs();
-    if (docs === 'glossary' && appStore.getState().isStale('glossary')) void loadGlossary();
-    else if (docs === 'adr' && !adrLoaded) void loadAdr();
-    else if (docs === 'notes' && !notesLoaded) void loadNotes();
+    if (docs === 'glossary' && appStore.getState().isStale('glossary')) void loaders.loadGlossary();
+    else if (docs === 'adr' && !loaders.isAdrLoaded()) void loaders.loadAdr();
+    else if (docs === 'notes' && !loaders.isNotesLoaded()) void loaders.loadNotes();
   }
 
   function selectDocsTab(view: DocsView, term?: string): void {
-    // A launcher scroll-to-term (#1165): stash it (bump the nonce so the panel applies it once). If the
-    // glossary is already loaded + fresh, re-render it now with the new target (no refetch); otherwise the
-    // lazy load below renders it with the target. The panel scrolls in a post-commit effect, which runs
-    // after setDocs below makes the Docs surface visible.
-    if (view === 'glossary' && term) {
-      glossaryScrollTerm = term;
-      glossaryScrollNonce += 1;
-      if (lastGlossaryModel?.entries.length && !appStore.getState().isStale('glossary')) {
-        renderGlossaryPanel(lastGlossaryModel);
-      }
-    }
+    // A launcher scroll-to-term (#1165): stash it + re-render if the glossary is already loaded + fresh
+    // (no refetch); otherwise the lazy load below renders it with the target. surfaceLoaders.tsx owns the
+    // glossary's scroll-nonce/last-model state now (#985 Task 3). The panel scrolls in a post-commit
+    // effect, which runs after setDocs below makes the Docs surface visible.
+    if (view === 'glossary' && term) loaders.scrollGlossaryToTerm(term);
     // setDocs sets the facet and brings Docs up if it isn't shown; the deck subscription applies the
     // chrome + lazy-loads.
     appStore.getState().setDocs(view);
@@ -1493,8 +1161,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureOutputLoaded(): void {
     if (!visibleCenters().includes('output')) return;
     const output = activeOutput();
-    if (output === 'generated' && appStore.getState().isStale('preview')) void loadPreview();
-    else if (output === 'compatibility') renderCheckIdleIfEmpty();
+    if (output === 'generated' && appStore.getState().isStale('preview')) void loaders.loadPreview();
+    else if (output === 'compatibility') loaders.renderCheckIdleIfEmpty();
     else if (output === 'contextmap' && appStore.getState().isStale('contextmap')) void contextMapPanel.load();
   }
 
@@ -1510,50 +1178,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectOutput('contextmap');
   }
 
-  // Repaint the always-visible left rail (Explorer + Overview + the right-rail Properties inspector) +
-  // every center surface currently showing (both panes of a 2-up, all four in overview).
-  function refreshActiveSurfaces(): void {
-    void loadModel();
-    const vis = visibleCenters();
-    if (vis.includes('visual')) void loadDiagrams();
-    // The glossary is model-derived (refresh on edit); the ADR/Notes Docs panel is folder-derived, so an
-    // edit never invalidates it — it reloads on folder change / its own create/save.
-    if (vis.includes('docs') && activeDocs() === 'glossary') void loadGlossary();
-    if (vis.includes('technical')) ensureTechLoaded();
-    if (vis.includes('output')) ensureOutputLoaded();
-    // The Syntax Tree is a RIGHT-rail model-derived surface (#890): reload it here (the model surfaces'
-    // debounced repaint home) when it's the active right view and an edit re-staled its docViews key.
-    if (appStore.getState().right === 'syntax-tree' && appStore.getState().isStale('syntax-tree')) loadSyntaxTree();
-  }
-
-  // Mark the cached, model-derived surfaces stale (e.g. after an edit or a file switch). A model edit
-  // touches EVERY model-derived surface, so a single all-keys invalidate() bumps the preview / model /
-  // diagram / glossary tokens at once (the docViews slice is the single source of truth — #193);
-  // invalidateBottomPanels() then bumps the three bottom-table keys and live-refreshes the visible one.
-  function invalidateDocViews(): void {
-    appStore.getState().invalidate();
-    // The joined glossary+diagram index (#142) and its in-flight builder are stale — drop both so the
-    // next model load rebuilds against the current model.
-    modelIndex = null;
-    indexPromise = null;
-    cachedDomainIndex = null; // the assistant's domain index is derived from the same model
-    invalidateBottomPanels(); // the Events/Relationships/Context Map tables are model-derived too
-  }
-
-  // An edit makes the model-derived surfaces stale. Mark them dirty and (debounced) repaint the live
-  // ones — the always-visible left rail plus the active center view — so they track the model without a
-  // manual refresh. This is what makes the emitted preview + the diagram live.
-  let editDebounce: ReturnType<typeof setTimeout> | undefined;
-  function onDocEdited(): void {
-    invalidateDocViews();
-    // The set of contexts can change as the model is edited (a context added / renamed / removed), so
-    // keep the switcher's options in step — debounced, and regardless of which view is active.
-    clearTimeout(editDebounce);
-    editDebounce = setTimeout(() => {
-      void activeContextCtrl.refreshContextList();
-      refreshActiveSurfaces();
-    }, 350);
-  }
+  // refreshActiveSurfaces / invalidateDocViews / onDocEdited now live in surfaceLoaders.tsx (#985 Task 3):
+  // the debounced doc-edit repaint rides the docViews slice's OWN `scheduleRefresh` there (its first
+  // production caller) rather than a facade-local timer. The public interface below forwards straight to
+  // `loaders.onDocEdited` / `loaders.invalidateDocViews` / `loaders.refreshActiveSurfaces`.
 
   // The center surface switcher + facet sub-strips are now the DeckSpine / DeckCard Preact components
   // (mounted in init()); they call focusPrimary / openBeside / setTech|Output|Docs on the store directly,
@@ -1588,7 +1216,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // Source Control is lazily mounted + folder-derived (#272): paint it on first open and re-fetch git
     // status on every re-open (so a save / external `git` since the last view is reflected — the panel
     // itself owns the in-place refresh). The canUseGit gate + the non-repo empty state live in the panel.
-    if (view === 'source-control') loadSourceControl();
+    if (view === 'source-control') loaders.loadSourceControl();
     // The Syntax Tree is lazily mounted + model-derived (#890): mount on first open, re-fetch on re-open
     // (loadSyntaxTree bumps the panel's revision); an edit reloads it via the docViews 'syntax-tree' key.
     else if (view === 'syntax-tree') loadSyntaxTree();
@@ -1600,11 +1228,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // commands (Show AI Chat, Explain this construct) route through so the panel is always actually visible.
   // A `focus` (#1165) stashes a Source-Control target (a file diff / a commit) so the panel reveals it on
   // this open; the nonce bumps only for a real focus, so a plain re-open never re-applies a stale one.
+  // surfaceLoaders.tsx owns the focus/nonce state now (#985 Task 3) — this just forwards the request.
   function selectRight(view: RightView, focus?: SourceControlFocus): void {
-    if (view === 'source-control' && focus) {
-      sourceControlFocus = focus;
-      sourceControlFocusNonce += 1;
-    }
+    if (view === 'source-control' && focus) loaders.focusSourceControl(focus);
     if (appStore.getState().rightCollapsed) appStore.getState().setRightCollapsed(false);
     selectRightView(view);
   }
@@ -1674,8 +1300,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // click, the palette command, or a selection auto-activating Properties all route
   // through the slice, so re-running applyRightCollapsed here is the single reconciliation point. Persist
   // only on an actual collapse transition (not on every view switch that also repaints). Captured +
-  // disposed (like unsubscribeDirtyCount, and activeContextCtrl's own subscription) so a deferred slice
-  // change can't fire applyRightCollapsed into a torn-down host's captured DOM after dispose().
+  // disposed (like activeContextCtrl's own subscription, and surfaceLoaders' dirty-count subscription) so
+  // a deferred slice change can't fire applyRightCollapsed into a torn-down host's captured DOM after
+  // dispose().
   const unsubscribeRightCollapsed = appStore.subscribe((s, prev) => {
     if (s.right !== prev.right || s.rightCollapsed !== prev.rightCollapsed) {
       applyRightCollapsed(s.rightCollapsed);
@@ -1730,7 +1357,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     appStore.getState().openBeside('visual');
     // The subscription applied the chrome (synchronous on set); make sure the canvas pane has rendered
     // nodes (the editor pane is the always-live CodeMirror).
-    if (appStore.getState().isStale('diagrams')) void loadDiagrams();
+    if (appStore.getState().isStale('diagrams')) void loaders.loadDiagrams();
   }
 
   // Subscribe to deck + facet changes so any mutation — from the DeckSpine / DeckCard, a palette command,
@@ -1752,182 +1379,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     },
   );
 
-  // --- compatibility check (on-demand) ---------------------------------------
-  // The check only runs when the user picks a baseline, so the panel would otherwise be an empty void
-  // when its tab is first opened. Paint an explanatory idle state (with the trigger) so the surface
-  // always reads as a feature, never a blank pane. Skipped once a check has produced output.
-  function renderCheckIdleIfEmpty(): void {
-    if (checkView.childElementCount > 0) return; // a prior result / loading / error line already shows
-    render(null, checkView);
-    checkView.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'koi-check-idle';
-
-    const title = document.createElement('h3');
-    title.className = 'koi-check-idle-title';
-    title.textContent = 'Model compatibility';
-
-    const body = document.createElement('p');
-    body.className = 'koi-docs-empty';
-    body.textContent =
-      'Compare this model against an earlier baseline to catch breaking changes before you ship — renamed or removed types, changed fields, or tightened invariants.';
-    wrap.append(title, body);
-
-    if (platform.canOpenFolders) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'koi-docs-new-btn koi-check-idle-action';
-      btn.textContent = 'Check against baseline…';
-      btn.addEventListener('click', () => void runCheck());
-      wrap.appendChild(btn);
-    } else {
-      const note = document.createElement('p');
-      note.className = 'koi-docs-empty';
-      note.textContent = 'Selecting a baseline folder needs a Chromium-based browser.';
-      wrap.appendChild(note);
-    }
-    checkView.appendChild(wrap);
-  }
-
-  async function runCheck(): Promise<void> {
-    if (!platform.canOpenFolders) {
-      docMessage(checkView, 'Selecting a baseline folder needs a Chromium-based browser.', 'error');
-      selectOutput('compatibility');
-      return;
-    }
-    let folder: string | null;
-    try {
-      folder = await platform.pickFolder('Select baseline model folder');
-    } catch (e) {
-      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
-      docMessage(checkView, 'Could not open the folder picker: ' + String(e), 'error');
-      selectOutput('compatibility');
-      return;
-    }
-    if (disposed) return;
-    if (!folder) return; // cancelled — abort silently
-    selectOutput('compatibility');
-    docMessage(checkView, 'Checking against baseline…');
-    try {
-      // Hosts whose compat check runs in-process must be handed the baseline sources; others read the path.
-      const baselineSources = platform.compatNeedsInProcessSources
-        ? await platform.readFolderSources(folder)
-        : undefined;
-      if (disposed) return;
-      const res = await lsp.check(folder, baselineSources);
-      if (disposed) return;
-      if (res.error) {
-        docMessage(checkView, 'Compatibility check failed: ' + res.error, 'error');
-        return;
-      }
-      checkView.innerHTML = `<div class="koi-md">${renderMarkdown(renderCheckMarkdown(res))}</div>`;
-    } catch (e) {
-      if (disposed) return;
-      docMessage(checkView, 'Check request failed: ' + String(e), 'error');
-    }
-  }
-
-  // --- emitted-code preview --------------------------------------------------
-  let currentTarget: PreviewTarget = deps.initialTarget;
-
-  function setTarget(target: PreviewTarget): void {
-    // The Output surface's "Generated" facet now lives in the DeckCard header (a static label); the
-    // active emit target is owned by the preview loader below rather than surfaced as a tab caption.
-    currentTarget = target;
-  }
-
-  // Emit the current target into the preview pane. Folded into the doc-view lifecycle (like the
-  // glossary/diagrams tabs) so it loads on open and tracks edits live — no button press required. The
-  // loaded/stale GATE is the docViews slice's 'preview' key (markLoaded only takes if the captured token
-  // is still current). A local monotonic `previewSeq` is kept ALONGSIDE it because a destination-language
-  // switch re-emits WITHOUT bumping the slice token: the seq drops a stale emit a newer call (edit or
-  // target switch) superseded. The prior output stays on screen across a refresh (only the very first
-  // load shows a placeholder) so live typing never flashes the pane empty.
-  // A friendly language chip for the crumb / rail head (the emit target drives the highlighter as-is).
-  const TARGET_LABEL: Record<string, string> = {
-    csharp: 'C#',
-    typescript: 'TypeScript',
-    python: 'Python',
-    php: 'PHP',
-    rust: 'Rust',
-  };
-  const targetLabel = (t: string): string => TARGET_LABEL[t] ?? t.toUpperCase();
-
-  // Paint the output rail from the current emit result + the active scope (ADR 0009: the rail obeys the
-  // scope by EMPHASIS, never hiding). Split out so the scope-change fan-out can refresh the emphasis
-  // without a re-emit. `null` for the *All contexts* case leaves every group plain.
-  function paintOutputRail(): void {
-    const ac = activeContextCtrl.handle.get();
-    const emphasis = isAllContexts(ac) ? null : ac;
-    renderOutputRail(outputScaffold, outputFiles, selectedOutputPath, targetLabel(currentTarget), showOutputFile, emphasis);
-  }
-
-  // Show one generated file in the viewer and reflect it in the rail + crumb + Copy button.
-  function showOutputFile(path: string): void {
-    const f = outputFiles.find((x) => x.path === path);
-    if (!f) return;
-    selectedOutputPath = path;
-    output.setContent(f.contents, currentTarget);
-    lastPreview = f.contents;
-    copyBtn.disabled = false;
-    renderOutputCrumb(outputScaffold, path, targetLabel(currentTarget));
-    paintOutputRail();
-  }
-
-  // Clear the rail/crumb/viewer to a message (error / empty / failure states).
-  function clearOutput(message: string): void {
-    outputFiles = [];
-    selectedOutputPath = null;
-    lastPreview = '';
-    copyBtn.disabled = true;
-    paintOutputRail();
-    renderOutputCrumb(outputScaffold, null, '');
-    output.setContent(message, 'plain');
-  }
-
-  let previewSeq = 0;
-  async function loadPreview(): Promise<void> {
-    const seq = ++previewSeq;
-    const token = appStore.getState().currentToken('preview');
-    if (!outputFiles.length) output.setContent('// generating preview…', 'plain');
-    try {
-      const res = await lsp.emitPreview(currentTarget);
-      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
-      if (seq !== previewSeq) return;
-      if (res.error) {
-        clearOutput('// emit error\n' + res.error);
-      } else if (!res.files.length) {
-        clearOutput('// no files emitted (fix diagnostics first)');
-      } else {
-        outputFiles = res.files.map((f) => ({
-          path: f.path,
-          contents: f.contents,
-          kind: f.kind ?? null,
-          loc: f.contents.length ? f.contents.split('\n').length : 0,
-        }));
-        // Keep the current selection if that file survived the re-emit; else fall back to the first.
-        const keep = selectedOutputPath && outputFiles.some((f) => f.path === selectedOutputPath);
-        showOutputFile(keep ? selectedOutputPath! : outputFiles[0].path);
-      }
-      appStore.getState().markLoaded('preview', token);
-    } catch (e) {
-      if (disposed) return;
-      if (seq !== previewSeq) return;
-      clearOutput('// preview request failed\n' + String(e));
-    }
-  }
-
-  // Adopt a destination-language change from Settings → Output: relabel the tab, mark the preview
-  // stale, and re-emit it when the Generated sub-view is the one showing (else it reloads next open).
-  function onPreviewTargetChanged(target: PreviewTarget): void {
-    if (target === currentTarget) return;
-    setTarget(target);
-    // A destination-language switch re-emits ONLY the preview (not a model edit), so mark just the
-    // 'preview' key stale — a single-key invalidate that leaves every other surface fresh. A visible
-    // SECONDARY Output pane (2-up / overview) must re-emit too, so visibleCenters, not just the primary.
-    appStore.getState().invalidate('preview');
-    if (visibleCenters().includes('output') && activeOutput() === 'generated') void loadPreview();
-  }
+  // renderCheckIdleIfEmpty / runCheck and the whole emitted-code preview subsystem (setTarget,
+  // onPreviewTargetChanged, loadPreview + the Output rail / Copy affordance) now live in
+  // surfaceLoaders.tsx (#985 Task 3) — `currentTarget` is gone: `setTarget` writes the shared store's
+  // `emitTarget` slice (#923's existing top-bar mirror) and every reader loads it fresh from there, so
+  // there is no more facade-local closure copy to drift out of step with the top-bar selector.
 
   // --- bottom panel (Problems / Events / Relationships / Context Map, #144) --
   // The Events/Relationships tables + the Context Map are model-derived bottom-strip views; their lazy
@@ -1943,7 +1399,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // sites, matching how center/tech/docs already flow through the slice; selectBottomTab writes it via
   // setBottom, so the slice genuinely owns that state.
   const activeBottomTab = (): BottomTab => appStore.getState().bottom;
-  let bottomPanelDebounce: ReturnType<typeof setTimeout> | undefined;
 
   deps.initEdgeResizer({
     target: diagEl,
@@ -2012,14 +1467,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     t.addEventListener('click', () => selectBottomTab(t.dataset.panel as BottomTab));
   }
 
-  // Row click → jump to the construct's `.koi` declaration (the same span navigation the diagram uses)
-  // AND select it, so the Properties inspector loads the event — clicking an Events-table row inspects
-  // it just like clicking its diagram node. The inspector resolves the diagram qualified name itself.
-  const bottomTableHandlers = {
-    goto: (span: SourceSpan) => deps.gotoSourceSpan(span),
-    onSelect: (qualifiedName: string, context: string) => selection.set({ qualifiedName, context }),
-  };
-
   // The Events panel's Flow canvas (#270) bubbles the canvas's own NODE_NAVIGATE_EVENT up to this host when
   // a card is clicked (the bottom strip isn't under the diagrams container ide.tsx listens on, so the event
   // is routed here, like the context-map graph). Route it to the SAME select-and-goto path the Events table
@@ -2034,24 +1481,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selection.set({ qualifiedName: d.qualifiedName, context: dot < 0 ? '' : d.qualifiedName.slice(0, dot) });
   });
 
-  // The merged DiagramGraph projection behind both tables: every per-diagram graph from livingDocs fused
-  // into one (node ids disambiguated) so the extractors see all aggregates + the integration-event flow
-  // at once. It's the SAME source the diagram renders from, so the tables and the diagram never drift.
-  // Returned UNSCOPED — the Events/Relationships Preact panels narrow it to the active bounded context
-  // themselves (#146, subscribing to the activeContext slice), so a scope change re-frames the mounted
-  // table without a refetch.
-  async function bottomGraph() {
-    const docs = await lsp.livingDocs();
-    return mergeDiagramGraphs(docs.files.flatMap((f) => f.diagrams.map((d) => d.graph)));
-  }
-
   // Per-tab lazy-load gate, read straight off the docViews slice: each table has its own key, so
   // isStale(tab) is the gate (true until a load marks that key loaded at the current token). An edit's
   // all-keys invalidate() clears every key, so a re-show after an edit refetches; a re-show without one
-  // reuses the render.
+  // reuses the render. Events/Relationships fetch + render live in surfaceLoaders.tsx now (#985 Task 3);
+  // Terminal/Review stay facade-owned (lazily created by ide.ts, not docViews-gated).
   function ensureBottomLoaded(tab: BottomTab): void {
-    if (tab === 'events' && appStore.getState().isStale('events')) void loadEventsPanel();
-    if (tab === 'relationships' && appStore.getState().isStale('relationships')) void loadRelationshipsPanel();
+    if (tab === 'events' && appStore.getState().isStale('events')) void loaders.loadEventsPanel();
+    if (tab === 'relationships' && appStore.getState().isStale('relationships')) void loaders.loadRelationshipsPanel();
     // The terminal panel is created lazily by ide.ts the first time its tab is shown (mirrors the
     // assistant/scenarios panels); fit() reflows xterm now that the panel has layout. Desktop-only —
     // the browser host omits ensureTerminal and the panel shows its placeholder.
@@ -2074,59 +1511,51 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     onNavigate: { setActiveContext: activeContextCtrl.setActiveContext, gotoSourceSpan: deps.gotoSourceSpan },
   });
 
-  // Events + Relationships are Preact panels mounted into their hosts; each subscribes to the store's
-  // `activeContext` slice and scopes itself, so the loaders pass the UNSCOPED merged graph and a scope
-  // change re-renders the table without a refetch. Both are tabular views of the same model the Canvas
-  // draws; the Relationships table shows structural edges only (the strategic context map has its own
-  // home, the Output → Context Map facet), so neither loader fetches the context map. The fetch rides the
-  // docViews slice's own per-tab token ('events' / 'relationships'): captured before the await, compared
-  // after (so an edit mid-fetch discards the superseded result), and the panel is marked loaded only for
-  // the token it fetched. The loading/error states write the host imperatively via docMessage, which
-  // unmounts the prior Preact tree first — so the reconciler and the imperative write never fight over it.
-  async function loadEventsPanel(): Promise<void> {
-    await guardedLoad({
-      store: appStore,
-      key: 'events',
-      isDisposed: () => disposed,
-      loading: () => docMessage(eventsPanel, 'Loading events…'),
-      fetch: () => bottomGraph(),
-      render: (graph) =>
-        renderPanel(eventsPanel, <EventsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />),
-      onError: (e) => docMessage(eventsPanel, 'Events request failed: ' + String(e), 'error'),
-    });
-  }
-
-  async function loadRelationshipsPanel(): Promise<void> {
-    await guardedLoad({
-      store: appStore,
-      key: 'relationships',
-      isDisposed: () => disposed,
-      loading: () => docMessage(relationshipsPanel, 'Loading relationships…'),
-      fetch: () => bottomGraph(),
-      render: (graph) =>
-        renderPanel(
-          relationshipsPanel,
-          <RelationshipsPanel store={appStore} graph={graph} handlers={bottomTableHandlers} />,
-        ),
-      onError: (e) => docMessage(relationshipsPanel, 'Relationships request failed: ' + String(e), 'error'),
-    });
-  }
-
-  // Mark the Events/Relationships/Context Map tables stale (called from invalidateDocViews on any model
-  // change, and from a scope change). Each has its own docViews key now (#193): bumping a key's token
-  // both invalidates any in-flight load of that tab (its captured token no longer matches) and makes the
-  // tab stale for its next show (isStale reads the cleared `loaded`). If one is on screen and expanded,
-  // live-refresh it (debounced) so it tracks edits like the inspector; Problems is refreshed by the
-  // diagnostics push, and a collapsed panel reloads when next expanded.
-  function invalidateBottomPanels(): void {
-    const inv = appStore.getState().invalidate;
-    inv('events');
-    inv('relationships');
-    inv('contextmap');
-    if (activeBottomTab() === 'problems' || appStore.getState().diagCollapsed) return;
-    clearTimeout(bottomPanelDebounce);
-    bottomPanelDebounce = setTimeout(() => ensureBottomLoaded(activeBottomTab()), 350);
-  }
+  // --- surface loaders (#985 Task 3) ------------------------------------------
+  // Every lazily-loaded, model-/folder-derived panel — the Generated preview (+ Copy affordance + Output
+  // rail), the diagram, the glossary, the left-rail model-index fetch, the ADR/Notes docs pages, Source
+  // Control (+ its live dirty-count repaint), the Events/Relationships tables, and the on-demand
+  // Compatibility check — now live in surfaceLoaders.tsx, along with the docViews invalidation + the
+  // debounced doc-edit repaint (onDocEdited, riding the docViews slice's own `scheduleRefresh`). This
+  // facade wires the DOM hosts it already looked up, the write-path deps those loaders need, and the
+  // handful of hooks back into facade-private state (the joined model index, the Domain navigator, the
+  // chrome functions, Task 1/2's sibling modules) that a loader can't own itself.
+  loaders = createSurfaceLoaders({
+    store: appStore,
+    lsp,
+    output,
+    platform,
+    hosts: {
+      preview: previewEl,
+      diagrams: diagramsView,
+      glossary: glossaryView,
+      adr: adrView,
+      notes: notesView,
+      sourceControl: sourceControlRightView,
+      events: eventsPanel,
+      relationships: relationshipsPanel,
+      check: checkView,
+    },
+    deps: {
+      folderRootToken: deps.folderRootToken,
+      setStatus: deps.setStatus,
+      onSaveGlossaryDescription: deps.onSaveGlossaryDescription,
+      saveAllDirty: deps.saveAllDirty,
+      gotoSourceSpan: deps.gotoSourceSpan,
+      gotoRange: (start, end) => editor.gotoRange(start, end),
+    },
+    hooks: {
+      ensureModelIndex,
+      onModelIndexRebuilt,
+      ensureDomainNavigator,
+      invalidateModelDerivedCaches,
+      ensureTechLoaded,
+      ensureOutputLoaded,
+      ensureBottomLoaded,
+      loadSyntaxTree,
+      refreshContextList: activeContextCtrl.refreshContextList,
+    },
+  });
 
   // --- boot ------------------------------------------------------------------
   // Boot the center chrome into the restored center pane (no fetch — ide.ts's boot ladder's
@@ -2136,7 +1565,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // chrome from that slice state.
   function init(): void {
     applyCenterChrome();
-    setTarget(currentTarget);
+    // Seed the shared store's `emitTarget` slice from the boot-time target — surfaceLoaders' `setTarget`
+    // writes THROUGH that slice now (#923's existing top-bar mirror), so this is what makes the very
+    // first `loadPreview()` (and the top-bar selector's initial paint) agree before any Settings→Output
+    // effective-settings push runs.
+    loaders.setTarget(deps.initialTarget);
     // The rail axis is hydrated + painted at construction now (#983 — via the uiChrome slice).
     // Mount the Deck: detach the four center-host sections first so rendering the stage into #center-body
     // doesn't destroy them, then let the DeckStage re-parent each into its card body (via a ref). The
@@ -2167,16 +1600,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // environment, where `render` would throw "document is not defined".
   function dispose(): void {
     disposed = true;
-    clearTimeout(copyResetTimer);
-    clearTimeout(editDebounce);
-    clearTimeout(bottomPanelDebounce);
     clearTimeout(caretSyncTimer); // #890: clear the debounced Syntax Tree caret-sync so it can't re-render a torn-down host
     clearTimeout(notifyTimer); // #648: clear the stripe-flash timer so it can't touch a torn-down DOM node
     // Drop the Domain navigator's store subscription so a deferred store change can't repaint a torn-down
     // host (the same hazard the debounce clears, for the navigator's #453 subscription).
     domainNavigator?.unmount();
-    // Drop the Source Control dirty-count subscription (#470) for the same reason.
-    unsubscribeDirtyCount();
+    // Drop surfaceLoaders' own timers (the Copy-affordance reset, the bottom-panel debounce) and its
+    // Source Control dirty-count subscription (#470) — and cancel any pending onDocEdited scheduleRefresh
+    // callback (#985 Task 3: it self-guards on a `disposed` flag this call flips).
+    loaders.dispose();
     // Drop the Syntax Tree caret-sync subscription (#890) too — its callback re-renders the panel, which
     // must not fire into a torn-down host after dispose.
     unsubscribeCursor();
@@ -2237,17 +1669,17 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     selectBottomTab,
     selectRight,
     splitCodeCanvas,
-    loadPreview,
-    loadDiagrams,
-    setTarget,
-    onPreviewTargetChanged,
-    runCheck,
-    onDocEdited,
-    invalidateDocViews,
-    invalidateDocsPanel,
-    refreshSourceControl,
-    onThemeChanged,
-    refreshActiveSurfaces,
+    loadPreview: loaders.loadPreview,
+    loadDiagrams: loaders.loadDiagrams,
+    setTarget: loaders.setTarget,
+    onPreviewTargetChanged: loaders.onPreviewTargetChanged,
+    runCheck: loaders.runCheck,
+    onDocEdited: loaders.onDocEdited,
+    invalidateDocViews: loaders.invalidateDocViews,
+    invalidateDocsPanel: loaders.invalidateDocsPanel,
+    refreshSourceControl: loaders.refreshSourceControl,
+    onThemeChanged: loaders.onThemeChanged,
+    refreshActiveSurfaces: loaders.refreshActiveSurfaces,
     refreshContextList: activeContextCtrl.refreshContextList,
     restoreActiveContext: activeContextCtrl.restoreActiveContext,
     followActiveFileContext: activeContextCtrl.followActiveFileContext,
