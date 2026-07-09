@@ -13,9 +13,6 @@ import {
     saveApiKey,
     clearApiKey,
     whenSecretsReady,
-    resolveKeybindings,
-    loadKeybindingOverrides,
-    saveKeybindingOverride,
     clearKeybindingOverrides,
     DEFAULT_SETTINGS,
     type Settings,
@@ -34,15 +31,10 @@ import type { SectionCtx } from "@/settings/prefsSections/types";
 import { buildAppearanceSection } from "@/settings/prefsSections/appearance";
 import { buildAboutSection } from "@/settings/prefsSections/about";
 import { buildEditorSection } from "@/settings/prefsSections/editor";
+import { buildKeyboardSection } from "@/settings/prefsSections/keyboard";
 import { buildOutputSection } from "@/settings/prefsSections/output";
 import { createJsonView } from "@/editor/editor";
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
-import {
-    KEYBINDINGS,
-    DEFAULT_BINDINGS,
-    type BindingId,
-} from "@/editor/keybindings";
-import { chordFromEvent, prettyChord } from "@/shared/platform";
 
 export interface PrefsCallbacks {
     /** Fired after every committed change with the merged, persisted Settings. */
@@ -127,9 +119,6 @@ const ICON = {
     output: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.4 2.6c-1.2 0-1.7.6-1.7 1.8v1.6c0 .9-.3 1.3-1.1 1.4v1.2c.8.1 1.1.5 1.1 1.4v1.6c0 1.2.5 1.8 1.7 1.8M9.6 2.6c1.2 0 1.7.6 1.7 1.8v1.6c0 .9.3 1.3 1.1 1.4v1.2c-.8.1-1.1.5-1.1 1.4v1.6c0 1.2-.5 1.8-1.7 1.8"/></svg>',
     about: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.8"/><path d="M8 7.3v3.4"/><circle cx="8" cy="4.9" r="0.9" fill="currentColor" stroke="none"/></svg>',
 } as const;
-
-// chordFromEvent (keydown → CodeMirror key) and prettyChord (CodeMirror key → display string) live in
-// shared/platform.ts beside formatChord — they're platform-string helpers, not Settings-dialog logic.
 
 /** A mounted preferences pane. The public contract is just teardown; the embedded Settings page drives the
  *  richer {@link MountedPrefsPane} returned by {@link mountPreferencesPane}. */
@@ -258,326 +247,16 @@ export function mountPreferencesPane(
     const editor = buildEditorSection(sectionCtx, { scopeKit });
 
     // --- Keyboard -------------------------------------------------------------
-    // One row per rebindable editor command (KEYBINDINGS). Each row records a new combo (a document-level
-    // capture-phase keydown listener while armed), resets to its default, or — on a clash with another
-    // command's chord — surfaces a confirmable conflict. Every committed change persists through the
-    // Task-2 override store and live-applies via cb.onKeybindingsChanged.
+    // Construction + control wiring — including the chord recorder's document-level capture-phase
+    // keydown listener (armRecording/disarmRecording) — extracted whole into prefsSections/keyboard.ts
+    // (#987 task 5, the most delicate section: get the arm/disarm pairing wrong and a listener leaks that
+    // swallows every keystroke on the page). Keyboard does NOT take sectionCtx: its commits go straight
+    // through saveKeybindingOverride/clearKeybindingOverrides, not commit()/onChange(), and it notifies via
+    // its own deps.onKeybindingsChanged rather than the shared ctx.
 
-    // Editor shortcuts OUTSIDE the rebindable registry that a remap would silently shadow: the registry
-    // keymap compartment is registered at higher precedence than the editor's own Mod-Alt-h (call
-    // hierarchy) and the loaded CodeMirror keymaps (search → Mod-f / Mod-d, default → Mod-a). We can't
-    // unbind these, but we warn before letting a remap mask one. Verified against editor.ts's loaded
-    // keymaps (note: historyKeymap is NOT loaded, so Mod-z is free); not exhaustive — built-in coverage
-    // can grow as more commands enter scope.
-    const RESERVED_CHORDS: Record<string, string> = {
-        "Mod-Alt-h": "Call hierarchy",
-        "Mod-f": "Find",
-        "Mod-d": "Select next occurrence",
-        "Mod-a": "Select all",
-    };
-
-    interface KbdRowState {
-        chord: HTMLElement;
-        recordBtn: HTMLButtonElement;
-        resetBtn: HTMLButtonElement;
-        conflict: HTMLElement;
-        reassignBtn: HTMLButtonElement;
-        cancelBtn: HTMLButtonElement;
-        /** A recorded chord awaiting conflict confirmation: the clashing label and the rebindable command
-         *  that currently owns it — null when it clashes with a reserved/built-in shortcut we can't unbind
-         *  (confirming then just applies the remap, shadowing the built-in). */
-        pending: {
-            chord: string;
-            otherId: BindingId | null;
-            label: string;
-        } | null;
-    }
-    const kbdRows = new Map<BindingId, KbdRowState>();
-
-    // Recording is global (only one row arms at a time): the armed id + its document listener.
-    let kbdArmed: BindingId | null = null;
-    let kbdKeyListener: ((e: KeyboardEvent) => void) | null = null;
-
-    const kbdLabel = (id: BindingId): string =>
-        KEYBINDINGS.find((b) => b.id === id)?.label ?? id;
-
-    // Re-read the resolved map and repaint one row: chord display + the per-row Reset's enabled state
-    // (Reset only means something when this command actually carries an override).
-    function repaintKbdRow(id: BindingId): void {
-        const row = kbdRows.get(id);
-        if (!row) return;
-        row.chord.textContent = prettyChord(resolveKeybindings()[id]);
-        row.resetBtn.disabled = !(id in loadKeybindingOverrides());
-    }
-    function repaintKeyboard(): void {
-        for (const id of kbdRows.keys()) repaintKbdRow(id);
-    }
-
-    function hideKbdConflict(id: BindingId): void {
-        const row = kbdRows.get(id);
-        if (!row) return;
-        row.pending = null;
-        row.conflict.hidden = true;
-        row.conflict.textContent = "";
-        row.reassignBtn.hidden = true;
-        row.cancelBtn.hidden = true;
-    }
-
-    function showKbdConflict(
-        id: BindingId,
-        chord: string,
-        label: string,
-        otherId: BindingId | null,
-    ): void {
-        const row = kbdRows.get(id);
-        if (!row) return;
-        row.pending = { chord, otherId, label };
-        // Unhide BEFORE writing the text: role="alert" only announces a content change made while the node
-        // is already rendered, so setting textContent while [hidden] then revealing it would stay silent.
-        row.conflict.hidden = false;
-        row.conflict.textContent = `Already bound to “${label}”. Reassign?`;
-        row.reassignBtn.hidden = false;
-        row.cancelBtn.hidden = false;
-        row.reassignBtn.focus(); // move focus to the confirm so keyboard / screen-reader users can act on it
-    }
-
-    function disarmRecording(): void {
-        if (kbdKeyListener) {
-            document.removeEventListener("keydown", kbdKeyListener, true);
-            kbdKeyListener = null;
-        }
-        if (kbdArmed !== null) {
-            const row = kbdRows.get(kbdArmed);
-            if (row) {
-                row.recordBtn.textContent = "Record";
-                row.recordBtn.classList.remove("is-recording");
-            }
-            kbdArmed = null;
-        }
-    }
-
-    // The rebindable command (≠ id) whose RESOLVED chord equals `chord` — the duplicate a commit
-    // without a conflict prompt would silently double-bind. Unbound ("") rows never count.
-    function findKbdDuplicate(
-        id: BindingId,
-        chord: string,
-    ): BindingId | undefined {
-        const resolved = resolveKeybindings();
-        return (Object.keys(resolved) as BindingId[]).find(
-            (k) => k !== id && resolved[k] !== "" && resolved[k] === chord,
-        );
-    }
-
-    // Commit a freshly recorded chord, or defer to a conflict prompt when it clashes with another
-    // rebindable command or a reserved/built-in shortcut.
-    function applyRecordedChord(id: BindingId, chord: string): void {
-        // Scan for a duplicate owner BEFORE the own-default fast path below: the Reassign flow can hand
-        // this command's default chord to another command, so even the default can clash.
-        const otherId = findKbdDuplicate(id, chord);
-        if (otherId) {
-            showKbdConflict(id, chord, kbdLabel(otherId), otherId); // clashes with another rebindable command
-            return; // wait for the user to confirm the reassignment
-        }
-        // Recording a command's own default drops any override instead of persisting a redundant one — so
-        // the store stays clean and the per-row Reset's enabled state stays honest.
-        if (chord === DEFAULT_BINDINGS[id]) {
-            saveKeybindingOverride(id, null);
-            repaintKbdRow(id);
-            cb.onKeybindingsChanged?.();
-            return;
-        }
-        const reserved = RESERVED_CHORDS[chord];
-        if (reserved) {
-            showKbdConflict(id, chord, reserved, null); // would shadow a built-in / call-hierarchy shortcut
-            return;
-        }
-        saveKeybindingOverride(id, chord);
-        repaintKbdRow(id);
-        cb.onKeybindingsChanged?.();
-    }
-
-    function armRecording(id: BindingId): void {
-        disarmRecording(); // cancel any other in-flight recording first
-        for (const k of kbdRows.keys()) hideKbdConflict(k); // clear THIS and any other row's stale conflict prompt
-        kbdArmed = id;
-        const row = kbdRows.get(id);
-        if (row) {
-            row.recordBtn.textContent = "Press keys…";
-            row.recordBtn.classList.add("is-recording");
-        }
-        kbdKeyListener = (e: KeyboardEvent) => {
-            // Capture + swallow so the combo isn't also handled by the app/editor underneath the dialog.
-            e.preventDefault();
-            e.stopPropagation();
-            if (e.key === "Escape") {
-                disarmRecording(); // cancel — no change
-                return;
-            }
-            const chord = chordFromEvent(e);
-            if (chord === null) return; // a bare modifier — keep waiting for the real key
-            // Reject a modifier-less printable single char: binding it would swallow that character in the
-            // editor (preventDefault), making it un-typeable. Named keys (F2/F12/Enter…) and any modifier
-            // combo are fine; stay armed so the user can press a valid combo.
-            if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1)
-                return;
-            const armedId = kbdArmed;
-            disarmRecording();
-            if (armedId !== null) applyRecordedChord(armedId, chord);
-        };
-        document.addEventListener("keydown", kbdKeyListener, true);
-    }
-
-    function buildKbdRow(id: BindingId, label: string): HTMLElement {
-        const control = document.createElement("div");
-        control.className = "koi-kbd-control";
-
-        const chord = document.createElement("span");
-        chord.className = "koi-kbd-chord";
-        // The current binding lives in this span; tie it to the Record button so a screen reader announces
-        // "Record a new shortcut for Format document, ⌘S" instead of a bare, ambiguous "Record".
-        chord.id = `koi-kbd-chord-${id}`;
-
-        const recordBtn = document.createElement("button");
-        recordBtn.type = "button";
-        recordBtn.className = "koi-set-action koi-kbd-record";
-        recordBtn.textContent = "Record";
-        recordBtn.setAttribute(
-            "aria-label",
-            `Record a new shortcut for ${label}`,
-        );
-        recordBtn.setAttribute("aria-describedby", chord.id);
-
-        const resetBtn = document.createElement("button");
-        resetBtn.type = "button";
-        resetBtn.className = "koi-kbd-reset";
-        resetBtn.textContent = "Reset";
-        resetBtn.setAttribute(
-            "aria-label",
-            `Reset the ${label} shortcut to its default`,
-        );
-
-        const conflict = document.createElement("span");
-        conflict.className = "koi-kbd-conflict";
-        conflict.setAttribute("role", "alert");
-        conflict.hidden = true;
-
-        const reassignBtn = document.createElement("button");
-        reassignBtn.type = "button";
-        reassignBtn.className = "koi-set-action koi-kbd-reassign";
-        reassignBtn.textContent = "Reassign";
-        reassignBtn.setAttribute(
-            "aria-label",
-            `Reassign this shortcut to ${label}`,
-        );
-        reassignBtn.hidden = true;
-
-        const cancelBtn = document.createElement("button");
-        cancelBtn.type = "button";
-        cancelBtn.className = "koi-kbd-cancel";
-        cancelBtn.textContent = "Cancel";
-        cancelBtn.setAttribute(
-            "aria-label",
-            `Cancel reassigning the ${label} shortcut`,
-        );
-        cancelBtn.hidden = true;
-
-        control.append(
-            chord,
-            recordBtn,
-            resetBtn,
-            conflict,
-            reassignBtn,
-            cancelBtn,
-        );
-
-        const r = row(label, "", control);
-        r.classList.add("koi-kbd-row");
-        r.dataset.bindingId = id;
-
-        kbdRows.set(id, {
-            chord,
-            recordBtn,
-            resetBtn,
-            conflict,
-            reassignBtn,
-            cancelBtn,
-            pending: null,
-        });
-
-        recordBtn.addEventListener("click", () => {
-            if (kbdArmed === id)
-                disarmRecording(); // a second click toggles recording off
-            else armRecording(id);
-        });
-        resetBtn.addEventListener("click", () => {
-            hideKbdConflict(id);
-            // Reset restores the default chord, which the Reassign flow may meanwhile have handed to
-            // ANOTHER command — route through the same conflict prompt instead of silently double-binding.
-            const otherId = findKbdDuplicate(id, DEFAULT_BINDINGS[id]);
-            if (otherId) {
-                showKbdConflict(
-                    id,
-                    DEFAULT_BINDINGS[id],
-                    kbdLabel(otherId),
-                    otherId,
-                );
-                return; // wait for the user to confirm the reassignment
-            }
-            saveKeybindingOverride(id, null); // drop the remap so the default wins again
-            repaintKbdRow(id);
-            cb.onKeybindingsChanged?.();
-        });
-        reassignBtn.addEventListener("click", () => {
-            const row = kbdRows.get(id);
-            const p = row?.pending;
-            if (!p) return;
-            if (p.otherId) saveKeybindingOverride(p.otherId, ""); // a rebindable prior owner becomes unbound
-            // This command takes the chord (shadowing a built-in if reserved); taking back its OWN default
-            // drops the override instead of persisting a redundant one, keeping the store clean.
-            saveKeybindingOverride(
-                id,
-                p.chord === DEFAULT_BINDINGS[id] ? null : p.chord,
-            );
-            hideKbdConflict(id);
-            repaintKbdRow(id);
-            if (p.otherId) repaintKbdRow(p.otherId);
-            cb.onKeybindingsChanged?.();
-        });
-        cancelBtn.addEventListener("click", () => hideKbdConflict(id)); // dismiss — keep the current binding
-
-        return r;
-    }
-
-    const keyboardRows = KEYBINDINGS.map((b) => buildKbdRow(b.id, b.label));
-
-    const kbdResetAll = document.createElement("button");
-    kbdResetAll.type = "button";
-    kbdResetAll.className = "koi-set-action koi-kbd-reset-all";
-    kbdResetAll.textContent = "Reset all shortcuts";
-    kbdResetAll.addEventListener("click", () => {
-        clearKeybindingOverrides();
-        for (const id of kbdRows.keys()) hideKbdConflict(id);
-        repaintKeyboard();
-        cb.onKeybindingsChanged?.();
+    const keyboard = buildKeyboardSection({
+        onKeybindingsChanged: cb.onKeybindingsChanged,
     });
-
-    const keyboardPanel = panel(
-        "keyboard",
-        ...keyboardRows,
-        row(
-            "Reset all",
-            "Restore the default shortcut for every command.",
-            kbdResetAll,
-        ),
-    );
-
-    // Cancel any armed recording / open conflict and repaint from the current overrides — called on
-    // every open (populate) so the panel never reopens mid-recording or showing a stale chord.
-    function refreshKeyboard(): void {
-        disarmRecording();
-        for (const id of kbdRows.keys()) hideKbdConflict(id);
-        repaintKeyboard();
-    }
 
     // --- Output ---------------------------------------------------------------
     // Construction + control wiring extracted into prefsSections/output.ts (#987 task 4), following the
@@ -1227,7 +906,7 @@ export function mountPreferencesPane(
             id: "keyboard",
             label: "Keyboard",
             icon: ICON.keyboard,
-            panel: keyboardPanel,
+            panel: keyboard.panel,
         },
         {
             id: "output",
@@ -1286,8 +965,7 @@ export function mountPreferencesPane(
         // Switching (or re-selecting) a category cancels an armed keybinding recorder and clears any open
         // conflict prompt — otherwise the document-level capture listener keeps swallowing keystrokes typed
         // into another panel and could rebind the now-hidden Keyboard row.
-        disarmRecording();
-        for (const id of kbdRows.keys()) hideKbdConflict(id);
+        keyboard.suspend();
         activeIndex = index;
         categories.forEach((c, i) => {
             const on = i === index;
@@ -1353,7 +1031,7 @@ export function mountPreferencesPane(
         shellArgsControl.set(s.terminalShellArgs);
         // Repaint the Keyboard panel from the current overrides (and cancel any armed recording / open
         // conflict) so a reopen — including the one the Advanced reset triggers — shows fresh chords.
-        refreshKeyboard();
+        keyboard.populate(s);
     }
 
     // The pane's "open" state: repaint every control from the current Settings, refresh the About card,
@@ -1395,8 +1073,7 @@ export function mountPreferencesPane(
     // listener would otherwise outlive a close and hijack the next keystroke — e.g. swallow Mod-S and
     // silently rebind a hidden row) and any open conflict prompt. The modal calls this on close by ANY path.
     function suspend(): void {
-        disarmRecording();
-        for (const id of kbdRows.keys()) hideKbdConflict(id);
+        keyboard.suspend();
     }
 
     // Fully tear the pane down: drop transient state, supersede any in-flight async (so a late sidecar /
