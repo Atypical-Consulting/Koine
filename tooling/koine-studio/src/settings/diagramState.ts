@@ -11,6 +11,7 @@ import {
   sanitizeNotes,
   type DiagramGroup,
   type DiagramNote,
+  type DiagramPosition,
 } from '@/diagrams/diagramContract';
 import { readRaw, writeRaw } from '@/shell/storage';
 
@@ -44,12 +45,6 @@ export function saveDiagramZoom(key: string, percent: number): void {
 // survives a re-render (and most model edits). Every read is guarded so a hand-edited key can't break the
 // canvas, and malformed entries are dropped individually.
 const DIAGRAM_POSITIONS_KEY_PREFIX = 'koine.studio.diagramPositions.';
-
-/** A persisted node position in diagram content coordinates. */
-export interface DiagramPosition {
-  x: number;
-  y: number;
-}
 
 /** The persisted node positions for a diagram key, keyed by qualified name; {} when absent/malformed. */
 export function loadDiagramPositions(key: string): Record<string, DiagramPosition> {
