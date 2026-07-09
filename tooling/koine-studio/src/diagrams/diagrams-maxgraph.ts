@@ -154,6 +154,11 @@ const SIMPLE_H = 40;
 const CONTEXT_MIN_W = 120;
 const CONTEXT_H = 56;
 
+// The three ranked HierarchicalLayouts (domain-canvas inner layout, context map, event flow) all pin the
+// upstream/root nodes to this one edge so a dependency reads left→right. One shared constant instead of
+// three independent literals — the #1209 regression was exactly these three sites drifting out of sync.
+const UPSTREAM_ORIENTATION = 'west';
+
 /** Split a class node's members into the attribute compartment (field/value/computed) and methods. */
 function partitionMembers(node: DiagramNode): { fields: DiagramMember[]; methods: DiagramMember[] } {
   const fields = node.members.filter((m) => m.kind === 'field' || m.kind === 'value' || m.kind === 'computed');
@@ -426,12 +431,10 @@ function runTwoLevelLayout(mx: Mx, graph: MxGraph): void {
     graph.batchUpdate(() => {
       const count = root.getChildCount();
       // Inner: arrange each context container's members left→right and resize the box to wrap them.
-      // 'west' positions the ROOT nodes at the left edge (HierarchicalLayout's orientation argument pins
-      // root placement, not flow direction) — that's what makes the ranked members read left→right.
       for (let i = 0; i < count; i++) {
         const child = root.getChildAt(i);
         if (child?.isVertex() && child.getChildCount() > 0) {
-          const inner = new HierarchicalLayout(graph, 'west');
+          const inner = new HierarchicalLayout(graph, UPSTREAM_ORIENTATION);
           inner.resizeParent = true;
           inner.parentBorder = 40; // clears the swimlane header (startSize 30) with breathing room
           inner.intraCellSpacing = 30;
@@ -1440,14 +1443,12 @@ export function routeContextMapClick(value: unknown, hooks: ContextMapGraphHooks
   else hooks.onRelationSelect?.(null);
 }
 
-/** Arrange the context-map graph by its relations: a dependency-ranked {@link HierarchicalLayout}. The
- *  orientation argument pins where maxGraph places the ROOT nodes (the pure-upstream contexts), not the
- *  reading direction — so `'west'` puts the roots at the left and lets an upstream → downstream edge
- *  read left→right (matching the domain canvas's inner layout). Wrapped so a measure-less headless DOM
- *  can't blank it. */
+/** Arrange the context-map graph by its relations: a dependency-ranked {@link HierarchicalLayout} so an
+ *  upstream → downstream edge reads left→right (matching the domain canvas's inner layout). Wrapped so a
+ *  measure-less headless DOM can't blank it. */
 function runContextMapLayout(mx: Mx, graph: MxGraph): void {
   try {
-    const layout = new mx.HierarchicalLayout(graph, 'west');
+    const layout = new mx.HierarchicalLayout(graph, UPSTREAM_ORIENTATION);
     layout.intraCellSpacing = 40;
     layout.interRankCellSpacing = 90;
     graph.batchUpdate(() => layout.execute(graph.getDefaultParent()));
@@ -1580,13 +1581,12 @@ function eventFlowPositionKey(): string {
   return `${diagramPersistScope()}:koi-event-flow`;
 }
 
-/** Arrange the event flow left→right by its edges — a dependency-ranked {@link HierarchicalLayout}
- *  (orientation `'west'` pins the root nodes to the left, like the context-map layout) so
+/** Arrange the event flow left→right by its edges — a dependency-ranked {@link HierarchicalLayout} so
  *  command→event→policy reads as a causal chain. Wrapped so a measure-less headless DOM (vitest) can't
  *  blank it — the model is the tested contract. */
 function runEventFlowLayout(mx: Mx, graph: MxGraph): void {
   try {
-    const layout = new mx.HierarchicalLayout(graph, 'west');
+    const layout = new mx.HierarchicalLayout(graph, UPSTREAM_ORIENTATION);
     layout.intraCellSpacing = 40;
     layout.interRankCellSpacing = 80;
     graph.batchUpdate(() => layout.execute(graph.getDefaultParent()));
