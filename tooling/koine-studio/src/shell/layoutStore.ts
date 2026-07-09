@@ -2,6 +2,7 @@
 // and side-rail position, all backed by localStorage. Pure data — no DOM, no signals.
 // Every read is guarded against absent storage and malformed JSON so a corrupt key never breaks
 // the app; every write is best-effort and swallows quota/security errors.
+import { readRaw, writeRaw } from '@/shell/storage';
 
 // --- model -------------------------------------------------------------------
 
@@ -31,26 +32,6 @@ export const DEFAULT_LAYOUT: LayoutState = {
 // --- storage key -------------------------------------------------------------
 
 const LAYOUT_KEY = 'koine.studio.layout';
-
-// --- raw localStorage helpers (never throw) ----------------------------------
-
-/** Read a key, returning null on any error or when storage is unavailable. */
-function readRaw(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-/** Write a key, swallowing quota/security errors. */
-function writeRaw(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // storage unavailable or full — best effort only
-  }
-}
 
 // --- per-field coercions -----------------------------------------------------
 

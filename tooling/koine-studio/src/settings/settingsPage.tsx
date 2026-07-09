@@ -14,6 +14,7 @@ import { settingsToJsonDoc, jsonDocToSettings, workspaceOverridesToJsonDoc, json
 import { loadSettings, saveSettings, loadWorkspaceOverrides, replaceWorkspaceOverrides } from '@/settings/persistence';
 import { setTheme } from '@/settings/theme';
 import { appStore } from '@/store/index';
+import { readRaw, writeRaw } from '@/shell/storage';
 import { el } from '@atypical/koine-ui';
 
 /** Which representation the page is showing. Persisted so the last-used one is restored on reopen. */
@@ -51,39 +52,21 @@ export interface SettingsPageHandle {
 
 /** Read the persisted representation, defaulting to Visual when absent/invalid. */
 function loadMode(): SettingsEditorMode {
-  try {
-    return localStorage.getItem(MODE_KEY) === 'json' ? 'json' : 'visual';
-  } catch {
-    // A storage-locked host (private mode / denied) must fall back to Visual, never let the read throw
-    // and break the page mount — matching the guard every sibling helper already has.
-    return 'visual';
-  }
+  return readRaw(MODE_KEY) === 'json' ? 'json' : 'visual';
 }
 
 function saveMode(mode: SettingsEditorMode): void {
-  try {
-    localStorage.setItem(MODE_KEY, mode);
-  } catch {
-    // A storage failure (private mode / quota) must never break switching representations.
-  }
+  writeRaw(MODE_KEY, mode);
 }
 
 /** Read the persisted JSON scope, defaulting to 'user' when absent/invalid. */
 function loadScope(): JsonScope {
-  try {
-    return localStorage.getItem(SCOPE_KEY) === 'workspace' ? 'workspace' : 'user';
-  } catch {
-    return 'user';
-  }
+  return readRaw(SCOPE_KEY) === 'workspace' ? 'workspace' : 'user';
 }
 
 /** Persist the JSON scope. A storage failure must never break scope switching. */
 function saveScope(s: JsonScope): void {
-  try {
-    localStorage.setItem(SCOPE_KEY, s);
-  } catch {
-    // Ignore storage failures (private mode / quota).
-  }
+  writeRaw(SCOPE_KEY, s);
 }
 
 const MODES: { value: SettingsEditorMode; label: string }[] = [

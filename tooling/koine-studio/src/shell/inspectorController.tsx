@@ -85,6 +85,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
+import { readRaw, writeRaw } from '@/shell/storage';
 import { DEFAULT_CENTER, DEFAULT_DECK_STATE, isValidCenter, type DeckState, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { currentTheme } from '@/settings/theme';
@@ -1088,23 +1089,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     goto: (line, col) => editor.goto(line, col),
     onOpenContextMap: () => focusContextMap(),
     onOpenGlossary: () => focusDocs(),
-  };
-
-  // Guarded localStorage access (never throws in locked-down hosts) — the layoutStore readRaw/writeRaw
-  // shape, reused for the chrome keys this controller owns (#983).
-  const readRaw = (key: string): string | null => {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  };
-  const writeRaw = (key: string, value: string): void => {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      // storage unavailable — the in-session choice still applies
-    }
   };
 
   // --- rail axis switch: Domain vs Files (#453) ------------------------------
