@@ -130,7 +130,7 @@ export function createWorkspaceBuffers(ctx: WorkspaceModuleCtx) {
       if (uri === st().activeUri) editor.setDoc(body); // reflect in the open editor (fires onChange → dirty)
       // Ensure the buffer holds `body` whether or not onChange ran (tests don't wire the editor↔sync).
       const cur = st().buffers.get(uri);
-      if (cur && cur.text !== body) st().upsertBuffer({ ...cur, text: body });
+      if (cur && cur.text !== body) st().upsertBuffer({ ...cur, text: body, dirty: true });
       lsp.changeDoc(uri, body);
       try {
         await platform.writeTextFile(path, body);

@@ -1233,6 +1233,28 @@ describe('createWorkspaceController — applyFileEdit', () => {
     expect(ws.buffers.get(aUri)!.dirty).toBe(true);
     expect(lsp.didSave).not.toHaveBeenCalled();
   });
+
+  // Regression (#1089): the non-active-buffer safety-net `upsertBuffer` spread `...cur` verbatim,
+  // including `cur.dirty` — so a previously-clean background buffer stayed `dirty: false` even after
+  // its text was force-set to the new (unwritten) body. If the write then failed, the buffer was left
+  // holding unsaved content with no dirty signal at all — a silent-data-loss path.
+  test('a non-active buffer force-synced by the safety-net stays dirty when its write fails', async () => {
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n');
+    platform.files.set('b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const bUri = uriOf('b.koi'); // open but not active; clean, text matches disk
+    platform.failWrites.add('b.koi');
+
+    await expect(ws.applyFileEdit(bUri, 'new body\n')).resolves.toBeNull();
+
+    expect(ws.buffers.get(bUri)!.text).toBe('new body\n');
+    expect(ws.buffers.get(bUri)!.dirty).toBe(true);
+  });
 });
 
 // #472 Task 3: applyFileEdit resolves by the OPAQUE session key — an open buffer's uri (unique across
