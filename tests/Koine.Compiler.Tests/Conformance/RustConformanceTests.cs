@@ -301,4 +301,77 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1084 — the demand-gating for a quantity's scalar Mul/Div must be genuinely two-way,
+    /// mirroring the plain-VO negative fixture <see cref="Value_object_used_only_in_subtraction_does_not_emit_add"/>:
+    /// a quantity used ONLY in <c>* scalar</c> (never <c>/ scalar</c>) must get <c>Mul</c> but NOT a
+    /// spurious <c>Div</c>. Without this, a bug that collapses the separate <c>MultiplyFactors</c>/
+    /// <c>DivideFactors</c> checks into one shared gate would slip through undetected, since the sibling
+    /// positive test exercises a quantity that needs both operators together.
+    /// </summary>
+    [Fact]
+    public void Quantity_used_only_in_multiplication_does_not_emit_div()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "    invariant amount >= 0 \"a weight cannot be negative\"\n" +
+            "  }\n" +
+            "  value Box {\n" +
+            "    base: Weight\n" +
+            "    scaled: Weight = base * 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Mul<i64> for Weight");
+        rust.ShouldNotContain("impl std::ops::Div<i64> for Weight");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1084 — a quantity scaled by a <c>Decimal</c> factor (not just the <c>Int</c> literal the
+    /// sibling positive test uses) must also get a real <c>impl std::ops::Mul&lt;Decimal&gt;</c>/
+    /// <c>Div&lt;Decimal&gt;</c>, exercising the same <c>ScalarFactors</c>/<c>ScaleField</c> path
+    /// <see cref="RustSnapshotTests"/> already pins for a plain (non-quantity) value object.
+    /// </summary>
+    [Fact]
+    public void Quantity_scalar_multiply_and_divide_by_decimal_emit_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "    invariant amount >= 0 \"a weight cannot be negative\"\n" +
+            "  }\n" +
+            "  value Box {\n" +
+            "    base: Weight\n" +
+            "    scaled: Weight = base * 2.5\n" +
+            "    halved: Weight = base / 2.5\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Mul<Decimal> for Weight");
+        rust.ShouldContain("impl std::ops::Div<Decimal> for Weight");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
