@@ -324,7 +324,9 @@ internal sealed class ExpressionChecker
     /// declared type. Nothing previously checked that both operands of a binary <c>+</c>/<c>-</c> are
     /// the SAME quantity type, so e.g. <c>Weight + Volume</c> compiled with zero diagnostics and only
     /// failed downstream in a target's own toolchain (a real Rust cargo check E0308). Reject it here,
-    /// target-agnostically, before any emitter ever sees the expression.
+    /// target-agnostically, before any emitter ever sees the expression. Scoped to quantity-vs-quantity
+    /// only — a quantity combined with a differently-typed PLAIN value object is a separate, broader gap
+    /// (tracked outside #1266).
     /// </summary>
     private void CheckQuantityTypeMismatch(BinaryExpr b, TypeScope scope)
     {
@@ -348,8 +350,23 @@ internal sealed class ExpressionChecker
         }
     }
 
-    private bool IsQuantity(TypeRef t) =>
-        _index.TryGetDecl(t.Name, out TypeDecl decl) && decl is ValueObjectDecl { IsQuantity: true };
+    /// <summary>
+    /// Resolves <paramref name="t"/> the same context-aware way member/operation lookups do elsewhere
+    /// in this file (<c>t.Qualifier ?? _resolver.Context</c>, R13.2) — NOT the flat
+    /// <see cref="ModelIndex.TryGetDecl"/> alone, which is keyed by bare name across the whole model.
+    /// Two different contexts may legally declare their own same-named type (one a quantity, one not);
+    /// resolving without the reference site's context can silently pick the WRONG declaration.
+    /// </summary>
+    private bool IsQuantity(TypeRef t)
+    {
+        var context = t.Qualifier ?? _resolver.Context;
+        if (context is not null && _index.TryGetDeclIn(context, t.Name, out TypeDecl decl))
+        {
+            return decl is ValueObjectDecl { IsQuantity: true };
+        }
+
+        return _index.TryGetDecl(t.Name, out decl) && decl is ValueObjectDecl { IsQuantity: true };
+    }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
     {

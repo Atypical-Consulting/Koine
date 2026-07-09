@@ -281,29 +281,30 @@ public class R9ValueObjectTests
     // emitter target (e.g. Rust cargo check E0308) with zero diagnostics.
     // ======================================================================
 
+    /// <summary>Shared fixture: two distinct quantity types combined via <paramref name="op"/> on line 15.</summary>
+    private static string MixSrc(string op = "+") =>
+        "context Shop {\n" +
+        "  enum MassUnit { Grams, Kilograms }\n" +
+        "  enum VolumeUnit { Liters }\n" +
+        "  quantity Weight {\n" +
+        "    amount: Decimal\n" +
+        "    unit: MassUnit\n" +
+        "  }\n" +
+        "  quantity Volume {\n" +
+        "    amount: Decimal\n" +
+        "    unit: VolumeUnit\n" +
+        "  }\n" +
+        "  value Mix {\n" +
+        "    w: Weight\n" +
+        "    v: Volume\n" +
+        $"    bad: Weight = w {op} v\n" +
+        "  }\n" +
+        "}\n";
+
     [Fact]
     public void Quantity_addition_across_different_quantity_types_is_rejected()
     {
-        const string src =
-            "context Shop {\n" +
-            "  enum MassUnit { Grams, Kilograms }\n" +
-            "  enum VolumeUnit { Liters }\n" +
-            "  quantity Weight {\n" +
-            "    amount: Decimal\n" +
-            "    unit: MassUnit\n" +
-            "  }\n" +
-            "  quantity Volume {\n" +
-            "    amount: Decimal\n" +
-            "    unit: VolumeUnit\n" +
-            "  }\n" +
-            "  value Mix {\n" +
-            "    w: Weight\n" +
-            "    v: Volume\n" +
-            "    bad: Weight = w + v\n" +
-            "  }\n" +
-            "}\n";
-
-        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        var result = new KoineCompiler().Compile(MixSrc("+"), new CSharpEmitter());
         result.Success.ShouldBeFalse();
 
         var diag = result.Diagnostics.Single(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
@@ -315,26 +316,7 @@ public class R9ValueObjectTests
     [Fact]
     public void Quantity_subtraction_across_different_quantity_types_is_rejected()
     {
-        const string src =
-            "context Shop {\n" +
-            "  enum MassUnit { Grams, Kilograms }\n" +
-            "  enum VolumeUnit { Liters }\n" +
-            "  quantity Weight {\n" +
-            "    amount: Decimal\n" +
-            "    unit: MassUnit\n" +
-            "  }\n" +
-            "  quantity Volume {\n" +
-            "    amount: Decimal\n" +
-            "    unit: VolumeUnit\n" +
-            "  }\n" +
-            "  value Mix {\n" +
-            "    w: Weight\n" +
-            "    v: Volume\n" +
-            "    bad: Weight = w - v\n" +
-            "  }\n" +
-            "}\n";
-
-        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
+        Diagnose(MixSrc("-")).ShouldContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
     }
 
     [Fact]
@@ -359,37 +341,40 @@ public class R9ValueObjectTests
     }
 
     [Fact]
+    public void Quantity_type_mismatch_is_still_caught_when_an_unrelated_context_reuses_the_same_type_name()
+    {
+        // Code-review finding (#1266): IsQuantity/left.Name==right.Name resolved via the flat,
+        // context-unaware ModelIndex.TryGetDecl(name), so an UNRELATED context declaring its own
+        // plain (non-quantity) value object with the same bare name ("Weight") as Shop's quantity
+        // clobbered the lookup and silently suppressed KOI0218 for Shop's own mismatched w + v —
+        // reopening the exact bug this diagnostic exists to close, via an ordinary, legal
+        // multi-context model (R13.2 explicitly allows the same type name in different contexts).
+        const string otherContext =
+            "context Other {\n" +
+            "  value Weight {\n" +
+            "    label: String\n" +
+            "  }\n" +
+            "}\n";
+
+        Diagnose(MixSrc("+") + otherContext).ShouldContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
+    }
+
+    [Fact]
     public void Quantity_type_mismatch_is_rejected_before_reaching_any_code_emitter()
     {
         // #1266: the check lives in Semantics/ (KoineCompiler.Compile validates BEFORE ever calling
         // IEmitter.Emit), so it must reject the mismatched model for every code emitter identically —
-        // pinning that ordering so it can't silently regress into a Rust-only (or any single-target)
-        // fix that leaves the other four targets to fail downstream on their own toolchains.
-        const string src =
-            "context Shop {\n" +
-            "  enum MassUnit { Grams, Kilograms }\n" +
-            "  enum VolumeUnit { Liters }\n" +
-            "  quantity Weight {\n" +
-            "    amount: Decimal\n" +
-            "    unit: MassUnit\n" +
-            "  }\n" +
-            "  quantity Volume {\n" +
-            "    amount: Decimal\n" +
-            "    unit: VolumeUnit\n" +
-            "  }\n" +
-            "  value Mix {\n" +
-            "    w: Weight\n" +
-            "    v: Volume\n" +
-            "    bad: Weight = w + v\n" +
-            "  }\n" +
-            "}\n";
-
+        // pinning that ordering so it can't silently regress into a single-target fix that leaves
+        // the other targets to fail downstream on their own toolchains.
+        var src = MixSrc("+");
         var compiler = new KoineCompiler();
         AssertRejected(compiler.Compile(src, new CSharpEmitter()));
         AssertRejected(compiler.Compile(src, new TypeScriptEmitter()));
         AssertRejected(compiler.Compile(src, new PythonEmitter()));
         AssertRejected(compiler.Compile(src, new PhpEmitter()));
         AssertRejected(compiler.Compile(src, new RustEmitter()));
+        AssertRejected(compiler.Compile(src, new JavaEmitter()));
+        AssertRejected(compiler.Compile(src, new KotlinEmitter()));
 
         static void AssertRejected(CompileResult result)
         {
