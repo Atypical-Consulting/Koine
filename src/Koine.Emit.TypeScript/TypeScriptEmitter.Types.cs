@@ -352,6 +352,13 @@ public sealed partial class TypeScriptEmitter
 
         sb.Append('\n');
         sb.Append(Indent).Append("divide(divisor: number): ").Append(name).Append(" {\n");
+        // Guard up front, mirroring WriteScalarOp's isDiv guard: without it, the thrown
+        // DomainInvariantViolationError carries the generic 'Decimal' runtime type name instead of
+        // this quantity's own, diverging from the plain-VO divide's error identity.
+        sb.Append(Indent).Append(Indent).Append("if (divisor === 0) {\n");
+        sb.Append(Indent).Append(Indent).Append(Indent)
+          .Append("throw new DomainInvariantViolationError('").Append(name).Append("', 'division by zero');\n");
+        sb.Append(Indent).Append(Indent).Append("}\n");
         sb.Append(Indent).Append(Indent).Append("return ")
           .Append(Construct($"this.{amt}.divide(new Decimal(divisor.toString()))", $"this.{u}")).Append(";\n");
         sb.Append(Indent).Append("}\n");

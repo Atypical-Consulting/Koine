@@ -356,9 +356,12 @@ public class TypeScriptConformanceTests
         var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
-        // Always-on guard (no tsc required): the quantity class must define the method it's called on.
+        // Always-on guard (no tsc required): the quantity class must define the method it's called on,
+        // and its zero-divisor guard must name the quantity itself (parity with the plain-VO divide's
+        // error identity), not the generic Decimal runtime type.
         var rendered = TestSupport.Render(result.Files);
         rendered.ShouldContain("divide(divisor: number): Weight");
+        rendered.ShouldContain("DomainInvariantViolationError('Weight', 'division by zero')");
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
