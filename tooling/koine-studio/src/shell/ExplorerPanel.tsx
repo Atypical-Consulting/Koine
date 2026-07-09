@@ -45,10 +45,10 @@ import {
 // to the one handler on `ul[role="tree"]`, which is what makes the old "double-fire through nested
 // treeitem ancestors" bug (and its `stopPropagation` workaround) structurally impossible here.
 //
-// NOT in this task: drag-and-drop move, the "…" per-row context-menu trigger, and the ADR-0009
-// active-context is-scoped/dim emphasis (explorerModel.ts's public `analyze()` doesn't carry that scope
-// match — only the private analyze() inside explorer.ts does). `filterText` and the collapsed-directories
-// set are component-LOCAL `useState` here; task 7 lifts them into the app store.
+// NOT in this task: the "…" per-row context-menu trigger, and the ADR-0009 active-context is-scoped/dim
+// emphasis (explorerModel.ts's public `analyze()` doesn't carry that scope match — only the private
+// analyze() inside explorer.ts does). `filterText` and the collapsed-directories set are component-LOCAL
+// `useState` here; task 7 lifts them into the app store.
 //
 // CONTEXT MENUS + DELETE CONFIRM (#989 task 4): right-click a row, the `ContextMenu` key on a focused
 // row, or right-click the tree's empty background all open a `createFloatingMenu` (row: New File/New
@@ -73,6 +73,25 @@ import {
 // explorer.ts's `wireInlineEdit` semantics 1:1 (Enter commits a valid name, Escape cancels, blur commits-
 // or-cancels, an invalid name stays open to fix) — see their doc comments for the one behavioral addition
 // (the `input.isConnected` blur guard) that keyed reconciliation itself doesn't remove the need for.
+//
+// DRAG-AND-DROP MOVE (#989 task 6): every row is draggable AND a drop target - a directory accepts a drop
+// INTO itself, a file routes to its own containing directory (so a drop onto a file row is never a dead
+// zone), and the tree's empty background drops to the PRIMARY root. Per-row handlers
+// (`onRowDragStart`/`onRowDragOver`/`onRowDrop`/`endDrag`) are built inside `renderEntry` below; the
+// tree-background equivalents (`onTreeDragOver`/`onTreeDragLeave`/`onTreeDrop`) are wired on the shared
+// `ul[role="tree"]`. THE STRUCTURAL POINT of this task: drop validity (`canDropTo` below) is checked via
+// DATA ancestry - `parentMap` (explorerModel.ts's `parentMapOf`, already computed above for ArrowLeft) -
+// never `Element.contains()`, which is how explorer.ts's `wireDrag`/`canDropTo` do it. explorer.ts NEEDS
+// DOM containment because its rebuild-based render would otherwise detach the dragged `<li>` mid-drag and
+// invalidate any cached ancestry - which is exactly why it also needs `flushPendingRender()` to defer any
+// re-render for the drag's whole lifetime. Here a mid-drag re-render (e.g. a diagnostics push) just runs
+// normally: the dragged row is still the SAME keyed `<li key={token}>`, so its DOM identity survives by
+// construction, and `parentMap` is recomputed fresh off the current `groups` on every render regardless -
+// there is nothing to defend and nothing to defer (see ExplorerPanel.test.tsx's mid-drag re-render test,
+// strictly stronger than explorer.test.ts's own parity test since it changes real data, not just re-runs
+// an identical render). `.is-dragging`/`.is-drop-target`/`.is-drop-root` are preserved verbatim
+// (`_explorer.scss` styles them); a row mid-rename/mid-create (`editing` state, not a DOM query for
+// `.explorer-rename`) suppresses its own `dragstart`, since its input owns its own native text-drag.
 export interface ExplorerPanelProps {
   cb: ExplorerCallbacks;
   groups: ExplorerRootGroup[];
@@ -302,6 +321,68 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   // from a directory-target create (lands nested inside that directory's children), mirroring
   // explorer.ts's `rootTokens.has(parentDirToken)` branch in `beginCreate`.
   const rootTokens = useMemo(() => new Set(groups.map((g) => g.root)), [groups]);
+
+  // --- drag-and-drop move (#989 task 6) -----------------------------------------------------------------
+  // `drag` is the in-flight drag's token — replaces explorer.ts's module-scoped `dragEntry`/`dragLi`
+  // mutable DOM refs with plain state; being DATA (not a DOM reference), it survives a re-render
+  // unaffected by construction, which is the whole point of this task (see the file-header note above).
+  // `dropMark` is the current visual drop-target mark — a directory row's token, the tree background
+  // ('root'), or `null` for none — replacing explorer.ts's imperative markDropTarget()/clearDropMarks()
+  // classList calls.
+  const [drag, setDrag] = useState<{ token: string } | null>(null);
+  const [dropMark, setDropMark] = useState<{ kind: 'dir'; token: string } | { kind: 'root' } | null>(null);
+
+  // The destination directory for a drop ONTO `entry`: the entry itself when it's a directory, else its
+  // PARENT directory via `parentMap` (not a DOM walk) — ported from explorer.ts's `dropDirOf`. `null` means
+  // the tree's PRIMARY root (a top-level entry has no parent).
+  const dropDirOf = (entry: FsEntry): string | null => (entry.kind === 'dir' ? entry.token : (parentMap.get(entry.token) ?? null));
+
+  // Can the in-flight drag drop into `destToken` (`null` = the PRIMARY root)? Ported from explorer.ts's
+  // `canDropTo`: reject if nothing is dragged; a root-drop is valid only when the dragged item isn't
+  // ALREADY at the root (no-op guard); reject dropping onto itself; reject dropping into its own subtree —
+  // via a `parentMap`-based ancestor walk UP from `destToken`, not `Element.contains()`; reject dropping
+  // back into the dragged item's current parent (no-op).
+  const canDropTo = (destToken: string | null): boolean => {
+    if (!drag) return false;
+    const dragParent = parentMap.get(drag.token) ?? null;
+    if (destToken === null) return dragParent !== null; // already at root -> no-op guard
+    if (destToken === drag.token) return false; // onto itself
+    for (let cur: string | null = destToken; cur != null; cur = parentMap.get(cur) ?? null) {
+      if (cur === drag.token) return false; // into its own subtree
+    }
+    if (dragParent === destToken) return false; // already a direct child -> no-op
+    return true;
+  };
+
+  // Clear ALL drag state — idempotent, so calling it from both a successful `drop` (which doesn't wait for
+  // `dragend`, which may not fire after a synthetic/edge drop) and `dragend` itself can never strand stale
+  // state, mirroring explorer.ts's `endDrag`.
+  const endDrag = (): void => {
+    setDrag(null);
+    setDropMark(null);
+  };
+
+  // Tree-background drop target ("move to the PRIMARY root"): only handled when the event target isn't
+  // inside a row — a row handles its own dragover/drop first (and `ev.stopPropagation()`s so it never also
+  // reaches here) — mirrors explorer.ts's tree-level dragover/dragleave/drop listeners.
+  const onTreeDragOver = (ev: JSX.TargetedDragEvent<HTMLUListElement>): void => {
+    if ((ev.target as HTMLElement | null)?.closest('.explorer-row')) return;
+    if (!canDropTo(null)) return;
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+    setDropMark({ kind: 'root' });
+  };
+  const onTreeDragLeave = (ev: JSX.TargetedDragEvent<HTMLUListElement>): void => {
+    if (ev.target === ev.currentTarget) setDropMark(null);
+  };
+  const onTreeDrop = (ev: JSX.TargetedDragEvent<HTMLUListElement>): void => {
+    if ((ev.target as HTMLElement | null)?.closest('.explorer-row')) return;
+    if (!canDropTo(null)) return;
+    ev.preventDefault();
+    const moved = drag ? entryIndex.entries.get(drag.token) : undefined;
+    endDrag();
+    if (moved) cb.onMove(moved, primaryRoot);
+  };
 
   // --- inline create/rename (#989 task 5) ---------------------------------------------------------------
   // `beginCreate`/`startRename` open the ONE inline-edit session `editing` tracks — see its doc comment.
@@ -631,6 +712,42 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
       ? { value: editValue, invalid: editInvalid, onInput: onEditInput, onKeyDown: onEditKeyDown, onBlur: onEditBlur }
       : undefined;
 
+    // --- drag-and-drop move (#989 task 6): per-row handlers -----------------------------------------------
+    // `dragging`/`isDropTarget` derive purely from `drag`/`dropMark` state (compared to THIS entry's own
+    // token) — no DOM query, unlike explorer.ts's `dragLi`/`destLi` element comparisons.
+    const dragging = drag?.token === entry.token;
+    const isDropTarget = dropMark?.kind === 'dir' && dropMark.token === entry.token;
+    // A rename/create input owns its own native text-drag; don't start a row move from inside it — ported
+    // from explorer.ts's `row.querySelector('.explorer-rename')` guard, checked here via `editing` state
+    // (this row IS being renamed iff `renaming` above is defined) instead of a DOM query.
+    const onRowDragStart = (ev: JSX.TargetedDragEvent<HTMLDivElement>): void => {
+      if (renaming) {
+        ev.preventDefault();
+        return;
+      }
+      setDrag({ token: entry.token });
+      ev.dataTransfer?.setData('text/plain', entry.name);
+      if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'move';
+    };
+    const onRowDragOver = (ev: JSX.TargetedDragEvent<HTMLDivElement>): void => {
+      const dest = dropDirOf(entry);
+      if (!canDropTo(dest)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+      setDropMark(dest === null ? { kind: 'root' } : { kind: 'dir', token: dest });
+    };
+    const onRowDragLeave = (): void => setDropMark(null);
+    const onRowDrop = (ev: JSX.TargetedDragEvent<HTMLDivElement>): void => {
+      const dest = dropDirOf(entry);
+      if (!canDropTo(dest)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const moved = drag ? entryIndex.entries.get(drag.token) : undefined;
+      endDrag();
+      if (moved) cb.onMove(moved, dest ?? primaryRoot);
+    };
+
     return (
       <ExplorerItem
         key={entry.token}
@@ -646,12 +763,19 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         filterText={filterText}
         focused={entry.token === effectiveFocusedToken}
         renaming={renaming}
+        dragging={dragging}
+        dropTarget={isDropTarget}
         onToggle={() => toggleDir(entry.token)}
         onOpen={() => cb.onOpenFile(entry.token)}
         onContextMenu={(e) => {
           e.preventDefault();
           openRowMenu(entry, e.clientX, e.clientY);
         }}
+        onDragStart={onRowDragStart}
+        onDragEnd={endDrag}
+        onDragOver={onRowDragOver}
+        onDragLeave={onRowDragLeave}
+        onDrop={onRowDrop}
       >
         {childNodes}
       </ExplorerItem>
@@ -816,12 +940,15 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         // boundaries — see `onTreeKeyDown` above) and what explorer.test.ts's structural assertions pin (a
         // lone `ul[role="tree"]` queried singular throughout).
         <ul
-          class="explorer-tree"
+          class={dropMark?.kind === 'root' ? 'explorer-tree is-drop-root' : 'explorer-tree'}
           role="tree"
           aria-label="Workspace files"
           ref={treeRef}
           onKeyDown={onTreeKeyDown}
           onContextMenu={onTreeContextMenu}
+          onDragOver={onTreeDragOver}
+          onDragLeave={onTreeDragLeave}
+          onDrop={onTreeDrop}
         >
           {groups.length <= 1 ? renderGroupRows(groups[0], 1) : groups.map(renderGroupWrapper)}
         </ul>

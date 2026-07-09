@@ -5,10 +5,10 @@ import type { FsEntry } from '@/host';
 // One workspace-explorer row (#989 task 2, corrected in the task-2a follow-up): a keyed
 // `<li role="treeitem">` — the Preact counterpart of explorer.ts's `buildItem()`. Ported for
 // STATIC-render parity: the icon classifier, dirty dot, error/warning badge, active row
-// (aria-current/aria-selected) and filter-match highlight all mirror buildItem() exactly. Drag-and-drop
-// and the "…" context-menu trigger are NOT here yet — drag-and-drop lands in #989 task 6; a directory
-// click (this component's only click affordance today) simply toggles expansion via `onToggle`, and a
-// file click opens it via `onOpen`. As of task 3, `tabIndex` is a pure function of the `focused` prop
+// (aria-current/aria-selected) and filter-match highlight all mirror buildItem() exactly. The "…"
+// context-menu trigger is NOT here (right-click + the ContextMenu key cover it, see `ExplorerPanel`); a
+// directory click (this component's only click affordance today) simply toggles expansion via
+// `onToggle`, and a file click opens it via `onOpen`. As of task 3, `tabIndex` is a pure function of the `focused` prop
 // (`ExplorerPanel`'s roving-tabindex state) rather than a fixed -1 — see `focused` below. The actual
 // keydown ROUTING (ArrowUp/Down/Left/Right, Enter, F2/Delete/ContextMenu) lives entirely in
 // `ExplorerPanel`'s single delegated `onKeyDown` on `ul[role="tree"]`, not here — this component owns no
@@ -26,10 +26,17 @@ import type { FsEntry } from '@/host';
 // its own Preact identity via `key={token}` in `ExplorerPanel`, so nothing here needs to detach/reattach
 // anything). Focus + the stem preselection (`setSelectionRange`) are the one bit of imperative DOM work
 // Preact can't express declaratively, so they're a `useEffect` gated on `renaming` FLIPPING to defined
-// (not on every keystroke — see the effect below). NOT implemented here: drag-and-drop (#989 task 6) —
-// when it lands, its dragstart handler must check `renaming` (mirroring explorer.ts's `wireDrag`'s
-// `row.querySelector('.explorer-rename')` guard) so a text-selection drag inside this input can never be
-// mistaken for a row-move drag.
+// (not on every keystroke — see the effect below).
+//
+// DRAG-AND-DROP MOVE (#989 task 6): `.explorer-row` is unconditionally `draggable` and wired for every
+// native drag event; `ExplorerPanel` owns all drop-validity/ancestry logic (`parentMapOf`-based, not a
+// DOM walk) and only hands this component plain forwarding callbacks plus two booleans — `dragging`
+// (adds `.is-dragging` to this row's own `<li>`) and `dropTarget` (adds `.is-drop-target` to
+// `.explorer-row`) — ported verbatim from explorer.ts's `wireDrag`/`markDropTarget` class names
+// (`_explorer.scss` styles them). `ExplorerPanel`'s own `onDragStart` handler checks its `editing` state
+// (mirroring explorer.ts's `row.querySelector('.explorer-rename')` guard) so a text-selection drag inside
+// a mid-rename/mid-create input can never be mistaken for a row-move drag — that check happens one layer
+// up, not in this component.
 //
 // RECURSIVE NESTING (the task-2a fix): a directory's rendered children are passed in as `children` —
 // already-built `<ExplorerItem>` elements for its immediate entries, recursively built the same way one
@@ -94,6 +101,26 @@ export interface ExplorerItemProps {
    * plain `.explorer-name` label.
    */
   renaming?: ExplorerItemRenamingProps;
+  /**
+   * Whether this row is the in-flight drag source (#989 task 6) — adds `.is-dragging` to this row's own
+   * `<li>` (ported from explorer.ts's `wireDrag`'s `li.classList.add('is-dragging')`). Defaults to `false`.
+   */
+  dragging?: boolean;
+  /**
+   * Whether this row is the current drop-target destination (#989 task 6) — adds `.is-drop-target` to
+   * `.explorer-row` (ported from explorer.ts's `markDropTarget`). Defaults to `false`.
+   */
+  dropTarget?: boolean;
+  /**
+   * Native drag events forwarded straight through to `.explorer-row` — `ExplorerPanel` alone owns
+   * drop-validity/ancestry (`parentMapOf`) and the in-flight `drag`/`dropMark` state (#989 task 6); this
+   * component has no drag logic of its own beyond making the row draggable and calling these back.
+   */
+  onDragStart: (ev: JSX.TargetedDragEvent<HTMLDivElement>) => void;
+  onDragEnd: (ev: JSX.TargetedDragEvent<HTMLDivElement>) => void;
+  onDragOver: (ev: JSX.TargetedDragEvent<HTMLDivElement>) => void;
+  onDragLeave: (ev: JSX.TargetedDragEvent<HTMLDivElement>) => void;
+  onDrop: (ev: JSX.TargetedDragEvent<HTMLDivElement>) => void;
 }
 
 /** See {@link ExplorerItemProps.renaming}. */
@@ -130,6 +157,13 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
     children,
     focused,
     renaming,
+    dragging,
+    dropTarget,
+    onDragStart,
+    onDragEnd,
+    onDragOver,
+    onDragLeave,
+    onDrop,
   } = props;
   const isDir = kind === 'dir';
   const isActiveFile = !isDir && active;
@@ -162,13 +196,20 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
       aria-expanded={isDir ? expanded : undefined}
       aria-selected={isActiveFile ? 'true' : undefined}
       tabIndex={focused ? 0 : -1}
+      class={dragging ? 'is-dragging' : undefined}
     >
       <div
-        class="explorer-row"
+        class={dropTarget ? 'explorer-row is-drop-target' : 'explorer-row'}
         aria-current={isActiveFile ? 'true' : undefined}
         style={{ '--depth': String(level - 1) }}
+        draggable
         onClick={isDir ? onToggle : onOpen}
         onContextMenu={onContextMenu}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
       >
         <span
           class="explorer-twisty"

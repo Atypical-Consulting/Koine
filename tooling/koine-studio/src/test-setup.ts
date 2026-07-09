@@ -69,3 +69,32 @@ export function installRafShim(target: Record<string, unknown>): void {
 
 installRafShim(globalThis as unknown as Record<string, unknown>);
 if (typeof window !== 'undefined') installRafShim(window as unknown as Record<string, unknown>);
+
+// happy-dom 20.x's GlobalEventHandlers mixin omits `ondragstart`/`ondragover`/`ondrop`/&c. on
+// Element/HTMLElement — it only defines them on `BrowserWindow` (spec-wise they belong on both). Preact's
+// DOM-prop -> event-name inference (`lowerCaseName in dom` in preact/src/diff/props.js) uses THEIR
+// PRESENCE ON THE TARGET NODE to decide whether to lowercase a JSX `onDragStart`-style prop before calling
+// `addEventListener`. Without them, Preact falls back to the *unlowercased* prop remainder ("DragStart"
+// instead of "dragstart"), so `<div onDragStart={...}>` silently registers a listener for a native event
+// name no browser ever dispatches, and a test's `dispatchEvent(new Event('dragstart'))` never reaches it.
+// Defining the properties (mirroring the real HTMLElement.prototype IDL surface) closes the gap —
+// ExplorerPanel's drag-and-drop (#989 task 6) is the first place in this codebase to hit it. Installed
+// only when absent, so a real browser/Playwright run (the storybook project doesn't load this setup file)
+// or a future happy-dom that adds proper support is never clobbered.
+const DRAG_EVENT_HANDLER_PROPS = ['ondrag', 'ondragend', 'ondragenter', 'ondragexit', 'ondragleave', 'ondragover', 'ondragstart', 'ondrop'];
+if (typeof HTMLElement !== 'undefined') {
+  for (const prop of DRAG_EVENT_HANDLER_PROPS) {
+    if (!(prop in HTMLElement.prototype)) {
+      const handlers = new WeakMap<HTMLElement, unknown>();
+      Object.defineProperty(HTMLElement.prototype, prop, {
+        configurable: true,
+        get(this: HTMLElement) {
+          return handlers.get(this) ?? null;
+        },
+        set(this: HTMLElement, value: unknown) {
+          handlers.set(this, value);
+        },
+      });
+    }
+  }
+}

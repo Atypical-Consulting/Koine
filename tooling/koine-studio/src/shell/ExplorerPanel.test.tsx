@@ -1085,4 +1085,150 @@ describe('ExplorerPanel', () => {
       expect(cb.onRename).not.toHaveBeenCalled();
     });
   });
+
+  // --- drag-and-drop move (#989 task 6): HTML5 DnD wired per-row (draggable + dragstart/dragover/
+  // dragleave/drop/dragend) and on the tree background. Drop validity comes from `explorerModel.ts`'s
+  // `parentMapOf` — DATA ancestry, never `Element.contains()` — which is what makes it immune to a
+  // re-render mid-drag (see the last test below, strictly stronger than explorer.test.ts's own "defers a
+  // re-render while a drag is in progress" parity test since it exercises a re-render with CHANGED data,
+  // not just an identical one). The other tests mirror explorer.test.ts's own drag assertions (~720-780)
+  // for the actual RULES (self/descendant/current-parent rejection, file-row-routes-to-parent), just
+  // replacing the underlying DOM-containment technique.
+  describe('drag-and-drop move (#989 task 6)', () => {
+    function fileRow(container: Element, name: string): HTMLElement {
+      return Array.from(container.querySelectorAll<HTMLElement>('li[data-kind="file"] > .explorer-row')).find(
+        (r) => r.querySelector('.explorer-name')?.textContent === name,
+      )!;
+    }
+    function dirRow(container: Element): HTMLElement {
+      return container.querySelector<HTMLElement>('li[data-kind="dir"] > .explorer-row')!;
+    }
+    // Fires a plain (non-DragEvent) Event, mirroring explorer.test.ts's own `fireDrag` helper — the
+    // handlers only ever touch `ev.dataTransfer` via optional chaining, so a plain Event (whose
+    // `dataTransfer` is `undefined`) exercises the exact same code path a real DragEvent would.
+    function fireDrag(el: Element, type: string): void {
+      act(() => {
+        el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+      });
+    }
+
+    it('moves an entry into a directory via drag-and-drop', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+
+      fireDrag(fileRow(container, 'shared.koi'), 'dragstart');
+      fireDrag(dirRow(container), 'dragover');
+      fireDrag(dirRow(container), 'drop');
+
+      const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0].token).toBe('ROOT/shared.koi');
+      expect(call[1]).toBe('ROOT/orders');
+    });
+
+    it("dropping onto a FILE row moves into that file's containing directory (no dead zone)", () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+
+      fireDrag(fileRow(container, 'shared.koi'), 'dragstart'); // top-level file
+      fireDrag(fileRow(container, 'order.koi'), 'drop'); // onto a file inside orders/
+
+      const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0].token).toBe('ROOT/shared.koi');
+      expect(call[1]).toBe('ROOT/orders'); // routed to the file's parent directory, not a no-op
+    });
+
+    it('rejects a drag-drop back into the same parent directory (no-op)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+
+      fireDrag(fileRow(container, 'order.koi'), 'dragstart'); // already inside orders/
+      fireDrag(dirRow(container), 'drop');
+      expect(cb.onMove).not.toHaveBeenCalled();
+    });
+
+    it('rejects dropping a directory onto itself and into its own subtree (parentMap ancestor walk)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(
+        <ExplorerPanel cb={cb} groups={[{ root: 'ROOT', entries: nestedTree() }]} />,
+      );
+      const outerDirRow = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"] > .explorer-row')!;
+      const innerDirRow = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/2024"] > .explorer-row')!;
+
+      fireDrag(outerDirRow, 'dragstart');
+      fireDrag(outerDirRow, 'drop'); // onto itself
+      fireDrag(innerDirRow, 'drop'); // into its own descendant
+      expect(cb.onMove).not.toHaveBeenCalled();
+    });
+
+    it('root-background drop moves a nested entry to the primary root, but is a no-op for an already-top-level entry', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
+
+      // Already at the root -> no-op.
+      fireDrag(fileRow(container, 'shared.koi'), 'dragstart');
+      fireDrag(tree, 'drop');
+      expect(cb.onMove).not.toHaveBeenCalled();
+
+      // Nested -> moves to the primary root.
+      fireDrag(fileRow(container, 'order.koi'), 'dragstart');
+      fireDrag(tree, 'drop');
+      const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[0].token).toBe('ROOT/orders/order.koi');
+      expect(call[1]).toBe('ROOT');
+    });
+
+    it('a rename-input row does not start a row drag (dragstart is prevented while editing targets it)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      expect(file.querySelector('.explorer-rename')).not.toBeNull(); // mid-rename
+
+      const row = file.querySelector<HTMLElement>(':scope > .explorer-row')!;
+      const ev = new Event('dragstart', { bubbles: true, cancelable: true });
+      act(() => { row.dispatchEvent(ev); });
+      expect(ev.defaultPrevented).toBe(true); // dragstart was prevented, not started
+
+      // Prove no drag actually started: a subsequent drop elsewhere fires no cb.onMove.
+      fireDrag(dirRow(container), 'drop');
+      expect(cb.onMove).not.toHaveBeenCalled();
+    });
+
+    // The load-bearing test for this task: STRICTLY STRONGER than explorer.test.ts's own "defers a
+    // re-render while a drag is in progress" parity test (~736-757), which only proves survival across an
+    // IDENTICAL re-render. Here the re-render's props actually CHANGE mid-drag (a DIFFERENT file's dirty
+    // flag flips) — proving drop-validity checks stay correct not because a rebuild was deferred (there is
+    // no such machinery here, and none is needed), but because validity is DATA-derived (`parentMapOf`) and
+    // the dragged row's own DOM identity survives the re-render purely from being a keyed `<li key={token}>`.
+    it("a mid-drag re-render with CHANGED data keeps the dragged row's DOM identity and the drop still fires the right onMove", () => {
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+
+      const sharedLi = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      fireDrag(fileRow(container, 'shared.koi'), 'dragstart');
+      expect(sharedLi.classList.contains('is-dragging')).toBe(true);
+
+      // A diagnostics push mid-drag re-renders with CHANGED props — order.koi becomes dirty — while the
+      // drag above is still in flight. NOT a rebuild: this is the same keyed <li>, unlike explorer.ts's
+      // innerHTML-wipe render, which the OLD parity test had to defer specifically to avoid.
+      const dirtyCb = makeCallbacks({ isDirty: vi.fn((t: string) => t === 'ROOT/orders/order.koi') });
+      act(() => rerender(<ExplorerPanel cb={dirtyCb} groups={[group()]} />));
+
+      const stillSharedLi = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      expect(stillSharedLi).toBe(sharedLi); // SAME DOM node reference, not rebuilt
+      expect(stillSharedLi.classList.contains('is-dragging')).toBe(true); // drag state survived the re-render
+
+      // Sanity: the re-render's OWN change did take effect elsewhere in the tree.
+      const orderRow = container.querySelector('li[data-token="ROOT/orders/order.koi"] .explorer-row')!;
+      expect(orderRow.querySelector('.tree-dirty')).not.toBeNull();
+
+      // Drop still validates against the live `drag` state and fires the move.
+      fireDrag(dirRow(container), 'dragover');
+      fireDrag(dirRow(container), 'drop');
+      expect((dirtyCb.onMove as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+      expect((dirtyCb.onMove as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ROOT/orders');
+    });
+  });
 });
