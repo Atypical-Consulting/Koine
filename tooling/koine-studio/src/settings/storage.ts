@@ -1,8 +1,11 @@
 // Internal to the settings package — NOT part of the public `@/settings/persistence` API. These are
-// the shared read/parse/guard prologue and the guarded read-modify-write behind the settings blob and
-// its sibling JSON-object blobs (workspace overrides, keybinding remaps), so callers within
-// settings/*.ts can't drift from each other. Both treat anything but a plain non-null, non-array
-// object as "no blob" ({}), exactly like every other guarded read in this package.
+// the shared read/parse/guard prologue, the guarded read-modify-write, and the guarded-remove behind
+// every JSON-object blob in settings/*.ts (the settings blob, workspace overrides, keybinding remaps,
+// diagram positions/annotations, the last-session snapshot) plus every plain single-key `clearX`, so
+// callers across settingsStore.ts, workspaceState.ts, and diagramState.ts can't drift from each other.
+// readJsonObject treats anything but a plain non-null, non-array object as "no blob" ({}), exactly like
+// every other guarded read in this package; array-shaped blobs (recentFolders) and multi-key migration
+// reads (the workspace Deck layout) have different-enough guard shapes that they stay hand-rolled.
 
 import { readRaw, writeRaw } from '@/shell/storage';
 

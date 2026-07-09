@@ -8,7 +8,7 @@
 import type { ChatMessage } from '@/ai/ai';
 import { DEFAULT_DECK_STATE, isValidCenter, isValidDeckState, type CenterView, type DeckState } from '@/store/slices/uiChrome';
 import { readRaw, writeRaw } from '@/shell/storage';
-import { removeKey } from './storage';
+import { readJsonObject, removeKey } from './storage';
 
 // --- storage keys ------------------------------------------------------------
 
@@ -290,24 +290,16 @@ export interface LastSession {
  * right type. Never throws.
  */
 export function getLastSession(): LastSession | null {
-  const raw = readRaw(LAST_SESSION_KEY);
-  if (raw === null) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    const o = parsed as Record<string, unknown>;
-    if (typeof o.project !== 'string' || o.project.length === 0) return null;
-    if (typeof o.editedAt !== 'number' || !Number.isFinite(o.editedAt) || o.editedAt <= 0) return null;
-    const session: LastSession = {
-      project: o.project,
-      editedAt: o.editedAt,
-    };
-    if (typeof o.file === 'string') session.file = o.file;
-    if (typeof o.unsavedCount === 'number' && Number.isFinite(o.unsavedCount)) session.unsavedCount = o.unsavedCount;
-    return session;
-  } catch {
-    return null;
-  }
+  const o = readJsonObject(LAST_SESSION_KEY);
+  if (typeof o.project !== 'string' || o.project.length === 0) return null;
+  if (typeof o.editedAt !== 'number' || !Number.isFinite(o.editedAt) || o.editedAt <= 0) return null;
+  const session: LastSession = {
+    project: o.project,
+    editedAt: o.editedAt,
+  };
+  if (typeof o.file === 'string') session.file = o.file;
+  if (typeof o.unsavedCount === 'number' && Number.isFinite(o.unsavedCount)) session.unsavedCount = o.unsavedCount;
+  return session;
 }
 
 /** Persist (or, with null, forget) the last-session snapshot. Best-effort — swallows storage errors. */

@@ -14,7 +14,7 @@ import {
   type DiagramPosition,
 } from '@/diagrams/diagramContract';
 import { readRaw, writeRaw } from '@/shell/storage';
-import { removeKey } from './storage';
+import { readJsonObject, removeKey } from './storage';
 
 // --- diagram canvas zoom (#145) ----------------------------------------------
 // Each diagram's last zoom *percent* is round-tripped under its own key so the interactive canvas can
@@ -49,24 +49,17 @@ const DIAGRAM_POSITIONS_KEY_PREFIX = 'koine.studio.diagramPositions.';
 
 /** The persisted node positions for a diagram key, keyed by qualified name; {} when absent/malformed. */
 export function loadDiagramPositions(key: string): Record<string, DiagramPosition> {
-  const raw = readRaw(DIAGRAM_POSITIONS_KEY_PREFIX + key);
-  if (raw === null) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const out: Record<string, DiagramPosition> = {};
-    for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (value && typeof value === 'object') {
-        const p = value as Record<string, unknown>;
-        if (typeof p.x === 'number' && Number.isFinite(p.x) && typeof p.y === 'number' && Number.isFinite(p.y)) {
-          out[name] = { x: p.x, y: p.y };
-        }
+  const parsed = readJsonObject(DIAGRAM_POSITIONS_KEY_PREFIX + key);
+  const out: Record<string, DiagramPosition> = {};
+  for (const [name, value] of Object.entries(parsed)) {
+    if (value && typeof value === 'object') {
+      const p = value as Record<string, unknown>;
+      if (typeof p.x === 'number' && Number.isFinite(p.x) && typeof p.y === 'number' && Number.isFinite(p.y)) {
+        out[name] = { x: p.x, y: p.y };
       }
     }
-    return out;
-  } catch {
-    return {};
   }
+  return out;
 }
 
 /** Persist a diagram's node positions (best-effort). */
@@ -95,16 +88,8 @@ export interface DiagramAnnotations {
 
 /** The persisted annotations for a diagram key; empty notes/groups when absent or malformed. */
 export function loadDiagramAnnotations(key: string): DiagramAnnotations {
-  const raw = readRaw(DIAGRAM_ANNOTATIONS_KEY_PREFIX + key);
-  if (raw === null) return { notes: [], groups: [] };
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== 'object') return { notes: [], groups: [] };
-    const p = parsed as Record<string, unknown>;
-    return { notes: sanitizeNotes(p.notes), groups: sanitizeGroups(p.groups) };
-  } catch {
-    return { notes: [], groups: [] };
-  }
+  const p = readJsonObject(DIAGRAM_ANNOTATIONS_KEY_PREFIX + key);
+  return { notes: sanitizeNotes(p.notes), groups: sanitizeGroups(p.groups) };
 }
 
 /** Persist a diagram's canvas annotations (best-effort). */
