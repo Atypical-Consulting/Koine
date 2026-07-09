@@ -204,12 +204,19 @@ function commandEntries(commands: Command[]): CatalogEntry[] {
   }));
 }
 
-/** Commits ← the host's git log, newest first, when `canUseGit`; otherwise NO commit entries at all. */
+/**
+ * Commits ← the host's git log, newest first, when `canUseGit`; otherwise NO commit entries at all.
+ * The desktop host's `gitLog()` shells out to real `git log` (src-tauri's `git_log`), which rejects
+ * whenever the open workspace isn't a git repository — routine for a freshly materialized example or
+ * an opened plain folder. That must degrade to "no commits", not sink the whole catalog: this function
+ * is raced via `Promise.all` in `buildCatalog` below, so an uncaught rejection here would silently
+ * empty out commands/symbols/files/glossary too (#1276).
+ */
 async function commitEntries(sources: LauncherSources): Promise<CatalogEntry[]> {
   if (!sources.canUseGit) return [];
   const pending = sources.gitLog();
   if (!pending) return [];
-  const log = await pending;
+  const log = await pending.catch(() => []);
   return log.map(({ sha, author, date, message }) => ({
     id: `commit:${sha}`,
     cat: 'commit',

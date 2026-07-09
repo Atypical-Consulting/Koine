@@ -197,6 +197,19 @@ describe('LauncherPanel', () => {
     await waitFor(() => expect(view.container.querySelector('.lx-count')!.textContent).toBe('1'));
     expect(sources.modelIndex).toHaveBeenCalledTimes(1);
   });
+
+  // #1276: on desktop, a rejected source join (e.g. buildCatalog's own commitEntries somehow still
+  // throwing, or any future source added the same way) must not leave the launcher stuck showing
+  // nothing forever with an unhandled rejection — it should settle on an empty, but responsive, catalog.
+  test('degrades to an empty (not stuck) catalog when the source join rejects', async () => {
+    const sources = makeSources({
+      commands: () => [{ id: 'cmd:new-file', title: 'New file', run: () => {} }],
+      modelIndex: vi.fn(() => Promise.reject(new Error('boom'))),
+    });
+    const view = mount(sources);
+
+    await waitFor(() => expect(view.container.querySelector('.lx-count')!.textContent).toBe('0'));
+  });
 });
 
 describe('LauncherPanel — grouped results (issue #1143, task 4)', () => {
