@@ -24,7 +24,7 @@ public sealed partial class OpenApiEmitter
             foreach (CommandDecl command in entity.Commands)
             {
                 operations.Add((
-                    $"/{Kebab(entity.Name)}/{Kebab(command.Name)}",
+                    RouteDerivation.ForCommand(entity, command).Route,
                     new YamlObject().Add("post", CommandOperation(entity, command, index, emitted))));
             }
         }
@@ -33,7 +33,7 @@ public sealed partial class OpenApiEmitter
         foreach (QueryDecl query in ctx.AllTypeDecls().OfType<QueryDecl>())
         {
             operations.Add((
-                $"/{Kebab(query.Name)}",
+                RouteDerivation.ForQuery(query).Route,
                 new YamlObject().Add("get", QueryOperation(query, index, emitted))));
         }
 
@@ -50,7 +50,7 @@ public sealed partial class OpenApiEmitter
     private static YamlObject CommandOperation(EntityDecl entity, CommandDecl command, ModelIndex index, HashSet<string> emitted)
     {
         var operation = new YamlObject();
-        operation.Add("operationId", $"{entity.Name}_{command.Name}");
+        operation.Add("operationId", RouteDerivation.ForCommand(entity, command).OperationId);
         operation.Add("summary", string.IsNullOrWhiteSpace(command.Doc)
             ? Yaml.Str($"{command.Name} on {entity.Name}")
             : Yaml.Str(OneLine(command.Doc!)));
@@ -87,7 +87,7 @@ public sealed partial class OpenApiEmitter
     private static YamlObject QueryOperation(QueryDecl query, ModelIndex index, HashSet<string> emitted)
     {
         var operation = new YamlObject();
-        operation.Add("operationId", query.Name);
+        operation.Add("operationId", RouteDerivation.ForQuery(query).OperationId);
         operation.Add("summary", string.IsNullOrWhiteSpace(query.Doc)
             ? Yaml.Str(query.Name)
             : Yaml.Str(OneLine(query.Doc!)));
@@ -132,39 +132,5 @@ public sealed partial class OpenApiEmitter
         response.Add("description", description);
         response.Add("content", content);
         return response;
-    }
-
-    /// <summary>
-    /// Converts a Pascal/camel-cased identifier to a kebab-cased path segment
-    /// (<c>OrdersByStatus → orders-by-status</c>). A boundary is inserted before an uppercase letter that
-    /// either follows a lowercase/digit or ends an acronym run (an uppercase followed by a lowercase), so
-    /// acronyms split as expected (<c>XMLImport → xml-import</c>) — matching the word-boundary convention
-    /// the per-language <c>ToSnakeCase</c> naming helpers use.
-    /// </summary>
-    private static string Kebab(string name)
-    {
-        var sb = new System.Text.StringBuilder(name.Length + 4);
-        for (int i = 0; i < name.Length; i++)
-        {
-            char c = name[i];
-            if (char.IsAsciiLetterUpper(c))
-            {
-                bool afterWord = i > 0 && (char.IsAsciiLetterLower(name[i - 1]) || char.IsAsciiDigit(name[i - 1]));
-                bool acronymEnd = i > 0 && char.IsAsciiLetterUpper(name[i - 1])
-                    && i + 1 < name.Length && char.IsAsciiLetterLower(name[i + 1]);
-                if (afterWord || acronymEnd)
-                {
-                    sb.Append('-');
-                }
-
-                sb.Append(char.ToLowerInvariant(c));
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-
-        return sb.ToString();
     }
 }
