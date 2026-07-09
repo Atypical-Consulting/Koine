@@ -18,7 +18,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
+    <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
     <!-- The Streamable HTTP / SSE server transport (WithHttpTransport + MapMcp) lives in the
          ASP.NET Core companion package; it brings the Microsoft.AspNetCore.App framework reference
          transitively. Only the HTTP host (HttpHost) uses it; the stdio host is unaffected. -->
