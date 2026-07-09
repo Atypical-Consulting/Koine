@@ -331,6 +331,42 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #1269, TypeScript sibling of #1084 (Rust): a <c>quantity</c> value object's scalar
+    /// <c>/ scalar</c> — <c>halved: Weight = base / 2</c> — must emit a real <c>divide</c> method,
+    /// mirroring the already-emitted <c>multiply</c>. Before the fix <c>WriteQuantityOps</c> only ever
+    /// emitted <c>add</c>/<c>subtract</c>/<c>multiply</c> for a quantity, so the general arithmetic
+    /// path's <c>.divide(...)</c> call referenced a method the class never defined (a real
+    /// <c>tsc --noEmit</c> TS2339).
+    /// </summary>
+    [Fact]
+    public void Quantity_scalar_divide_typechecks_under_tsc()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Box {\n" +
+            "    base: Weight\n" +
+            "    halved: Weight = base / 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no tsc required): the quantity class must define the method it's called on.
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("divide(divisor: number): Weight");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("quantity / scalar should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// The outcome contract <see cref="TestSupport.RequireOrSkip"/> relies on: a missing toolchain
     /// yields a <see cref="TestSupport.TypeScriptCheck.Skipped"/> result whose <c>ToolchainAvailable</c>
     /// and <c>Ok</c> are both <c>false</c> — so it can never be mistaken for a real pass.

@@ -304,7 +304,7 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append("}\n");
     }
 
-    /// <summary>A quantity's unit-checked <c>add</c>/<c>subtract</c> and scalar <c>multiply</c>.</summary>
+    /// <summary>A quantity's unit-checked <c>add</c>/<c>subtract</c> and scalar <c>multiply</c>/<c>divide</c>.</summary>
     private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers, ModelIndex index)
     {
         Member? amount = ctorMembers.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
@@ -319,6 +319,7 @@ public sealed partial class TypeScriptEmitter
             WriteRefStubMethod(sb, $"add(other: {name}): {name}");
             WriteRefStubMethod(sb, $"subtract(other: {name}): {name}");
             WriteRefStubMethod(sb, $"multiply(factor: number): {name}");
+            WriteRefStubMethod(sb, $"divide(divisor: number): {name}");
             return;
         }
 
@@ -347,6 +348,12 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append("multiply(factor: number): ").Append(name).Append(" {\n");
         sb.Append(Indent).Append(Indent).Append("return ")
           .Append(Construct($"this.{amt}.multiply(new Decimal(factor.toString()))", $"this.{u}")).Append(";\n");
+        sb.Append(Indent).Append("}\n");
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("divide(divisor: number): ").Append(name).Append(" {\n");
+        sb.Append(Indent).Append(Indent).Append("return ")
+          .Append(Construct($"this.{amt}.divide(new Decimal(divisor.toString()))", $"this.{u}")).Append(";\n");
         sb.Append(Indent).Append("}\n");
     }
 
