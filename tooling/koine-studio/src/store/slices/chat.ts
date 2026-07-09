@@ -66,10 +66,12 @@ export interface ChatStreamingTurn {
 
 export type ChangeSetPhase =
   | { kind: 'reviewing'; note?: string } // note carries the #633 apply-failure / partial-failure message
-  // #1136: cleanCount snapshots the accepted-and-not-drifted rows AT BEGIN — the host marks drift
-  // before dispatching, so this is the exact set about to be written; resolveChangeSetApply reports
-  // it as-is, so a mid-apply checkbox toggle can never skew the terminal "Applied N" count. note
-  // carries the host's in-flight wording (the "Applying N clean files. Skipped M…" text).
+  // #1136/#1225: cleanCount is the HOST's own fresh per-attempt clean-file count (aiPanel.ts's
+  // `clean.length`), snapshotted verbatim at begin time — NOT re-derived from the change set's sticky
+  // `files[].drifted` flag, which can lag a file that drifted then reverted across two attempts.
+  // resolveChangeSetApply reports it as-is, so a mid-apply checkbox toggle can never skew the
+  // terminal "Applied N" count. note carries the host's in-flight wording (the "Applying N clean
+  // files. Skipped M…" text).
   | { kind: 'applying'; note?: string; cleanCount: number }
   | { kind: 'applied'; appliedCount: number; note?: string } // terminal; note is the host's wording (falls back to "Applied N files." when absent)
   | { kind: 'invalidated'; reason: string }; // terminal (#473/#684)
