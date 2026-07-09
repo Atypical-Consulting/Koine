@@ -238,6 +238,9 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
         },
         onRelationSelect: (edge) => showRelationDetails(details, edge as ContextMapEdge | null),
         tooltip: (value) => contextMapTooltip(value),
+        // Re-focus the scoped node after every view refresh (zoom/pan, #1210): maxGraph recreates the
+        // HTML label DOM on a refresh, discarding the `.is-scoped` mark this same function applies below.
+        onAfterRender: () => emphasiseContextMapScope(),
       });
       // Focus the active context's node once the graph is mounted (ADR 0009 / #1188).
       if (seq === contextMapRenderSeq) emphasiseContextMapScope();

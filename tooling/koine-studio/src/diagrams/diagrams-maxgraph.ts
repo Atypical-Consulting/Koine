@@ -1427,6 +1427,12 @@ export interface ContextMapGraphHooks {
   onRelationSelect?(edge: DiagramEdge | null): void;
   /** Hover-tooltip text (plain string) for a cell value (a context node or a relation edge), or null for none. */
   tooltip?(value: DiagramNode | DiagramEdge): string | null;
+  /** The view re-rendered its cell states (zoom, pan, or any other scale/translate change) AFTER the
+   *  initial mount — maxGraph recreates each cell's HTML label DOM on a view refresh, discarding any
+   *  DOM-level marks a caller applied post-paint (`.is-scoped` / `aria-current`, #1210). The caller
+   *  re-applies those marks here; NOT called for the initial render (the caller does that itself once
+   *  {@link renderContextMapGraph} resolves). */
+  onAfterRender?(): void;
 }
 
 /** A teardown handle for a mounted context-map graph. */
@@ -1512,7 +1518,19 @@ export async function renderContextMapGraph(
     routeContextMapClick((evt.getProperty('cell') as MxCell | null)?.value, hooks);
   });
 
+  // Re-run the caller's post-paint DOM marks (`.is-scoped` / `aria-current`) after every view refresh
+  // (#1210): maxGraph recreates each cell's HTML label on scale/translate, silently dropping them on the
+  // very next zoom or pan. SCALE/TRANSLATE cover a direct view mutation (fit(), programmatic zoomTo);
+  // SCALE_AND_TRANSLATE covers the combined centered-zoom path the chrome's +/−/wheel buttons take.
+  const rerunAfterRender = (): void => hooks.onAfterRender?.();
+  if (hooks.onAfterRender) {
+    handle.graph.getView().addListener(mx.InternalEvent.SCALE, rerunAfterRender);
+    handle.graph.getView().addListener(mx.InternalEvent.TRANSLATE, rerunAfterRender);
+    handle.graph.getView().addListener(mx.InternalEvent.SCALE_AND_TRANSLATE, rerunAfterRender);
+  }
+
   const dispose = (): void => {
+    if (hooks.onAfterRender) handle.graph.getView().removeListener(rerunAfterRender);
     chrome.dispose();
     handle.dispose();
   };
