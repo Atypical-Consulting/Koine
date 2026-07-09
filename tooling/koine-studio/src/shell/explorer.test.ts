@@ -7,6 +7,14 @@ import { render as unmountPreact } from 'preact';
 import type { FsEntry } from '@/host';
 import { createExplorer, type ExplorerCallbacks } from '@/shell/explorer';
 import { appStore } from '@/store/index';
+import { installExplorerSyncRendering } from '../test-setup';
+
+// This file drives the facade with a raw stimulus (row.click() / input.dispatchEvent(...) / ex.render())
+// immediately followed by a DOM assertion, with no `act()` wrapper and no awaited tick — see
+// `test-setup.ts`'s own "SYNC RENDERING" comment for what this installs and why it's opt-in (installing
+// it unconditionally for every test file in the project breaks OTHER suites that rely on Preact's normal
+// deferred effect timing).
+installExplorerSyncRendering();
 
 // Properly unmount whatever a PREVIOUS test mounted (rather than just wiping innerHTML, which detaches
 // the DOM but leaves the Preact component tree "live" and still subscribed to the singleton appStore —

@@ -182,7 +182,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // `ExplorerPanel` (#989 tasks 1-7 own the actual widget logic now, tested via ExplorerPanel.test.tsx).
   // Renamed .ts → .tsx (the mount wrapper is a JSX-authored Preact component). 255 LOC, ceil(255 × 1.02)
   // = 261. This ratchet is now a plain god-file guard again, not an in-progress-decomposition tracker.
-  { file: 'src/shell/explorer.tsx', maxLines: 261 },
+  // Lowered 261 → 202: #989 task 8 follow-up moved the `installSyncRendering()` Preact-internals patch
+  // (a test-only concern that was risky to ship in production — an undocumented, build-mangled `__c`
+  // internal, patched process-wide for the app's whole lifetime) out of this file entirely, into
+  // `src/test-setup.ts` (opt-in, called only from explorer.test.ts). 198 LOC, ceil(198 × 1.02) = 202.
+  { file: 'src/shell/explorer.tsx', maxLines: 202 },
   // #982 decomposed workspaceController.ts into a thin facade + three sibling modules
   // (workspaceBuffers / workspaceMutations / workspaceSave). The facade measured 775 LOC post-split.
   // Raised 791 → 849: #1005 re-homes its Home resume/recents capture onto the facade after the #982 merge

@@ -12,43 +12,13 @@
 // `explorer.test.ts`, unchanged apart from one `beforeEach` store reset) is the parity gate: every
 // scenario the old imperative widget passed still passes here, against the NEW facade-mounted panel.
 //
-// SYNC RENDERING (load-bearing): `explorer.test.ts` drives this facade the way the retired imperative
-// widget always was — a raw `row.click()` / `input.dispatchEvent(...)` / `ex.render(...)` /
-// `ex.revealByContext(...)` immediately followed by a DOM assertion, with no `act()` wrapper and no
-// awaited tick. Preact defers a state-driven re-render (`options.debounceRendering`, default: a
-// microtask), so by default none of that would be visible synchronously — `installSyncRendering()`
-// below forces `debounceRendering` to run its callback immediately, the same technique
-// `preact/test-utils`'s own `act()` uses (temporarily, for the duration of its callback), just installed
-// once, permanently, process-wide. `debounceRendering` is a Preact-internal scheduling seam (not the
-// browser's real `requestAnimationFrame`), so this only changes WHEN a re-render commits — not what it
-// applies.
-//
-// `useEffect` needs the SAME synchronous-observability treatment (e.g. the collapsed-token-pruning
-// effect ExplorerPanel already had, #989 task 7) — but its flush hook, `options.requestAnimationFrame`,
-// CANNOT be forced synchronous the same naive way: it fires from `options.diffed`, per component, DURING
-// the recursive diff walk — BEFORE `commitRoot()` applies that render's refs and flushes its
-// `useLayoutEffect`s. Calling the queued callback immediately there runs `useEffect`s with refs not yet
-// assigned (e.g. ExplorerItem's rename-input autofocus would see `renameInputRef.current === null` and
-// silently no-op — caught empirically: it broke the F2-then-blur parity tests). So instead this QUEUES
-// the callback and flushes the queue from the internal per-commit hook `preact/hooks` itself chains onto
-// for `useLayoutEffect` (Preact's build MANGLES this hook's property name to `__c`; the unmangled name in
-// Preact's own source is `_commit` — `options._commit` in `preact/src/diff/index.js`, but that literal
-// property is absent on the shipped, mangled build this app actually runs, so patching it silently no-ops;
-// verified empirically by diffing `node_modules/preact/hooks/dist/hooks.mjs`, whose own chain-the-prior-
-// handler pattern targets `__c`). It's called once per `commitRoot()` (render.js's top-level `render()`
-// AND component.js's `renderComponent()`, i.e. every synchronous commit) AFTER refs/layout effects settle
-// — the same relative ordering a real (deferred) `requestAnimationFrame` callback would see, just
-// synchronous instead of a real animation frame later.
-//
-// INSTALLED LAZILY (from createExplorer(), not at this module's own top level): `preact/hooks` installs
-// its own `__c` wrapper (the one this chains onto) the first time ANY module imports `preact/hooks` — and
-// ESM import evaluation order does not guarantee that has already happened by the time this module's own
-// top-level statements run (verified empirically: reading `__c` at module scope here sometimes observed
-// it still undefined, silently dropping every later `useLayoutEffect` flush and breaking the whole
-// render). Deferring to createExplorer()'s first call sidesteps the ordering question entirely — by the
-// time ANY caller (a test or ide.tsx's init()) actually INVOKES createExplorer(), the whole static module
-// graph (hooks included) has already finished loading.
-import { render as preactRender, options as preactOptions } from 'preact';
+// SYNC RENDERING: `explorer.test.ts` drives this facade the way the retired imperative widget always
+// was — a raw `row.click()` / `input.dispatchEvent(...)` / `ex.render(...)` / `ex.revealByContext(...)`
+// immediately followed by a DOM assertion, with no `act()` wrapper and no awaited tick. Preact defers a
+// state-driven re-render by default, so making that observable synchronously needs patching Preact's
+// internal scheduling seams — a test-environment concern, not a production one. That patch lives in
+// `src/test-setup.ts` (vitest's `setupFiles`), NOT here: this file has zero Preact-internals patching.
+import { render as preactRender } from 'preact';
 import type { JSX } from 'preact';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -56,37 +26,6 @@ import type { FsEntry } from '@/host';
 import { appStore, type AppState } from '@/store/index';
 import { ExplorerPanel } from '@/shell/ExplorerPanel';
 import { findFileForContext } from '@/shell/explorerModel';
-
-// `__c` (Preact's build-mangled `_commit` hook) isn't part of Preact's public `Options` type
-// (preact/src/index.d.ts only documents the stable seams) — `preact/hooks` itself reaches into the
-// identical property to chain its own `useLayoutEffect` flush, so this cast mirrors an already-
-// established internal-API usage, not a novel one.
-type InternalOptions = typeof preactOptions & {
-  __c?: (vnode: unknown, commitQueue: unknown[]) => void;
-};
-
-let syncRenderingInstalled = false;
-function installSyncRendering(): void {
-  if (syncRenderingInstalled) return;
-  syncRenderingInstalled = true;
-
-  preactOptions.debounceRendering = (cb: () => void) => cb();
-
-  let pendingEffectFlushes: Array<() => void> = [];
-  preactOptions.requestAnimationFrame = (cb: () => void) => {
-    pendingEffectFlushes.push(cb);
-  };
-  const internalOptions = preactOptions as InternalOptions;
-  const priorCommit = internalOptions.__c;
-  internalOptions.__c = (vnode, commitQueue) => {
-    priorCommit?.(vnode, commitQueue);
-    while (pendingEffectFlushes.length) {
-      const queued = pendingEffectFlushes;
-      pendingEffectFlushes = [];
-      for (const flush of queued) flush();
-    }
-  };
-}
 
 export interface ExplorerCallbacks {
   onOpenFile(fileToken: string): void;
@@ -187,7 +126,6 @@ function ExplorerWrapper({ cb, propsStore, chromeStore }: ExplorerWrapperProps):
 }
 
 export function createExplorer(cb: ExplorerCallbacks, chromeStore: StoreApi<AppState> = appStore): Explorer {
-  installSyncRendering();
   // The mount host. `display: contents` so it never becomes a layout box of its own — `ExplorerPanel`'s
   // own root `<div class="explorer">` stays the effective flex child of `.rail-sect-body`
   // (`_explorer.scss` relies on `.explorer` itself being the flex item, not a wrapper around it).

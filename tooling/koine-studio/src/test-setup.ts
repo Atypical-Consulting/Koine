@@ -5,7 +5,12 @@
 // happy-dom ships no IndexedDB either; the secret store (secrets.ts) needs one. fake-indexeddb/auto
 // installs an in-memory IndexedDB on the global. A fresh environment per test file isolates it.
 import 'fake-indexeddb/auto';
+// Side-effect import, textually BEFORE `preact` below — see the "SYNC RENDERING" section further down
+// for why this ordering is load-bearing (it guarantees preact/hooks' own internal `__c` wrapper is
+// installed before this file chains onto it).
+import 'preact/hooks';
 import { webcrypto } from 'node:crypto';
+import { options as preactOptions } from 'preact';
 import { afterEach, expect } from 'vitest';
 import { cleanup } from '@testing-library/preact';
 import * as axeMatchers from 'vitest-axe/matchers';
@@ -97,4 +102,91 @@ if (typeof HTMLElement !== 'undefined') {
       });
     }
   }
+}
+
+// SYNC RENDERING (#989 task 8 follow-up — moved here from src/shell/explorer.tsx, which no longer
+// patches any Preact internals): explorer.test.ts drives the `createExplorer()` facade the way the
+// retired imperative widget always was — a raw `row.click()` / `input.dispatchEvent(...)` /
+// `ex.render(...)` / `ex.revealByContext(...)` immediately followed by a DOM assertion, with no `act()`
+// wrapper and no awaited tick (that assertion style is pinned; not something this shim gets to change).
+// Preact defers a state-driven re-render (`options.debounceRendering`, default: a microtask), so none of
+// that would be visible synchronously without help — `installExplorerSyncRendering()` below forces
+// `debounceRendering` to run its callback immediately, the same technique `preact/test-utils`'s own
+// `act()` uses (temporarily, for the duration of its callback), just installed for the rest of the
+// calling test file's run instead. `debounceRendering` is a Preact-internal scheduling seam (not the
+// browser's real `requestAnimationFrame`), so this only changes WHEN a re-render commits, not what it
+// applies — and being confined to this vitest-only setup file, it never touches the production (Tauri
+// desktop / browser-WASM) bundle.
+//
+// OPT-IN, NOT AUTO-INSTALLED — this is exported rather than run at this file's own top level, unlike
+// every other shim above. Every test file in this vitest project loads `test-setup.ts` (it's a
+// `setupFiles` entry), so patching `preactOptions` unconditionally here would make EVERY test file's
+// Preact rendering synchronous, not just explorer.test.ts's. Tried exactly that first, and it broke two
+// unrelated suites that depend on Preact's normal DEFERRED effect timing to model a real async race:
+// `inspectorController.test.ts`'s "dispose() synchronously releases every store subscription" tests (a
+// panel's `useStore` effect-subscription, normally deferred past the test's synchronous
+// init()-then-dispose() with no `await` between them, fired synchronously instead and outlived dispose)
+// and `SyntaxTreePanel.test.tsx`'s virtualized-scroll `waitFor` assertion. Neither is an explorer
+// regression to chase down — they're a DIFFERENT part of the suite relying on the untouched default
+// behavior, which this shim must not disturb. So callers opt in explicitly: only explorer.test.ts calls
+// `installExplorerSyncRendering()` (ExplorerPanel.test.tsx already wraps its interactions in `act()` per
+// Preact-testing convention, so it needs no help either way).
+//
+// `useEffect` needs the SAME synchronous-observability treatment (e.g. ExplorerPanel's collapsed-token-
+// pruning effect) — but its flush hook, `options.requestAnimationFrame`, CANNOT be forced synchronous the
+// same naive way: it fires from `options.diffed`, per component, DURING the recursive diff walk — BEFORE
+// `commitRoot()` applies that render's refs and flushes its `useLayoutEffect`s. Calling the queued
+// callback immediately there runs `useEffect`s with refs not yet assigned (e.g. ExplorerItem's
+// rename-input autofocus would see `renameInputRef.current === null` and silently no-op — caught
+// empirically: it broke the F2-then-blur parity tests). So instead this QUEUES the callback and flushes
+// the queue from the internal per-commit hook `preact/hooks` itself chains onto for `useLayoutEffect`
+// (Preact's build MANGLES this hook's property name to `__c`; the unmangled name in Preact's own source
+// is `_commit` — `options._commit` in `preact/src/diff/index.js`, but that literal property is absent on
+// the shipped, mangled build this app actually runs, so patching it silently no-ops; verified empirically
+// by diffing `node_modules/preact/hooks/dist/hooks.mjs`, whose own chain-the-prior-handler pattern
+// targets `__c`). It's called once per `commitRoot()` (render.js's top-level `render()` AND
+// component.js's `renderComponent()`, i.e. every synchronous commit) AFTER refs/layout effects settle —
+// the same relative ordering a real (deferred) `requestAnimationFrame` callback would see, just
+// synchronous instead of a real animation frame later.
+//
+// ESM ORDERING HAZARD: `preact/hooks` installs its own `__c` wrapper (the one this chains onto) the first
+// time ANY module imports it — the code below must observe that BEFORE it reads/chains `__c` itself, or
+// the chain silently drops every `useLayoutEffect` flush. `explorer.tsx` used to dodge this by installing
+// its patch lazily, from `createExplorer()`'s first call (module-top-level import order wasn't guaranteed
+// there). Here the ordering is forced directly instead, via the side-effect `import 'preact/hooks';` at
+// the top of THIS file: `test-setup.ts` runs (and fully finishes, imports included) before any test
+// file's own module code runs, so by the time `installExplorerSyncRendering()` is actually called from
+// explorer.test.ts, `preact/hooks`' own `__c` wrapper is already installed. Verified empirically, not
+// just assumed: explorer.test.ts (58 tests) and ExplorerPanel.test.tsx both ran green after this moved
+// here, with no F2-then-blur or reveal-effect regressions — the same signals that would resurface if the
+// ordering hazard had come back.
+//
+// `__c` isn't part of Preact's public `Options` type (preact/src/index.d.ts only documents the stable
+// seams) — `preact/hooks` itself reaches into the identical property to chain its own `useLayoutEffect`
+// flush, so this cast mirrors an already-established internal-API usage, not a novel one.
+type InternalPreactOptions = typeof preactOptions & {
+  __c?: (vnode: unknown, commitQueue: unknown[]) => void;
+};
+
+let explorerSyncRenderingInstalled = false;
+export function installExplorerSyncRendering(): void {
+  if (explorerSyncRenderingInstalled) return;
+  explorerSyncRenderingInstalled = true;
+
+  preactOptions.debounceRendering = (cb: () => void) => cb();
+
+  let pendingEffectFlushes: Array<() => void> = [];
+  preactOptions.requestAnimationFrame = (cb: () => void) => {
+    pendingEffectFlushes.push(cb);
+  };
+  const internalPreactOptions = preactOptions as InternalPreactOptions;
+  const priorCommit = internalPreactOptions.__c;
+  internalPreactOptions.__c = (vnode, commitQueue) => {
+    priorCommit?.(vnode, commitQueue);
+    while (pendingEffectFlushes.length) {
+      const queued = pendingEffectFlushes;
+      pendingEffectFlushes = [];
+      for (const flush of queued) flush();
+    }
+  };
 }
