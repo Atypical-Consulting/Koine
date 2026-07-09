@@ -194,6 +194,44 @@ public class KotlinConformanceTests
     }
 
     /// <summary>
+    /// Issue #1289 cross-target audit: <c>KotlinExpressionTranslator</c>'s value-object arithmetic lowering
+    /// picks <c>.times</c>/<c>.div</c> based on the operand's FULL inferred type (<c>_resolver.Infer</c>),
+    /// so it already recognized a compound (conditional) operand as a value object — but the
+    /// demand-generation walker (the shared <c>OperatorNeedsAnalyzer.ScalarOpWalker</c>, fixed by #1289's
+    /// Task 1) only recognized a bare identifier/literal, so the <c>times</c> operator it called was never
+    /// actually generated for a conditional operand — a compile-time "unresolved reference" analogous to
+    /// Rust's <c>cargo check</c> E0369. Fixed for free by the shared analyzer fix; this pins the
+    /// regression on the Kotlin side too.
+    /// </summary>
+    [Fact]
+    public void Plain_value_object_scalar_multiply_with_conditional_operand_emits_compiling_kotlin()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    scaledConditional: Money = (if flag then a else b) * 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no toolchain required): the demand-generated operator the call site relies on.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("operator fun times(factor: Long): Money");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a genuine
     /// <c>kotlinc</c> check. We take a well-formed emit and corrupt one file with a deliberate syntax error;
     /// the compile must FAIL.
