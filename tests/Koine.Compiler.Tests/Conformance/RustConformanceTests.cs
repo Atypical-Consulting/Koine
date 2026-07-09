@@ -261,4 +261,44 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1084, sibling of #1068's Add/Sub fix: a <c>quantity</c> value object's scalar
+    /// <c>* scalar</c>/<c>/ scalar</c> — <c>scaled: Weight = base * 2</c> / <c>halved: Weight = base / 2</c>
+    /// — must get real <c>impl std::ops::Mul</c>/<c>Div</c> so the native operator the translator lowers
+    /// to resolves. Before the fix <c>WriteQuantityOps</c> only ever emitted the unit-checked
+    /// <c>add</c>/<c>sub</c> methods for a quantity, so the native <c>*</c>/<c>/</c> the general
+    /// arithmetic path emits referenced an impl that was never generated (a real <c>cargo check</c>
+    /// E0369).
+    /// </summary>
+    [Fact]
+    public void Quantity_scalar_multiply_and_divide_emit_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "    invariant amount >= 0 \"a weight cannot be negative\"\n" +
+            "  }\n" +
+            "  value Box {\n" +
+            "    base: Weight\n" +
+            "    scaled: Weight = base * 2\n" +
+            "    halved: Weight = base / 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the native operator must resolve to a real impl.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Mul<i64> for Weight");
+        rust.ShouldContain("impl std::ops::Div<i64> for Weight");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
