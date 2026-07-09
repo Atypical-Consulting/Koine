@@ -1,12 +1,13 @@
-# 0009. The active bounded-context scope is the workbench spine
+---
+id: 9
+title: The active bounded-context scope is the workbench spine
+status: proposed
+date: 2026-07-08
+---
 
-Date: 2026-07-08
+# The active bounded-context scope is the workbench spine
 
-## Status
-
-Proposed
-
-## Context
+## Context and Problem Statement
 
 Koine Studio already has a global **active bounded-context scope** (the `activeContext` store slice,
 issue #146): a single "which context am I looking at" value, defaulting to *All contexts*, driven from
@@ -29,7 +30,19 @@ The audit also established two facts that shape the fix:
   and manage `.koi` source; the Output rail is the overview of *everything* the model emits. Hiding
   their non-active entries would break authoring and lose the whole-model view.
 
-## Decision
+## Considered Options
+
+* Narrow every surface to the active context, including the Files tree and Output/Generated rail —
+  hiding non-active entries.
+* Split surfaces into narrowing (model-derived), emphasising (source/output), and the selector
+  (Domain navigator) — never hiding source or output.
+
+## Decision Outcome
+
+Chosen option: "Split surfaces into narrowing, emphasising, and the selector", because hiding the
+Files tree or Output rail's non-active entries would break authoring (the Files tree is the only place
+you author and manage `.koi` source) and lose the whole-model overview (the Output rail is the
+overview of everything the model emits).
 
 We will make the active-context scope the **single spine every surface obeys**. Concretely:
 
