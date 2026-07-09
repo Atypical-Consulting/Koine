@@ -96,6 +96,7 @@ internal sealed class ExpressionChecker
                 CheckComparison(b, scope, expected);
                 CheckArithmeticNullSafety(b, scope);
                 CheckValueObjectScalarArithmetic(b, scope);
+                CheckQuantityTypeMismatch(b, scope);
                 break;
 
             case CoalesceExpr co:
@@ -315,6 +316,56 @@ internal sealed class ExpressionChecker
 
         var names = v.Members.Select(m => m.Name).ToList();
         return v.Members.Any(m => !MemberAnalysis.IsDerived(m, names) && TypeResolver.IsNumeric(m.Type));
+    }
+
+    /// <summary>
+    /// #1266: a <c>quantity</c> value object's <c>+</c>/<c>-</c> lowers to its unit-checked
+    /// <c>add</c>/<c>sub</c> method (#1068), which only ever accepts another instance of its OWN
+    /// declared type. Nothing previously checked that both operands of a binary <c>+</c>/<c>-</c> are
+    /// the SAME quantity type, so e.g. <c>Weight + Volume</c> compiled with zero diagnostics and only
+    /// failed downstream in a target's own toolchain (a real Rust cargo check E0308). Reject it here,
+    /// target-agnostically, before any emitter ever sees the expression. Scoped to quantity-vs-quantity
+    /// only — a quantity combined with a differently-typed PLAIN value object is a separate, broader gap
+    /// (tracked outside #1266).
+    /// </summary>
+    private void CheckQuantityTypeMismatch(BinaryExpr b, TypeScope scope)
+    {
+        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub))
+        {
+            return;
+        }
+
+        TypeRef? left = _resolver.Infer(b.Left, scope);
+        TypeRef? right = _resolver.Infer(b.Right, scope);
+        if (left is null || right is null || left.Name == right.Name)
+        {
+            return;
+        }
+
+        if (IsQuantity(left) && IsQuantity(right))
+        {
+            var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+            Report(DiagnosticCodes.QuantityTypeMismatch,
+                $"cannot {verb} quantities '{left.Name}' and '{right.Name}'; quantities must be the same type", b);
+        }
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="t"/> the same context-aware way member/operation lookups do elsewhere
+    /// in this file (<c>t.Qualifier ?? _resolver.Context</c>, R13.2) — NOT the flat
+    /// <see cref="ModelIndex.TryGetDecl"/> alone, which is keyed by bare name across the whole model.
+    /// Two different contexts may legally declare their own same-named type (one a quantity, one not);
+    /// resolving without the reference site's context can silently pick the WRONG declaration.
+    /// </summary>
+    private bool IsQuantity(TypeRef t)
+    {
+        var context = t.Qualifier ?? _resolver.Context;
+        if (context is not null && _index.TryGetDeclIn(context, t.Name, out TypeDecl decl))
+        {
+            return decl is ValueObjectDecl { IsQuantity: true };
+        }
+
+        return _index.TryGetDecl(t.Name, out decl) && decl is ValueObjectDecl { IsQuantity: true };
     }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
