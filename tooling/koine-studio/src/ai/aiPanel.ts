@@ -43,7 +43,7 @@ import {
   type AssistantContext,
 } from '@/ai/aiPrompts';
 import { AssistantChat } from '@/ai/components/AssistantChat';
-import { files, type ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
+import { files } from '@/ai/components/ChangeSetPanel';
 import { makeTextCoalescer } from '@/ai/textCoalescer';
 import type { ComposerQuickAction } from '@/ai/components/Composer';
 import type { TranscriptNotice, TurnMechanism } from '@/ai/components/Transcript';
@@ -204,7 +204,6 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
   // The trailing turn's settled tool cards: snapshotted off the ephemeral chat.turn at commit time so
   // they stay visible above the reply after the turn ends (as the imperative transcript kept them).
   let toolCardsView: readonly ChatToolCall[] | null = null;
-  let attempt: ChangeSetAttempt | null = null;
   // The live apply-gate (#444): registered per generative turn BEFORE the reply commits, so the
   // committed bubble's `getApplyCandidate` call resolves with THIS turn's validated (possibly
   // repaired, #257) candidate instead of re-running the legacy re-validation.
@@ -296,7 +295,6 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         stoppedPartial,
         mechanism: mechanismView,
         settledToolCalls: toolCardsView,
-        changeSetAttempt: attempt,
         onApplyChangeSet: applyChangeSet,
         onDiscardChangeSet: () => store.getState().discardChangeSet(),
         onSend: (draft) => void send(draft, undefined, { fromInput: true }),
@@ -394,8 +392,11 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
   // LIVE workspace read partitions the accepted files into drifted (warned + skipped, #473) and clean;
   // only the clean subset is written via the host, and the settle dispatches walk the slice —
   // beginChangeSetApply → resolveChangeSetApply / rejectChangeSetApply (#633) — with the stale-set
-  // guards keeping a late settle from un-retiring a superseded set (#684). The per-attempt wording
-  // (the clean count, the skip notices) rides `attempt` into the panel's live region.
+  // guards keeping a late settle from un-retiring a superseded set (#684). The host still COMPOSES the
+  // wording (the clean count, the skip notices) but rides it into the live region entirely through the
+  // slice's phase `note` (#1136) — the panel is a pure consumer of `chat.changeSet.phase`, no side
+  // channel, no `forId` staleness match (the phase transitions themselves are already keyed to the
+  // right set by the store's own guards).
   function applyChangeSet(_accepted: readonly ChangeSetFileState[]): void {
     // Belt-and-braces re-entrancy guard alongside the disabled button: only the CURRENT set, still
     // under review, can be applied — 'applying' (in flight) and the terminal phases bail here.
@@ -423,28 +424,26 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
       // Everything selected drifted: write nothing (beginChangeSetApply is never dispatched — the
       // phase stays reviewing, so Apply stays usable for a fresh review), keep the panel open with
       // the warnings and announce why in the live region.
-      setAttempt({
-        forId: id,
-        appliedCount: null,
-        note:
+      store
+        .getState()
+        .noteChangeSetReview(
           `${drifted.length} ${files(drifted.length)} changed since ` +
-          `${drifted.length === 1 ? 'it was' : 'they were'} proposed; nothing was applied. ` +
-          `Send again for a fresh proposal.`,
-      });
+            `${drifted.length === 1 ? 'it was' : 'they were'} proposed; nothing was applied. ` +
+            `Send again for a fresh proposal.`,
+        );
       return;
     }
 
     const skipped = drifted.length
       ? ` Skipped ${drifted.length} that changed since ${drifted.length === 1 ? 'it was' : 'they were'} proposed.`
       : '';
-    // Announce the skip synchronously (drift detection is synchronous) so the warning is visible the
-    // instant Apply is clicked; the async result below refines it to the final "Applied N" message.
-    setAttempt({
-      forId: id,
-      appliedCount: clean.length,
-      note: drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : null,
-    });
-    store.getState().beginChangeSetApply(); // reviewing → applying; the phase guards the in-flight window
+    // reviewing → applying; the phase guards the in-flight window and snapshots the clean count for the
+    // truthful terminal label (#1136). Announce the skip synchronously (drift detection is synchronous)
+    // so the warning is visible the instant Apply is clicked; the async result below refines it to the
+    // final "Applied N" message.
+    store
+      .getState()
+      .beginChangeSetApply(drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : undefined);
     // Address each write by the row's OWN opaque key (#472 Task 4): the rows carry the staged edit's
     // key end-to-end through the review, so a revision applies to exactly the buffer it was staged
     // from — even when several roots share the relPath — and a brand-new file keeps the `new:<relPath>`
@@ -467,11 +466,9 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         if (result.failed.length) {
           // Partial/total failure: back to reviewing (no false "Applied ✓") with Apply re-opened by the
           // phase, and report exactly which files didn't write so the user can retry the checked set.
-          store.getState().resolveChangeSetApply({ failed: result.failed });
           const wrote = clean.length - result.failed.length;
-          setAttempt({
-            forId: id,
-            appliedCount: null,
+          store.getState().resolveChangeSetApply({
+            failed: result.failed,
             note:
               `${wrote ? `Applied ${wrote} ${files(wrote)}; ` : ''}` +
               `couldn't write ${result.failed.length}: ${result.failed.join(', ')}. Re-apply to retry.` +
@@ -481,8 +478,9 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         }
         // Success: terminal applied — the phase locks the review (checkboxes disabled so a later
         // toggle can't trigger a second write), flips Apply to "Applied ✓", and drops Discard.
-        store.getState().resolveChangeSetApply({ failed: [] });
-        setAttempt({ forId: id, appliedCount: clean.length, note: `Applied ${clean.length} ${files(clean.length)}.` + skipped });
+        store
+          .getState()
+          .resolveChangeSetApply({ failed: [], note: `Applied ${clean.length} ${files(clean.length)}.${skipped}` });
       })
       .catch((e) => {
         // A set superseded mid-apply stays terminal (#684): a late rejection must not re-enable Apply
@@ -493,17 +491,11 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         // onApply REJECTED (#633): applyFileEdit only turns disk-write errors into a { failed } result;
         // an un-guarded throw from a non-disk op (renderer/LSP sync, dirty refresh, saved-callback)
         // escapes as a rejection. rejectChangeSetApply releases the in-flight lock back to reviewing
-        // (re-opening Apply for a retry of the still-checked set) and the error is surfaced in the
-        // polite live region so the failure is announced and recoverable.
-        const message = `Apply failed: ${String(e)}` + skipped;
-        store.getState().rejectChangeSetApply(message);
-        setAttempt({ forId: id, appliedCount: null, note: message });
+        // (re-opening Apply for a retry of the still-checked set) and stores the error as the reviewing
+        // phase's own note (#1136 — no duplicate side-channel note to keep in sync) so the failure is
+        // announced and recoverable.
+        store.getState().rejectChangeSetApply(`Apply failed: ${String(e)}${skipped}`);
       });
-  }
-
-  function setAttempt(next: ChangeSetAttempt | null): void {
-    attempt = next;
-    rerender();
   }
 
   function setMechanism(patch: Partial<TurnMechanism>): void {
@@ -841,7 +833,6 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
         // The model staged a multi-file change: review it per file BEFORE any disk write. The
         // single-file Apply gate is for non-staged replies, so this turn's bubble offers nothing.
         resolveGate(null);
-        attempt = null; // the fresh set has no apply attempt yet
         // Stage the set in the chat slice (#984): the state machine owns accepted/drift/phase — a
         // later send supersedes it via invalidateChangeSet, and the declarative ChangeSetPanel is
         // its consumer. The slice's rows resolve their send-time text by the staged edit's KEY
