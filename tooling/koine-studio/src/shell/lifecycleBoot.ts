@@ -12,6 +12,7 @@ import { clearModelHash, readModelFromHash } from '@/export/share';
 import { getLastWorkspace, setLastWorkspace, clearLegacyScratch } from '@/settings/persistence';
 import { basename } from '@/shared/path';
 import { type Template } from '@/welcome/templates';
+import { type WorkspaceOpLock } from '@/shell/workspaceOpLock';
 
 // The host's reserved default-workspace token (mirrors host/browser/fs.ts DEFAULT_WS_TOKEN). Parentheses
 // can't appear in a real picked-folder name, so it never collides. Used as the lastWorkspace pointer
@@ -48,6 +49,9 @@ export interface LifecycleBootDeps {
   hasOpenWorkspace(): boolean;
   /** Overlays.confirmReplaceWork — resolves true when nothing is dirty or the user confirmed the loss. */
   confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean>;
+  /** The boot-wide workspace-open mutex, owned by ide.tsx's composition root so the toolbar / keyboard /
+   *  palette / onWorkspaceEmptied entry points serialize against this ladder's opens too (#1088). */
+  workspaceOpLock: WorkspaceOpLock;
   /** Open the host's persistent default workspace (workspace.openDefaultWorkspaceFlow). */
   openHostDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean }>;
   setStatus(text: string, kind: 'error'): void;
@@ -129,12 +133,13 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   // another Home action — and silently clobber it (#1046). Each call waits for whatever is already
   // running rather than firing blindly; a queued call re-checks its own preconditions (e.g.
   // hasOpenWorkspace()) once it's actually its turn.
-  let workspaceOpQueue: Promise<unknown> = Promise.resolve();
-  function withWorkspaceOpLock<T>(op: () => Promise<T>): Promise<T> {
-    const run = workspaceOpQueue.catch(() => {}).then(op);
-    workspaceOpQueue = run.catch(() => {});
-    return run;
-  }
+  //
+  // The lock is INJECTED, not private (#1088): ide.tsx owns the single instance and shares it with the
+  // toolbar / keyboard / palette / onWorkspaceEmptied entry points, which reach the same underlying
+  // newModel()/openFolder() without ever passing through this file. The raw `deps.newModel`/
+  // `deps.openFolder` closures handed to us stay UNwrapped — runStartIntent already holds the lock when
+  // it calls them, and the queue has no re-entrancy detection, so a self-locking action would deadlock.
+  const withWorkspaceOpLock = <T>(op: () => Promise<T>): Promise<T> => deps.workspaceOpLock.run(op);
 
   // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
   // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.
@@ -211,6 +216,16 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       // Isolated try/finally per branch: an open failure must not masquerade as a connection failure.
       if (shared?.kind === 'workspace') {
         await withWorkspaceOpLock(async () => {
+          // Re-checked HERE, once this op's turn in the queue actually comes — not before queueing
+          // (#1088). Serializing alone isn't enough: the shared branch waits out lsp.start() before it
+          // ever reaches the lock, so a Home pick taken during that connect window acquires the lock
+          // FIRST and opens its own workspace. Importing on top of it would silently discard the
+          // workspace the user just asked for — the same clobber #1046 fixed, in the reverse ordering.
+          // The hash is still cleared: this boot consumed the link, so a reload must not re-import it.
+          if (deps.hasOpenWorkspace()) {
+            clearModelHash();
+            return;
+          }
           let opened = false;
           try {
             opened = await deps.importSharedWorkspace(shared.files, shared.active);
@@ -227,6 +242,11 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
         });
       } else if (shared?.kind === 'single') {
         await withWorkspaceOpLock(async () => {
+          // Same queued-turn recheck as the workspace branch above (#1088).
+          if (deps.hasOpenWorkspace()) {
+            clearModelHash();
+            return;
+          }
           try {
             await deps.openWorkspaceWith1File(shared.text);
           } catch (e) {

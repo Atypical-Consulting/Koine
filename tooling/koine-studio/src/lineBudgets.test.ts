@@ -84,7 +84,14 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // composition-root wiring now maps N patches to their live buffers and drops any whose uri closed
   // since the snapshot, then fires ONE `appStore.getState().upsertBuffers(...)` call instead of per-buffer
   // `upsertBuffer` calls, ~7 LOC net. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1470 },
+  // Raised 1470 → 1488: #1088 hoists the workspace-open lock to the composition root — one
+  // `createWorkspaceOpLock()` instance plus the four entry points that previously bypassed it (toolbar
+  // Open-folder, the palette/mod+Shift+O openFolder, overlays' requestNewModel reset, and the reactive
+  // onWorkspaceEmptied) now wrapped in `workspaceOpLock.run(...)`. The wraps are one-liners; most of the
+  // growth is the comments recording WHY the lifecycleBoot closures beneath them must stay unwrapped
+  // (the FIFO queue has no re-entrancy detection, so self-locking deadlocks the boot). ~18 LOC net,
+  // measured end-state — the lock has to live here, above every consumer, so this cannot be extracted.
+  { file: 'src/shell/ide.tsx', maxLines: 1488 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.

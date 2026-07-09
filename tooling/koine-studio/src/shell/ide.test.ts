@@ -59,6 +59,37 @@ vi.mock('@/settings/persistence', async () => {
 });
 const { peekLegacyScratch, clearLegacyScratch } = storeSeam;
 
+// Capture the deps bag init() hands createWorkspaceController, so a test can fire the REACTIVE
+// callbacks the workspace controller owns (onWorkspaceEmptied) exactly as production does — there is no
+// DOM affordance that deletes the last buffer without also driving the explorer's menu + confirm. The
+// mock delegates fully to the real controller, so every other test boots unchanged.
+const wsControllerSeam = vi.hoisted(() => ({ deps: null as { onWorkspaceEmptied(): void } | null }));
+vi.mock('@/shell/workspaceController', async () => {
+  const actual = await vi.importActual<typeof import('@/shell/workspaceController')>('@/shell/workspaceController');
+  return {
+    ...actual,
+    createWorkspaceController: (deps: Parameters<typeof actual.createWorkspaceController>[0]) => {
+      wsControllerSeam.deps = deps;
+      return actual.createWorkspaceController(deps);
+    },
+  };
+});
+
+// Same trick for the command surface: the palette's "Open folder…" entry and its mod+Shift+O chord both
+// dispatch through the `openFolder` thunk init() passes here. Driving the real chord would fan out to
+// every prior boot's window keydown listener (happy-dom shares `window`), so capture the thunk instead.
+const cmdWiringSeam = vi.hoisted(() => ({ deps: null as { openFolder(): void } | null }));
+vi.mock('@/shell/commandWiring', async () => {
+  const actual = await vi.importActual<typeof import('@/shell/commandWiring')>('@/shell/commandWiring');
+  return {
+    ...actual,
+    createCommandWiring: (deps: Parameters<typeof actual.createCommandWiring>[0]) => {
+      cmdWiringSeam.deps = deps;
+      return actual.createCommandWiring(deps);
+    },
+  };
+});
+
 // #731: capture the `onOpenPrefs` callback ide.ts wires into the (lazily-created) Assistant panel, so a
 // test can invoke it and assert it routes to the Settings overlay. A partial mock: every other aiPanel
 // export is preserved, and createAssistantChat returns a minimal stub (the panel is created lazily on
@@ -677,6 +708,135 @@ describe('ide init() — #-hash multi-file shared workspace', () => {
     expect(platform.files.has('model.koi')).toBe(false);
     // The #model= fragment is cleared after import so a reload returns home (clearModelHash).
     expect(window.location.hash).toBe('');
+  });
+});
+
+// Regression (#1088): #1046's workspace-open lock lived inside createLifecycleBoot, so it only ever
+// serialized the boot ladder's own branches. The toolbar's New / Open-folder buttons — and the mod+N,
+// mod+Shift+O and palette entries that share their closures — reach the same underlying
+// newModel()/openFolder() straight from ide.tsx and never saw the lock. They stay clickable for the
+// whole multi-second lsp.start() + import window, so either could land on top of an in-flight
+// shared-workspace import, with whichever settled last silently winning.
+//
+// These drive the REAL init() with the shared import held open, then click the real toolbar buttons.
+describe('ide init() — the workspace-open lock covers the toolbar entry points (#1088)', () => {
+  /**
+   * Park the shared-workspace import inside `materializeWorkspace` until the returned `release()` is
+   * called — i.e. hold the workspace-open lock the way a slow host does — then let the real import run.
+   */
+  function gateSharedImport(platform: FakePlatform): () => void {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const real = platform.materializeWorkspace.bind(platform);
+    platform.materializeWorkspace = async (name, files) => {
+      await gate;
+      return real(name, files);
+    };
+    return release;
+  }
+
+  test('the toolbar Open-folder button defers to an in-flight shared import instead of racing it', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+    // A cancelled picker: we assert only on WHEN the picker opens, never on what it returns.
+    const pickFolder = vi.fn(async (): Promise<string | null> => null);
+    platform.pickFolder = pickFolder;
+
+    await boot({ platform }); // the ladder is parked mid-import, holding the lock
+
+    document.getElementById('btn-open-folder')!.click();
+    await settleBoot();
+    // The import is still in flight, so the folder picker must not open on top of it.
+    expect(pickFolder).not.toHaveBeenCalled();
+
+    release();
+    await settleBoot();
+    // Deferred, not dropped: once the import settles the queued open runs.
+    expect(pickFolder).toHaveBeenCalledOnce();
+  });
+
+  test('the toolbar New button defers to an in-flight shared import instead of racing it', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+
+    await boot({ platform });
+    // A share boot never touches the default workspace, so `defaultWorkspaceSeed` is a clean probe for
+    // "New ran": newModel() resets the default workspace via platform.defaultWorkspace(BLANK).
+    expect(platform.defaultWorkspaceSeed).toBeNull();
+
+    document.getElementById('btn-new')!.click();
+    await settleBoot();
+    // Nothing is dirty, so the New guard's confirm resolves straight through — but the reset itself
+    // must still wait for the in-flight import rather than blowing it away.
+    expect(platform.defaultWorkspaceSeed).toBeNull();
+
+    release();
+    await settleBoot();
+    expect(platform.defaultWorkspaceSeed).not.toBeNull();
+  });
+
+  test('the palette / mod+Shift+O Open-folder thunk defers to an in-flight shared import', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+    const pickFolder = vi.fn(async (): Promise<string | null> => null);
+    platform.pickFolder = pickFolder;
+
+    await boot({ platform });
+
+    // The exact thunk init() handed createCommandWiring, which the palette entry and chord dispatch to.
+    cmdWiringSeam.deps!.openFolder();
+    await settleBoot();
+    expect(pickFolder).not.toHaveBeenCalled();
+
+    release();
+    await settleBoot();
+    expect(pickFolder).toHaveBeenCalledOnce();
+  });
+
+  // The fourth wrapped entry point. It fires reactively (the last buffer was deleted), so unlike the
+  // toolbar paths it has no click to gate on — without this, a later refactor could unwrap it and the
+  // suite would stay green while the clobber returned.
+  test('the reactive onWorkspaceEmptied reset defers to an in-flight shared import', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+
+    await boot({ platform }); // parked mid-import, holding the lock
+    expect(platform.defaultWorkspaceSeed).toBeNull();
+
+    // Fire the exact callback ide.tsx handed the workspace controller.
+    wsControllerSeam.deps!.onWorkspaceEmptied();
+    await settleBoot();
+    expect(platform.defaultWorkspaceSeed).toBeNull(); // the blank reset waited its turn
+
+    release();
+    await settleBoot();
+    expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
+  });
+
+  // The other half of the invariant. The closures handed to createLifecycleBoot must stay UNWRAPPED:
+  // runStartIntent already holds the lock when it calls them, and the FIFO queue has no re-entrancy
+  // detection, so wrapping them too would enqueue the action behind the very op awaiting it — "New"
+  // from Home would hang forever. Asserting the reset actually COMPLETED is what catches that; the
+  // sibling #368 test only asserts the intent was consumed, which stays true under a deadlock.
+  test('a Home "New model" start-intent still completes — the boot-ladder closures are not double-locked', async () => {
+    const { setStartIntent } = await import('@/shell/bootIntent');
+    const { appStore } = await import('@/store');
+
+    const { platform } = await boot();
+    expect(platform.defaultWorkspaceSeed).toContain('context Billing'); // the default boot's SEED
+
+    setStartIntent({ kind: 'new' });
+    appStore.setState({ route: 'editor' });
+    await settleBoot();
+
+    // runStartIntent → the raw deps.newModel() ran to completion inside the lock, resetting to BLANK.
+    expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
   });
 });
 
