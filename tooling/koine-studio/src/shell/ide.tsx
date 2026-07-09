@@ -25,6 +25,7 @@ import { koineMark } from '@/shared/logo';
 import { basename } from '@/shared/path';
 import { domById } from '@/shared/domById';
 import { createLifecycleBoot } from '@/shell/lifecycleBoot';
+import { createWorkspaceOpLock } from '@/shell/workspaceOpLock';
 import { createFormatActive } from '@/shell/formatActive';
 import { initTheme } from '@/settings/theme';
 import {
@@ -749,6 +750,14 @@ export function init(hooks: IdeHooks = {}): () => void {
   // flow's refreshActiveSurfaces loads everything once the workspace document is open).
   controller.init();
 
+  // The boot-wide workspace-open mutex (#1046, hoisted here by #1088). Exactly ONE per init(): every
+  // path that swaps the workspace out from under the editor — the boot ladder's shared-import /
+  // restore / start-intent branches, the toolbar's Open-folder button, the mod+N and mod+Shift+O
+  // shortcuts, the command palette, and the reactive onWorkspaceEmptied reset — queues through this
+  // instance, so two of them can never interleave and silently discard each other's workspace. The
+  // toolbar stays interactive for the multi-second lsp.start() connect window, which is when they race.
+  const workspaceOpLock = createWorkspaceOpLock();
+
   // --- open folder (directory-mode workspace) -------------------------------
 
   const openFolderBtn = domById<HTMLButtonElement>('btn-open-folder');
@@ -1434,6 +1443,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     isAutoRestorableToken: (token) => platform.isAutoRestorableToken(token),
     hasOpenWorkspace: () => workspace.rootsList().length > 0 || workspace.buffers.size > 0,
     confirmReplaceWork: (title, label) => overlays.confirmReplaceWork(title, label),
+    workspaceOpLock,
     openHostDefaultWorkspaceFlow: (seed) => workspace.openDefaultWorkspaceFlow(seed),
     setStatus,
     setOutput: (content, lang) => output.setContent(content, lang),

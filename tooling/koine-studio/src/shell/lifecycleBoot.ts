@@ -12,6 +12,7 @@ import { clearModelHash, readModelFromHash } from '@/export/share';
 import { getLastWorkspace, setLastWorkspace, clearLegacyScratch } from '@/settings/persistence';
 import { basename } from '@/shared/path';
 import { type Template } from '@/welcome/templates';
+import { type WorkspaceOpLock } from '@/shell/workspaceOpLock';
 
 // The host's reserved default-workspace token (mirrors host/browser/fs.ts DEFAULT_WS_TOKEN). Parentheses
 // can't appear in a real picked-folder name, so it never collides. Used as the lastWorkspace pointer
@@ -48,6 +49,9 @@ export interface LifecycleBootDeps {
   hasOpenWorkspace(): boolean;
   /** Overlays.confirmReplaceWork — resolves true when nothing is dirty or the user confirmed the loss. */
   confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean>;
+  /** The boot-wide workspace-open mutex, owned by ide.tsx's composition root so the toolbar / keyboard /
+   *  palette / onWorkspaceEmptied entry points serialize against this ladder's opens too (#1088). */
+  workspaceOpLock: WorkspaceOpLock;
   /** Open the host's persistent default workspace (workspace.openDefaultWorkspaceFlow). */
   openHostDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean }>;
   setStatus(text: string, kind: 'error'): void;
@@ -129,12 +133,13 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   // another Home action — and silently clobber it (#1046). Each call waits for whatever is already
   // running rather than firing blindly; a queued call re-checks its own preconditions (e.g.
   // hasOpenWorkspace()) once it's actually its turn.
-  let workspaceOpQueue: Promise<unknown> = Promise.resolve();
-  function withWorkspaceOpLock<T>(op: () => Promise<T>): Promise<T> {
-    const run = workspaceOpQueue.catch(() => {}).then(op);
-    workspaceOpQueue = run.catch(() => {});
-    return run;
-  }
+  //
+  // The lock is INJECTED, not private (#1088): ide.tsx owns the single instance and shares it with the
+  // toolbar / keyboard / palette / onWorkspaceEmptied entry points, which reach the same underlying
+  // newModel()/openFolder() without ever passing through this file. The raw `deps.newModel`/
+  // `deps.openFolder` closures handed to us stay UNwrapped — runStartIntent already holds the lock when
+  // it calls them, and the queue has no re-entrancy detection, so a self-locking action would deadlock.
+  const withWorkspaceOpLock = <T>(op: () => Promise<T>): Promise<T> => deps.workspaceOpLock.run(op);
 
   // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
   // OPFS-error output line are ide-specific, so they wrap workspace.openDefaultWorkspaceFlow here.

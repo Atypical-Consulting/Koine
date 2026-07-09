@@ -15,6 +15,7 @@ vi.mock('@/export/share', () => ({ clearModelHash: vi.fn(), readModelFromHash: v
 vi.mock('@/settings/persistence', () => ({ getLastWorkspace: getLastWorkspaceMock, setLastWorkspace: vi.fn(), clearLegacyScratch: vi.fn() }));
 
 import { createLifecycleBoot, type LifecycleBootDeps } from '@/shell/lifecycleBoot';
+import { createWorkspaceOpLock } from '@/shell/workspaceOpLock';
 import { clearModelHash } from '@/export/share';
 import { appStore } from '@/store/index';
 
@@ -45,6 +46,9 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
     isAutoRestorableToken: vi.fn(async (t: string) => t === '(default)' || t.startsWith('example-')),
     hasOpenWorkspace: vi.fn(() => false),
     confirmReplaceWork: vi.fn(async () => true),
+    // The real lock (not a pass-through double): its FIFO queueing IS what the #1046/#1088 race tests
+    // exercise. ide.tsx creates one per boot; each makeDeps() gets its own, exactly as a boot does.
+    workspaceOpLock: createWorkspaceOpLock(),
     openHostDefaultWorkspaceFlow: vi.fn(async () => ({ opened: true })),
     setStatus: vi.fn(),
     setOutput: vi.fn(),
