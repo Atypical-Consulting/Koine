@@ -23,18 +23,20 @@ public sealed partial class OpenApiEmitter
         {
             foreach (CommandDecl command in entity.Commands)
             {
+                RouteInfo route = RouteDerivation.ForCommand(entity, command);
                 operations.Add((
-                    RouteDerivation.ForCommand(entity, command).Route,
-                    new YamlObject().Add("post", CommandOperation(entity, command, index, emitted))));
+                    route.Route,
+                    new YamlObject().Add("post", CommandOperation(entity, command, route, index, emitted))));
             }
         }
 
         // Queries: read operations over a read model → GET.
         foreach (QueryDecl query in ctx.AllTypeDecls().OfType<QueryDecl>())
         {
+            RouteInfo route = RouteDerivation.ForQuery(query);
             operations.Add((
-                RouteDerivation.ForQuery(query).Route,
-                new YamlObject().Add("get", QueryOperation(query, index, emitted))));
+                route.Route,
+                new YamlObject().Add("get", QueryOperation(query, route, index, emitted))));
         }
 
         var paths = new YamlObject();
@@ -47,10 +49,10 @@ public sealed partial class OpenApiEmitter
     }
 
     /// <summary>A command → a <c>POST</c> operation: a JSON request body from its parameters, plus success/validation responses.</summary>
-    private static YamlObject CommandOperation(EntityDecl entity, CommandDecl command, ModelIndex index, HashSet<string> emitted)
+    private static YamlObject CommandOperation(EntityDecl entity, CommandDecl command, RouteInfo route, ModelIndex index, HashSet<string> emitted)
     {
         var operation = new YamlObject();
-        operation.Add("operationId", RouteDerivation.ForCommand(entity, command).OperationId);
+        operation.Add("operationId", route.OperationId);
         operation.Add("summary", string.IsNullOrWhiteSpace(command.Doc)
             ? Yaml.Str($"{command.Name} on {entity.Name}")
             : Yaml.Str(OneLine(command.Doc!)));
@@ -84,10 +86,10 @@ public sealed partial class OpenApiEmitter
     }
 
     /// <summary>A query → a <c>GET</c> operation: its criteria become query parameters, the result a <c>200</c> body.</summary>
-    private static YamlObject QueryOperation(QueryDecl query, ModelIndex index, HashSet<string> emitted)
+    private static YamlObject QueryOperation(QueryDecl query, RouteInfo route, ModelIndex index, HashSet<string> emitted)
     {
         var operation = new YamlObject();
-        operation.Add("operationId", RouteDerivation.ForQuery(query).OperationId);
+        operation.Add("operationId", route.OperationId);
         operation.Add("summary", string.IsNullOrWhiteSpace(query.Doc)
             ? Yaml.Str(query.Name)
             : Yaml.Str(OneLine(query.Doc!)));
