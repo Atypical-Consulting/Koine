@@ -219,50 +219,46 @@ public sealed partial class RustEmitter
     private void WriteDerived(StringBuilder sb, Member m, RustExpressionTranslator translator, RustTypeMapper typeMapper)
     {
         var field = RustNaming.Field(m.Name);
+        string body;
 
         // A bare conditional/let/guard body (no arithmetic operator at all) has its own recursive
         // owned-value dispatch — a leaf place a branch would otherwise move out of `&self` must be
-        // cloned, which neither this method's own clone/`to_string` cases below (they only recognize a
-        // bare `IdentifierExpr`/`MemberAccessExpr` initializer) nor a plain `Translate` provide (#1282,
-        // generalizing #1268's quantity-guard fix). Every other initializer shape keeps its existing
-        // rendering unchanged.
+        // cloned, which neither the clone/`to_string` handling below (it only recognizes a bare
+        // `IdentifierExpr`/`MemberAccessExpr` initializer) nor a plain `Translate` provide (#1282,
+        // generalizing #1268's quantity-guard fix).
         if (m.Initializer is ConditionalExpr or LetExpr or GuardExpr)
         {
-            var ownedBody = translator.TranslateOwned(m.Initializer!, EnumExpectedRef(m, typeMapper));
+            body = translator.TranslateOwned(m.Initializer!, EnumExpectedRef(m, typeMapper));
             if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } ownedWrap)
             {
-                ownedBody = $"{ownedWrap}({ownedBody})";
+                body = $"{ownedWrap}({body})";
             }
-
-            WriteDoc(sb, m.Doc, Indent);
-            sb.Append(Indent).Append("pub fn ").Append(field).Append("(&self) -> ").Append(typeMapper.Map(m.Type))
-              .Append(" {\n");
-            sb.Append(Indent).Append(Indent).Append(ownedBody).Append('\n');
-            sb.Append(Indent).Append("}\n");
-            return;
         }
+        else
+        {
+            body = RustExpressionTranslator.StripOuterParens(
+                translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Property, EnumExpectedRef(m, typeMapper)));
 
-        var body = RustExpressionTranslator.StripOuterParens(
-            translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Property, EnumExpectedRef(m, typeMapper)));
-
-        // Reconcile the body's inferred numeric type with the declared type. Rust has no implicit numeric
-        // widening, so an `Int`-inferred body in a `-> Decimal` getter (a widening C# does for free) must
-        // be wrapped in `Decimal::from(...)` or rustc rejects it as E0308 (#961) — the derived-member dual
-        // of the scalar-operator coercion #937 fixed. Takes precedence over the clone/`to_string` cases
-        // below (the wrapped value is always a `Copy` primitive, so no clone is owed).
-        if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
-        {
-            body = $"{wrap}({body})";
-        }
-        // A String-typed derived member whose body yields a borrowed &str (e.g. `name.trim`) must be
-        // owned; a bare non-Copy field read must be cloned out of `&self`.
-        else if (m.Type is { Name: "String", IsOptional: false } && body.EndsWith(".trim()", StringComparison.Ordinal))
-        {
-            body += ".to_string()";
-        }
-        else if (m.Initializer is IdentifierExpr or MemberAccessExpr && !typeMapper.IsCopy(m.Type))
-        {
-            body += ".clone()";
+            // Reconcile the body's inferred numeric type with the declared type. Rust has no implicit
+            // numeric widening, so an `Int`-inferred body in a `-> Decimal` getter (a widening C# does
+            // for free) must be wrapped in `Decimal::from(...)` or rustc rejects it as E0308 (#961) — the
+            // derived-member dual of the scalar-operator coercion #937 fixed. Takes precedence over the
+            // clone/`to_string` cases below (the wrapped value is always a `Copy` primitive, so no clone
+            // is owed).
+            if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
+            {
+                body = $"{wrap}({body})";
+            }
+            // A String-typed derived member whose body yields a borrowed &str (e.g. `name.trim`) must be
+            // owned; a bare non-Copy field read must be cloned out of `&self`.
+            else if (m.Type is { Name: "String", IsOptional: false } && body.EndsWith(".trim()", StringComparison.Ordinal))
+            {
+                body += ".to_string()";
+            }
+            else if (m.Initializer is IdentifierExpr or MemberAccessExpr && !typeMapper.IsCopy(m.Type))
+            {
+                body += ".clone()";
+            }
         }
 
         WriteDoc(sb, m.Doc, Indent);

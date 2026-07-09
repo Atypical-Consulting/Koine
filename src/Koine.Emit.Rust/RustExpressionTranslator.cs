@@ -380,10 +380,14 @@ internal sealed class RustExpressionTranslator
 
     /// <summary>
     /// Writes a leaf (non-conditional/let/guard) expression as an owned value — the base case
-    /// <see cref="WriteOwnedOperand"/> recurses down to. A <c>String</c>-typed leaf is normalized via
-    /// <c>.to_string()</c> (correct whether it renders as an owned <c>String</c> place or a borrowed
-    /// <c>&amp;str</c> accessor result — <c>.clone()</c> on the latter would stay a <c>&amp;str</c> and
-    /// mistype the position); any other non-<c>Copy</c> place is cloned.
+    /// <see cref="WriteOwnedOperand"/> recurses down to. A <c>String</c>-typed <b>place</b>
+    /// (identifier/member access) is normalized via <c>.to_string()</c> (correct whether it renders as
+    /// an owned <c>String</c> field or a borrowed <c>&amp;str</c> accessor result — <c>.clone()</c> on
+    /// the latter would stay a <c>&amp;str</c> and mistype the position); any other non-<c>Copy</c>
+    /// place is cloned. A <b>non-place</b> String leaf (a concatenation) is left as-is: it already
+    /// renders as an owned <c>String</c> via <see cref="WriteStringOwned"/>, and appending a suffix
+    /// after <see cref="StripOuterParens"/> has removed its enclosing parens would bind to the
+    /// concatenation's last operand instead of the whole expression.
     /// </summary>
     private void WriteOwnedLeaf(Expr expr, StringBuilder sb, TypeRef? coerceTo)
     {
@@ -392,7 +396,8 @@ internal sealed class RustExpressionTranslator
         Write(expr, bodyBuf, coerceTo);
         sb.Append(StripOuterParens(bodyBuf.ToString()));
 
-        if (type is { Name: "String", IsOptional: false })
+        var isPlace = expr is IdentifierExpr or MemberAccessExpr;
+        if (type is { Name: "String", IsOptional: false } && isPlace)
         {
             sb.Append(".to_string()");
         }
@@ -445,9 +450,11 @@ internal sealed class RustExpressionTranslator
     /// <summary>
     /// Writes a <c>let</c> block's opening brace and bindings; caller writes the body and closing
     /// brace, then calls <see cref="PopLocals"/>. When <paramref name="cloneNonCopyPlaces"/> is set (the
-    /// <see cref="WriteOwnedOperand"/> context, #1268), a binding whose value is a non-Copy place is
-    /// cloned — otherwise binding it would move it out of <c>&amp;self</c>, and the block must still
-    /// yield an owned value once its body is later cloned/consumed.
+    /// <see cref="WriteOwnedOperand"/> context, #1268), a binding's value is itself written as an owned
+    /// value via <see cref="WriteOwnedOperand"/> — not just cloned when it's a bare place, but recursing
+    /// into a compound (conditional/let/guard) value too (#1282) — otherwise binding it would move a
+    /// non-Copy leaf out of <c>&amp;self</c>, and the block must still yield an owned value once its
+    /// body is later cloned/consumed.
     /// </summary>
     private List<string> WriteLetBindings(IReadOnlyList<LetBinding> bindings, StringBuilder sb, bool cloneNonCopyPlaces)
     {
@@ -457,10 +464,13 @@ internal sealed class RustExpressionTranslator
         {
             sb.Append("let ").Append(RustNaming.Field(b.Name)).Append(" = ");
             TypeRef? bindingType = _resolver.Infer(b.Value, EffectiveScope());
-            Write(b.Value, sb, null);
-            if (cloneNonCopyPlaces && IsNonCopyPlace(b.Value, bindingType))
+            if (cloneNonCopyPlaces)
             {
-                sb.Append(".clone()");
+                WriteOwnedOperand(b.Value, sb);
+            }
+            else
+            {
+                Write(b.Value, sb, null);
             }
 
             sb.Append("; ");

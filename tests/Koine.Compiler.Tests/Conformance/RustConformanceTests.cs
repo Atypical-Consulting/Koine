@@ -635,4 +635,84 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1282 code-review finding — a let-binding's own VALUE (not just the let's body) can be a
+    /// bare compound expression (a conditional): <c>let picked = (if flag then a else b) in picked</c>
+    /// used as a bare derived-member body. <c>WriteLetBindings</c>'s <c>cloneNonCopyPlaces</c> path
+    /// previously rendered a binding's value with plain <c>Write</c> and only cloned it when it was a
+    /// bare place, never recursing into a compound value the way the let's body already did — so the
+    /// conditional's branches inside the binding's value were left un-cloned and failed a real
+    /// <c>cargo check</c> E0507, independently confirmed by three finder agents during code review.
+    /// </summary>
+    [Fact]
+    public void Let_binding_value_is_conditional_derived_member_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    combined: Money = let picked = (if flag then a else b) in picked\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the let-binding's own conditional value must
+        // clone its non-Copy branches, never leave them as bare, un-borrowed places.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1282 code-review finding — a <c>String</c>-typed conditional branch that is itself a
+    /// concatenation (not a bare place) must NOT get an appended <c>.to_string()</c>: the concatenation
+    /// already renders as an owned <c>String</c> via <c>WriteStringOwned</c>, and appending a suffix
+    /// after <c>StripOuterParens</c> removes its enclosing parens binds the suffix to the
+    /// concatenation's LAST operand instead of the whole expression (e.g.
+    /// <c>"URGENT ".to_string() + &amp;self.hours.to_string().to_string()</c> — a misassociated,
+    /// redundant double <c>.to_string()</c> on <c>hours</c> alone). Confirmed via a real <c>cargo
+    /// check</c> comparison against `main`'s pre-fix rendering during code review.
+    /// </summary>
+    [Fact]
+    public void String_typed_conditional_branch_that_is_a_concatenation_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Announcement {\n" +
+            "    hours: Int\n" +
+            "    minutes: Int\n" +
+            "    urgent: Bool\n" +
+            "    display: String = if urgent then \"URGENT \" + hours else \"normal \" + minutes\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): each concatenated branch renders exactly one
+        // `.to_string()` on the Int operand, never a misassociated double.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("\"URGENT \".to_string() + &self.hours.to_string()");
+        rust.ShouldContain("\"normal \".to_string() + &self.minutes.to_string()");
+        rust.ShouldNotContain("self.hours.to_string().to_string()");
+        rust.ShouldNotContain("self.minutes.to_string().to_string()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
