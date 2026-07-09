@@ -1208,6 +1208,31 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   let modelIndex: ModelIndex | null = null;
   let indexPromise: Promise<ModelIndex> | null = null;
 
+  // Shared in-flight fetch of `glossaryModel()`/`model()` (#484 follow-up on #460's review): loadModel()
+  // below reloads the Domain navigator AND calls ensureModelIndex() in the same tick, and each used to
+  // issue its OWN request for these same two endpoints — doubling them on every edit. Memoizing the
+  // in-flight promise here means whichever caller asks first kicks off the one lsp call and the other
+  // awaits that same promise, so the request count halves WITHOUT delaying either caller — both still
+  // kick off their fetch immediately, in parallel with everything else loadModel does.
+  let glossaryFetch: Promise<GlossaryModel> | null = null;
+  function fetchGlossaryModel(): Promise<GlossaryModel> {
+    glossaryFetch ??= lsp.glossaryModel().finally(() => {
+      glossaryFetch = null;
+    });
+    return glossaryFetch;
+  }
+  let structuredModelFetch: Promise<ModelNode | null> | null = null;
+  function fetchStructuredModel(): Promise<ModelNode | null> {
+    structuredModelFetch ??= lsp
+      .model()
+      .then((m): ModelNode | null => m ?? null)
+      .catch(() => null)
+      .finally(() => {
+        structuredModelFetch = null;
+      });
+    return structuredModelFetch;
+  }
+
   /**
    * Build (or reuse) the joined model index. `livingDocs` (diagram nodes) and the structured `model`
    * (the #91 field source for elements with no class node) are both best-effort — a glossary-only
@@ -1216,11 +1241,11 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureModelIndex(): Promise<ModelIndex> {
     if (modelIndex) return Promise.resolve(modelIndex);
     indexPromise ??= Promise.all([
-      lsp.glossaryModel(),
+      fetchGlossaryModel(),
       lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
-      lsp.model().catch(() => undefined),
+      fetchStructuredModel(),
     ])
-      .then(([glossary, docs, model]) => (modelIndex = buildModelIndex(glossary, docs, model)))
+      .then(([glossary, docs, model]) => (modelIndex = buildModelIndex(glossary, docs, model ?? undefined)))
       .finally(() => {
         indexPromise = null;
       });
@@ -1284,10 +1309,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // fetch failure in the pane itself); a reload re-fetches its strategic data. Kicking this off before
     // the await runs its fetch in parallel with the model index build, so the rail paints promptly. Its
     // Context Map / Glossary doorways route to the same focuses the docs footer used.
+    // The reload is SEEDED with the same glossary + model fetch ensureModelIndex() is about to start
+    // below (#484 follow-up on #460's review) — both calls land on the shared fetchGlossaryModel() /
+    // fetchStructuredModel() promises, so the navigator's own doFetch reuses them instead of re-issuing
+    // glossaryModel()/model(), halving the per-edit request count with no change to when the rail paints.
     if (!domainNavigator) {
       domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
     } else if (!hadIndex) {
-      domainNavigator.reload();
+      domainNavigator.reload({ glossaryModel: fetchGlossaryModel(), model: fetchStructuredModel() });
     }
     try {
       await ensureModelIndex();

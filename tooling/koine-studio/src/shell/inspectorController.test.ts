@@ -805,6 +805,31 @@ describe('createInspectorController — loading states clear on success', () => 
     expect(domainPane.textContent).not.toContain('Loading');
   });
 
+  // Regression (#484 follow-up on #460's review): a model reload used to fetch glossaryModel()/model()
+  // TWICE per edit — once from the Domain navigator's own doFetch, once from loadModel's ensureModelIndex
+  // — because each issued its own request. loadModel() now seeds the navigator's reload with the SAME
+  // in-flight fetch ensureModelIndex() starts, so the two endpoints are each called once per edit.
+  test('a model reload fetches glossaryModel()/model() once each — not once per consumer', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.refreshActiveSurfaces(); // the FIRST load: mounts the navigator (self-fetch) + builds the index
+    await flush();
+    lsp.glossaryModel.mockClear();
+    lsp.model.mockClear();
+
+    ctl.invalidateDocViews(); // an edit happened — the navigator reloads AND the index rebuilds
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
+    expect(lsp.model).toHaveBeenCalledTimes(1);
+    // The reload still painted correctly from the seeded data (behaviour unchanged).
+    const domainPane = domById('rail-domain-pane');
+    expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
+  });
+
   test('the glossary replaces its "Loading glossary…" line on success', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
