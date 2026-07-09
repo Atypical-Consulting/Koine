@@ -246,7 +246,7 @@ public static partial class CompilerInterop
         {
             var text = lines[line];
             var e = col;
-            while (e < text.Length && (char.IsLetterOrDigit(text[e]) || text[e] == '_'))
+            while (e < text.Length && SourceTextGeometry.IsIdentifierChar(text[e]))
             {
                 e++;
             }
