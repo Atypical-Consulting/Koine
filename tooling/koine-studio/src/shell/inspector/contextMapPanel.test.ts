@@ -235,6 +235,42 @@ describe('createContextMapPanel — scope focus (ADR 0009 / #1188)', () => {
 
     panel.dispose();
   });
+
+  test('a maxGraph view refresh (zoom/pan) re-applies the mark — it does not merely survive a live scope change (#1210)', async () => {
+    const store = createAppStore();
+    const host = makeHost();
+    // renderContextMapGraph itself recreates each cell's HTML label on a view refresh (maxGraph internals,
+    // not exercised under happy-dom) — capture the onAfterRender hook the panel wires so this test can
+    // drive that refresh directly, the same way a real zoom/pan would.
+    let onAfterRender: (() => void) | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockImplementation(async (container, _graph, _isCurrent, hooks) => {
+      onAfterRender = hooks?.onAfterRender;
+      container.innerHTML = '<div class="koi-ctxmap-graph"><div class="koi-node koi-svg-node" data-qname="Billing">Billing</div></div>';
+      return { dispose: vi.fn() };
+    });
+
+    const panel = createContextMapPanel({ store, host, lsp: makeLsp(), onNavigate: makeOnNavigate() });
+    store.getState().setActiveContext('Billing');
+    await panel.load();
+    await flush();
+
+    const node = () => host.querySelector<HTMLElement>('.koi-svg-node[data-qname="Billing"]')!;
+    expect(node().classList.contains('is-scoped')).toBe(true);
+    expect(node().getAttribute('aria-current')).toBe('true');
+
+    // Simulate maxGraph recreating the label DOM on a refresh: a fresh element with no marks, same qname.
+    const fresh = document.createElement('div');
+    fresh.className = 'koi-node koi-svg-node';
+    fresh.dataset.qname = 'Billing';
+    node().replaceWith(fresh);
+    expect(node().classList.contains('is-scoped')).toBe(false); // dropped by the "re-render" — the bug
+
+    onAfterRender?.();
+    expect(node().classList.contains('is-scoped')).toBe(true);
+    expect(node().getAttribute('aria-current')).toBe('true');
+
+    panel.dispose();
+  });
 });
 
 describe('createContextMapPanel — context-node click navigation (#290)', () => {
