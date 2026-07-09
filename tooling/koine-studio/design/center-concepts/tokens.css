@@ -3,6 +3,11 @@
    Real --koi-* tokens lifted from src/styles/themes/_dark.scss + _light.scss so
    the POCs look like the actual product. Each concept file reuses this; only the
    CENTER interaction model differs between concepts.
+
+   This is a CURATED SUBSET, not an exhaustive mirror (e.g. --koi-hl-regex/-meta/-sem-* and
+   --koi-hl-match are intentionally omitted — none of them are used by these center-view mocks).
+   The authoritative token source is tooling/koine-ui/src/tokens.css; check there before assuming
+   a token is missing from the real product.
    ========================================================================== */
 
 :root {
