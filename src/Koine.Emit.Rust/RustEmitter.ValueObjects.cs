@@ -56,20 +56,38 @@ public sealed partial class RustEmitter
 
         sb.Append("}\n");
 
-        // Demand-driven / quantity operators.
+        // Demand-driven / quantity operators. This value object's full operator demand, resolved once
+        // from the analyzer's single-pass model (#1126): scalar multiply/divide factors, the `sum`-fold
+        // `IsSummable` flag, the plain binary `+`/`-` ops, and the precomputed `NeedsAdd` union. `null` =
+        // this VO needs no generated arithmetic (absent from the unified map, exactly as it was absent
+        // from all four separate maps before). Read null-safely below, mirroring CSharpEmitter/PhpEmitter.
+        var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
+
         if (vo.IsQuantity)
         {
             WriteQuantityOps(sb, name, stored);
+
+            // A quantity's scalar Mul/Div (`base * 2`, `fee / 2`) has no unit to check — unlike its
+            // Add/Sub, which route through the unit-checked inherent methods above — so it can reuse the
+            // same demand-driven `impl std::ops::Mul`/`Div` the plain-VO branch below emits (#1084,
+            // sibling of #1068's Add/Sub fix). Before this, `RustExpressionTranslator.WriteBinary` still
+            // lowered a quantity's `* scalar`/`/ scalar` to the native operator with no backing impl — a
+            // real `cargo check` E0369.
+            IReadOnlySet<string>? qScalars = needs?.MultiplyFactors;
+            if (qScalars is { Count: > 0 }
+                && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
+            {
+                WriteScalarOp(sb, name, stored, qScalars, "*");
+            }
+            IReadOnlySet<string>? qDivScalars = needs?.DivideFactors;
+            if (qDivScalars is { Count: > 0 }
+                && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
+            {
+                WriteScalarOp(sb, name, stored, qDivScalars, "/");
+            }
         }
         else
         {
-            // This value object's full operator demand, resolved once from the analyzer's single-pass
-            // model (#1126): scalar multiply/divide factors, the `sum`-fold `IsSummable` flag, the plain
-            // binary `+`/`-` ops, and the precomputed `NeedsAdd` union. `null` = this VO needs no
-            // generated arithmetic (absent from the unified map, exactly as it was absent from all four
-            // separate maps before). Read null-safely below, mirroring CSharpEmitter/PhpEmitter.
-            var needs = emit.OperatorNeeds.GetValueOrDefault(vo.Name);
-
             IReadOnlySet<string>? scalars = needs?.MultiplyFactors;
             if (scalars is { Count: > 0 }
                 && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
