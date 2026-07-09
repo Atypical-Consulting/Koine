@@ -1,6 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler;
 
@@ -314,7 +315,7 @@ public sealed partial class PhpEmitter
 
             bool leftOk = idx == 0 || !IsBoundaryBlocking(body[idx - 1]);
             int end = idx + shortName.Length;
-            bool rightOk = end >= body.Length || !IsIdentifierChar(body[end]);
+            bool rightOk = end >= body.Length || !SourceTextGeometry.IsIdentifierChar(body[end]);
             if (leftOk && rightOk)
             {
                 return true;
@@ -328,9 +329,7 @@ public sealed partial class PhpEmitter
     /// an identifier char (part of a longer name), a <c>\</c> (already-qualified), a <c>$</c>
     /// (a variable), or a <c>></c> (the <c>-&gt;</c> of a property/method access).</summary>
     private static bool IsBoundaryBlocking(char c) =>
-        IsIdentifierChar(c) || c is '\\' or '$' or '>';
-
-    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+        SourceTextGeometry.IsIdentifierChar(c) || c is '\\' or '$' or '>';
 
     // -------------------------------------------------------------------------
     // Type catalog (short name → FQN) for cross-namespace `use` imports
