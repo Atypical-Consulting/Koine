@@ -48,3 +48,10 @@ export { initInstantTooltip, type TooltipController } from './tooltip';
 // The single source of truth for the ids/data-attributes/classes LeftRail.tsx & RightStrip.tsx render
 // and koine-studio queries. `export *` re-exports the values plus the `RightStripView` type.
 export * from './domIds';
+
+// --- Generic store/host adapter contract (issue #944, second-tranche extraction) ------------
+// A koine-studio-agnostic read/subscribe seam: components below depend on `ReadableStore<T>` +
+// `useReadableStore` instead of Koine Studio's concrete `StoreApi<AppState>` + `useStore`/`useAppStore`.
+// See host/store.ts's module doc for the full rationale and koine-studio's zustandToReadableStore
+// adapter for how the real Zustand store satisfies this contract.
+export { useReadableStore, type ReadableStore } from './host/store';
