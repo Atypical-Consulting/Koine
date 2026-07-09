@@ -96,7 +96,7 @@ internal sealed class ExpressionChecker
                 CheckComparison(b, scope, expected);
                 CheckArithmeticNullSafety(b, scope);
                 CheckValueObjectScalarArithmetic(b, scope);
-                CheckQuantityTypeMismatch(b, scope);
+                CheckValueObjectTypeMismatch(b, scope);
                 break;
 
             case CoalesceExpr co:
@@ -319,16 +319,20 @@ internal sealed class ExpressionChecker
     }
 
     /// <summary>
-    /// #1266: a <c>quantity</c> value object's <c>+</c>/<c>-</c> lowers to its unit-checked
-    /// <c>add</c>/<c>sub</c> method (#1068), which only ever accepts another instance of its OWN
-    /// declared type. Nothing previously checked that both operands of a binary <c>+</c>/<c>-</c> are
-    /// the SAME quantity type, so e.g. <c>Weight + Volume</c> compiled with zero diagnostics and only
-    /// failed downstream in a target's own toolchain (a real Rust cargo check E0308). Reject it here,
-    /// target-agnostically, before any emitter ever sees the expression. Scoped to quantity-vs-quantity
-    /// only — a quantity combined with a differently-typed PLAIN value object is a separate, broader gap
-    /// (tracked outside #1266).
+    /// #1266/#1284: a value-object's <c>+</c>/<c>-</c> lowers to an operator/method that only ever
+    /// accepts another instance of its OWN declared type (a <c>quantity</c>'s unit-checked
+    /// <c>add</c>/<c>sub</c>, #1068; a plain value object's generated same-type operator, #833/#600).
+    /// Nothing previously checked that both operands of a binary <c>+</c>/<c>-</c> declare the SAME
+    /// type, so e.g. <c>Weight + Volume</c> or <c>Weight + Money</c> compiled with zero diagnostics and
+    /// only failed downstream in a target's own toolchain (a real C# CS0019 / Rust E0308). Reject it
+    /// here, target-agnostically, before any emitter ever sees the expression. #1266 introduced this
+    /// scoped to quantity-vs-quantity only (<see cref="DiagnosticCodes.QuantityTypeMismatch"/>,
+    /// KOI0218); #1284 generalizes it to any two value-like operands (quantity-vs-quantity,
+    /// quantity-vs-plain-VO, or plain-VO-vs-plain-VO) via <see cref="TypeResolver.IsValueLike"/>,
+    /// keeping KOI0218's quantity-specific message for the quantity-vs-quantity case and a new
+    /// <see cref="DiagnosticCodes.ValueObjectTypeMismatch"/> (KOI0219) for the general case.
     /// </summary>
-    private void CheckQuantityTypeMismatch(BinaryExpr b, TypeScope scope)
+    private void CheckValueObjectTypeMismatch(BinaryExpr b, TypeScope scope)
     {
         if (b.Op is not (BinaryOp.Add or BinaryOp.Sub))
         {
@@ -342,11 +346,21 @@ internal sealed class ExpressionChecker
             return;
         }
 
+        if (!_resolver.IsValueLike(left) || !_resolver.IsValueLike(right))
+        {
+            return;
+        }
+
+        var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
         if (IsQuantity(left) && IsQuantity(right))
         {
-            var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
             Report(DiagnosticCodes.QuantityTypeMismatch,
                 $"cannot {verb} quantities '{left.Name}' and '{right.Name}'; quantities must be the same type", b);
+        }
+        else
+        {
+            Report(DiagnosticCodes.ValueObjectTypeMismatch,
+                $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; a value object's '+'/'-' only combines two instances of the SAME declared type", b);
         }
     }
 

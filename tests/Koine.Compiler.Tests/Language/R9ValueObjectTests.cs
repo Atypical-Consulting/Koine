@@ -385,6 +385,167 @@ public class R9ValueObjectTests
     }
 
     // ======================================================================
+    // #1284: a binary +/- across a quantity and a differently-typed PLAIN
+    // value object (or two differently-typed plain value objects) must also
+    // be rejected — the sibling gap #1266 explicitly left open (KOI0218 only
+    // fires when BOTH operands are quantity-classified).
+    // ======================================================================
+
+    /// <summary>Shared fixture: a quantity and a plain value object combined via <paramref name="op"/> on line 11.</summary>
+    private static string QuantityVsPlainSrc(string op = "+") =>
+        "context Shop {\n" +
+        "  enum MassUnit { Grams, Kilograms }\n" +
+        "  quantity Weight {\n" +
+        "    amount: Decimal\n" +
+        "    unit: MassUnit\n" +
+        "  }\n" +
+        "  value Money {\n" +
+        "    amount: Decimal\n" +
+        "  }\n" +
+        "  value Mix {\n" +
+        "    w: Weight\n" +
+        "    m: Money\n" +
+        $"    bad: Weight = w {op} m\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void Quantity_plus_differently_typed_plain_value_object_is_rejected()
+    {
+        var result = new KoineCompiler().Compile(QuantityVsPlainSrc("+"), new CSharpEmitter());
+        result.Success.ShouldBeFalse();
+
+        var diag = result.Diagnostics.Single(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+        diag.Message.ShouldContain("Weight");
+        diag.Message.ShouldContain("Money");
+        diag.Line.ShouldBe(13); // the `bad: Weight = w + m` line
+    }
+
+    [Fact]
+    public void Quantity_minus_differently_typed_plain_value_object_is_rejected()
+    {
+        Diagnose(QuantityVsPlainSrc("-")).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    [Fact]
+    public void Plain_value_object_plus_quantity_is_rejected_regardless_of_operand_order()
+    {
+        // Reversed operand order (`value Money` on the left, `quantity Weight` on the right) — the
+        // check must not be order-dependent.
+        const string src = """
+            context Shop {
+              enum MassUnit { Grams, Kilograms }
+              quantity Weight {
+                amount: Decimal
+                unit:   MassUnit
+              }
+              value Money {
+                amount: Decimal
+              }
+              value Mix {
+                w: Weight
+                m: Money
+                bad: Weight = m + w
+              }
+            }
+            """;
+        var diag = Diagnose(src).Single(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+        diag.Message.ShouldContain("Weight");
+        diag.Message.ShouldContain("Money");
+    }
+
+    [Fact]
+    public void Two_differently_typed_plain_value_objects_added_is_rejected()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+              }
+              value Label {
+                text: String
+              }
+              value Mix {
+                m: Money
+                l: Label
+                bad: Money = m + l
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    [Fact]
+    public void Same_type_plain_value_object_addition_is_not_flagged_by_the_type_mismatch_check()
+    {
+        // Same-type VO `+`/`-` (#833/#600) remains valid and untouched by this check.
+        const string src = """
+            context C {
+              value Money {
+                amount: Decimal
+              }
+              value Wallet {
+                a: Money
+                b: Money
+                total: Money = a + b
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    [Fact]
+    public void Quantity_type_mismatch_still_reports_the_quantity_specific_message()
+    {
+        // #1266's quantity-vs-quantity case keeps its own KOI0218 code/message rather than falling
+        // through to the general KOI0219 wording.
+        var diags = Diagnose(MixSrc("+"));
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.QuantityTypeMismatch);
+        diags.ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    [Fact]
+    public void Scalar_plus_value_object_stays_routed_through_the_scalar_arithmetic_check()
+    {
+        // `vo +/- scalar` is unaffected — still KOI0215, not the new VO-vs-VO check.
+        const string src = """
+            context C {
+              value Money {
+                amount: Decimal
+              }
+              value Bad {
+                m: Money
+                x: Money = m + 5
+              }
+            }
+            """;
+        var diags = Diagnose(src);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmetic);
+        diags.ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    [Fact]
+    public void Value_object_type_mismatch_is_rejected_before_reaching_any_code_emitter()
+    {
+        var src = QuantityVsPlainSrc("+");
+        var compiler = new KoineCompiler();
+        AssertRejected(compiler.Compile(src, new CSharpEmitter()));
+        AssertRejected(compiler.Compile(src, new TypeScriptEmitter()));
+        AssertRejected(compiler.Compile(src, new PythonEmitter()));
+        AssertRejected(compiler.Compile(src, new PhpEmitter()));
+        AssertRejected(compiler.Compile(src, new RustEmitter()));
+        AssertRejected(compiler.Compile(src, new JavaEmitter()));
+        AssertRejected(compiler.Compile(src, new KotlinEmitter()));
+
+        static void AssertRejected(CompileResult result)
+        {
+            result.Success.ShouldBeFalse();
+            result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+            result.Files.ShouldBeEmpty();
+        }
+    }
+
+    // ======================================================================
     // Regressions found by the R9 review
     // ======================================================================
 

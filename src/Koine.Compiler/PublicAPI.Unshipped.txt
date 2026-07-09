@@ -297,6 +297,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.NumericNarrowingConversion = "K
 const Koine.Compiler.Diagnostics.DiagnosticCodes.QuantityTypeMismatch = "KOI0218" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectTypeMismatch = "KOI0219" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmetic = "KOI0215" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField = "KOI0216" -> string!
 const Koine.Compiler.Services.ModelRoundTripService.ContextMapQualifiedName = "$contextMap" -> string!
