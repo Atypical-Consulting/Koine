@@ -341,8 +341,15 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
 
   // The ordered, flattened visible rows — the SAME data this render walks (via `analysis.visible` inside
   // `renderEntry`) to decide what to show, reused as-is for keyboard-nav ordering (`navTokens` below) so
-  // the two can never drift apart. Also backs the empty/no-match state (`totalRows`).
-  const flatRows = useMemo(() => flattenVisible(groups, collapsed, filterText), [groups, collapsed, filterText]);
+  // the two can never drift apart. Also backs the empty/no-match state (`totalRows`). Passes `analysis`'s
+  // own `visible` set through (code-review fix) so `flattenVisible` doesn't re-walk the whole entry tree
+  // via its own internal `analyze()` call — `analysis` above already computed the identical set this
+  // render, and `flatRows` is keyed on `collapsed`, which changes on every single directory
+  // collapse/expand click, the most common explorer interaction.
+  const flatRows = useMemo(
+    () => flattenVisible(groups, collapsed, filterText, analysis.visible),
+    [groups, collapsed, filterText, analysis.visible],
+  );
   const totalRows = flatRows.length;
   const showEmpty = totalRows === 0;
 
@@ -407,8 +414,22 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   // deferred to `options.requestAnimationFrame`), so the expand/reveal is visible by the time the
   // triggering call returns — see explorer.tsx's sync-render note for the other half of this contract
   // (the state-driven re-render itself must also run synchronously, not just the effect reacting to it).
+  //
+  // SCROLL RETRY (code-review fix): `expandExplorerTokens` is a STORE WRITE — it only becomes a
+  // `collapsed` (and thus `flatRows`) change on Preact's NEXT re-render, not synchronously within this
+  // same effect. So when the target sits inside a currently-collapsed ancestor, `findRowEl` can't find it
+  // yet in THIS pass — its `<ul class="explorer-children">` doesn't even exist until the deferred
+  // re-render commits (`ExplorerItem` only renders it while `expanded`). Each mechanism below is therefore
+  // split into two effects: this one triggers the expand + highlight; a companion "scroll" effect, also
+  // keyed on `flatRows`, retries `scrollIntoView` on every subsequent commit until the row actually exists
+  // (then clears its own pending token so a later, unrelated `flatRows` change can't re-trigger a stale
+  // scroll). Both scroll effects also skip (never retry) the actual scroll while a context menu is open —
+  // a reveal firing while the user has a row/root menu open would otherwise strand that menu's
+  // fixed-position chrome relative to a tree that just scrolled out from under it; the expand/highlight
+  // still apply regardless (only the scroll is gated).
   const revealedActiveRef = useRef<string | null>(null);
   const activeToken = analysis.active?.token ?? null;
+  const [pendingActiveScroll, setPendingActiveScroll] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (filtering || activeToken == null) {
       revealedActiveRef.current = null;
@@ -418,26 +439,60 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     revealedActiveRef.current = activeToken;
     const ancestors = analysis.active?.ancestors ?? [];
     if (ancestors.length) expandExplorerTokens(ancestors);
-    findRowEl(activeToken)?.scrollIntoView?.({ block: 'nearest' });
+    setPendingActiveScroll(activeToken);
     // Deliberately gated on the TOKEN only (see the comment above): re-firing whenever
     // `analysis`/`expandExplorerTokens` identity changes (without the active token itself changing) would
     // re-fight a manual collapse made after the file was already revealed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gated on the token only, see the comment above: re-firing on every analysis/expandExplorerTokens identity change would re-fight a manual collapse
   }, [activeToken, filtering]);
+  useLayoutEffect(() => {
+    if (pendingActiveScroll == null) return;
+    const row = findRowEl(pendingActiveScroll);
+    if (!row) return; // ancestor not expanded in the DOM yet — retry once `flatRows` changes again
+    if (!ctxMenuRef.current?.isOpen) row.scrollIntoView?.({ block: 'nearest' });
+    setPendingActiveScroll(null);
+  }, [pendingActiveScroll, flatRows]);
 
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  const [pendingRevealScroll, setPendingRevealScroll] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (!reveal) return;
     const found = findFileForContext(groups, reveal.context);
     if (!found) return; // best-effort: no matching .koi → silent no-op (mirrors explorer.ts)
     if (found.ancestors.length) expandExplorerTokens(found.ancestors);
     setRevealedToken(found.token);
-    findRowEl(found.token)?.scrollIntoView?.({ block: 'nearest' });
+    setPendingRevealScroll(found.token);
     // Deliberately gated on `reveal`'s IDENTITY only: createExplorer() bumps `seq` on every
     // revealByContext() call (even a repeat context), which is what should re-trigger this — not an
     // unrelated `groups` change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gated on reveal's identity only, see the comment above: an unrelated groups change must not re-trigger this
   }, [reveal]);
+  useLayoutEffect(() => {
+    if (pendingRevealScroll == null) return;
+    const row = findRowEl(pendingRevealScroll);
+    if (!row) return; // ancestor not expanded in the DOM yet — retry once `flatRows` changes again
+    if (!ctxMenuRef.current?.isOpen) row.scrollIntoView?.({ block: 'nearest' });
+    setPendingRevealScroll(null);
+  }, [pendingRevealScroll, flatRows]);
+
+  // The reveal highlight is TRANSIENT (see `_explorer.scss`'s own `.is-revealed` comment: "cleared on the
+  // next reveal / re-render") — but `setRevealedToken` above had exactly one call site, so once set it
+  // persisted forever. Code-review fix: clear it once the ACTIVE file changes to something other than the
+  // revealed token itself — the closest Preact-idiomatic equivalent of explorer.ts's old rebuild-driven
+  // mark (wiped on virtually any state change, since every state change drove a full imperative rebuild
+  // there). Gated on `activeToken` actually CHANGING (`prevActiveTokenRef`, updated on every run) rather
+  // than just "currently differs from revealedToken" — a reveal-by-context target usually ISN'T the open
+  // file, so a plain mismatch check would clear the highlight the instant it was set, before the user did
+  // anything at all. Opening the just-revealed file itself (`activeToken === revealedToken`) is not
+  // treated as staling it.
+  const prevActiveTokenRef = useRef<string | null>(activeToken);
+  useLayoutEffect(() => {
+    const prevActiveToken = prevActiveTokenRef.current;
+    prevActiveTokenRef.current = activeToken;
+    if (activeToken !== prevActiveToken && activeToken !== revealedToken) {
+      setRevealedToken((current) => (current !== null ? null : current));
+    }
+  }, [activeToken, revealedToken]);
 
   // --- context menus + delete confirm (#989 task 4) ----------------------------------------------------
   // token → FsEntry + token → parentDir, for the keyboard-triggered (Delete key / ContextMenu key) paths
@@ -669,7 +724,16 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const onTreeKeyDown = (ev: JSX.TargetedKeyboardEvent<HTMLUListElement>): void => {
     if (navTokens.length === 0) return;
     const rowEl = (ev.target as HTMLElement | null)?.closest<HTMLElement>('li[role="treeitem"][data-token]') ?? null;
-    const token = rowEl?.dataset.token ?? effectiveFocusedToken;
+    // `rowToken`: the row the keydown ACTUALLY originated on, or `null` when it didn't (e.g. Tab landed on
+    // the multi-root `.explorer-group-remove` button — a real tabbable `<button>` nested in a
+    // `.explorer-group` `<li>` that has `data-root`, not `data-token`, so `rowEl` misses it). Code-review
+    // fix: Delete/F2/ContextMenu below must target a real row under the event, never a fallback guess —
+    // see `token` (which DOES fall back to `effectiveFocusedToken`) for why the two are kept separate.
+    const rowToken = rowEl?.dataset.token ?? null;
+    // `token`: the roving tab stop's effective target, falling back to `effectiveFocusedToken` when the
+    // keydown didn't land on a row — correct ONLY for the Arrow/Enter navigation below, which by design
+    // operates on "whatever's the current roving tab stop" regardless of where the event originated.
+    const token = rowToken ?? effectiveFocusedToken;
     const idx = token != null ? navTokens.indexOf(token) : -1;
 
     // Panel-specific keys the shared router doesn't own (matches explorer.ts's onRowKeydown switch).
@@ -677,22 +741,24 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     // ANY row kind, file or directory: explorer.ts's own onRowKeydown calls startRename(li, entry)
     // unconditionally, with no `entry.kind === 'file'` guard, so a focused directory renames just like a
     // file. Delete/ContextMenu are wired (#989 task 4) to the same confirmDelete/openRowMenu the row's
-    // right-click and menu items use.
+    // right-click and menu items use. All three use `rowToken` (NOT `token`) — a keydown that didn't
+    // originate on an actual treeitem row (see `rowToken` above) must no-op here, not act on whatever the
+    // roving tab stop happens to default to.
     switch (ev.key) {
       case 'F2':
         ev.preventDefault();
-        if (token != null) startRename(token);
+        if (rowToken != null) startRename(rowToken);
         return;
       case 'Delete': {
         ev.preventDefault();
-        const entry = token != null ? entryIndex.entries.get(token) : undefined;
+        const entry = rowToken != null ? entryIndex.entries.get(rowToken) : undefined;
         if (entry) void confirmDelete(entry);
         return;
       }
       case 'ContextMenu': {
         ev.preventDefault();
-        const entry = token != null ? entryIndex.entries.get(token) : undefined;
-        const li = token != null ? findRowEl(token) : null;
+        const entry = rowToken != null ? entryIndex.entries.get(rowToken) : undefined;
+        const li = rowToken != null ? findRowEl(rowToken) : null;
         if (entry && li) {
           const r = li.getBoundingClientRect();
           openRowMenu(entry, r.left, r.bottom);

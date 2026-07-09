@@ -180,6 +180,36 @@ describe('flattenVisible', () => {
       'ROOT2/billing',
     ]);
   });
+
+  // Code-review fix (Fix 7): `flattenVisible` used to ALWAYS re-derive `visible` via its own internal
+  // `analyze()` call, duplicating a tree walk `ExplorerPanel` already performs itself every render (for
+  // `matchCount`/`liveDirs`) — and `flattenVisible` is keyed on `collapsed`, which changes on every single
+  // directory collapse/expand click, the most common explorer interaction. The optional 4th `visible`
+  // param lets a caller pass a pre-computed set in instead; omitting it (every call above) keeps computing
+  // it internally, unchanged.
+  describe('with a precomputed visible set (optional 4th param)', () => {
+    test('passing analyze()’s own visible set produces IDENTICAL output to self-computing it, unfiltered', () => {
+      const collapsed = new Set<string>();
+      const selfComputed = flattenVisible([group(), secondGroup()], collapsed, '');
+      const { visible } = analyze([group(), secondGroup()], '', notActive);
+      const precomputed = flattenVisible([group(), secondGroup()], collapsed, '', visible);
+      expect(precomputed).toEqual(selfComputed);
+    });
+
+    test('passing analyze()’s own visible set produces IDENTICAL output to self-computing it, while filtering', () => {
+      const collapsed = new Set(['ROOT/orders']);
+      const filter = 'order';
+      const selfComputed = flattenVisible([group()], collapsed, filter);
+      const { visible } = analyze([group()], filter, notActive);
+      const precomputed = flattenVisible([group()], collapsed, filter, visible);
+      expect(precomputed).toEqual(selfComputed);
+    });
+
+    test('an explicitly empty precomputed visible set still yields no rows while filtering (no silent full-tree fallback)', () => {
+      const rows = flattenVisible([group()], new Set(), 'order', new Set());
+      expect(rows).toEqual([]);
+    });
+  });
 });
 
 describe('parentMapOf', () => {
@@ -239,9 +269,23 @@ describe('findFileForContext', () => {
     expect(hit).toBeNull();
   });
 
-  test('a non-.koi file can still be matched by its literal (non-stripped) name', () => {
-    const hit = findFileForContext([group()], 'notes.txt');
-    expect(hit).toEqual({ token: 'ROOT/orders/notes.txt', ancestors: ['ROOT/orders'] });
+  // Code-review fix (Fix 6): this used to inline its own stem-stripping instead of calling `koiStem`, and
+  // fell back to the full lowercased filename (not `null`) for a non-`.koi` file — so a non-`.koi` file
+  // used to be matchable by its literal name. That's a genuine behavioral drift from `koiStem`'s own
+  // documented null-for-non-koi contract (one `.koi` file is one bounded context — "Reveal in Files" has
+  // nothing to reveal for anything else), and worse, it could FALSE-MATCH: see the next test.
+  test('does NOT match a non-.koi file, even by its literal name (one .koi file is one bounded context)', () => {
+    expect(findFileForContext([group()], 'notes.txt')).toBeNull();
+  });
+
+  test('a coincidentally-named non-.koi file does not false-match a context search', () => {
+    const bareNameGroup: ExplorerRootGroup = {
+      root: 'ROOT3',
+      entries: [{ token: 'ROOT3/billing', name: 'billing', relPath: 'billing', kind: 'file' }],
+    };
+    // "billing" (no extension) must NOT match a search for the "billing" context — only a real
+    // "billing.koi" file's stem should.
+    expect(findFileForContext([bareNameGroup], 'billing')).toBeNull();
   });
 
   test('returns null on a miss', () => {

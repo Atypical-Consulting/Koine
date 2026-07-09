@@ -95,18 +95,27 @@ export interface ExplorerFlatRow {
  * filter is active every directory is treated as force-expanded (mirrors the DOM build's
  * `expanded = filterText ? true : !collapsed.has(token)`), so `collapsed` is only honoured when
  * `filter` is empty.
+ *
+ * `visible` (optional): a PRE-COMPUTED visible-token set, i.e. `analyze(groups, filter, ...).visible`
+ * a caller already has lying around — code-review fix, since `ExplorerPanel` already runs its own
+ * `analyze()` pass every render (for `matchCount`/`liveDirs`) and this function used to duplicate that
+ * SAME tree walk internally on every call, including every directory collapse/expand toggle (the most
+ * common explorer interaction, since `flattenVisible` is keyed on `collapsed`). Omit it (the default) to
+ * compute it here exactly as before — every existing direct call in `explorerModel.test.ts` keeps working
+ * unchanged.
  */
 export function flattenVisible(
   groups: readonly ExplorerRootGroup[],
   collapsed: ReadonlySet<string>,
   filter: string,
+  visible?: ReadonlySet<string>,
 ): ExplorerFlatRow[] {
-  const { visible } = analyze(groups, filter, () => false);
+  const resolvedVisible = visible ?? analyze(groups, filter, () => false).visible;
   const filtering = filter.trim() !== '';
 
   const out: ExplorerFlatRow[] = [];
   const walk = (e: FsEntry, level: number, parentToken: string | null): void => {
-    if (filtering && !visible.has(e.token)) return;
+    if (filtering && !resolvedVisible.has(e.token)) return;
     out.push({ token: e.token, kind: e.kind, level, parentToken });
     if (e.kind === 'dir') {
       const expanded = filtering || !collapsed.has(e.token);
@@ -231,9 +240,15 @@ export function findFileForContext(
   const walk = (e: FsEntry, ancestors: string[]): void => {
     if (hit) return;
     if (e.kind === 'file') {
-      const lower = e.name.toLowerCase();
-      const stem = lower.endsWith('.koi') ? lower.slice(0, -'.koi'.length) : lower;
-      if (stem === target) hit = { token: e.token, ancestors };
+      // Code-review fix: route through the SAME canonical {@link koiStem} used everywhere else, rather
+      // than re-deriving the stem-stripping logic inline. The two had drifted — this used to fall back to
+      // the full lowercased filename for a non-`.koi` file instead of `koiStem`'s `null`, so a
+      // coincidentally-named non-`.koi` file (e.g. one literally named `billing`, no extension) could
+      // FALSE-MATCH a context search that stem-based matching correctly rejects. "Reveal in Files" only
+      // ever targets a bounded context's `.koi` file (one `.koi` file is one bounded context — see
+      // {@link koiStem}'s own doc comment), so a non-`.koi` file must never match here at all.
+      const stem = koiStem(e.name);
+      if (stem !== null && stem === target) hit = { token: e.token, ancestors };
       return;
     }
     const childAncestors = [...ancestors, e.token];

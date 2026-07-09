@@ -565,6 +565,34 @@ describe('ExplorerPanel', () => {
         expect(ev.defaultPrevented).toBe(true);
       }
     });
+
+    // Code-review fix (Fix 1): the delegated handler used to fall back to `effectiveFocusedToken` (which
+    // defaults to the FIRST visible row) whenever a keydown didn't land on an actual row — so Tabbing to
+    // the multi-root group's own Remove button (a real tabbable `<button>` nested inside a
+    // `.explorer-group` `<li role="treeitem" data-root=…>`, which has NO `data-token`) and pressing Delete
+    // used to open a delete-confirm for the WRONG entry (the tree's first row), not no-op. Arrow-key
+    // navigation is deliberately untouched by this fix (still falls back to `effectiveFocusedToken`, by
+    // design) — only Delete/F2/ContextMenu require a real row under the event.
+    it('Delete/F2/ContextMenu on a non-row focusable element (the group-remove button) is a no-op, not a wrong-row action', () => {
+      const cb = makeCallbacks();
+      const store = createAppStore();
+      const { container } = render(
+        <ExplorerPanel store={store} cb={cb} groups={[group('/home/me/sales'), secondGroup()]} />,
+      );
+      const removeBtn = container.querySelector<HTMLElement>('.explorer-group-remove')!;
+      act(() => removeBtn.focus());
+      expect(document.activeElement).toBe(removeBtn);
+
+      for (const key of ['Delete', 'F2', 'ContextMenu']) {
+        act(() => {
+          removeBtn.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+        });
+      }
+
+      expect(cb.onDelete).not.toHaveBeenCalled();
+      expect(container.querySelector('.explorer-rename')).toBeNull(); // F2 opened no rename input
+      expect(document.querySelector('.explorer-menu[role="menu"]')).toBeNull(); // ContextMenu opened no menu
+    });
   });
 
   // --- context menus + delete confirm (#989 task 4): right-click a row, the ContextMenu key, or a
@@ -1493,6 +1521,128 @@ describe('ExplorerPanel', () => {
       act(() => dirRow(container).click());
       act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    // Code-review fix (Fix 2): `expandExplorerTokens` is a STORE write — Preact doesn't re-render (and
+    // mount the previously-collapsed ancestor's children) synchronously within the SAME layout-effect pass
+    // that calls it, so a bare `findRowEl(...)?.scrollIntoView(...)` right after it used to silently miss
+    // the target row (it doesn't exist in the DOM yet — see ExplorerItem.tsx: a collapsed dir's children
+    // simply aren't rendered). The expand/highlight land correctly regardless (already covered above) —
+    // this pins that the scroll ALSO actually happens, once the row mounts, for BOTH reveal mechanisms.
+    it('retries scrollIntoView (revealByContext) once a previously-collapsed ancestor actually mounts the revealed row', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+
+      // Collapse orders/ BEFORE the reveal fires, so order.koi's row doesn't exist in the DOM at all when
+      // the reveal effect's first (synchronous) pass runs.
+      act(() => dirRow(container).click());
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
+
+      const scrolled: Element[] = [];
+      const orig = Element.prototype.scrollIntoView;
+      // happy-dom doesn't implement scrollIntoView; install a spy that records the element it lands on
+      // (same pattern as GlossaryPanel.test.tsx's own scroll-target test).
+      Element.prototype.scrollIntoView = function (this: Element) {
+        scrolled.push(this);
+      };
+      try {
+        act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
+        expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
+        const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
+        expect(scrolled).toContain(targetLi);
+      } finally {
+        Element.prototype.scrollIntoView = orig;
+      }
+    });
+
+    it('retries scrollIntoView (auto-reveal) once a previously-collapsed ancestor actually mounts the newly-active row', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+
+      act(() => dirRow(container).click()); // collapse orders/
+      expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
+
+      const scrolled: Element[] = [];
+      const orig = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (this: Element) {
+        scrolled.push(this);
+      };
+      try {
+        const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/orders/order.koi' });
+        act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
+        expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
+        const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
+        expect(scrolled).toContain(targetLi);
+      } finally {
+        Element.prototype.scrollIntoView = orig;
+      }
+    });
+
+    // Code-review fix (Fix 3): `.is-revealed` is documented (`_explorer.scss`) as a TRANSIENT mark, but
+    // `setRevealedToken` used to have exactly one call site, so once set it persisted forever — surviving
+    // file switches, filtering, diagnostics pushes — until another explicit reveal. It must clear once a
+    // DIFFERENT file becomes active (a real user navigation), but NOT when the revealed file itself is the
+    // one that becomes active.
+    it('clears the reveal highlight once a DIFFERENT file becomes active (transient, not permanent)', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(
+        <ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />,
+      );
+      expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
+
+      // shared.koi becomes the active/open file — a real user navigation unrelated to the reveal.
+      const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/shared.koi' });
+      act(() =>
+        rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />),
+      );
+
+      expect(container.querySelector('.explorer-row.is-revealed')).toBeNull();
+    });
+
+    it('does NOT clear the reveal highlight when the revealed file itself becomes the active one', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(
+        <ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />,
+      );
+      expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
+
+      const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/orders/order.koi' });
+      act(() =>
+        rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />),
+      );
+
+      expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
+    });
+
+    // Code-review fix (Fix 4): a reveal firing while the user has a row/root context menu open shouldn't
+    // scroll the tree out from under that menu's fixed-position chrome. The expand/highlight still apply
+    // regardless — only the scroll itself is gated.
+    it('skips the reveal scroll (but still expands/highlights) while a context menu is open', () => {
+      const store = createAppStore();
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+
+      fileRow(container, 'shared.koi').dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }),
+      );
+      expect(document.querySelector('.explorer-menu[role="menu"]')).not.toBeNull();
+
+      const scrolled: Element[] = [];
+      const orig = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (this: Element) {
+        scrolled.push(this);
+      };
+      try {
+        act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
+        expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
+        expect(scrolled.length).toBe(0);
+      } finally {
+        Element.prototype.scrollIntoView = orig;
+      }
     });
   });
 });

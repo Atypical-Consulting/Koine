@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import type { FsEntry } from '@/host';
+import { koiStem } from '@/shell/explorerModel';
 
 // One workspace-explorer row (#989 task 2, corrected in the task-2a follow-up): a keyed
 // `<li role="treeitem">` — the Preact counterpart of explorer.ts's `buildItem()`. Ported for
@@ -221,7 +222,13 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
         class={rowClassName(dropTarget, scopeClass, revealed)}
         aria-current={isActiveFile ? 'true' : undefined}
         style={{ '--depth': String(level - 1) }}
-        draggable
+        // Defense in depth (code-review fix): `ExplorerPanel`'s `onRowDragStart` already
+        // `preventDefault()`s a drag start while THIS row is being renamed (an `editing`-state check), but
+        // the old `explorer.ts` additionally flipped `row.draggable = false` at the DOM-attribute level for
+        // the edit's whole duration — not relying solely on cancelling the event. Mirrors that here: a
+        // renaming row's native text-drag (for cursor placement / text selection inside the input) should
+        // never be shadowed by a stale `draggable` attribute on its ancestor row.
+        draggable={!isRenaming}
         onClick={isDir ? onToggle : onOpen}
         onContextMenu={onContextMenu}
         onDragStart={onDragStart}
@@ -335,7 +342,10 @@ export function ItemIcon({ kind, name, expanded }: { kind: FsEntry['kind']; name
       </span>
     );
   }
-  const isKoi = name.toLowerCase().endsWith('.koi');
+  // Code-review fix: route through the SAME canonical `koiStem` the active-context scope emphasis and
+  // "Reveal in Files" matching use, rather than a THIRD independent re-derivation of the `.koi`-suffix
+  // test — one canonical rule, per the same reasoning `koiStem` was extracted from `explorer.ts` for.
+  const isKoi = koiStem(name) !== null;
   return (
     <span class={`explorer-icon ${isKoi ? 'explorer-icon--koi' : 'explorer-icon--file'}`} aria-hidden="true">
       {isKoi ? <KoiGlyph /> : <FileGlyph />}
