@@ -1,29 +1,26 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
-import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
-import type { LspDiagnostic } from '@/lsp/lsp';
-import { createAppStore } from '@/store/index';
+import { WorkspaceProblemsBadge, type WorkspaceProblemsSlice } from './WorkspaceProblemsBadge';
+import type { ReadableStore } from '../host/store';
 
 // The workspace-wide problems rollup in the status bar: it reads the WHOLE diagnostics slice (not just the
 // active file) so a broken context in an unopened file is visible at a glance. It renders NOTHING while the
 // workspace is clean — the absence is the "all good" signal — so the `Clean` story is intentionally empty.
+// The host's `ReadableStore<WorkspaceProblemsSlice>` already carries classified counts (issue #944); this
+// Storybook file mocks that contract directly rather than a real Zustand store + diagnosticsSummary.
 
-const err = (msg: string): LspDiagnostic => ({
-  range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
-  message: msg,
-  severity: 1,
-});
-const warn = (msg: string): LspDiagnostic => ({
-  range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
-  message: msg,
-  severity: 2,
-});
+function readableStoreOf(initial: WorkspaceProblemsSlice): ReadableStore<WorkspaceProblemsSlice> {
+  return {
+    getState: () => initial,
+    subscribe: () => () => {},
+  };
+}
 
 const meta = {
   title: 'Panels/WorkspaceProblemsBadge',
   component: WorkspaceProblemsBadge,
   parameters: { layout: 'centered' },
   args: {
-    store: createAppStore(),
+    store: readableStoreOf({ kind: 'clean', parts: [], fileCount: 0 }),
   },
 } satisfies Meta<typeof WorkspaceProblemsBadge>;
 
@@ -35,10 +32,7 @@ export const Clean: Story = {};
 
 /** Errors and warnings spread across two files: the badge summarises them with the affected-file count. */
 export const WithProblems: Story = {
-  render: (args) => {
-    const store = createAppStore();
-    store.getState().setDiagnostics('file:///a.koi', [err('Unknown type `OrderId`')]);
-    store.getState().setDiagnostics('file:///b.koi', [warn('Unused value object')]);
-    return <WorkspaceProblemsBadge {...args} store={store} />;
+  args: {
+    store: readableStoreOf({ kind: 'error', parts: ['1 error', '1 warning'], fileCount: 2 }),
   },
 };

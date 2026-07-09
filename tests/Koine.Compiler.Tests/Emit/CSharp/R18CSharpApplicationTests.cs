@@ -508,6 +508,37 @@ public class R18CSharpApplicationTests
         endpoints.ShouldContain("endpoints.MapGet(\"/order-by-id\", async ([AsParameters] OrderById query, OrderByIdHandler handler, CancellationToken ct) =>");
     }
 
+    /// <summary>An acronym-bearing entity name (four consecutive capitals), to prove the api layer's
+    /// route-building agrees with the openapi emitter's acronym-aware kebab-casing (#1042 / W2.0).</summary>
+    internal const string XmlImportFixture = """
+        context Imports {
+          aggregate XMLImport root XMLImport {
+            repository {
+              operations: getById
+            }
+
+            entity XMLImport identified by XMLImportId {
+              command retry {
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The naive per-uppercase <c>Kebab</c> that used to live on <c>CSharpEmitter.Api.cs</c> dashed
+    /// before EVERY uppercase after position 0, so <c>XMLImport</c> produced <c>/x-m-l-import/retry</c>.
+    /// The shared, acronym-aware <see cref="RouteDerivation.Kebab"/> (Task 1) only dashes before an
+    /// uppercase that follows a lowercase/digit or ends an acronym run, so it agrees with the openapi
+    /// emitter and produces <c>/xml-import/retry</c>.
+    /// </summary>
+    [Fact]
+    public void Api_layer_kebabs_acronym_boundaries_like_openapi()
+    {
+        var endpoints = File(Emit(ApiOn, XmlImportFixture), "ImportsEndpoints.cs").Contents;
+        endpoints.ShouldContain("endpoints.MapPost(\"/xml-import/retry\", ");
+    }
+
     [Fact]
     public void Api_layer_nullable_not_found_maps_a_missing_aggregate_to_404()
     {
