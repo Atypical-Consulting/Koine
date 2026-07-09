@@ -18,10 +18,6 @@ import { readRaw, writeRaw } from '@/shell/storage';
 import type { SettingsEditorMode, SettingsJsonScope } from '@/settings/settingsTypes';
 import { el } from '@atypical/koine-ui';
 
-// Re-exported for backward-compatible external consumers (e.g. settingsPage.stories.tsx) that import
-// the page's editor-mode type from here — the shared definition now lives in settingsTypes.ts (#1094).
-export type { SettingsEditorMode, SettingsJsonScope };
-
 /** localStorage key for the active representation (visual/json). */
 const MODE_KEY = 'koine.studio.settingsEditorMode';
 

@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { expect, waitFor } from 'storybook/test';
 import { EditorView } from '@codemirror/view';
-import { createSettingsPage, type SettingsPageHandle, type SettingsEditorMode } from '@/settings/settingsPage';
+import { createSettingsPage, type SettingsPageHandle } from '@/settings/settingsPage';
+import type { SettingsEditorMode } from '@/settings/settingsTypes';
 import type { PrefsCallbacks } from '@/settings/prefs';
 import { WORKSPACE_OVERRIDE_KEY_PREFIX } from '@/settings/persistence';
 
