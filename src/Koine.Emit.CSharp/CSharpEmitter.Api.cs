@@ -97,7 +97,7 @@ public sealed partial class CSharpEmitter
     private void WriteCommandEndpoint(StringBuilder body, EntityDecl root, CommandDecl cmd)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(cmd.Name);
-        var route = "/" + Kebab(root.Name) + "/" + Kebab(cmd.Name);
+        var route = RouteDerivation.ForCommand(root, cmd).Route;
 
         // Mirror the Application layer's handler result shape (W1): the handler returns a value when the
         // command declares a return type, or --app-handler-result aggregate/readModel, or --app-not-found
@@ -113,7 +113,7 @@ public sealed partial class CSharpEmitter
     private void WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(factory.Name);
-        var route = "/" + Kebab(root.Name) + "/" + Kebab(factory.Name);
+        var route = "/" + RouteDerivation.Kebab(root.Name) + "/" + RouteDerivation.Kebab(factory.Name);
         // A factory creates — it has no not-found concept — so it always returns the created aggregate
         // plainly, regardless of the not-found policy.
         WriteMutationEndpoint(body, route, behavior, returnsValue: true, CSharpNotFound.Throw);
@@ -155,7 +155,7 @@ public sealed partial class CSharpEmitter
     /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query string.</summary>
     private void WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query)
     {
-        var route = "/" + Kebab(query.Name);
+        var route = RouteDerivation.ForQuery(query).Route;
         // Only a by-identity query returns a wrapped value (nullable/Result<T>) — a list/non-identity
         // query returns a plain value, so its endpoint stays a plain 200 regardless of the policy. Uses
         // the same resolution as the Application-layer handler, so the two never disagree.
@@ -178,29 +178,4 @@ public sealed partial class CSharpEmitter
         CSharpNotFound.Result => "return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound();\n",
         _ => "return Results.Ok(result);\n",
     };
-
-    /// <summary>Kebab-cases a PascalCase name for a route segment (Order → order, OrderById → order-by-id).</summary>
-    private static string Kebab(string name)
-    {
-        var sb = new StringBuilder(name.Length + 4);
-        for (var i = 0; i < name.Length; i++)
-        {
-            var c = name[i];
-            if (char.IsUpper(c))
-            {
-                if (i > 0)
-                {
-                    sb.Append('-');
-                }
-
-                sb.Append(char.ToLowerInvariant(c));
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-
-        return sb.ToString();
-    }
 }
