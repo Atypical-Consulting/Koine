@@ -109,22 +109,32 @@ export interface KindMeta {
 }
 
 /**
- * DDD kind → chip metadata, keyed by the real glossary `kind` string (a `ConceptSlug`). Only the
- * kinds the launcher renders a chip for are present — reuses `ConceptSlug` for the keys (ADR 0004)
- * rather than re-hardcoding the prototype's own kind strings.
+ * DDD kind → chip code + human word, keyed by the real glossary `kind` string (a `ConceptSlug`). Only
+ * the kinds the launcher renders a chip for are present — reuses `ConceptSlug` for the keys (ADR 0004)
+ * rather than re-hardcoding the prototype's own kind strings. The `--koi-ddd-*` token is deliberately
+ * NOT stored here — it's derived from the key below (issue #1162) so it can never desync from it.
  */
-export const KIND: Partial<Record<ConceptSlug, KindMeta>> = {
-  aggregate: { code: 'AR', word: 'aggregate root', token: '--koi-ddd-aggregate' },
-  entity: { code: 'EN', word: 'entity', token: '--koi-ddd-entity' },
-  value: { code: 'VO', word: 'value object', token: '--koi-ddd-value' },
-  enum: { code: 'EM', word: 'enum', token: '--koi-ddd-enum' },
-  service: { code: 'SV', word: 'domain service', token: '--koi-ddd-service' },
-  repository: { code: 'RP', word: 'repository', token: '--koi-ddd-repository' },
-  command: { code: 'CM', word: 'command', token: '--koi-ddd-command' },
-  query: { code: 'QY', word: 'query', token: '--koi-ddd-query' },
-  event: { code: 'EV', word: 'domain event', token: '--koi-ddd-event' },
-  'integration-event': { code: 'IE', word: 'integration event', token: '--koi-ddd-integration-event' },
+const KIND_META: Partial<Record<ConceptSlug, Omit<KindMeta, 'token'>>> = {
+  aggregate: { code: 'AR', word: 'aggregate root' },
+  entity: { code: 'EN', word: 'entity' },
+  value: { code: 'VO', word: 'value object' },
+  enum: { code: 'EM', word: 'enum' },
+  service: { code: 'SV', word: 'domain service' },
+  repository: { code: 'RP', word: 'repository' },
+  command: { code: 'CM', word: 'command' },
+  query: { code: 'QY', word: 'query' },
+  event: { code: 'EV', word: 'domain event' },
+  'integration-event': { code: 'IE', word: 'integration event' },
 };
+
+/**
+ * DDD kind → full chip metadata, built from {@link KIND_META} by deriving each entry's
+ * `--koi-ddd-<slug>` token from its own key (issue #1162) — the literal can never drift from the slug
+ * it's supposed to color.
+ */
+export const KIND: Partial<Record<ConceptSlug, KindMeta>> = Object.fromEntries(
+  Object.entries(KIND_META).map(([slug, meta]) => [slug, { ...meta, token: `--koi-ddd-${slug}` }]),
+) as Partial<Record<ConceptSlug, KindMeta>>;
 
 /**
  * Resolve a raw launcher input to its mode + the query with the prefix stripped. `input[0]` being one
