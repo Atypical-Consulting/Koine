@@ -1,5 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { ChatMessage } from '@/ai/ai';
+import type { ChatMessage, ChatToolCall } from '@/ai/ai';
 import type { StagedEdit } from '@/ai/editSession';
 
 /** One reviewed file inside the pending change set. */
@@ -27,29 +27,6 @@ export interface ChangeSetFileState {
   readonly accepted: boolean;
   /** Sticky once marked at apply time (#473) — never unset. */
   readonly drifted: boolean;
-}
-
-/**
- * One tool call inside the EPHEMERAL streaming turn (#990 Task 4): the state behind a
- * `koi-assistant-tool` card. Mirrors exactly what the imperative panel's card displays — nothing more.
- */
-export interface ChatToolCall {
-  /** The per-turn call id from ai.ts's ToolCallStart/End (1, 2, …) — the card correlation key. */
-  readonly id: number;
-  readonly name: string;
-  /** The raw argsJson the model produced (pretty-printed at render time, like the card's dataset.args). */
-  readonly args: string;
-  /** The card's data-state: pending on START, ok/error once the END event settles it. */
-  readonly state: 'pending' | 'ok' | 'error';
-  /** The chip text on the card's summary row (ToolCallEnd.summary); null while pending. */
-  readonly summary: string | null;
-  /**
-   * The card body's Result text — the tool's resultText on success, the error message on failure
-   * (the caller folds ToolCallEnd exactly as the imperative card did). Stored RAW; the renderer
-   * clamps it to TOOL_RESULT_CLAMP with a "(truncated)" note. Null while pending.
-   */
-  readonly result: string | null;
-  readonly durationMs: number | null;
 }
 
 /**
@@ -119,20 +96,22 @@ export interface ChatSlice {
   /** Append one turn immutably (new array identity, prior snapshot untouched). */
   appendChatMessage(msg: ChatMessage): void;
   /**
+   * Commit a finished (or stop-mid-stream partial) turn ATOMICALLY (#1133): append `msg` — carrying
+   * the live turn's settled `toolCalls`, if any — to `messages` AND clear `turn`, in ONE `set()`. This
+   * is the sole assistant-turn-commit path, closing the window a two-step `appendChatMessage` +
+   * clear-turn sequence left open, where a subscriber could render the committed bubble and the stale
+   * live cards side by side. Attaching the cards to the committed message (rather than a host-side
+   * snapshot) means `abortChatTurn`'s rollback — which pops only a trailing USER message — leaves them
+   * intact. `appendChatMessage` stays as-is for its other callers (e.g. appending the user turn).
+   */
+  commitChatTurn(msg: ChatMessage): void;
+  /**
    * idle|error → streaming, seeding an empty {@link ChatStreamingTurn}; no-op if a turn is already
    * streaming (in particular, the live turn's accumulated text/cards are never clobbered).
    */
   startChatTurn(): void;
   /** streaming → idle; drops the ephemeral turn. */
   finishChatTurn(): void;
-  /**
-   * Drop the ephemeral turn while KEEPING the streaming status (#990 Task 6). The send effect
-   * commits the finished reply to `messages` BEFORE its post-turn work settles (the bounded
-   * parse-and-repair loop still runs LLM turns under the same busy window), so without this the
-   * transcript would render the committed bubble AND the stale streaming bubble side by side.
-   * No-op when no turn is live.
-   */
-  clearStreamingTurn(): void;
   /**
    * Abort the live turn (dropping the ephemeral turn). rollbackUserTurn: true pops exactly the
    * trailing message if it is the just-sent user turn and sets status 'error'; false keeps the
@@ -252,6 +231,12 @@ export function createChatSlice(
       const chat = get().chat;
       set({ chat: { ...chat, messages: [...chat.messages, msg] } });
     },
+    commitChatTurn: (msg) => {
+      const chat = get().chat;
+      const toolCalls = chat.turn?.toolCalls ?? [];
+      const committed: ChatMessage = toolCalls.length ? { ...msg, toolCalls } : msg;
+      set({ chat: { ...chat, messages: [...chat.messages, committed], turn: null } });
+    },
     startChatTurn: () => {
       const chat = get().chat;
       if (chat.status === 'streaming') return;
@@ -259,11 +244,6 @@ export function createChatSlice(
     },
     finishChatTurn: () => {
       set({ chat: { ...get().chat, status: 'idle', turn: null } });
-    },
-    clearStreamingTurn: () => {
-      const chat = get().chat;
-      if (!chat.turn) return;
-      set({ chat: { ...chat, turn: null } });
     },
     abortChatTurn: ({ rollbackUserTurn }) => {
       const chat = get().chat;

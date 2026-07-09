@@ -435,6 +435,37 @@ describe('Assistant conversation persistence', () => {
     expect(loadChat('scratch')).toEqual([]);
   });
 
+  test('saveChat strips toolCalls (#1133): raw tool results never enter the stored blob', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'user', content: 'compile this' },
+      {
+        role: 'assistant',
+        content: 'done',
+        toolCalls: [
+          {
+            id: 1,
+            name: 'koine_compile',
+            args: '{"target":"csharp"}',
+            state: 'ok',
+            summary: 'ok',
+            result: 'a very large unclamped result blob',
+            durationMs: 42,
+          },
+        ],
+      },
+    ];
+    saveChat('scratch', msgs);
+    const raw = localStorage.getItem('koine.studio.chat.scratch') ?? '';
+    expect(raw).not.toContain('toolCalls');
+    expect(raw).not.toContain('unclamped result blob');
+    // loadChat round-trips it as a plain message (the well-formed-entry filter tolerates the
+    // field's absence — it never required it in the first place).
+    expect(loadChat('scratch')).toEqual([
+      { role: 'user', content: 'compile this' },
+      { role: 'assistant', content: 'done' },
+    ]);
+  });
+
   test('uses a distinct namespace, leaving settings/scratch/secrets untouched', async () => {
     await clearApiKey();
     await saveApiKey('sk-must-not-leak');

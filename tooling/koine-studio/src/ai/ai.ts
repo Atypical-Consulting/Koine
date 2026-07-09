@@ -17,6 +17,29 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { KOINE_EDIT_TOOL_NAMES, koineToolDefs, summarizeForChip, toAnthropicTool, toOpenAiTool, type NeutralTool } from '@/ai/assistantTools';
 import type { EditSession } from '@/ai/editSession';
 
+/**
+ * One tool call inside a turn (#990 Task 4, #1133): the state behind a `koi-assistant-tool` card.
+ * Mirrors exactly what the imperative panel's card displays — nothing more.
+ */
+export interface ChatToolCall {
+  /** The per-turn call id from ai.ts's ToolCallStart/End (1, 2, …) — the card correlation key. */
+  readonly id: number;
+  readonly name: string;
+  /** The raw argsJson the model produced (pretty-printed at render time, like the card's dataset.args). */
+  readonly args: string;
+  /** The card's data-state: pending on START, ok/error once the END event settles it. */
+  readonly state: 'pending' | 'ok' | 'error';
+  /** The chip text on the card's summary row (ToolCallEnd.summary); null while pending. */
+  readonly summary: string | null;
+  /**
+   * The card body's Result text — the tool's resultText on success, the error message on failure
+   * (the caller folds ToolCallEnd exactly as the imperative card did). Stored RAW; the renderer
+   * clamps it to TOOL_RESULT_CLAMP with a "(truncated)" note. Null while pending.
+   */
+  readonly result: string | null;
+  readonly durationMs: number | null;
+}
+
 /** A turn in the assistant transcript. */
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -27,6 +50,14 @@ export interface ChatMessage {
    * survives a reload/replay. Absent ⇒ apply is offered as usual.
    */
   offerApply?: boolean;
+  /**
+   * The turn's settled tool-call cards (#1133), attached at commit time so a card the user
+   * expanded survives the commit remount and a failed follow-up's rollback leaves it untouched.
+   * Transcript-only — stripped before the turn is sent to a provider (both provider adapters
+   * already map to `{role, content}`) and stripped again by `saveChat` (raw tool results are
+   * unclamped and must not enter the persisted blob). Absent/empty ⇒ no cards for this message.
+   */
+  toolCalls?: readonly ChatToolCall[];
 }
 
 /** Most tool round-trips the agentic loop will run before forcing a final text answer. */
