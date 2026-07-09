@@ -129,7 +129,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // fetching. Adds the shared `fetchGlossaryModel`/`fetchStructuredModel` in-flight-promise memoizer next to
   // `ensureModelIndex` and seeds the navigator's `reload()` from it, ~11 LOC net. Measured end-state; #985
   // owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2581 },
+  // Raised 2581 → 2590: #484's code-review pass found the shared fetch memoizer above didn't get dropped by
+  // invalidateDocViews() the way indexPromise already is — a fetch still in flight when an edit lands could
+  // get reused by the NEXT edit instead of that edit starting its own, seeding the navigator/model index
+  // with stale (prior-edit) data. Fix: clear glossaryFetch/structuredModelFetch alongside modelIndex/
+  // indexPromise in invalidateDocViews(), ~9 LOC. Measured end-state; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2590 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
   // Lowered 2250 → 517: #987's seven-task split carved every category out into prefsSections/ (Appearance,
