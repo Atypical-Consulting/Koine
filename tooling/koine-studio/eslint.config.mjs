@@ -69,8 +69,16 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
-    // retired when the settings form is Preact-converted (split by #987, migrated with the panels arc #991)
-    files: ['src/settings/prefs.ts'],
+    // retired when the settings form is Preact-converted (migrated with the panels arc #991). #987 split
+    // the settings form's innerHTML sites across three files (the category-tab icons stayed in prefs.ts;
+    // the chip-list clear in prefsControls.ts; the type specimen in prefsSections/editor.ts) — all three
+    // stay listed until the Preact conversion, per the same freeze-then-shrink discipline as the rest of
+    // this table.
+    files: [
+      'src/settings/prefs.ts',
+      'src/settings/prefsControls.ts',
+      'src/settings/prefsSections/editor.ts',
+    ],
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
