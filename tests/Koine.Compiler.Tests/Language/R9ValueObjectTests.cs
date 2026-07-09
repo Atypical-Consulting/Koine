@@ -684,13 +684,15 @@ public class R9ValueObjectTests
     public void Entity_identity_comparison_remains_valid_and_unaffected()
     {
         // `==`/`!=` (identity comparison) is legitimate and untouched by this check — scoped to `+`/`-`.
+        // Asserts a fully clean compile (not just "no KOI0220"), so an unrelated typo in the fixture
+        // can't make this pass vacuously.
         const string src = """
             context Shop {
               aggregate CartAgg root Cart {
                 entity Cart identified by CartId {
                   item1: Item
                   item2: Item
-                  same:  Boolean = item1 == item2
+                  same:  Bool = item1 == item2
                 }
                 entity Item identified by ItemId {
                   name: String
@@ -698,7 +700,38 @@ public class R9ValueObjectTests
               }
             }
             """;
-        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Aggregate_typed_operand_is_also_rejected()
+    {
+        // Coverage for the `or AggregateDecl` disjunct in CheckEntityOperandArithmetic — a field can
+        // legally be typed with an AGGREGATE's own bare name (not just an entity's), e.g. this
+        // cross-aggregate reference (also separately flagged by KOI1602/EntityReferencesForeignAggregate,
+        // per DddReferenceDisciplineTests.An_entity_field_typed_as_an_aggregate_is_reported) or a
+        // domain-service `operation` parameter that ReferenceDisciplineAnalyzer doesn't cover at all.
+        // Either way, an aggregate has no generated '+'/'-' operator either.
+        const string src = """
+            context Sales {
+              value Money {
+                amount: Decimal
+              }
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  related: Customers
+                  fee:     Money
+                  bad:     Money = related + fee
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
     }
 
     [Fact]

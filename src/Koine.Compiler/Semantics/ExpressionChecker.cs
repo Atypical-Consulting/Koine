@@ -452,6 +452,15 @@ internal sealed class ExpressionChecker
     ///
     /// Both operands are resolved via <see cref="ResolveDecl"/> — the SAME context-aware resolution
     /// <see cref="ResolveValueObject"/> and #1266/#1284 already established.
+    ///
+    /// The <c>or AggregateDecl</c> disjunct is NOT defensive/dead code: a field can legally be typed
+    /// with an aggregate's own bare name (e.g. a cross-aggregate reference, separately also flagged by
+    /// <c>ReferenceDisciplineAnalyzer</c>'s KOI1602 — see <c>DddReferenceDisciplineTests
+    /// .An_entity_field_typed_as_an_aggregate_is_reported</c>), and a domain-service <c>operation</c>
+    /// parameter typed with an aggregate's name is NOT covered by <c>ReferenceDisciplineAnalyzer</c> at
+    /// all (it only guards entity fields, value-object members, domain-event fields, and
+    /// command/factory parameters) — so this disjunct is this check's ONLY guard against an
+    /// aggregate-typed <c>operation</c> parameter reaching <c>+</c>/<c>-</c>.
     /// </summary>
     private void CheckEntityOperandArithmetic(BinaryExpr b, TypeScope scope)
     {
@@ -467,17 +476,33 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        bool leftIsEntity = ResolveDecl(left) is EntityDecl or AggregateDecl;
-        bool rightIsEntity = ResolveDecl(right) is EntityDecl or AggregateDecl;
-        if (!leftIsEntity && !rightIsEntity)
+        string? leftKind = EntityOrAggregateKind(ResolveDecl(left));
+        string? rightKind = EntityOrAggregateKind(ResolveDecl(right));
+        if (leftKind is null && rightKind is null)
         {
             return;
         }
 
         var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+        var culprit = leftKind is not null && rightKind is not null
+            ? $"'{left.Name}' ({leftKind}) and '{right.Name}' ({rightKind})"
+            : leftKind is not null
+                ? $"'{left.Name}' ({leftKind})"
+                : $"'{right.Name}' ({rightKind})";
         Report(DiagnosticCodes.EntityOperandArithmetic,
-            $"cannot {verb} '{left.Name}' and '{right.Name}'; an entity has no generated '+'/'-' operator", b);
+            $"cannot {verb} '{left.Name}' and '{right.Name}'; {culprit} — entities and aggregates never "
+            + "have a generated '+'/'-' operator, regardless of the other operand", b);
     }
+
+    /// <summary>"entity"/"aggregate" for <see cref="DiagnosticCodes.EntityOperandArithmetic"/>'s
+    /// message, naming which side is the offending operand and its exact kind; <c>null</c> when
+    /// <paramref name="decl"/> is neither (the caller's early-return signal).</summary>
+    private static string? EntityOrAggregateKind(TypeDecl? decl) => decl switch
+    {
+        EntityDecl => "entity",
+        AggregateDecl => "aggregate",
+        _ => null
+    };
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
     {
