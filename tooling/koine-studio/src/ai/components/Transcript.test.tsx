@@ -12,6 +12,7 @@ import { fireEvent } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { createAppStore, type AppState } from '@/store/index';
 import type { StoreApi } from 'zustand/vanilla';
+import type { ChatToolCall } from '@/ai/ai';
 import { Transcript, TOOL_RESULT_CLAMP, type TranscriptProps } from '@/ai/components/Transcript';
 
 /** A store whose chat slice holds a finished user → assistant exchange. */
@@ -278,7 +279,7 @@ describe('Transcript (#990)', () => {
   // <details>'s `open` is DOM state, lost on any remount — survives the commit remount by keying
   // on an identity that's stable across a card's live→settled transition.
   describe('settled tool cards attached to their message (#1133)', () => {
-    const settledCall = (id: number): import('@/store/slices/chat').ChatToolCall => ({
+    const settledCall = (id: number): ChatToolCall => ({
       id,
       name: 'koine_compile',
       args: '{}',
@@ -341,6 +342,32 @@ describe('Transcript (#990)', () => {
 
       act(() =>
         store.getState().hydrateChat('ws-B', [{ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] }]),
+      );
+
+      const after = cards(container)[0] as HTMLDetailsElement;
+      expect(after.open).toBe(false);
+    });
+
+    // Code-review finding (#1133): "Clear conversation" empties `messages` WITHOUT changing
+    // `workspaceKey` (unlike a workspace swap), so a brand-new conversation's card at the same
+    // index/call-id would otherwise collide with a stale identity left over from before the clear.
+    test('clearing the conversation resets card expansion (no stale-identity reuse in the next conversation)', () => {
+      const store = createAppStore();
+      store.getState().appendChatMessage({ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] });
+      const { container } = mount(store);
+
+      const before = cards(container)[0] as HTMLDetailsElement;
+      act(() => {
+        before.open = true;
+        before.dispatchEvent(new Event('toggle'));
+      });
+      expect(before.open).toBe(true);
+
+      act(() => store.getState().clearChatTranscript());
+      // The next conversation's first assistant reply lands at the SAME message index with the SAME
+      // tool-call id — an identity collision with the stale (pre-clear) entry, absent a reset.
+      act(() =>
+        store.getState().appendChatMessage({ role: 'assistant', content: 'new reply', toolCalls: [settledCall(1)] }),
       );
 
       const after = cards(container)[0] as HTMLDetailsElement;

@@ -364,11 +364,10 @@ export function loadChat(key: string): ChatMessage[] {
  * blob — cards stay in-session-only, so a reload/replay renders none (unchanged from before #1133).
  */
 export function saveChat(key: string, msgs: ChatMessage[]): void {
-  const stored = msgs.slice(-CHAT_HISTORY_CAP).map(({ role, content, offerApply }) => ({
-    role,
-    content,
-    ...(offerApply === false ? { offerApply } : {}),
-  }));
+  // An omit-list, not an allow-list (matching saveSettings' aiApiKey strip below): a future
+  // ChatMessage field passes through unchanged by default, and only a field that must NOT survive
+  // persistence — like toolCalls — needs naming here.
+  const stored = msgs.slice(-CHAT_HISTORY_CAP).map(({ toolCalls: _omit, ...persisted }) => persisted);
   writeRaw(CHAT_KEY_PREFIX + key, JSON.stringify(stored));
 }
 

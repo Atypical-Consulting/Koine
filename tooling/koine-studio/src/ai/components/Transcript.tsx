@@ -3,7 +3,7 @@ import { Fragment, type ComponentChildren } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import { useAppStore } from '@/store/hooks';
 import type { AppState } from '@/store/index';
-import type { ChatToolCall } from '@/store/slices/chat';
+import type { ChatToolCall } from '@/ai/ai';
 import { MdHtml } from '@/ai/components/MdHtml';
 
 // The assistant transcript as a declarative Preact component (#990 Task 4). It replaces the
@@ -287,6 +287,15 @@ export function Transcript({
   const toolCard = (id: string, c: ChatToolCall) => (
     <ToolCard key={id} call={c} open={expandedCards.has(id)} onToggle={(open) => toggleCard(id, open)} />
   );
+  // "Clear conversation" empties `messages` WITHOUT changing `workspaceKey` (unlike a workspace swap),
+  // so identities restart from the same `m0`/`m1` indices and per-turn tool-call ids restart from 1 —
+  // a stale entry would otherwise mark a brand-new, never-touched card in the NEXT conversation as
+  // pre-expanded. `Transcript` never unmounts across a Clear (same render target), so this state would
+  // otherwise persist right through it.
+  const messagesEmpty = messages.length === 0;
+  useEffect(() => {
+    if (messagesEmpty) setExpandedCards((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [messagesEmpty]);
 
   // The live turn renders only while streaming — finish/abort clear `chat.turn`, but gating on the
   // status too keeps a stray ephemeral turn from ghosting a bubble after the lifecycle settles.

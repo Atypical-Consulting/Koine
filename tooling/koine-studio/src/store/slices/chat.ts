@@ -2,10 +2,6 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { ChatMessage, ChatToolCall } from '@/ai/ai';
 import type { StagedEdit } from '@/ai/editSession';
 
-/** {@link ChatToolCall} lives in `@/ai/ai` (#1133) — re-exported so existing `@/store/slices/chat`
- *  imports keep compiling. */
-export type { ChatToolCall } from '@/ai/ai';
-
 /** One reviewed file inside the pending change set. */
 export interface ChangeSetFileState {
   /**
@@ -102,11 +98,11 @@ export interface ChatSlice {
   /**
    * Commit a finished (or stop-mid-stream partial) turn ATOMICALLY (#1133): append `msg` — carrying
    * the live turn's settled `toolCalls`, if any — to `messages` AND clear `turn`, in ONE `set()`. This
-   * replaces the `appendChatMessage` + `clearStreamingTurn` pair for the assistant-turn-commit path,
-   * closing the window where a subscriber could render the committed bubble and the stale live cards
-   * side by side. Attaching the cards to the committed message (rather than a host-side snapshot)
-   * means `abortChatTurn`'s rollback — which pops only a trailing USER message — leaves them intact.
-   * `appendChatMessage` / `clearStreamingTurn` stay as-is for their other callers.
+   * is the sole assistant-turn-commit path, closing the window a two-step `appendChatMessage` +
+   * clear-turn sequence left open, where a subscriber could render the committed bubble and the stale
+   * live cards side by side. Attaching the cards to the committed message (rather than a host-side
+   * snapshot) means `abortChatTurn`'s rollback — which pops only a trailing USER message — leaves them
+   * intact. `appendChatMessage` stays as-is for its other callers (e.g. appending the user turn).
    */
   commitChatTurn(msg: ChatMessage): void;
   /**
@@ -116,14 +112,6 @@ export interface ChatSlice {
   startChatTurn(): void;
   /** streaming → idle; drops the ephemeral turn. */
   finishChatTurn(): void;
-  /**
-   * Drop the ephemeral turn while KEEPING the streaming status (#990 Task 6). The send effect
-   * commits the finished reply to `messages` BEFORE its post-turn work settles (the bounded
-   * parse-and-repair loop still runs LLM turns under the same busy window), so without this the
-   * transcript would render the committed bubble AND the stale streaming bubble side by side.
-   * No-op when no turn is live.
-   */
-  clearStreamingTurn(): void;
   /**
    * Abort the live turn (dropping the ephemeral turn). rollbackUserTurn: true pops exactly the
    * trailing message if it is the just-sent user turn and sets status 'error'; false keeps the
@@ -256,11 +244,6 @@ export function createChatSlice(
     },
     finishChatTurn: () => {
       set({ chat: { ...get().chat, status: 'idle', turn: null } });
-    },
-    clearStreamingTurn: () => {
-      const chat = get().chat;
-      if (!chat.turn) return;
-      set({ chat: { ...chat, turn: null } });
     },
     abortChatTurn: ({ rollbackUserTurn }) => {
       const chat = get().chat;
