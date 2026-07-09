@@ -308,27 +308,21 @@ internal sealed class ExpressionChecker
     /// validator and every emitter classify members identically.
     /// </summary>
     /// <remarks>
-    /// #1285: resolves <paramref name="vo"/> the same context-aware way <see cref="IsQuantity"/> does
-    /// (<c>vo.Qualifier ?? _resolver.Context</c>, R13.2) — NOT the flat <see cref="ModelIndex.TryGetDecl"/>
-    /// alone, which is keyed by bare name across the whole model. Two different contexts may legally
-    /// declare their own same-named value object; resolving without the reference site's context can
-    /// silently pick the WRONG declaration.
+    /// #1285: resolves <paramref name="vo"/> via <see cref="ResolveValueObject"/> — the same
+    /// context-aware lookup (<c>vo.Qualifier ?? _resolver.Context</c>, R13.2) already used elsewhere in
+    /// this file — NOT the flat <see cref="ModelIndex.TryGetDecl"/> alone, which is keyed by bare name
+    /// across the whole model. Two different contexts may legally declare their own same-named value
+    /// object; resolving without the reference site's context can silently pick the WRONG declaration.
     /// </remarks>
     private bool HasNumericStoredField(TypeRef vo)
     {
-        var context = vo.Qualifier ?? _resolver.Context;
-        if (context is not null && _index.TryGetDeclIn(context, vo.Name, out TypeDecl decl))
+        if (ResolveValueObject(vo) is not { } v)
         {
-            return decl is ValueObjectDecl v && HasNumericField(v);
+            return false;
         }
 
-        return _index.TryGetDecl(vo.Name, out decl) && decl is ValueObjectDecl fallback && HasNumericField(fallback);
-
-        static bool HasNumericField(ValueObjectDecl v)
-        {
-            var names = v.Members.Select(m => m.Name).ToList();
-            return v.Members.Any(m => !MemberAnalysis.IsDerived(m, names) && TypeResolver.IsNumeric(m.Type));
-        }
+        var names = v.Members.Select(m => m.Name).ToList();
+        return v.Members.Any(m => !MemberAnalysis.IsDerived(m, names) && TypeResolver.IsNumeric(m.Type));
     }
 
     /// <summary>
