@@ -72,11 +72,6 @@ export interface CenterDeckControllerDeps {
    *  module an already-migration-aware closure. */
   saveWorkspaceDeck?: (deck: DeckState) => void;
   loadWorkspaceDeck?: () => DeckState;
-  /** The integrated terminal panel (#256), created lazily by ide.ts the first time its tab is shown.
-   *  Desktop-only — the browser host omits it. */
-  ensureTerminal?(): { fit(): void };
-  /** The Review panel (#259), created lazily by ide.ts the first time its bottom-panel tab is shown. */
-  ensureReview?(): void;
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this module DOM-infra-free
    *  beyond its own element lookups). */
   initEdgeResizer(opts: {
@@ -120,9 +115,9 @@ export interface CenterDeckControllerHooks {
    *  facade-private lazy singleton (`deps.ensureAssistant`, not part of this module's own deps subset). */
   ensureAssistantShown(): void;
   /** Refresh the given bottom-strip tab if it needs it: Events/Relationships (Task 3's surfaceLoaders) or
-   *  the lazily-created Terminal/Review panels (facade-owned `deps.ensureTerminal`/`deps.ensureReview` —
-   *  those two ARE in this module's own deps subset, but the hook still owns the whole tab dispatch so the
-   *  Events/Relationships half doesn't need a second injected seam). */
+   *  the lazily-created Terminal/Review panels (both facade-private — `deps.ensureTerminal`/
+   *  `deps.ensureReview` are NOT part of this module's own deps subset; the hook owns the whole tab
+   *  dispatch instead). */
   ensureBottomLoaded(tab: BottomTab): void;
 }
 

@@ -1030,8 +1030,6 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       saveWorkspaceCenter: deps.saveWorkspaceCenter,
       saveWorkspaceDeck: deps.saveWorkspaceDeck,
       loadWorkspaceDeck: restoreWorkspaceDeck,
-      ensureTerminal: deps.ensureTerminal,
-      ensureReview: deps.ensureReview,
       initEdgeResizer: deps.initEdgeResizer,
     },
     hooks: {
