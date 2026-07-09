@@ -391,7 +391,7 @@ public class R9ValueObjectTests
     // fires when BOTH operands are quantity-classified).
     // ======================================================================
 
-    /// <summary>Shared fixture: a quantity and a plain value object combined via <paramref name="op"/> on line 11.</summary>
+    /// <summary>Shared fixture: a quantity and a plain value object combined via <paramref name="op"/> on line 13.</summary>
     private static string QuantityVsPlainSrc(string op = "+") =>
         "context Shop {\n" +
         "  enum MassUnit { Grams, Kilograms }\n" +
@@ -543,6 +543,55 @@ public class R9ValueObjectTests
             result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
             result.Files.ShouldBeEmpty();
         }
+    }
+
+    [Fact]
+    public void Value_object_type_mismatch_is_still_caught_when_an_unrelated_context_declares_a_differently_kinded_same_named_type()
+    {
+        // Code-review finding (#1284): the check must resolve BOTH the "is this value-like" and "is
+        // this a quantity" classifications the SAME context-aware way #1266's review pass fixed for
+        // IsQuantity — not via TypeResolver.IsValueLike's flat, context-blind ModelIndex.Classify
+        // lookup. Without that, an UNRELATED context declaring its own, differently-kinded type under
+        // the SAME bare name as Shop's in-scope plain value object ("Money") can silently misclassify
+        // the in-scope operand as not value-like, causing the whole check to bail out — reopening
+        // exactly the class of bug #1266 closed, just via the new IsValueLike gate instead of IsQuantity.
+        const string otherContext =
+            "context Other {\n" +
+            "  entity Money identified by MoneyId {\n" +
+            "    label: String\n" +
+            "  }\n" +
+            "}\n";
+
+        Diagnose(QuantityVsPlainSrc("+") + otherContext).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    [Fact]
+    public void Differently_typed_value_objects_across_two_contexts_sharing_a_bare_name_are_rejected()
+    {
+        // Code-review finding (#1284): a bare-name equality check (`left.Name == right.Name`) is wrong
+        // when two operands are explicitly qualified (R13.2) to DIFFERENT contexts — Alpha.Money and
+        // Beta.Money share a bare name but are genuinely unrelated declared types; comparing by resolved
+        // declaration identity (not bare name) is required to reject this correctly.
+        const string src = """
+            context Alpha {
+              value Money {
+                amount: Decimal
+              }
+            }
+            context Beta {
+              value Money {
+                code: String
+              }
+            }
+            context Gamma {
+              value Mix {
+                a: Alpha.Money
+                b: Beta.Money
+                bad: Alpha.Money = a + b
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
     }
 
     // ======================================================================
