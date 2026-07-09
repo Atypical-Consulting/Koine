@@ -53,7 +53,7 @@ import type {
 import { koineHighlight, sharedTheme } from '@/editor/cmTheme';
 // The LSP-backed CodeMirror extensions (hover, LSP completion source, inlay hints, semantic tokens) and
 // their provider function types live in ./lspExtensions (#986); createKoineEditor wires the values
-// directly and references the types below. Re-exported (above) so `@/editor/editor` consumers keep
+// directly and references the types below. Re-exported (below) so `@/editor/editor` consumers keep
 // resolving the whole facade surface unchanged.
 import {
   koineHoverTooltip,
@@ -928,11 +928,9 @@ export function renderSymbolTree(
 // The read-only output viewers (createOutputView / createJsonView / langExt / OutputLang / OutputView /
 // ConfigView) live in ./outputView (#986); re-exported so `@/editor/editor` consumers keep resolving
 // them here.
-export { langExt, createOutputView, createJsonView } from '@/editor/outputView';
-export type { OutputLang, OutputView, ConfigView } from '@/editor/outputView';
+export { langExt, createOutputView, createJsonView, type OutputLang, type OutputView, type ConfigView } from '@/editor/outputView';
 
 // The editable settings.json editor (createJsonSettingsEditor / settingsSchemaHover /
 // settingsCompletionSource / JsonSettingsEditor) lives in ./settingsJsonEditor (#986); re-exported so
 // `@/editor/editor` consumers (settingsPage.tsx) keep resolving it here.
-export { settingsSchemaHover, settingsCompletionSource, createJsonSettingsEditor } from '@/editor/settingsJsonEditor';
-export type { JsonSettingsEditor } from '@/editor/settingsJsonEditor';
+export { settingsSchemaHover, settingsCompletionSource, createJsonSettingsEditor, type JsonSettingsEditor } from '@/editor/settingsJsonEditor';
