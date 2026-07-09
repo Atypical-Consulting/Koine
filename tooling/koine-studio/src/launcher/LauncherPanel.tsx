@@ -153,9 +153,16 @@ export function LauncherPanel(props: LauncherPanelProps) {
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    void buildCatalog(sources).then((entries) => {
-      if (!cancelled) setCatalog(entries);
-    });
+    // A source join can still reject outright (e.g. a corrupt model index) even with commitEntries'
+    // own git-failure fallback (#1276) — catch here too so one bad source degrades to an empty catalog
+    // instead of an unhandled rejection that leaves `catalog` stuck at its stale/initial value forever.
+    void buildCatalog(sources)
+      .then((entries) => {
+        if (!cancelled) setCatalog(entries);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalog([]);
+      });
     return () => {
       cancelled = true;
     };

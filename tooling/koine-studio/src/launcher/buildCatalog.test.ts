@@ -92,6 +92,13 @@ const sourcesNoGit: LauncherSources = {
   canUseGit: false,
 };
 
+// Reproduces the desktop host's real failure mode (#1276): `canUseGit` is true, but the open
+// workspace isn't a git repo, so the Tauri `git_log` command rejects.
+const sourcesGitRejects: LauncherSources = {
+  ...sourcesWithGit,
+  gitLog: () => Promise.reject(new Error('not a git repository')),
+};
+
 // Characterization safety net (issue #1162): pins `normalizeKind`'s behaviour — including its
 // passthrough fallback — on the PUBLIC exported symbol `preview.ts` and consumers actually import, so
 // a future edit that breaks its delegation to the shared `@/model/dddKind` normalizer (dddKind.test.ts)
@@ -287,6 +294,18 @@ describe('buildCatalog — commits', () => {
   test('omits every commit entry when canUseGit is false, even if gitLog somehow returned data', async () => {
     const commits = (await buildCatalog(sourcesNoGit)).filter((e) => e.cat === 'commit');
     expect(commits).toEqual([]);
+  });
+
+  // #1276: the desktop host's gitLog() rejects when the open workspace isn't a git repository (the
+  // Tauri `git_log` command shells out to real `git log`). That must degrade to "no commits", not sink
+  // the whole join — a fresh "Start from an example" workspace is never git-initialized, so this is the
+  // COMMON case, not an edge case.
+  test('falls back to no commits (not a rejected catalog) when gitLog rejects', async () => {
+    const catalog = await buildCatalog(sourcesGitRejects);
+    expect(catalog.filter((e) => e.cat === 'commit')).toEqual([]);
+    // Every other category still joined normally — the git failure didn't take the catalog down with it.
+    expect(catalog.some((e) => e.cat === 'action')).toBe(true);
+    expect(catalog.some((e) => e.cat === 'symbol')).toBe(true);
   });
 });
 

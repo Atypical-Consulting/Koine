@@ -1397,7 +1397,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     exportSourceZip: () => void exportShare.exportSourceZip(),
     exportActiveDiagram: (format) => void exportShare.exportActiveDiagram(format),
     copyActiveDiagramMermaid: () => void exportShare.copyActiveDiagramMermaid(),
-    saveProjectToDisk: () => void exportShare.saveProjectToDisk(),
+    // Save-to-disk's reopen-from-disk is a workspace-replacing operation too (#1274).
+    saveProjectToDisk: () => void workspaceOpLock.run(() => exportShare.saveProjectToDisk()),
     canSaveProjects: platform.canSaveProjects,
     layoutActions,
     openSettings: panelHost.openSettings,
