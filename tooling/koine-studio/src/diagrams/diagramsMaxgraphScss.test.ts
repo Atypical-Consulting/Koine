@@ -12,6 +12,7 @@ import * as sass from 'sass-embedded';
 import { resolve } from 'node:path';
 
 let oneLine = '';
+let rule = '';
 
 beforeAll(async () => {
   // vitest runs from the package root (tooling/koine-studio), so this source path is stable across
@@ -20,6 +21,7 @@ beforeAll(async () => {
   const scssPath = resolve(process.cwd(), 'src/styles/components/_diagrams-maxgraph.scss');
   const css = (await sass.compileAsync(scssPath)).css;
   oneLine = css.replace(/\s+/g, '');
+  rule = oneLine.match(/\.koi-ctxmap-graph\.koi-node\.is-scoped\{([^}]*)\}/)?.[1] ?? '';
 });
 
 describe('.koi-ctxmap-graph .koi-node.is-scoped — the active-context focus ring (#1210)', () => {
@@ -29,16 +31,13 @@ describe('.koi-ctxmap-graph .koi-node.is-scoped — the active-context focus rin
     // border box instead — BOTH layers (the crisp inner ring and the soft outer halo), since a bare
     // non-inset layer alongside an inset one would still get clipped for that layer.
     expect(oneLine, 'the .is-scoped rule must exist').toContain('.koi-ctxmap-graph.koi-node.is-scoped{');
-    expect(oneLine, 'the crisp ring layer must be inset').toContain('box-shadow:inset0002pxvar(--koi-on-accent)');
-    expect(oneLine, 'the soft halo layer must also be inset').toContain(
+    expect(rule, 'the crisp ring layer must be inset').toContain('box-shadow:inset0002pxvar(--koi-on-accent)');
+    expect(rule, 'the soft halo layer must also be inset').toContain(
       ',inset0005pxcolor-mix(insrgb,var(--koi-on-accent)28%,transparent);',
     );
-    // Guard against a regression back to a bare (non-inset) leading layer, e.g. `box-shadow:0 0 0 2px`.
-    expect(oneLine).not.toMatch(/\.koi-ctxmap-graph\.koi-node\.is-scoped\{[^}]*box-shadow:0/);
   });
 
   test('the ring colour is NOT the tile fill (--koi-accent) — it must have real contrast against it', () => {
-    const rule = oneLine.match(/\.koi-ctxmap-graph\.koi-node\.is-scoped\{([^}]*)\}/)?.[1] ?? '';
     // The context tile's own fill/border IS var(--koi-accent) (.koi-node--simple[data-kind='context']),
     // so a ring drawn in that same colour has ~1.0 contrast against its own background — invisible even
     // if it weren't clipped. `--koi-on-accent` is the token already paired with `--koi-accent` for
