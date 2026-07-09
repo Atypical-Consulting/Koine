@@ -882,6 +882,12 @@ export function init(hooks: IdeHooks = {}): () => void {
     activeUri: () => workspace.activeUri(),
     editor: { getDoc: () => editor.getDoc(), setDoc: (d) => editor.setDoc(d) },
     lsp: { syncDoc: (uri, text) => lsp.syncDoc(uri, text) },
+    // Write a restored buffer's text+dirty through the workspace slice's upsertBuffer — the single
+    // owner of buffers (#982/#1004) — instead of mutating the store-owned Buffer in place.
+    writeBuffer: (uri, text, dirty) => {
+      const b = workspace.buffers.get(uri);
+      if (b) appStore.getState().upsertBuffer({ ...b, text, dirty });
+    },
     activateFile: (uri) => workspace.activateFile(uri),
     onRestored: () => {
       controller.onDocEdited();

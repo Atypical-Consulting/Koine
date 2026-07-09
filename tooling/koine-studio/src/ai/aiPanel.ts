@@ -443,7 +443,10 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     // final "Applied N" message.
     store
       .getState()
-      .beginChangeSetApply(drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : undefined);
+      .beginChangeSetApply(
+        clean.length,
+        drifted.length ? `Applying ${clean.length} clean ${files(clean.length)}.${skipped}` : undefined,
+      );
     // Address each write by the row's OWN opaque key (#472 Task 4): the rows carry the staged edit's
     // key end-to-end through the review, so a revision applies to exactly the buffer it was staged
     // from — even when several roots share the relPath — and a brand-new file keeps the `new:<relPath>`

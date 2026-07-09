@@ -66,10 +66,12 @@ export interface ChatStreamingTurn {
 
 export type ChangeSetPhase =
   | { kind: 'reviewing'; note?: string } // note carries the #633 apply-failure / partial-failure message
-  // #1136: cleanCount snapshots the accepted-and-not-drifted rows AT BEGIN — the host marks drift
-  // before dispatching, so this is the exact set about to be written; resolveChangeSetApply reports
-  // it as-is, so a mid-apply checkbox toggle can never skew the terminal "Applied N" count. note
-  // carries the host's in-flight wording (the "Applying N clean files. Skipped M…" text).
+  // #1136/#1225: cleanCount is the HOST's own fresh per-attempt clean-file count (aiPanel.ts's
+  // `clean.length`), snapshotted verbatim at begin time — NOT re-derived from the change set's sticky
+  // `files[].drifted` flag, which can lag a file that drifted then reverted across two attempts.
+  // resolveChangeSetApply reports it as-is, so a mid-apply checkbox toggle can never skew the
+  // terminal "Applied N" count. note carries the host's in-flight wording (the "Applying N clean
+  // files. Skipped M…" text).
   | { kind: 'applying'; note?: string; cleanCount: number }
   | { kind: 'applied'; appliedCount: number; note?: string } // terminal; note is the host's wording (falls back to "Applied N files." when absent)
   | { kind: 'invalidated'; reason: string }; // terminal (#473/#684)
@@ -183,12 +185,14 @@ export interface ChatSlice {
   /** Set `drifted: true` on the files named by KEY — sticky (never unsets) and idempotent (#473). */
   markChangeSetDrift(keys: readonly string[]): void;
   /**
-   * reviewing → applying; no-op unless reviewing with at least one accepted file. Snapshots
-   * `cleanCount` from the accepted-and-not-drifted rows AT THIS MOMENT (#1136) — the host marks
-   * drift before calling this, so the snapshot is exactly the set about to be written, immune to any
-   * checkbox toggle for the rest of the apply. `note` carries the host's in-flight wording.
+   * reviewing → applying; no-op unless reviewing with at least one accepted file. `cleanCount` is the
+   * HOST's own fresh count of files about to be written this attempt (aiPanel.ts's `clean.length`,
+   * computed from a live isDrifted() re-check) — NOT re-derived from the change set's sticky
+   * `files[].drifted` flag, which can lag a file that drifted then reverted across two attempts
+   * (#1225). Snapshotted once here, so a mid-apply checkbox toggle still can't skew the terminal
+   * count. `note` carries the host's in-flight wording.
    */
-  beginChangeSetApply(note?: string): void;
+  beginChangeSetApply(cleanCount: number, note?: string): void;
   /**
    * Settle an apply: no failures → terminal `applied` reporting the begin-time `cleanCount` snapshot
    * (#1136 — truthful and immune to a mid-apply checkbox toggle) with the host's `note`; any failures
@@ -345,14 +349,10 @@ export function createChatSlice(
         files: cs.files.map((f) => (keys.includes(f.key) ? { ...f, drifted: true } : f)),
       });
     },
-    beginChangeSetApply: (note) => {
+    beginChangeSetApply: (cleanCount, note) => {
       const cs = get().chat.changeSet;
       if (!cs || cs.phase.kind !== 'reviewing') return;
       if (!cs.files.some((f) => f.accepted)) return;
-      // Snapshot the clean set NOW (#1136): the host marks drift before calling this, so
-      // accepted-and-not-drifted at this instant is exactly what's about to be written — immune to
-      // any checkbox toggle for the rest of this apply.
-      const cleanCount = cs.files.filter((f) => f.accepted && !f.drifted).length;
       setChangeSet({ ...cs, phase: { kind: 'applying', cleanCount, note } });
     },
     resolveChangeSetApply: ({ failed, note }) => {

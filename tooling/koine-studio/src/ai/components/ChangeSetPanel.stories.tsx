@@ -74,7 +74,7 @@ export const Reviewing: Story = {
 export const Applying: Story = {
   render: (args) => {
     const store = reviewingStore();
-    store.getState().beginChangeSetApply();
+    store.getState().beginChangeSetApply(2);
     return <ChangeSetPanel {...args} store={store} />;
   },
 };
@@ -84,7 +84,7 @@ export const Applying: Story = {
 export const Applied: Story = {
   render: (args) => {
     const store = reviewingStore();
-    store.getState().beginChangeSetApply();
+    store.getState().beginChangeSetApply(2);
     store.getState().resolveChangeSetApply({ failed: [] });
     return <ChangeSetPanel {...args} store={store} />;
   },
@@ -105,7 +105,7 @@ export const Superseded: Story = {
 export const FailedWithRetry: Story = {
   render: (args) => {
     const store = reviewingStore();
-    store.getState().beginChangeSetApply();
+    store.getState().beginChangeSetApply(2);
     store.getState().rejectChangeSetApply('Apply failed: Error: disk write failed');
     return <ChangeSetPanel {...args} store={store} />;
   },

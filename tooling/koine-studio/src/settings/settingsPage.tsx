@@ -15,13 +15,8 @@ import { loadSettings, saveSettings, loadWorkspaceOverrides, replaceWorkspaceOve
 import { setTheme } from '@/settings/theme';
 import { appStore } from '@/store/index';
 import { readRaw, writeRaw } from '@/shell/storage';
+import type { SettingsEditorMode, SettingsJsonScope } from '@/settings/settingsTypes';
 import { el } from '@atypical/koine-ui';
-
-/** Which representation the page is showing. Persisted so the last-used one is restored on reopen. */
-export type SettingsEditorMode = 'visual' | 'json';
-
-/** Which settings document the JSON editor targets. */
-type JsonScope = 'user' | 'workspace';
 
 /** localStorage key for the active representation (visual/json). */
 const MODE_KEY = 'koine.studio.settingsEditorMode';
@@ -60,12 +55,12 @@ function saveMode(mode: SettingsEditorMode): void {
 }
 
 /** Read the persisted JSON scope, defaulting to 'user' when absent/invalid. */
-function loadScope(): JsonScope {
+function loadScope(): SettingsJsonScope {
   return readRaw(SCOPE_KEY) === 'workspace' ? 'workspace' : 'user';
 }
 
 /** Persist the JSON scope. A storage failure must never break scope switching. */
-function saveScope(s: JsonScope): void {
+function saveScope(s: SettingsJsonScope): void {
   writeRaw(SCOPE_KEY, s);
 }
 
@@ -113,7 +108,7 @@ export function createSettingsPage(
   function schemaForScope(): Record<string, unknown> {
     return appStore.getState().settingsJsonScope === 'workspace' ? WORKSPACE_SETTINGS_JSON_SCHEMA : SETTINGS_JSON_SCHEMA;
   }
-  let scopeToggle: { el: HTMLElement; set(value: JsonScope): void; setDisabled(disabled: boolean): void } | null = null;
+  let scopeToggle: { el: HTMLElement; set(value: SettingsJsonScope): void; setDisabled(disabled: boolean): void } | null = null;
 
   // The wsKey() value captured when the JSON body was last built, so refresh() can detect a
   // workspace-availability change and fully rebuild the body (toggle enabled-state + seed) instead
@@ -196,7 +191,7 @@ export function createSettingsPage(
   // Switch the JSON scope: persists the new choice, syncs the toggle UI, cancels any in-flight
   // debounce (abandoning an invalid draft — mirrors the Visual↔JSON swap behavior), clears stale
   // diagnostics, and re-seeds the editor from the scope's own document.
-  function setScope(next: JsonScope): void {
+  function setScope(next: SettingsJsonScope): void {
     if (next === appStore.getState().settingsJsonScope) return;
     if (next === 'workspace' && wsKey() === null) {
       scopeToggle?.set(appStore.getState().settingsJsonScope); // re-sync the toggle to the unchanged scope (Fix 4)
@@ -298,7 +293,7 @@ export function createSettingsPage(
       // Re-derive scope from persistence on each build: restores a persisted 'workspace' scope when a
       // folder opens mid-session (Fix 3); forces 'user' when no workspace is available.
       appStore.getState().setSettingsJsonScope(currentWsKey === null ? 'user' : loadScope());
-      scopeToggle = segmented<JsonScope>(
+      scopeToggle = segmented<SettingsJsonScope>(
         'Settings JSON scope',
         [
           { value: 'user', label: 'User' },

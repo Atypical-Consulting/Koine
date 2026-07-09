@@ -77,7 +77,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // `revertCommitFromLauncher`, the reveal-in-file-manager thunk, and the five CommandWiringDeps seam
   // registrations (findReferences / renameSymbol / gitRevert / canRevealInFileManager / revealPath). A
   // code-review DRY pass collapsed three near-identical activate helpers into one. Measured post-merge + 2.
-  { file: 'src/shell/ide.tsx', maxLines: 1459 },
+  // Raised 1459 → 1463: #1010 wires `writeBuffer` into `createHistoryController({ ... })` — the
+  // historyController.restore write path now goes through the workspace slice's `upsertBuffer` instead of
+  // mutating a store-owned Buffer in place, ~6 LOC of composition-root wiring. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1463 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
