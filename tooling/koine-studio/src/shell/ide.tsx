@@ -16,7 +16,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
-import { initInstantTooltip, LEFT_RAIL_IDS, LeftRail, RightStrip } from '@atypical/koine-ui';
+import { HistoryControls, initInstantTooltip, LEFT_RAIL_IDS, LeftRail, RightStrip, WorkspaceProblemsBadge } from '@atypical/koine-ui';
 import { ensureOutputScaffold } from '@/shell/outputRail';
 import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
@@ -54,6 +54,7 @@ import { initEdgeResizer } from '@/shell/resize';
 import { formatChord } from '@/shared/platform';
 import { setDefaultCanvasZoom } from '@/diagrams/diagramContract';
 import { appStore } from '@/store/index';
+import { createHistoryControlsStore, createWorkspaceProblemsStore } from '@/store/readableStores';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/selection';
 import { renameStatusMessage, type InspectorElement } from '@/model/inspector';
@@ -64,12 +65,10 @@ import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
 import { installExportMenuDismiss } from '@/shell/exportMenuDismiss';
-import { HistoryControls } from '@/shell/HistoryControls';
 import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { CompilingIndicator } from '@/shell/CompilingIndicator';
 import { createEmitTargetControl } from '@/shell/emitTargetControl';
 import { createStatusBar } from '@/shell/statusBar';
-import { WorkspaceProblemsBadge } from '@/diagnostics/WorkspaceProblemsBadge';
 import { createWorkspaceController, type WorkspaceController } from '@/shell/workspaceController';
 import { createSearchPanel } from '@/shell/searchController';
 import { type Match } from '@/shell/workspaceSearch';
@@ -269,9 +268,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   );
 
   // Workspace-wide problems rollup beside the #sb-problems split (which is active-file only): a status-bar
-  // badge summarising every file's diagnostics, hidden while the workspace is clean. Subscribes to the
-  // diagnostics slice, so the LSP publish path keeps it current with no extra wiring.
-  render(<WorkspaceProblemsBadge store={appStore} />, domById('sb-problems-host'));
+  // badge summarising every file's diagnostics, hidden while the workspace is clean. Subscribes via the
+  // generic ReadableStore adapter (store/readableStores.ts, issue #944), so the LSP publish path keeps it
+  // current with no extra wiring.
+  render(<WorkspaceProblemsBadge store={createWorkspaceProblemsStore(appStore)} />, domById('sb-problems-host'));
 
   // Transient "compiling…" indicator (#516): surfaces the existing compile-in-flight signal (#469) while
   // the compiler is busy (diagnose / emit-preview / run-scenario), debounced so a fast keystroke-diagnose
@@ -895,10 +895,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     },
     publish: (s) => appStore.getState().setHistoryState(s),
   });
-  // The top-bar Undo/Redo buttons (reactive enable/disable via the store).
+  // The top-bar Undo/Redo buttons (reactive enable/disable via a generic ReadableStore, store/readableStores.ts).
   render(
     <HistoryControls
-      store={appStore}
+      store={createHistoryControlsStore(appStore)}
       onUndo={() => commandWiring.run('undo')}
       onRedo={() => commandWiring.run('redo')}
       undoTitle={`Undo (${formatChord('mod+Z')})`}
