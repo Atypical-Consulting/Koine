@@ -137,6 +137,18 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // now holds only the `.koi` editor core (createKoineEditor + its language/completions/touch theme)
   // plus the facade re-exports; end-state 938 LOC + ~15 lines headroom.
   { file: 'src/editor/editor.ts', maxLines: 953 },
+  // Frozen 2026-07-09 at 113 LOC, ceil(113 × 1.02) = 116. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/cmTheme.ts', maxLines: 116 },
+  // Frozen 2026-07-09 at 130 LOC, ceil(130 × 1.02) = 133. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/outputView.ts', maxLines: 133 },
+  // Frozen 2026-07-09 at 176 LOC, ceil(176 × 1.02) = 180. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/settingsJsonEditor.ts', maxLines: 180 },
+  // Frozen 2026-07-09 at 534 LOC, ceil(534 × 1.02) = 545. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/lspExtensions.ts', maxLines: 545 },
   // Frozen 2026-07-02 at 1354 LOC, ceil(1354 × 1.02) = 1382. #990 ratchets this down as it decomposes
   // aiPanel.ts. Freezing prevents further regrowth; it does not mandate the split — #990 owns that.
   // Raised 1382 → 1424: #984 Task 4 rewires the change-set sub-panel onto the chat slice's state
