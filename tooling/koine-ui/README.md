@@ -7,8 +7,13 @@ components that don't need a store or a host (Tauri/browser) to render — so a 
 (the docs-site playground, a future embed, another IDE) can reuse Koine Studio's look and
 interaction patterns without pulling in the whole IDE.
 
-This is a **presentation-only** package: no Zustand store, no `Platform` port, no host coupling.
-Koine Studio itself remains the only consumer that assembles these pieces into the actual IDE.
+This is a **store-free** package: no Zustand (or any other concrete state-management library) may
+be imported here, and no `Platform`/Tauri host coupling. That doesn't mean every component is
+*data*-free, though — issue [#944](https://github.com/Atypical-Consulting/Koine/issues/944) added a
+generic `ReadableStore<T>` host-adapter contract (see below) so a component that DOES need live
+data from a host's store can still live here, typed against the generic contract instead of Koine
+Studio's concrete `AppState`. Koine Studio itself remains the only consumer that assembles these
+pieces (plain and store-coupled alike) into the actual IDE.
 
 ## Install
 
@@ -93,14 +98,72 @@ Each component's own doc comment (at the top of its `.tsx` file) has the full de
 including what was deliberately generalized when it was extracted from Koine Studio (e.g.
 `DeckSpine`'s `surfaces` prop replaces a hardcoded app-specific surface registry).
 
+**Generic host-adapter contract** (issue #944 — lets a component read live data from a host's store
+without this package depending on that store):
+
+| Export | What it does |
+| --- | --- |
+| `ReadableStore<T>` | A minimal `{ getState(): T; subscribe(listener): () => void }` interface — the seam a component depends on INSTEAD of a concrete store type. Any host (Koine Studio's Zustand `StoreApi<AppState>`, a future embedding) satisfies it via its own adapter. |
+| `useReadableStore(store)` | The Preact hook a component calls to subscribe to a `ReadableStore<T>`'s slice and re-render on change — the `koine-ui`-side counterpart to Zustand's `useStore(store, selector)`, without importing Zustand. |
+
+**Store-coupled components via `ReadableStore<T>`** (issue #944's prototype targets — each takes a
+`store: ReadableStore<SomeSlice>` prop instead of Koine Studio's `StoreApi<AppState>`):
+
+| Component | What it does |
+| --- | --- |
+| `HistoryControls` | The top-bar Undo/Redo button pair; disabled state driven by `ReadableStore<HistoryControlsSlice>` (`{ canUndo, canRedo }`). |
+| `WorkspaceProblemsBadge` | The status-bar workspace-wide problems rollup; driven by `ReadableStore<WorkspaceProblemsSlice>` (`{ errors, warnings, fileCount }` — already classified, so this package never needs Koine Studio's `LspDiagnostic` type). |
+
+### The host-adapter pattern — when to reach for it, and how
+
+Two shapes exist for crossing the store/host boundary into `koine-ui`; pick per-component, not
+uniformly:
+
+1. **Props/callbacks refactor** (no `ReadableStore` involved) — when a component reads at most a
+   couple of primitives that rarely change and doesn't need the "subscribe to just this slice"
+   performance property, just pass already-selected values + callbacks straight through
+   (`onUndo`/`onRedo` in `HistoryControls` are already this shape). Simplest option; prefer it when
+   it doesn't cost you anything.
+2. **`ReadableStore<T>` host adapter** — when a component needs to re-render reactively as the
+   host's data changes *while mounted* (not just once at render time), use the contract above. The
+   recipe, proven by `HistoryControls`/`WorkspaceProblemsBadge`:
+   - **Define a narrow slice interface** in the component's own file — sized to exactly what that
+     component reads (`HistoryControlsSlice`, `WorkspaceProblemsSlice`), never Koine Studio's whole
+     `AppState`. If the raw host data isn't `koine-ui`-safe to depend on (e.g. Koine Studio's
+     `LspDiagnostic` type), have the **host's adapter selector** pre-classify/summarise it into
+     plain primitives — keep any domain classification logic (severity buckets, etc.) in its single
+     owning module on the Koine Studio side, not duplicated in `koine-ui`.
+   - **Component depends only on `ReadableStore<TheSlice>` + `useReadableStore`** — never the
+     concrete store type, never Zustand.
+   - **The host writes a small adapter** wrapping its real store to satisfy the contract. Koine
+     Studio's is `zustandToReadableStore(store, selector, isEqual?)`
+     (`tooling/koine-studio/src/store/readableStoreAdapter.ts`), which mirrors what Zustand's own
+     `useStore(store, selector)` does internally: subscribe once to the whole store, but only notify
+     when the selected slice changes under `isEqual` (default `Object.is`; pass the adapter's
+     `shallowEqual` when the selector builds a fresh object each call) — preserving the "re-render
+     only on this slice" property the pre-extraction direct `useStore` call had. Keep the actual
+     `zustandToReadableStore(...)` calls out of a line-budget-guarded call site (Koine Studio's
+     `ide.tsx`) by giving each adapted store its own small factory function
+     (`tooling/koine-studio/src/store/readableStores.ts`).
+   - **Port the component's tests/stories** to mock `ReadableStore<T>` directly (a plain object with
+     `getState`/`subscribe`/a test-only `set()`, see `HistoryControls.test.tsx`) instead of a real or
+     fake Zustand store — `koine-ui`'s tests never construct a Zustand store. Add a host-side test
+     (`tooling/koine-studio/src/store/readableStores.test.ts`) that pins the REAL wiring end-to-end
+     (a real `createAppStore()`) so a change to the store's shape or a classifier is caught there.
+
 ## What stays out of this package
 
-Store-coupled and host(Tauri)-coupled panels — `PropertiesPanel`, `SourceControlPanel`,
-`DeckStage`, `HistoryControls`, `WorkspaceProblemsBadge`, and similar — intentionally **stay in
-Koine Studio** (`tooling/koine-studio/src/**`). They depend on the Zustand store and/or the
-`Platform` host port, which this package deliberately does not take a dependency on. Extracting
-them (behind an injected data/callback API instead of a direct store subscription) is a candidate
-for a **follow-up issue**, not this one.
+Deeply Tauri/desktop-only-capability panels — e.g. the terminal panel
+(`tooling/koine-studio/src/shell/terminal/terminalPanel.tsx`, gated on `Platform.canRunShell`) —
+are **permanent exclusions**: they have no meaningful behavior on a host without that capability, so
+there's no generic contract worth designing for them.
+
+The remaining store/host-coupled panels not yet migrated (`PropertiesPanel`, `SourceControlPanel`,
+`DeckStage`, `StoreInspector`, `UnsavedIndicator`, `DiagnosticsStripPanel`, `CanvasPalette`,
+`DocsPanelHost`, `EventsPanel`, `GlossaryPanel`, `RelationshipsPanel`, `settingsPage`, and
+`AssistantView`'s sibling panels) are candidates for a **next-tranche follow-up** using the
+host-adapter pattern above — see issue #944's Task 1 audit comment for the full per-component
+coupling breakdown and which look like the next-best candidates.
 
 ## Development
 
