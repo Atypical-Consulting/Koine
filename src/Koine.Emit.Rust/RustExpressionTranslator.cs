@@ -220,9 +220,9 @@ internal sealed class RustExpressionTranslator
         // the call site must route through them instead (#1068).
         if (bin.Op is BinaryOp.Add or BinaryOp.Sub && IsQuantityType(leftType))
         {
-            WriteOperand(bin.Left, sb, null, null, clone: false);
+            WriteQuantityOperand(bin.Left, sb);
             sb.Append('.').Append(bin.Op == BinaryOp.Add ? "add" : "sub").Append("(&");
-            WriteOperand(bin.Right, sb, null, null, clone: false);
+            WriteQuantityOperand(bin.Right, sb);
             sb.Append(").expect(\"").Append(leftType!.Name).Append(": unit mismatch\")");
             if (parenthesize)
             {
@@ -290,6 +290,54 @@ internal sealed class RustExpressionTranslator
                     sb.Append(".clone()");
                 }
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Writes an operand of the quantity <c>+</c>/<c>-</c> guard (#1068). A simple place
+    /// (identifier/member access) is written bare — the receiver and the <c>&amp;</c>-borrowed argument
+    /// of a method call auto-ref a place without moving it. A compound expression (e.g. a conditional)
+    /// must itself evaluate to an owned value before the call site can consume it, so it is parenthesized
+    /// and its leaf places are cloned via <see cref="WriteOwnedOperand"/> (#1268).
+    /// </summary>
+    private void WriteQuantityOperand(Expr expr, StringBuilder sb)
+    {
+        if (expr is IdentifierExpr or MemberAccessExpr)
+        {
+            WriteOperand(expr, sb, null, null, clone: false);
+            return;
+        }
+
+        sb.Append('(');
+        WriteOwnedOperand(expr, sb);
+        sb.Append(')');
+    }
+
+    /// <summary>
+    /// Writes an expression so it evaluates to an owned value, recursing into a conditional's branches
+    /// (including nested conditionals) so a leaf place a branch would otherwise move out of
+    /// <c>&amp;self</c> is cloned instead — the block-expression dual of <see cref="WriteOperandValue"/>
+    /// (#1268).
+    /// </summary>
+    private void WriteOwnedOperand(Expr expr, StringBuilder sb)
+    {
+        if (expr is ConditionalExpr cond)
+        {
+            var condBuf = new StringBuilder();
+            Write(cond.Condition, condBuf, null);
+            sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
+            WriteOwnedOperand(cond.Then, sb);
+            sb.Append(" } else { ");
+            WriteOwnedOperand(cond.Else, sb);
+            sb.Append(" }");
+            return;
+        }
+
+        TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+        Write(expr, sb, null);
+        if (IsNonCopyPlace(expr, type))
+        {
+            sb.Append(".clone()");
         }
     }
 

@@ -263,6 +263,48 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1268, follow-up of #1068's Add/Sub fix: a <c>quantity</c>'s unit-checked <c>+</c>/<c>-</c>
+    /// must compile via a real <c>cargo check</c> when an operand is a compound (non-place) expression
+    /// such as a conditional, not just a bare identifier/field access. The #1068 guard wrote a
+    /// conditional operand's branches as bare place expressions (<c>self.a</c>/<c>self.b</c>) with no
+    /// borrow/clone, so the generated <c>if</c>/<c>else</c> tried to move a non-<c>Copy</c> field out of
+    /// <c>&amp;self</c> — a real E0507.
+    /// </summary>
+    [Fact]
+    public void Quantity_addition_with_conditional_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "  }\n" +
+            "  value Mix {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    flag: Bool\n" +
+            "    combined: Weight = (if flag then a else b) + a\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): a conditional branch that yields a non-Copy
+        // field must be cloned, never emitted as a bare, un-borrowed place headed into the if/else.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.a.clone()");
+        rust.ShouldContain("self.b.clone()");
+        rust.ShouldNotContain("{ self.a }");
+        rust.ShouldNotContain("{ self.b }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1084, sibling of #1068's Add/Sub fix: a <c>quantity</c> value object's scalar
     /// <c>* scalar</c>/<c>/ scalar</c> — <c>scaled: Weight = base * 2</c> / <c>halved: Weight = base / 2</c>
     /// — must get real <c>impl std::ops::Mul</c>/<c>Div</c> so the native operator the translator lowers
