@@ -52,8 +52,10 @@ public static class RouteDerivation
     /// either follows a lowercase/digit or ends an acronym run (an uppercase followed by a lowercase), so
     /// acronyms split as expected (<c>XMLImport → xml-import</c>) — matching the word-boundary convention
     /// the per-language <c>ToSnakeCase</c> naming helpers use. Thin wrapper over the shared
-    /// <see cref="IdentifierWords.Split"/> boundary rule (#1239).
+    /// <see cref="IdentifierWords.Split"/> boundary rule (#1239); passes <c>splitAfterDigit: true</c> to
+    /// preserve this method's pre-extraction digit-boundary behavior (<c>Order2Ship → order2-ship</c>) —
+    /// a rule the per-language <c>ToSnakeCase</c> helpers never had (#1239 code review).
     /// </summary>
     public static string Kebab(string name) =>
-        string.Join('-', IdentifierWords.Split(name)).ToLowerInvariant();
+        string.Join('-', IdentifierWords.Split(name, splitAfterDigit: true)).ToLowerInvariant();
 }

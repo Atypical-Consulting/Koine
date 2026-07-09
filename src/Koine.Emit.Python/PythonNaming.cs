@@ -78,7 +78,11 @@ internal static class PythonNaming
     /// Handles PascalCase, camelCase, already-snake_case inputs, and acronym runs:
     /// <c>UnitPrice</c> → <c>unit_price</c>, <c>unitPrice</c> → <c>unit_price</c>,
     /// <c>URLPath</c> → <c>url_path</c>, <c>subtotal</c> → <c>subtotal</c>.
-    /// No leading underscore is ever produced.
+    /// No leading underscore is ever produced. Digits never start a new word (<c>V2Import</c> →
+    /// <c>v2import</c>, not <c>v2_import</c>) — unlike <see cref="RouteDerivation.Kebab"/>, which does
+    /// split after a digit; passing <c>splitAfterDigit: false</c> below preserves this method's
+    /// original behavior (#1239 code review: the two pre-extraction implementations genuinely
+    /// disagreed on this).
     /// </summary>
     public static string ToSnakeCase(string name)
     {
@@ -95,32 +99,10 @@ internal static class PythonNaming
         }
 
         // Thin wrapper over the shared IdentifierWords.Split boundary rule (#1239). The
-        // already-snake_case short-circuit above and the underscore de-duplication below are
-        // Python-local input handling, not part of the shared core.
-        var joined = string.Join('_', IdentifierWords.Split(name)).ToLowerInvariant();
-        return CollapseUnderscoreRuns(joined).TrimStart('_');
-    }
-
-    /// <summary>
-    /// Collapses any run of consecutive underscores already present in <paramref name="value"/> down
-    /// to one, mirroring the pre-extraction single-pass algorithm's underscore de-duplication. Not
-    /// part of the shared <see cref="IdentifierWords"/> boundary rule — separator-specific
-    /// normalization local to snake_case.
-    /// </summary>
-    private static string CollapseUnderscoreRuns(string value)
-    {
-        var sb = new StringBuilder(value.Length);
-        foreach (var c in value)
-        {
-            if (c == '_' && sb.Length > 0 && sb[sb.Length - 1] == '_')
-            {
-                continue;
-            }
-
-            sb.Append(c);
-        }
-
-        return sb.ToString();
+        // already-snake_case short-circuit above is Python-local input handling, not part of the
+        // shared core.
+        var joined = string.Join('_', IdentifierWords.Split(name, splitAfterDigit: false)).ToLowerInvariant();
+        return IdentifierWords.CollapseSeparatorRuns(joined, '_').TrimStart('_');
     }
 
     /// <summary>

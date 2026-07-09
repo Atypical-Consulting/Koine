@@ -194,9 +194,12 @@ internal static class PhpNaming
     /// <summary>
     /// Converts an identifier to <c>snake_case</c>. Handles PascalCase, camelCase, acronym runs:
     /// <c>UnitPrice</c> → <c>unit_price</c>, <c>URLPath</c> → <c>url_path</c>,
-    /// <c>ID</c> → <c>id</c>. Thin wrapper over the shared <see cref="IdentifierWords.Split"/>
-    /// boundary rule (#1239); the already-snake_case short-circuit and underscore de-duplication
-    /// below are Php-local input handling, not part of the shared core.
+    /// <c>ID</c> → <c>id</c>. Digits never start a new word (<c>V2Import</c> → <c>v2import</c>, not
+    /// <c>v2_import</c>) — unlike <see cref="RouteDerivation.Kebab"/>, which does split after a
+    /// digit; passing <c>splitAfterDigit: false</c> below preserves this method's original behavior
+    /// (#1239 code review: the two pre-extraction implementations genuinely disagreed on this). Thin
+    /// wrapper over the shared <see cref="IdentifierWords.Split"/> boundary rule; the already-snake_case
+    /// short-circuit below is Php-local input handling, not part of the shared core.
     /// </summary>
     private static string ToSnakeCase(string name)
     {
@@ -211,30 +214,8 @@ internal static class PhpNaming
             return name;
         }
 
-        var joined = string.Join('_', IdentifierWords.Split(name)).ToLowerInvariant();
-        return CollapseUnderscoreRuns(joined).TrimStart('_');
-    }
-
-    /// <summary>
-    /// Collapses any run of consecutive underscores already present in <paramref name="value"/> down
-    /// to one, mirroring the pre-extraction single-pass algorithm's underscore de-duplication. Not
-    /// part of the shared <see cref="IdentifierWords"/> boundary rule — separator-specific
-    /// normalization local to snake_case.
-    /// </summary>
-    private static string CollapseUnderscoreRuns(string value)
-    {
-        var sb = new StringBuilder(value.Length);
-        foreach (var c in value)
-        {
-            if (c == '_' && sb.Length > 0 && sb[sb.Length - 1] == '_')
-            {
-                continue;
-            }
-
-            sb.Append(c);
-        }
-
-        return sb.ToString();
+        var joined = string.Join('_', IdentifierWords.Split(name, splitAfterDigit: false)).ToLowerInvariant();
+        return IdentifierWords.CollapseSeparatorRuns(joined, '_').TrimStart('_');
     }
 
     private static bool IsAlreadySnakeCase(string name)
