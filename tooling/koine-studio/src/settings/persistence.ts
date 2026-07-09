@@ -20,6 +20,7 @@ import {
 import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
 import { DEFAULT_DECK_STATE, isValidCenter, isValidDeckState, type CenterView, type DeckState } from '@/store/slices/uiChrome';
+import { readRaw, writeRaw } from '@/shell/storage';
 
 // --- settings model ----------------------------------------------------------
 
@@ -236,26 +237,6 @@ export const ACCENT_NAMES: readonly AccentName[] = ['blue', 'teal', 'violet', 'a
 // The canonical MCP-client roster, used to validate a stored mcpClient. The recipe UI (mcp.ts)
 // owns the per-client copy; this layer only owns the set of valid ids.
 const MCP_CLIENT_IDS: readonly McpClientId[] = ['claude-desktop', 'lm-studio', 'cursor', 'vscode', 'generic'];
-
-// --- raw localStorage helpers (never throw) ----------------------------------
-
-/** Read a key, returning null on any error or when storage is unavailable. */
-function readRaw(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-/** Write a key, swallowing quota/security errors. */
-function writeRaw(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // storage unavailable or full — best effort only
-  }
-}
 
 // --- guarded JSON-object blob helpers ----------------------------------------
 // The shared read/parse/guard prologue and the guarded read-modify-write behind the override
