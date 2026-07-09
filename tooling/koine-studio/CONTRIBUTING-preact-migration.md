@@ -111,10 +111,10 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
   - **Permanent islands** (`src/editor/**`, `src/diagrams/diagrams-maxgraph.ts`, `src/host/**`) — the
     CodeMirror / maxGraph / host-seam non-goals above; imperative by design, off permanently.
   - **Pending-migration islands** — one entry per already-imperative panel (a few related panels may share
-    one entry), **each naming the migration issue that retires it** (explorer → #989, the
+    one entry), **each naming the migration issue that retires it** (the
     self-contained panels welcome/about/generate-project → #991, the model/docs builders → #992; settings
     `prefs.ts` and `inspectorController.tsx` span the arc — the config lists their exact issue set;
-    aiPanel's entry was deleted when #990 landed). This
+    aiPanel's entry was deleted when #990 landed; the explorer's entry was deleted when #989 landed). This
     is a **file-level** allow-list, not a per-file count budget: it freezes the *set of files* permitted to
     use `innerHTML` — any new file, and all non-island prod, stays fully gated — and shrinks as each panel
     migrates. **Shrinking this allow-list to empty is the definition of done for the migration arc.**
@@ -125,17 +125,18 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
 > is now the canonical, CI-checked census of pending-migration islands — one entry per file, each named
 > with the issue that retires it (#978). The hand-run grep below stays as a quick cross-check, not the
 > source of truth: `grep -rE 'innerHTML|document\.createElement' src/shell | grep -v '\.test\.' | wc -l`.
-> The remaining sites are the intentional imperative islands below (CodeMirror, the file explorer,
-> maxGraph, the `src/host` seam, and inspectorController's direct DOM writes) —
-> not chrome shells. (The all-files count is higher because the migrated panels' tests now seed their
-> hosts via Preact `render`/`createElement`.)
+> The remaining sites are the intentional imperative islands below (CodeMirror, maxGraph, the
+> `src/host` seam, and inspectorController's direct DOM writes) — not chrome shells. (The all-files
+> count is higher because the migrated panels' tests now seed their hosts via Preact
+> `render`/`createElement`.)
 
 - **Already Preact (reference patterns — do not redo):** `HistoryControls`, `UnsavedIndicator`,
   `CompilingIndicator`, `MobileZoneBar`, `StoreInspector`, `inspectorSheet`; `src/model/PropertiesPanel`,
   `RelationshipsPanel`, `EventsPanel`, `GlossaryPanel`, `ModelOutlinePanel`, `ContextBreadcrumb`,
   `SourceControlPanel`; `src/docs/DocsPanelHost`; the assistant chat —
   `src/ai/components/AssistantChat.tsx` (+ `Transcript`, `ChangeSetPanel`, `Composer`, `MdHtml`) over the
-  `chat` slice (#984/#990).
+  `chat` slice (#984/#990); the file explorer — `src/shell/ExplorerPanel.tsx` (+ `ExplorerItem`,
+  `explorerModel.ts`) over the `uiChrome` slice's `explorerFilter`/`explorerCollapsed` fields (#989).
 - **Migrated in #759:** the **right strip** → `src/shell/RightStrip.tsx`; the **left rail** →
   `src/shell/LeftRail.tsx`; the **AI-Chat host** → `src/shell/AssistantView.tsx` (a thin Preact host
   around the imperative `aiPanel`); the **export menu** → `src/diagrams/ExportMenu.tsx`; the capability
@@ -145,9 +146,20 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
 - **Resolved by prior work (no longer placeholders):** the right-rail **Rules** / **Notes** tabs were
   retired in #730 (invariants now surface in Properties; model Notes live in the center Deck's Docs
   surface); the **Compatibility** `view-check` paints a real "Check against baseline…" idle state.
-- **Stay imperative (non-goals):** **CodeMirror** (the editor, `editorSession`), the **file explorer**
-  (`explorer.ts`, fills `#filetree-body`), **maxGraph** (the domain canvas, fills `#rail-domain-pane`),
-  the **`src/host/` seam**, and the global export-menu **dismissal** seam (`exportMenuDismiss.ts`, a
-  document-level listener). These own and mutate their own DOM/lifecycle; do not re-render them through
-  Preact. (The assistant panel left this list with #990 — the lazy SDK load survives inside its send
-  effect; `AssistantView` now hosts Studio's Preact `AssistantChat`.)
+- **Stay imperative (non-goals):** **CodeMirror** (the editor, `editorSession`), **maxGraph** (the domain
+  canvas, fills `#rail-domain-pane`), the **`src/host/` seam**, and the global export-menu **dismissal**
+  seam (`exportMenuDismiss.ts`, a document-level listener). These own and mutate their own DOM/lifecycle;
+  do not re-render them through Preact. (The assistant panel left this list with #990 — the lazy SDK load
+  survives inside its send effect; `AssistantView` now hosts Studio's Preact `AssistantChat`.)
+
+> The **file explorer** is no longer on this list: #989 replaced the imperative tree and its re-render/
+> interaction-deferral machinery (`explorer.ts`, `#filetree-body`) with a keyed Preact `ExplorerPanel`
+> (`src/shell/ExplorerPanel.tsx` + `ExplorerItem.tsx` + `explorerModel.ts`) mounted behind a thin
+> `createExplorer(cb)` facade (`src/shell/explorer.tsx`). The imperative tree had been a recurring bug
+> generator — closed bug #355 (a multi-root inline-create input mis-mounted outside its group) traced to
+> state reconstructed by re-querying the DOM after a rebuild instead of being owned by a component — and
+> keyed Preact reconciliation makes that whole class of bug structurally impossible: a re-render can no
+> longer tear down an open rename input, a mid-drag row, or an open menu. The host contract (`ide.tsx`
+> wiring, `ExplorerCallbacks`, the `#filetree-body` mount) was preserved untouched throughout. The other
+> islands in this list — CodeMirror, maxGraph, the `src/host/` seam, `exportMenuDismiss.ts` — remain
+> unchanged non-goals; this migration doesn't touch them.
