@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { countsByContext, groupByConstruct } from '@/model/modelOutline';
+import { constructForKind, countsByContext, groupByConstruct } from '@/model/modelOutline';
 import type { GlossaryEntry, GlossaryModel, Range } from '@/lsp/lsp';
 
 const range = (line: number): Range => ({ start: { line, character: 2 }, end: { line, character: 8 } });
@@ -74,5 +74,22 @@ describe('countsByContext', () => {
       { label: 'Aggregates', count: 1 },
       { label: 'Integration Events', count: 1 },
     ]);
+  });
+});
+
+describe('constructForKind', () => {
+  // Characterization baseline (#1220): pins today's { slug, label } for every raw backend kind
+  // spelling — including the `quantity`/`'integration event'` aliases folded by `CONSTRUCTS` and
+  // `SINGULAR_LABEL_OF_KIND` — plus an unknown kind's fallback. Must stay green across the dedup
+  // that routes this lookup through the canonical `normalizeDddKind` (`src/model/dddKind.ts`).
+  test.each([
+    ['aggregate', { slug: 'aggregate', label: 'Aggregate' }],
+    ['value', { slug: 'value', label: 'Value Object' }],
+    ['quantity', { slug: 'value', label: 'Value Object' }],
+    ['integration event', { slug: 'integration-event', label: 'Integration Event' }],
+    ['service', { slug: 'service', label: 'Domain Service' }],
+    ['nonexistent-kind', { slug: 'type', label: 'Type' }],
+  ])('constructForKind(%j) === %j', (kind, expected) => {
+    expect(constructForKind(kind)).toEqual(expected);
   });
 });
