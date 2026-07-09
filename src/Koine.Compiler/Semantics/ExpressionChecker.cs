@@ -307,9 +307,16 @@ internal sealed class ExpressionChecker
     /// bound.StoredFields). Derived/computed members are excluded via MemberAnalysis.IsDerived so the
     /// validator and every emitter classify members identically.
     /// </summary>
+    /// <remarks>
+    /// #1285: resolves <paramref name="vo"/> via <see cref="ResolveValueObject"/> — the same
+    /// context-aware lookup (<c>vo.Qualifier ?? _resolver.Context</c>, R13.2) already used elsewhere in
+    /// this file — NOT the flat <see cref="ModelIndex.TryGetDecl"/> alone, which is keyed by bare name
+    /// across the whole model. Two different contexts may legally declare their own same-named value
+    /// object; resolving without the reference site's context can silently pick the WRONG declaration.
+    /// </remarks>
     private bool HasNumericStoredField(TypeRef vo)
     {
-        if (!_index.TryGetDecl(vo.Name, out TypeDecl decl) || decl is not ValueObjectDecl v)
+        if (ResolveValueObject(vo) is not { } v)
         {
             return false;
         }
