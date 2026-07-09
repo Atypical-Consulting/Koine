@@ -13,9 +13,6 @@ import {
     saveApiKey,
     clearApiKey,
     whenSecretsReady,
-    loadWorkspaceOverrides,
-    saveWorkspaceOverride,
-    effectiveSettings,
     resolveKeybindings,
     loadKeybindingOverrides,
     saveKeybindingOverride,
@@ -37,6 +34,7 @@ import {
     accentPicker,
     langPicker,
 } from "@/settings/prefsControls";
+import { createScopeKit } from "@/settings/prefsSections/scopeKit";
 import { createJsonView } from "@/editor/editor";
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
 import {
@@ -238,123 +236,17 @@ export function mountPreferencesPane(
 
     // --- per-workspace scope control ------------------------------------------
     // The four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be overridden per
-    // workspace. Each scoped row pairs its VALUE control with a User/Workspace `segmented` toggle that
-    // routes commits either to the global settings blob (User) or the workspace override store
-    // (Workspace). When no workspace is open the toggle is disabled and behavior is forced to User.
-
-    type Scope = "user" | "workspace";
-
-    // One scoped row's wiring, registered so populate() can re-sync its scope + value on every open.
-    interface ScopedControl {
-        /** Re-read the override store for the current workspace and reflect scope + effective value. */
-        sync(s: Settings): void;
-    }
-    const scopedControls: ScopedControl[] = [];
-
-    // The current workspace key, or null when none is open / the host doesn't scope settings.
-    const wsKey = (): string | null => cb.workspaceKey?.() ?? null;
-
-    /**
-     * The shared scope-binding for one workspace-scopable field. Builds the User/Workspace segmented
-     * toggle, owns this row's scope state, exposes the `scopedCommit` the value control calls on edit,
-     * and registers itself so populate() re-syncs scope + effective value on every open. The value
-     * control is supplied via `setValue` (so the binding can reset it on a Workspace→User flip) and
-     * `title` names the segmented accessibly ("<title> scope").
-     *
-     * - User scope (or no workspace): value edits go through patchSettings (the global path).
-     * - Workspace scope: value edits go through saveWorkspaceOverride; the host is notified with the
-     *   UNCHANGED user settings so the global value is never touched (it re-applies effective behavior).
-     */
-    function makeScopeBinding<
-        K extends "previewTarget" | "formatOnSave" | "wordWrap" | "lspTrace",
-    >(
-        field: K,
-        title: string,
-        setValue: (value: Settings[K]) => void,
-    ): { seg: HTMLElement; scopedCommit(value: Settings[K]): void } {
-        let scope: Scope = "user";
-
-        function scopedCommit(value: Settings[K]): void {
-            const key = wsKey();
-            if (scope === "workspace" && key) {
-                saveWorkspaceOverride(key, field, value);
-                cb.onChange(loadSettings());
-            } else {
-                cb.onChange(
-                    patchSettings({ [field]: value } as Partial<Settings>),
-                );
-            }
-        }
-
-        const scopeSeg = segmented<Scope>(
-            `${title} scope`,
-            [
-                { value: "user", label: "User" },
-                { value: "workspace", label: "Workspace" },
-            ],
-            (next) => {
-                const key = wsKey();
-                if (!key) return; // disabled — nothing to do without a workspace
-                if (next === scope) return;
-                scope = next;
-                if (next === "workspace") {
-                    // Make "Workspace" meaningful at once: persist the row's CURRENT value as the override.
-                    saveWorkspaceOverride(key, field, loadSettings()[field]);
-                } else {
-                    // Back to User: clear the override and reset the value control to the user value.
-                    saveWorkspaceOverride(key, field, null);
-                    setValue(loadSettings()[field]);
-                }
-                cb.onChange(loadSettings());
-            },
-        );
-
-        // Reflect "no workspace" unambiguously: disable the toggle's buttons and mark the group, so the
-        // control keeps its place in the layout while clearly inert (and the state stays testable).
-        function applyEnabled(): void {
-            scopeSeg.setDisabled(wsKey() === null);
-        }
-
-        scopedControls.push({
-            sync(s: Settings): void {
-                const key = wsKey();
-                const ov = key ? loadWorkspaceOverrides(key) : {};
-                scope = key && field in ov ? "workspace" : "user";
-                scopeSeg.set(scope);
-                // Show the effective value: a Workspace row shows its override, a User row the user value.
-                setValue(effectiveSettings(s, key)[field]);
-                applyEnabled();
-            },
-        });
-
-        return { seg: scopeSeg.el, scopedCommit };
-    }
-
-    /**
-     * Build a labelled scoped ROW (label/description on the left; value control + User/Workspace toggle
-     * on the right). `makeControl` receives the row's `scopedCommit` to call on every value edit.
-     */
-    function scopedRow<
-        K extends "previewTarget" | "formatOnSave" | "wordWrap" | "lspTrace",
-    >(
-        field: K,
-        title: string,
-        description: string,
-        makeControl: (scopedCommit: (value: Settings[K]) => void) => {
-            el: HTMLElement;
-            set(value: Settings[K]): void;
-        },
-    ): HTMLElement {
-        // Late-bound so the binding's Workspace→User reset can drive the value control built just below.
-        let control: { el: HTMLElement; set(value: Settings[K]): void };
-        const binding = makeScopeBinding(field, title, (v) => control.set(v));
-        control = makeControl(binding.scopedCommit);
-
-        const wrap = document.createElement("div");
-        wrap.className = "koi-set-scoped";
-        wrap.append(control.el, binding.seg);
-        return row(title, description, wrap, control.el);
-    }
+    // workspace. The shared machinery (the User/Workspace segmented toggle, the scoped-commit routing,
+    // and the scoped row layout) lives in @/settings/prefsSections/scopeKit (#987 task 2) — one kit
+    // instance is built here and reused at its three call sites below (Editor's wordWrapRow /
+    // formatOnSaveRow, Output's outputScope, Advanced's traceRow). `deps.commit` is this module's own
+    // `commit` (the User-scope path); `deps.onChange` is the Workspace-scope path and the segmented
+    // toggle's own scope-flip handler.
+    const scopeKit = createScopeKit({
+        workspaceKey: () => cb.workspaceKey?.() ?? null,
+        commit,
+        onChange: cb.onChange,
+    });
 
     // --- Appearance -----------------------------------------------------------
 
@@ -536,7 +428,7 @@ export function mountPreferencesPane(
     // Word wrap + Format on save are workspace-scopable: each pairs its toggle with a User/Workspace
     // scope control (scopedRow). The toggle is built inside makeControl so its onChange routes through
     // the row's scopedCommit (User → global blob; Workspace → the override store).
-    const wordWrapRow = scopedRow(
+    const wordWrapRow = scopeKit.scopedRow(
         "wordWrap",
         "Word wrap",
         "Wrap long lines instead of scrolling sideways.",
@@ -555,7 +447,7 @@ export function mountPreferencesPane(
             };
         },
     );
-    const formatOnSaveRow = scopedRow(
+    const formatOnSaveRow = scopeKit.scopedRow(
         "formatOnSave",
         "Format on save",
         "Run the Koine formatter when you press save.",
@@ -920,7 +812,7 @@ export function mountPreferencesPane(
     // previewTarget is workspace-scopable. Route the picker's commit through the shared scope binding
     // (User → global blob; Workspace → the override store) and surface its User/Workspace toggle in the
     // output block's heading row.
-    const outputScope = makeScopeBinding(
+    const outputScope = scopeKit.makeScopeBinding(
         "previewTarget",
         "Output language",
         (t) => outputLang.set(t),
@@ -1492,7 +1384,7 @@ export function mountPreferencesPane(
         { value: "messages", label: "Messages" },
         { value: "verbose", label: "Verbose" },
     ] as const);
-    const traceRow = scopedRow(
+    const traceRow = scopeKit.scopedRow(
         "lspTrace",
         "Language server trace",
         "Verbosity of LSP logging in the console.",
@@ -1723,7 +1615,7 @@ export function mountPreferencesPane(
         // row's scope (User/Workspace) from the override store and set its value control to the EFFECTIVE
         // value, so a Workspace row shows its override while a User row shows the user value. Runs after
         // outputLang.refresh() so the picker's cards exist before its selection is set.
-        for (const sc of scopedControls) sc.sync(s);
+        scopeKit.syncAll(s);
         shellArgsControl.set(s.terminalShellArgs);
         // Repaint the Keyboard panel from the current overrides (and cancel any armed recording / open
         // conflict) so a reopen — including the one the Advanced reset triggers — shows fresh chords.
