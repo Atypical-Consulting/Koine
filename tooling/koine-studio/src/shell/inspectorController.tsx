@@ -1682,6 +1682,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     // next model load rebuilds against the current model.
     modelIndex = null;
     indexPromise = null;
+    // Drop the shared glossary/model in-flight fetch too (#484 follow-up), for the same reason: without
+    // this, a fetch already in flight when THIS edit lands would still be reused by fetchGlossaryModel()/
+    // fetchStructuredModel() on the next loadModel() (they only start a new lsp call when the memo is
+    // null) — seeding the Domain navigator and model index with the PRIOR edit's data instead of this
+    // one's, on a slow LSP / fast-typing overlap. Dropping the reference doesn't cancel the in-flight
+    // promise (JS can't cancel promises) — its `.finally()` still runs, harmlessly, on an already-null var
+    // — it just forces the next caller to kick off a fresh request for the current model.
+    glossaryFetch = null;
+    structuredModelFetch = null;
     cachedDomainIndex = null; // the assistant's domain index is derived from the same model
     invalidateBottomPanels(); // the Events/Relationships/Context Map tables are model-derived too
   }
