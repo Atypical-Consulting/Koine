@@ -1,151 +1,6 @@
 @use '../abstracts' as a;
 
-/* --- DDD-aware model workspace (#142): construct-grouped navigator + counts + inspector --------- */
-.koi-model {
-  padding: 0.5rem 0.75rem 1rem;
-}
-
-/* Explorer outline = a type-to-filter box above the construct tree (the tree is rendered into
-   .koi-outline-mount by ModelOutlinePanel). The filter narrows leaves by name within the active scope. */
-.koi-outline {
-  display: flex;
-  flex-direction: column;
-}
-
-.koi-outline-filter {
-  margin: var(--koi-space-2) var(--koi-space-3) 0;
-  padding: var(--koi-space-1-25) var(--koi-space-2);
-  background: var(--koi-paper);
-  color: var(--koi-fg);
-  border: 1px solid var(--koi-line);
-  border-radius: var(--koi-radius-sm);
-  font-family: var(--koi-font-body);
-  font-size: var(--koi-text-xs);
-
-  &::placeholder {
-    color: var(--koi-muted);
-  }
-
-  /* Keep a clearly-visible focus ring for keyboard users (WCAG 2.4.7), matching the context <select>. */
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent);
-    outline-offset: 1px;
-    border-color: var(--koi-accent);
-  }
-}
-
-.koi-model-ctx {
-  margin-bottom: 1.1rem;
-}
-
-.koi-model-ctx-name {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0 0 0.4rem;
-  font: inherit;
-  font-size: var(--koi-text-base);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--koi-muted);
-  cursor: pointer;
-
-  &:hover:not(:disabled) {
-    color: var(--koi-accent);
-  }
-
-  &:disabled {
-    cursor: default;
-  }
-}
-
-/* The compact per-context counts strip. */
-.koi-model-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-bottom: 0.6rem;
-}
-
-.koi-model-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: var(--koi-text-2xs);
-  color: var(--koi-muted);
-  padding: 0.05rem 0.45rem;
-  border-radius: var(--koi-radius-pill);
-  background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
-}
-
-.koi-model-count-num {
-  font-family: var(--koi-font-mono);
-  font-weight: 600;
-  color: var(--koi-fg);
-}
-
-.koi-model-construct {
-  margin-bottom: 0.6rem;
-}
-
-.koi-model-construct-name {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0 0 0.25rem;
-  font-size: var(--koi-text-sm);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--koi-accent);
-}
-
-.koi-model-construct-num {
-  font-family: var(--koi-font-mono);
-  font-weight: 600;
-  color: var(--koi-muted);
-}
-
-.koi-model-list {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 var(--koi-space-2);
-  border-left: 1px solid var(--koi-line);
-}
-
-.koi-model-leaf {
-  display: flex;
-  align-items: center;
-  gap: var(--koi-space-1-5);
-  width: 100%;
-  /* WCAG 2.5.8 target size: keep each construct row at least 24px tall so it's a comfortable click
-     and pointer target (was ~23.5px). box-sizing keeps the padding inside that minimum. */
-  box-sizing: border-box;
-  min-height: 26px;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--koi-fg);
-  padding: var(--koi-space-0-75) var(--koi-space-1-5);
-  border-radius: var(--koi-radius-xs);
-  cursor: pointer;
-  font-family: var(--koi-font-mono);
-  font-size: var(--koi-text-base-plus);
-
-  &:hover {
-    background: var(--koi-surface);
-  }
-
-  /* Cross-highlight: the leaf matching the current selection (set from the diagram or here). */
-  &.is-selected {
-    background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
-    color: var(--koi-accent);
-  }
-}
+/* --- DDD-aware model workspace (#142): per-construct icons + Domain navigator + element inspector --- */
 
 /* --- per-DDD-concept icons (shape + colour) -----------------------------------------------------
    One icon per construct, in the Explorer leaves and construct headers, so each concept is scannable
@@ -446,8 +301,8 @@
 /* --- Domain navigator: the TACTICAL tree (#453) ------------------------------------------------
    The aggregate-centric drill-down shown under the breadcrumb once a context is in scope: each aggregate
    owns a bracketed spine of its constructs; declarations that live at the context level (not inside an
-   aggregate) sit below as peers. Leaves reuse the Explorer's mono, shape-coded look (.koi-model-leaf) so
-   a value object reads the same blue lozenge in both navigators. */
+   aggregate) sit below as peers. Leaves reuse the Explorer's mono, shape-coded look so a value object
+   reads the same blue lozenge in both navigators. */
 .koi-domain-tactical-body {
   padding: var(--koi-space-1) var(--koi-space-2) var(--koi-space-3);
 }
@@ -473,7 +328,7 @@
   gap: var(--koi-space-1-5);
   width: 100%;
   box-sizing: border-box;
-  /* WCAG 2.5.8 target size — keep each row a comfortable click/pointer target, like .koi-model-leaf. */
+  /* WCAG 2.5.8 target size — keep each row a comfortable click/pointer target (min 24px, was ~23.5px). */
   min-height: 26px;
   text-align: left;
   background: transparent;
@@ -578,46 +433,6 @@
 
 .koi-tactical-empty {
   padding: var(--koi-space-1) var(--koi-space-1-5);
-}
-
-.koi-model-navs {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  margin-top: 0.4rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--koi-line);
-}
-
-.koi-model-nav {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--koi-fg);
-  padding: var(--koi-space-0-75) var(--koi-space-1-5);
-  border-radius: var(--koi-radius-xs);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--koi-text-base-plus);
-  font-weight: 600;
-
-  &:hover:not(:disabled) {
-    background: var(--koi-surface);
-    color: var(--koi-accent);
-  }
-
-  &:disabled {
-    color: var(--koi-muted);
-    cursor: default;
-  }
-}
-
-/* The workspace stacks the navigator above the element inspector (#142, Task 3). */
-.koi-model-inspector {
-  margin-top: 0.6rem;
-  border-top: 2px solid var(--koi-line);
 }
 
 /* --- element inspector (#142): a "spec card" for the selected domain element -------------------

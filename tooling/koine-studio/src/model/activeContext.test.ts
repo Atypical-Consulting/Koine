@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   ALL_CONTEXTS,
+  contextOf,
   fileContextFollow,
   filterGlossaryModel,
   isAllContexts,
@@ -184,6 +185,26 @@ describe('filterGlossaryModel', () => {
       'Sales',
       'Sales.Order',
     ]);
+  });
+});
+
+describe('contextOf', () => {
+  test('returns the segment before the first dot', () => {
+    expect(contextOf('Sales.Order')).toBe('Sales');
+    expect(contextOf('Sales.Order.Line')).toBe('Sales'); // only the FIRST dot — Order.Line is one member name
+  });
+
+  test('with no fallback, an unqualified name is its own context (identity) — the scoping helpers’ need', () => {
+    expect(contextOf('Sales')).toBe('Sales');
+  });
+
+  test('with a fallback, an unqualified name resolves to it instead — a UI caller’s active-scope need', () => {
+    expect(contextOf('Sales', 'Inventory')).toBe('Inventory');
+    expect(contextOf('Sales', '')).toBe('');
+  });
+
+  test('a qualified name ignores the fallback — the dot always wins', () => {
+    expect(contextOf('Sales.Order', 'Inventory')).toBe('Sales');
   });
 });
 

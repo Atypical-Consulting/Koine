@@ -563,6 +563,42 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     // The debounced refresh never ran: disposing cleared the timer (no post-teardown "document is not defined").
     expect(lsp.glossaryModel).not.toHaveBeenCalled();
   });
+
+  // Code-review regression (#484 follow-up): the shared glossaryModel()/model() in-flight-fetch memoizer
+  // that de-dupes the Domain navigator's reload against ensureModelIndex() must NOT survive across two
+  // separate edits. If a fetch from edit N is still in flight (slow LSP) when edit N+1's
+  // invalidateDocViews() runs, the memo has to drop so edit N+1's loadModel() starts its OWN fetch rather
+  // than reusing edit N's — otherwise the navigator/model index settle on stale (edit N) data with
+  // nothing left to correct it once edit N's slow fetch finally resolves.
+  test('invalidateDocViews() drops an in-flight glossary/model fetch — the next load fetches fresh, not the stale one', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    ctl.refreshActiveSurfaces(); // first load settles the baseline
+    await flush();
+    lsp.glossaryModel.mockClear();
+
+    // Edit N's fetch never resolves in this test — stands in for "still in flight when edit N+1 lands".
+    let resolveStaleGlossary!: (model: GlossaryModel) => void;
+    lsp.glossaryModel.mockImplementationOnce(
+      () =>
+        new Promise<GlossaryModel>((resolve) => {
+          resolveStaleGlossary = resolve;
+        }),
+    );
+    ctl.invalidateDocViews(); // edit N: without this the index/memo are still warm and loadModel is a no-op
+    ctl.refreshActiveSurfaces(); // kicks off the stale, never-(yet)-resolving fetch
+    await Promise.resolve(); // let it start without resolving
+
+    // Edit N+1 lands before edit N's fetch resolves.
+    ctl.invalidateDocViews();
+    ctl.refreshActiveSurfaces(); // must issue a FRESH call, not reuse edit N's still-pending one
+    await flush();
+
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(2); // edit N's (unresolved) + edit N+1's fresh call
+    resolveStaleGlossary(glossaryFixture()); // let edit N's stale fetch settle too, harmlessly, after
+    await flush();
+  });
 });
 
 describe('createInspectorController — bottom strip lazy loading', () => {
@@ -803,6 +839,31 @@ describe('createInspectorController — loading states clear on success', () => 
     expect(domainPane.textContent).toContain('Billing');
     // …and neither the navigator's loading placeholder nor any stale loading line is left behind.
     expect(domainPane.textContent).not.toContain('Loading');
+  });
+
+  // Regression (#484 follow-up on #460's review): a model reload used to fetch glossaryModel()/model()
+  // TWICE per edit — once from the Domain navigator's own doFetch, once from loadModel's ensureModelIndex
+  // — because each issued its own request. loadModel() now seeds the navigator's reload with the SAME
+  // in-flight fetch ensureModelIndex() starts, so the two endpoints are each called once per edit.
+  test('a model reload fetches glossaryModel()/model() once each — not once per consumer', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.refreshActiveSurfaces(); // the FIRST load: mounts the navigator (self-fetch) + builds the index
+    await flush();
+    lsp.glossaryModel.mockClear();
+    lsp.model.mockClear();
+
+    ctl.invalidateDocViews(); // an edit happened — the navigator reloads AND the index rebuilds
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
+    expect(lsp.model).toHaveBeenCalledTimes(1);
+    // The reload still painted correctly from the seeded data (behaviour unchanged).
+    const domainPane = domById('rail-domain-pane');
+    expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
   });
 
   test('the glossary replaces its "Loading glossary…" line on success', async () => {

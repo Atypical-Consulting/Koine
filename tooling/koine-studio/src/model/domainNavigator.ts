@@ -309,10 +309,24 @@ function noopTacticalHandlers(): TacticalHandlers {
  */
 export type DomainNavigatorHandlers = Partial<ModelOutlineHandlers>;
 
+/** A pre-fetched seed for {@link DomainNavigatorHandle.reload}: the glossary + structured model the
+ * caller already has in flight (or has), so the navigator's reload reuses them instead of re-issuing its
+ * own `glossaryModel()`/`model()` requests. Promises (not resolved values) so the caller can hand off an
+ * ALREADY-STARTED fetch — the navigator awaits the same in-flight request rather than delaying its own
+ * kickoff to wait for the caller's fetch to settle first. `contextMap()` is still fetched directly (its
+ * relation count is navigator-only, so there's nothing to de-dupe there). */
+export interface DomainNavigatorSeed {
+  glossaryModel: Promise<GlossaryModel>;
+  model: Promise<ModelNode | null>;
+}
+
 /** The live handle a mounted navigator returns. {@link reload} re-fetches the strategic data after a
- * model edit; {@link unmount} drops the store subscription so a torn-down host stops re-rendering. */
+ * model edit — optionally seeded (#484 follow-up on #460's review) to halve the per-edit fetch when the
+ * caller already fetched the same two endpoints; omit the seed and it self-fetches as before, so a bare
+ * `reload()` call (e.g. the unit tests) stays a no-op change. {@link unmount} drops the store subscription
+ * so a torn-down host stops re-rendering. */
 export interface DomainNavigatorHandle {
-  reload(): void;
+  reload(seed?: DomainNavigatorSeed): void;
   unmount(): void;
 }
 
@@ -445,15 +459,17 @@ export function mountDomainNavigator(
     paint(renderStrategic(model, cache.relLinks, strategicHandlers, scope), 'strategic');
   }
 
-  async function doFetch(): Promise<void> {
+  async function doFetch(seed?: DomainNavigatorSeed): Promise<void> {
     const seq = ++fetchSeq;
     try {
       // The model graph is fetched alongside the strategic data (and degrades to an empty tactical tree
       // on its own failure) so a drill-in repaints synchronously from cache, like every other altitude.
+      // A seed (#484 follow-up) reuses the caller's already-in-flight glossary/model fetch instead of
+      // issuing a second one; contextMap() is always fetched here (navigator-only data).
       const [model, contextMap, tree] = await Promise.all([
-        lsp.glossaryModel(),
+        seed ? seed.glossaryModel : lsp.glossaryModel(),
         lsp.contextMap(),
-        lsp.model().catch(() => null),
+        seed ? seed.model : lsp.model().catch(() => null),
       ]);
       if (seq !== fetchSeq) return; // a newer reload superseded this fetch
       cache = { model, relLinks: contextMap.relations.length, tree };
@@ -490,7 +506,7 @@ export function mountDomainNavigator(
   void doFetch(); // then fetch the strategic data and repaint
 
   return {
-    reload: () => void doFetch(),
+    reload: (seed) => void doFetch(seed),
     unmount: () => {
       closeLeafMenu(false); // a torn-down host must not leave an orphaned floating menu + global listeners
       unsubscribe();
