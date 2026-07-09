@@ -1,11 +1,20 @@
 // Settings form for Koine Studio: the two-pane preference center the gear-launched Settings page embeds
 // (the legacy modal was retired, #731). Laid out as a vertical category rail (Appearance / Editor /
-// Assistant / Advanced) on the left, the active category's controls on the right. The set of persisted
-// Settings is the
-// source of truth (./persistence); each control writes a single-field patch through patchSettings() and
-// reports the merged Settings back via onChange. The app's onChange handler is the single place that
-// re-skins the studio (applyAppearance + editor soft-wrap), so flipping a control applies live there;
-// only Theme is applied here directly, through ./theme's setTheme (its own live-apply + listeners).
+// Keyboard / Output / Assistant / MCP / Advanced / About) on the left, the active category's controls on
+// the right. The set of persisted Settings (./persistence) is the source of truth; each control writes a
+// single-field patch through patchSettings() and reports the merged Settings back via onChange. The app's
+// onChange handler is the single place that re-skins the studio (applyAppearance + editor soft-wrap), so
+// flipping a control applies live there; only Theme is applied here directly, through ./theme's setTheme
+// (its own live-apply + listeners).
+//
+// mountPreferencesPane below is a thin ASSEMBLER, not the home of the controls themselves (#987): each
+// category's DOM + wiring lives in its own module under ./prefsSections/ (appearance, about, editor,
+// keyboard, output, assistant, mcp, advanced), built via a buildXSection(ctx, deps) call and composed
+// into the `categories` rail here. Shared machinery lives beside them: ./prefsControls.ts (the pure,
+// callback-driven control factories — row/panel/select/toggle/segmented/…), ./prefsSections/scopeKit.ts
+// (the User/Workspace per-field override toggle, built once and passed to every scopable section), and
+// ./prefsSections/types.ts (the SectionCtx/PrefsSection contracts every section module implements). A
+// section module must never import this file — mountPreferencesPane imports them, never the reverse.
 import {
     loadSettings,
     patchSettings,
@@ -17,7 +26,6 @@ import {
 } from "@/settings/persistence";
 import type { McpEndpoint } from "@/host/types";
 import { setTheme } from "@/settings/theme";
-import { row, panel, select } from "@/settings/prefsControls";
 import { createScopeKit } from "@/settings/prefsSections/scopeKit";
 import type { SectionCtx } from "@/settings/prefsSections/types";
 import { buildAppearanceSection } from "@/settings/prefsSections/appearance";
@@ -27,6 +35,7 @@ import { buildKeyboardSection } from "@/settings/prefsSections/keyboard";
 import { buildOutputSection } from "@/settings/prefsSections/output";
 import { buildAssistantSection } from "@/settings/prefsSections/assistant";
 import { buildMcpSection } from "@/settings/prefsSections/mcp";
+import { buildAdvancedSection } from "@/settings/prefsSections/advanced";
 
 export interface PrefsCallbacks {
     /** Fired after every committed change with the merged, persisted Settings. */
@@ -163,12 +172,12 @@ import { wrapIndex } from "@/shared/wrapIndex";
 
 // segmented() and stringListInput() now live in @/settings/prefsControls (hoisted out to module scope,
 // #987 task 1) alongside the other pure control factories; re-exported so callers importing from this
-// module (e.g. prefs.test.ts, settingsPage.tsx) keep working without an import-path change. `segmented`
-// itself is no longer called directly in THIS module (its one call site, Theme, moved into
-// prefsSections/appearance.ts, #987 task 3) — kept as a pure re-export, not a local import, so it
-// doesn't trip noUnusedLocals; `stringListInput` is still used below (Advanced's shellArgsControl).
+// module (e.g. prefs.test.ts, settingsPage.tsx) keep working without an import-path change. Neither is
+// called directly in THIS module anymore: `segmented`'s one call site (Theme) moved into
+// prefsSections/appearance.ts (#987 task 3), and `stringListInput`'s (Advanced's shellArgsControl) moved
+// into prefsSections/advanced.ts (#987 task 7) — kept as pure re-exports, not local imports, so neither
+// trips noUnusedLocals.
 export { segmented, stringListInput } from "@/settings/prefsControls";
-import { stringListInput } from "@/settings/prefsControls";
 
 /**
  * Build the two-pane preference form (category rail + control pane) and append it into `container` — no
@@ -193,27 +202,20 @@ export function mountPreferencesPane(
     // same ctx at their own call sites.
     const sectionCtx: SectionCtx = { commit, onChange: cb.onChange };
 
-    // --- control factories ----------------------------------------------------
-    // row, panel, and select are the pure, callback-driven control factories hoisted to module scope in
-    // @/settings/prefsControls (#987 task 1) that this module still uses directly (Advanced's traceRow /
-    // advancedPanel) — they don't close over `cb`/`commit`, so they're imported above rather than defined
-    // here. `toggle` and `metricInput` were used the same way but their only remaining call sites moved
-    // with Assistant/MCP into prefsSections/{assistant,mcp}.ts (#987 task 6), so they're no longer
-    // imported here. `langPicker` is likewise a pure factory there, imported directly by
-    // prefsSections/output.ts (#987 task 4) rather than here.
-
-    // The segmented radio group (the User/Workspace scope toggles) is likewise the shared,
-    // keyboard-navigable `segmented()` helper from @/settings/prefsControls, so settingsPage.tsx can
-    // reuse it too.
+    // Every pure, callback-driven control factory (row, panel, select, toggle, metricInput, segmented,
+    // stringListInput, langPicker, accentPicker — @/settings/prefsControls, #987 task 1) is now used only
+    // INSIDE the section modules that need it (Advanced's traceRow/advancedPanel among the last call
+    // sites, #987 task 7) — none is imported directly here anymore; this module only re-exports
+    // `segmented`/`stringListInput` for callers importing from this path (see above).
 
     // --- per-workspace scope control ------------------------------------------
     // The four scoped fields (previewTarget, formatOnSave, wordWrap, lspTrace) can be overridden per
     // workspace. The shared machinery (the User/Workspace segmented toggle, the scoped-commit routing,
     // and the scoped row layout) lives in @/settings/prefsSections/scopeKit (#987 task 2) — one kit
     // instance is built here and passed as a dependency to its three call sites (Editor's wordWrapRow /
-    // formatOnSaveRow, Output's outputScope — both now in prefsSections/, #987 task 4 — and Advanced's
-    // traceRow, still inline below). `deps.commit` is this module's own `commit` (the User-scope path);
-    // `deps.onChange` is the Workspace-scope path and the segmented toggle's own scope-flip handler.
+    // formatOnSaveRow, Output's outputScope, and Advanced's traceRow — all three now in prefsSections/).
+    // `deps.commit` is this module's own `commit` (the User-scope path); `deps.onChange` is the
+    // Workspace-scope path and the segmented toggle's own scope-flip handler.
     const scopeKit = createScopeKit({
         workspaceKey: () => cb.workspaceKey?.() ?? null,
         commit,
@@ -272,96 +274,19 @@ export function mountPreferencesPane(
         mcpHostable: cb.mcpHostable,
     });
 
-    // --- Workspace root (shown only when the host can save projects) ----------
+    // --- Advanced (+ Workspace root) --------------------------------------------
+    // Construction + control wiring — the workspace-root control, the workspace-scopable LSP trace row,
+    // the terminal shell-args editor, and the two-click Reset's arm/confirm/disarm state machine —
+    // extracted whole into prefsSections/advanced.ts (#987 task 7, the FINAL section in the split).
+    //
+    // Reset's CONFIRMED-click behavior is the one genuine cross-section fan-out in the whole pane: it
+    // must reach into every other section (repaint the whole pane, stop the MCP sidecar, reset the MCP
+    // panel, live-apply the theme and keymap), which a section module must never do directly (no
+    // cross-section coupling, no import cycles). So `onReset` below stays HERE, in the assembler, holding
+    // that entire original sequence verbatim, unchanged in order or content; buildAdvancedSection is only
+    // handed the hook and calls it once, on confirmation.
 
-    const wsRootValue = document.createElement("span");
-    wsRootValue.className = "koi-set-label";
-    wsRootValue.textContent = "Not set yet";
-
-    const wsRootBtn = document.createElement("button");
-    wsRootBtn.type = "button";
-    wsRootBtn.className = "koi-set-action";
-    wsRootBtn.textContent = "Change…";
-    wsRootBtn.addEventListener("click", () => {
-        void cb.pickWorkspaceRoot?.().then((name) => {
-            if (name !== null) wsRootValue.textContent = name;
-        });
-    });
-
-    const wsRootControl = document.createElement("div");
-    wsRootControl.className = "koi-mcp-control";
-    wsRootControl.append(wsRootValue, wsRootBtn);
-    const wsRootRow = row(
-        "Workspace root",
-        'The directory under which "Save to disk" writes named projects.',
-        wsRootControl,
-    );
-    wsRootRow.hidden = !cb.canSaveProjects;
-
-    async function refreshWsRootValue(): Promise<void> {
-        if (!cb.canSaveProjects || !cb.workspaceRootName) return;
-        const name = await cb.workspaceRootName();
-        wsRootValue.textContent = name ?? "Not set yet";
-    }
-
-    // --- Advanced -------------------------------------------------------------
-
-    // LSP trace is workspace-scopable. The <select> is the value control; its change routes through the
-    // scope binding (User → global blob; Workspace → the override store).
-    const traceSelect = select([
-        { value: "off", label: "Off" },
-        { value: "messages", label: "Messages" },
-        { value: "verbose", label: "Verbose" },
-    ] as const);
-    const traceRow = scopeKit.scopedRow(
-        "lspTrace",
-        "Language server trace",
-        "Verbosity of LSP logging in the console.",
-        (scopedCommit) => {
-            traceSelect.addEventListener("change", () => {
-                const v = traceSelect.value;
-                scopedCommit(v === "messages" || v === "verbose" ? v : "off");
-            });
-            return { el: traceSelect, set: (v) => (traceSelect.value = v) };
-        },
-    );
-
-    // Terminal shell args — desktop only (hidden on the web host).
-    const shellArgsControl = stringListInput(
-        "Terminal shell arguments",
-        (values) => {
-            commit({ terminalShellArgs: values });
-        },
-    );
-    const shellArgsRow = row(
-        "Terminal shell args",
-        "Arguments passed to the login shell when the integrated terminal opens. Empty uses the shell default (`-l`).",
-        shellArgsControl.el,
-    );
-    shellArgsRow.hidden = !cb.hasIntegratedTerminal;
-
-    // Reset is destructive (it clears the assistant key too), so it confirms on a second click and
-    // disarms itself shortly after to avoid an accidental wipe.
-    const resetBtn = document.createElement("button");
-    resetBtn.type = "button";
-    resetBtn.className = "koi-set-danger";
-    let armed = false;
-    let disarmTimer: ReturnType<typeof setTimeout> | undefined;
-    function disarmReset(): void {
-        armed = false;
-        resetBtn.classList.remove("is-armed");
-        resetBtn.textContent = "Reset to defaults";
-        if (disarmTimer) clearTimeout(disarmTimer);
-    }
-    resetBtn.addEventListener("click", () => {
-        if (!armed) {
-            armed = true;
-            resetBtn.classList.add("is-armed");
-            resetBtn.textContent = "Click again to reset everything";
-            disarmTimer = setTimeout(disarmReset, 4000);
-            return;
-        }
-        disarmReset();
+    function onReset(): void {
         saveSettings({ ...DEFAULT_SETTINGS });
         void clearApiKey(); // reset wipes the secret too, not just the plaintext settings
         clearKeybindingOverrides(); // ...and restores default keybindings (kept in their own store)
@@ -375,19 +300,16 @@ export function mountPreferencesPane(
         mcp.syncMcpUi(false);
         cb.onChange(fresh); // re-skins accent/motion/editor metrics + soft-wrap via the app's onChange
         cb.onKeybindingsChanged?.(); // live-apply the restored default keymap to the editor
-    });
+    }
 
-    const advancedPanel = panel(
-        "advanced",
-        wsRootRow,
-        traceRow,
-        shellArgsRow,
-        row(
-            "Reset",
-            "Restore every setting — including the assistant — to its default.",
-            resetBtn,
-        ),
-    );
+    const advanced = buildAdvancedSection(sectionCtx, {
+        scopeKit,
+        canSaveProjects: cb.canSaveProjects,
+        hasIntegratedTerminal: cb.hasIntegratedTerminal,
+        workspaceRootName: cb.workspaceRootName,
+        pickWorkspaceRoot: cb.pickWorkspaceRoot,
+        onReset,
+    });
 
     // --- About ----------------------------------------------------------------
     // Construction extracted into prefsSections/about.ts (#987 task 3); `about.refresh()` is still
@@ -433,7 +355,7 @@ export function mountPreferencesPane(
             id: "advanced",
             label: "Advanced",
             icon: ICON.advanced,
-            panel: advancedPanel,
+            panel: advanced.panel,
         },
         { id: "about", label: "About", icon: ICON.about, panel: about.panel },
     ] as const;
@@ -518,7 +440,7 @@ export function mountPreferencesPane(
         // value, so a Workspace row shows its override while a User row shows the user value. Runs after
         // output.populate(s) (outputLang.refresh()) so the picker's cards exist before its selection is set.
         scopeKit.syncAll(s);
-        shellArgsControl.set(s.terminalShellArgs);
+        advanced.populate(s);
         // Repaint the Keyboard panel from the current overrides (and cancel any armed recording / open
         // conflict) so a reopen — including the one the Advanced reset triggers — shows fresh chords.
         keyboard.populate(s);
@@ -531,11 +453,11 @@ export function mountPreferencesPane(
     // server. `focusTab` moves focus onto the active category tab: wanted when a MODAL opens (focus into the
     // dialog), but NOT for the embedded center page (it would steal focus from the page).
     function applyOpenState({ focusTab }: { focusTab: boolean }): void {
-        disarmReset();
+        advanced.disarmReset();
         const s = loadSettings();
         populate(s);
         about.refresh();
-        void refreshWsRootValue();
+        void advanced.refreshWsRootValue();
         // On a very fast first paint the secret may still be decrypting; back-fill the key once it lands,
         // but never clobber a value the user has already started typing.
         assistant.backfillSecret();
@@ -569,7 +491,7 @@ export function mountPreferencesPane(
     function destroy(): void {
         suspend();
         mcp.destroy();
-        clearTimeout(disarmTimer);
+        advanced.destroy();
         layout.remove();
     }
 
