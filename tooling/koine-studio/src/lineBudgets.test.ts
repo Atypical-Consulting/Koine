@@ -80,7 +80,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1459 → 1463: #1010 wires `writeBuffer` into `createHistoryController({ ... })` — the
   // historyController.restore write path now goes through the workspace slice's `upsertBuffer` instead of
   // mutating a store-owned Buffer in place, ~6 LOC of composition-root wiring. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1463 },
+  // Raised 1463 → 1470: #1231 swaps the `writeBuffer` dep for the batched `writeBuffers` — the
+  // composition-root wiring now maps N patches to their live buffers and drops any whose uri closed
+  // since the snapshot, then fires ONE `appStore.getState().upsertBuffers(...)` call instead of per-buffer
+  // `upsertBuffer` calls, ~7 LOC net. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1470 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.

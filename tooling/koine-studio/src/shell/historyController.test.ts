@@ -266,8 +266,12 @@ describe('historyController', () => {
         if (b) h.buffers.set(p.uri, { ...b, text: p.text, dirty: p.dirty });
       }
     });
-    h.setDoc.mockImplementation(() => callOrder.push('setDoc'));
-    h.syncDoc.mockImplementation(() => callOrder.push('syncDoc'));
+    h.setDoc.mockImplementation(() => {
+      callOrder.push('setDoc');
+    });
+    h.syncDoc.mockImplementation(() => {
+      callOrder.push('syncDoc');
+    });
     h.ctrl.undo();
     expect(callOrder).toEqual(['writeBuffers', 'setDoc', 'syncDoc']);
   });
