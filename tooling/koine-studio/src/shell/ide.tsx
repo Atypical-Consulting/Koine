@@ -882,11 +882,18 @@ export function init(hooks: IdeHooks = {}): () => void {
     activeUri: () => workspace.activeUri(),
     editor: { getDoc: () => editor.getDoc(), setDoc: (d) => editor.setDoc(d) },
     lsp: { syncDoc: (uri, text) => lsp.syncDoc(uri, text) },
-    // Write a restored buffer's text+dirty through the workspace slice's upsertBuffer — the single
-    // owner of buffers (#982/#1004) — instead of mutating the store-owned Buffer in place.
-    writeBuffer: (uri, text, dirty) => {
-      const b = workspace.buffers.get(uri);
-      if (b) appStore.getState().upsertBuffer({ ...b, text, dirty });
+    // Write every restored buffer's text+dirty through the workspace slice's BATCHED upsertBuffers —
+    // the single owner of buffers (#982/#1004) — in ONE store transition per restore, instead of
+    // mutating the store-owned Buffer in place, or firing one upsertBuffer call per buffer (#1231).
+    // A patch whose uri closed since the snapshot was taken is dropped (its buffer is gone).
+    writeBuffers: (patches) => {
+      const next = patches
+        .map((p) => {
+          const b = workspace.buffers.get(p.uri);
+          return b ? { ...b, text: p.text, dirty: p.dirty } : null;
+        })
+        .filter((b): b is NonNullable<typeof b> => b !== null);
+      appStore.getState().upsertBuffers(next);
     },
     activateFile: (uri) => workspace.activateFile(uri),
     onRestored: () => {
