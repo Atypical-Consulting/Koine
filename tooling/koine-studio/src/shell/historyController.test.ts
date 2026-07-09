@@ -16,11 +16,13 @@ function setup(opts: { maxDepth?: number; debounceMs?: number } = {}) {
   const syncDoc = vi.fn();
   const activateFile = vi.fn((uri: string) => { active = uri; });
   const onRestored = vi.fn(() => hooks.onRestored?.());
-  // Mirrors the real appStore.upsertBuffer wiring in ide.tsx: an immutable replace into the map,
-  // never an in-place write onto the existing Buffer object.
-  const writeBuffer = vi.fn((uri: string, text: string, dirty: boolean) => {
-    const b = buffers.get(uri);
-    if (b) buffers.set(uri, { ...b, text, dirty });
+  // Mirrors the real appStore.upsertBuffers wiring in ide.tsx: an immutable, ONE-shot replace of
+  // several buffers into the map, never an in-place write onto an existing Buffer object.
+  const writeBuffers = vi.fn((patches: Array<{ uri: string; text: string; dirty: boolean }>) => {
+    for (const p of patches) {
+      const b = buffers.get(p.uri);
+      if (b) buffers.set(p.uri, { ...b, text: p.text, dirty: p.dirty });
+    }
   });
   const published: Array<{ canUndo: boolean; canRedo: boolean }> = [];
   const ctrl: HistoryController = createHistoryController({
@@ -28,7 +30,7 @@ function setup(opts: { maxDepth?: number; debounceMs?: number } = {}) {
     activeUri: () => active,
     editor: { getDoc: () => buffers.get(active)!.text, setDoc },
     lsp: { syncDoc },
-    writeBuffer,
+    writeBuffers,
     activateFile,
     onRestored,
     publish: (s) => published.push({ ...s }),
@@ -40,7 +42,7 @@ function setup(opts: { maxDepth?: number; debounceMs?: number } = {}) {
     b.text = text;
     b.dirty = dirty;
   };
-  return { ctrl, buffers, mk, edit, setDoc, syncDoc, writeBuffer, activateFile, onRestored, published, hooks,
+  return { ctrl, buffers, mk, edit, setDoc, syncDoc, writeBuffers, activateFile, onRestored, published, hooks,
            setActive: (u: string) => { active = u; } };
 }
 
@@ -133,6 +135,23 @@ describe('historyController', () => {
     expect(h.syncDoc).toHaveBeenCalledWith('b', 'B0'); // non-active buffer via the LSP
   });
 
+  // Regression for #1231: a multi-buffer restore must fire ONE batched writeBuffers call carrying
+  // every changed buffer's patch, not N separate single-buffer writes.
+  test('a multi-buffer undo batches every buffer into ONE writeBuffers call', () => {
+    const h = setup();
+    h.buffers.set('b', h.mk('b', 'B0'));
+    h.ctrl.reset(); // baseline now includes 'b'
+    h.edit('a', 'A1');
+    h.edit('b', 'B1');
+    h.ctrl.noteEdit({ immediate: true });
+    h.ctrl.undo();
+    expect(h.writeBuffers).toHaveBeenCalledTimes(1);
+    expect(h.writeBuffers).toHaveBeenCalledWith([
+      { uri: 'a', text: 'A0', dirty: false },
+      { uri: 'b', text: 'B0', dirty: false },
+    ]);
+  });
+
   test('restore activates the snapshot’s file when the active file differs', () => {
     const h = setup();
     h.buffers.set('b', h.mk('b', 'B0'));
@@ -176,7 +195,7 @@ describe('historyController', () => {
   });
 
   // Regression coverage for #1010: `restore` must write buffers back through the slice's immutable
-  // `writeBuffer` dep, never by mutating a store-owned Buffer in place.
+  // `writeBuffers` dep, never by mutating a store-owned Buffer in place.
   test('undo replaces the restored buffer with a new object (no in-place mutation)', () => {
     const h = setup();
     h.edit('a', 'A1');
@@ -189,14 +208,14 @@ describe('historyController', () => {
     expect(postRestore.text).toBe('A0');
   });
 
-  test('restoring a non-active buffer writes through writeBuffer, not just lsp.syncDoc', () => {
+  test('restoring a non-active buffer writes through writeBuffers, not just lsp.syncDoc', () => {
     const h = setup();
     h.buffers.set('b', h.mk('b', 'B0'));
     h.ctrl.reset(); // baseline now includes 'b'
     h.edit('b', 'B1');
     h.ctrl.noteEdit({ immediate: true }); // active stays 'a'; 'b' is the non-active buffer
     h.ctrl.undo();
-    expect(h.writeBuffer).toHaveBeenCalledWith('b', 'B0', false);
+    expect(h.writeBuffers).toHaveBeenCalledWith([{ uri: 'b', text: 'B0', dirty: false }]);
     expect(h.syncDoc).toHaveBeenCalledWith('b', 'B0');
   });
 
@@ -205,17 +224,18 @@ describe('historyController', () => {
     h.edit('a', 'A1', true); // dirty edit
     h.ctrl.noteEdit({ immediate: true });
     h.ctrl.undo(); // baseline was dirty:false
-    expect(h.writeBuffer).toHaveBeenCalledWith('a', 'A0', false);
+    expect(h.writeBuffers).toHaveBeenCalledWith([{ uri: 'a', text: 'A0', dirty: false }]);
     expect(h.buffers.get('a')!.dirty).toBe(false);
   });
 
-  // Regression: `restore` must call `writeBuffer` BEFORE `editor.setDoc` for the active buffer.
-  // `editor.setDoc` dispatches synchronously and reenters onChange -> workspace.syncBuffer while
-  // `isRestoring` is still true (mirrored here via the `onSetDoc` hook); that reentrant sync must see
-  // the buffer ALREADY at its restored text — exactly like the old in-place `buf.text = …` write that
-  // ran before `setDoc` — or it mistakes the restore for a real edit and churns an extra, wrongly
-  // dirty store transition before the real `writeBuffer` call corrects it.
-  test('writeBuffer runs before editor.setDoc, so a reentrant onChange never sees stale text', () => {
+  // Regression: `restore` must call `writeBuffers` BEFORE `editor.setDoc` for the active buffer, even
+  // in the batched two-pass shape (#1231). `editor.setDoc` dispatches synchronously and reenters
+  // onChange -> workspace.syncBuffer while `isRestoring` is still true (mirrored here via the
+  // `onSetDoc` hook); that reentrant sync must see the buffer ALREADY at its restored text — exactly
+  // like the old in-place `buf.text = …` write that ran before `setDoc` — or it mistakes the restore
+  // for a real edit and churns an extra, wrongly dirty store transition before the real `writeBuffers`
+  // call corrects it. Carried over from #1010's own code-review fix.
+  test('writeBuffers runs before editor.setDoc, so a reentrant onChange never sees stale text', () => {
     const h = setup();
     h.edit('a', 'A1');
     h.ctrl.noteEdit({ immediate: true });
@@ -226,5 +246,29 @@ describe('historyController', () => {
     h.ctrl.undo();
     expect(h.setDoc).toHaveBeenCalledWith('A0'); // sanity: setDoc did fire
     expect(sawRestoredTextInReentrantOnChange).toBe(true);
+  });
+
+  // Regression for #1231: the write-before-effect ordering must also hold for a multi-buffer restore
+  // — the batched writeBuffers call lands before ANY buffer's setDoc/syncDoc effect fires, not
+  // interleaved per-buffer.
+  test('writeBuffers runs before ANY editor/lsp effect in a multi-buffer restore', () => {
+    const h = setup();
+    h.buffers.set('b', h.mk('b', 'B0'));
+    h.ctrl.reset(); // baseline now includes 'b'
+    h.edit('a', 'A1');
+    h.edit('b', 'B1');
+    h.ctrl.noteEdit({ immediate: true });
+    const callOrder: string[] = [];
+    h.writeBuffers.mockImplementation((patches: Array<{ uri: string; text: string; dirty: boolean }>) => {
+      callOrder.push('writeBuffers');
+      for (const p of patches) {
+        const b = h.buffers.get(p.uri);
+        if (b) h.buffers.set(p.uri, { ...b, text: p.text, dirty: p.dirty });
+      }
+    });
+    h.setDoc.mockImplementation(() => callOrder.push('setDoc'));
+    h.syncDoc.mockImplementation(() => callOrder.push('syncDoc'));
+    h.ctrl.undo();
+    expect(callOrder).toEqual(['writeBuffers', 'setDoc', 'syncDoc']);
   });
 });
