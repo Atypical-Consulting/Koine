@@ -38,9 +38,9 @@ internal static class OperatorNeedsAnalyzer
     /// Per-<see cref="KoineModel"/>, per-<see cref="ModelIndex"/> cache for <see cref="BuildOperatorNeeds"/>
     /// keyed by reference identity (both are immutable per compile — <see cref="KoineModel"/> is a record
     /// over <see cref="IReadOnlyList{T}"/> contexts, <see cref="ModelIndex"/> is built once and treated
-    /// read-only by every consumer). Without this, every public <c>Build*</c> caller (the C#, TypeScript,
-    /// Python, and Rust emitters each call several of them per emit) would re-run the full single pass —
-    /// the exact "each re-walking the model" cost the single-pass design was meant to retire (#836).
+    /// read-only by every consumer). Without this, every consumer of <see cref="BuildValueObjectOperatorNeeds"/>
+    /// (the C#, TypeScript, Python, and Rust emitters each call it per emit) would re-run the full single
+    /// pass — the exact "each re-walking the model" cost the single-pass design was meant to retire (#836).
     /// <see cref="ConditionalWeakTable{TKey,TValue}"/> uses reference identity for its keys regardless of
     /// any value-equality a key type defines, so this is safe even though <see cref="KoineModel"/> is a
     /// record.
@@ -51,11 +51,12 @@ internal static class OperatorNeedsAnalyzer
     /// The single demand-driven pass: walks every expression site (<see cref="ExpressionScanSites"/>)
     /// <b>once</b>, running the scalar-multiply, scalar-divide, <c>sum</c>-fold, and plain-binary
     /// walkers per <c>(Expr, TypeScope)</c> site and merging their signals into one
-    /// <see cref="ValueObjectOperatorNeeds"/> per value-object name. The public <c>Build*</c> methods are
-    /// thin projections over this map, so they share one site enumeration and one per-VO need model
+    /// <see cref="ValueObjectOperatorNeeds"/> per value-object name. Every consumer reads what it needs
+    /// directly off that per-VO record (e.g. <see cref="ValueObjectOperatorNeeds.NeedsAdd"/>) rather than
+    /// through a separate projection method, so they share one site enumeration and one per-VO need model
     /// rather than each re-walking the model (#836) — memoized per (model, index) via
-    /// <see cref="OperatorNeedsCache"/> so that sharing holds across separate <c>Build*</c> calls too, not
-    /// just within one.
+    /// <see cref="OperatorNeedsCache"/> so that sharing holds across separate calls to
+    /// <see cref="BuildValueObjectOperatorNeeds"/> too, not just within one.
     /// </summary>
     private static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> BuildOperatorNeeds(KoineModel model, ModelIndex index)
     {
@@ -161,8 +162,9 @@ internal static class OperatorNeedsAnalyzer
         /// <summary>
         /// Mutators are internal and exposed only as named operations (not a writable property/collection)
         /// because <see cref="BuildOperatorNeeds"/> now caches and shares each instance across every
-        /// <c>Build*</c> caller within a compile — a writable public surface would let one consumer
-        /// corrupt the result every other consumer of the same cached instance sees.
+        /// consumer that reads <see cref="ValueObjectOperatorNeeds.NeedsAdd"/> and its sibling properties
+        /// within a compile — a writable public surface would let one consumer corrupt the result every
+        /// other consumer of the same cached instance sees.
         /// </summary>
         internal void UnionMultiplyFactors(IEnumerable<string> factors) => _multiplyFactors.UnionWith(factors);
 

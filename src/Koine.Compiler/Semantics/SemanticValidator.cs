@@ -493,6 +493,9 @@ public sealed class SemanticValidator
     /// collide iff their keys are equal (e.g. <c>Active</c> → <c>active</c>; <c>FreeOrder</c> →
     /// <c>freeorder</c>). This is the strictest (PHP-equivalent) fold — see
     /// <see cref="ValidateUniqueSpecPredicateNames"/> for why that is the intended conservative choice.
+    /// Note: this <c>char.IsLetterOrDigit</c> filter deliberately drops <c>_</c> (unlike
+    /// <see cref="SourceTextGeometry.IsIdentifierChar"/>), so it is a separator-insensitive collision
+    /// key, not the identifier-char predicate — do not fold this onto the shared helper.
     /// </summary>
     private static string CanonicalKey(string subject) =>
         new(subject.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

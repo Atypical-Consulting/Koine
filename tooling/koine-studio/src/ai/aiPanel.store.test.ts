@@ -222,7 +222,12 @@ describe('assistant ↔ chat slice change-set bridge (#984 Task 4)', () => {
 
     container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
     await vi.waitFor(() =>
-      expect(store.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 1 }),
+      // #1136: the host's composed wording now rides in on the slice phase's own `note`.
+      expect(store.getState().chat.changeSet?.phase).toEqual({
+        kind: 'applied',
+        appliedCount: 1,
+        note: 'Applied 1 file.',
+      }),
     );
     expect(phases).toEqual(['reviewing', 'applying', 'applied']);
   });

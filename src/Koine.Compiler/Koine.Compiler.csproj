@@ -43,6 +43,12 @@
     <InternalsVisibleTo Include="Koine.Emit.Docs" />
     <InternalsVisibleTo Include="Koine.Emit.AsyncApi" />
     <InternalsVisibleTo Include="Koine.Emit.OpenApi" />
+    <!-- Koine.Cli (LspServer) and Koine.Wasm (the browser-hosted language service) each carry a
+         hand-rolled copy of the identifier-char scan predicate that duplicates
+         SourceTextGeometry.IsIdentifierChar (#1127); grant IVT so both can route onto the shared
+         helper instead of drifting further. -->
+    <InternalsVisibleTo Include="Koine.Cli" />
+    <InternalsVisibleTo Include="Koine.Wasm" />
   </ItemGroup>
 
   <ItemGroup>

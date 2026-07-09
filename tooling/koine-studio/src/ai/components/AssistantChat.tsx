@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import type { ChangeSetFileState, ChatToolCall } from '@/store/slices/chat';
 import { Transcript, type TranscriptNotice, type TurnMechanism } from '@/ai/components/Transcript';
-import { ChangeSetPanel, type ChangeSetAttempt } from '@/ai/components/ChangeSetPanel';
+import { ChangeSetPanel } from '@/ai/components/ChangeSetPanel';
 import { Composer, type ComposerQuickAction } from '@/ai/components/Composer';
 
 // The assembled assistant view (#990 Task 6): Transcript + ChangeSetPanel + Composer composed inside
@@ -11,8 +11,9 @@ import { Composer, type ComposerQuickAction } from '@/ai/components/Composer';
 // in-bubble island did), then the `koi-assistant-controls` row. The host factory
 // (`createAssistantChat` in src/ai/aiPanel.ts) owns everything effectful — the send effect and its
 // AbortController, the grammar-constraint/repair loop, the apply-gate, the change-set apply flow —
-// and re-renders this component with fresh ephemeral props (notice / stoppedPartial / mechanism /
-// changeSetAttempt) as that work progresses; everything durable renders from the store's chat slice.
+// and re-renders this component with fresh ephemeral props (notice / stoppedPartial / mechanism) as
+// that work progresses; everything durable — including the change-set live-region wording (#1136) —
+// renders from the store's chat slice.
 
 export interface AssistantChatProps {
   /** The app store carrying the chat slice (#984); tests and stories inject their own createAppStore(). */
@@ -35,8 +36,6 @@ export interface AssistantChatProps {
   onApplyChangeSet: (accepted: readonly ChangeSetFileState[]) => void;
   /** Discard clicked on the change-set review. */
   onDiscardChangeSet: () => void;
-  /** The host's per-apply-attempt outcome for the change-set live region / terminal label. */
-  changeSetAttempt?: ChangeSetAttempt | null;
   /** Send gesture (Send button or ⌘/Ctrl+Enter) with the current draft. */
   onSend: (draft: string) => void;
   /** Stop clicked while streaming; the host aborts its AbortController. */
@@ -62,12 +61,7 @@ export function AssistantChat(p: AssistantChatProps) {
         mechanism={p.mechanism}
         settledToolCalls={p.settledToolCalls}
       >
-        <ChangeSetPanel
-          store={p.store}
-          onApply={p.onApplyChangeSet}
-          onDiscard={p.onDiscardChangeSet}
-          attempt={p.changeSetAttempt}
-        />
+        <ChangeSetPanel store={p.store} onApply={p.onApplyChangeSet} onDiscard={p.onDiscardChangeSet} />
       </Transcript>
       <Composer
         store={p.store}

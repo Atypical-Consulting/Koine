@@ -1,6 +1,7 @@
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler;
 
@@ -147,7 +148,7 @@ public sealed partial class AsyncApiEmitter : IEmitter
 
         foreach (char c in value)
         {
-            if (!char.IsLetterOrDigit(c) && c != '_')
+            if (!SourceTextGeometry.IsIdentifierChar(c))
             {
                 return true;
             }

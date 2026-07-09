@@ -11,6 +11,7 @@ import type { ModelIndex } from '@/model/modelIndex';
 import type { GlossaryEntry } from '@/lsp/lsp';
 import type { GitLogEntry } from '@/host/types';
 import { KIND, type CatalogEntry } from '@/launcher/catalog';
+import { normalizeDddKind } from '@/model/dddKind';
 
 /**
  * Everything `buildCatalog` needs, injected by the shell (Task 8) so this module stays a pure join
@@ -34,18 +35,13 @@ const EVENT_KINDS = new Set(['event', 'integration-event']);
 
 /**
  * Normalize a raw glossary `kind` string to the slug `KIND` (catalog.ts) and the category split key
- * on. `Koine.Compiler/Emit/Glossary/GlossaryModelBuilder.KindOf` emits `"quantity"` (not `"value"`) for
- * a `quantity` value object and `"integration event"` — a SPACE, not a hyphen — for an integration
- * event; `src/model/inspector.ts`'s `constructKey()` folds the very same two spellings for the same
- * reason. Without this step neither would ever match `SYMBOL_KINDS`/`EVENT_KINDS` or find their
- * `KIND[...]` chip. Every other kind (including the still-unrouted service/repository/command/query
- * noted in scratchpad/SEAMS.md) passes through unchanged.
+ * on. A thin alias of the canonical `@/model/dddKind` fold (issue #1162) — kept under this name
+ * because `src/launcher/preview.ts` and this module's own tests import `normalizeKind` from here.
+ * `src/model/inspector.ts`'s `constructKey()` delegates to the same canonical fold, so the two call
+ * sites can no longer drift. Every kind the fold doesn't alias (including the still-unrouted
+ * service/repository/command/query noted in scratchpad/SEAMS.md) passes through unchanged.
  */
-export function normalizeKind(kind: string): string {
-  if (kind === 'quantity') return 'value';
-  if (kind === 'integration event') return 'integration-event';
-  return kind;
-}
+export const normalizeKind = normalizeDddKind;
 
 /** Joins the given parts with a space and lowercases the result; falsy parts are dropped. */
 function keywordsOf(...parts: (string | null | undefined)[]): string {

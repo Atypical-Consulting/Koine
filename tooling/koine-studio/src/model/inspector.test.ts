@@ -39,6 +39,22 @@ const fullElement: InspectorElement = {
 
 const noop: InspectorHandlers = { onGoto: () => {} };
 
+// Characterization safety net (issue #1162): pins constructKey's end-to-end DOM behaviour — including
+// its palette-or-'type' fallback — via the rendered root's dataset.kind. Exercises paths dddKind.test.ts's
+// cross-check doesn't cover (e.g. `service`/an unknown kind falling back to `type`).
+describe('renderInspector dataset.kind (constructKey) — characterization (issue #1162)', () => {
+  test.each([
+    ['aggregate', 'aggregate'],
+    ['quantity', 'value'],
+    ['integration event', 'integration-event'],
+    ['service', 'type'],
+    ['unknown-kind', 'type'],
+  ])('renderInspector(kind: %s).dataset.kind === %s', (kind, expected) => {
+    const el = renderInspector({ ...fullElement, kind }, noop);
+    expect(el.dataset.kind).toBe(expected);
+  });
+});
+
 describe('renderInspector', () => {
   test('renders an empty state when nothing is selected', () => {
     const el = renderInspector(null, noop);
