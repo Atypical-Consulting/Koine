@@ -10,6 +10,7 @@ Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.Alias = 2 -> Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.Generate = 0 -> Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.ParamProvidesIdDirectly = 1 -> Koine.Compiler.FactoryIdSource
+Koine.Compiler.IdentifierWords
 Koine.Compiler.MarkdownDoc
 Koine.Compiler.RouteDerivation
 Koine.Compiler.RouteInfo
@@ -26,6 +27,7 @@ Koine.Compiler.RouteInfo.RouteInfo(string! Verb, string! Route, string! Operatio
 Koine.Compiler.RouteInfo.Verb.get -> string!
 Koine.Compiler.RouteInfo.Verb.init -> void
 static Koine.Compiler.FactoryIdBinding.ResolveFactoryId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory, System.Func<string!, string!>! emitParamName) -> Koine.Compiler.FactoryIdBinding
+static Koine.Compiler.IdentifierWords.Split(string! name) -> System.Collections.Generic.IReadOnlyList<string!>!
 static Koine.Compiler.MarkdownDoc.Cell(string? doc) -> string!
 static Koine.Compiler.MarkdownDoc.EnumValues(Koine.Compiler.Ast.EnumDecl! en) -> string!
 static Koine.Compiler.MarkdownDoc.EscapeMarkdown(string! s) -> string!
