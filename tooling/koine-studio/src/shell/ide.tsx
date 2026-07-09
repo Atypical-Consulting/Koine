@@ -750,18 +750,17 @@ export function init(hooks: IdeHooks = {}): () => void {
   // flow's refreshActiveSurfaces loads everything once the workspace document is open).
   controller.init();
 
-  // The boot-wide workspace-open mutex (#1046, hoisted here by #1088). Exactly ONE per init(): every
-  // path that swaps the workspace out from under the editor — the boot ladder's shared-import /
-  // restore / start-intent branches, the toolbar's Open-folder button, the mod+N and mod+Shift+O
-  // shortcuts, the command palette, and the reactive onWorkspaceEmptied reset — queues through this
-  // instance, so two of them can never interleave and silently discard each other's workspace. The
-  // toolbar stays interactive for the multi-second lsp.start() connect window, which is when they race.
+  // The boot-wide workspace-open mutex (#1046, hoisted out of lifecycleBoot by #1088). Exactly ONE per
+  // init(): every path that swaps the workspace out from under the editor — the boot ladder's branches,
+  // the toolbar buttons, mod+N / mod+Shift+O, the palette, the reactive onWorkspaceEmptied reset —
+  // queues through it, so no two can interleave and silently discard each other's workspace. They race
+  // because the toolbar stays interactive across the multi-second lsp.start() connect window.
   const workspaceOpLock = createWorkspaceOpLock();
 
   // --- open folder (directory-mode workspace) -------------------------------
 
   const openFolderBtn = domById<HTMLButtonElement>('btn-open-folder');
-  openFolderBtn.addEventListener('click', () => void openFolder());
+  openFolderBtn.addEventListener('click', () => void workspaceOpLock.run(() => openFolder()));
   // Opening a folder relies on the File System Access API (Chromium-only). On browsers without it, the
   // button would look active but only ever raise an error toast — so disable it with an explanatory
   // tooltip rather than leaving a dead control. (Examples + share links + in-memory editing still work.)
@@ -871,7 +870,9 @@ export function init(hooks: IdeHooks = {}): () => void {
       void reviewStore.load().then(() => editorSession.refreshReviewDecorations());
     },
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
-    onWorkspaceEmptied: () => void newModel(),
+    // Locked (#1088) — it fires reactively, so it can land mid shared-import. Safe to lock: newModel()
+    // clears the default workspace through the platform API, never re-entering onWorkspaceEmptied.
+    onWorkspaceEmptied: () => void workspaceOpLock.run(() => newModel()),
     pushRecentFolder,
     // Remember the opened workspace so a reload restores it instead of the empty default (#535). Gated
     // (in the controller) on the same `recent` flag as pushRecentFolder, so transient opens don't set it.
@@ -1234,7 +1235,10 @@ export function init(hooks: IdeHooks = {}): () => void {
   // (#757). It reaches the workspace's dirty check + blank-model reset through these two deps.
   const overlays = createOverlays({
     anyDirty: () => workspace.anyDirty(),
-    newModel: () => newModel(),
+    // Backs requestNewModel() — the New button, mod+N, the palette (#1088). Only the RESET is locked:
+    // requestNewModel's confirm dialog runs before this, and locking it would hold the queue for as
+    // long as the modal is on screen.
+    newModel: () => workspaceOpLock.run(() => newModel()),
   });
 
   // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
@@ -1382,7 +1386,8 @@ export function init(hooks: IdeHooks = {}): () => void {
     history,
     format: () => void formatActive(),
     goHome,
-    openFolder: () => void openFolder(),
+    // The palette's "Open folder…" entry and its mod+Shift+O chord (#1088).
+    openFolder: () => void workspaceOpLock.run(() => openFolder()),
     search,
     requestNewModel: () => void overlays.requestNewModel(),
     workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: () => workspace.buffers },
@@ -1451,6 +1456,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     refreshActiveSurfaces: () => controller.refreshActiveSurfaces(),
     persistsWorkspace: platform.persistsWorkspace,
     showMemoryOnlyBanner: () => overlays.showMemoryOnlyBanner(),
+    // RAW, deliberately unwrapped (#1088): runStartIntent already holds workspaceOpLock when it calls
+    // these, and the FIFO queue has no re-entrancy detection — self-locking would enqueue behind the
+    // very op awaiting it and deadlock the boot. The wrapped variants are the closures above.
     newModel: () => newModel(),
     openFolder: () => openFolder(),
     openRecentFolder: (path) => openRecentFolder(path),
