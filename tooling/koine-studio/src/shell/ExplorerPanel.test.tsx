@@ -358,4 +358,182 @@ describe('ExplorerPanel', () => {
     );
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  // --- keyboard navigation (#989 task 3): one delegated onKeyDown on ul[role=tree], routed through the
+  // SHARED rovingTreeNav.ts router (handleTreeKeydown) — the same one explorer.ts, the domain navigator
+  // and the syntax-tree panel already use (#1105). These tests pin behavioral parity with explorer.ts's
+  // old per-row `rowNav`/`onRowKeydown` (explorer.test.ts's equivalents), not a reinvention of the model.
+  describe('keyboard navigation', () => {
+    it('ArrowDown/ArrowUp move the roving tab stop through every visible row in flattenVisible order, crossing group boundaries (clamped, no wrap)', () => {
+      const { container } = render(
+        <ExplorerPanel cb={makeCallbacks()} groups={[group('/home/me/sales'), secondGroup()]} />,
+      );
+      const first = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
+      act(() => first.focus());
+      expect(document.activeElement).toBe(first);
+
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders/order.koi');
+
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/shared.koi');
+
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('BILL/invoice.koi');
+
+      // Clamped at the last row — no wrap back to the first.
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('BILL/invoice.koi');
+
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/shared.koi');
+    });
+
+    it("ArrowDown skips a collapsed directory's hidden children (matches flattenVisible order)", () => {
+      const { container } = render(
+        <ExplorerPanel cb={makeCallbacks()} groups={[group()]} initialCollapsed={['ROOT/orders']} />,
+      );
+      const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
+      expect(dir.getAttribute('aria-expanded')).toBe('false');
+      act(() => dir.focus());
+
+      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      // order.koi is hidden (its parent is collapsed) — focus lands directly on shared.koi.
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/shared.koi');
+    });
+
+    it('ArrowRight opens a closed directory in place (focus stays), then descends into its child on the next press', () => {
+      const { container } = render(
+        <ExplorerPanel cb={makeCallbacks()} groups={[group()]} initialCollapsed={['ROOT/orders']} />,
+      );
+      const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
+      expect(dir.getAttribute('aria-expanded')).toBe('false');
+      act(() => dir.focus());
+
+      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+      const stillDir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
+      expect(stillDir.getAttribute('aria-expanded')).toBe('true');
+      expect(document.activeElement).toBe(stillDir); // focus stays on the directory itself
+
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders/order.koi');
+    });
+
+    it('ArrowLeft collapses an open directory in place, then ascends to the parent on the next press', () => {
+      const { container } = render(
+        <ExplorerPanel cb={makeCallbacks()} groups={[{ root: 'ROOT', entries: nestedTree() }]} />,
+      );
+      const inner = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/2024"]')!;
+      act(() => inner.focus());
+
+      act(() => { inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+      const stillInner = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/2024"]')!;
+      expect(stillInner.getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(stillInner); // focus stays on the now-closed directory
+
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders'); // ascended to parent
+    });
+
+    it('ArrowLeft on a file (nothing to collapse) focuses its parent directory', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
+      act(() => file.focus());
+
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+      expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders');
+    });
+
+    it('Enter opens a focused file and toggles a focused directory', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      expect(cb.onOpenFile).toHaveBeenCalledWith('ROOT/shared.koi');
+
+      const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
+      expect(dir.getAttribute('aria-expanded')).toBe('true');
+      act(() => dir.focus());
+      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      expect(container.querySelector('li[data-token="ROOT/orders"]')!.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('moves focus to the treeitem <li> itself, not the inner .explorer-row div', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const first = container.querySelector<HTMLElement>('li[role="treeitem"]')!;
+      act(() => first.focus());
+
+      act(() => { first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      const active = document.activeElement as HTMLElement;
+      expect(active.getAttribute('role')).toBe('treeitem');
+      expect(active.classList.contains('explorer-row')).toBe(false);
+      expect(active.tabIndex).toBe(0);
+    });
+
+    // The load-bearing parity test for the migration: explorer.ts's OLD per-row handler needed
+    // `ev.stopPropagation()` to avoid re-running once per ancestor <li> as a nested row's keydown bubbled
+    // up (explorer.test.ts's "does not double-fire keydown through nested treeitem ancestors"). Here there
+    // is exactly ONE delegated handler (on ul[role=tree]) and no per-row listeners at all, so there is
+    // nothing to double-fire BY CONSTRUCTION — proven by asserting the observable side effect (onOpenFile)
+    // fires exactly once for a row nested three <li> deep, not once per ancestor.
+    it('does not double-fire keydown through nested treeitem ancestors (one delegated handler ⇒ exactly one action per keypress)', () => {
+      const cb = makeCallbacks();
+      const nested: FsEntry[] = [
+        {
+          token: 'R/a',
+          name: 'a',
+          relPath: 'a',
+          kind: 'dir',
+          children: [
+            {
+              token: 'R/a/b',
+              name: 'b',
+              relPath: 'a/b',
+              kind: 'dir',
+              children: [{ token: 'R/a/b/c.koi', name: 'c.koi', relPath: 'a/b/c.koi', kind: 'file' }],
+            },
+          ],
+        },
+      ];
+      const { container } = render(<ExplorerPanel cb={cb} groups={[{ root: 'R', entries: nested }]} />);
+
+      const deep = container.querySelector<HTMLElement>('li[data-token="R/a/b/c.koi"]')!;
+      act(() => deep.focus());
+      act(() => { deep.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+      expect(cb.onOpenFile).toHaveBeenCalledTimes(1);
+      expect(cb.onOpenFile).toHaveBeenCalledWith('R/a/b/c.koi');
+    });
+
+    it('does not consume Backspace (no preventDefault, no callback, focus unchanged)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+
+      const ev = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
+      act(() => { file.dispatchEvent(ev); });
+
+      expect(ev.defaultPrevented).toBe(false);
+      expect(cb.onDelete).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(file);
+    });
+
+    // F2/Delete/ContextMenu are panel-specific keys the shared router doesn't own; the explorer opts them
+    // out of default browser handling (matching explorer.ts) even though their actual actions (rename /
+    // delete-confirm / context menu) aren't wired up until #989 tasks 5/4.
+    it('recognizes F2 / Delete / ContextMenu as consumed panel-specific keys (stubbed pending #989 tasks 4/5)', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+
+      for (const key of ['F2', 'Delete', 'ContextMenu']) {
+        const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        act(() => { file.dispatchEvent(ev); });
+        expect(ev.defaultPrevented).toBe(true);
+      }
+    });
+  });
 });

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
-import { analyze, flattenVisible } from '@/shell/explorerModel';
+import { analyze, flattenVisible, parentMapOf } from '@/shell/explorerModel';
 import { ExplorerItem } from '@/shell/ExplorerItem';
+import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 
 // The workspace explorer as a keyed Preact component tree (#989 task 2, corrected in the task-2a
 // follow-up). This is the Preact counterpart of `createExplorer()` in explorer.ts, which stays untouched
@@ -28,11 +29,22 @@ import { ExplorerItem } from '@/shell/ExplorerItem';
 // test, the assertion the rest of the #989 arc leans on to retire explorer.ts's re-render-deferral
 // machinery.
 //
-// NOT in this task: keyboard nav (roving tabindex, arrow keys, F2/Delete), drag-and-drop move, inline
-// create/rename inputs, the "…" per-row context-menu trigger, and the ADR-0009 active-context
-// is-scoped/dim emphasis (explorerModel.ts's public `analyze()` doesn't carry that scope match — only
-// the private analyze() inside explorer.ts does). Those land in later #989 tasks. `filterText` and the
-// collapsed-directories set are component-LOCAL `useState` here; task 7 lifts them into the app store.
+// KEYBOARD NAV (#989 task 3): one delegated `onKeyDown` on the shared `ul[role="tree"]` — see
+// `onTreeKeyDown` below — routed through the SAME shared WAI-ARIA roving-tabindex router
+// (`shell/rovingTreeNav.ts`'s `handleTreeKeydown`, #1105) that explorer.ts's old per-row `rowNav` used,
+// so ArrowUp/Down/Left/Right and Enter behave identically to the pre-migration explorer. `focusedToken`
+// is Preact state; `ExplorerItem`'s `tabIndex` is a pure function of it (`token === focusedToken`), not
+// an imperative DOM sweep. There are NO per-row keydown listeners — a nested row's keydown simply bubbles
+// to the one handler on `ul[role="tree"]`, which is what makes the old "double-fire through nested
+// treeitem ancestors" bug (and its `stopPropagation` workaround) structurally impossible here.
+//
+// NOT in this task: drag-and-drop move, inline create/rename inputs, the "…" per-row context-menu
+// trigger, and the ADR-0009 active-context is-scoped/dim emphasis (explorerModel.ts's public `analyze()`
+// doesn't carry that scope match — only the private analyze() inside explorer.ts does). F2/Delete/
+// ContextMenu are recognized (and `preventDefault`ed) by `onTreeKeyDown` but their actual actions are
+// stubs — see the TODOs there — pending #989 tasks 5/4 respectively. Those land in later #989 tasks.
+// `filterText` and the collapsed-directories set are component-LOCAL `useState` here; task 7 lifts them
+// into the app store.
 export interface ExplorerPanelProps {
   cb: ExplorerCallbacks;
   groups: ExplorerRootGroup[];
@@ -47,6 +59,10 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const [filterInput, setFilterInput] = useState(props.initialFilterText ?? '');
   const [filterText, setFilterText] = useState(() => (props.initialFilterText ?? '').trim().toLowerCase());
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set(props.initialCollapsed ?? []));
+  // The lone WAI-ARIA roving tab stop's token (#989 task 3) — `null` until the tree has been focused at
+  // least once, in which case the first visible row is the default tab stop (see `effectiveFocusedToken`).
+  const [focusedToken, setFocusedToken] = useState<string | null>(null);
+  const treeRef = useRef<HTMLUListElement>(null);
 
   // Debounce the filter — 110ms, mirroring explorer.ts's `setTimeout(applyFilter, 110)` — so each
   // keystroke doesn't re-derive visibility/highlighting for the whole tree.
@@ -78,9 +94,11 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     });
   }, [analysis.liveDirs]);
 
-  // Total visible-row count across every group, for the empty/no-match state — flattenVisible()'s FLAT
-  // shape doesn't matter here, only its length, so one call over every group (not one per group) is fine.
-  const totalRows = useMemo(() => flattenVisible(groups, collapsed, filterText).length, [groups, collapsed, filterText]);
+  // The ordered, flattened visible rows — the SAME data this render walks (via `analysis.visible` inside
+  // `renderEntry`) to decide what to show, reused as-is for keyboard-nav ordering (`navTokens` below) so
+  // the two can never drift apart. Also backs the empty/no-match state (`totalRows`).
+  const flatRows = useMemo(() => flattenVisible(groups, collapsed, filterText), [groups, collapsed, filterText]);
+  const totalRows = flatRows.length;
   const showEmpty = totalRows === 0;
 
   const toggleDir = (token: string): void => {
@@ -90,6 +108,126 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
       else next.add(token);
       return next;
     });
+  };
+
+  // --- keyboard navigation (#989 task 3) --------------------------------------------------------------
+  // `navTokens` is `flatRows`' token order — the exact visible-row sequence ArrowUp/Down walk. `rowByToken`
+  // resolves a token back to its kind (dir/file) for expand/collapse/activate; `parentMap` (from
+  // `explorerModel.ts`'s `parentMapOf`, not a DOM walk) resolves ArrowLeft's ascend-to-parent target.
+  const navTokens = useMemo(() => flatRows.map((r) => r.token), [flatRows]);
+  const rowByToken = useMemo(() => new Map(flatRows.map((r) => [r.token, r] as const)), [flatRows]);
+  const parentMap = useMemo(() => parentMapOf(groups), [groups]);
+  const navTokenSet = useMemo(() => new Set(navTokens), [navTokens]);
+  // The default tab stop: the currently roving-focused token when it's still visible, else the first
+  // visible row (mirrors explorer.ts's renderRoots() falling back to `tree.querySelector('li[role=treeitem]')`
+  // when there's no explicit refocus target) — keeps the tree Tab-reachable even before any key is pressed,
+  // and recovers gracefully if the focused row was hidden by a collapse/filter change elsewhere.
+  const effectiveFocusedToken = focusedToken != null && navTokenSet.has(focusedToken) ? focusedToken : (navTokens[0] ?? null);
+
+  // Find a row's <li role="treeitem"> in the live DOM (not a CSS attribute-value selector, since a token
+  // is an opaque path that could contain characters unsafe to interpolate into a selector string).
+  const findRowEl = (token: string): HTMLLIElement | null => {
+    const root = treeRef.current;
+    if (!root) return null;
+    for (const li of root.querySelectorAll<HTMLLIElement>('li[role="treeitem"][data-token]')) {
+      if (li.dataset.token === token) return li;
+    }
+    return null;
+  };
+
+  // Move the roving tab stop to `token` AND move real browser focus there synchronously — like
+  // explorer.ts's `focusItem()`, but the tabIndex flip itself is a derived render (via `focusedToken`),
+  // not an imperative sweep. The target row is always already mounted: every token this is ever called
+  // with comes from `navTokens` (already-visible rows) or is the SAME token whose subtree just expanded.
+  const focusToken = (token: string | null): void => {
+    setFocusedToken(token);
+    if (token == null) return;
+    findRowEl(token)?.focus();
+  };
+
+  // One delegated `onKeyDown` on the shared `ul[role="tree"]` (NOT one listener per row) — routes
+  // ArrowUp/Down/Left/Right/Enter through the shared `handleTreeKeydown` router (rovingTreeNav.ts, #1105),
+  // exactly as explorer.ts's old per-row `rowNav`/`onRowKeydown` did, minus the `stopPropagation()` that
+  // router needed: with only ONE handler total, a nested row's keydown simply bubbles here once, so there
+  // is nothing left to double-fire. `supportsHomeEnd`/`supportsSpaceActivate` stay `false` — this pane
+  // deliberately never wired Home/End or Space-activation, matching explorer.ts's rowNav exactly.
+  const onTreeKeyDown = (ev: JSX.TargetedKeyboardEvent<HTMLUListElement>): void => {
+    if (navTokens.length === 0) return;
+    const rowEl = (ev.target as HTMLElement | null)?.closest<HTMLElement>('li[role="treeitem"][data-token]') ?? null;
+    const token = rowEl?.dataset.token ?? effectiveFocusedToken;
+    const idx = token != null ? navTokens.indexOf(token) : -1;
+
+    // Panel-specific keys the shared router doesn't own (matches explorer.ts's onRowKeydown switch).
+    // Recognized + preventDefault'ed here so #989 tasks 4 (Delete/ContextMenu) and 5 (F2) have an obvious
+    // slot to fill in without restructuring this handler — there's no rename UI, delete-confirm flow or
+    // context menu wired up yet, so each action is a stub.
+    switch (ev.key) {
+      case 'F2':
+        ev.preventDefault();
+        // TODO(#989 task 5): start inline rename for `token`.
+        return;
+      case 'Delete':
+        ev.preventDefault();
+        // TODO(#989 task 4): open the delete-confirm flow for `token`.
+        return;
+      case 'ContextMenu':
+        ev.preventDefault();
+        // TODO(#989 task 4): open the same context menu a right-click on this row would.
+        return;
+    }
+
+    const nav: RovingTreeNav<string> = {
+      items: () => navTokens,
+      activeIndex: () => idx,
+      focusIndex: (i) => focusToken(navTokens[i] ?? null),
+      // ArrowRight: open a closed directory in place (focus stays on it), or step into an already-open
+      // one's next visible row. Always reports the key consumed — a file has nothing to expand.
+      expand: (i) => {
+        const t = navTokens[i];
+        const row = rowByToken.get(t);
+        if (row?.kind === 'dir') {
+          const open = filtering || !collapsed.has(t);
+          if (!open) {
+            setCollapsed((prev) => {
+              const next = new Set(prev);
+              next.delete(t);
+              return next;
+            });
+          } else if (i < navTokens.length - 1) {
+            focusToken(navTokens[i + 1]);
+          }
+        }
+        return true;
+      },
+      // ArrowLeft: collapse an open directory in place, else ascend to the parent row.
+      collapse: (i) => {
+        const t = navTokens[i];
+        const row = rowByToken.get(t);
+        const open = row?.kind === 'dir' && (filtering || !collapsed.has(t));
+        if (open) {
+          setCollapsed((prev) => {
+            const next = new Set(prev);
+            next.add(t);
+            return next;
+          });
+        } else {
+          const parent = parentMap.get(t) ?? null;
+          if (parent != null) focusToken(parent);
+        }
+        return true;
+      },
+      // Enter: toggle a directory, or open a file.
+      activate: (i) => {
+        const t = navTokens[i];
+        const row = rowByToken.get(t);
+        if (row?.kind === 'dir') toggleDir(t);
+        else cb.onOpenFile(t);
+        return true;
+      },
+      supportsHomeEnd: false,
+      supportsSpaceActivate: false,
+    };
+    handleTreeKeydown(nav, ev);
   };
 
   const collapseAllDirs = (): void => {
@@ -138,6 +276,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         errors={diag.errors}
         warnings={diag.warnings}
         filterText={filterText}
+        focused={entry.token === effectiveFocusedToken}
         onToggle={() => toggleDir(entry.token)}
         onOpen={() => cb.onOpenFile(entry.token)}
       >
@@ -288,10 +427,10 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         // ONE shared `<ul role="tree">` for every root — matching explorer.ts's `tree` element exactly
         // (byte-identical single-root shape, and the same tree instance multi-root groups attach to) —
         // rather than task 2's per-root `role="tree"` split. A single tree is what #989's own design spec
-        // requires (one delegated `onKeyDown` on `ul[role="tree"]`, so a later arrow-key nav task can cross
-        // group boundaries) and what explorer.test.ts's structural assertions pin (a lone
-        // `ul[role="tree"]` queried singular throughout).
-        <ul class="explorer-tree" role="tree" aria-label="Workspace files">
+        // requires (one delegated `onKeyDown` on `ul[role="tree"]`, so arrow-key nav can cross group
+        // boundaries — see `onTreeKeyDown` above) and what explorer.test.ts's structural assertions pin (a
+        // lone `ul[role="tree"]` queried singular throughout).
+        <ul class="explorer-tree" role="tree" aria-label="Workspace files" ref={treeRef} onKeyDown={onTreeKeyDown}>
           {groups.length <= 1 ? renderGroupRows(groups[0], 1) : groups.map(renderGroupWrapper)}
         </ul>
       )}

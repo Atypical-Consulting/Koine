@@ -4,12 +4,14 @@ import type { FsEntry } from '@/host';
 // One workspace-explorer row (#989 task 2, corrected in the task-2a follow-up): a keyed
 // `<li role="treeitem">` — the Preact counterpart of explorer.ts's `buildItem()`. Ported for
 // STATIC-render parity: the icon classifier, dirty dot, error/warning badge, active row
-// (aria-current/aria-selected) and filter-match highlight all mirror buildItem() exactly. Keyboard nav
-// (F2 rename, Delete, arrow/roving-tabindex), drag-and-drop, inline create/rename and the "…"
-// context-menu trigger are NOT here yet — those land in later #989 tasks; a directory click (this
-// component's only affordance today) simply toggles expansion via `onToggle`, and a file click opens it
-// via `onOpen`. `tabIndex` stays a fixed -1 (no roving-tabindex focus management until the keyboard-nav
-// task).
+// (aria-current/aria-selected) and filter-match highlight all mirror buildItem() exactly. Drag-and-drop,
+// inline create/rename and the "…" context-menu trigger are NOT here yet — those land in later #989
+// tasks; a directory click (this component's only click affordance today) simply toggles expansion via
+// `onToggle`, and a file click opens it via `onOpen`. As of task 3, `tabIndex` is a pure function of the
+// `focused` prop (`ExplorerPanel`'s roving-tabindex state) rather than a fixed -1 — see `focused` below.
+// The actual keydown ROUTING (ArrowUp/Down/Left/Right, Enter, F2/Delete/ContextMenu stubs) lives entirely
+// in `ExplorerPanel`'s single delegated `onKeyDown` on `ul[role="tree"]`, not here — this component owns
+// no keyboard handling of its own.
 //
 // RECURSIVE NESTING (the task-2a fix): a directory's rendered children are passed in as `children` —
 // already-built `<ExplorerItem>` elements for its immediate entries, recursively built the same way one
@@ -54,10 +56,16 @@ export interface ExplorerItemProps {
    * empty directory), wrapped in a nested `<ul class="explorer-children" role="group">`.
    */
   children?: ComponentChildren;
+  /**
+   * Whether this row is the lone WAI-ARIA roving tab stop (#989 task 3) — `ExplorerPanel` derives this
+   * from its `focusedToken` state (one row `true` at a time), so `tabIndex` is a pure function of that
+   * state rather than an imperative `querySelectorAll` sweep. Defaults to `false` (not the tab stop).
+   */
+  focused?: boolean;
 }
 
 export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
-  const { token, kind, name, level, expanded, active, dirty, errors, warnings, filterText, onToggle, onOpen, children } =
+  const { token, kind, name, level, expanded, active, dirty, errors, warnings, filterText, onToggle, onOpen, children, focused } =
     props;
   const isDir = kind === 'dir';
   const isActiveFile = !isDir && active;
@@ -71,7 +79,7 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
       aria-level={level}
       aria-expanded={isDir ? expanded : undefined}
       aria-selected={isActiveFile ? 'true' : undefined}
-      tabIndex={-1}
+      tabIndex={focused ? 0 : -1}
     >
       <div
         class="explorer-row"
