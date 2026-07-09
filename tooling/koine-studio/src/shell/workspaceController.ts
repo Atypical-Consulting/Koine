@@ -139,8 +139,11 @@ export interface WorkspaceControllerDeps {
 
 export interface WorkspaceController {
   /** Every open document, keyed by its file:// uri (read by ide.ts for share/export/palette/etc.). A
-   *  getter over the store-owned buffer Map (#982), so per-call access always sees the current set. */
-  readonly buffers: Map<string, Buffer>;
+   *  getter over the store-owned buffer Map (#982), so per-call access always sees the current set.
+   *  Read-only (#1010): the slice is the single owner, so writes must go through its actions
+   *  (upsertBuffer / removeBuffer / rekeyBuffer / syncBufferText / markSaved), never an in-place
+   *  mutation of a Buffer read off this map. */
+  readonly buffers: ReadonlyMap<string, Readonly<Buffer>>;
   /** The uri the editor currently shows / all LSP requests target. */
   activeUri(): string;
   /**
@@ -785,10 +788,10 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
 
   return {
     // A getter over the store-owned buffer Map (#982): per-call access always returns the current set.
-    // The slice types it ReadonlyMap; the runtime value is a real Map and no consumer mutates it, so the
-    // back-compat `Map<string, Buffer>` surface is preserved.
+    // Typed ReadonlyMap<string, Readonly<Buffer>> (#1010) to match the slice and make an in-place
+    // mutation a compile error — every write must go through a slice action instead.
     get buffers() {
-      return st().buffers as Map<string, Buffer>;
+      return st().buffers;
     },
     activeUri: () => st().activeUri,
     // Back-compat: the PRIMARY root (the legacy single opened folder); '' before any folder opens.

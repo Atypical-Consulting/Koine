@@ -7,14 +7,18 @@ export interface HistorySnapshot {
 }
 
 export interface HistoryControllerDeps {
-  /** The live open buffer set (workspaceController.buffers). */
-  buffers(): Map<string, Buffer>;
+  /** The live open buffer set (workspaceController.buffers). Read-only (#1010): writes go through
+   *  {@link writeBuffer}, never an in-place mutation of a Buffer read off this map. */
+  buffers(): ReadonlyMap<string, Readonly<Buffer>>;
   /** The uri shown in the editor right now. */
   activeUri(): string;
   /** The editor handle — swap the active buffer's doc. */
   editor: { getDoc(): string; setDoc(doc: string): void };
   /** The LSP client — push a restored NON-active buffer to the server. */
   lsp: { syncDoc(uri: string, text: string): void };
+  /** Write a restored buffer's text+dirty through the workspace slice's `upsertBuffer` — never
+   *  mutate the Map's objects in place. */
+  writeBuffer(uri: string, text: string, dirty: boolean): void;
   /** Switch the editor to a file (workspaceController.activateFile) so a restore reveals the change. */
   activateFile(uri: string): void;
   /** Re-derive every view from the restored code (ide.tsx wires onDocEdited + renderTree). */
@@ -112,12 +116,22 @@ export function createHistoryController(deps: HistoryControllerDeps): HistoryCon
       for (const [uri, doc] of Object.entries(snap.docs)) {
         const buf = bufs.get(uri);
         if (!buf) continue; // file no longer open (shouldn't happen: structural ops reset history)
-        if (buf.text !== doc.text) {
-          buf.text = doc.text;
+        const textChanged = buf.text !== doc.text;
+        // Write text+dirty back through the slice's immutable upsertBuffer BEFORE firing the
+        // editor/LSP side effects below (never mutate `buf` in place) — skip the call entirely when
+        // neither field actually changed, so an untouched buffer doesn't churn a needless new Map.
+        // Ordering matters: `editor.setDoc` dispatches synchronously and reenters onChange →
+        // workspace.syncBuffer while `restoring` is still true; that reentrant sync must see the
+        // buffer ALREADY at its restored text (exactly like the old in-place `buf.text = …` write
+        // that ran before `setDoc`), or it mistakes the restore for a real edit and churns an extra
+        // store transition with the wrong (dirty: true) flag before this call corrects it.
+        if (textChanged || buf.dirty !== doc.dirty) {
+          deps.writeBuffer(uri, doc.text, doc.dirty);
+        }
+        if (textChanged) {
           if (uri === active) deps.editor.setDoc(doc.text);
           else deps.lsp.syncDoc(uri, doc.text);
         }
-        buf.dirty = doc.dirty;
       }
       if (snap.activeUri !== active && bufs.has(snap.activeUri)) {
         deps.activateFile(snap.activeUri);
