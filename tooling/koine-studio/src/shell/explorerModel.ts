@@ -174,6 +174,17 @@ export function indexEntries(groups: readonly ExplorerRootGroup[]): ExplorerEntr
 }
 
 /**
+ * A name is one path segment. Reject path separators and the `.`/`..` traversal names so an inline
+ * create/rename input can't escape the folder (or, for rename, become a cross-directory move) from a
+ * single-name input — ported verbatim from `explorer.ts`'s `invalidSegment` (#989 task 5) so the two
+ * inline-edit implementations (the old imperative one and `ExplorerPanel`'s controlled-input one) share
+ * ONE definition instead of drifting.
+ */
+export function invalidSegment(name: string): boolean {
+  return name.includes('/') || name.includes('\\') || name === '.' || name === '..';
+}
+
+/**
  * Find the file backing a bounded context by matching its STEM (the basename minus the `.koi`
  * extension) case-insensitively — the "Reveal in Files" (#453) convention that one `.koi` file is
  * one bounded context. Ported from `explorer.ts`'s `findFileForContext` (formerly around

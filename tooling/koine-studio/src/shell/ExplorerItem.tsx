@@ -1,15 +1,16 @@
+import { useEffect, useRef } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import type { FsEntry } from '@/host';
 
 // One workspace-explorer row (#989 task 2, corrected in the task-2a follow-up): a keyed
 // `<li role="treeitem">` — the Preact counterpart of explorer.ts's `buildItem()`. Ported for
 // STATIC-render parity: the icon classifier, dirty dot, error/warning badge, active row
-// (aria-current/aria-selected) and filter-match highlight all mirror buildItem() exactly. Drag-and-drop,
-// inline create/rename and the "…" context-menu trigger are NOT here yet — those land in later #989
-// tasks; a directory click (this component's only click affordance today) simply toggles expansion via
-// `onToggle`, and a file click opens it via `onOpen`. As of task 3, `tabIndex` is a pure function of the
-// `focused` prop (`ExplorerPanel`'s roving-tabindex state) rather than a fixed -1 — see `focused` below.
-// The actual keydown ROUTING (ArrowUp/Down/Left/Right, Enter, F2/Delete/ContextMenu) lives entirely in
+// (aria-current/aria-selected) and filter-match highlight all mirror buildItem() exactly. Drag-and-drop
+// and the "…" context-menu trigger are NOT here yet — drag-and-drop lands in #989 task 6; a directory
+// click (this component's only click affordance today) simply toggles expansion via `onToggle`, and a
+// file click opens it via `onOpen`. As of task 3, `tabIndex` is a pure function of the `focused` prop
+// (`ExplorerPanel`'s roving-tabindex state) rather than a fixed -1 — see `focused` below. The actual
+// keydown ROUTING (ArrowUp/Down/Left/Right, Enter, F2/Delete/ContextMenu) lives entirely in
 // `ExplorerPanel`'s single delegated `onKeyDown` on `ul[role="tree"]`, not here — this component owns no
 // keyboard handling of its own. As of task 4, right-click DOES get a per-row listener here (`onContextMenu`,
 // wired straight to `.explorer-row`) rather than a delegated one: unlike a nested `<li role="treeitem">`,
@@ -17,6 +18,18 @@ import type { FsEntry } from '@/host';
 // `.explorer-children` list, not inside its own `.explorer-row`), so there is no ancestor-bubbling
 // double-fire risk to design around here — `ExplorerPanel` still owns a SEPARATE delegated `contextmenu`
 // listener on the tree itself, purely to catch a right-click on empty background (see its `onTreeContextMenu`).
+//
+// INLINE RENAME (#989 task 5): when `ExplorerPanel` is renaming THIS row (its `editing` state's token
+// matches), it hands down a `renaming` prop bundling the controlled input's value/invalid flag/handlers —
+// `.explorer-name` is swapped for a controlled `<input class="explorer-rename">` (ported from explorer.ts's
+// `startRename`'s DOM-mutation technique, but as a plain conditional render: the surrounding `<li>` keeps
+// its own Preact identity via `key={token}` in `ExplorerPanel`, so nothing here needs to detach/reattach
+// anything). Focus + the stem preselection (`setSelectionRange`) are the one bit of imperative DOM work
+// Preact can't express declaratively, so they're a `useEffect` gated on `renaming` FLIPPING to defined
+// (not on every keystroke — see the effect below). NOT implemented here: drag-and-drop (#989 task 6) —
+// when it lands, its dragstart handler must check `renaming` (mirroring explorer.ts's `wireDrag`'s
+// `row.querySelector('.explorer-rename')` guard) so a text-selection drag inside this input can never be
+// mistaken for a row-move drag.
 //
 // RECURSIVE NESTING (the task-2a fix): a directory's rendered children are passed in as `children` —
 // already-built `<ExplorerItem>` elements for its immediate entries, recursively built the same way one
@@ -73,7 +86,31 @@ export interface ExplorerItemProps {
    * state rather than an imperative `querySelectorAll` sweep. Defaults to `false` (not the tab stop).
    */
   focused?: boolean;
+  /**
+   * Present iff `ExplorerPanel`'s `editing` state is a rename targeting THIS row's token (#989 task 5) —
+   * bundles the controlled `<input class="explorer-rename">`'s value/invalid flag and its
+   * input/keydown/blur handlers (all owned by `ExplorerPanel`, which alone knows the shared inline-edit
+   * commit/cancel lifecycle create-row and rename-row share). `undefined` (the default) renders the
+   * plain `.explorer-name` label.
+   */
+  renaming?: ExplorerItemRenamingProps;
 }
+
+/** See {@link ExplorerItemProps.renaming}. */
+export interface ExplorerItemRenamingProps {
+  value: string;
+  invalid: boolean;
+  onInput: (ev: JSX.TargetedEvent<HTMLInputElement>) => void;
+  onKeyDown: (ev: JSX.TargetedKeyboardEvent<HTMLInputElement>) => void;
+  onBlur: (ev: JSX.TargetedFocusEvent<HTMLInputElement>) => void;
+}
+
+/**
+ * Ported from explorer.ts's `markInvalid()` — the shared invalid-name tooltip text. Exported so
+ * `ExplorerPanel`'s create-row (which renders its own `<input>` inline, outside this component) uses the
+ * IDENTICAL string rather than a second copy that could drift.
+ */
+export const INVALID_NAME_TITLE = 'A name can’t contain “/”, “\\”, “.” or “..”.';
 
 export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
   const {
@@ -92,10 +129,29 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
     onContextMenu,
     children,
     focused,
+    renaming,
   } = props;
   const isDir = kind === 'dir';
   const isActiveFile = !isDir && active;
   const hasBadge = !isDir && (errors > 0 || warnings > 0);
+  const isRenaming = renaming !== undefined;
+
+  // Focus the rename input and preselect the stem, once, right when renaming STARTS — not on every
+  // keystroke. `isRenaming` (a plain boolean) is the dependency rather than `renaming` itself: a fresh
+  // `renaming` object literal arrives from `ExplorerPanel` on every keystroke (its `value` changes), so
+  // depending on the object would re-focus/re-select on every character typed, blowing away the user's
+  // own cursor position. Ported from explorer.ts's `startRename`'s `input.focus()` +
+  // `input.setSelectionRange(0, dot > 0 ? dot : entry.name.length)`.
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!isRenaming) return;
+    const input = renameInputRef.current;
+    if (!input) return;
+    input.focus();
+    const dot = kind === 'file' ? name.lastIndexOf('.') : -1;
+    input.setSelectionRange(0, dot > 0 ? dot : name.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see the comment above: keyed on isRenaming only
+  }, [isRenaming]);
 
   return (
     <li
@@ -129,7 +185,27 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
           {isDir ? (expanded ? '▾' : '▸') : ''}
         </span>
         <ItemIcon kind={kind} name={name} expanded={expanded} />
-        <span class="explorer-name">{highlightMatch(name, filterText)}</span>
+        {renaming ? (
+          <input
+            ref={renameInputRef}
+            type="text"
+            class={renaming.invalid ? 'explorer-rename is-invalid' : 'explorer-rename'}
+            id="koi-explorer-rename"
+            name="koi-explorer-rename"
+            aria-label={`Rename ${name}`}
+            title={renaming.invalid ? INVALID_NAME_TITLE : undefined}
+            spellcheck={false}
+            value={renaming.value}
+            onInput={renaming.onInput}
+            onKeyDown={renaming.onKeyDown}
+            onBlur={renaming.onBlur}
+            // Renaming replaces the label, not the row: without this, a click to place the text cursor
+            // bubbles to `.explorer-row`'s own onClick above and toggles/opens the row mid-edit.
+            onClick={(e: MouseEvent) => e.stopPropagation()}
+          />
+        ) : (
+          <span class="explorer-name">{highlightMatch(name, filterText)}</span>
+        )}
         {!isDir && dirty && (
           <span class="tree-dirty" title="Unsaved changes">
             •
@@ -172,7 +248,10 @@ function highlightMatch(name: string, query: string): JSX.Element | string {
 // ported verbatim (same classification + same SVG paths) from explorer.ts's classifyIcon()/ICON. Kept as
 // literal JSX <svg> (not dangerouslySetInnerHTML'd markup strings) per the project's innerHTML ban
 // (eslint.config.mjs's `no-restricted-syntax` gate — MdHtml.tsx is the only permitted innerHTML sink).
-function ItemIcon({ kind, name, expanded }: { kind: FsEntry['kind']; name: string; expanded: boolean }): JSX.Element {
+// Exported (#989 task 5) so `ExplorerPanel`'s inline-create row can reuse the exact same dir/koi glyph
+// instead of a third, duplicated copy (explorer.ts's own `beginCreate` reuses its module-private `ICON`
+// the same way).
+export function ItemIcon({ kind, name, expanded }: { kind: FsEntry['kind']; name: string; expanded: boolean }): JSX.Element {
   if (kind === 'dir') {
     return (
       <span class="explorer-icon explorer-icon--dir" aria-hidden="true">

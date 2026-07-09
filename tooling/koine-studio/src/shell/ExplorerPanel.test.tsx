@@ -544,10 +544,10 @@ describe('ExplorerPanel', () => {
   // file-header note). Delete (menu item OR the Delete key) runs a `createModal`-based in-pane confirm.
   // These tests are apples-to-apples with explorer.test.ts's own parity assertions (same
   // `.explorer-menu[role="menu"]` / `.explorer-menu-item` / `.explorer-confirm-btn(-danger)` /
-  // `.koi-modal-backdrop` queries) — see explorer.test.ts around lines 223-310, 354-369, 405-415.
-  // New File/New Folder/Rename don't have an inline-edit UI yet (#989 task 5), so these only assert the
-  // ROUTING target via `data-pending-edit` (see ExplorerPanel.tsx's `pendingEdit` doc comment) rather than
-  // any rendered input.
+  // `.koi-modal-backdrop` queries) — see explorer.test.ts around lines 223-310, 354-369, 405-415. New
+  // File/New Folder/Rename DO have a real inline-edit `<input>` as of #989 task 5 — the routing tests
+  // below drive that input end-to-end (type + commit) and assert the resulting `cb.onNewFile`/
+  // `onNewFolder`/`onRename` call, rather than a placeholder `data-pending-edit` attribute.
   describe('context menus + delete confirm', () => {
     // `container` is typed `Element` by @testing-library/preact's RenderResult (not `HTMLElement`), so
     // these helpers accept that wider type — matching how the file's other tests call
@@ -560,11 +560,32 @@ describe('ExplorerPanel', () => {
     function dirRow(container: Element): HTMLElement {
       return container.querySelector<HTMLElement>('li[data-kind="dir"] > .explorer-row')!;
     }
-    function pendingEditOf(container: Element): string | null {
-      return container.querySelector('.explorer')!.getAttribute('data-pending-edit');
+    // Drive the inline create input (#989 task 5): type `value` and press Enter to commit.
+    function commitCreate(container: Element, value: string): void {
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      expect(input).not.toBeNull();
+      act(() => {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
     }
-    // Clicking a menu item may call `setPendingEdit` (New File/New Folder/Rename), so route every click
-    // through `act()` to flush that re-render before the caller reads `data-pending-edit`.
+    // Drive the inline rename input for `token` (#989 task 5): type `value` and press Enter to commit.
+    function commitRename(container: Element, token: string, value: string): void {
+      const input = container.querySelector<HTMLInputElement>(`li[data-token="${token}"] .explorer-rename`)!;
+      expect(input).not.toBeNull();
+      act(() => {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+    }
+    // Clicking a menu item may open an inline edit (New File/New Folder/Rename), so route every click
+    // through `act()` to flush that re-render before the caller looks for the resulting input.
     function clickMenuItem(label: string): void {
       const item = Array.from(document.querySelectorAll<HTMLElement>('.explorer-menu-item')).find(
         (b) => b.textContent === label,
@@ -595,31 +616,56 @@ describe('ExplorerPanel', () => {
     });
 
     it('New File from a nested file row targets its containing directory (menu)', () => {
-      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
       fileRow(container, 'order.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
       clickMenuItem('New File');
-      expect(pendingEditOf(container)).toBe('new-file:ROOT/orders');
+
+      // The create row lands INSIDE the orders directory's own children list, ahead of order.koi.
+      const ordersChildren = container.querySelector('li[data-token="ROOT/orders"] > ul.explorer-children')!;
+      expect(ordersChildren.querySelector(':scope > li.explorer-create-li')).not.toBeNull();
+
+      commitCreate(container, 'extra.koi');
+      expect(cb.onNewFile).toHaveBeenCalledWith('ROOT/orders', 'extra.koi');
     });
 
     it('New File from a top-level file row falls back to the root token (menu)', () => {
-      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
       fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
       clickMenuItem('New File');
-      expect(pendingEditOf(container)).toBe('new-file:ROOT');
+
+      commitCreate(container, 'catalog.koi');
+      expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'catalog.koi');
     });
 
     it('New Folder from a directory row targets that directory (menu)', () => {
-      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
       dirRow(container).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
       clickMenuItem('New Folder');
-      expect(pendingEditOf(container)).toBe('new-folder:ROOT/orders');
+
+      const ordersChildren = container.querySelector('li[data-token="ROOT/orders"] > ul.explorer-children')!;
+      expect(ordersChildren.querySelector(':scope > li.explorer-create-li')).not.toBeNull();
+
+      commitCreate(container, 'archive');
+      expect(cb.onNewFolder).toHaveBeenCalledWith('ROOT/orders', 'archive');
     });
 
     it("Rename identifies the right-clicked entry's own token (menu)", () => {
-      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
       fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
       clickMenuItem('Rename');
-      expect(pendingEditOf(container)).toBe('rename:ROOT/shared.koi');
+
+      const input = container.querySelector<HTMLInputElement>('li[data-token="ROOT/shared.koi"] .explorer-rename')!;
+      expect(input).not.toBeNull();
+      expect(input.value).toBe('shared.koi'); // prefilled with the current name
+
+      commitRename(container, 'ROOT/shared.koi', 'common.koi');
+      const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(renamed[0].token).toBe('ROOT/shared.koi');
+      expect(renamed[1]).toBe('common.koi');
     });
 
     it('Duplicate invokes cb.onDuplicate with the right-clicked entry (menu)', () => {
@@ -699,7 +745,8 @@ describe('ExplorerPanel', () => {
     });
 
     it('right-clicking empty tree space opens the root menu (New File / New Folder only) targeting the primary root', () => {
-      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
       const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
       tree.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 1, clientY: 1 }));
 
@@ -707,18 +754,335 @@ describe('ExplorerPanel', () => {
       expect(labels).toEqual(['New File', 'New Folder']);
 
       clickMenuItem('New File');
-      expect(pendingEditOf(container)).toBe('new-file:ROOT');
+      // Single-root: the create row is a direct child of the tree (no group wrapper) — see the toolbar
+      // tests below for the same structural assertion driven off the toolbar button instead.
+      expect(tree.querySelector(':scope > li.explorer-create-li')).not.toBeNull();
+      commitCreate(container, 'catalog.koi');
+      expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'catalog.koi');
     });
 
     it('root menu targets the FIRST group root in a multi-root workspace', () => {
+      const cb = makeCallbacks();
       const { container } = render(
-        <ExplorerPanel cb={makeCallbacks()} groups={[group('/home/me/sales'), secondGroup()]} />,
+        <ExplorerPanel cb={cb} groups={[group('/home/me/sales'), secondGroup()]} />,
       );
       const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
       tree.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 1, clientY: 1 }));
 
       clickMenuItem('New File');
-      expect(pendingEditOf(container)).toBe('new-file:/home/me/sales');
+      const salesItems = container.querySelector<HTMLElement>(
+        '.explorer-group[data-root="/home/me/sales"] > .explorer-group-items',
+      )!;
+      expect(salesItems.querySelector(':scope > li.explorer-create-li')).not.toBeNull();
+      commitCreate(container, 'catalog.koi');
+      expect(cb.onNewFile).toHaveBeenCalledWith('/home/me/sales', 'catalog.koi');
+    });
+  });
+
+  // --- inline create/rename (#989 task 5): the create-row / rename-input are CONTROLLED, keyed elements
+  // rendered off `ExplorerPanel`'s own `editing` state — not explorer.ts's imperative DOM-insert
+  // technique. The load-bearing test in this block ("survives a changed re-render mid-edit") is the
+  // concrete proof that keyed reconciliation makes explorer.ts's whole `renaming`/`creating`/
+  // `flushPendingRender()` deferral machinery unnecessary: a re-render triggered by something ELSE
+  // changing (here, an unrelated file's dirty flag) must reconcile onto the SAME `<input>` DOM node,
+  // never tearing it down or losing the half-typed value.
+  describe('inline create/rename (#989 task 5)', () => {
+    function fileRow(container: Element, name: string): HTMLElement {
+      return Array.from(container.querySelectorAll<HTMLElement>('li[data-kind="file"] > .explorer-row')).find(
+        (r) => r.querySelector('.explorer-name')?.textContent === name,
+      )!;
+    }
+
+    it("toolbar New File mounts the create row inside the PRIMARY root's group (multi-root)", () => {
+      const cb = makeCallbacks();
+      const { container } = render(
+        <ExplorerPanel cb={cb} groups={[group('/home/me/sales'), secondGroup()]} />,
+      );
+
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const salesItems = container.querySelector<HTMLElement>(
+        '.explorer-group[data-root="/home/me/sales"] > .explorer-group-items',
+      )!;
+      const createLi = salesItems.querySelector<HTMLElement>(':scope > li.explorer-create-li');
+      expect(createLi).not.toBeNull();
+
+      // Never leaks into the billing group, nor sits as a stray direct child of the shared tree.
+      const billingItems = container.querySelector<HTMLElement>(
+        '.explorer-group[data-root="/home/me/billing"] > .explorer-group-items',
+      )!;
+      expect(billingItems.querySelector('.explorer-create-li')).toBeNull();
+      const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
+      expect(Array.from(tree.children)).not.toContain(createLi);
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      act(() => {
+        input.value = 'catalog.koi';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      expect(cb.onNewFile).toHaveBeenCalledWith('/home/me/sales', 'catalog.koi');
+    });
+
+    it('toolbar New File in single-root mode mounts the create row directly in the tree (no group)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      expect(container.querySelector('.explorer-group')).toBeNull();
+      const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
+      const createLi = tree.querySelector<HTMLElement>(':scope > li.explorer-create-li');
+      expect(createLi).not.toBeNull();
+
+      const input = createLi!.querySelector<HTMLInputElement>('.explorer-rename')!;
+      expect(input.placeholder).toBe('name.koi');
+      expect(input.getAttribute('aria-label')).toBe('New file name');
+      act(() => {
+        input.value = 'catalog.koi';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'catalog.koi');
+    });
+
+    it('the toolbar New folder button opens a folder-flavored create row', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const tools = Array.from(container.querySelectorAll<HTMLElement>('.explorer-toolbar .explorer-tool'));
+      act(() => tools.find((b) => b.getAttribute('aria-label') === 'New folder')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      expect(input.placeholder).toBe('folder name');
+      expect(input.getAttribute('aria-label')).toBe('New folder name');
+      act(() => {
+        input.value = 'archive';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      expect(cb.onNewFolder).toHaveBeenCalledWith('ROOT', 'archive');
+    });
+
+    it('Escape cancels an inline create without calling onNewFile', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      act(() => {
+        input.value = 'scrap.koi';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+
+      expect(cb.onNewFile).not.toHaveBeenCalled();
+      expect(container.querySelector('.explorer-create')).toBeNull();
+    });
+
+    it('keeps an inline create open and flags an invalid name instead of creating (Enter)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      act(() => {
+        input.value = 'bad/name';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+      expect(cb.onNewFile).not.toHaveBeenCalled();
+      expect(input.classList.contains('is-invalid')).toBe(true);
+      expect(container.querySelector('.explorer-create')).not.toBeNull(); // still open to fix
+    });
+
+    it('cancels an inline create with an invalid name on blur (never traps the user in a bad-name row)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      act(() => {
+        input.value = 'bad/name';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new Event('blur')); });
+
+      expect(cb.onNewFile).not.toHaveBeenCalled();
+      expect(container.querySelector('.explorer-create')).toBeNull();
+    });
+
+    it('F2 starts an inline rename and commits the typed name on Enter', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
+      expect(input).not.toBeNull();
+      expect(input.value).toBe('shared.koi');
+
+      act(() => {
+        input.value = 'common.koi';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+      const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(renamed[0].token).toBe('ROOT/shared.koi');
+      expect(renamed[1]).toBe('common.koi');
+      expect(container.querySelector('.explorer-rename')).toBeNull();
+    });
+
+    it('F2 on a DIRECTORY row also starts an inline rename (no file-only guard)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
+      act(() => dir.focus());
+      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = dir.querySelector<HTMLInputElement>(':scope > .explorer-row .explorer-rename')!;
+      expect(input).not.toBeNull();
+      expect(input.value).toBe('orders');
+
+      act(() => {
+        input.value = 'purchase-orders';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(renamed[0].token).toBe('ROOT/orders');
+      expect(renamed[1]).toBe('purchase-orders');
+    });
+
+    it('preselects the stem (before the last dot) for a file rename', () => {
+      const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
+      expect(input.selectionStart).toBe(0);
+      expect(input.selectionEnd).toBe('shared'.length); // up to (not including) ".koi"
+    });
+
+    it('Escape cancels an inline rename without calling onRename (label restored)', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
+      act(() => {
+        input.value = 'whatever.koi';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+
+      expect(cb.onRename).not.toHaveBeenCalled();
+      expect(container.querySelector('.explorer-rename')).toBeNull();
+      expect(fileRow(container, 'shared.koi')).toBeTruthy(); // label restored
+    });
+
+    it('discards an invalid rename on blur without calling onRename', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
+      act(() => {
+        input.value = 'bad/name';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new Event('blur')); });
+
+      expect(cb.onRename).not.toHaveBeenCalled();
+      expect(container.querySelector('.explorer-rename')).toBeNull(); // discarded, label restored
+    });
+
+    it('a no-op rename (name unchanged) closes the edit without calling onRename', () => {
+      const cb = makeCallbacks();
+      const { container } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+      expect(cb.onRename).not.toHaveBeenCalled();
+      expect(container.querySelector('.explorer-rename')).toBeNull();
+    });
+
+    // The load-bearing test for the whole #989 migration: a re-render triggered by something ELSE
+    // changing (an unrelated file's dirty flag) WHILE a rename is mid-edit, with a half-typed,
+    // uncommitted value, must reconcile onto the SAME `<input>` DOM node — not tear it down and lose the
+    // in-progress text — because the row is keyed by its own token. explorer.ts needed a `renaming` flag
+    // plus `flushPendingRender()` to defend against exactly this scenario (see its own parity test,
+    // explorer.test.ts:458-478, which only proves survival across an IDENTICAL re-render). This test goes
+    // further: the props actually CHANGE mid-edit, which explorer.test.ts's version never exercises.
+    it('survives a re-render with CHANGED groups/cb props while a rename is mid-edit (keyed reconciliation, #989)', () => {
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-rename')!;
+      expect(input).not.toBeNull();
+      act(() => {
+        input.value = 'ren'; // half-typed, not yet committed
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(input.value).toBe('ren');
+
+      // A diagnostics push re-renders with CHANGED props — a DIFFERENT file (order.koi) just became
+      // dirty — while the rename above is still open and uncommitted.
+      const dirtyCb = makeCallbacks({ isDirty: vi.fn((t: string) => t === 'ROOT/orders/order.koi') });
+      act(() => rerender(<ExplorerPanel cb={dirtyCb} groups={[group()]} />));
+
+      const stillInput = container.querySelector<HTMLInputElement>('.explorer-rename')!;
+      expect(stillInput).toBe(input); // SAME DOM node reference — not torn down and rebuilt
+      expect(stillInput.value).toBe('ren'); // half-typed value untouched
+      expect(cb.onRename).not.toHaveBeenCalled(); // no spurious commit
+      expect(dirtyCb.onRename).not.toHaveBeenCalled();
+
+      // Sanity: the re-render's OWN change did take effect elsewhere in the tree.
+      const orderRow = container.querySelector('li[data-token="ROOT/orders/order.koi"] .explorer-row')!;
+      expect(orderRow.querySelector('.tree-dirty')).not.toBeNull();
+
+      // Enter now commits exactly once, with the (still-current) typed value.
+      act(() => { stillInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      expect(dirtyCb.onRename).toHaveBeenCalledTimes(1);
+      expect((dirtyCb.onRename as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ren');
+    });
+
+    // Design decision #3 (#989): an upstream deletion of the edited entry mid-edit cancels rather than
+    // commits. Simulated here by re-rendering with `shared.koi` removed from `groups` while its rename is
+    // open — Preact unmounts the `<input>` (this row no longer exists to render), and a late `blur` event
+    // on that now-detached node must be a no-op rather than firing `onRename` for a vanished entry.
+    it('an upstream deletion of the edited entry cancels the pending rename instead of committing (isConnected blur guard)', () => {
+      const cb = makeCallbacks();
+      const { container, rerender } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
+      const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
+      act(() => file.focus());
+      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-rename')!;
+      expect(input).not.toBeNull();
+
+      const groupsWithoutShared: ExplorerRootGroup[] = [
+        { root: 'ROOT', entries: sampleTree().filter((e) => e.token !== 'ROOT/shared.koi') },
+      ];
+      act(() => rerender(<ExplorerPanel cb={cb} groups={groupsWithoutShared} />));
+      expect(input.isConnected).toBe(false); // Preact already removed it — the entry it belonged to is gone
+
+      act(() => { input.dispatchEvent(new Event('blur')); });
+      expect(cb.onRename).not.toHaveBeenCalled();
     });
   });
 });

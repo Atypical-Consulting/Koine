@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
-import { analyze, flattenVisible, indexEntries, parentDirOf, parentMapOf } from '@/shell/explorerModel';
-import { ExplorerItem } from '@/shell/ExplorerItem';
+import { analyze, flattenVisible, indexEntries, invalidSegment, parentDirOf, parentMapOf } from '@/shell/explorerModel';
+import { ExplorerItem, INVALID_NAME_TITLE, ItemIcon } from '@/shell/ExplorerItem';
 import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 import {
   createFloatingMenu,
@@ -45,10 +45,10 @@ import {
 // to the one handler on `ul[role="tree"]`, which is what makes the old "double-fire through nested
 // treeitem ancestors" bug (and its `stopPropagation` workaround) structurally impossible here.
 //
-// NOT in this task: drag-and-drop move, inline create/rename inputs, the "…" per-row context-menu
-// trigger, and the ADR-0009 active-context is-scoped/dim emphasis (explorerModel.ts's public `analyze()`
-// doesn't carry that scope match — only the private analyze() inside explorer.ts does). `filterText` and
-// the collapsed-directories set are component-LOCAL `useState` here; task 7 lifts them into the app store.
+// NOT in this task: drag-and-drop move, the "…" per-row context-menu trigger, and the ADR-0009
+// active-context is-scoped/dim emphasis (explorerModel.ts's public `analyze()` doesn't carry that scope
+// match — only the private analyze() inside explorer.ts does). `filterText` and the collapsed-directories
+// set are component-LOCAL `useState` here; task 7 lifts them into the app store.
 //
 // CONTEXT MENUS + DELETE CONFIRM (#989 task 4): right-click a row, the `ContextMenu` key on a focused
 // row, or right-click the tree's empty background all open a `createFloatingMenu` (row: New File/New
@@ -58,11 +58,21 @@ import {
 // (`createFloatingMenu`/`createModal`), NOT reimplemented as JSX — they mount on `document.body`, built
 // once per `ExplorerPanel` instance in the mount effect below and torn down on unmount, so a re-render can
 // never touch (or need to defer for) them; there is no `interactionOpen()`/`pendingRender`/
-// `flushPendingRender()` machinery here, unlike explorer.ts. New File/New Folder/Rename don't have an
-// inline-edit UI yet (that's #989 task 5) — their menu items call `beginCreate`/`startRename`, which for
-// now only record the routing target into `pendingEdit` (a deliberately minimal placeholder — see its
-// doc comment) rather than opening any input.
-// F2 is still recognized-but-stubbed pending #989 task 5.
+// `flushPendingRender()` machinery here, unlike explorer.ts.
+//
+// INLINE CREATE/RENAME (#989 task 5): New File/New Folder/Rename/F2 open a CONTROLLED, keyed `<input>` —
+// `editing` state (below) drives a create-row (`renderCreateRow`) or a rename swapped into the target
+// row (`ExplorerItem`'s `renaming` prop) — instead of explorer.ts's imperative DOM-insert-an-`<input>`
+// technique. This is the structural point of the whole #989 migration: because the row is a KEYED Preact
+// element (`key={entry.token}`), a re-render that happens mid-edit (e.g. a diagnostics push changing an
+// unrelated file's badge count) reconciles onto the SAME `<input>` DOM node rather than tearing it down —
+// see ExplorerPanel.test.tsx's "survives a changed re-render mid-edit" test. explorer.ts needed a whole
+// `renaming`/`creating` flag pair plus `flushPendingRender()` to defend against exactly this; here there
+// is nothing to defend, because keyed reconciliation makes the tear-down structurally impossible. The
+// commit/cancel/invalid-mark lifecycle (`commitEdit`/`cancelEdit`/`onEditBlur` below) still ports
+// explorer.ts's `wireInlineEdit` semantics 1:1 (Enter commits a valid name, Escape cancels, blur commits-
+// or-cancels, an invalid name stays open to fix) — see their doc comments for the one behavioral addition
+// (the `input.isConnected` blur guard) that keyed reconciliation itself doesn't remove the need for.
 export interface ExplorerPanelProps {
   cb: ExplorerCallbacks;
   groups: ExplorerRootGroup[];
@@ -72,12 +82,14 @@ export interface ExplorerPanelProps {
   initialCollapsed?: readonly string[];
 }
 
-// See `pendingEdit`'s doc comment (inside ExplorerPanel) for why this exists and how temporary it is.
-interface PendingEdit {
-  kind: 'new-file' | 'new-folder' | 'rename';
-  /** The New File/Folder parent dir token, or the renamed entry's own token. */
-  target: string;
-}
+// The one inline-edit session that can be open at a time (#989 task 5) — replaces task 4's placeholder
+// `PendingEdit` (which only recorded a routing target for test observability, since no input rendered
+// yet). `create`'s `parent` is the New File/Folder target dir token (or a workspace root token for a
+// top-level create); `rename`'s `token` is the renamed entry's own token. `null` when no edit is open —
+// `beginCreate`/`startRename` both no-op if one already is (mirrors explorer.ts's
+// `if (creating || renaming) return;` / `if (row.querySelector('.explorer-rename')) return;` guards:
+// only one inline edit is ever in flight).
+type EditingState = { kind: 'create'; parent: string; entryKind: 'file' | 'dir' } | { kind: 'rename'; token: string } | null;
 
 // The delete-confirm dialog's imperative handle — one `createModal()` instance reused across every
 // delete (its title/message/OK-label are rewritten per call), mirroring explorer.ts's
@@ -150,14 +162,21 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const [focusedToken, setFocusedToken] = useState<string | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
 
-  // PLACEHOLDER routing target for New File/New Folder/Rename menu actions (#989 task 4). Task 5 owns the
-  // real inline-edit design (an actual `<input>` + commit/cancel) and will replace or extend this — this
-  // only exists so `beginCreate`/`startRename` have somewhere obvious to record WHAT they were asked to
-  // act on (the New File/Folder parent dir token, or the renamed entry's own token), so ExplorerPanel's
-  // own tests can assert a menu item routed to the right target without asserting any input renders (none
-  // does yet). Exposed on the root `.explorer` element via `data-pending-edit` (`"<kind>:<target>"`)
-  // purely for that test observability.
-  const [pendingEdit, setPendingEdit] = useState<PendingEdit | null>(null);
+  // The one open inline create/rename session (#989 task 5) — see {@link EditingState}. `editValue`/
+  // `editInvalid` are kept as SEPARATE state (not nested in `editing`) so typing a keystroke
+  // (`onEditInput`) never touches the `editing` object's own reference — that reference only changes
+  // twice per edit (start, end), which is what lets a mid-edit re-render (a `groups`/`cb` prop change
+  // from elsewhere) leave the same `<input>` DOM node mounted (see the file-header note above).
+  const [editing, setEditing] = useState<EditingState>(null);
+  const [editValue, setEditValue] = useState('');
+  const [editInvalid, setEditInvalid] = useState(false);
+  // Autofocus target for the create-row's input — the rename input's own focus is handled inside
+  // `ExplorerItem` (it already owns the row's DOM), but the create row is built inline below, so its
+  // input needs the same "focus once, right when the row appears" treatment here instead.
+  const createInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing?.kind === 'create') createInputRef.current?.focus();
+  }, [editing]);
 
   // Debounce the filter — 110ms, mirroring explorer.ts's `setTimeout(applyFilter, 110)` — so each
   // keystroke doesn't re-derive visibility/highlighting for the whole tree.
@@ -279,14 +298,99 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   // The PRIMARY root token (the first group's): the root-menu New File/New Folder target, mirroring
   // explorer.ts's `rootToken` (always `groups[0]?.root` there too).
   const primaryRoot = groups[0]?.root ?? '';
+  // Every workspace root token — distinguishes a top-level create (lands directly in a group's own rows)
+  // from a directory-target create (lands nested inside that directory's children), mirroring
+  // explorer.ts's `rootTokens.has(parentDirToken)` branch in `beginCreate`.
+  const rootTokens = useMemo(() => new Set(groups.map((g) => g.root)), [groups]);
 
-  // New File/New Folder/Rename menu actions (#989 task 4): no inline-edit UI exists yet (#989 task 5), so
-  // these only record the routing target `pendingEdit` carries — see its doc comment above.
+  // --- inline create/rename (#989 task 5) ---------------------------------------------------------------
+  // `beginCreate`/`startRename` open the ONE inline-edit session `editing` tracks — see its doc comment.
+  // Both no-op while an edit is already open (ported from explorer.ts's `creating`/`renaming` guards).
   const beginCreate = (parentDirToken: string, kind: 'file' | 'dir'): void => {
-    setPendingEdit({ kind: kind === 'dir' ? 'new-folder' : 'new-file', target: parentDirToken });
+    if (editing) return;
+    // Force-expand a directory target so its create row (rendered as its first child, see
+    // `renderEntry`) is actually visible — mirrors explorer.ts's `setExpanded(dirLi, true)`.
+    if (!rootTokens.has(parentDirToken)) {
+      setCollapsed((prev) => {
+        if (!prev.has(parentDirToken)) return prev;
+        const next = new Set(prev);
+        next.delete(parentDirToken);
+        return next;
+      });
+    }
+    setEditing({ kind: 'create', parent: parentDirToken, entryKind: kind });
+    setEditValue('');
+    setEditInvalid(false);
   };
   const startRename = (token: string): void => {
-    setPendingEdit({ kind: 'rename', target: token });
+    if (editing) return;
+    const entry = entryIndex.entries.get(token);
+    if (!entry) return;
+    setEditing({ kind: 'rename', token });
+    setEditValue(entry.name);
+    setEditInvalid(false);
+  };
+
+  // Shared commit — ported from explorer.ts's `wireInlineEdit`'s `tryCommit()`: an empty (trimmed) name
+  // cancels outright; an invalid one (see `invalidSegment`) is flagged and the edit STAYS OPEN so the
+  // user can fix it; otherwise the matching callback fires and the edit closes. A no-op rename (typed
+  // name unchanged) still closes the edit but skips `cb.onRename` — same as explorer.ts.
+  const commitEdit = (raw: string): void => {
+    if (!editing) return;
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      cancelEdit();
+      return;
+    }
+    if (invalidSegment(trimmed)) {
+      setEditInvalid(true);
+      return;
+    }
+    if (editing.kind === 'create') {
+      const { parent, entryKind } = editing;
+      setEditing(null);
+      if (entryKind === 'dir') cb.onNewFolder(parent, trimmed);
+      else cb.onNewFile(parent, trimmed);
+    } else {
+      const entry = entryIndex.entries.get(editing.token);
+      setEditing(null);
+      if (entry && trimmed !== entry.name) cb.onRename(entry, trimmed);
+    }
+  };
+  const cancelEdit = (): void => setEditing(null);
+
+  const onEditInput = (ev: JSX.TargetedEvent<HTMLInputElement>): void => {
+    setEditValue(ev.currentTarget.value);
+    setEditInvalid(false); // typing clears the invalid mark, mirrors explorer.ts's `input` listener
+  };
+  const onEditKeyDown = (ev: JSX.TargetedKeyboardEvent<HTMLInputElement>): void => {
+    // Stop here so a keypress inside the edit input — notably Arrow keys used to move the text cursor,
+    // or a literal "Delete" character-delete — never bubbles to the tree's delegated `onTreeKeyDown` and
+    // gets misrouted as tree navigation or a delete-confirm. Ported from explorer.ts's `wireInlineEdit`'s
+    // unconditional `ev.stopPropagation()`.
+    ev.stopPropagation();
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      commitEdit(ev.currentTarget.value);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      cancelEdit();
+    }
+  };
+  // Blur commits a valid name, else cancels — never traps the user in a bad-name row (explorer.ts's
+  // `wireInlineEdit`'s blur listener). Guarded by `isConnected` per the issue's design decision #3: if an
+  // upstream data change removed the edited entry (or its parent directory) out from under the user mid-
+  // edit, Preact will have already unmounted this `<input>` by the time any blur fires for it — treat
+  // that as a cancel, not a commit, since there is nothing left to rename/create into.
+  const onEditBlur = (ev: JSX.TargetedFocusEvent<HTMLInputElement>): void => {
+    const input = ev.currentTarget;
+    if (!input.isConnected) {
+      setEditing(null);
+      return;
+    }
+    const raw = input.value.trim();
+    if (raw && !invalidSegment(raw)) commitEdit(raw);
+    else cancelEdit();
   };
 
   // The shared confirm dialog (#989 task 4), ported from explorer.ts's openConfirm()/confirmDelete():
@@ -362,12 +466,15 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     const idx = token != null ? navTokens.indexOf(token) : -1;
 
     // Panel-specific keys the shared router doesn't own (matches explorer.ts's onRowKeydown switch).
-    // F2 stays a stub pending #989 task 5 (no inline-rename UI exists yet); Delete/ContextMenu are wired
-    // (#989 task 4) to the same confirmDelete/openRowMenu the row's right-click and menu items use.
+    // F2 is wired (#989 task 5) to the same startRename the row's context-menu "Rename" item uses — for
+    // ANY row kind, file or directory: explorer.ts's own onRowKeydown calls startRename(li, entry)
+    // unconditionally, with no `entry.kind === 'file'` guard, so a focused directory renames just like a
+    // file. Delete/ContextMenu are wired (#989 task 4) to the same confirmDelete/openRowMenu the row's
+    // right-click and menu items use.
     switch (ev.key) {
       case 'F2':
         ev.preventDefault();
-        // TODO(#989 task 5): start inline rename for `token`.
+        if (token != null) startRename(token);
         return;
       case 'Delete': {
         ev.preventDefault();
@@ -455,6 +562,39 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
 
   const filtering = filterText !== '';
 
+  // The transient inline-create row (#989 task 5) — ported from explorer.ts's `beginCreate`'s DOM-build
+  // (`<li class="explorer-create-li"><div class="explorer-row explorer-create">…`), as JSX instead of
+  // imperative element construction. A stable literal key: at most ONE of these is ever rendered at a
+  // time (`editing` is a single value, not a list), and — same as every other row — a stable key is what
+  // lets this survive a re-render triggered by something else changing mid-edit, rather than being torn
+  // down and rebuilt from scratch every render.
+  const renderCreateRow = (kind: 'file' | 'dir', level: number): JSX.Element => (
+    <li key="__explorer-create__" class="explorer-create-li">
+      <div class="explorer-row explorer-create" style={{ '--depth': String(level - 1) }}>
+        <span class="explorer-twisty" aria-hidden="true" />
+        {/* Always the dir/koi glyph regardless of what's typed so far — matches explorer.ts's
+            beginCreate, which never re-classifies the icon off the in-progress name. */}
+        <ItemIcon kind={kind} name={kind === 'dir' ? 'new folder' : 'new.koi'} expanded={false} />
+        <input
+          ref={createInputRef}
+          type="text"
+          class={editInvalid ? 'explorer-rename is-invalid' : 'explorer-rename'}
+          id="koi-explorer-new"
+          name="koi-explorer-new"
+          placeholder={kind === 'dir' ? 'folder name' : 'name.koi'}
+          aria-label={kind === 'dir' ? 'New folder name' : 'New file name'}
+          title={editInvalid ? INVALID_NAME_TITLE : undefined}
+          spellcheck={false}
+          value={editValue}
+          onInput={onEditInput}
+          onKeyDown={onEditKeyDown}
+          onBlur={onEditBlur}
+          onClick={(e: JSX.TargetedMouseEvent<HTMLInputElement>) => e.stopPropagation()}
+        />
+      </div>
+    </li>
+  );
+
   // Recursively render one entry (and, when it's an expanded directory, its own children) as a keyed
   // `ExplorerItem` — the DOM-shape fix (#989 task-2a): a directory's children nest INSIDE its own `<li>`
   // (via `ExplorerItem`'s `children` prop) rather than sitting flat beside it. Filter-visibility reuses
@@ -476,8 +616,20 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
 
     // Only compute (and pass) children when this directory is actually expanded — a collapsed directory
     // simply doesn't render its subtree at all (the JS/Preact equivalent of the original's CSS
-    // `display:none`), rather than building it and hiding it.
-    const childNodes = isDir && expanded ? (entry.children ?? []).map((c) => renderEntry(c, level + 1)).filter(nonNull) : undefined;
+    // `display:none`), rather than building it and hiding it. A create targeting THIS directory (#989
+    // task 5) renders as the FIRST child, ahead of its real entries — mirrors explorer.ts's
+    // `container.prepend(li)` in `beginCreate`.
+    let childNodes: JSX.Element[] | undefined;
+    if (isDir && expanded) {
+      childNodes = (entry.children ?? []).map((c) => renderEntry(c, level + 1)).filter(nonNull);
+      if (editing?.kind === 'create' && editing.parent === entry.token) {
+        childNodes = [renderCreateRow(editing.entryKind, level + 1), ...childNodes];
+      }
+    }
+
+    const renaming = editing?.kind === 'rename' && editing.token === entry.token
+      ? { value: editValue, invalid: editInvalid, onInput: onEditInput, onKeyDown: onEditKeyDown, onBlur: onEditBlur }
+      : undefined;
 
     return (
       <ExplorerItem
@@ -493,6 +645,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         warnings={diag.warnings}
         filterText={filterText}
         focused={entry.token === effectiveFocusedToken}
+        renaming={renaming}
         onToggle={() => toggleDir(entry.token)}
         onOpen={() => cb.onOpenFile(entry.token)}
         onContextMenu={(e) => {
@@ -508,9 +661,19 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   // A group's top-level rows: its entries recursively rendered, filtered rows dropped. Level 1 in
   // single-root mode (no wrapper); level 2 in multi-root mode, since the wrapper ITSELF now occupies
   // level 1 (see renderGroupWrapper below) — the top-level entries genuinely ARE one level deeper than
-  // the workspace-root node that contains them, mirroring how a directory's own children are level+1.
-  const renderGroupRows = (group: ExplorerRootGroup, level: number): JSX.Element[] =>
-    group.entries.map((e) => renderEntry(e, level)).filter(nonNull);
+  // the workspace-root node that contains them, mirroring how a directory's own children are level+1. A
+  // top-level create targeting THIS root (#989 task 5) renders first — mirrors explorer.ts's
+  // `container.prepend(li)`, where `container` is this same group's `.explorer-group-items` (or the bare
+  // tree in single-root mode). `group` may be `undefined` when the workspace has zero roots but a
+  // top-level create is still open (see the tree/empty-state branch below) — falls back to an empty row
+  // list, targeted via `primaryRoot` (which is `''` in that same degenerate case, so the two agree).
+  const renderGroupRows = (group: ExplorerRootGroup | undefined, level: number): JSX.Element[] => {
+    const rows = (group?.entries ?? []).map((e) => renderEntry(e, level)).filter(nonNull);
+    if (editing?.kind === 'create' && editing.parent === (group?.root ?? primaryRoot)) {
+      rows.unshift(renderCreateRow(editing.entryKind, level));
+    }
+    return rows;
+  };
 
   // Multi-root (2+ groups) only: one `.explorer-group[data-root]` wrapper per root, itself a direct child
   // of the single shared tree below, containing that root's header (name + Remove) and its top-level rows.
@@ -580,12 +743,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const matchCount = analysis.matchCount;
 
   return (
-    <div
-      class="explorer"
-      // See `pendingEdit`'s doc comment above — test-only observability for the New File/New
-      // Folder/Rename menu stubs, not part of Task 5's eventual real inline-edit design.
-      data-pending-edit={pendingEdit ? `${pendingEdit.kind}:${pendingEdit.target}` : undefined}
-    >
+    <div class="explorer">
       <div class="explorer-head">
         <div class="explorer-filter-row">
           <input
@@ -613,13 +771,12 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
           </span>
         </div>
         <div class="explorer-toolbar">
-          {/* New file/New folder render for visual/DOM parity but are inert placeholders in this task —
-              their real behavior (an inline-create input) is a later #989 task; wiring them to
-              cb.onNewFile/onNewFolder needs a name the user hasn't typed anywhere yet. */}
-          <ToolbarButton label="New file">
+          {/* Both target the PRIMARY (first) workspace root (#989 task 5) — mirrors explorer.ts's
+              toolbar, which wires New file/New folder to `beginCreate(rootToken, 'file'|'dir')`. */}
+          <ToolbarButton label="New file" onClick={() => beginCreate(primaryRoot, 'file')}>
             <NewFileGlyph />
           </ToolbarButton>
-          <ToolbarButton label="New folder">
+          <ToolbarButton label="New folder" onClick={() => beginCreate(primaryRoot, 'dir')}>
             <NewFolderGlyph />
           </ToolbarButton>
           <ToolbarButton label="Add folder to workspace" extraClass="explorer-add-root" onClick={() => cb.onAddRoot?.()}>
@@ -634,15 +791,18 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
           </ToolbarButton>
         </div>
       </div>
-      {showEmpty ? (
+      {/* A create in flight (#989 task 5) always shows the tree (with its create row) even when the
+          workspace is otherwise empty — clicking the empty-state's own "New file" action opens exactly
+          that create, so the empty message must yield to it rather than the create row having nowhere
+          to render. */}
+      {showEmpty && editing?.kind !== 'create' ? (
         <div class="explorer-empty">
           {filterText ? (
             `No files match “${filterInput.trim()}”.`
           ) : (
             <>
               <p class="explorer-empty-line">This folder is empty.</p>
-              {/* Inert for the same reason as the toolbar's New file — no inline-create input yet. */}
-              <button type="button" class="explorer-empty-action">
+              <button type="button" class="explorer-empty-action" onClick={() => beginCreate(primaryRoot, 'file')}>
                 New file
               </button>
             </>
