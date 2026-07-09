@@ -14,10 +14,9 @@ import { fileURLToPath } from 'node:url';
 // via var(...). This is a plain string check — the file is plain CSS, not a stylesheet the DOM parses
 // in this Node test environment — so it just proves the core tokens made the move byte-for-byte.
 const tokensCssPath = fileURLToPath(new URL('./tokens.css', import.meta.url));
+const css = readFileSync(tokensCssPath, 'utf8');
 
 describe('tokens.css', () => {
-  const css = readFileSync(tokensCssPath, 'utf8');
-
   test('defines the default (dark) theme tokens on :root', () => {
     expect(css).toContain('--koi-fg:');
     expect(css).toContain('--koi-muted:');
@@ -94,9 +93,18 @@ function extractToken(block: string, token: string): string {
   return match![1];
 }
 
-describe('launcher match highlight contrast', () => {
-  const css = readFileSync(tokensCssPath, 'utf8');
+// Mirrors `.lx-item.sel { background: color-mix(in srgb, var(--koi-accent) 15%, transparent); }`
+// composited over the launcher card's --koi-paper-2 surface: CSS color-mix(in srgb, ...) blends
+// the raw (non-linearized) sRGB channel values by the given weight.
+function mixSrgb(fgHex: string, bgHex: string, fgWeight: number): string {
+  const [fr, fgc, fb] = hexToRgb(fgHex);
+  const [br, bg, bb] = hexToRgb(bgHex);
+  const blend = (f: number, b: number) => Math.round(f * fgWeight + b * (1 - fgWeight));
+  const toHex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${toHex(blend(fr, br))}${toHex(blend(fgc, bg))}${toHex(blend(fb, bb))}`;
+}
 
+describe('launcher match highlight contrast', () => {
   test('dark theme --koi-hl-match clears WCAG AA (>= 4.5:1) on --koi-paper-2', () => {
     const darkBlock = extractThemeBlock(css, ':root');
     const hlMatch = extractToken(darkBlock, '--koi-hl-match');
@@ -109,5 +117,26 @@ describe('launcher match highlight contrast', () => {
     const hlMatch = extractToken(lightBlock, '--koi-hl-match');
     const paper2 = extractToken(lightBlock, '--koi-paper-2');
     expect(contrastRatio(hlMatch, paper2)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // The selected-row tint (color-mix(--koi-accent 15%, transparent) over --koi-paper-2) is the
+  // WORST-CASE background per the issue's own spec — a future change to --koi-accent alone (used
+  // elsewhere for pills/focus rings/etc.) must not silently drop this below AA again.
+  test('dark theme --koi-hl-match clears WCAG AA on the worst-case selected-row tint', () => {
+    const darkBlock = extractThemeBlock(css, ':root');
+    const hlMatch = extractToken(darkBlock, '--koi-hl-match');
+    const accent = extractToken(darkBlock, '--koi-accent');
+    const paper2 = extractToken(darkBlock, '--koi-paper-2');
+    const selectedRowBg = mixSrgb(accent, paper2, 0.15);
+    expect(contrastRatio(hlMatch, selectedRowBg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('light theme --koi-hl-match clears WCAG AA on the worst-case selected-row tint', () => {
+    const lightBlock = extractThemeBlock(css, "html[data-theme='light']");
+    const hlMatch = extractToken(lightBlock, '--koi-hl-match');
+    const accent = extractToken(lightBlock, '--koi-accent');
+    const paper2 = extractToken(lightBlock, '--koi-paper-2');
+    const selectedRowBg = mixSrgb(accent, paper2, 0.15);
+    expect(contrastRatio(hlMatch, selectedRowBg)).toBeGreaterThanOrEqual(4.5);
   });
 });
