@@ -139,17 +139,36 @@ uniformly:
      Studio's is `zustandToReadableStore(store, selector, isEqual?)`
      (`tooling/koine-studio/src/store/readableStoreAdapter.ts`), which mirrors what Zustand's own
      `useStore(store, selector)` does internally: subscribe once to the whole store, but only notify
-     when the selected slice changes under `isEqual` (default `Object.is`; pass the adapter's
-     `shallowEqual` when the selector builds a fresh object each call) — preserving the "re-render
-     only on this slice" property the pre-extraction direct `useStore` call had. Keep the actual
-     `zustandToReadableStore(...)` calls out of a line-budget-guarded call site (Koine Studio's
-     `ide.tsx`) by giving each adapted store its own small factory function
+     when the selected slice changes under `isEqual` — preserving the "re-render only on this slice"
+     property the pre-extraction direct `useStore` call had. `isEqual` defaults to `Object.is`
+     (correct for a selector that returns a reference-stable value, e.g. picking one immutable field
+     straight off the state); pass the adapter's `shallowEqual` (Zustand's own `shallow`) when the
+     selector builds a fresh object of PRIMITIVE fields each call (`HistoryControlsSlice`); write a
+     small dedicated comparator when a field is itself an array/object built fresh each call
+     (`WorkspaceProblemsSlice`'s `parts: string[]` — `shallowEqual`'s one-level `Object.is` would
+     never consider two content-equal-but-different-instance arrays equal, so
+     `readableStores.ts`'s `problemsSliceEqual` compares `parts` element-wise instead). Keep the
+     actual `zustandToReadableStore(...)` calls out of a line-budget-guarded call site (Koine
+     Studio's `ide.tsx`) by giving each adapted store its own small factory function
      (`tooling/koine-studio/src/store/readableStores.ts`).
    - **Port the component's tests/stories** to mock `ReadableStore<T>` directly (a plain object with
      `getState`/`subscribe`/a test-only `set()`, see `HistoryControls.test.tsx`) instead of a real or
      fake Zustand store — `koine-ui`'s tests never construct a Zustand store. Add a host-side test
      (`tooling/koine-studio/src/store/readableStores.test.ts`) that pins the REAL wiring end-to-end
      (a real `createAppStore()`) so a change to the store's shape or a classifier is caught there.
+   - **Export the component (and its slice type) from `koine-ui`'s barrel**
+     (`tooling/koine-ui/src/index.ts`) — without this the component isn't importable from
+     `@atypical/koine-ui` at all; easy to forget since none of the steps above touch `index.ts`.
+   - **Port any CSS the component's class names need** into `tooling/koine-ui/src/components.css`,
+     **copying rather than moving** the source rules from Koine Studio's SCSS partials when those
+     class names are also used by other, non-migrating panels (the common case — chrome classes like
+     button/badge/group styling tend to be shared). Copying keeps Studio's own SCSS untouched (zero
+     regression risk for what stays behind) at the cost of the two stylesheets needing to be kept in
+     sync by hand if that shared rule ever changes. Check every class name the moved markup renders,
+     including ones on child elements like icons (`HistoryControls`' `.tb-ico` SVG glyphs were missed
+     in this PR's first pass — masked inside the full app, since both stylesheets load together, but
+     it would have rendered unstyled in this package's own Storybook, the first real signal a
+     standalone consumer would have caught).
 
 ## What stays out of this package
 
