@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand/vanilla';
 
 /**
- * A client-side open buffer keyed by its file:// uri. Structural match for dirty.ts's SaveableBuffer.
+ * A client-side open buffer keyed by its file:// uri — the file path, text content, dirty flag, and root token.
  *
  * This type LIVES in the store layer (#982): the workspace slice is the single owner of the buffer set,
  * so its element type must be defined here — the workspace controller re-exports it for back-compat, so
