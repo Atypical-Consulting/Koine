@@ -71,6 +71,13 @@ internal static class RustNaming
     /// Converts an identifier to <c>snake_case</c> (fields, methods, modules). Handles PascalCase,
     /// camelCase, already-snake_case inputs, and acronym runs: <c>UnitPrice</c> → <c>unit_price</c>,
     /// <c>unitPrice</c> → <c>unit_price</c>, <c>URLPath</c> → <c>url_path</c>. No leading underscore.
+    /// Digits never start a new word (<c>V2Import</c> → <c>v2import</c>, not <c>v2_import</c>) — unlike
+    /// <see cref="RouteDerivation.Kebab"/>, which does split after a digit; passing
+    /// <c>splitAfterDigit: false</c> below preserves this method's original behavior (#1239 code
+    /// review: the two pre-extraction implementations genuinely disagreed on this). Thin wrapper over
+    /// the shared <see cref="IdentifierWords.Split"/> boundary rule; the already-snake_case
+    /// short-circuit and underscore de-duplication below are Rust-local input handling, not part of
+    /// the shared core.
     /// </summary>
     public static string ToSnakeCase(string name)
     {
@@ -84,39 +91,8 @@ internal static class RustNaming
             return name;
         }
 
-        var sb = new StringBuilder(name.Length + 4);
-        for (var i = 0; i < name.Length; i++)
-        {
-            var c = name[i];
-            if (c == '_')
-            {
-                if (sb.Length > 0 && sb[sb.Length - 1] != '_')
-                {
-                    sb.Append('_');
-                }
-                continue;
-            }
-
-            if (char.IsUpper(c))
-            {
-                var prevIsLower = i > 0 && char.IsLower(name[i - 1]);
-                var nextIsLower = i + 1 < name.Length && char.IsLower(name[i + 1]);
-                var prevIsUpper = i > 0 && char.IsUpper(name[i - 1]);
-                var prevIsUnderscore = i > 0 && name[i - 1] == '_';
-                if (sb.Length > 0 && !prevIsUnderscore && (prevIsLower || (prevIsUpper && nextIsLower)))
-                {
-                    sb.Append('_');
-                }
-
-                sb.Append(char.ToLowerInvariant(c));
-            }
-            else
-            {
-                sb.Append(char.ToLowerInvariant(c));
-            }
-        }
-
-        return sb.ToString().TrimStart('_');
+        var joined = string.Join('_', IdentifierWords.Split(name, splitAfterDigit: false)).ToLowerInvariant();
+        return IdentifierWords.CollapseSeparatorRuns(joined, '_').TrimStart('_');
     }
 
     /// <summary>Converts an identifier to <c>SCREAMING_SNAKE_CASE</c> (associated constants).</summary>

@@ -34,6 +34,20 @@ public class PythonNamingTests
         PythonNaming.ToSnakeCase("UnitPrice").ShouldBe("unit_price");
     }
 
+    /// <summary>
+    /// A digit immediately before an uppercase letter never starts a new word — unlike
+    /// <see cref="RouteDerivation.Kebab"/>, which does split there. Regression test for #1239's code
+    /// review: the shared <see cref="IdentifierWords.Split"/> extraction initially and silently
+    /// imported <c>Kebab</c>'s digit-boundary rule into this method, which never had it.
+    /// </summary>
+    [Theory]
+    [InlineData("V2Import", "v2import")]
+    [InlineData("Order2Ship", "order2ship")]
+    public void ToSnakeCase_does_not_split_after_a_digit(string input, string expected)
+    {
+        PythonNaming.ToSnakeCase(input).ShouldBe(expected);
+    }
+
     // =========================================================================
     // ToUpperSnake
     // =========================================================================
