@@ -8,7 +8,7 @@
 // one vertex per node, the empty state, and the superseded-render guard. Styling, bounded-context
 // containers, layout, edges, interaction, and persistence land in later tasks.
 import type { DiagramRenderer } from '@/diagrams/diagrams';
-import type { Graph as MxGraph, Cell as MxCell } from '@maxgraph/core';
+import type { Graph as MxGraph, Cell as MxCell, TooltipHandler } from '@maxgraph/core';
 import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView, type EventFlowEdge, type EventFlowNode } from '@/model/modelTables';
 // Concept Colors (ADR 0004): the single-source palette. The canvas shape fill/stroke needs literal hex
@@ -1502,10 +1502,15 @@ export async function renderContextMapGraph(
   if (hooks.tooltip) {
     try {
       handle.graph.setTooltips(true);
-      (handle.graph as unknown as { getTooltipForCell: (cell: MxCell) => string }).getTooltipForCell = (cell) => {
-        const v = cell?.value as DiagramNode | DiagramEdge | undefined;
-        return (v && typeof v === 'object' && hooks.tooltip!(v)) || '';
-      };
+      // getTooltipForCell lives on the TooltipHandler plugin, not on Graph itself — assigning it onto
+      // handle.graph silently writes a property nobody reads (setTooltips(true) exists, so this never throws).
+      const tooltipHandler = handle.graph.getPlugin<TooltipHandler>('TooltipHandler');
+      if (tooltipHandler) {
+        tooltipHandler.getTooltipForCell = (cell) => {
+          const v = cell?.value as DiagramNode | DiagramEdge | undefined;
+          return (v && typeof v === 'object' && hooks.tooltip!(v)) || '';
+        };
+      }
     } catch {
       // tooltips are non-essential — selection still surfaces the same detail in the inspector
     }
