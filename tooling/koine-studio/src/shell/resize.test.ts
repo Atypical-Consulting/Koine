@@ -4,7 +4,7 @@
 // mounted in document.body), the `resizing` body-class toggling, and the localStorage persistence
 // (both restore-on-init and save-on-drag-end). happy-dom supplies PointerEvent, setPointerCapture,
 // and getBoundingClientRect; test-setup.ts installs the in-memory localStorage shim.
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { initEdgeResizer, initSplitResizer, type EdgeResizerOptions } from '@/shell/resize';
 
 // ---------------------------------------------------------------------------
@@ -567,6 +567,57 @@ describe('initEdgeResizer — persistence', () => {
       max: 500,
     });
     expect(target.style.getPropertyValue(CSS_VAR)).toBe('');
+  });
+
+  test('a throwing localStorage.getItem degrades to no size applied, without throwing (init)', () => {
+    const { target, handle, container } = mount();
+    stubRect(container, { left: 0, right: 800, width: 800 });
+    const getItem = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    try {
+      expect(() =>
+        initEdgeResizer({
+          target,
+          handle,
+          container,
+          cssVar: CSS_VAR,
+          anchor: 'right',
+          storageKey: 'koine.test.width',
+          min: 160,
+          max: 500,
+        }),
+      ).not.toThrow();
+      expect(target.style.getPropertyValue(CSS_VAR)).toBe('');
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+
+  test('a throwing localStorage.setItem is swallowed, without throwing (drag end)', () => {
+    const { target, handle, container } = mount();
+    stubRect(container, { left: 0, right: 800, width: 800 });
+    initEdgeResizer({
+      target,
+      handle,
+      container,
+      cssVar: CSS_VAR,
+      anchor: 'right',
+      storageKey: 'koine.test.width',
+      min: 10,
+      max: 1000,
+    });
+    const setItem = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      pointerdown(handle, 800, 0);
+      pointermove(handle, 500, 0); // 300px
+      expect(() => pointerup(handle, 500, 0)).not.toThrow();
+      expect(sizeOf(target, CSS_VAR)).toBe(300);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 
   test('a vertical anchor restores against the container HEIGHT extent', () => {

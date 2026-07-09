@@ -6,6 +6,7 @@
 // Three panels use this: the inspector (anchored right, drives --koi-inspector-w on #split), the
 // file tree (anchored left, drives --koi-filetree-w on #split), and the diagnostics strip (anchored
 // bottom, drives --koi-diag-h on #diagnostics).
+import { readRaw, writeRaw } from '@/shell/storage';
 
 /** The edge a panel is pinned to; size grows from the opposite side toward this edge. */
 type Anchor = 'right' | 'left' | 'bottom' | 'top';
@@ -59,15 +60,11 @@ export function initEdgeResizer(opts: EdgeResizerOptions): () => void {
   };
 
   // Apply any persisted size on init (guarded against absent storage / bad value).
-  try {
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
-      const px = parseFloat(saved);
-      const rect = container.getBoundingClientRect();
-      if (Number.isFinite(px)) setSize(clamp(px, horizontal ? rect.width : rect.height));
-    }
-  } catch {
-    // ignore — no persistence available
+  const saved = readRaw(storageKey);
+  if (saved) {
+    const px = parseFloat(saved);
+    const rect = container.getBoundingClientRect();
+    if (Number.isFinite(px)) setSize(clamp(px, horizontal ? rect.width : rect.height));
   }
 
   let dragging = false;
@@ -100,12 +97,8 @@ export function initEdgeResizer(opts: EdgeResizerOptions): () => void {
     if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
     document.body.classList.remove('resizing', 'resizing-x', 'resizing-y');
     // Persist the resolved size (read back the computed property to store the clamped px).
-    try {
-      const px = target.style.getPropertyValue(cssVar).trim();
-      if (px) localStorage.setItem(storageKey, px.replace('px', ''));
-    } catch {
-      // ignore — no persistence available
-    }
+    const px = target.style.getPropertyValue(cssVar).trim();
+    if (px) writeRaw(storageKey, px.replace('px', ''));
   };
 
   handle.addEventListener('pointerdown', onPointerDown);
