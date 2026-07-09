@@ -7,13 +7,8 @@
 // spying on a mocked destroy(), since that's the mocking (non-)pattern already established in this repo.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildMcpSection } from "@/settings/prefsSections/mcp";
-import type { SectionCtx } from "@/settings/prefsSections/types";
-import {
-    DEFAULT_SETTINGS,
-    saveSettings,
-    loadSettings,
-    type Settings,
-} from "@/settings/persistence";
+import { buildCtx } from "@/settings/prefsSections/testSupport";
+import { DEFAULT_SETTINGS, saveSettings, loadSettings } from "@/settings/persistence";
 import type { McpEndpoint } from "@/host/types";
 
 // Flush queued microtasks + timers so the section's async steps (mcpEndpoint, mcpStop, probe) settle —
@@ -30,17 +25,6 @@ beforeEach(() => {
     localStorage.clear();
     saveSettings({ ...DEFAULT_SETTINGS });
 });
-
-function buildCtx(): SectionCtx & {
-    commit: ReturnType<typeof vi.fn>;
-    onChange: ReturnType<typeof vi.fn>;
-} {
-    const commit = vi.fn((patch: Partial<Settings>) => {
-        saveSettings({ ...loadSettings(), ...patch });
-    });
-    const onChange = vi.fn();
-    return { commit, onChange };
-}
 
 const enableToggle = (panel: HTMLElement) =>
     panel.querySelector<HTMLButtonElement>(

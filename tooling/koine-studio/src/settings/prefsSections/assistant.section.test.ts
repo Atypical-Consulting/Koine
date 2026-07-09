@@ -3,9 +3,9 @@
 // buildAssistantSection() in isolation — no mountPreferencesPane — against the REAL
 // @/settings/persistence module backed by happy-dom's localStorage, matching output.section.test.ts's
 // established pattern for these section-module tests.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { buildAssistantSection } from "@/settings/prefsSections/assistant";
-import type { SectionCtx } from "@/settings/prefsSections/types";
+import { buildCtx } from "@/settings/prefsSections/testSupport";
 import {
     DEFAULT_SETTINGS,
     saveSettings,
@@ -18,17 +18,6 @@ beforeEach(() => {
     localStorage.clear();
     saveSettings({ ...DEFAULT_SETTINGS });
 });
-
-function buildCtx(): SectionCtx & {
-    commit: ReturnType<typeof vi.fn>;
-    onChange: ReturnType<typeof vi.fn>;
-} {
-    const commit = vi.fn((patch: Partial<Settings>) => {
-        saveSettings({ ...loadSettings(), ...patch });
-    });
-    const onChange = vi.fn();
-    return { commit, onChange };
-}
 
 const toolsToggle = (panel: HTMLElement) =>
     panel.querySelector<HTMLButtonElement>(

@@ -5,10 +5,9 @@
 // localStorage, and a REAL createScopeKit instance (matching scopeKit.test.ts's own pattern) for the
 // word-wrap / format-on-save scoped rows, since buildEditorSection takes the shared kit as a dependency
 // rather than building its own.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { buildEditorSection } from "@/settings/prefsSections/editor";
-import { createScopeKit } from "@/settings/prefsSections/scopeKit";
-import type { SectionCtx } from "@/settings/prefsSections/types";
+import { buildCtx, buildScopeKit as buildKit } from "@/settings/prefsSections/testSupport";
 import {
     DEFAULT_SETTINGS,
     saveSettings,
@@ -33,28 +32,6 @@ beforeEach(() => {
     localStorage.clear();
     saveSettings({ ...DEFAULT_SETTINGS });
 });
-
-function buildCtx(): SectionCtx & {
-    commit: ReturnType<typeof vi.fn>;
-    onChange: ReturnType<typeof vi.fn>;
-} {
-    const commit = vi.fn((patch: Partial<Settings>) => {
-        saveSettings({ ...loadSettings(), ...patch });
-    });
-    const onChange = vi.fn();
-    return { commit, onChange };
-}
-
-// The shared ScopeKit instance buildEditorSection takes as a dependency (#987 task 2), built the same
-// way mountPreferencesPane builds its one instance — no workspace open by default, matching most tests.
-function buildKit(workspaceKey: () => string | null = () => null) {
-    return createScopeKit({
-        workspaceKey,
-        commit: (patch: Partial<Settings>) =>
-            saveSettings({ ...loadSettings(), ...patch }),
-        onChange: () => {},
-    });
-}
 
 describe("buildEditorSection — panel shape", () => {
     it("builds the koi-settings-panel-editor tabpanel", () => {

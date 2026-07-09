@@ -13,8 +13,7 @@
 // restores it afterward.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildOutputSection } from "@/settings/prefsSections/output";
-import { createScopeKit } from "@/settings/prefsSections/scopeKit";
-import type { SectionCtx } from "@/settings/prefsSections/types";
+import { buildScopeKit as buildKit } from "@/settings/prefsSections/testSupport";
 import {
     DEFAULT_SETTINGS,
     saveSettings,
@@ -37,52 +36,20 @@ afterEach(() => {
     setEmitTargets(BUILTIN_EMIT_TARGETS); // undo any test's seeding so later files see the built-ins
 });
 
-function buildCtx(): SectionCtx & {
-    commit: ReturnType<typeof vi.fn>;
-    onChange: ReturnType<typeof vi.fn>;
-} {
-    const commit = vi.fn((patch: Partial<Settings>) => {
-        saveSettings({ ...loadSettings(), ...patch });
-    });
-    const onChange = vi.fn();
-    return { commit, onChange };
-}
-
-// The shared ScopeKit instance buildOutputSection takes as a dependency (#987 task 2), built the same
-// way mountPreferencesPane builds its one instance.
-function buildKit(
-    deps: Partial<{
-        workspaceKey: () => string | null;
-        commit: (patch: Partial<Settings>) => void;
-        onChange: (s: Settings) => void;
-    }> = {},
-) {
-    return createScopeKit({
-        workspaceKey: deps.workspaceKey ?? (() => null),
-        commit:
-            deps.commit ??
-            ((patch: Partial<Settings>) =>
-                saveSettings({ ...loadSettings(), ...patch })),
-        onChange: deps.onChange ?? (() => {}),
-    });
-}
-
 const langOptsIn = (panel: HTMLElement) => [
     ...panel.querySelectorAll<HTMLButtonElement>(".koi-lang-opt"),
 ];
 
 describe("buildOutputSection — panel shape", () => {
     it("builds the koi-settings-panel-output tabpanel", () => {
-        const ctx = buildCtx();
-        const section = buildOutputSection(ctx, { scopeKit: buildKit() });
+        const section = buildOutputSection({ scopeKit: buildKit() });
         expect(section.panel.id).toBe("koi-settings-panel-output");
         expect(section.panel.getAttribute("role")).toBe("tabpanel");
         expect(section.panel.tagName).toBe("SECTION");
     });
 
     it("renders one language card per built-in emit target", () => {
-        const ctx = buildCtx();
-        const section = buildOutputSection(ctx, { scopeKit: buildKit() });
+        const section = buildOutputSection({ scopeKit: buildKit() });
         expect(langOptsIn(section.panel).map((b) => b.dataset.value)).toEqual(
             BUILTIN_EMIT_TARGETS.map((t) => t.id),
         );
@@ -91,8 +58,7 @@ describe("buildOutputSection — panel shape", () => {
 
 describe("buildOutputSection.populate — issue #282", () => {
     it("calls outputLang.refresh() so a target added to EMIT_TARGETS AFTER construction appears once populate() runs", () => {
-        const ctx = buildCtx();
-        const section = buildOutputSection(ctx, { scopeKit: buildKit() });
+        const section = buildOutputSection({ scopeKit: buildKit() });
         document.body.appendChild(section.panel);
 
         // Not present yet: the picker was built (and rendered its cards) before this target existed.
@@ -113,11 +79,10 @@ describe("buildOutputSection.populate — issue #282", () => {
 
 describe("buildOutputSection — previewTarget routes through the shared ScopeKit", () => {
     it("selecting a language calls scopeKit's commit path with previewTarget", () => {
-        const ctx = buildCtx();
         const kitCommit = vi.fn((patch: Partial<Settings>) => {
             saveSettings({ ...loadSettings(), ...patch });
         });
-        const section = buildOutputSection(ctx, {
+        const section = buildOutputSection({
             scopeKit: buildKit({ commit: kitCommit }),
         });
         document.body.appendChild(section.panel);
@@ -129,7 +94,5 @@ describe("buildOutputSection — previewTarget routes through the shared ScopeKi
 
         expect(kitCommit).toHaveBeenCalledWith({ previewTarget: "python" });
         expect(loadSettings().previewTarget).toBe("python");
-        // The Output section routes through the shared scope kit, not ctx.commit directly.
-        expect(ctx.commit).not.toHaveBeenCalled();
     });
 });

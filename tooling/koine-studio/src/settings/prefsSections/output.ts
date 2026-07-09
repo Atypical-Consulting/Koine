@@ -14,21 +14,17 @@
 import type { Settings } from "@/settings/persistence";
 import { langPicker, panel } from "@/settings/prefsControls";
 import type { ScopeKit } from "@/settings/prefsSections/scopeKit";
-import type { PrefsSection, SectionCtx } from "@/settings/prefsSections/types";
+import type { PrefsSection } from "@/settings/prefsSections/types";
 
-/** What buildOutputSection needs from its host beyond {@link SectionCtx}: the shared ScopeKit instance
- *  that backs the previewTarget scoped binding (and Editor's / Advanced's own scoped rows). */
+/** What buildOutputSection needs from its host: the shared ScopeKit instance that backs the
+ *  previewTarget scoped binding (and Editor's / Advanced's own scoped rows). Output routes its only
+ *  field (previewTarget) entirely through scopeKit, not through a SectionCtx commit/onChange path — so
+ *  unlike most other sections, this builder takes no {@link import('@/settings/prefsSections/types').SectionCtx}. */
 export interface OutputSectionDeps {
     scopeKit: ScopeKit;
 }
 
-// ctx is unused: Output routes its only field (previewTarget) through the shared scopeKit dependency,
-// not through ctx.commit/ctx.onChange directly — kept as a parameter to match the shared section-builder
-// shape every other buildXSection(ctx, deps) follows.
-export function buildOutputSection(
-    _ctx: SectionCtx,
-    deps: OutputSectionDeps,
-): PrefsSection {
+export function buildOutputSection(deps: OutputSectionDeps): PrefsSection {
     const { scopeKit } = deps;
 
     // previewTarget is workspace-scopable. Route the picker's commit through the shared scope binding

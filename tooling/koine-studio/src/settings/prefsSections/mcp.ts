@@ -12,19 +12,20 @@
 // "Server off" after a disable.
 //
 // showMcpOff() bumps mcpGen ITSELF (rather than requiring callers to bump immediately before calling it):
-// audited all 3 original call sites in prefs.ts before making that call —
-//   1. the initial mount sequence: `applyOpenState(...); ++mcpGen; showMcpOff();`
-//   2. applyMcpEnabled's disable branch: `await cb.mcpStop?.(); if (gen !== mcpGen) return; showMcpOff();`
+// audited all 4 original call sites (3 in prefs.ts, 1 here in this module) before making that call —
+//   1. the initial mount sequence (prefs.ts): `applyOpenState(...); ++mcpGen; showMcpOff();`
+//   2. applyMcpEnabled's disable branch (below): `await cb.mcpStop?.(); if (gen !== mcpGen) return; showMcpOff();`
 //      — the ONE call site that did NOT pair an immediate ++mcpGen right before the call (it captured
 //      `gen` at the top of the function instead). Bumping again inside showMcpOff() here is harmless: the
 //      function returns right after (`syncMcpUi(on)`, which doesn't read mcpGen), so nothing in the same
 //      tick checks mcpGen after the extra bump.
 //   3. the Advanced Reset handler (prefs.ts, outside this module): `void cb.mcpStop?.(); ++mcpGen;
 //      showMcpOff(); syncMcpUi(false);`
-// Sites 1 and 3 paired an immediate bump with the call, so folding the bump into showMcpOff() itself is a
-// pure simplification there; site 2 is harmless per the above. So showMcpOff() now owns the bump, and
-// every call site just calls it — see prefs.ts's own destroy()/mount-tail/Advanced-reset-handler for the
-// updated (bump-free) call sites.
+//   4. startMcpSidecar's "not enabled / not hostable" branch (below): `else { ++mcpGen; showMcpOff(); }`
+// Sites 1, 3, and 4 paired an immediate bump with the call, so folding the bump into showMcpOff() itself is
+// a pure simplification there; site 2 is harmless per the above. So showMcpOff() now owns the bump, and
+// every call site just calls it — see prefs.ts's own destroy()/mount-tail/Advanced-reset-handler and this
+// module's startMcpSidecar for the updated (bump-free) call sites.
 //
 // applyMcpPort / startMcpSidecar (re)launch the sidecar directly through `resolveMcpEndpoint()` — the
 // pane-independent startMcpSidecarIfEnabled in prefs.ts re-checks `s.mcpEnabled && mcpHostable !== false`

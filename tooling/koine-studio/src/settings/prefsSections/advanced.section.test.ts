@@ -15,42 +15,14 @@
 // wiring in isolation.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildAdvancedSection } from "@/settings/prefsSections/advanced";
-import { createScopeKit } from "@/settings/prefsSections/scopeKit";
-import type { SectionCtx } from "@/settings/prefsSections/types";
-import {
-    DEFAULT_SETTINGS,
-    saveSettings,
-    loadSettings,
-    type Settings,
-} from "@/settings/persistence";
+import { buildCtx, buildScopeKit as buildKit } from "@/settings/prefsSections/testSupport";
+import { DEFAULT_SETTINGS, saveSettings } from "@/settings/persistence";
 
 beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
     saveSettings({ ...DEFAULT_SETTINGS });
 });
-
-function buildCtx(): SectionCtx & {
-    commit: ReturnType<typeof vi.fn>;
-    onChange: ReturnType<typeof vi.fn>;
-} {
-    const commit = vi.fn((patch: Partial<Settings>) => {
-        saveSettings({ ...loadSettings(), ...patch });
-    });
-    const onChange = vi.fn();
-    return { commit, onChange };
-}
-
-// The shared ScopeKit instance buildAdvancedSection takes as a dependency (#987 task 2), built the same
-// way mountPreferencesPane builds its one instance.
-function buildKit() {
-    return createScopeKit({
-        workspaceKey: () => null,
-        commit: (patch: Partial<Settings>) =>
-            saveSettings({ ...loadSettings(), ...patch }),
-        onChange: () => {},
-    });
-}
 
 function buildSection(
     overrides: Partial<{

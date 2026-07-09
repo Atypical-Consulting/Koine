@@ -4,9 +4,9 @@
 // isolation — no mountPreferencesPane — against the REAL @/settings/persistence + @/settings/theme
 // modules backed by happy-dom's localStorage, matching the pattern scopeKit.test.ts already uses (no
 // mocking of persistence).
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { buildAppearanceSection } from "@/settings/prefsSections/appearance";
-import type { SectionCtx } from "@/settings/prefsSections/types";
+import { buildCtx } from "@/settings/prefsSections/testSupport";
 import {
     DEFAULT_SETTINGS,
     saveSettings,
@@ -29,17 +29,6 @@ beforeEach(() => {
     localStorage.clear();
     saveSettings({ ...DEFAULT_SETTINGS });
 });
-
-function buildCtx(): SectionCtx & {
-    commit: ReturnType<typeof vi.fn>;
-    onChange: ReturnType<typeof vi.fn>;
-} {
-    const commit = vi.fn((patch: Partial<Settings>) => {
-        saveSettings({ ...loadSettings(), ...patch });
-    });
-    const onChange = vi.fn();
-    return { commit, onChange };
-}
 
 describe("buildAppearanceSection — panel shape", () => {
     it("builds the koi-settings-panel-appearance tabpanel", () => {

@@ -1,8 +1,12 @@
 // Shared types for the per-category section modules extracted from prefs.ts (#987 task 3 onward: this
-// pair of interfaces is set by the FIRST section module — Appearance/About — and reused unchanged by
-// every later one (Editor, Keyboard, Output, Assistant, MCP, Advanced). A section module builds one
-// category's panel + control wiring in isolation and must not import prefs.ts (no import cycles):
-// mountPreferencesPane imports these modules, never the other way around.
+// pair of interfaces is set by the FIRST section module — Appearance/About. `PrefsSection` is reused
+// unchanged by every later section; `SectionCtx` is taken by most of them (Appearance, Editor, Assistant,
+// MCP, Advanced) but not all — Keyboard and Output don't need it (Keyboard's commits route through
+// saveKeybindingOverride/clearKeybindingOverrides and its own `onKeybindingsChanged` dep, not
+// commit/onChange; Output routes its one field through the shared ScopeKit instead — see their own
+// builders' deps shapes). A section module builds one category's panel + control wiring in isolation and
+// must not import prefs.ts (no import cycles): mountPreferencesPane imports these modules, never the
+// other way around.
 import type { Settings } from "@/settings/persistence";
 
 /**
@@ -10,12 +14,13 @@ import type { Settings } from "@/settings/persistence";
  *
  * - `commit` is the single-field-patch path — the exact shape of prefs.ts's own `commit()`
  *   (`cb.onChange(patchSettings(patch))`). Almost every control in every section uses only this.
- * - `onChange` is the raw report path for the rare control that persists through ITS OWN path instead
- *   of `patchSettings` (Appearance's Theme: it persists + applies live via `@/settings/theme`'s
- *   `setTheme`, which has its own live-apply + listener-notify story) and must still hand the host the
- *   merged Settings the same way `commit` would. Kept as a narrow second field rather than folding
- *   Theme into `commit` so `SectionCtx` stays a plain, composable pair — a section that never needs the
- *   bypass just never calls `onChange`.
+ * - `onChange` is the raw report path for a control that persists through ITS OWN path instead of
+ *   `patchSettings` and must still hand the host the merged Settings the same way `commit` would —
+ *   Appearance's Theme (persists + applies live via `@/settings/theme`'s `setTheme`, which has its own
+ *   live-apply + listener-notify story) and, in Assistant, the AI-provider switch and the API-key save
+ *   (both read back a value `patchSettings`/`saveApiKey` themselves computed, rather than a caller-known
+ *   patch). Kept as a narrow second field rather than folding these into `commit` so `SectionCtx` stays
+ *   a plain, composable pair — a section that never needs the bypass just never calls `onChange`.
  */
 export interface SectionCtx {
     /** Commit a single-field patch — same shape as prefs.ts's own `commit(patch)`. */

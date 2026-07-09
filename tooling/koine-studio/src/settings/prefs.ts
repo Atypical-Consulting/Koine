@@ -250,9 +250,10 @@ export function mountPreferencesPane(
     // --- Output ---------------------------------------------------------------
     // Construction + control wiring extracted into prefsSections/output.ts (#987 task 4), following the
     // pattern Appearance set (task 3). Takes the shared scopeKit as a dependency for its one workspace-
-    // scopable field (previewTarget).
+    // scopable field (previewTarget) — no sectionCtx: unlike most sections, Output routes that field
+    // entirely through scopeKit, not through ctx.commit/ctx.onChange.
 
-    const output = buildOutputSection(sectionCtx, { scopeKit });
+    const output = buildOutputSection({ scopeKit });
 
     // --- Assistant (AI) -------------------------------------------------------
     // Construction + control wiring — including the Compiler-tools/grammar mutual exclusion (#447) and
