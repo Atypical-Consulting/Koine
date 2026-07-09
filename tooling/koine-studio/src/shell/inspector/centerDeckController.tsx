@@ -1,11 +1,12 @@
 // The center/deck + chrome orchestration — extracted from inspectorController (Task 4 of #985's
 // decomposition, the last of the four). Owns: the CENTER "Deck" surfaces (Canvas / Code / Output / Docs)
-// and their tab-level chrome (applyCenterChrome/syncCenterChrome/visibleCenters), the center/deck restore
-// + persistence (#980's captured center-persist subscription, #983's deck persistence), the rail-axis
-// switch (Domain vs Files, #453), the right-edge tool-window stripe (#500) + its collapse/expand/notify
-// chrome, the left navigator morph-collapse (#730), the bottom strip's tabs/collapse/edge-resizer (#983,
-// #475's narrow-viewport default), the viewport-resize cross handler's #475 re-evaluation, and the
-// DeckStage/DeckSpine mount (moved out of the facade's `init()`).
+// and their tab-level chrome (applyCenterChrome/syncCenterChrome/visibleCenters), the center-pane
+// persistence (#980's captured center-persist subscription, #983's deck persistence) — but NOT the deck's
+// initial restore, which moved to the facade (#1260, see `centerDeckInitialChrome` and the construction-
+// reset block below) — the rail-axis switch (Domain vs Files, #453), the right-edge tool-window stripe
+// (#500) + its collapse/expand/notify chrome, the left navigator morph-collapse (#730), the bottom strip's
+// tabs/collapse/edge-resizer (#983, #475's narrow-viewport default), the viewport-resize cross handler's
+// #475 re-evaluation, and the DeckStage/DeckSpine mount (moved out of the facade's `init()`).
 //
 // Deliberately standalone, like Tasks 1-3's sibling modules: this module never imports
 // `@/shell/inspectorController` (the facade wires it in, never the reverse) and never imports the other
@@ -39,7 +40,6 @@ import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { readRaw, writeRaw } from '@/shell/storage';
 import {
-  DEFAULT_DECK_STATE,
   isValidCenter,
   type BottomTab,
   type CenterView,
@@ -48,6 +48,7 @@ import {
   type OutputTab,
   type RightView,
   type TechView,
+  type UiChromeSlice,
 } from '@/store/slices/uiChrome';
 import type { SourceControlFocus } from '@/model/SourceControlPanel';
 import { DeckSpineConnected } from '@/shell/deck/DeckSpine';
@@ -65,13 +66,11 @@ export interface CenterDeckControllerDeps {
   /** Persist the legacy single-key center pane on every real change (kept alongside the Deck v2
    *  persistence below for whatever still reads it). */
   saveWorkspaceCenter(id: string): void;
-  /** Persist/restore the Deck v2 center layout. Optional so a caller that only wires the legacy pair
-   *  doesn't need updating. Read ONCE at construction (see the module doc on `restoreInitialDeck`) —
-   *  the facade resolves the pre-Deck-v2 migration fallback (which needs the full
-   *  `InspectorControllerDeps.loadWorkspaceCenter`, deliberately NOT part of this subset) and hands this
-   *  module an already-migration-aware closure. */
+  /** Persist the Deck v2 center layout on every real deck change. Optional so a caller that only wires the
+   *  legacy pair doesn't need updating. Restoring the deck is no longer this module's job (#1260 — see the
+   *  module doc on the construction-reset block): the facade computes it and seeds the store before this
+   *  controller is even constructed, so there is no corresponding `loadWorkspaceDeck` read-path here. */
   saveWorkspaceDeck?: (deck: DeckState) => void;
-  loadWorkspaceDeck?: () => DeckState;
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this module DOM-infra-free
    *  beyond its own element lookups). */
   initEdgeResizer(opts: {
@@ -166,6 +165,24 @@ export interface CenterDeckController {
   dispose(): void;
 }
 
+/** The pure chrome reset this controller applies at construction: every sub-view lands back on its
+ *  default landing tab for the given (restored or default) deck. Extracted from the constructor's own
+ *  `setState` call (#1260) so the facade can compute it and fold it into ITS OWN construction-time write —
+ *  landing both in one atomic `setState` rather than two separate notifications. */
+export function centerDeckInitialChrome(
+  deck: DeckState,
+): Pick<UiChromeSlice, 'deck' | 'center' | 'tech' | 'output' | 'docs' | 'bottom' | 'right'> {
+  return {
+    deck,
+    center: deck.primary,
+    tech: 'editor',
+    output: 'generated',
+    docs: 'glossary',
+    bottom: 'problems',
+    right: 'props',
+  };
+}
+
 export function createCenterDeckController(options: CenterDeckControllerOptions): CenterDeckController {
   const { store, editor, deps, hooks } = options;
 
@@ -213,27 +230,18 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   const terminalPanel = domById('panel-terminal');
   const reviewPanel = domById('panel-review');
 
-  // --- center/deck restore + construction reset -------------------------------
-  // Restore the Deck v2 layout via the injected (already migration-aware, see the deps doc) closure,
-  // defaulting to the 1-up Canvas layout when nothing is persisted yet.
-  const restoredDeck = deps.loadWorkspaceDeck?.();
-  const initialDeck: DeckState = restoredDeck ?? DEFAULT_DECK_STATE;
-  // The chrome (center / tech / docs / bottom / right tab states) is owned by the uiChrome slice — the ONE
-  // source of truth for both the highlighted tab AND the shown view (#193). Reset it to this controller's
-  // defaults atomically (one notification, before any subscriber below runs): the restored deck/center,
-  // with every sub-view back at its landing tab. The store is INJECTED and, in production, is the app-wide
-  // singleton reused across workspace reopens — so without this reset a prior session's tab choices would
-  // leak into a freshly-booted controller (mirrors the facade's own `navAltitude`/docViews resets, which
-  // stay facade-owned since they're Domain-navigator/loader concerns, not center/deck chrome).
-  store.setState({
-    deck: initialDeck,
-    center: initialDeck.primary,
-    tech: 'editor',
-    output: 'generated',
-    docs: 'glossary',
-    bottom: 'problems',
-    right: 'props',
-  });
+  // --- center/deck construction reset: OWNED BY THE CALLER, NOT THIS MODULE (#1260) -------------------
+  // This module no longer restores or resets the deck/chrome itself. The facade computes the restored (or
+  // defaulted) deck and applies `centerDeckInitialChrome(deck)` as part of ITS OWN construction-time
+  // `setState` — before constructing this controller — so the whole boot-time reset (facade fields +
+  // this module's chrome) lands as one write, before ANY subscriber exists anywhere (this module's own
+  // subscriptions below included). Previously this module applied `centerDeckInitialChrome` in its OWN
+  // separate `setState` call here, which ran AFTER the facade's earlier-constructed subscriptions (e.g.
+  // activeContextController's) were already live — letting a subscriber observe a torn reset (the facade's
+  // fields already reset, this module's chrome still stale) for one tick. A test harness that constructs
+  // this controller directly (not through the facade) must likewise seed the store via
+  // `centerDeckInitialChrome(deck)` before calling `createCenterDeckController` — see
+  // centerDeckController.test.tsx's `makeController`.
 
   // Persist the active center pane across reloads: on a real, valid center change, write it through.
   // #985 Task 4 deletes the closure-mirror `persistedCenter` guard (#980) that used to sit alongside this

@@ -18,7 +18,9 @@ import { createElement, render } from 'preact';
 import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { createAppStore } from '@/store/index';
-import { createCountingStore } from '@/store/testing';
+import { createCountingStore, createRecordingStore } from '@/store/testing';
+import { centerDeckInitialChrome } from '@/shell/inspector/centerDeckController';
+import type { DeckState } from '@/store/slices/uiChrome';
 import { ALL_CONTEXTS } from '@/model/activeContext';
 import { domById } from '@/shared/domById';
 import * as maxgraphRenderer from '@/diagrams/diagrams-maxgraph';
@@ -2208,6 +2210,40 @@ describe('createInspectorController — persistence round-trips (#983)', () => {
     const panel = domById('panel-contextmap');
     expect(panel.querySelector('[data-ctxmap-view="table"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(panel.innerHTML).toContain('koi-md');
+    ctl.dispose();
+  });
+});
+
+describe('createInspectorController — construction-time reset is atomic (#1260)', () => {
+  test('the construction reset has already fully landed by the time the first subscriber registers', () => {
+    // A NON-default restored deck: `createUiChromeSlice`'s own initial state already happens to equal
+    // `centerDeckInitialChrome(DEFAULT_DECK_STATE)` field-for-field, so booting with the default deck could
+    // never distinguish "not yet reset" from "already reset" — it would pass by coincidence either way.
+    // primary: 'technical' (not the 'visual' default) makes the reset's effect actually observable.
+    const restoredDeck: DeckState = { mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.5, flipped: false };
+    const { store, subscribeSnapshots } = createRecordingStore();
+
+    // The synchronous constructor ONLY — never init(), which legitimately writes (surface loaders, deck
+    // persistence) after subscribing; that's normal steady-state operation, not the boot-time reset this
+    // guards.
+    const ctl = createInspectorController(makeDeps(makeLsp(), { store, loadWorkspaceDeck: () => restoredDeck }));
+
+    expect(subscribeSnapshots.length).toBeGreaterThan(0); // sanity: the constructor does register subscriptions
+    const atFirstSubscribe = subscribeSnapshots[0];
+    expect(atFirstSubscribe.navAltitude).toBe('strategic');
+    expect({
+      deck: atFirstSubscribe.deck,
+      center: atFirstSubscribe.center,
+      tech: atFirstSubscribe.tech,
+      output: atFirstSubscribe.output,
+      docs: atFirstSubscribe.docs,
+      bottom: atFirstSubscribe.bottom,
+      right: atFirstSubscribe.right,
+    }).toEqual(centerDeckInitialChrome(restoredDeck));
+    // invalidate() genuinely ran too (not just the chrome literals): every docViews token bumped off its
+    // fresh-store 0.
+    expect(atFirstSubscribe.docViews.model.token).toBeGreaterThan(0);
+
     ctl.dispose();
   });
 });
