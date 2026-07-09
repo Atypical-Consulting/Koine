@@ -325,16 +325,19 @@ describe('preview.ts — module import discipline', () => {
     }
   });
 
-  test('every .ts file under src/launcher only ever value-imports from other launcher modules or vitest', () => {
+  test('every .ts file under src/launcher only ever value-imports from other launcher modules, the pure dddKind fold, or vitest', () => {
     const dir = dirname(fileURLToPath(import.meta.url));
     const files = readdirSync(dir).filter((f) => /\.ts$/.test(f) && !/\.test\.ts$/.test(f));
+    // The canonical, pure, DOM-free `@/model/dddKind` alias fold (issue #1162) is a sanctioned VALUE
+    // import from outside `@/launcher/` — it carries no DOM/LSP/host dependency, unlike the other
+    // model/lsp/host seams this guard otherwise restricts to type-only imports.
     for (const file of files) {
       const full = join(dir, file);
       if (statSync(full).isDirectory()) continue;
       const src = readFileSync(full, 'utf8');
       const valueImports = src.split('\n').filter((l) => /^import (?!type )/.test(l));
       for (const line of valueImports) {
-        expect(line).toMatch(/from ['"]@\/launcher\//);
+        expect(/from ['"]@\/launcher\//.test(line) || /from ['"]@\/model\/dddKind['"]/.test(line)).toBe(true);
       }
     }
   });
