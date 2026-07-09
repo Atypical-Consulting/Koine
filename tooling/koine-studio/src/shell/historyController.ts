@@ -15,6 +15,9 @@ export interface HistoryControllerDeps {
   editor: { getDoc(): string; setDoc(doc: string): void };
   /** The LSP client — push a restored NON-active buffer to the server. */
   lsp: { syncDoc(uri: string, text: string): void };
+  /** Write a restored buffer's text+dirty through the workspace slice's `upsertBuffer` — never
+   *  mutate the Map's objects in place. */
+  writeBuffer(uri: string, text: string, dirty: boolean): void;
   /** Switch the editor to a file (workspaceController.activateFile) so a restore reveals the change. */
   activateFile(uri: string): void;
   /** Re-derive every view from the restored code (ide.tsx wires onDocEdited + renderTree). */

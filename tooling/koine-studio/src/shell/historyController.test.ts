@@ -16,12 +16,19 @@ function setup(opts: { maxDepth?: number; debounceMs?: number } = {}) {
   const syncDoc = vi.fn();
   const activateFile = vi.fn((uri: string) => { active = uri; });
   const onRestored = vi.fn(() => hooks.onRestored?.());
+  // Mirrors the real appStore.upsertBuffer wiring in ide.tsx: an immutable replace into the map,
+  // never an in-place write onto the existing Buffer object.
+  const writeBuffer = vi.fn((uri: string, text: string, dirty: boolean) => {
+    const b = buffers.get(uri);
+    if (b) buffers.set(uri, { ...b, text, dirty });
+  });
   const published: Array<{ canUndo: boolean; canRedo: boolean }> = [];
   const ctrl: HistoryController = createHistoryController({
     buffers: () => buffers,
     activeUri: () => active,
     editor: { getDoc: () => buffers.get(active)!.text, setDoc },
     lsp: { syncDoc },
+    writeBuffer,
     activateFile,
     onRestored,
     publish: (s) => published.push({ ...s }),
@@ -33,7 +40,7 @@ function setup(opts: { maxDepth?: number; debounceMs?: number } = {}) {
     b.text = text;
     b.dirty = dirty;
   };
-  return { ctrl, buffers, mk, edit, setDoc, syncDoc, activateFile, onRestored, published, hooks,
+  return { ctrl, buffers, mk, edit, setDoc, syncDoc, writeBuffer, activateFile, onRestored, published, hooks,
            setActive: (u: string) => { active = u; } };
 }
 
@@ -166,5 +173,39 @@ describe('historyController', () => {
     h.ctrl.undo(); // A1 (A0 was dropped)
     expect(last(h.published)).toEqual({ canUndo: false, canRedo: true });
     expect(h.buffers.get('a')!.text).toBe('A1');
+  });
+
+  // Regression coverage for #1010: `restore` must write buffers back through the slice's immutable
+  // `writeBuffer` dep, never by mutating a store-owned Buffer in place.
+  test('undo replaces the restored buffer with a new object (no in-place mutation)', () => {
+    const h = setup();
+    h.edit('a', 'A1');
+    h.ctrl.noteEdit({ immediate: true });
+    const preRestore = h.buffers.get('a')!;
+    h.ctrl.undo();
+    const postRestore = h.buffers.get('a')!;
+    expect(postRestore).not.toBe(preRestore); // immutable replace, not an in-place write
+    expect(preRestore.text).toBe('A1'); // the pre-restore object itself must be left untouched
+    expect(postRestore.text).toBe('A0');
+  });
+
+  test('restoring a non-active buffer writes through writeBuffer, not just lsp.syncDoc', () => {
+    const h = setup();
+    h.buffers.set('b', h.mk('b', 'B0'));
+    h.ctrl.reset(); // baseline now includes 'b'
+    h.edit('b', 'B1');
+    h.ctrl.noteEdit({ immediate: true }); // active stays 'a'; 'b' is the non-active buffer
+    h.ctrl.undo();
+    expect(h.writeBuffer).toHaveBeenCalledWith('b', 'B0', false);
+    expect(h.syncDoc).toHaveBeenCalledWith('b', 'B0');
+  });
+
+  test('undo to a clean baseline restores dirty:false through the write path', () => {
+    const h = setup();
+    h.edit('a', 'A1', true); // dirty edit
+    h.ctrl.noteEdit({ immediate: true });
+    h.ctrl.undo(); // baseline was dirty:false
+    expect(h.writeBuffer).toHaveBeenCalledWith('a', 'A0', false);
+    expect(h.buffers.get('a')!.dirty).toBe(false);
   });
 });
