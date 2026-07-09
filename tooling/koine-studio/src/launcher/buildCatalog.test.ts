@@ -6,7 +6,7 @@ import type { Command } from '@atypical/koine-ui';
 import type { ModelIndex } from '@/model/modelIndex';
 import type { GlossaryEntry } from '@/lsp/lsp';
 import type { GitLogEntry } from '@/host/types';
-import { buildCatalog, type LauncherSources } from '@/launcher/buildCatalog';
+import { buildCatalog, normalizeKind, type LauncherSources } from '@/launcher/buildCatalog';
 
 // Hand-built fixtures standing in for the real model index / git store / command registry — the
 // whole point of `LauncherSources` is that buildCatalog never has to know these are fakes.
@@ -91,6 +91,23 @@ const sourcesNoGit: LauncherSources = {
   gitLog: () => null,
   canUseGit: false,
 };
+
+// Characterization safety net (issue #1162): pins `normalizeKind`'s behaviour — including its
+// passthrough fallback — on the PUBLIC exported symbol `preview.ts` and consumers actually import, so
+// a future edit that breaks its delegation to the shared `@/model/dddKind` normalizer (dddKind.test.ts)
+// gets caught here too, independent of the internal implementation.
+describe('normalizeKind — characterization (pins the public re-export behaviour, issue #1162)', () => {
+  test.each([
+    ['aggregate', 'aggregate'],
+    ['value', 'value'],
+    ['quantity', 'value'],
+    ['integration event', 'integration-event'],
+    ['service', 'service'],
+    ['weird', 'weird'],
+  ])('normalizeKind(%s) === %s', (input, expected) => {
+    expect(normalizeKind(input)).toBe(expected);
+  });
+});
 
 describe('buildCatalog — symbols', () => {
   test('maps aggregate/value/enum glossary entries to symbol entries carrying the DDD chip kind + qualifiedName', async () => {
@@ -273,6 +290,13 @@ describe('buildCatalog — commits', () => {
   });
 });
 
+// A launcher module's VALUE import is allowed from another `@/launcher/` module, or from the
+// canonical, pure, DOM-free `@/model/dddKind` alias fold (issue #1162) — sanctioned because it carries
+// no DOM/LSP/host dependency, unlike `@/model/inspector` or the other model/lsp/host seams this guard
+// otherwise restricts to type-only imports.
+const isAllowedLauncherValueImport = (line: string): boolean =>
+  /from ['"]@\/launcher\//.test(line) || /from ['"]@\/model\/dddKind['"]/.test(line);
+
 describe('buildCatalog — pure join', () => {
   test('a fake source set with no real host still produces a full catalog across every category', async () => {
     const catalog = await buildCatalog(sourcesWithGit);
@@ -287,14 +311,16 @@ describe('buildCatalog — pure join', () => {
     expect(src).not.toMatch(/from ['"]@\/host\/(tauri|browser)/);
     expect(src).not.toMatch(/from ['"]@\/shell\//);
     // Every import from outside `@/launcher/` (the lsp/host/model/koine-ui seams) is `import type` —
-    // the only allowed VALUE import is the pure `catalog` module (for `KIND`).
-    const importLines = src.split('\n').filter((l) => /^import /.test(l) && !/from ['"]@\/launcher\//.test(l));
+    // the only allowed VALUE imports are the pure `catalog` module (for `KIND`) and the canonical,
+    // DOM-free `@/model/dddKind` alias fold (issue #1162) that this module's `normalizeKind` delegates
+    // to — neither pulls in the live LSP client, a host platform impl, or the DOM.
+    const importLines = src.split('\n').filter((l) => /^import /.test(l) && !isAllowedLauncherValueImport(l));
     for (const line of importLines) {
       expect(line).toMatch(/^import type /);
     }
   });
 
-  test('every .ts file under src/launcher only ever value-imports from other launcher modules or vitest', () => {
+  test('every .ts file under src/launcher only ever value-imports from other launcher modules, the pure dddKind fold, or vitest', () => {
     const dir = dirname(fileURLToPath(import.meta.url));
     const files2 = readdirSync(dir).filter((f) => /\.ts$/.test(f) && !/\.test\.ts$/.test(f));
     for (const file of files2) {
@@ -305,7 +331,7 @@ describe('buildCatalog — pure join', () => {
         .split('\n')
         .filter((l) => /^import (?!type )/.test(l));
       for (const line of valueImports) {
-        expect(line).toMatch(/from ['"]@\/launcher\//);
+        expect(isAllowedLauncherValueImport(line)).toBe(true);
       }
     }
   });
