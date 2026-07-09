@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
+import { forceParsing } from '@codemirror/language';
 import { CompletionContext } from '@codemirror/autocomplete';
 import { jsonSchema, getJSONSchema } from 'codemirror-json-schema';
 import { createJsonSettingsEditor, settingsSchemaHover, settingsCompletionSource } from './editor';
@@ -114,6 +115,18 @@ describe('settings.json schema hover + completion (#765)', () => {
       }),
     });
     views.push(view);
+    // `jsonPointerForPosition` (which both settingsSchemaHover and settingsCompletionSource resolve
+    // through) reads `syntaxTree(state)` — CodeMirror's NON-blocking accessor, which only returns
+    // whatever the language's incremental Lezer parse has completed SO FAR. A fresh EditorState only
+    // guarantees the first `Work.Apply` (20ms) budget of parsing before yielding the rest to a
+    // background `requestIdleCallback`-style continuation (@codemirror/language's `parseWorker`,
+    // gated behind a 100ms+ setTimeout) — a budget a real hover clears easily (the user has to move the
+    // mouse and dwell first) but that a synchronous call immediately after `mount()` can race under
+    // CPU contention (e.g. the full suite's ~200 files sharing the machine), returning a still-partial
+    // tree and an empty/short JSON pointer. `forceParsing` (also from @codemirror/language) blocks
+    // until the tree is complete and dispatches the resulting state onto the view, so every caller of
+    // `mount()` sees a fully-parsed document — deterministic regardless of what else is running.
+    forceParsing(view, view.state.doc.length);
     return view;
   };
   afterEach(() => {
