@@ -358,9 +358,18 @@ export function loadChat(key: string): ChatMessage[] {
   }
 }
 
-/** Persist a workspace transcript (best-effort), keeping only the last CHAT_HISTORY_CAP messages. */
+/**
+ * Persist a workspace transcript (best-effort), keeping only the last CHAT_HISTORY_CAP messages.
+ * Strips `toolCalls` (#1133): raw tool results are unclamped and must not enter the localStorage
+ * blob — cards stay in-session-only, so a reload/replay renders none (unchanged from before #1133).
+ */
 export function saveChat(key: string, msgs: ChatMessage[]): void {
-  writeRaw(CHAT_KEY_PREFIX + key, JSON.stringify(msgs.slice(-CHAT_HISTORY_CAP)));
+  const stored = msgs.slice(-CHAT_HISTORY_CAP).map(({ role, content, offerApply }) => ({
+    role,
+    content,
+    ...(offerApply === false ? { offerApply } : {}),
+  }));
+  writeRaw(CHAT_KEY_PREFIX + key, JSON.stringify(stored));
 }
 
 /** Forget a workspace's stored transcript (e.g. the user clears the conversation). */
