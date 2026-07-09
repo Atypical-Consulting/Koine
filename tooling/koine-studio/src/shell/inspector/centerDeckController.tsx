@@ -39,7 +39,6 @@ import { isNarrowViewport } from '@/shared/breakpoint';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { readRaw, writeRaw } from '@/shell/storage';
 import {
-  DEFAULT_DECK_STATE,
   isValidCenter,
   type BottomTab,
   type CenterView,
@@ -66,13 +65,11 @@ export interface CenterDeckControllerDeps {
   /** Persist the legacy single-key center pane on every real change (kept alongside the Deck v2
    *  persistence below for whatever still reads it). */
   saveWorkspaceCenter(id: string): void;
-  /** Persist/restore the Deck v2 center layout. Optional so a caller that only wires the legacy pair
-   *  doesn't need updating. Read ONCE at construction (see the module doc on `restoreInitialDeck`) —
-   *  the facade resolves the pre-Deck-v2 migration fallback (which needs the full
-   *  `InspectorControllerDeps.loadWorkspaceCenter`, deliberately NOT part of this subset) and hands this
-   *  module an already-migration-aware closure. */
+  /** Persist the Deck v2 center layout on every real deck change. Optional so a caller that only wires the
+   *  legacy pair doesn't need updating. Restoring the deck is no longer this module's job (#1260 — see the
+   *  module doc on the construction-reset block): the facade computes it and seeds the store before this
+   *  controller is even constructed, so there is no corresponding `loadWorkspaceDeck` read-path here. */
   saveWorkspaceDeck?: (deck: DeckState) => void;
-  loadWorkspaceDeck?: () => DeckState;
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this module DOM-infra-free
    *  beyond its own element lookups). */
   initEdgeResizer(opts: {
@@ -232,19 +229,18 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   const terminalPanel = domById('panel-terminal');
   const reviewPanel = domById('panel-review');
 
-  // --- center/deck restore + construction reset -------------------------------
-  // Restore the Deck v2 layout via the injected (already migration-aware, see the deps doc) closure,
-  // defaulting to the 1-up Canvas layout when nothing is persisted yet.
-  const restoredDeck = deps.loadWorkspaceDeck?.();
-  const initialDeck: DeckState = restoredDeck ?? DEFAULT_DECK_STATE;
-  // The chrome (center / tech / docs / bottom / right tab states) is owned by the uiChrome slice — the ONE
-  // source of truth for both the highlighted tab AND the shown view (#193). Reset it to this controller's
-  // defaults atomically (one notification, before any subscriber below runs): the restored deck/center,
-  // with every sub-view back at its landing tab. The store is INJECTED and, in production, is the app-wide
-  // singleton reused across workspace reopens — so without this reset a prior session's tab choices would
-  // leak into a freshly-booted controller (mirrors the facade's own `navAltitude`/docViews resets, which
-  // stay facade-owned since they're Domain-navigator/loader concerns, not center/deck chrome).
-  store.setState(centerDeckInitialChrome(initialDeck));
+  // --- center/deck construction reset: OWNED BY THE CALLER, NOT THIS MODULE (#1260) -------------------
+  // This module no longer restores or resets the deck/chrome itself. The facade computes the restored (or
+  // defaulted) deck and applies `centerDeckInitialChrome(deck)` as part of ITS OWN construction-time
+  // `setState` — before constructing this controller — so the whole boot-time reset (facade fields +
+  // this module's chrome) lands as one write, before ANY subscriber exists anywhere (this module's own
+  // subscriptions below included). Previously this module applied `centerDeckInitialChrome` in its OWN
+  // separate `setState` call here, which ran AFTER the facade's earlier-constructed subscriptions (e.g.
+  // activeContextController's) were already live — letting a subscriber observe a torn reset (the facade's
+  // fields already reset, this module's chrome still stale) for one tick. A test harness that constructs
+  // this controller directly (not through the facade) must likewise seed the store via
+  // `centerDeckInitialChrome(deck)` before calling `createCenterDeckController` — see
+  // centerDeckController.test.tsx's `makeController`.
 
   // Persist the active center pane across reloads: on a real, valid center change, write it through.
   // #985 Task 4 deletes the closure-mirror `persistedCenter` guard (#980) that used to sit alongside this

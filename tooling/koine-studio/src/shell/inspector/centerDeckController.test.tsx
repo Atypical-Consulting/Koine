@@ -113,7 +113,6 @@ function makeDeps(over: Partial<CenterDeckControllerDeps> = {}) {
   const deps: CenterDeckControllerDeps = {
     saveWorkspaceCenter,
     saveWorkspaceDeck,
-    loadWorkspaceDeck: () => DEFAULT_DECK_STATE,
     initEdgeResizer,
     ...over,
   };
@@ -139,8 +138,15 @@ function makeHooks(over: Partial<CenterDeckControllerHooks> = {}) {
   return { hooks, ensureVisibleLoaded, loadSourceControl, focusSourceControl, loadSyntaxTree, ensureAssistantShown, ensureBottomLoaded };
 }
 
-function makeController(depsOver: Partial<CenterDeckControllerDeps> = {}, hooksOver: Partial<CenterDeckControllerHooks> = {}) {
+// This controller no longer restores/resets its own deck (#1260): the OWNER seeds the store via
+// `centerDeckInitialChrome(deck)` before construction — here, this test harness plays that role, mirroring
+// what the facade does in production.
+function makeController(
+  opts: { deck?: DeckState; deps?: Partial<CenterDeckControllerDeps>; hooks?: Partial<CenterDeckControllerHooks> } = {},
+) {
+  const { deck = DEFAULT_DECK_STATE, deps: depsOver = {}, hooks: hooksOver = {} } = opts;
   const store = createAppStore();
+  store.setState(centerDeckInitialChrome(deck));
   const editor = fakeEditor();
   const d = makeDeps(depsOver);
   const h = makeHooks(hooksOver);
@@ -272,7 +278,7 @@ describe('createCenterDeckController — (b) deck changes re-apply chrome and pe
 
   test('a persisted deck restores the 2-up on construction', () => {
     const deck: DeckState = { mode: 'focus', primary: 'technical', secondary: 'visual', ratio: 0.5, flipped: false };
-    const { store, ctl } = makeController({ loadWorkspaceDeck: () => deck });
+    const { store, ctl } = makeController({ deck });
     ctl.init();
 
     expect(store.getState().deck).toEqual(deck);

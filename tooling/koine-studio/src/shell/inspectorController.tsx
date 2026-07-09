@@ -72,7 +72,7 @@ import {
   type ActiveContextHandle,
 } from '@/shell/inspector/activeContextController';
 import { createSurfaceLoaders } from '@/shell/inspector/surfaceLoaders';
-import { createCenterDeckController } from '@/shell/inspector/centerDeckController';
+import { centerDeckInitialChrome, createCenterDeckController } from '@/shell/inspector/centerDeckController';
 
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
@@ -383,16 +383,28 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   const relationshipsPanel = domById('panel-relationships');
   const contextMapView = domById('panel-contextmap');
 
-  // --- construction reset (facade-owned pieces only) --------------------------
-  // The center/deck restore + the bulk of the uiChrome reset (center/tech/output/docs/bottom/right) now
-  // live in centerDeckController (#985 Task 4 — see `restoreWorkspaceDeck` and its own construction-time
-  // `setState` below). This facade keeps only the ONE field that's a Domain-navigator/loader concern, not
-  // a center/deck-chrome one: the Domain navigator starts at the strategic altitude (#453) for a fresh
-  // workspace session — reset here (a separate `setState`, still landing before ANY subscriber exists in
-  // either module, so still effectively atomic) for the same reason centerDeckController's own reset
-  // exists: the injected store is, in production, the app-wide singleton reused across workspace reopens,
-  // so a prior session left on tactical mustn't leak into a fresh boot.
-  appStore.setState({ navAltitude: 'strategic' });
+  // --- construction reset (facade + centerDeck chrome, ONE atomic write) -----
+  // The center/deck restore (`restoreWorkspaceDeck`, needing this facade's FULL deps for the pre-Deck-v2
+  // migration fallback) is resolved HERE, before centerDeckController is even constructed (it's built much
+  // further down, once its own hook-helper functions exist — see the forward-declaration comment below).
+  // Folding its chrome reset (`centerDeckInitialChrome`, #985 Task 4 / #1260) into THIS SAME `setState` call
+  // as this facade's own `navAltitude` reset (the Domain navigator's strategic-altitude default, #453, a
+  // Domain-navigator/loader concern this facade keeps) makes the whole boot-time reset ONE notification,
+  // landing before ANY subscriber exists anywhere in the facade or centerDeck — the earliest is
+  // `activeContextController`'s, wired below. Previously centerDeckController applied its own chrome reset
+  // independently, inside ITS OWN constructor call (much further down) — by then activeContextController's
+  // subscription was already live, so it could observe a torn reset (this facade's fields already reset,
+  // centerDeck's still stale) for one tick. The injected store is, in production, the app-wide singleton
+  // reused across workspace reopens, so a prior session's altitude/chrome mustn't leak into a fresh boot.
+  function restoreWorkspaceDeck(): DeckState {
+    const restoredDeck = deps.loadWorkspaceDeck?.();
+    if (restoredDeck) return restoredDeck;
+    const restoredCenter = deps.loadWorkspaceCenter();
+    const initialCenter: CenterView = restoredCenter && isValidCenter(restoredCenter) ? restoredCenter : DEFAULT_CENTER;
+    return { ...DEFAULT_DECK_STATE, primary: initialCenter };
+  }
+  const initialDeck = restoreWorkspaceDeck();
+  appStore.setState({ navAltitude: 'strategic', ...centerDeckInitialChrome(initialDeck) });
   // The docViews slice (#193) is the single source of truth for which lazily-loaded, model-derived
   // surfaces — the Generated preview, the left-rail model, the diagram, the glossary, and the bottom
   // Events/Relationships/Context Map tables — are loaded vs stale; there are no longer any controller-
@@ -401,7 +413,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // This reset is load-bearing because the injected store is, in production, the app-wide singleton reused
   // across workspace reopens (and the test suite builds many controllers): without it, a prior session that
   // left a view `loaded` would make a freshly-booted controller skip its first fetch. It resets the store's
-  // surface-staleness for this controller's session.
+  // surface-staleness for this controller's session. A separate `invalidate()` call, still landing before
+  // any subscriber exists — the atomicity guarantee is about ORDERING relative to subscriptions, not about
+  // collapsing every construction-time write into a single call.
   appStore.getState().invalidate();
 
   // The center-persist subscription (#980) — the closure-mirror `persistedCenter` guard it used to sit
@@ -1047,26 +1061,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (tab === 'review') deps.ensureReview?.();
   }
 
-  // centerDeckController's own restore reads ONLY `deps.loadWorkspaceDeck` (Deck v2) — its own deps subset
-  // deliberately omits `loadWorkspaceCenter`. The pre-Deck-v2 migration fallback — deriving a fresh 1-up
-  // deck from the legacy single-key `loadWorkspaceCenter` when no deck has been persisted yet — needs the
-  // FULL `InspectorControllerDeps` this facade holds, so it's resolved HERE and folded into the closure
-  // handed down, matching the original restore logic exactly.
-  function restoreWorkspaceDeck(): DeckState {
-    const restoredDeck = deps.loadWorkspaceDeck?.();
-    if (restoredDeck) return restoredDeck;
-    const restoredCenter = deps.loadWorkspaceCenter();
-    const initialCenter: CenterView = restoredCenter && isValidCenter(restoredCenter) ? restoredCenter : DEFAULT_CENTER;
-    return { ...DEFAULT_DECK_STATE, primary: initialCenter };
-  }
-
+  // centerDeckController no longer restores/resets its own deck (#1260 — see the construction-reset block
+  // above): `initialDeck` was already computed there, before ANY subscription, and its chrome folded into
+  // this facade's own atomic `setState`. So the deps handed down are the plain persistence write-paths only.
   centerDeck = createCenterDeckController({
     store: appStore,
     editor,
     deps: {
       saveWorkspaceCenter: deps.saveWorkspaceCenter,
       saveWorkspaceDeck: deps.saveWorkspaceDeck,
-      loadWorkspaceDeck: restoreWorkspaceDeck,
       initEdgeResizer: deps.initEdgeResizer,
     },
     hooks: {
