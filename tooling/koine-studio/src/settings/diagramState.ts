@@ -14,6 +14,7 @@ import {
   type DiagramPosition,
 } from '@/diagrams/diagramContract';
 import { readRaw, writeRaw } from '@/shell/storage';
+import { removeKey } from './storage';
 
 // --- diagram canvas zoom (#145) ----------------------------------------------
 // Each diagram's last zoom *percent* is round-tripped under its own key so the interactive canvas can
@@ -75,11 +76,7 @@ export function saveDiagramPositions(key: string, positions: Record<string, Diag
 
 /** Forget a diagram's saved positions (the "Auto-arrange / reset layout" action). */
 export function clearDiagramPositions(key: string): void {
-  try {
-    localStorage.removeItem(DIAGRAM_POSITIONS_KEY_PREFIX + key);
-  } catch {
-    // storage unavailable — nothing to clear
-  }
+  removeKey(DIAGRAM_POSITIONS_KEY_PREFIX + key);
 }
 
 // --- diagram canvas annotations (notes + groups, #255) -----------------------

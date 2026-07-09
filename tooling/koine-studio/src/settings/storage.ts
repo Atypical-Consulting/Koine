@@ -38,3 +38,17 @@ export function patchJsonBlob(storageKey: string, field: string, value: unknown 
   }
   writeRaw(storageKey, JSON.stringify(blob));
 }
+
+/**
+ * Forget a single key, guarded: swallows quota/security errors exactly like {@link writeRaw}, so a
+ * caller's `clearX`/`forget` action never throws even when storage is unavailable. The shared home for
+ * what used to be six independent `try { localStorage.removeItem(key) } catch {}` copies across
+ * settings/*.ts.
+ */
+export function removeKey(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // storage unavailable — nothing to clear
+  }
+}

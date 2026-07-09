@@ -8,6 +8,7 @@
 import type { ChatMessage } from '@/ai/ai';
 import { DEFAULT_DECK_STATE, isValidCenter, isValidDeckState, type CenterView, type DeckState } from '@/store/slices/uiChrome';
 import { readRaw, writeRaw } from '@/shell/storage';
+import { removeKey } from './storage';
 
 // --- storage keys ------------------------------------------------------------
 
@@ -164,11 +165,7 @@ export function peekLegacyScratch(): string | null {
  * Only call this after a successful workspace open so the migration is non-destructive.
  */
 export function clearLegacyScratch(): void {
-  try {
-    localStorage.removeItem(SCRATCH_KEY);
-  } catch {
-    // storage unavailable — nothing to clear
-  }
+  removeKey(SCRATCH_KEY);
 }
 
 // --- workspace center pane ---------------------------------------------------
@@ -263,11 +260,7 @@ export function setLastWorkspace(token: string): void {
 
 /** Forget the last-opened workspace pointer (best-effort). */
 export function clearLastWorkspace(): void {
-  try {
-    localStorage.removeItem(LAST_WORKSPACE_KEY);
-  } catch {
-    // storage unavailable — nothing to clear
-  }
+  removeKey(LAST_WORKSPACE_KEY);
 }
 
 // --- last-session snapshot (Home resume card, #1005) -------------------------
@@ -320,11 +313,7 @@ export function getLastSession(): LastSession | null {
 /** Persist (or, with null, forget) the last-session snapshot. Best-effort — swallows storage errors. */
 export function setLastSession(s: LastSession | null): void {
   if (s === null) {
-    try {
-      localStorage.removeItem(LAST_SESSION_KEY);
-    } catch {
-      // storage unavailable — nothing to clear
-    }
+    removeKey(LAST_SESSION_KEY);
     return;
   }
   writeRaw(LAST_SESSION_KEY, JSON.stringify(s));
@@ -384,9 +373,5 @@ export function saveChat(key: string, msgs: ChatMessage[]): void {
 
 /** Forget a workspace's stored transcript (e.g. the user clears the conversation). */
 export function clearChat(key: string): void {
-  try {
-    localStorage.removeItem(CHAT_KEY_PREFIX + key);
-  } catch {
-    // storage unavailable — nothing to clear
-  }
+  removeKey(CHAT_KEY_PREFIX + key);
 }
