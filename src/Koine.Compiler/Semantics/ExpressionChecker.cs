@@ -96,7 +96,7 @@ internal sealed class ExpressionChecker
                 CheckComparison(b, scope, expected);
                 CheckArithmeticNullSafety(b, scope);
                 CheckValueObjectScalarArithmetic(b, scope);
-                CheckQuantityTypeMismatch(b, scope);
+                CheckValueObjectTypeMismatch(b, scope);
                 break;
 
             case CoalesceExpr co:
@@ -319,16 +319,35 @@ internal sealed class ExpressionChecker
     }
 
     /// <summary>
-    /// #1266: a <c>quantity</c> value object's <c>+</c>/<c>-</c> lowers to its unit-checked
-    /// <c>add</c>/<c>sub</c> method (#1068), which only ever accepts another instance of its OWN
-    /// declared type. Nothing previously checked that both operands of a binary <c>+</c>/<c>-</c> are
-    /// the SAME quantity type, so e.g. <c>Weight + Volume</c> compiled with zero diagnostics and only
-    /// failed downstream in a target's own toolchain (a real Rust cargo check E0308). Reject it here,
-    /// target-agnostically, before any emitter ever sees the expression. Scoped to quantity-vs-quantity
-    /// only — a quantity combined with a differently-typed PLAIN value object is a separate, broader gap
-    /// (tracked outside #1266).
+    /// #1266/#1284: a value-object's <c>+</c>/<c>-</c> lowers to an operator/method that only ever
+    /// accepts another instance of its OWN declared type (a <c>quantity</c>'s unit-checked
+    /// <c>add</c>/<c>sub</c>, #1068; a plain value object's generated same-type operator, #833/#600).
+    /// Nothing previously checked that both operands of a binary <c>+</c>/<c>-</c> declare the SAME
+    /// type, so e.g. <c>Weight + Volume</c> or <c>Weight + Money</c> compiled with zero diagnostics and
+    /// only failed downstream in a target's own toolchain (a real C# CS0019 / Rust E0308). Reject it
+    /// here, target-agnostically, before any emitter ever sees the expression. #1266 introduced this
+    /// scoped to quantity-vs-quantity only (<see cref="DiagnosticCodes.QuantityTypeMismatch"/>,
+    /// KOI0218); #1284 generalizes it to any two value-like operands (quantity-vs-quantity,
+    /// quantity-vs-plain-VO, or plain-VO-vs-plain-VO), keeping KOI0218's quantity-specific message for
+    /// the quantity-vs-quantity case and a new <see cref="DiagnosticCodes.ValueObjectTypeMismatch"/>
+    /// (KOI0219) for the general case.
+    ///
+    /// Both operands are resolved via <see cref="ResolveValueObject"/> — the SAME context-aware
+    /// resolution #1266's review pass established for the (now-folded-in) former <c>IsQuantity</c>
+    /// helper (<c>t.Qualifier ?? _resolver.Context</c> + <see cref="ModelIndex.TryGetDeclIn"/>, falling
+    /// back to the global <see cref="ModelIndex.TryGetDecl"/>) — and type identity is compared by the
+    /// resolved <see cref="ValueObjectDecl"/> reference, not by bare name. A bare-name/flat-classify
+    /// comparison (the original, narrower <c>IsQuantity</c> shape this replaces) is wrong on two counts
+    /// R13.2 explicitly allows: (1) two operands can share a bare name while naming DIFFERENT declared
+    /// types in different contexts (e.g. qualified references <c>A.Money</c> vs <c>B.Money</c>), which a
+    /// bare-name equality check would wrongly treat as "the same type" and skip; (2) an unrelated
+    /// context can declare its own, differently-kinded type under the SAME bare name as an in-scope
+    /// value object, which <see cref="TypeResolver.IsValueLike"/>'s flat, context-blind
+    /// <see cref="ModelIndex.Classify"/> lookup can resolve instead — wrongly classifying a genuinely
+    /// value-like operand as not value-like and skipping the check entirely (a regression of #1266's own
+    /// guarantee, not just an #1284 gap).
     /// </summary>
-    private void CheckQuantityTypeMismatch(BinaryExpr b, TypeScope scope)
+    private void CheckValueObjectTypeMismatch(BinaryExpr b, TypeScope scope)
     {
         if (b.Op is not (BinaryOp.Add or BinaryOp.Sub))
         {
@@ -337,35 +356,63 @@ internal sealed class ExpressionChecker
 
         TypeRef? left = _resolver.Infer(b.Left, scope);
         TypeRef? right = _resolver.Infer(b.Right, scope);
-        if (left is null || right is null || left.Name == right.Name)
+        if (left is null || right is null)
         {
             return;
         }
 
-        if (IsQuantity(left) && IsQuantity(right))
+        ValueObjectDecl? leftDecl = ResolveValueObject(left);
+        ValueObjectDecl? rightDecl = ResolveValueObject(right);
+
+        // A resolved declaration is authoritative for its side; a side that resolves to no declared
+        // type at all (e.g. an Id-convention synthetic type, which has no TypeDecl to resolve) falls
+        // back to the flat IsValueLike classification so ID-typed operands stay covered.
+        if (leftDecl is null && !_resolver.IsValueLike(left))
         {
-            var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+            return;
+        }
+
+        if (rightDecl is null && !_resolver.IsValueLike(right))
+        {
+            return;
+        }
+
+        if (ReferenceEquals(leftDecl, rightDecl) || (leftDecl is null && rightDecl is null && left.Name == right.Name))
+        {
+            return; // same declared type
+        }
+
+        var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+        if (leftDecl is { IsQuantity: true } && rightDecl is { IsQuantity: true })
+        {
             Report(DiagnosticCodes.QuantityTypeMismatch,
                 $"cannot {verb} quantities '{left.Name}' and '{right.Name}'; quantities must be the same type", b);
+        }
+        else
+        {
+            Report(DiagnosticCodes.ValueObjectTypeMismatch,
+                $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; a value object's '+'/'-' only combines two instances of the SAME declared type", b);
         }
     }
 
     /// <summary>
-    /// Resolves <paramref name="t"/> the same context-aware way member/operation lookups do elsewhere
-    /// in this file (<c>t.Qualifier ?? _resolver.Context</c>, R13.2) — NOT the flat
-    /// <see cref="ModelIndex.TryGetDecl"/> alone, which is keyed by bare name across the whole model.
-    /// Two different contexts may legally declare their own same-named type (one a quantity, one not);
-    /// resolving without the reference site's context can silently pick the WRONG declaration.
+    /// Resolves <paramref name="t"/> to its declared <see cref="ValueObjectDecl"/> the same
+    /// context-aware way member/operation lookups do elsewhere in this file (<c>t.Qualifier ??
+    /// _resolver.Context</c>, R13.2) — NOT the flat <see cref="ModelIndex.TryGetDecl"/> alone, which is
+    /// keyed by bare name across the whole model. Two different contexts may legally declare their own
+    /// same-named type (one a value object, one not); resolving without the reference site's context can
+    /// silently pick the WRONG declaration. Returns <c>null</c> when <paramref name="t"/> doesn't resolve
+    /// to a value object in scope (including when it doesn't resolve to any declared type at all).
     /// </summary>
-    private bool IsQuantity(TypeRef t)
+    private ValueObjectDecl? ResolveValueObject(TypeRef t)
     {
         var context = t.Qualifier ?? _resolver.Context;
         if (context is not null && _index.TryGetDeclIn(context, t.Name, out TypeDecl decl))
         {
-            return decl is ValueObjectDecl { IsQuantity: true };
+            return decl as ValueObjectDecl;
         }
 
-        return _index.TryGetDecl(t.Name, out decl) && decl is ValueObjectDecl { IsQuantity: true };
+        return _index.TryGetDecl(t.Name, out decl) ? decl as ValueObjectDecl : null;
     }
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
