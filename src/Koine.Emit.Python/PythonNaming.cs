@@ -94,51 +94,33 @@ internal static class PythonNaming
             return name;
         }
 
-        var sb = new StringBuilder(name.Length + 4);
+        // Thin wrapper over the shared IdentifierWords.Split boundary rule (#1239). The
+        // already-snake_case short-circuit above and the underscore de-duplication below are
+        // Python-local input handling, not part of the shared core.
+        var joined = string.Join('_', IdentifierWords.Split(name)).ToLowerInvariant();
+        return CollapseUnderscoreRuns(joined).TrimStart('_');
+    }
 
-        // Insert underscores before transitions: lower→upper and upper→upper-followed-by-lower
-        // (the latter handles acronym runs like "URLPath" → "url_path").
-        for (int i = 0; i < name.Length; i++)
+    /// <summary>
+    /// Collapses any run of consecutive underscores already present in <paramref name="value"/> down
+    /// to one, mirroring the pre-extraction single-pass algorithm's underscore de-duplication. Not
+    /// part of the shared <see cref="IdentifierWords"/> boundary rule — separator-specific
+    /// normalization local to snake_case.
+    /// </summary>
+    private static string CollapseUnderscoreRuns(string value)
+    {
+        var sb = new StringBuilder(value.Length);
+        foreach (var c in value)
         {
-            char c = name[i];
-
-            if (c == '_')
+            if (c == '_' && sb.Length > 0 && sb[sb.Length - 1] == '_')
             {
-                // Pass through existing underscores; avoid doubles at the start.
-                if (sb.Length > 0 && sb[sb.Length - 1] != '_')
-                {
-                    sb.Append('_');
-                }
                 continue;
             }
 
-            if (char.IsUpper(c))
-            {
-                bool prevIsLower = i > 0 && char.IsLower(name[i - 1]);
-                bool nextIsLower = i + 1 < name.Length && char.IsLower(name[i + 1]);
-                bool prevIsUpper = i > 0 && char.IsUpper(name[i - 1]);
-                bool prevIsUnderscore = i > 0 && name[i - 1] == '_';
-
-                // Insert underscore before this capital if:
-                //   1. Previous char was lowercase (e.g. unitP → unit_p)
-                //   2. Previous was uppercase AND next is lowercase (last cap of an acronym run:
-                //      URLPath → URL_Path → url_path)
-                if (sb.Length > 0 && !prevIsUnderscore && (prevIsLower || (prevIsUpper && nextIsLower)))
-                {
-                    sb.Append('_');
-                }
-
-                sb.Append(char.ToLowerInvariant(c));
-            }
-            else
-            {
-                sb.Append(char.ToLowerInvariant(c));
-            }
+            sb.Append(c);
         }
 
-        // Strip any leading underscore that might have been produced.
-        var result = sb.ToString().TrimStart('_');
-        return result;
+        return sb.ToString();
     }
 
     /// <summary>

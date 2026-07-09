@@ -71,6 +71,9 @@ internal static class RustNaming
     /// Converts an identifier to <c>snake_case</c> (fields, methods, modules). Handles PascalCase,
     /// camelCase, already-snake_case inputs, and acronym runs: <c>UnitPrice</c> → <c>unit_price</c>,
     /// <c>unitPrice</c> → <c>unit_price</c>, <c>URLPath</c> → <c>url_path</c>. No leading underscore.
+    /// Thin wrapper over the shared <see cref="IdentifierWords.Split"/> boundary rule (#1239); the
+    /// already-snake_case short-circuit and underscore de-duplication below are Rust-local input
+    /// handling, not part of the shared core.
     /// </summary>
     public static string ToSnakeCase(string name)
     {
@@ -84,39 +87,30 @@ internal static class RustNaming
             return name;
         }
 
-        var sb = new StringBuilder(name.Length + 4);
-        for (var i = 0; i < name.Length; i++)
+        var joined = string.Join('_', IdentifierWords.Split(name)).ToLowerInvariant();
+        return CollapseUnderscoreRuns(joined).TrimStart('_');
+    }
+
+    /// <summary>
+    /// Collapses any run of consecutive underscores already present in <paramref name="value"/> down
+    /// to one, mirroring the pre-extraction single-pass algorithm's underscore de-duplication. Not
+    /// part of the shared <see cref="IdentifierWords"/> boundary rule — separator-specific
+    /// normalization local to snake_case.
+    /// </summary>
+    private static string CollapseUnderscoreRuns(string value)
+    {
+        var sb = new StringBuilder(value.Length);
+        foreach (var c in value)
         {
-            var c = name[i];
-            if (c == '_')
+            if (c == '_' && sb.Length > 0 && sb[sb.Length - 1] == '_')
             {
-                if (sb.Length > 0 && sb[sb.Length - 1] != '_')
-                {
-                    sb.Append('_');
-                }
                 continue;
             }
 
-            if (char.IsUpper(c))
-            {
-                var prevIsLower = i > 0 && char.IsLower(name[i - 1]);
-                var nextIsLower = i + 1 < name.Length && char.IsLower(name[i + 1]);
-                var prevIsUpper = i > 0 && char.IsUpper(name[i - 1]);
-                var prevIsUnderscore = i > 0 && name[i - 1] == '_';
-                if (sb.Length > 0 && !prevIsUnderscore && (prevIsLower || (prevIsUpper && nextIsLower)))
-                {
-                    sb.Append('_');
-                }
-
-                sb.Append(char.ToLowerInvariant(c));
-            }
-            else
-            {
-                sb.Append(char.ToLowerInvariant(c));
-            }
+            sb.Append(c);
         }
 
-        return sb.ToString().TrimStart('_');
+        return sb.ToString();
     }
 
     /// <summary>Converts an identifier to <c>SCREAMING_SNAKE_CASE</c> (associated constants).</summary>
