@@ -17,7 +17,8 @@ import {
 import { createElement, render } from 'preact';
 import { LeftRail, RightStrip } from '@atypical/koine-ui';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
-import { createAppStore } from '@/store/index';
+import type { StoreApi } from 'zustand/vanilla';
+import { createAppStore, type AppState } from '@/store/index';
 import { createCountingStore } from '@/store/testing';
 import { ALL_CONTEXTS } from '@/model/activeContext';
 import { domById } from '@/shared/domById';
@@ -2208,6 +2209,61 @@ describe('createInspectorController — persistence round-trips (#983)', () => {
     const panel = domById('panel-contextmap');
     expect(panel.querySelector('[data-ctxmap-view="table"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(panel.innerHTML).toContain('koi-md');
+    ctl.dispose();
+  });
+});
+
+// One ordered log entry per `subscribe(...)` REGISTRATION (any module wiring a listener) and per actual
+// store WRITE (any `setState` call OR an action's internal `set(...)` — both funnel through the same
+// zustand notify loop, so a plain sentinel listener registered via the RAW subscribe sees every one of
+// them without needing to intercept `setState` itself, and gets the changed top-level keys for free from
+// zustand's own `(state, previousState)` callback args). The sentinel is wired before `store.subscribe` is
+// wrapped, so it never logs itself as a 'subscribe' entry — only genuine, facade-driven registrations do.
+type RecordEntry = { kind: 'write'; changedKeys: string[] } | { kind: 'subscribe' };
+
+function createRecordingStore(): { store: StoreApi<AppState>; log: RecordEntry[] } {
+  const store = createAppStore();
+  const log: RecordEntry[] = [];
+  const rawSubscribe = store.subscribe.bind(store);
+  rawSubscribe((state, prev) => {
+    const s = state as unknown as Record<string, unknown>;
+    const p = prev as unknown as Record<string, unknown>;
+    const changedKeys = Object.keys(s).filter((k) => s[k] !== p[k]);
+    log.push({ kind: 'write', changedKeys });
+  });
+  store.subscribe = ((listener: Parameters<StoreApi<AppState>['subscribe']>[0]) => {
+    log.push({ kind: 'subscribe' });
+    return rawSubscribe(listener);
+  }) as StoreApi<AppState>['subscribe'];
+  return { store, log };
+}
+
+// The construction-time reset's OWN fields (#1260): the facade's `navAltitude`, the docViews-staleness
+// reset `invalidate()` drives, and centerDeckController's 7-field chrome reset folded into the SAME atomic
+// `setState` (`centerDeckInitialChrome`). Deliberately narrower than "every key any module ever seeds
+// before its own subscription" — sibling seed-then-subscribe patterns for UNRELATED slices (rail axis,
+// right/left rail collapse, the narrow-viewport diag default, the Context Map Graph/Table toggle) are
+// each-module-local, pre-existing, and disjoint from this reset; they are not what this issue's report
+// found torn, so a write to one of THOSE keys after the first subscribe is not a regression this test
+// should catch.
+const RESET_KEYS = ['navAltitude', 'deck', 'center', 'tech', 'output', 'docs', 'bottom', 'right', 'docViews'];
+
+describe('createInspectorController — construction-time reset is atomic (#1260)', () => {
+  test('no write to a construction-reset field is recorded after the first subscribe registration', () => {
+    const { store, log } = createRecordingStore();
+
+    // The synchronous constructor ONLY — never init(), which legitimately writes (surface loaders, deck
+    // persistence) after subscribing; that's normal steady-state operation, not the boot-time reset this
+    // guards.
+    const ctl = createInspectorController(makeDeps(makeLsp(), { store }));
+
+    const firstSubscribeIndex = log.findIndex((entry) => entry.kind === 'subscribe');
+    expect(firstSubscribeIndex).toBeGreaterThanOrEqual(0); // sanity: the constructor does register subscriptions
+    const resetKeyWritesAfterFirstSubscribe = log
+      .slice(firstSubscribeIndex + 1)
+      .filter((entry) => entry.kind === 'write' && entry.changedKeys.some((k) => RESET_KEYS.includes(k)));
+    expect(resetKeyWritesAfterFirstSubscribe).toEqual([]);
+
     ctl.dispose();
   });
 });
