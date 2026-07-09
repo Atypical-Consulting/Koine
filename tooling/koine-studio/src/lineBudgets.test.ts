@@ -80,7 +80,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1459 → 1463: #1010 wires `writeBuffer` into `createHistoryController({ ... })` — the
   // historyController.restore write path now goes through the workspace slice's `upsertBuffer` instead of
   // mutating a store-owned Buffer in place, ~6 LOC of composition-root wiring. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1463 },
+  // Raised 1463 → 1470: #1231 swaps the `writeBuffer` dep for the batched `writeBuffers` — the
+  // composition-root wiring now maps N patches to their live buffers and drops any whose uri closed
+  // since the snapshot, then fires ONE `appStore.getState().upsertBuffers(...)` call instead of per-buffer
+  // `upsertBuffer` calls, ~7 LOC net. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1470 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
@@ -120,10 +124,25 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // a stale term). #1188 (ADR 0009) focuses the active context's NODE on the Context Map centre — the
   // `emphasiseContextMapScope` helper (a `.koi-svg-node[data-qname]` mark mirroring applySelectionHighlight)
   // called from paintContextMap and the scope fan-out. Combined measured end-state 2568 + 2; #985 owns the split.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 2570 },
+  // Raised 2570 → 2581: #484 (follow-up on #460's review) de-dupes the per-edit `glossaryModel()`/`model()`
+  // fetch — the Domain navigator's reload used to re-fetch both endpoints ensureModelIndex() was already
+  // fetching. Adds the shared `fetchGlossaryModel`/`fetchStructuredModel` in-flight-promise memoizer next to
+  // `ensureModelIndex` and seeds the navigator's `reload()` from it, ~11 LOC net. Measured end-state; #985
+  // owns the split.
+  // Raised 2581 → 2590: #484's code-review pass found the shared fetch memoizer above didn't get dropped by
+  // invalidateDocViews() the way indexPromise already is — a fetch still in flight when an edit lands could
+  // get reused by the NEXT edit instead of that edit starting its own, seeding the navigator/model index
+  // with stale (prior-edit) data. Fix: clear glossaryFetch/structuredModelFetch alongside modelIndex/
+  // indexPromise in invalidateDocViews(), ~9 LOC. Measured end-state; #985 owns the split.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 2590 },
   // Frozen 2026-07-02 at 2205 LOC, ceil(2205 × 1.02) = 2250. #987 ratchets this down as it decomposes
   // prefs.ts. Freezing prevents further regrowth; it does not mandate the split — #987 owns that.
-  { file: 'src/settings/prefs.ts', maxLines: 2250 },
+  // Lowered 2250 → 517: #987's seven-task split carved every category out into prefsSections/ (Appearance,
+  // About, Editor, Keyboard, Output, Assistant, MCP, Advanced) plus the shared prefsControls.ts factories
+  // and prefsSections/{scopeKit,types}.ts. prefs.ts is now a thin assembler — ctx/scopeKit construction,
+  // the 8 section builder calls, the category rail/tab wiring, and populate/applyOpenState/refresh/
+  // suspend/destroy/onReset. End-state 506 LOC, ceil(506 × 1.02) = 517.
+  { file: 'src/settings/prefs.ts', maxLines: 517 },
   // Frozen 2026-07-02 at 1745 LOC, ceil(1745 × 1.02) = 1780. #986 ratchets this down as it decomposes
   // editor.ts. Freezing prevents further regrowth; it does not mandate the split — #986 owns that.
   // Lowered 1780 → 953: #986 split editor.ts's 38-export grab-bag into four sibling modules behind
@@ -133,6 +152,18 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // now holds only the `.koi` editor core (createKoineEditor + its language/completions/touch theme)
   // plus the facade re-exports; end-state 938 LOC + ~15 lines headroom.
   { file: 'src/editor/editor.ts', maxLines: 953 },
+  // Frozen 2026-07-09 at 113 LOC, ceil(113 × 1.02) = 116. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/cmTheme.ts', maxLines: 116 },
+  // Frozen 2026-07-09 at 130 LOC, ceil(130 × 1.02) = 133. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/outputView.ts', maxLines: 133 },
+  // Frozen 2026-07-09 at 176 LOC, ceil(176 × 1.02) = 180. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/settingsJsonEditor.ts', maxLines: 180 },
+  // Frozen 2026-07-09 at 534 LOC, ceil(534 × 1.02) = 545. Guards the #986 split's new sibling from
+  // regrowing unguarded — see #981/#757.
+  { file: 'src/editor/lspExtensions.ts', maxLines: 545 },
   // Frozen 2026-07-02 at 1354 LOC, ceil(1354 × 1.02) = 1382. #990 ratchets this down as it decomposes
   // aiPanel.ts. Freezing prevents further regrowth; it does not mandate the split — #990 owns that.
   // Raised 1382 → 1424: #984 Task 4 rewires the change-set sub-panel onto the chat slice's state
@@ -223,7 +254,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // #988 split: internal localStorage read/write guards (present/absent key checks, JSON parse/
   // stringify with corrupt-data fallback, best-effort write swallowing quota/security errors)
   // extracted to storage.ts. Measured 40 LOC, +15% headroom = 46.
-  { file: 'src/settings/storage.ts', maxLines: 46 },
+  // Raised 46 → 66: #1241 added removeKey (the shared home for what used to be six independent
+  // guarded-remove call sites across diagramState.ts/workspaceState.ts/settingsStore.ts) and widened
+  // the header comment now that readJsonObject/patchJsonBlob genuinely serve all three sibling
+  // domain modules. Measured 57 LOC, +15% headroom = 66.
+  { file: 'src/settings/storage.ts', maxLines: 66 },
   // #988 split: the API-key secret cache singleton (secretCache) plus its lifecycle
   // (initSecrets/whenSecretsReady/saveApiKey/clearApiKey/getCachedApiKey) extracted to secrets.ts —
   // the one piece of mutable module state in the settings layer, now isolated from the rest of the

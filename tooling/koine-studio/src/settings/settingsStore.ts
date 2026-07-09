@@ -12,7 +12,7 @@ import { clampZoomPercent } from '@/diagrams/diagramContract';
 import { isEmitTarget } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS, type BindingId } from '@/editor/keybindings';
 import { readRaw, writeRaw } from '@/shell/storage';
-import { readJsonObject, patchJsonBlob, SETTINGS_KEY } from './storage';
+import { readJsonObject, patchJsonBlob, removeKey, SETTINGS_KEY } from './storage';
 import { getCachedApiKey } from './secrets';
 
 // --- settings model ----------------------------------------------------------
@@ -480,9 +480,5 @@ export function saveKeybindingOverride(id: BindingId, key: string | null): void 
 
 /** Forget all keybinding overrides — resolveKeybindings() then returns pure defaults. */
 export function clearKeybindingOverrides(): void {
-  try {
-    localStorage.removeItem(KEYBINDINGS_KEY);
-  } catch {
-    // storage unavailable — nothing to clear
-  }
+  removeKey(KEYBINDINGS_KEY);
 }

@@ -508,6 +508,18 @@ public class R18CSharpApplicationTests
         endpoints.ShouldContain("endpoints.MapGet(\"/order-by-id\", async ([AsParameters] OrderById query, OrderByIdHandler handler, CancellationToken ct) =>");
     }
 
+    /// <summary>The plain (non-acronym) counterpart to
+    /// <see cref="Api_layer_factory_endpoint_kebabs_acronym_boundaries_like_openapi"/>: <see cref="Fixture"/>'s
+    /// <c>Order</c> aggregate declares a repository <c>add</c> operation and an <c>open</c> factory, so
+    /// <c>WriteFactoryEndpoint</c> must map it to <c>POST /order/open</c> — this route text was never
+    /// asserted anywhere before this test, only the sibling <c>place</c> command's route was.</summary>
+    [Fact]
+    public void Api_layer_maps_a_factory_to_a_post_endpoint()
+    {
+        var endpoints = File(Emit(ApiOn), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("endpoints.MapPost(\"/order/open\", async (OrderOpenRequest request, OrderOpenHandler handler, CancellationToken ct) =>");
+    }
+
     /// <summary>An acronym-bearing entity name (four consecutive capitals), to prove the api layer's
     /// route-building agrees with the openapi emitter's acronym-aware kebab-casing (#1042 / W2.0).</summary>
     internal const string XmlImportFixture = """
@@ -537,6 +549,33 @@ public class R18CSharpApplicationTests
     {
         var endpoints = File(Emit(ApiOn, XmlImportFixture), "ImportsEndpoints.cs").Contents;
         endpoints.ShouldContain("endpoints.MapPost(\"/xml-import/retry\", ");
+    }
+
+    /// <summary>An acronym-bearing entity name with a <c>create</c> factory rather than a <c>command</c>
+    /// (#1238): <c>WriteFactoryEndpoint</c> builds its route via <see cref="RouteDerivation.Kebab"/>
+    /// directly (factories have no <see cref="RouteInfo"/> representation, so they can't go through
+    /// <c>RouteDerivation.ForCommand</c>/<c>ForQuery</c> like the command/query endpoint writers do) —
+    /// this is the one call site #1042 left unasserted for an acronym-bearing name.</summary>
+    internal const string XmlImportFactoryFixture = """
+        context Imports {
+          aggregate XMLImport root XMLImport {
+            repository {
+              operations: add
+            }
+
+            entity XMLImport identified by XMLImportId {
+              create open() {
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Api_layer_factory_endpoint_kebabs_acronym_boundaries_like_openapi()
+    {
+        var endpoints = File(Emit(ApiOn, XmlImportFactoryFixture), "ImportsEndpoints.cs").Contents;
+        endpoints.ShouldContain("endpoints.MapPost(\"/xml-import/open\", ");
     }
 
     [Fact]

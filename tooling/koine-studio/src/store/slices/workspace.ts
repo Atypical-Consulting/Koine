@@ -50,6 +50,10 @@ export interface WorkspaceSlice {
   // --- pure actions (no side effects — effects stay in the shell modules) -----
   /** Insert or replace a buffer (new Map). */
   upsertBuffer(buf: Buffer): void;
+  /** Insert or replace MANY buffers atomically (ONE new Map, ONE set()) — the batched sibling of
+   *  {@link upsertBuffer} for callers (like historyController.restore) that update several buffers as
+   *  one logical transition. A true no-op (same Map reference, no notification) for an empty array. */
+  upsertBuffers(patches: ReadonlyArray<Buffer>): void;
   /** Remove a buffer by uri (new Map); a no-op (same reference) when the uri isn't open. */
   removeBuffer(uri: string): void;
   /** Re-key `oldUri` → `next.uri` atomically; when `oldUri` was active, re-point `activeUri` in the
@@ -95,6 +99,12 @@ export function createWorkspaceSlice(
     upsertBuffer: (buf) => {
       const next = new Map(get().buffers);
       next.set(buf.uri, buf);
+      set({ buffers: next });
+    },
+    upsertBuffers: (patches) => {
+      if (patches.length === 0) return; // true no-op — no Map copy, no set()
+      const next = new Map(get().buffers);
+      for (const buf of patches) next.set(buf.uri, buf);
       set({ buffers: next });
     },
     removeBuffer: (uri) => {

@@ -1,12 +1,16 @@
-# 0002. Conventional Commits + automated semantic versioning via release-please
+---
+id: 2
+title: Conventional Commits + automated semantic versioning via release-please
+status: accepted
+date: 2026-06-30
+links:
+  - type: relates-to
+    target: 8
+---
 
-Date: 2026-06-30
+# Conventional Commits + automated semantic versioning via release-please
 
-## Status
-
-Accepted
-
-## Context
+## Context and Problem Statement
 
 `CONTRIBUTING.md` already states "Commits follow Conventional Commits" but nothing enforced it: of
 the 624 commits on `main` at the time of this ADR, 369 (~59%) didn't match the `type(scope): subject`
@@ -22,11 +26,16 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/), and notes the project is pre-1.0 ("minor versions may
 include breaking changes").
 
-A first pass at this ADR proposed rewording only the most recent violators and leaving the rest of
-history alone, on the grounds that a full rewrite would touch every commit SHA. On review, the
-project maintainer wanted full compliance: every commit on `main`, not just the recent ones.
+## Considered Options
 
-## Decision
+* Reword only the most recent Conventional-Commits violators, leaving the rest of history alone — a
+  full rewrite would touch every commit SHA.
+* Reword all 624 commits on `main` to Conventional Commits form, in one rewrite.
+
+## Decision Outcome
+
+Chosen option: "Reword all 624 commits on `main`, in one rewrite", because on review the project
+maintainer wanted full compliance — every commit on `main`, not just the recent ones.
 
 1. **Reword all 624 commits on `main` to Conventional Commits form, in one rewrite.** A classifier
    was built rather than hand-typing 369 messages:

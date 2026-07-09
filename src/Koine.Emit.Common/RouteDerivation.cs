@@ -51,32 +51,11 @@ public static class RouteDerivation
     /// (<c>OrdersByStatus → orders-by-status</c>). A boundary is inserted before an uppercase letter that
     /// either follows a lowercase/digit or ends an acronym run (an uppercase followed by a lowercase), so
     /// acronyms split as expected (<c>XMLImport → xml-import</c>) — matching the word-boundary convention
-    /// the per-language <c>ToSnakeCase</c> naming helpers use.
+    /// the per-language <c>ToSnakeCase</c> naming helpers use. Thin wrapper over the shared
+    /// <see cref="IdentifierWords.Split"/> boundary rule (#1239); passes <c>splitAfterDigit: true</c> to
+    /// preserve this method's pre-extraction digit-boundary behavior (<c>Order2Ship → order2-ship</c>) —
+    /// a rule the per-language <c>ToSnakeCase</c> helpers never had (#1239 code review).
     /// </summary>
-    public static string Kebab(string name)
-    {
-        var sb = new System.Text.StringBuilder(name.Length + 4);
-        for (int i = 0; i < name.Length; i++)
-        {
-            char c = name[i];
-            if (char.IsAsciiLetterUpper(c))
-            {
-                bool afterWord = i > 0 && (char.IsAsciiLetterLower(name[i - 1]) || char.IsAsciiDigit(name[i - 1]));
-                bool acronymEnd = i > 0 && char.IsAsciiLetterUpper(name[i - 1])
-                    && i + 1 < name.Length && char.IsAsciiLetterLower(name[i + 1]);
-                if (afterWord || acronymEnd)
-                {
-                    sb.Append('-');
-                }
-
-                sb.Append(char.ToLowerInvariant(c));
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-
-        return sb.ToString();
-    }
+    public static string Kebab(string name) =>
+        string.Join('-', IdentifierWords.Split(name, splitAfterDigit: true)).ToLowerInvariant();
 }

@@ -1,12 +1,16 @@
-# 0001. Record architecture decisions
+---
+id: 1
+title: Record architecture decisions
+status: accepted
+date: 2026-06-30
+links:
+  - type: relates-to
+    target: 10
+---
 
-Date: 2026-06-30
+# Record architecture decisions
 
-## Status
-
-Accepted
-
-## Context
+## Context and Problem Statement
 
 Koine has accumulated 600+ commits and a non-trivial pipeline (grammar → AST → semantics → multiple
 emitters → tooling). Decisions about *why* the codebase looks the way it does — why the lexer
@@ -20,7 +24,16 @@ are expensive to reverse need a durable, discoverable record — separate from `
 describes the current state) and separate from PR descriptions (which describe a single change, not
 the decision's full context and consequences).
 
-## Decision
+## Considered Options
+
+* Keep deciding architecture silently — `CLAUDE.md`, PR descriptions, and the maintainer's memory,
+  as before.
+* Adopt lightweight Architecture Decision Records (ADRs), stored as versioned Markdown under `/adr/`.
+
+## Decision Outcome
+
+Chosen option: "Adopt lightweight Architecture Decision Records", because the status quo left
+decisions unindexed, undated, and silent about the alternatives that were rejected and why.
 
 We will record architecturally significant decisions as Architecture Decision Records (ADRs), using
 the lightweight format described at [adr.github.io](https://adr.github.io/) (Michael Nygard's

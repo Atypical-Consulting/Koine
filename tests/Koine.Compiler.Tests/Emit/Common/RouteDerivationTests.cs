@@ -54,4 +54,16 @@ public class RouteDerivationTests
     [InlineData("OrderById", "order-by-id")]
     public void Kebab_splits_on_word_and_acronym_boundaries(string name, string expected) =>
         RouteDerivation.Kebab(name).ShouldBe(expected);
+
+    /// <summary>
+    /// A digit immediately before an uppercase letter always started a new word here (pre-#1239), unlike
+    /// the per-language <c>ToSnakeCase</c> helpers, which never split there — #1239's extraction preserves
+    /// this method's own pre-extraction behavior via <c>IdentifierWords.Split(name, splitAfterDigit:
+    /// true)</c> rather than silently converging on the other helpers' behavior.
+    /// </summary>
+    [Theory]
+    [InlineData("Order2Ship", "order2-ship")]
+    [InlineData("V2Import", "v2-import")]
+    public void Kebab_splits_after_a_digit(string name, string expected) =>
+        RouteDerivation.Kebab(name).ShouldBe(expected);
 }
