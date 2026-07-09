@@ -220,9 +220,9 @@ internal sealed class RustExpressionTranslator
         // the call site must route through them instead (#1068).
         if (bin.Op is BinaryOp.Add or BinaryOp.Sub && IsQuantityType(leftType))
         {
-            WriteOperand(bin.Left, sb, null, null, clone: false);
+            WriteQuantityOperand(bin.Left, sb);
             sb.Append('.').Append(bin.Op == BinaryOp.Add ? "add" : "sub").Append("(&");
-            WriteOperand(bin.Right, sb, null, null, clone: false);
+            WriteQuantityOperand(bin.Right, sb);
             sb.Append(").expect(\"").Append(leftType!.Name).Append(": unit mismatch\")");
             if (parenthesize)
             {
@@ -293,6 +293,75 @@ internal sealed class RustExpressionTranslator
         }
     }
 
+    /// <summary>
+    /// Writes an operand of the quantity <c>+</c>/<c>-</c> guard (#1068). A simple place
+    /// (identifier/member access) is written bare — the receiver and the <c>&amp;</c>-borrowed argument
+    /// of a method call auto-ref a place without moving it. A compound expression (e.g. a conditional)
+    /// must itself evaluate to an owned value before the call site can consume it, so it is parenthesized
+    /// and its leaf places are cloned via <see cref="WriteOwnedOperand"/> (#1268).
+    /// </summary>
+    private void WriteQuantityOperand(Expr expr, StringBuilder sb)
+    {
+        if (expr is IdentifierExpr or MemberAccessExpr)
+        {
+            WriteOperand(expr, sb, null, null, clone: false);
+            return;
+        }
+
+        sb.Append('(');
+        WriteOwnedOperand(expr, sb);
+        sb.Append(')');
+    }
+
+    /// <summary>
+    /// Writes an expression so it evaluates to an owned value, recursing into a conditional's branches
+    /// (including nested conditionals) so a leaf place a branch would otherwise move out of
+    /// <c>&amp;self</c> is cloned instead — the block-expression dual of <see cref="WriteOperandValue"/>
+    /// (#1268).
+    /// </summary>
+    private void WriteOwnedOperand(Expr expr, StringBuilder sb)
+    {
+        if (expr is ConditionalExpr cond)
+        {
+            var condBuf = new StringBuilder();
+            Write(cond.Condition, condBuf, null);
+            sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
+            WriteOwnedOperand(cond.Then, sb);
+            sb.Append(" } else { ");
+            WriteOwnedOperand(cond.Else, sb);
+            sb.Append(" }");
+            return;
+        }
+
+        if (expr is LetExpr let)
+        {
+            List<string> pushed = WriteLetBindings(let.Bindings, sb, cloneNonCopyPlaces: true);
+            var bodyBuf = new StringBuilder();
+            WriteOwnedOperand(let.Body, bodyBuf);
+            sb.Append(StripOuterParens(bodyBuf.ToString()));
+            sb.Append(" }");
+            PopLocals(pushed);
+            return;
+        }
+
+        if (expr is GuardExpr g)
+        {
+            // `when` is a semantic-only disambiguation with no runtime Rust representation (mirrors
+            // Write's GuardExpr case) — the owned-value treatment belongs to the guarded body.
+            WriteOwnedOperand(g.Body, sb);
+            return;
+        }
+
+        TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+        var bodyOnlyBuf = new StringBuilder();
+        Write(expr, bodyOnlyBuf, null);
+        sb.Append(StripOuterParens(bodyOnlyBuf.ToString()));
+        if (IsNonCopyPlace(expr, type))
+        {
+            sb.Append(".clone()");
+        }
+    }
+
     /// <summary>Writes an expression as an owned value (used for coalesce arms): cloned when it is a place.</summary>
     private void WriteOperandValue(Expr expr, StringBuilder sb)
     {
@@ -308,16 +377,9 @@ internal sealed class RustExpressionTranslator
     private void WriteLet(LetExpr let, StringBuilder sb, TypeRef? coerceTo)
     {
         // `let x = e1, y = e2 in body` -> `{ let x = e1; let y = e2; body }` (a Rust block expression).
-        var pushed = new List<string>();
-        sb.Append("{ ");
-        foreach (LetBinding b in let.Bindings)
-        {
-            sb.Append("let ").Append(RustNaming.Field(b.Name)).Append(" = ");
-            Write(b.Value, sb, null);
-            sb.Append("; ");
-            PushLocal(b.Name, _resolver.Infer(b.Value, EffectiveScope()));
-            pushed.Add(b.Name);
-        }
+        // A binding's value is written as-is here: it need not be an owned value (e.g. an accessor call
+        // like `title.trim()` legitimately binds a borrow), so it is not cloned.
+        List<string> pushed = WriteLetBindings(let.Bindings, sb, cloneNonCopyPlaces: false);
 
         // The block's return value needs no outer parentheses (rustc warns on them), so render the
         // body to a buffer and drop one fully-enclosing pair.
@@ -326,6 +388,40 @@ internal sealed class RustExpressionTranslator
         sb.Append(StripOuterParens(bodyBuf.ToString()));
         sb.Append(" }");
 
+        PopLocals(pushed);
+    }
+
+    /// <summary>
+    /// Writes a <c>let</c> block's opening brace and bindings; caller writes the body and closing
+    /// brace, then calls <see cref="PopLocals"/>. When <paramref name="cloneNonCopyPlaces"/> is set (the
+    /// <see cref="WriteOwnedOperand"/> context, #1268), a binding whose value is a non-Copy place is
+    /// cloned — otherwise binding it would move it out of <c>&amp;self</c>, and the block must still
+    /// yield an owned value once its body is later cloned/consumed.
+    /// </summary>
+    private List<string> WriteLetBindings(IReadOnlyList<LetBinding> bindings, StringBuilder sb, bool cloneNonCopyPlaces)
+    {
+        var pushed = new List<string>();
+        sb.Append("{ ");
+        foreach (LetBinding b in bindings)
+        {
+            sb.Append("let ").Append(RustNaming.Field(b.Name)).Append(" = ");
+            TypeRef? bindingType = _resolver.Infer(b.Value, EffectiveScope());
+            Write(b.Value, sb, null);
+            if (cloneNonCopyPlaces && IsNonCopyPlace(b.Value, bindingType))
+            {
+                sb.Append(".clone()");
+            }
+
+            sb.Append("; ");
+            PushLocal(b.Name, bindingType);
+            pushed.Add(b.Name);
+        }
+
+        return pushed;
+    }
+
+    private void PopLocals(List<string> pushed)
+    {
         for (var i = pushed.Count - 1; i >= 0; i--)
         {
             PopLocal(pushed[i]);
