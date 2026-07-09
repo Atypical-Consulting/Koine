@@ -941,6 +941,65 @@ public class R9ValueObjectTests
     }
 
     [Fact]
+    public void Scalar_multiply_on_a_value_object_with_a_numeric_field_is_not_flagged_when_an_unrelated_context_declares_the_same_name_without_one()
+    {
+        // Issue #1285: HasNumericStoredField resolved via the flat, context-unaware
+        // ModelIndex.TryGetDecl(name) — the same root-cause class fixed in #1266's IsQuantity helper.
+        // context A's Money HAS a numeric field and legitimately scales via `* 2`; context B declares
+        // its own unrelated, same-named Money with none. B is registered LAST in ModelIndex._byName,
+        // so the flat lookup silently resolved A's `fee * 2` against B's declaration and wrongly
+        // flagged KOI0216, even though A's own Money has amount: Decimal to scale.
+        const string src = """
+            context A {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                doubled: Money = fee * 2
+              }
+            }
+            context B {
+              value Money {
+                label: String
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField);
+    }
+
+    [Fact]
+    public void Scalar_multiply_on_a_value_object_with_a_numeric_field_is_not_flagged_regardless_of_which_same_named_context_registers_last()
+    {
+        // Reversed declaration order from the fixture above (numeric-bearing context A declared
+        // LAST, so it's the one registered last in ModelIndex._byName) — the fix must not be
+        // order-dependent in either direction.
+        const string src = """
+            context B {
+              value Money {
+                label: String
+              }
+            }
+            context A {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                doubled: Money = fee * 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField);
+    }
+
+    [Fact]
     public void Derived_member_narrowing_decimal_body_into_an_int_declared_type_is_rejected()
     {
         // `total: Int = base * 1.5` — the body infers to Decimal, the member is declared Int; no target

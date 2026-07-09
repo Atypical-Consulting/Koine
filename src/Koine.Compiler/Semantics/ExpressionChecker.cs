@@ -307,15 +307,28 @@ internal sealed class ExpressionChecker
     /// bound.StoredFields). Derived/computed members are excluded via MemberAnalysis.IsDerived so the
     /// validator and every emitter classify members identically.
     /// </summary>
+    /// <remarks>
+    /// #1285: resolves <paramref name="vo"/> the same context-aware way <see cref="IsQuantity"/> does
+    /// (<c>vo.Qualifier ?? _resolver.Context</c>, R13.2) — NOT the flat <see cref="ModelIndex.TryGetDecl"/>
+    /// alone, which is keyed by bare name across the whole model. Two different contexts may legally
+    /// declare their own same-named value object; resolving without the reference site's context can
+    /// silently pick the WRONG declaration.
+    /// </remarks>
     private bool HasNumericStoredField(TypeRef vo)
     {
-        if (!_index.TryGetDecl(vo.Name, out TypeDecl decl) || decl is not ValueObjectDecl v)
+        var context = vo.Qualifier ?? _resolver.Context;
+        if (context is not null && _index.TryGetDeclIn(context, vo.Name, out TypeDecl decl))
         {
-            return false;
+            return decl is ValueObjectDecl v && HasNumericField(v);
         }
 
-        var names = v.Members.Select(m => m.Name).ToList();
-        return v.Members.Any(m => !MemberAnalysis.IsDerived(m, names) && TypeResolver.IsNumeric(m.Type));
+        return _index.TryGetDecl(vo.Name, out decl) && decl is ValueObjectDecl fallback && HasNumericField(fallback);
+
+        static bool HasNumericField(ValueObjectDecl v)
+        {
+            var names = v.Members.Select(m => m.Name).ToList();
+            return v.Members.Any(m => !MemberAnalysis.IsDerived(m, names) && TypeResolver.IsNumeric(m.Type));
+        }
     }
 
     /// <summary>
