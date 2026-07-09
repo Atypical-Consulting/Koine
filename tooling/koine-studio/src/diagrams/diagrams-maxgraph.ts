@@ -1427,6 +1427,12 @@ export interface ContextMapGraphHooks {
   onRelationSelect?(edge: DiagramEdge | null): void;
   /** Hover-tooltip text (plain string) for a cell value (a context node or a relation edge), or null for none. */
   tooltip?(value: DiagramNode | DiagramEdge): string | null;
+  /** The view re-rendered its cell states (zoom, pan, or any other scale/translate change) AFTER the
+   *  initial mount — maxGraph recreates each cell's HTML label DOM on a view refresh, discarding any
+   *  DOM-level marks a caller applied post-paint (`.is-scoped` / `aria-current`, #1210). The caller
+   *  re-applies those marks here; NOT called for the initial render (the caller does that itself once
+   *  {@link renderContextMapGraph} resolves). */
+  onAfterRender?(): void;
 }
 
 /** A teardown handle for a mounted context-map graph. */
@@ -1512,16 +1518,33 @@ export async function renderContextMapGraph(
     routeContextMapClick((evt.getProperty('cell') as MxCell | null)?.value, hooks);
   });
 
+  const view = handle.graph.getView();
+  const rerunAfterRender = (): void => hooks.onAfterRender?.();
+
   const dispose = (): void => {
+    if (hooks.onAfterRender) view.removeListener(rerunAfterRender);
     chrome.dispose();
     handle.dispose();
   };
 
   if (isCurrent()) {
     container.replaceChildren(root);
-    handle.graph.getView().revalidate(); // re-render now that the surface is in the live DOM
+    view.revalidate(); // re-render now that the surface is in the live DOM
     // Restore saved zoom when available; fall back to fit() when nothing is saved (#769).
     chrome.applyInitialZoom();
+    // Re-run the caller's post-paint DOM marks (`.is-scoped` / `aria-current`) after every LATER view
+    // refresh (#1210): maxGraph recreates each cell's HTML label on scale/translate, silently dropping
+    // them on the very next zoom or pan. Registered AFTER applyInitialZoom() — whose fit()/zoomTo() path
+    // fires these same events synchronously — so onAfterRender genuinely never fires for the initial
+    // render (the caller re-applies its own marks once this promise resolves), matching the contract
+    // documented on the hook itself. SCALE/TRANSLATE cover a direct view mutation (fit(), programmatic
+    // zoomTo); SCALE_AND_TRANSLATE covers the combined centered-zoom path the chrome's +/−/wheel buttons
+    // take.
+    if (hooks.onAfterRender) {
+      for (const evt of [mx.InternalEvent.SCALE, mx.InternalEvent.TRANSLATE, mx.InternalEvent.SCALE_AND_TRANSLATE]) {
+        view.addListener(evt, rerunAfterRender);
+      }
+    }
     return { dispose };
   }
   dispose();
