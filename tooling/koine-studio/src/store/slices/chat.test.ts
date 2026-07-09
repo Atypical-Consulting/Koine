@@ -579,15 +579,42 @@ describe('change-set state machine', () => {
     expect(s.getState().chat.changeSet).toBeNull();
   });
 
+  // #1225: a file can drift on one Apply attempt (nothing written, but `markChangeSetDrift` sticks
+  // `drifted: true` on its row per #473) and then revert to its pre-drift text before the next Apply
+  // attempt — at which point the host's fresh `isDrifted()` re-check says it's clean again, but the
+  // change set's own stored `drifted` flag is still sticky-true. `beginChangeSetApply` must trust the
+  // host's fresh, explicit count for THIS attempt rather than re-deriving a stale one from the sticky
+  // flag, or the terminal "Applied N" label contradicts the live-region announcement.
+  test("beginChangeSetApply(cleanCount, note) honors the host-supplied count even when the file's stored drifted flag is stale", () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().markChangeSetDrift(['a.koi']); // simulates an earlier all-drifted attempt: sticky drifted: true
+    // This attempt's fresh isDrifted() re-check (host-side) found the file clean again — explicit
+    // cleanCount of 1, NOT re-derived as 0 from the still-sticky `drifted` flag.
+    s.getState().beginChangeSetApply(1, 'Applying 1 clean file.');
+    expect(s.getState().chat.changeSet?.phase).toEqual({
+      kind: 'applying',
+      cleanCount: 1,
+      note: 'Applying 1 clean file.',
+    });
+    s.getState().resolveChangeSetApply({ failed: [], note: 'Applied 1 file.' });
+    expect(s.getState().chat.changeSet?.phase).toEqual({
+      kind: 'applied',
+      appliedCount: 1,
+      note: 'Applied 1 file.',
+    });
+  });
+
   // #1136: the apply-attempt wording used to ride a host-owned `ChangeSetAttempt` side-channel keyed
   // by `forId`; it now lives entirely in `ChangeSetPhase` so the panel can derive it from the slice
-  // alone. `beginChangeSetApply` snapshots the clean (accepted && !drifted) count at click time so a
-  // mid-apply checkbox toggle can never skew the terminal "Applied N" label.
-  test('beginChangeSetApply(note) snapshots cleanCount (accepted && !drifted) and stores the note', () => {
+  // alone. #1225: `beginChangeSetApply` no longer re-derives `cleanCount` from the change set's own
+  // (sticky) `files[].drifted` flag — it takes the host's already-computed, fresh-per-attempt count
+  // verbatim, so a mid-apply checkbox toggle still can't skew the terminal "Applied N" label (the
+  // count is fixed the instant `beginChangeSetApply` runs, same guarantee as before).
+  test('beginChangeSetApply(cleanCount, note) stores the host-supplied count and note verbatim', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y'), edit('c.koi', 'z')], {}, null);
-    s.getState().markChangeSetDrift(['a.koi']); // accepted but drifted — excluded from the clean snapshot
-    s.getState().beginChangeSetApply('Applying 2 clean files. Skipped 1 that changed since it was proposed.');
+    s.getState().beginChangeSetApply(2, 'Applying 2 clean files. Skipped 1 that changed since it was proposed.');
     expect(s.getState().chat.changeSet?.phase).toEqual({
       kind: 'applying',
       cleanCount: 2,
