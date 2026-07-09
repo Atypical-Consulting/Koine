@@ -391,7 +391,7 @@ describe('change-set state machine', () => {
   test('setChangeSetFileAccepted also works while applying', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applying', cleanCount: 1 });
     s.getState().setChangeSetFileAccepted('a.koi', false);
     expect(s.getState().chat.changeSet?.files[0]?.accepted).toBe(false);
@@ -403,7 +403,7 @@ describe('change-set state machine', () => {
     expect(s.getState().chat.changeSet).toBeNull();
 
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     s.getState().resolveChangeSetApply({ failed: [] });
     s.getState().setChangeSetFileAccepted('a.koi', false);
     expect(s.getState().chat.changeSet?.files[0]?.accepted).toBe(true); // applied: untouched
@@ -417,7 +417,7 @@ describe('change-set state machine', () => {
   test('beginChangeSetApply moves reviewing → applying', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applying', cleanCount: 1 });
   });
 
@@ -425,21 +425,21 @@ describe('change-set state machine', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
     s.getState().setChangeSetFileAccepted('a.koi', false);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(0);
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'reviewing' });
   });
 
   test('beginChangeSetApply is a no-op outside reviewing and on null', () => {
     const s = createAppStore();
-    s.getState().beginChangeSetApply(); // null: must not throw
+    s.getState().beginChangeSetApply(0); // null: must not throw
     expect(s.getState().chat.changeSet).toBeNull();
 
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
-    s.getState().beginChangeSetApply(); // already applying
+    s.getState().beginChangeSetApply(1);
+    s.getState().beginChangeSetApply(1); // already applying
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applying', cleanCount: 1 });
     s.getState().resolveChangeSetApply({ failed: [] });
-    s.getState().beginChangeSetApply(); // applied is terminal
+    s.getState().beginChangeSetApply(1); // applied is terminal
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 1 });
   });
 
@@ -447,7 +447,7 @@ describe('change-set state machine', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y'), edit('c.koi', 'z')], {}, null);
     s.getState().setChangeSetFileAccepted('b.koi', false);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(2);
     s.getState().resolveChangeSetApply({ failed: [] });
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 2 });
   });
@@ -456,9 +456,10 @@ describe('change-set state machine', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y'), edit('c.koi', 'z')], {}, null);
     // The host marks drift BEFORE beginChangeSetApply (#473) and never writes a drifted row — an
-    // accepted-but-drifted file was NOT applied, so the terminal count must not include it.
+    // accepted-but-drifted file was NOT applied, so the terminal count must not include it. The host
+    // computes its own fresh clean count (#1225) — here that's b and c, excluding drifted a.
     s.getState().markChangeSetDrift(['a.koi']);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(2);
     s.getState().resolveChangeSetApply({ failed: [] });
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 2 });
   });
@@ -466,7 +467,7 @@ describe('change-set state machine', () => {
   test('resolveChangeSetApply with failures returns to reviewing with a note naming them (no false Applied)', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(2);
     s.getState().resolveChangeSetApply({ failed: ['a.koi', 'b.koi'] });
     const phase = s.getState().chat.changeSet!.phase;
     expect(phase.kind).toBe('reviewing');
@@ -487,14 +488,14 @@ describe('change-set state machine', () => {
   test('#633: rejectChangeSetApply releases the in-flight lock back to reviewing with the error note', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     s.getState().rejectChangeSetApply('workspace write failed');
     expect(s.getState().chat.changeSet?.phase).toEqual({
       kind: 'reviewing',
       note: 'workspace write failed',
     });
     // Retry stays open: the set can be applied again.
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applying', cleanCount: 1 });
   });
 
@@ -518,7 +519,7 @@ describe('change-set state machine', () => {
   test('invalidateChangeSet also cuts off an in-flight apply', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     s.getState().invalidateChangeSet('workspace switched');
     expect(s.getState().chat.changeSet?.phase).toEqual({
       kind: 'invalidated',
@@ -532,7 +533,7 @@ describe('change-set state machine', () => {
     expect(s.getState().chat.changeSet).toBeNull();
 
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     s.getState().resolveChangeSetApply({ failed: [] });
     s.getState().invalidateChangeSet('too late');
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applied', appliedCount: 1 });
@@ -541,7 +542,7 @@ describe('change-set state machine', () => {
   test('#684: resolve and reject after invalidation are no-ops (a stale apply must not resurrect the set)', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     s.getState().invalidateChangeSet('superseded');
     s.getState().resolveChangeSetApply({ failed: [] });
     expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'invalidated', reason: 'superseded' });
@@ -557,7 +558,7 @@ describe('change-set state machine', () => {
     s.getState().markChangeSetDrift(['a.koi']); // idempotent
     expect(s.getState().chat.changeSet?.files.map((f) => f.drifted)).toEqual([true, false]);
     // Sticky across later transitions: a failed apply round-trip never clears the flag.
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1); // b is the only clean (accepted, undrifted) file at this point
     s.getState().rejectChangeSetApply('apply failed');
     expect(s.getState().chat.changeSet?.files.map((f) => f.drifted)).toEqual([true, false]);
     s.getState().markChangeSetDrift(['b.koi']);
@@ -625,7 +626,7 @@ describe('change-set state machine', () => {
   test('resolveChangeSetApply success reports appliedCount from the begin-time cleanCount snapshot even after a mid-apply toggle, and carries the note', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(2);
     // A checkbox toggled mid-apply must not skew the terminal count — the clean set was already
     // snapshotted at begin time.
     s.getState().setChangeSetFileAccepted('b.koi', false);
@@ -640,7 +641,7 @@ describe('change-set state machine', () => {
   test('resolveChangeSetApply failure prefers the passed note over the default "Failed to apply" fallback', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(1);
     s.getState().resolveChangeSetApply({
       failed: ['a.koi'],
       note: "Applied 0 files; couldn't write 1: a.koi. Re-apply to retry.",
@@ -654,7 +655,7 @@ describe('change-set state machine', () => {
   test('resolveChangeSetApply failure falls back to "Failed to apply: …" when no note is passed', () => {
     const s = createAppStore();
     s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null);
-    s.getState().beginChangeSetApply();
+    s.getState().beginChangeSetApply(2);
     s.getState().resolveChangeSetApply({ failed: ['a.koi', 'b.koi'] });
     expect(s.getState().chat.changeSet?.phase).toEqual({
       kind: 'reviewing',
@@ -679,7 +680,7 @@ describe('change-set state machine', () => {
       expect(s.getState().chat.changeSet).toBeNull();
 
       s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
-      s.getState().beginChangeSetApply();
+      s.getState().beginChangeSetApply(1);
       s.getState().noteChangeSetReview('should not land');
       expect(s.getState().chat.changeSet?.phase).toEqual({ kind: 'applying', cleanCount: 1 });
 

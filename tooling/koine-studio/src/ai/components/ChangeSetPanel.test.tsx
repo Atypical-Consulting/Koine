@@ -135,7 +135,7 @@ describe('ChangeSetPanel (#990)', () => {
   test('applying: Apply stays label-tracked but disabled (no second concurrent apply), checkboxes stay live', () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => store.getState().beginChangeSetApply());
+    act(() => store.getState().beginChangeSetApply(2));
 
     expect(applyBtn(container).textContent).toBe('Apply 2 files');
     expect(applyBtn(container).disabled).toBe(true);
@@ -150,7 +150,9 @@ describe('ChangeSetPanel (#990)', () => {
     const store = reviewingStore();
     const { container } = mount(store);
     act(() =>
-      store.getState().beginChangeSetApply('Applying 1 clean file. Skipped 1 that changed since it was proposed.'),
+      store
+        .getState()
+        .beginChangeSetApply(2, 'Applying 1 clean file. Skipped 1 that changed since it was proposed.'),
     );
 
     expect(status(container).textContent).toBe(
@@ -162,7 +164,7 @@ describe('ChangeSetPanel (#990)', () => {
     const store = reviewingStore();
     const { container } = mount(store);
     act(() => {
-      store.getState().beginChangeSetApply();
+      store.getState().beginChangeSetApply(2);
       store
         .getState()
         .resolveChangeSetApply({ failed: [], note: 'Applied 2 files. Skipped 1 that changed since it was proposed.' });
@@ -178,7 +180,7 @@ describe('ChangeSetPanel (#990)', () => {
     const store = reviewingStore();
     const { container } = mount(store);
     act(() => {
-      store.getState().beginChangeSetApply();
+      store.getState().beginChangeSetApply(2);
       store.getState().rejectChangeSetApply('Apply failed: Error: disk write failed');
     });
 
@@ -192,7 +194,7 @@ describe('ChangeSetPanel (#990)', () => {
     const store = reviewingStore();
     const { container } = mount(store);
     act(() => {
-      store.getState().beginChangeSetApply();
+      store.getState().beginChangeSetApply(2);
       store.getState().resolveChangeSetApply({ failed: ['billing/invoice.koi'] });
     });
 
@@ -204,7 +206,7 @@ describe('ChangeSetPanel (#990)', () => {
     const store = reviewingStore();
     const { container } = mount(store);
     act(() => {
-      store.getState().beginChangeSetApply();
+      store.getState().beginChangeSetApply(2);
       store.getState().resolveChangeSetApply({ failed: [] });
     });
 
@@ -220,7 +222,7 @@ describe('ChangeSetPanel (#990)', () => {
     const { container } = mount(store);
     act(() => {
       store.getState().setChangeSetFileAccepted('billing/invoice.koi', false);
-      store.getState().beginChangeSetApply();
+      store.getState().beginChangeSetApply(1);
       store.getState().resolveChangeSetApply({ failed: [] });
     });
 
