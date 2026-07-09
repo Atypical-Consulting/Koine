@@ -1,21 +1,33 @@
-import type { JSX } from 'preact';
+import type { ComponentChildren, JSX } from 'preact';
 import type { FsEntry } from '@/host';
 
-// One workspace-explorer row (#989 task 2): a keyed `<li role="treeitem">` — the Preact counterpart of
-// explorer.ts's `buildItem()`. Ported for STATIC-render parity only: the icon classifier, dirty dot,
-// error/warning badge, active row (aria-current/aria-selected) and filter-match highlight all mirror
-// buildItem() exactly. Keyboard nav (F2 rename, Delete, arrow/roving-tabindex), drag-and-drop, inline
-// create/rename and the "…" context-menu trigger are NOT here yet — those land in later #989 tasks; a
-// directory click (this component's only affordance today) simply toggles expansion via `onToggle`, and
-// a file click opens it via `onOpen`. `tabIndex` stays a fixed -1 (no roving-tabindex focus management
-// until the keyboard-nav task).
+// One workspace-explorer row (#989 task 2, corrected in the task-2a follow-up): a keyed
+// `<li role="treeitem">` — the Preact counterpart of explorer.ts's `buildItem()`. Ported for
+// STATIC-render parity: the icon classifier, dirty dot, error/warning badge, active row
+// (aria-current/aria-selected) and filter-match highlight all mirror buildItem() exactly. Keyboard nav
+// (F2 rename, Delete, arrow/roving-tabindex), drag-and-drop, inline create/rename and the "…"
+// context-menu trigger are NOT here yet — those land in later #989 tasks; a directory click (this
+// component's only affordance today) simply toggles expansion via `onToggle`, and a file click opens it
+// via `onOpen`. `tabIndex` stays a fixed -1 (no roving-tabindex focus management until the keyboard-nav
+// task).
 //
-// This component owns nothing but its own row-shaped props — no `collapsed`/`filterText` state, no
-// ExplorerCallbacks — so `ExplorerPanel` (which flattens the visible rows via `explorerModel.ts` and
-// derives `expanded`/`active`/`dirty`/diagnostics from `ExplorerCallbacks` per row) is the sole owner of
-// that lifecycle. Being its own component (not just a rendering function) makes each row's Preact
-// identity explicit, which is what the "keyed identity" test in ExplorerPanel.test.tsx pins: an
-// untouched row keeps its DOM node across a re-render that only changes a SIBLING row's props.
+// RECURSIVE NESTING (the task-2a fix): a directory's rendered children are passed in as `children` —
+// already-built `<ExplorerItem>` elements for its immediate entries, recursively built the same way one
+// level up — and this component wraps them in a nested `<ul class="explorer-children" role="group">`
+// that is a DIRECT CHILD of this row's own `<li>`, exactly matching explorer.ts's `buildItem()` nesting
+// (and the `.explorer-tree li[aria-expanded='false'] > .explorer-children` CSS collapse selector, which
+// only works with this literal nesting). The caller (`ExplorerPanel`) only supplies `children` for an
+// EXPANDED directory — a collapsed directory simply isn't given any, so nothing is rendered for it (the
+// JS/Preact equivalent of the original's CSS `display:none`); `expanded` still reflects true state via
+// `aria-expanded` regardless, so a later re-expand (or a test toggling it) works correctly.
+//
+// This component owns nothing but its own row-shaped props (and its already-rendered child rows) — no
+// `collapsed`/`filterText` state, no ExplorerCallbacks — so `ExplorerPanel` (which walks the entry tree
+// via `explorerModel.ts`'s `analyze()` for filter-visibility and derives `expanded`/`active`/`dirty`/
+// diagnostics from `ExplorerCallbacks` per entry) is the sole owner of that lifecycle. Being its own
+// component (not just a rendering function) makes each row's Preact identity explicit, which is what the
+// "keyed identity" test in ExplorerPanel.test.tsx pins: an untouched row keeps its DOM node across a
+// re-render that only changes a SIBLING row's props.
 export interface ExplorerItemProps {
   token: string;
   kind: FsEntry['kind'];
@@ -36,10 +48,17 @@ export interface ExplorerItemProps {
   onToggle: () => void;
   /** Files only — open the buffer. */
   onOpen: () => void;
+  /**
+   * Directories only — this directory's already-rendered child rows (recursive `ExplorerItem`s), or
+   * `undefined` when collapsed / not a directory. When provided (even an empty array, for an expanded-but-
+   * empty directory), wrapped in a nested `<ul class="explorer-children" role="group">`.
+   */
+  children?: ComponentChildren;
 }
 
 export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
-  const { token, kind, name, level, expanded, active, dirty, errors, warnings, filterText, onToggle, onOpen } = props;
+  const { token, kind, name, level, expanded, active, dirty, errors, warnings, filterText, onToggle, onOpen, children } =
+    props;
   const isDir = kind === 'dir';
   const isActiveFile = !isDir && active;
   const hasBadge = !isDir && (errors > 0 || warnings > 0);
@@ -90,6 +109,11 @@ export function ExplorerItem(props: ExplorerItemProps): JSX.Element {
           </span>
         )}
       </div>
+      {isDir && expanded && children !== undefined && (
+        <ul class="explorer-children" role="group">
+          {children}
+        </ul>
+      )}
     </li>
   );
 }

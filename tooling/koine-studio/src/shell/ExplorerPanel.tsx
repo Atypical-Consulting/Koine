@@ -2,22 +2,31 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren, JSX } from 'preact';
 import type { FsEntry } from '@/host';
 import type { ExplorerCallbacks, ExplorerRootGroup } from '@/shell/explorer';
-import { analyze, flattenVisible, type ExplorerFlatRow } from '@/shell/explorerModel';
+import { analyze, flattenVisible } from '@/shell/explorerModel';
 import { ExplorerItem } from '@/shell/ExplorerItem';
 
-// The workspace explorer as a keyed Preact component tree (#989 task 2: STATIC render only). This is
-// the Preact counterpart of `createExplorer()` in explorer.ts, which stays untouched (and mounted) until
-// the facade swap (#989 task 8) — ExplorerPanel is purely additive today.
+// The workspace explorer as a keyed Preact component tree (#989 task 2, corrected in the task-2a
+// follow-up). This is the Preact counterpart of `createExplorer()` in explorer.ts, which stays untouched
+// (and mounted) until the facade swap (#989 task 8) — ExplorerPanel is purely additive today.
 //
-// Row order/visibility/filtering is delegated to explorerModel.ts's pure `analyze()`/`flattenVisible()`
-// (extracted verbatim from explorer.ts's internal analyze()/visibleItems() in task 1) rather than
-// reimplemented here: `analyze()` supplies the filter-match count (the "matched-dir-reveals-subtree"/
-// "dir-counted-in-matches" rules live there), and `flattenVisible()` supplies the ordered, level-tagged
-// row list per root — called ONE ROOT AT A TIME so each group's rows can be nested inside that group's
-// own wrapper (its internal filter-visibility computation is per-subtree already, so slicing by group
-// is equivalent to filtering the combined list). Each row renders as a keyed `ExplorerItem`; unrelated
-// rows keep their DOM identity across a re-render — see ExplorerPanel.test.tsx's keyed-identity test,
-// the assertion the rest of the #989 arc leans on to retire explorer.ts's re-render-deferral machinery.
+// STRUCTURE (task-2a): a directory's children render as a nested `<ExplorerItem>` tree — a
+// `<ul class="explorer-children" role="group">` DIRECTLY inside the directory's own `<li>` — via the
+// recursive `renderEntry()` below, not a flat `aria-level`-only row list. All roots share ONE
+// `<ul class="explorer-tree" role="tree" aria-label="Workspace files">`; a 2+-root workspace wraps each
+// root's entries in one `.explorer-group[data-root]` `<li role="treeitem">` that is itself a direct child
+// of that single tree (see `renderGroupWrapper()` for why `role="treeitem"` — not explorer.ts's
+// `role="none"`, and NOT `role="group"` either — is what actually keeps this axe-clean). Single-root has
+// no wrapper at all — entries are direct tree children.
+//
+// Row visibility/filtering is delegated to explorerModel.ts's pure `analyze()` (extracted verbatim from
+// explorer.ts's internal analyze() in task 1) exactly as task 2 wired it: `analyze()` supplies the
+// filter-match count and the per-token `visible` set that `renderEntry()` consults while walking each
+// group's entries (the "matched-dir-reveals-subtree"/"dir-counted-in-matches" rules live there).
+// `flattenVisible()` is still used, but only for the empty/no-match row COUNT (its flat shape is
+// irrelevant there — counting doesn't care about nesting). Each row renders as a keyed `ExplorerItem`;
+// unrelated rows keep their DOM identity across a re-render — see ExplorerPanel.test.tsx's keyed-identity
+// test, the assertion the rest of the #989 arc leans on to retire explorer.ts's re-render-deferral
+// machinery.
 //
 // NOT in this task: keyboard nav (roving tabindex, arrow keys, F2/Delete), drag-and-drop move, inline
 // create/rename inputs, the "…" per-row context-menu trigger, and the ADR-0009 active-context
@@ -69,24 +78,9 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     });
   }, [analysis.liveDirs]);
 
-  // token -> FsEntry, so a flattened row (token/kind/level only) can recover the entry's name/children.
-  const entryIndex = useMemo(() => {
-    const map = new Map<string, FsEntry>();
-    const walk = (e: FsEntry): void => {
-      map.set(e.token, e);
-      for (const c of e.children ?? []) walk(c);
-    };
-    for (const g of groups) for (const e of g.entries) walk(e);
-    return map;
-  }, [groups]);
-
-  // One flattenVisible() call PER GROUP (not one call over all groups) so each group's rows nest inside
-  // that group's own wrapper — see the module doc comment above for why this is equivalent.
-  const rowsByGroup = useMemo(
-    () => groups.map((g) => ({ group: g, rows: flattenVisible([g], collapsed, filterText) })),
-    [groups, collapsed, filterText],
-  );
-  const totalRows = rowsByGroup.reduce((n, g) => n + g.rows.length, 0);
+  // Total visible-row count across every group, for the empty/no-match state — flattenVisible()'s FLAT
+  // shape doesn't matter here, only its length, so one call over every group (not one per group) is fine.
+  const totalRows = useMemo(() => flattenVisible(groups, collapsed, filterText).length, [groups, collapsed, filterText]);
   const showEmpty = totalRows === 0;
 
   const toggleDir = (token: string): void => {
@@ -110,21 +104,34 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   };
   const expandAllDirs = (): void => setCollapsed(new Set());
 
-  const renderRow = (row: ExplorerFlatRow): JSX.Element | null => {
-    const entry = entryIndex.get(row.token);
-    if (!entry) return null; // defensive — flattenVisible only ever emits tokens present in entryIndex
+  const filtering = filterText !== '';
+
+  // Recursively render one entry (and, when it's an expanded directory, its own children) as a keyed
+  // `ExplorerItem` — the DOM-shape fix (#989 task-2a): a directory's children nest INSIDE its own `<li>`
+  // (via `ExplorerItem`'s `children` prop) rather than sitting flat beside it. Filter-visibility reuses
+  // `analysis.visible` (from explorerModel.ts's `analyze()`) exactly as task 2 wired it — only the
+  // render SHAPE changed here, not the visibility rule. Returns null when a filter is active and neither
+  // this entry nor any descendant matches (mirrors explorer.ts's `buildItem()` early return).
+  const renderEntry = (entry: FsEntry, level: number): JSX.Element | null => {
+    if (filtering && !analysis.visible.has(entry.token)) return null;
     const isDir = entry.kind === 'dir';
-    const expanded = isDir && (filterText ? true : !collapsed.has(entry.token));
+    const expanded = isDir && (filtering || !collapsed.has(entry.token));
     const active = !isDir && cb.isActive(entry.token);
     const dirty = !isDir && cb.isDirty(entry.token);
     const diag = isDir ? { errors: 0, warnings: 0 } : cb.diagCounts(entry.token);
+
+    // Only compute (and pass) children when this directory is actually expanded — a collapsed directory
+    // simply doesn't render its subtree at all (the JS/Preact equivalent of the original's CSS
+    // `display:none`), rather than building it and hiding it.
+    const childNodes = isDir && expanded ? (entry.children ?? []).map((c) => renderEntry(c, level + 1)).filter(nonNull) : undefined;
+
     return (
       <ExplorerItem
         key={entry.token}
         token={entry.token}
         kind={entry.kind}
         name={entry.name}
-        level={row.level}
+        level={level}
         expanded={expanded}
         active={active}
         dirty={dirty}
@@ -133,7 +140,81 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
         filterText={filterText}
         onToggle={() => toggleDir(entry.token)}
         onOpen={() => cb.onOpenFile(entry.token)}
-      />
+      >
+        {childNodes}
+      </ExplorerItem>
+    );
+  };
+
+  // A group's top-level rows: its entries recursively rendered, filtered rows dropped. Level 1 in
+  // single-root mode (no wrapper); level 2 in multi-root mode, since the wrapper ITSELF now occupies
+  // level 1 (see renderGroupWrapper below) — the top-level entries genuinely ARE one level deeper than
+  // the workspace-root node that contains them, mirroring how a directory's own children are level+1.
+  const renderGroupRows = (group: ExplorerRootGroup, level: number): JSX.Element[] =>
+    group.entries.map((e) => renderEntry(e, level)).filter(nonNull);
+
+  // Multi-root (2+ groups) only: one `.explorer-group[data-root]` wrapper per root, itself a direct child
+  // of the single shared tree below, containing that root's header (name + Remove) and its top-level rows.
+  //
+  // WHY role="treeitem" (not explorer.ts's role="none", and NOT role="group" either): explorer.ts marks
+  // this wrapper `role="none"` (presentational), which removes its OWN boundary from the accessibility
+  // tree, so its child `.explorer-group-header` — a plain, roleless `<div>` around a real, focusable
+  // Remove `<button>` — ends up exposed straight onto `ul[role="tree"]`; `tree`'s `aria-required-children`
+  // check flags that bare button. The natural-seeming fix — give the wrapper `role="group"` instead —
+  // does NOT actually work: axe's aria-required-children walk treats `group` (and `rowgroup`) as
+  // TRANSPARENT whenever the ancestor `tree`/`grid`-family role accepts `group` as an owned role (which
+  // `tree` does), so it tunnels straight through any number of nested `group`s looking for the first
+  // non-group/treeitem descendant — and finds the button regardless of how many `role="group"` wrappers
+  // sit between it and the tree (confirmed empirically: a `role="group"` wrapper here still fails
+  // aria-required-children with the exact same "button is not allowed" violation). `role="treeitem"` is
+  // NOT given that transparency treatment — it's a genuine terminal leaf for this check, exactly like
+  // every ordinary file/folder row already is (a directory's own `.explorer-more` action button, in
+  // explorer.ts, sits inside its `<li role="treeitem">` without tripping this same rule, for the identical
+  // reason). So: treat a multi-root workspace root exactly like a folder — a `treeitem` whose "row" is
+  // `.explorer-group-header` (name + Remove, playing the part `.explorer-row` plays for a real directory)
+  // and whose nested `.explorer-group-items` list is its `role="group"` child (playing the part
+  // `.explorer-children` plays) — verified axe-clean this way for multi-root, nested-subdirectory and
+  // empty-state cases (see ExplorerPanel.test.tsx). `<li>` (matching explorer.ts's own element choice) is
+  // fine here — unlike `role="group"`, `role="treeitem"` IS an axe-allowed role for `<li>` (every ordinary
+  // row already relies on exactly that).
+  //
+  // The decorative folder-name text is `aria-hidden` (visually unchanged) so it isn't double-announced
+  // alongside the wrapper's own accessible name (`aria-label`, required for `treeitem`); the Remove button
+  // keeps its own accessible name via its own `aria-label` regardless of the ancestor's role.
+  const renderGroupWrapper = (group: ExplorerRootGroup): JSX.Element => {
+    const name = folderNameOf(group.root);
+    return (
+      <li
+        key={group.root}
+        class="explorer-group"
+        role="treeitem"
+        aria-level={1}
+        aria-expanded="true"
+        aria-label={`Files in ${name}`}
+        data-root={group.root}
+        tabIndex={-1}
+      >
+        <div class="explorer-group-header">
+          <span class="explorer-group-name" aria-hidden="true">
+            {name}
+          </span>
+          <button
+            type="button"
+            class="explorer-group-remove"
+            aria-label={`Remove folder ${name}`}
+            title={`Remove folder ${name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              cb.onRemoveRoot?.(group.root);
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <ul class="explorer-group-items" role="group">
+          {renderGroupRows(group, 2)}
+        </ul>
+      </li>
     );
   };
 
@@ -203,52 +284,24 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
             </>
           )}
         </div>
-      ) : groups.length <= 1 ? (
-        <ul class="explorer-tree" role="tree" aria-label="Workspace files">
-          {(rowsByGroup[0]?.rows ?? []).map(renderRow)}
-        </ul>
       ) : (
-        // Multi-root: each root gets its OWN independent `role="tree"` rather than one shared tree with
-        // role="group" sections. Two axe-verified reasons this diverges from a single shared tree (which
-        // is what explorer.ts — never axe-tested — renders): (1) aria-required-children flags the group
-        // header's interactive Remove button as soon as it's a descendant of a role=tree (a role="none"
-        // wrapper doesn't exempt it — only treeitem/group are allowed owned roles); putting the header
-        // OUTSIDE any tree-scoped element is the only fix. (2) axe's aria-required-parent check for
-        // treeitem does NOT treat an ancestor role="group" as sufficient on its own — the group itself
-        // must in turn be inside a role="tree" (see aria-core's getMissingContext), so a bare
-        // role="group" section with no enclosing tree also fails. Giving each group its own role="tree"
-        // satisfies both at once, and reads naturally to AT users as N separate file lists (mirrors how
-        // VS Code's multi-root explorer presents one tree per workspace folder).
-        <div class="explorer-tree">
-          {rowsByGroup.map(({ group, rows }) => {
-            const name = folderNameOf(group.root);
-            return (
-              <div key={group.root} class="explorer-group" data-root={group.root}>
-                <div class="explorer-group-header">
-                  <span class="explorer-group-name">{name}</span>
-                  <button
-                    type="button"
-                    class="explorer-group-remove"
-                    aria-label={`Remove folder ${name}`}
-                    title={`Remove folder ${name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      cb.onRemoveRoot?.(group.root);
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-                <ul class="explorer-group-items" role="tree" aria-label={`Files in ${name}`}>
-                  {rows.map(renderRow)}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
+        // ONE shared `<ul role="tree">` for every root — matching explorer.ts's `tree` element exactly
+        // (byte-identical single-root shape, and the same tree instance multi-root groups attach to) —
+        // rather than task 2's per-root `role="tree"` split. A single tree is what #989's own design spec
+        // requires (one delegated `onKeyDown` on `ul[role="tree"]`, so a later arrow-key nav task can cross
+        // group boundaries) and what explorer.test.ts's structural assertions pin (a lone
+        // `ul[role="tree"]` queried singular throughout).
+        <ul class="explorer-tree" role="tree" aria-label="Workspace files">
+          {groups.length <= 1 ? renderGroupRows(groups[0], 1) : groups.map(renderGroupWrapper)}
+        </ul>
       )}
     </div>
   );
+}
+
+/** Type guard for filtering `null`s out of a mapped array while keeping the element type non-nullable. */
+function nonNull<T>(value: T | null): value is T {
+  return value !== null;
 }
 
 /** The folder name shown in a group header: the root token's last non-empty path segment. */

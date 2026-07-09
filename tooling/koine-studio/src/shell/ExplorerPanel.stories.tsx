@@ -45,6 +45,37 @@ function secondGroup(): ExplorerRootGroup {
   };
 }
 
+// A folder inside a folder (two directory levels deep) — exercises the recursive `.explorer-children`
+// nesting (#989 task-2a) beyond the one-level `orders/` fixtures above, and is what the NestedSubdirectories
+// story's axe check covers that the other stories don't.
+function nestedGroup(root = 'ROOT'): ExplorerRootGroup {
+  return {
+    root,
+    entries: [
+      {
+        token: 'ROOT/orders',
+        name: 'orders',
+        relPath: 'orders',
+        kind: 'dir',
+        children: [
+          {
+            token: 'ROOT/orders/2024',
+            name: '2024',
+            relPath: 'orders/2024',
+            kind: 'dir',
+            children: [
+              { token: 'ROOT/orders/2024/order.koi', name: 'order.koi', relPath: 'orders/2024/order.koi', kind: 'file' },
+              { token: 'ROOT/orders/2024/notes.txt', name: 'notes.txt', relPath: 'orders/2024/notes.txt', kind: 'file' },
+            ],
+          },
+          { token: 'ROOT/orders/draft.koi', name: 'draft.koi', relPath: 'orders/draft.koi', kind: 'file' },
+        ],
+      },
+      { token: 'ROOT/shared.koi', name: 'shared.koi', relPath: 'shared.koi', kind: 'file' },
+    ],
+  };
+}
+
 // isActive/isDirty/diagCounts drive the active row, the unsaved-changes dot and the error/warning badge
 // so the Populated story shows every static-render affordance at once (order.koi is active + dirty;
 // shared.koi carries an error badge).
@@ -80,9 +111,16 @@ type Story = StoryObj<typeof meta>;
  *  file and an error badge shown. */
 export const SingleRoot: Story = {};
 
-/** Two workspace roots — a labeled `.explorer-group-header` (folder name + Remove) per root. */
+/** Two workspace roots — a labeled `.explorer-group-header` (folder name + Remove) per root. Both roots'
+ *  rows live under the SAME shared `ul[role="tree"]`, each inside its own `.explorer-group[data-root]`. */
 export const MultiRoot: Story = {
   args: { groups: [group('/home/me/sales'), secondGroup()] },
+};
+
+/** A folder inside a folder (two directory levels deep): `orders/2024/order.koi`. Proves the recursive
+ *  `.explorer-children[role=group]` nesting (#989 task-2a) holds at every depth, not just one level. */
+export const NestedSubdirectories: Story = {
+  args: { groups: [nestedGroup()] },
 };
 
 /** The debounced filter pre-seeded (via `initialFilterText`, a test/story-only seam) to "order" — only

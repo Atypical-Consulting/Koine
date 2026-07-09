@@ -36,6 +36,30 @@ function secondGroup(): ExplorerRootGroup {
   };
 }
 
+// A folder-inside-a-folder tree (two directory levels deep) — proof the recursive render nests EVERY
+// level's children inside their own directory's `<li>`, not just the first.
+function nestedTree(): FsEntry[] {
+  return [
+    {
+      token: 'ROOT/orders',
+      name: 'orders',
+      relPath: 'orders',
+      kind: 'dir',
+      children: [
+        {
+          token: 'ROOT/orders/2024',
+          name: '2024',
+          relPath: 'orders/2024',
+          kind: 'dir',
+          children: [
+            { token: 'ROOT/orders/2024/order.koi', name: 'order.koi', relPath: 'orders/2024/order.koi', kind: 'file' },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
 function makeCallbacks(overrides: Partial<ExplorerCallbacks> = {}): ExplorerCallbacks {
   return {
     onOpenFile: vi.fn(),
@@ -69,6 +93,58 @@ describe('ExplorerPanel', () => {
     expect(fileItem).not.toBeNull();
     expect(fileItem!.getAttribute('aria-level')).toBe('2');
     expect(fileItem!.querySelector('.explorer-name')?.textContent).toBe('order.koi');
+  });
+
+  // The hard structural constraint the #989 migration's eventual parity gate (task 8, against the
+  // EXISTING explorer.test.ts) depends on: a directory's children are a nested
+  // `<ul class="explorer-children" role="group">` that is a DIRECT CHILD of the directory's own
+  // `<li>` — not a flat sibling reachable only via `aria-level`. Mirrors explorer.test.ts's own
+  // `:scope > ul[role="group"] > li[role="treeitem"]` assertion (~line 55-66) so the two suites agree
+  // on the exact same shape, and goes one level further (folder-inside-folder) to prove the recursion
+  // nests EVERY level, not just the first.
+  it("nests a directory's children directly inside its own <li> via .explorer-children[role=group] (multi-level)", () => {
+    const { container } = render(
+      <ExplorerPanel cb={makeCallbacks()} groups={[{ root: 'ROOT', entries: nestedTree() }]} />,
+    );
+
+    const outerDir = container.querySelector<HTMLElement>('li[role="treeitem"][data-token="ROOT/orders"]')!;
+    expect(outerDir).not.toBeNull();
+
+    const innerDir = outerDir.querySelector<HTMLElement>(
+      ':scope > ul.explorer-children[role="group"] > li[role="treeitem"][data-token="ROOT/orders/2024"]',
+    );
+    expect(innerDir).not.toBeNull();
+
+    const nestedFile = innerDir!.querySelector(
+      ':scope > ul.explorer-children[role="group"] > li[role="treeitem"][data-token="ROOT/orders/2024/order.koi"] .explorer-name',
+    );
+    expect(nestedFile?.textContent).toBe('order.koi');
+  });
+
+  // The other hard structural constraint: ALL roots share ONE `ul[role="tree"]` — a 2+-root workspace
+  // does NOT get one tree per root. Each root's rows must land inside THAT root's own
+  // `.explorer-group[data-root]` / `.explorer-group-items`, and never leak into a sibling root's items.
+  it('keeps every root under ONE shared ul[role="tree"], each nested in its own .explorer-group', () => {
+    const { container } = render(
+      <ExplorerPanel cb={makeCallbacks()} groups={[group('/home/me/sales'), secondGroup()]} />,
+    );
+
+    const trees = container.querySelectorAll('ul[role="tree"]');
+    expect(trees.length).toBe(1);
+    const tree = trees[0]!;
+
+    const salesGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/sales"]');
+    const billingGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/billing"]');
+    expect(salesGroup).not.toBeNull();
+    expect(billingGroup).not.toBeNull();
+
+    const salesItems = salesGroup!.querySelector(':scope > .explorer-group-items')!;
+    const billingItems = billingGroup!.querySelector(':scope > .explorer-group-items')!;
+
+    expect(salesItems.querySelector('[data-token="ROOT/shared.koi"]')).not.toBeNull();
+    expect(billingItems.querySelector('[data-token="ROOT/shared.koi"]')).toBeNull();
+    expect(billingItems.querySelector('[data-token="BILL/invoice.koi"]')).not.toBeNull();
+    expect(salesItems.querySelector('[data-token="BILL/invoice.koi"]')).toBeNull();
   });
 
   it('opens a file when its row is clicked', () => {
@@ -226,19 +302,25 @@ describe('ExplorerPanel', () => {
   // that changes ONE row's props (here, a newly-dirty file) must never tear down and rebuild an
   // UNRELATED row elsewhere in the tree — the exact bug class the innerHTML-wipe rebuild in explorer.ts
   // structurally can't avoid. Capture the untouched row's <li> BEFORE the re-render and assert the SAME
-  // DOM node comes back after, not merely an equal-looking one.
-  it('keeps the same DOM node for an unrelated row across a re-render (keyed identity)', () => {
+  // DOM node comes back after, not merely an equal-looking one. Also captures the PARENT directory's
+  // <li> — now that children nest inside it (task-2a), the parent's own identity is equally load-bearing:
+  // if the recursive render ever rebuilt a directory's wrapper on every render, the nested child would
+  // lose its DOM identity too even while still being "the same row" by every other assertion here.
+  it('keeps the same DOM node for an unrelated row (and its nesting parent) across a re-render (keyed identity)', () => {
     const cb = makeCallbacks();
     const { container, rerender } = render(<ExplorerPanel cb={cb} groups={[group()]} />);
 
+    const untouchedParent = container.querySelector('li[data-token="ROOT/orders"]');
     const untouched = container.querySelector('li[data-token="ROOT/orders/order.koi"]');
+    expect(untouchedParent).not.toBeNull();
     expect(untouched).not.toBeNull();
 
     const dirtyCb = makeCallbacks({ isDirty: vi.fn((token: string) => token === 'ROOT/shared.koi') });
     act(() => rerender(<ExplorerPanel cb={dirtyCb} groups={[group()]} />));
 
+    const stillUntouchedParent = container.querySelector('li[data-token="ROOT/orders"]');
     const stillUntouched = container.querySelector('li[data-token="ROOT/orders/order.koi"]');
-    expect(stillUntouched).not.toBeNull();
+    expect(stillUntouchedParent).toBe(untouchedParent); // same node reference, not just deep-equal
     expect(stillUntouched).toBe(untouched); // same node reference, not just deep-equal
 
     // Sanity: the changed row DID pick up the new dirty dot.
@@ -246,13 +328,34 @@ describe('ExplorerPanel', () => {
     expect(sharedRow.querySelector('.tree-dirty')).not.toBeNull();
   });
 
-  it('has no accessibility violations (populated tree)', async () => {
+  it('has no accessibility violations (single-root tree)', async () => {
+    const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group()]} />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('has no accessibility violations (multi-root tree)', async () => {
     const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[group('/home/me/sales'), secondGroup()]} />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  // The specific scenario the axe fix targets: multi-root groups (the header/Remove-button leak that
+  // originally tripped aria-required-children) TOGETHER with multi-level nested subdirectories in one
+  // of those roots, so both structural fixes are exercised in the same accessibility tree at once.
+  it('has no accessibility violations (multi-root, with a multi-level nested subdirectory)', async () => {
+    const nestedGroup: ExplorerRootGroup = { root: '/home/me/sales', entries: nestedTree() };
+    const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[nestedGroup, secondGroup()]} />);
     expect(await axe(container)).toHaveNoViolations();
   });
 
   it('has no accessibility violations (empty state)', async () => {
     const { container } = render(<ExplorerPanel cb={makeCallbacks()} groups={[]} />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('has no accessibility violations (no-match / filtered-empty state)', async () => {
+    const { container } = render(
+      <ExplorerPanel cb={makeCallbacks()} groups={[group()]} initialFilterText="zzz-nope" />,
+    );
     expect(await axe(container)).toHaveNoViolations();
   });
 });
