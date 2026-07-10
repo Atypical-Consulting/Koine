@@ -158,7 +158,9 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Frozen 2026-07-09 at 281 LOC, ceil(281 × 1.02) = 287. #985 Task 1's new sibling — the Context Map
   // panel (maxGraph handle lifecycle, Graph/Table toggle, hover tooltip, ADR 0009 scope-focus repaint)
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
-  { file: 'src/shell/inspector/contextMapPanel.tsx', maxLines: 287 },
+  // Raised 287 → 288: #1352 migrated this panel's hand-rolled disposed/seq lifecycle pattern onto the
+  // shared createLifecycleGuard() primitive, adding one new import line. Measured end-state (288).
+  { file: 'src/shell/inspector/contextMapPanel.tsx', maxLines: 288 },
   // Frozen 2026-07-09 at 254 LOC, ceil(254 × 1.02) = 260. #985 Task 2's new sibling — the #146
   // bounded-context scope switcher (handle, per-workspace persist/restore, status-bar sync, context-list
   // refresh) extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
