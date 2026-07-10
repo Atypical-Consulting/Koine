@@ -711,7 +711,10 @@ internal sealed class RustExpressionTranslator
         // a derived member reads via its accessor), bare `<snake>` in a constructor/invariant.
         if (_memberNames.Contains(name))
         {
-            TypeRef? ownType = _resolver.Infer(new IdentifierExpr(name), EffectiveScope());
+            // Only worth resolving when EmitCoerced can actually use it (its own Decimal-coerceTo
+            // gate) — every OTHER member-identifier write (the overwhelming majority) would otherwise
+            // pay a TypeResolver walk whose result is immediately discarded.
+            TypeRef? ownType = coerceTo?.Name == "Decimal" ? InferType(new IdentifierExpr(name)) : null;
             EmitCoerced(sb, coerceTo, ownType, () =>
             {
                 if (_mode == NameMode.Property)

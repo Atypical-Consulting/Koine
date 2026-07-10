@@ -11,13 +11,13 @@ namespace Koine.Compiler.Tests;
 /// </summary>
 public class RustExpressionTranslatorTests
 {
-    private static RustExpressionTranslator NewTranslator()
+    private static RustExpressionTranslator NewTranslator(IReadOnlyList<Member>? members = null)
     {
         var result = new KoineCompiler().Compile("context C { value V { x: Int } }", new CSharpEmitter());
         ModelIndex index = new SemanticModel(result.Model!).Index;
         return new RustExpressionTranslator(
             index,
-            members: [],
+            members: members ?? [],
             enumMemberToType: new Dictionary<string, string>(),
             enumVariants: new Dictionary<(string, string), IReadOnlyDictionary<string, string>>(),
             typeMapper: new RustTypeMapper(index));
@@ -41,5 +41,24 @@ public class RustExpressionTranslatorTests
         translator.WriteIdentifier("y", sb, null, new TypeRef("Decimal"));
 
         sb.ToString().ShouldBe("y.map(Decimal::from)");
+    }
+
+    /// <summary>
+    /// The member branch resolves its own type via <c>TypeResolver.Infer</c> rather than a
+    /// caller-supplied <c>ownType</c> — the riskier half of the #1355 fix, since it walks the resolver
+    /// instead of a plain dictionary lookup. Pins the same <c>.map(Decimal::from)</c> shape for a bare
+    /// optional-<c>Int</c> MEMBER identifier (not a local), reached the same unthreaded way `Write`'s
+    /// own <c>IdentifierExpr</c> case does.
+    /// </summary>
+    [Fact]
+    public void Write_identifier_case_maps_an_optional_int_member_coerced_toward_decimal()
+    {
+        RustExpressionTranslator translator = NewTranslator(
+            [new Member("y", new TypeRef("Int", IsOptional: true), Initializer: null)]);
+
+        var sb = new StringBuilder();
+        translator.WriteIdentifier("y", sb, null, new TypeRef("Decimal"));
+
+        sb.ToString().ShouldBe("self.y.map(Decimal::from)");
     }
 }
