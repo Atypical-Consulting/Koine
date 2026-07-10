@@ -1777,4 +1777,84 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1343: a bare optional <c>Int?</c> identifier compared via <c>==</c> to a non-optional
+    /// <c>Decimal</c> must map inside its Option (not a bare <c>Decimal::from(...)</c> prefix, invalid
+    /// for an <c>Option&lt;i64&gt;</c> operand) — and the opposite non-optional <c>Decimal</c> operand
+    /// must itself become <c>Some(...)</c>-wrapped so both sides of <c>==</c> share the same Rust type —
+    /// or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Optional_int_identifier_compared_via_equality_to_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    a: Int?\n" +
+            "    c: Decimal\n" +
+            "    isEq: Bool = a == c\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1343: a compound (conditional) operand that itself yields an optional <c>Int?</c> (per
+    /// #975's branch-optionality join) compared via <c>==</c> to a non-optional <c>Decimal</c> must map
+    /// the whole rendered <c>if</c>/<c>else</c> inside its Option, with the opposite operand
+    /// <c>Some(...)</c>-wrapped to match — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Compound_optional_int_conditional_compared_via_equality_to_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    flag: Bool\n" +
+            "    x: Int\n" +
+            "    y: Int?\n" +
+            "    c: Decimal\n" +
+            "    isEq: Bool = (if flag then x else y) == c\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1343 edge case: when the opposite operand is ITSELF optional (<c>Decimal?</c>), the
+    /// coerced operand still needs <c>.map(Decimal::from)</c> with no <c>Some(...)</c> wrap on either
+    /// side — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Optional_int_compared_to_optional_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    a: Int?\n" +
+            "    d: Decimal?\n" +
+            "    isEq: Bool = a == d\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
