@@ -474,7 +474,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   activeContextCtrl = createActiveContextController({
     store: appStore,
-    lsp,
+    // The controller's glossary-model reads ride the facade's shared in-flight memoizer (#1258, the #484
+    // follow-up): onDocEdited's debounce fires refreshContextList() AND refreshActiveSurfaces() (→ the
+    // navigator's seeded reload + ensureModelIndex) in the same tick, so routing this THIRD consumer
+    // through fetchGlossaryModel() folds its formerly separate glossaryModel() request into the one
+    // shared fetch — one round-trip per edit instead of two. (`fetchGlossaryModel` is a hoisted function
+    // declaration further down this scope, and the controller only calls it post-construction, so
+    // referencing it here is safe.) documentSymbols passes through unmemoized — it's per-file, not
+    // per-model.
+    lsp: { glossaryModel: fetchGlossaryModel, documentSymbols: () => lsp.documentSymbols() },
     activeUri: deps.activeUri,
     folderRootToken: deps.folderRootToken,
     saveActiveContext: deps.saveActiveContext,

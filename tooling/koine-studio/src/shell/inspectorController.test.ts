@@ -527,13 +527,17 @@ describe('createInspectorController — invalidation forces a refetch', () => {
   });
 
   test('onDocEdited() debounces a refresh of the live surfaces (350ms) and refreshes the context list', async () => {
-    vi.useFakeTimers();
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
     // Land on the technical center so the only live model-derived surface is the left rail (loadModel),
     // keeping the assertion about the debounced refreshContextList clean.
     ctl.selectCenter('technical');
+    // Settle a FIRST load before measuring so the debounce window below exercises the steady-state
+    // per-edit path (the mounted navigator's SEEDED reload) — not the one-off unseeded mount self-fetch.
+    ctl.refreshActiveSurfaces();
+    await flush();
+    vi.useFakeTimers();
     lsp.glossaryModel.mockClear();
 
     ctl.onDocEdited();
@@ -544,11 +548,12 @@ describe('createInspectorController — invalidation forces a refetch', () => {
 
     await vi.advanceTimersByTimeAsync(350);
     // refreshContextList (glossaryModel) + refreshActiveSurfaces (loadModel → ensureModelIndex →
-    // glossaryModel) both ran once after the single debounce window — not three times.
-    expect(lsp.glossaryModel.mock.calls.length).toBeGreaterThanOrEqual(1);
-    const settled = lsp.glossaryModel.mock.calls.length;
+    // glossaryModel) both ran once after the single debounce window — and both land on the SAME shared
+    // fetchGlossaryModel() in-flight memo (#1258, the #484 follow-up), so the whole debounce-settled
+    // edit costs exactly ONE glossaryModel request, not one per consumer.
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(350);
-    expect(lsp.glossaryModel.mock.calls.length).toBe(settled); // no further timer fired
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1); // no further timer fired
   });
 
   test('dispose() cancels the pending edit-debounce so the refresh never fires', async () => {
