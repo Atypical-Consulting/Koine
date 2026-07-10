@@ -370,6 +370,161 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in numeric
+    /// type (a non-optional <c>Int</c> branch against a <c>Decimal</c> sibling) must widen the <c>Int</c>
+    /// branch to <c>Decimal.fromInt(...)</c> so both ternary arms share a type — <c>tsc --strict</c>
+    /// rejects a bare <c>number</c> where a <c>Decimal</c> (a class) is expected. Before the fix this
+    /// emitted an unreconciled <c>(this.amount > 0 ? this.amount : this.amountDecimal)</c> that fails
+    /// TS2322/TS2322 under <c>--strict</c>.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_typechecks_under_strict()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    amountDecimal: Decimal\n" +
+            "    total: Decimal = if amount > 0 then amount else amountDecimal\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal.fromInt(");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("numeric-mismatched conditional branches should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in
+    /// optionality (a non-optional branch against an optional sibling of the SAME underlying type) is
+    /// already <c>--strict</c>-clean in TypeScript with no emitter change: an optional Koine type maps to
+    /// a union with <c>undefined</c> (<c>T | undefined</c>), and a bare <c>T</c> value is structurally
+    /// assignable wherever <c>T | undefined</c> is expected — unlike Rust's <c>Option&lt;T&gt;</c> or
+    /// Java's <c>Optional&lt;T&gt;</c>, which are distinct nominal types that need an explicit wrap. This
+    /// guards that TypeScript keeps taking the no-op path (no wrap emitted) for this shape.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_optionality_only_mismatch_typechecks_under_strict()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    total: Int? = if amount > 0 then amount else bonus\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("optionality-only-mismatched conditional branches should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344 (the issue's exact repro): a <c>ConditionalExpr</c> derived-member body whose branches
+    /// disagree in BOTH numeric type and optionality at once — a non-optional <c>Decimal</c> branch
+    /// against an optional <c>Int</c> sibling — must null-check-and-widen the optional <c>Int</c> branch
+    /// so both ternary arms are <c>Decimal | undefined</c>-compatible. Before the fix TypeScript rendered
+    /// a bare <c>(this.decimalAmount > 0 ? this.decimalAmount : this.intBonus)</c> — a <c>Decimal</c>
+    /// against a bare <c>number | undefined</c> — which <c>tsc --strict</c> rejects with exactly
+    /// <c>TS2322: Type 'number | undefined' is not assignable to type 'Decimal | undefined'</c>.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_typechecks_under_strict()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    decimalAmount: Decimal\n" +
+            "    intBonus: Int?\n" +
+            "    total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal.fromInt(");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("both-mismatched conditional branches should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: the <c>needsWiden</c> widen must apply against an OPTIONAL <c>Decimal?</c> sibling
+    /// too (not just a non-optional one) — a non-optional <c>Int</c> branch against a <c>Decimal?</c>
+    /// sibling must still widen to <c>Decimal.fromInt(...)</c>; no further wrap is needed since a bare
+    /// <c>Decimal</c> is already assignable where <c>Decimal | undefined</c> is expected. Mirrors the
+    /// Rust/Java <c>Cash</c> fixture's widen+wrap composition case (TypeScript just never needs the wrap
+    /// half — see <see cref="Conditional_branch_optionality_only_mismatch_typechecks_under_strict"/>).
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_against_optional_sibling_typechecks_under_strict()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Cash {\n" +
+            "    amount: Int\n" +
+            "    bonusAmount: Decimal?\n" +
+            "    total: Decimal? = if amount > 0 then amount else bonusAmount\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal.fromInt(");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("widen-against-optional-sibling conditional branches should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: a nested <c>ConditionalExpr</c> used as one branch of an outer conditional must itself
+    /// reconcile its own two arms BEFORE the outer branch is emitted, so the inner ternary's inferred
+    /// (joined, #975) type lines up with the outer sibling's type. Here the inner <c>if</c> widens
+    /// <c>amount</c> (<c>Int</c>) against <c>bonus</c> (<c>Decimal</c>) to <c>Decimal</c>, which then
+    /// already matches the outer <c>else</c> branch <c>fallback: Decimal</c> with no further outer-level
+    /// reconciliation needed.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_nested_conditional_typechecks_under_strict()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Decimal\n" +
+            "    fallback: Decimal\n" +
+            "    total: Decimal = if amount > 0 then (if amount > 10 then amount else bonus) else fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal.fromInt(");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("nested-conditional branches should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// The outcome contract <see cref="TestSupport.RequireOrSkip"/> relies on: a missing toolchain
     /// yields a <see cref="TestSupport.TypeScriptCheck.Skipped"/> result whose <c>ToolchainAvailable</c>
     /// and <c>Ok</c> are both <c>false</c> — so it can never be mistaken for a real pass.

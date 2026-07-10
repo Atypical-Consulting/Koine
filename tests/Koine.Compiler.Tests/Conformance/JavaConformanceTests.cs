@@ -333,6 +333,163 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in numeric
+    /// type (a non-optional <c>Int</c> branch against a <c>Decimal</c> sibling) must widen the <c>Int</c>
+    /// branch to <c>BigDecimal.valueOf(...)</c> so both ternary arms share a type — Java's <c>?:</c>
+    /// (unlike C#'s implicit numeric conversions) rejects a bare <c>long</c>/<c>BigDecimal</c> mismatch
+    /// with "incompatible types". Before the fix this emitted an unreconciled
+    /// <c>flag ? this.amount() : this.amountDecimal()</c> that does not compile.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_emits_compiling_java()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    amountDecimal: Decimal\n" +
+            "    total: Decimal = if amount > 0 then amount else amountDecimal\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("java.math.BigDecimal.valueOf(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in
+    /// optionality (a non-optional branch against an optional sibling of the SAME underlying type) must
+    /// render both ternary arms in the same Java type — the non-optional branch <c>Optional.of(...)</c>-
+    /// wrapped to match its optional sibling — or <c>javac</c> rejects the mismatch between a bare
+    /// <c>long</c> and <c>Optional&lt;Long&gt;</c>.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_optionality_mismatch_emits_compiling_java()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    total: Int? = if amount > 0 then amount else bonus\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("java.util.Optional.of(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344 (the issue's exact repro): a <c>ConditionalExpr</c> derived-member body whose branches
+    /// disagree in BOTH numeric type and optionality at once — a non-optional <c>Decimal</c> branch
+    /// against an optional <c>Int</c> sibling — must <c>Optional.of(...)</c>-wrap the <c>Decimal</c> branch
+    /// and <c>.map(java.math.BigDecimal::valueOf)</c> the optional <c>Int</c> branch so both ternary arms
+    /// are <c>Optional&lt;BigDecimal&gt;</c>. Before the fix Java rendered a bare
+    /// <c>cond ? this.decimalAmount() : this.intBonus()</c> — a <c>BigDecimal</c> against an
+    /// <c>Optional&lt;Long&gt;</c> — which <c>javac</c> rejects outright.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_emits_compiling_java()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    decimalAmount: Decimal\n" +
+            "    intBonus: Int?\n" +
+            "    total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("java.util.Optional.of(");
+        money.ShouldContain(".map(java.math.BigDecimal::valueOf)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: the <c>needsWiden</c>/<c>needsSomeWrap</c> COMPOSITION — a non-optional <c>Int</c>
+    /// branch against an optional <c>Decimal?</c> sibling must both widen AND wrap
+    /// (<c>Optional.of(BigDecimal.valueOf(...))</c>, widen inside so the value is a <c>BigDecimal</c>
+    /// before it becomes an <c>Optional&lt;BigDecimal&gt;</c>), distinct from either transformation alone.
+    /// Mirrors the Rust <c>Cash</c> fixture in
+    /// <c>RustConformanceTests.Conditional_branch_optionality_mismatch_emits_compiling_rust</c>.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_composes_with_optional_wrap_emits_compiling_java()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Cash {\n" +
+            "    amount: Int\n" +
+            "    bonusAmount: Decimal?\n" +
+            "    total: Decimal? = if amount > 0 then amount else bonusAmount\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var cash = result.Files.Single(f => f.RelativePath.EndsWith("Cash.java", StringComparison.Ordinal)).Contents;
+        cash.ShouldContain("java.util.Optional.of(java.math.BigDecimal.valueOf(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: a nested <c>ConditionalExpr</c> used as one branch of an outer conditional must itself
+    /// reconcile its own two arms BEFORE the outer branch is emitted, so the inner ternary's inferred
+    /// (joined, #975) type lines up with the outer sibling's type. Here the inner <c>if</c> widens
+    /// <c>amount</c> (<c>Int</c>) against <c>bonus</c> (<c>Decimal</c>) to <c>Decimal</c>, which then
+    /// already matches the outer <c>else</c> branch <c>fallback: Decimal</c> with no further outer-level
+    /// wrapping needed.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_nested_conditional_emits_compiling_java()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Decimal\n" +
+            "    fallback: Decimal\n" +
+            "    total: Decimal = if amount > 0 then (if amount > 10 then amount else bonus) else fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("java.math.BigDecimal.valueOf(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must

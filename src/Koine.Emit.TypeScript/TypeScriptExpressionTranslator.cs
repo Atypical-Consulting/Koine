@@ -226,9 +226,9 @@ internal sealed class TypeScriptExpressionTranslator
                 sb.Append('(');
                 Write(cond.Condition, sb);
                 sb.Append(" ? ");
-                Write(cond.Then, sb);
+                WriteReconciledBranch(cond.Then, cond.Else, sb);
                 sb.Append(" : ");
-                Write(cond.Else, sb);
+                WriteReconciledBranch(cond.Else, cond.Then, sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
@@ -272,6 +272,56 @@ internal sealed class TypeScriptExpressionTranslator
                 sb.Append("/* unsupported expression */ undefined");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Writes one <c>ConditionalExpr</c> branch, individually widened to <c>Decimal</c> when its own
+    /// inferred type is a non-optional <c>Int</c> while the SIBLING branch is <c>Decimal</c>
+    /// (<c>Decimal.fromInt(...)</c>), or null-check-widened when its own inferred type is an OPTIONAL
+    /// <c>Int</c> while the SIBLING branch is <c>Decimal</c> — a JS <c>number | undefined</c> has no
+    /// <c>Option.map</c>, so the widen is an inline arrow function that passes <c>undefined</c> through
+    /// and widens the present value (<see cref="TsRuntime"/>'s <c>Decimal</c> has no <c>number</c>
+    /// overload). <see cref="TypeResolver"/> already widens the conditional's own aggregate type to the
+    /// wider/optional-joined type of the two branches (#975), so an unreconciled pair emits two
+    /// disagreeing types in the same ternary — a real <c>tsc --strict</c> TS2322 (issue #1344; the
+    /// numeric-only case, the optional-numeric case, and both at once). Reconciling per-branch (rather
+    /// than a single wrap around the whole conditional) is required because the branches disagree with
+    /// EACH OTHER, not with an externally supplied target type. Fixed here in the emitter (not the
+    /// semantic validator): a widened or optional-joined conditional is a legitimate, cross-target-
+    /// sanctioned pattern (#975) — this is a TypeScript-only rendering gap, not a modeling error.
+    /// Unlike the Rust/Java siblings, TypeScript has NO analogue of <c>Some(...)</c>/<c>Optional.of(...)</c>
+    /// wrapping: a Koine optional type maps to a plain union with <c>undefined</c> (<c>T | undefined</c>),
+    /// and a bare, non-optional <c>T</c> value is already structurally assignable wherever
+    /// <c>T | undefined</c> is expected — verified under <c>tsc --strict</c> — so a non-optional branch
+    /// against an optional sibling needs no rendering change at all. <c>needsWiden</c> and
+    /// <c>needsOptionalWiden</c> are mutually exclusive (they key off the same branch's own optionality).
+    /// </summary>
+    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    {
+        TypeScope scope = EffectiveScope();
+        TypeRef? branchType = _resolver.Infer(branch, scope);
+        TypeRef? siblingType = _resolver.Infer(sibling, scope);
+        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
+        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
+
+        if (needsWiden)
+        {
+            sb.Append("Decimal.fromInt(");
+            Write(branch, sb);
+            sb.Append(')');
+            return;
+        }
+
+        if (needsOptionalWiden)
+        {
+            sb.Append("((__v: ").Append(_typeMapper.Map(branchType!))
+              .Append(") => (__v === undefined ? undefined : Decimal.fromInt(__v)))(");
+            Write(branch, sb);
+            sb.Append(')');
+            return;
+        }
+
+        Write(branch, sb);
     }
 
     private void WriteBinary(BinaryExpr bin, StringBuilder sb, bool parenthesize)
