@@ -67,7 +67,7 @@ public sealed partial class RustEmitter
 
         if (vo.IsQuantity)
         {
-            WriteQuantityOps(sb, name, stored);
+            WriteQuantityOps(sb, name, required, stored, typeMapper);
         }
 
         // A quantity's scalar Mul/Div (`base * 2`, `fee / 2`) has no unit to check — unlike its Add/Sub,
@@ -385,26 +385,49 @@ public sealed partial class RustEmitter
     /// </summary>
     private static bool IsNumericField(Member m) => m.Type.Name is "Int" or "Decimal";
 
-    /// <summary>A quantity's unit-checked <c>add</c>/<c>sub</c> (returning Result) and scalar <c>scale</c>.</summary>
-    private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> fields)
+    /// <summary>
+    /// A quantity's unit-checked <c>add</c>/<c>sub</c> (returning <c>Result</c>) and scalar <c>scale</c>.
+    /// All three rebuild their result through the validating constructor <c>Name::new(...)</c> rather
+    /// than a raw struct literal, so every declared <c>invariant</c> runs on the result too — the
+    /// quantity-inherent-method sibling of the demand-driven operator fix in
+    /// <see cref="WriteValidatingConstruction"/> (#1270, #1318). <c>add</c>/<c>sub</c> return
+    /// <c>Result</c> already, so the unit-mismatch guard and the invariant check compose: <c>new</c>'s
+    /// own <c>Result</c> becomes the method's return value directly. <c>scale</c> is infallible by
+    /// signature, so it <c>.expect(...)</c>s the constructor, mirroring #1270's infallible operator
+    /// bodies (and reusing <see cref="WriteValidatingConstruction"/> for the same message shape).
+    /// </summary>
+    private void WriteQuantityOps(
+        StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> stored,
+        RustTypeMapper typeMapper)
     {
-        Member? amount = fields.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
-        Member? unit = fields.FirstOrDefault(m => !ReferenceEquals(m, amount) && !m.Type.IsOptional);
-        if (amount is null || unit is null)
+        Member? amount = stored.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
+        Member? unit = stored.FirstOrDefault(m => !ReferenceEquals(m, amount) && !m.Type.IsOptional);
+        if (amount is null || unit is null
+            || !required.Any(m => ReferenceEquals(m, amount)) || !required.Any(m => ReferenceEquals(m, unit)))
         {
+            // A constant-default `amount`/`unit` is absent from `required`, so `new(...)` can't be
+            // handed the combined/scaled value for it — bail rather than emit a call `new` won't
+            // accept (#1318). Neither case appears in practice (a quantity's core amount/unit carrying
+            // a constant default), so this only guards against emitting broken Rust.
             return;
         }
 
         var amt = RustNaming.Field(amount.Name);
         var u = RustNaming.Field(unit.Name);
 
-        string Construct(string amtExpr) =>
-            name + " {\n" + string.Concat(fields.Select(m =>
+        // Builds the `Name::new(...)` argument list over `required`, in declared order, substituting
+        // `amtExpr` for the amount field. The `&self` receiver means any other non-`Copy` carried field
+        // must be cloned out of `self` (units are `Copy` enums, so the common case clones nothing).
+        IEnumerable<string> NewArgs(string amtExpr) =>
+            required.Select(m =>
             {
-                var f = RustNaming.Field(m.Name);
-                var v = ReferenceEquals(m, amount) ? amtExpr : "self." + f;
-                return Indent + Indent + Indent + f + ": " + v + ",\n";
-            })) + Indent + Indent + "}";
+                if (ReferenceEquals(m, amount))
+                {
+                    return amtExpr;
+                }
+                var f = "self." + RustNaming.Field(m.Name);
+                return typeMapper.IsCopy(m.Type) ? f : f + ".clone()";
+            });
 
         sb.Append('\n');
         sb.Append("impl ").Append(name).Append(" {\n");
@@ -417,13 +440,14 @@ public sealed partial class RustEmitter
             sb.Append(Indent).Append(Indent).Append(Indent)
               .Append("return Err(DomainError::UnitMismatch { type_name: \"").Append(name).Append("\" });\n");
             sb.Append(Indent).Append(Indent).Append("}\n");
-            sb.Append(Indent).Append(Indent).Append("Ok(").Append(Construct($"self.{amt} {op} other.{amt}")).Append(")\n");
+            sb.Append(Indent).Append(Indent).Append(name).Append("::new(")
+              .Append(string.Join(", ", NewArgs($"self.{amt} {op} other.{amt}"))).Append(")\n");
             sb.Append(Indent).Append("}\n\n");
         }
 
         sb.Append(Indent).Append("/// Scales the amount by a factor, carrying the unit.\n");
         sb.Append(Indent).Append("pub fn scale(&self, factor: Decimal) -> ").Append(name).Append(" {\n");
-        sb.Append(Indent).Append(Indent).Append(Construct($"self.{amt} * factor")).Append('\n');
+        WriteValidatingConstruction(sb, name, NewArgs($"self.{amt} * factor"), "scale");
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
     }
