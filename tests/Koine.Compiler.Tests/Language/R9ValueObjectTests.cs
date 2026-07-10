@@ -595,6 +595,199 @@ public class R9ValueObjectTests
     }
 
     // ======================================================================
+    // #1291 — the */÷ sibling gap #1284's own code-review pass found but left out of its own scope: a
+    // binary '*'/'/' where BOTH operands are value-like (two value objects, or two quantities) must
+    // also be rejected — mirroring #1266/#1284's +/- coverage. Unlike +/-, there is NO same-type
+    // exception: no emitter ever generates a value-object-vs-value-object '*'/'/' operator, even for
+    // the SAME declared type.
+    // ======================================================================
+
+    /// <summary>Shared fixture: two distinct plain value objects combined via <paramref name="op"/> on line 11 (this issue's own repro).</summary>
+    private static string MulDivMixSrc(string op = "*") =>
+        "context Shop {\n" +
+        "  value Money {\n" +
+        "    amount: Decimal\n" +
+        "  }\n" +
+        "  value Weight {\n" +
+        "    amount: Decimal\n" +
+        "  }\n" +
+        "  value Mix {\n" +
+        "    m: Money\n" +
+        "    w: Weight\n" +
+        $"    bad: Money = m {op} w\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void Value_object_multiplication_across_different_types_is_rejected()
+    {
+        var result = new KoineCompiler().Compile(MulDivMixSrc("*"), new CSharpEmitter());
+        result.Success.ShouldBeFalse();
+
+        var diag = result.Diagnostics.Single(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+        diag.Message.ShouldContain("Money");
+        diag.Message.ShouldContain("Weight");
+        diag.Line.ShouldBe(11); // the `bad: Money = m * w` line
+    }
+
+    [Fact]
+    public void Value_object_division_across_different_types_is_rejected()
+    {
+        Diagnose(MulDivMixSrc("/")).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    [Fact]
+    public void Value_object_multiplication_is_rejected_regardless_of_operand_order()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+              }
+              value Weight {
+                amount: Decimal
+              }
+              value Mix {
+                m: Money
+                w: Weight
+                bad: Money = w * m
+              }
+            }
+            """;
+        var diag = Diagnose(src).Single(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+        diag.Message.ShouldContain("Money");
+        diag.Message.ShouldContain("Weight");
+    }
+
+    [Fact]
+    public void Same_type_value_object_multiplication_is_also_rejected()
+    {
+        // Unlike CheckValueObjectTypeMismatch's same-declared-type early return, VO-vs-VO of the SAME
+        // type is ALSO rejected here: no emitter generates a `Money * Money` operator either — same-type
+        // '*'/'/' between two value objects has no valid lowering, unlike same-type '+'/'-'.
+        const string src = """
+            context C {
+              value Money {
+                amount: Decimal
+              }
+              value Wallet {
+                a: Money
+                b: Money
+                bad: Money = a * b
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    [Fact]
+    public void Same_type_value_object_division_is_also_rejected()
+    {
+        const string src = """
+            context C {
+              value Money {
+                amount: Decimal
+              }
+              value Wallet {
+                a: Money
+                b: Money
+                bad: Money = a / b
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    [Fact]
+    public void Value_object_scalar_multiply_and_divide_remain_valid_and_unaffected_by_the_mul_div_mismatch_check()
+    {
+        // `vo * scalar` / `vo / scalar` (KOI0215/KOI0216-adjacent, already-valid scaling forms) is
+        // unaffected by this new VO-vs-VO check — it only fires when BOTH operands are value-like.
+        const string src = """
+            context C {
+              value Money {
+                amount: Decimal
+              }
+              value Bag {
+                m: Money
+                doubled: Money = m * 2
+                halved:  Money = m / 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Quantity_multiplication_across_different_quantity_types_is_rejected()
+    {
+        // Reuses the #1266 MixSrc fixture (two differently-typed quantities) parametrized to '*'.
+        Diagnose(MixSrc("*")).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    [Fact]
+    public void Quantity_division_across_different_quantity_types_is_rejected()
+    {
+        Diagnose(MixSrc("/")).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    [Fact]
+    public void Same_type_quantity_multiplication_is_also_rejected()
+    {
+        // No same-type exception here either: `Weight * Weight` is as dimensionally meaningless as
+        // `Weight * Volume` and has no generated operator.
+        const string src = """
+            context C {
+              enum MassUnit { Gram, Kilogram }
+              quantity Weight {
+                amount: Decimal
+                unit:   MassUnit
+              }
+              value Box {
+                w: Weight
+                bad: Weight = w * w
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    [Fact]
+    public void Quantity_scalar_multiply_remains_valid_and_unaffected_by_the_mul_div_mismatch_check()
+    {
+        const string src = """
+            context C {
+              enum MassUnit { Grams, Kilograms }
+              quantity Weight {
+                amount: Decimal
+                unit:   MassUnit
+              }
+              value Bag {
+                w: Weight
+                doubled: Weight = w * 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    [Fact]
+    public void Value_object_mul_div_mismatch_is_still_caught_when_an_unrelated_context_reuses_the_same_type_name()
+    {
+        // Mirrors #1266's own review-found regression: the check must resolve both operands the SAME
+        // context-aware way (t.Qualifier ?? _resolver.Context + ModelIndex.TryGetDeclIn) so an unrelated
+        // context declaring its own same-named type can't silently misclassify an in-scope operand.
+        const string otherContext =
+            "context Other {\n" +
+            "  value Weight {\n" +
+            "    label: String\n" +
+            "  }\n" +
+            "}\n";
+
+        Diagnose(MulDivMixSrc("*") + otherContext).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+    }
+
+    // ======================================================================
     // #1290 — an entity-typed operand in binary +/- (the Non-goal #1284 flagged for follow-up)
     // ======================================================================
 
