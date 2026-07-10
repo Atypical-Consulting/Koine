@@ -1,4 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
+import { useLayoutEffect } from 'preact/hooks';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
@@ -18,6 +19,11 @@ import type { LspDiagnostic, Range } from '@/lsp/lsp';
 // stem) instead of only the active file's, so "Context: Billing" narrows Problems too. Each scoped row is
 // prefixed with its file and opens it on click. Absent `scope`, or the *All contexts* view, is the
 // active-file strip above, byte-for-byte — so the default (and every existing caller) is unchanged.
+//
+// The Problems tab count pill (#diag-count) mirrors THIS panel's count (#1203): the host passes the pill
+// element as `countEl` and the panel writes the SAME text + data-kind it renders in its own count span —
+// so the pill is scoped exactly when the strip is scoped, from one computation. The status-bar problem
+// counts (#sb-problems-errors/-warnings) deliberately stay active-file, in editorSession.
 
 /** Stable empty reference so the active-uri selector yields an `===`-equal value when a file is clean. */
 const EMPTY_DIAGS: LspDiagnostic[] = [];
@@ -53,6 +59,10 @@ export function DiagnosticsStripPanel(props: {
     /** Open a scoped row's file and jump to `range` (0-based LSP positions). */
     onOpen: (uri: string, range: Range) => void;
   };
+  /** Optional external count badge — the Problems tab pill (#diag-count) — mirrored from this panel's
+   *  own count (#1203): same text + data-kind, scoped exactly when the strip is scoped. The status-bar
+   *  problem counts are NOT this mirror; they stay active-file (editorSession). */
+  countEl?: HTMLElement;
 }) {
   // The active scope decides the mode; a primitive read, so it re-renders the strip on a scope change.
   const activeContext = useAppStore(props.store, (s) => s.activeContext);
@@ -66,15 +76,31 @@ export function DiagnosticsStripPanel(props: {
   // while scoping — otherwise the stable EMPTY_BY_URI keeps the active-file-only optimisation above.
   const byUri = useAppStore(props.store, (s) => (scoping ? s.diagnosticsByUri : EMPTY_BY_URI));
 
+  // Every diagnostic across the active context's `.koi` files, in first-seen uri order (the slice
+  // preserves it). Only populated while scoping — the unscoped strip never reads it.
+  const rows: { uri: string; d: LspDiagnostic }[] = [];
   if (scoping) {
-    const context = (activeContext as string).toLowerCase();
-    // Every diagnostic across the context's `.koi` files, in first-seen uri order (the slice preserves it).
-    const rows: { uri: string; d: LspDiagnostic }[] = [];
+    const context = activeContext.toLowerCase();
     for (const [uri, diags] of Object.entries(byUri)) {
       if (koiStemOfUri(uri) !== context) continue;
       for (const d of diags) rows.push({ uri, d });
     }
-    const { count, kind } = countText(rows.map((r) => r.d));
+  }
+  // ONE count computation feeds both the strip's own count span and the external #diag-count pill —
+  // scoped and unscoped agree by construction (#1203).
+  const { count, kind } = countText(scoping ? rows.map((r) => r.d) : activeDiags);
+
+  // Mirror the count into the Problems tab pill (#diag-count). A layout effect so a synchronous
+  // top-level render (editorSession's paintActive) lands the pill write before the caller returns,
+  // matching the old imperative renderStrip timing.
+  const { countEl } = props;
+  useLayoutEffect(() => {
+    if (!countEl) return;
+    countEl.textContent = count;
+    countEl.dataset.kind = kind;
+  }, [countEl, count, kind]);
+
+  if (scoping) {
     return (
       <div class="koi-diag-strip">
         <span data-role="diag-count" data-kind={kind}>
@@ -105,7 +131,6 @@ export function DiagnosticsStripPanel(props: {
     );
   }
 
-  const { count, kind } = countText(activeDiags);
   return (
     <div class="koi-diag-strip">
       <span data-role="diag-count" data-kind={kind}>

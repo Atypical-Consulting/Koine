@@ -83,6 +83,41 @@ describe('DiagnosticsStripPanel — scope to context (ADR 0009 / #1188)', () => 
     expect(onOpen).toHaveBeenCalledWith('file:///Billing.koi', err('billing boom').range);
   });
 
+  test('mirrors its count into an injected countEl (the Problems tab pill) — scoped with the strip (#1203)', () => {
+    const store = createAppStore();
+    // The OPEN file is Ordering, but the scope is Billing — the pill must mirror the SCOPED strip.
+    store.getState().setActive('file:///Ordering.koi');
+    store.getState().setActiveContext('Billing');
+    const countEl = document.createElement('span');
+    const { container } = render(
+      <DiagnosticsStripPanel
+        store={store}
+        activeUri={() => 'file:///Ordering.koi'}
+        onGoto={() => {}}
+        scope={scope()}
+        countEl={countEl}
+      />,
+    );
+
+    // Mounted clean: the pill mirrors the strip's empty state (same 'clean' sentinel + data-kind).
+    expect(countEl.textContent).toBe('clean');
+    expect(countEl.dataset.kind).toBe('clean');
+
+    act(() => {
+      store.getState().setDiagnostics('file:///Billing.koi', [err('billing boom')]);
+      store.getState().setDiagnostics('file:///Ordering.koi', [err('ordering boom')]);
+    });
+
+    // The pill shows Billing's (the scoped context's) count — NOT the open file's — and stays
+    // byte-identical to the strip's own count element: one source, two mirrors.
+    expect(countEl.textContent).toBe('1 error');
+    expect(countEl.dataset.kind).toBe('error');
+    expect(countEl.textContent).toBe(container.querySelector('[data-role="diag-count"]')!.textContent);
+    expect(countEl.dataset.kind).toBe(
+      container.querySelector('[data-role="diag-count"]')!.getAttribute('data-kind'),
+    );
+  });
+
   test('All contexts (with a scope provided) still shows only the ACTIVE file, byte-for-byte', () => {
     const store = createAppStore(); // activeContext defaults to ALL_CONTEXTS
     store.getState().setActive('file:///Ordering.koi');

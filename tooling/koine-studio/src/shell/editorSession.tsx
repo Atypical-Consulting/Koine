@@ -10,10 +10,11 @@
 // LSP publish path writes it via deps.store.setDiagnostics and the accessors below
 // (diagnosticsFor / showDiagnostics / dropDiagnostics / renameDiagnostics / clearDiagnostics) delegate
 // to that single source of truth. Other controllers — notably workspaceController — keep reading and
-// mutating through these accessors. The diagnostics STRIP (#diag-body rows + its count) is rendered by
-// the Preact DiagnosticsStripPanel mounted below, which subscribes to the slice; the editor gutter, the
-// status pill (#status), the header count badge (#diag-count), and the status-bar validity mirror
-// (#sb-validity) stay imperative here. The store itself is injected (issue #760), not reached as a
+// mutating through these accessors. The diagnostics STRIP (#diag-body rows + its count) AND the header
+// count badge (#diag-count, the Problems tab pill — it mirrors the strip's scope-aware count, #1203)
+// are rendered by the Preact DiagnosticsStripPanel mounted below, which subscribes to the slice; the
+// editor gutter, the status pill (#status), and the status-bar problem counts (deliberately
+// active-file) stay imperative here. The store itself is injected (issue #760), not reached as a
 // module singleton — see EditorSessionDeps.store.
 import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor/editor';
@@ -91,6 +92,8 @@ export interface EditorSessionDeps {
 
   // Diagnostics / status DOM refs (looked up by ide.ts via el(...) and passed in).
   status: HTMLElement;
+  /** The Problems tab count pill (#diag-count) — handed to the strip panel as its countEl, so it
+   *  mirrors the strip's scope-aware count (#1203) rather than the active file's. */
   diagCount: HTMLElement;
   diagBody: HTMLElement;
   /** Status-bar connection mirror (#sb-connection). */
@@ -318,26 +321,20 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     deps.sbConnection.dataset.state = state;
   }
 
-  // The strip ROWS + their count text now live in the DiagnosticsStripPanel (mounted into #diag-body
-  // below), which reads the diagnostics slice. This helper keeps the two imperative MIRRORS that ride
-  // alongside the strip: the bottom-panel header count badge (#diag-count) and the status-bar validity
-  // mirror (#sb-validity). Both summarise the active file's diagnostics with the exact strings used
-  // before the migration.
-  function renderStrip(diags: LspDiagnostic[]): void {
-    const { errors, warnings, kind, parts } = diagnosticsSummary(diags);
-    // Status-bar problems split (#923): the SAME active-file counts that feed #diag-count, shown as a
-    // colour-coded ✕ errors / ⚠ warnings pair. The `.has` flag flips ✕ from muted to the error hue when
-    // errors > 0; ⚠ is always amber (styled in _statusbar.scss). Warnings alone never redden ✕.
+  // The strip ROWS + their count text live in the DiagnosticsStripPanel (mounted into #diag-body
+  // below), which reads the diagnostics slice — and since #1203 the panel ALSO owns the bottom-panel
+  // header count badge (#diag-count, passed as its countEl), so the Problems tab pill mirrors the
+  // strip's scoped count instead of the active file's. This helper keeps the one imperative mirror
+  // that is DELIBERATELY active-file: the status-bar problem counts (#923) — they report the OPEN
+  // file's health, never the scoped set.
+  function renderStatusBarProblems(diags: LspDiagnostic[]): void {
+    const { errors, warnings } = diagnosticsSummary(diags);
+    // Status-bar problems split (#923): the active file's counts, shown as a colour-coded ✕ errors /
+    // ⚠ warnings pair. The `.has` flag flips ✕ from muted to the error hue when errors > 0; ⚠ is
+    // always amber (styled in _statusbar.scss). Warnings alone never redden ✕.
     deps.sbProblemsErrors.textContent = `✕ ${errors}`;
     deps.sbProblemsErrors.classList.toggle('has', errors > 0);
     deps.sbProblemsWarnings.textContent = `⚠ ${warnings}`;
-    if (kind === 'clean') {
-      deps.diagCount.textContent = 'clean';
-      deps.diagCount.dataset.kind = 'clean';
-    } else {
-      deps.diagCount.textContent = parts.join(' · ');
-      deps.diagCount.dataset.kind = kind;
-    }
   }
 
   // Mount (and re-render) the diagnostics strip as a Preact panel into #diag-body. The panel reads the
@@ -360,6 +357,9 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
           uriLabel: deps.uriLabel,
           onOpen: (uri, range) => deps.onNavigate({ uri, range }),
         }}
+        // The Problems tab pill mirrors the panel's own (scope-aware) count (#1203) — one computation,
+        // two mirrors. The status-bar counts stay active-file via renderStatusBarProblems.
+        countEl={deps.diagCount}
       />,
       deps.diagBody,
     );
@@ -379,14 +379,15 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // --- diagnostics cache + render --------------------------------------------
 
   /**
-   * Repaint the editor gutter + the strip panel + the strip mirrors (#diag-count badge, #sb-validity) +
-   * the status pill from a diagnostics set (the active file). The strip ROWS are owned by the panel; the
-   * synchronous re-render here makes its repaint immediate (the slice was just written).
+   * Repaint the editor gutter + the strip panel + the status-bar problem counts + the status pill from
+   * a diagnostics set (the active file). The strip ROWS and the #diag-count pill are owned by the panel
+   * (the pill mirrors the panel's scope-aware count, #1203); the synchronous re-render here makes its
+   * repaint immediate (the slice was just written).
    */
   function paintActive(diags: LspDiagnostic[]): void {
     setEditorDiagnostics(editor.view, diags);
     renderStripPanel();
-    renderStrip(diags);
+    renderStatusBarProblems(diags);
     updateStatus(diags);
   }
 

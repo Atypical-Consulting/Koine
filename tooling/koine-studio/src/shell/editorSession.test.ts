@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { createEditorSession, type EditorSessionDeps } from '@/shell/editorSession';
 import type { CodeAction, CompletionItem, HoverResult, Location, LspDiagnostic, Range } from '@/lsp/lsp';
 import { domById } from '@/shared/domById';
+import { ALL_CONTEXTS } from '@/model/activeContext';
 import { appStore, createAppStore } from '@/store/index';
 
 // --- DOM seed ----------------------------------------------------------------
@@ -231,6 +232,55 @@ describe('createEditorSession — diagnostics for a non-active uri', () => {
     // Both pushes (active and not) fire the tree-refresh hook.
     expect(onDiagnostics).toHaveBeenCalledTimes(2);
     expect(onDiagnostics).toHaveBeenNthCalledWith(1, OTHER, expect.any(Array));
+  });
+});
+
+describe('createEditorSession — the #diag-count pill obeys the active-context scope (#1203)', () => {
+  test('scoped to a context whose .koi is NOT the open file: the pill mirrors the scoped strip, the status bar stays active-file', () => {
+    const lsp = makeLsp();
+    const store = createAppStore();
+    // Scope to Customer while the OPEN file stays order.koi — the mismatch #1203 is about.
+    store.getState().setActiveContext('Customer');
+    newSession(makeDeps(lsp, { store }));
+
+    act(() => {
+      // The open file carries a warning; the scoped context's file carries an error.
+      lsp.firePublish(ACTIVE, [warn(2, 'meh')]);
+      lsp.firePublish(OTHER, [err(5, 'elsewhere')]);
+    });
+
+    // The strip is scoped (ADR 0009): it shows customer.koi's row, file-labelled.
+    const rows = domById('diag-body').querySelectorAll('button.diag');
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain('customer.koi');
+    expect(rows[0].textContent).toContain('elsewhere');
+    // The Problems tab pill MIRRORS that scoped strip — Customer's 1 error, not the open file's warning.
+    expect(domById('diag-count').textContent).toBe('1 error');
+    expect(domById('diag-count').dataset.kind).toBe('error');
+    // The status-bar problem counts stay ACTIVE-FILE by design: order.koi has 0 errors / 1 warning.
+    expect(domById('sb-problems-errors').textContent).toBe('✕ 0');
+    expect(domById('sb-problems-errors').classList.contains('has')).toBe(false);
+    expect(domById('sb-problems-warnings').textContent).toBe('⚠ 1');
+    // The status pill (action feedback) stays active-file too.
+    expect(domById('status').textContent).toBe('1 warning');
+  });
+
+  test('back to All contexts: the pill returns to the ACTIVE file, byte-for-byte', () => {
+    const lsp = makeLsp();
+    const store = createAppStore();
+    store.getState().setActiveContext('Customer');
+    newSession(makeDeps(lsp, { store }));
+
+    act(() => {
+      lsp.firePublish(ACTIVE, [warn(2, 'meh')]);
+      lsp.firePublish(OTHER, [err(5, 'elsewhere')]);
+    });
+    expect(domById('diag-count').textContent).toBe('1 error'); // scoped (proven above)
+
+    // Widening back to All contexts repaints the pill from the ACTIVE file's diagnostics.
+    act(() => store.getState().setActiveContext(ALL_CONTEXTS));
+    expect(domById('diag-count').textContent).toBe('1 warning');
+    expect(domById('diag-count').dataset.kind).toBe('warn');
   });
 });
 
