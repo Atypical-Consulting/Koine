@@ -77,8 +77,7 @@ public sealed partial class RustEmitter
         // still lowered a quantity's `* scalar`/`/ scalar` to the native operator with no backing impl —
         // a real `cargo check` E0369.
         IReadOnlySet<string>? scalars = needs?.MultiplyFactors;
-        if (scalars is { Count: > 0 }
-            && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
+        if (scalars is { Count: > 0 } && stored.Any(IsNumericField))
         {
             WriteScalarOp(sb, name, required, scalars, "*");
         }
@@ -86,8 +85,7 @@ public sealed partial class RustEmitter
         // demand-generated only where the model actually divides this value object by a scalar
         // (fee / 2), never emitted unconditionally.
         IReadOnlySet<string>? divScalars = needs?.DivideFactors;
-        if (divScalars is { Count: > 0 }
-            && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
+        if (divScalars is { Count: > 0 } && stored.Any(IsNumericField))
         {
             WriteScalarOp(sb, name, required, divScalars, "/");
         }
@@ -332,7 +330,7 @@ public sealed partial class RustEmitter
         var args = required.Select(m =>
         {
             var f = RustNaming.Field(m.Name);
-            return m.Type.Name is "Int" or "Decimal"
+            return IsNumericField(m)
                 ? m.Type.IsOptional
                     ? $"self.{f}.zip({other}.{f}).map(|(a, b)| a {op} b)"
                     : $"self.{f} {op} {other}.{f}"
@@ -378,7 +376,14 @@ public sealed partial class RustEmitter
     /// re-derives it and the operand is genuinely unread. Keeps the emitted crate warning-free.
     /// </summary>
     private static string OperandName(IReadOnlyList<Member> required, string name) =>
-        required.Any(m => m.Type.Name is "Int" or "Decimal") ? name : "_" + name;
+        required.Any(IsNumericField) ? name : "_" + name;
+
+    /// <summary>
+    /// True when a member is one of the two numeric field types an arithmetic operator scales or
+    /// combines (optional or not — <c>Int?</c> still names <c>Int</c>); every other field is carried
+    /// through unchanged.
+    /// </summary>
+    private static bool IsNumericField(Member m) => m.Type.Name is "Int" or "Decimal";
 
     /// <summary>A quantity's unit-checked <c>add</c>/<c>sub</c> (returning Result) and scalar <c>scale</c>.</summary>
     private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> fields)

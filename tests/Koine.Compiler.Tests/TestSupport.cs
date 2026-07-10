@@ -1259,8 +1259,15 @@ public static class TestSupport
             // An offline runner cannot fetch crates.io dependencies; that is an environment limitation,
             // not a defect in the emitted code, so report it as a skip (toolchain unusable) rather than
             // a failure — exactly how an absent toolchain is treated.
+            //
+            // Never skip on a run that actually got as far as EXECUTING a test binary, though: once
+            // `test result:` is printed the toolchain has demonstrably worked, so a non-zero exit is a
+            // real assertion failure in the emitted code. Without this guard a genuine `cargo test`
+            // regression whose output happens to mention a marker (cargo prints "Blocking waiting for
+            // file lock on package cache" whenever a sibling run holds the lock) would be silently
+            // downgraded to a skip — a false green.
             string output = run.StdOut + run.StdErr;
-            if (IsCargoFetchFailure(output))
+            if (!RanTestBinary(output) && IsCargoFetchFailure(output))
             {
                 return RustCheck.Skipped;
             }
@@ -1285,6 +1292,15 @@ public static class TestSupport
         "\n" +
         "[lib]\n" +
         "path = \"src/lib.rs\"\n";
+
+    /// <summary>
+    /// True when a <c>cargo test</c> run actually executed a test binary (libtest prints
+    /// <c>test result:</c> per binary). Such a run proves the toolchain is usable, so its exit code is
+    /// a real verdict on the emitted code and must never be reinterpreted as a toolchain skip.
+    /// Always false for <c>cargo check</c>, which runs no tests.
+    /// </summary>
+    private static bool RanTestBinary(string output) =>
+        output.Contains("test result:", StringComparison.Ordinal);
 
     /// <summary>
     /// True when a failed <c>cargo</c> run reflects an inability to reach the crate registry / fetch
