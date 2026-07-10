@@ -1128,4 +1128,109 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>The #1270 repro model: a <c>Money</c> with a non-negativity invariant, scaled and subtracted.</summary>
+    private const string InvariantArithmeticSrc =
+        "context Shop {\n" +
+        "  value Money {\n" +
+        "    amount: Decimal\n" +
+        "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+        "  }\n" +
+        "  value Order {\n" +
+        "    fee: Money\n" +
+        "    scaled: Money = fee * -20\n" +
+        "    halved: Money = fee / 2\n" +
+        "    diff: Money = fee - fee\n" +
+        "    doubled: Money = fee + fee\n" +
+        "  }\n" +
+        "}\n";
+
+    /// <summary>
+    /// Issue #1270: the demand-driven value-object operators must build their result through the
+    /// validating constructor, not a raw struct literal. <c>WriteScalarOp</c> emitted
+    /// <c>Money { amount: self.amount * Decimal::from(factor) }</c> and <c>WriteAdditiveOp</c> the
+    /// pairwise equivalent — bypassing <c>Money::new</c>, and with it every declared <c>invariant</c>.
+    /// A `Money` scaled by a negative factor silently became a negative `Money`. This is the always-on
+    /// (no-toolchain) shape guard: every operator body must route through <c>Money::new(...)</c> and no
+    /// operator may construct a bare <c>Money { ... }</c> literal.
+    /// </summary>
+    [Fact]
+    public void Demand_driven_value_object_arithmetic_routes_through_the_validating_constructor()
+    {
+        var result = new KoineCompiler().Compile(InvariantArithmeticSrc, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Money::new(self.amount * Decimal::from(factor))");
+        rust.ShouldContain("Money::new(self.amount / Decimal::from(divisor))");
+        rust.ShouldContain("Money::new(self.amount + other.amount)");
+        rust.ShouldContain("Money::new(self.amount - other.amount)");
+        rust.ShouldContain(".expect(\"Money: `*` violated an invariant\")");
+        rust.ShouldContain(".expect(\"Money: `-` violated an invariant\")");
+
+        // The raw struct literal each operator used to build is gone. It was the only place a bare
+        // `Money { ... }` literal was ever emitted at an operator body's indent level (the smart
+        // constructor spells its own construction `Ok(Self { ... })`, and `pub struct Money {` is the
+        // declaration, not a literal) — so its absence at that indent is the precise regression guard.
+        rust.ShouldNotContain("        Money {\n");
+    }
+
+    /// <summary>
+    /// Issue #1270, the behavioural half: compiling the operator is not enough — it must actually
+    /// REJECT an invariant-violating result at runtime. Emitted-shape assertions alone would have
+    /// passed against the old raw-struct-literal code just as happily, so this runs the emitted crate
+    /// under <c>cargo test</c>: a valid scaling still succeeds, while <c>Money * -20</c> and a negative
+    /// <c>Money - Money</c> now panic through <c>Money::new</c>'s invariant guard instead of silently
+    /// producing a negative amount.
+    /// </summary>
+    [Fact]
+    public void Demand_driven_value_object_arithmetic_enforces_invariants_at_runtime()
+    {
+        var result = new KoineCompiler().Compile(InvariantArithmeticSrc, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Money;
+
+            /// A scaling that respects the invariant still yields the scaled value.
+            #[test]
+            fn scalar_mul_preserves_a_valid_value() {
+                let fee = Money::new(Decimal::from(10)).expect("10 is a valid Money");
+                assert_eq!(fee * 2, Money::new(Decimal::from(20)).unwrap());
+            }
+
+            /// Scaling by a negative factor violates `amount >= 0` and must not silently succeed.
+            #[test]
+            #[should_panic(expected = "an amount cannot be negative")]
+            fn scalar_mul_enforces_the_invariant() {
+                let fee = Money::new(Decimal::from(10)).expect("10 is a valid Money");
+                let _ = fee * -20;
+            }
+
+            /// A subtraction that goes below zero violates the same invariant.
+            #[test]
+            #[should_panic(expected = "an amount cannot be negative")]
+            fn subtraction_enforces_the_invariant() {
+                let small = Money::new(Decimal::from(1)).expect("1 is a valid Money");
+                let big = Money::new(Decimal::from(5)).expect("5 is a valid Money");
+                let _ = small - big;
+            }
+
+            /// Addition of two valid amounts stays valid, and yields their sum.
+            #[test]
+            fn addition_preserves_a_valid_value() {
+                let a = Money::new(Decimal::from(3)).expect("3 is a valid Money");
+                let b = Money::new(Decimal::from(4)).expect("4 is a valid Money");
+                assert_eq!(a + b, Money::new(Decimal::from(7)).unwrap());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

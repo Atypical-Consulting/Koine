@@ -65,10 +65,8 @@ impl Money {
 impl std::ops::Mul<i64> for Money {
     type Output = Money;
     fn mul(self, factor: i64) -> Money {
-        Money {
-            amount: self.amount * Decimal::from(factor),
-            currency: self.currency,
-        }
+        Money::new(self.amount * Decimal::from(factor), self.currency)
+            .expect("Money: `*` violated an invariant")
     }
 }
 

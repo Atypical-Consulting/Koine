@@ -291,8 +291,9 @@ public class RustSnapshotTests
         var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
         shop.ShouldContain("impl std::ops::Mul<Decimal> for Tally");
         // The Int field must be coerced through Decimal, scaled, and truncated back — not passed through.
-        shop.ShouldContain("steps: crate::koine_runtime::dec_to_i64(Decimal::from(self.steps) * factor)");
-        shop.ShouldNotContain("steps: self.steps,");
+        // Each field's scaled value is now a positional argument to the validating constructor (#1270).
+        shop.ShouldContain("Tally::new(self.total * factor, crate::koine_runtime::dec_to_i64(Decimal::from(self.steps) * factor))");
+        shop.ShouldNotContain(", self.steps)");
 
         var check = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
@@ -328,8 +329,8 @@ public class RustSnapshotTests
 
         var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
         shop.ShouldContain("impl std::ops::Div<Decimal> for Tally");
-        shop.ShouldContain("steps: crate::koine_runtime::dec_to_i64(Decimal::from(self.steps) / divisor)");
-        shop.ShouldNotContain("steps: self.steps,");
+        shop.ShouldContain("Tally::new(self.total / divisor, crate::koine_runtime::dec_to_i64(Decimal::from(self.steps) / divisor))");
+        shop.ShouldNotContain(", self.steps)");
 
         var check = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
@@ -374,12 +375,12 @@ public class RustSnapshotTests
         var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
         shop.ShouldContain("impl std::ops::Mul<Decimal> for Tally");
         // Int? × Decimal: coerce-and-truncate inside the map; the operator never touches Option<i64>.
-        shop.ShouldContain("steps: self.steps.map(|v| crate::koine_runtime::dec_to_i64(Decimal::from(v) * factor))");
+        shop.ShouldContain("self.steps.map(|v| crate::koine_runtime::dec_to_i64(Decimal::from(v) * factor))");
         // Decimal? × Decimal: multiply inside the map.
-        shop.ShouldContain("ratio: self.ratio.map(|v| v * factor)");
+        shop.ShouldContain("self.ratio.map(|v| v * factor)");
         // The broken emission applied the operator (or Decimal::from) directly to the Option.
         shop.ShouldNotContain("Decimal::from(self.steps)");
-        shop.ShouldNotContain("ratio: self.ratio * factor");
+        shop.ShouldNotContain("self.ratio * factor");
 
         var check = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
@@ -401,11 +402,11 @@ public class RustSnapshotTests
         var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
         shop.ShouldContain("impl std::ops::Mul<i64> for Tally");
         // Int? × i64: plain multiply inside the map.
-        shop.ShouldContain("steps: self.steps.map(|v| v * factor)");
+        shop.ShouldContain("self.steps.map(|v| v * factor)");
         // Decimal? × i64: coerce the factor to Decimal inside the map.
-        shop.ShouldContain("ratio: self.ratio.map(|v| v * Decimal::from(factor))");
-        shop.ShouldNotContain("steps: self.steps * factor");
-        shop.ShouldNotContain("ratio: self.ratio * Decimal::from(factor)");
+        shop.ShouldContain("self.ratio.map(|v| v * Decimal::from(factor))");
+        shop.ShouldNotContain("self.steps * factor");
+        shop.ShouldNotContain("self.ratio * Decimal::from(factor)");
 
         var check = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
@@ -426,10 +427,10 @@ public class RustSnapshotTests
 
         var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
         shop.ShouldContain("impl std::ops::Div<Decimal> for Tally");
-        shop.ShouldContain("steps: self.steps.map(|v| crate::koine_runtime::dec_to_i64(Decimal::from(v) / divisor))");
-        shop.ShouldContain("ratio: self.ratio.map(|v| v / divisor)");
+        shop.ShouldContain("self.steps.map(|v| crate::koine_runtime::dec_to_i64(Decimal::from(v) / divisor))");
+        shop.ShouldContain("self.ratio.map(|v| v / divisor)");
         shop.ShouldNotContain("Decimal::from(self.steps)");
-        shop.ShouldNotContain("ratio: self.ratio / divisor");
+        shop.ShouldNotContain("self.ratio / divisor");
 
         var check = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
@@ -450,10 +451,10 @@ public class RustSnapshotTests
 
         var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
         shop.ShouldContain("impl std::ops::Div<i64> for Tally");
-        shop.ShouldContain("steps: self.steps.map(|v| v / divisor)");
-        shop.ShouldContain("ratio: self.ratio.map(|v| v / Decimal::from(divisor))");
-        shop.ShouldNotContain("steps: self.steps / divisor");
-        shop.ShouldNotContain("ratio: self.ratio / Decimal::from(divisor)");
+        shop.ShouldContain("self.steps.map(|v| v / divisor)");
+        shop.ShouldContain("self.ratio.map(|v| v / Decimal::from(divisor))");
+        shop.ShouldNotContain("self.steps / divisor");
+        shop.ShouldNotContain("self.ratio / Decimal::from(divisor)");
 
         var check = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
@@ -491,11 +492,18 @@ public class RustSnapshotTests
 
         var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
         shop.ShouldContain("impl std::ops::Add for Tally");
-        shop.ShouldContain("total: self.total + other.total");
-        shop.ShouldContain("steps: self.steps.zip(other.steps).map(|(a, b)| a + b)");
-        shop.ShouldContain("ratio: self.ratio.zip(other.ratio).map(|(a, b)| a + b)");
-        shop.ShouldNotContain("steps: self.steps + other.steps");
-        shop.ShouldNotContain("ratio: self.ratio + other.ratio");
+        shop.ShouldContain("self.total + other.total");
+        shop.ShouldContain("self.steps.zip(other.steps).map(|(a, b)| a + b)");
+        shop.ShouldContain("self.ratio.zip(other.ratio).map(|(a, b)| a + b)");
+        shop.ShouldNotContain("self.steps + other.steps");
+        shop.ShouldNotContain("self.ratio + other.ratio");
+
+        // `Add::Output` must stay `Tally`, not `Result<Tally, DomainError>`: `koine_sum`'s
+        // `T: std::ops::Add<Output = T>` bound — which this very fixture's `tallies.sum(...)` relies on —
+        // would no longer be satisfied. The #1270 invariant check therefore lives inside the infallible
+        // operator body, routed through the validating constructor (`cargo check` below proves the fold
+        // still resolves).
+        shop.ShouldContain("    type Output = Tally;\n    fn add(self, other: Tally) -> Tally {\n        Tally::new(");
 
         var check = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);

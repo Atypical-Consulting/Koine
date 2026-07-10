@@ -1194,7 +1194,27 @@ public static class TestSupport
     /// to provide a networked Rust toolchain and therefore actually run the check.
     /// </para>
     /// </summary>
-    public static RustCheck CompileRust(IEnumerable<EmittedFile> files)
+    public static RustCheck CompileRust(IEnumerable<EmittedFile> files) => RunCargo(files, "check");
+
+    /// <summary>
+    /// Compiles the emitted crate together with <paramref name="integrationTest"/> — a hand-written
+    /// Rust integration test placed at <c>tests/koine_conformance.rs</c> — and RUNS it with
+    /// <c>cargo test</c>. Where <see cref="CompileRust"/> proves the emitted code type-checks, this
+    /// proves it <em>behaves</em>: the only way to assert that a generated operator actually enforces a
+    /// declared <c>invariant</c> at runtime rather than silently producing an invalid value (#1270).
+    /// <para>
+    /// The emitted crate is named <c>koine-domain</c>, so the integration test imports from
+    /// <c>koine_domain::&lt;context_module&gt;</c>. Toolchain absence funnels through
+    /// <see cref="RustCheck.Skipped"/> exactly as it does for <see cref="CompileRust"/>.
+    /// </para>
+    /// </summary>
+    public static RustCheck RunRust(IEnumerable<EmittedFile> files, string integrationTest) =>
+        RunCargo(
+            files.Append(new EmittedFile("tests/koine_conformance.rs", integrationTest)),
+            "test");
+
+    /// <summary>Shared plumbing for <see cref="CompileRust"/> and <see cref="RunRust"/>.</summary>
+    private static RustCheck RunCargo(IEnumerable<EmittedFile> files, string subcommand)
     {
         var fileList = files.ToList();
         if (ResolveCargo() is not { } cargo)
@@ -1225,7 +1245,7 @@ public static class TestSupport
             string targetDir = Path.Combine(Path.GetTempPath(), "koine-cargo-target");
             var env = new Dictionary<string, string> { ["CARGO_TARGET_DIR"] = targetDir };
 
-            var args = new List<string>(cargo.Arguments) { "check", "--quiet" };
+            var args = new List<string>(cargo.Arguments) { subcommand, "--quiet" };
             if (RunProcess(cargo.FileName, args, root, env) is not { } run)
             {
                 return RustCheck.Skipped;
@@ -1239,8 +1259,15 @@ public static class TestSupport
             // An offline runner cannot fetch crates.io dependencies; that is an environment limitation,
             // not a defect in the emitted code, so report it as a skip (toolchain unusable) rather than
             // a failure — exactly how an absent toolchain is treated.
+            //
+            // Never skip on a run that actually got as far as EXECUTING a test binary, though: once
+            // `test result:` is printed the toolchain has demonstrably worked, so a non-zero exit is a
+            // real assertion failure in the emitted code. Without this guard a genuine `cargo test`
+            // regression whose output happens to mention a marker (cargo prints "Blocking waiting for
+            // file lock on package cache" whenever a sibling run holds the lock) would be silently
+            // downgraded to a skip — a false green.
             string output = run.StdOut + run.StdErr;
-            if (IsCargoFetchFailure(output))
+            if (!RanTestBinary(output) && IsCargoFetchFailure(output))
             {
                 return RustCheck.Skipped;
             }
@@ -1265,6 +1292,15 @@ public static class TestSupport
         "\n" +
         "[lib]\n" +
         "path = \"src/lib.rs\"\n";
+
+    /// <summary>
+    /// True when a <c>cargo test</c> run actually executed a test binary (libtest prints
+    /// <c>test result:</c> per binary). Such a run proves the toolchain is usable, so its exit code is
+    /// a real verdict on the emitted code and must never be reinterpreted as a toolchain skip.
+    /// Always false for <c>cargo check</c>, which runs no tests.
+    /// </summary>
+    private static bool RanTestBinary(string output) =>
+        output.Contains("test result:", StringComparison.Ordinal);
 
     /// <summary>
     /// True when a failed <c>cargo</c> run reflects an inability to reach the crate registry / fetch
