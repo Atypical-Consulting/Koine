@@ -1747,6 +1747,90 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1333: a <c>CoalesceExpr</c> (<c>a ?? b</c>) whose right operand is itself optional must
+    /// render <c>.or_else(...)</c>, not <c>.unwrap_or_else(...)</c> — the latter force-unwraps to a bare
+    /// <c>T</c> while the closure actually returns <c>Option&lt;T&gt;</c>, a real <c>cargo check</c>
+    /// <c>E0308</c>. Exercises all four presence combinations (present/absent on each side) at runtime,
+    /// not just that it compiles.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_both_operands_optional_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    fallback: Int?\n" +
+            "    total: Int? = bonus ?? fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1333 edge case: a nested <c>CoalesceExpr</c> as the right operand of an outer coalesce
+    /// (<c>bonus ?? (fallback ?? backup)</c>) must render <c>.or_else(...)</c> at both levels and compile
+    /// cleanly — the outer method-name choice depends on the inner coalesce's own inferred optionality.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_nested_optional_coalesce_right_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    fallback: Int?\n" +
+            "    backup: Int?\n" +
+            "    total: Int? = bonus ?? (fallback ?? backup)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1332: an optional-declared <c>String?</c> derived member whose bare body ends in
+    /// <c>.trim()</c> must own the result (<c>.to_string()</c>) before <c>WriteDerived</c>'s
+    /// <c>Some(...)</c>-wrap is applied, or the emitted crate does not compile — the accessor's
+    /// declared return type is <c>Option&lt;String&gt;</c>, but a borrowed <c>&amp;str</c> (from
+    /// <c>.clone()</c> on the <c>.trim()</c> result) fails to unify with it (<c>E0308</c>). <c>slug</c>
+    /// is the non-optional-declared sibling, along for the ride to pin its (unchanged, previously
+    /// conformance-untested) baseline compile alongside the fix.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_trim_body_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Person {\n" +
+            "    name: String\n" +
+            "    nickname: String? = name.trim\n" +
+            "    slug: String = name.trim\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1335: a <c>ConditionalExpr</c> derived-member body whose numeric-widen-needing branch is
     /// itself optional (<c>Int?</c>) must render as <c>.map(Decimal::from)</c> — both against a
     /// non-optional <c>Decimal</c> sibling and against an optional <c>Decimal?</c> sibling — or the
@@ -1767,6 +1851,112 @@ public class RustConformanceTests
             "    bonusDecimal: Decimal?\n" +
             "    bonusInt: Int?\n" +
             "    total: Decimal? = if amount > 0 then bonusDecimal else bonusInt\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1343: a bare optional <c>Int?</c> identifier compared via <c>==</c> to a non-optional
+    /// <c>Decimal</c> must map inside its Option (not a bare <c>Decimal::from(...)</c> prefix, invalid
+    /// for an <c>Option&lt;i64&gt;</c> operand) — and the opposite non-optional <c>Decimal</c> operand
+    /// must itself become <c>Some(...)</c>-wrapped so both sides of <c>==</c> share the same Rust type —
+    /// or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Optional_int_identifier_compared_via_equality_to_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    a: Int?\n" +
+            "    c: Decimal\n" +
+            "    isEq: Bool = a == c\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1343: a compound (conditional) operand that itself yields an optional <c>Int?</c> (per
+    /// #975's branch-optionality join) compared via <c>==</c> to a non-optional <c>Decimal</c> must map
+    /// the whole rendered <c>if</c>/<c>else</c> inside its Option, with the opposite operand
+    /// <c>Some(...)</c>-wrapped to match — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Compound_optional_int_conditional_compared_via_equality_to_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    flag: Bool\n" +
+            "    x: Int\n" +
+            "    y: Int?\n" +
+            "    c: Decimal\n" +
+            "    isEq: Bool = (if flag then x else y) == c\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1343 edge case: when the opposite operand is ITSELF optional (<c>Decimal?</c>), the
+    /// coerced operand still needs <c>.map(Decimal::from)</c> with no <c>Some(...)</c> wrap on either
+    /// side — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Optional_int_compared_to_optional_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    a: Int?\n" +
+            "    d: Decimal?\n" +
+            "    isEq: Bool = a == d\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1343 code-review finding: the mirror of the bare-identifier case above — a non-optional
+    /// <c>Int</c> operand compared via <c>==</c> to an ALREADY-optional <c>Decimal?</c> operand. The Int
+    /// side still widens bare (it isn't itself optional), but the widened result must become
+    /// <c>Some(...)</c>-wrapped to match its optional sibling — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Non_optional_int_compared_to_optional_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    c: Decimal?\n" +
+            "    a: Int\n" +
+            "    isEq: Bool = c == a\n" +
             "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new RustEmitter());

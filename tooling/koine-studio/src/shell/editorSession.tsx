@@ -7,19 +7,20 @@
 // agnostic of buffers, the file tree, and the host platform.
 //
 // The per-uri diagnostics cache now lives in the app store's `diagnostics` slice (issue #193): the
-// LSP publish path writes it via appStore.setDiagnostics and the accessors below
+// LSP publish path writes it via deps.store.setDiagnostics and the accessors below
 // (diagnosticsFor / showDiagnostics / dropDiagnostics / renameDiagnostics / clearDiagnostics) delegate
 // to that single source of truth. Other controllers — notably workspaceController — keep reading and
 // mutating through these accessors. The diagnostics STRIP (#diag-body rows + its count) is rendered by
 // the Preact DiagnosticsStripPanel mounted below, which subscribes to the slice; the editor gutter, the
 // status pill (#status), the header count badge (#diag-count), and the status-bar validity mirror
-// (#sb-validity) stay imperative here.
+// (#sb-validity) stay imperative here. The store itself is injected (issue #760), not reached as a
+// module singleton — see EditorSessionDeps.store.
 import { render } from 'preact';
 import { createKoineEditor, setEditorDiagnostics, type KoineEditor } from '@/editor/editor';
 import { mountSymbolRow } from '@/editor/symbolRow';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { diagnosticsInRange } from '@/shell/ideUtils';
-import { appStore } from '@/store/index';
+import type { AppStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
 import type { ChangeSet, Text } from '@codemirror/state';
@@ -81,6 +82,12 @@ export interface EditorSessionDeps {
   minimap: boolean;
   /** The LSP client (request methods + diagnostics/exit subscriptions). */
   lsp: EditorSessionLsp;
+  /**
+   * The app state store, injected rather than reached as a module singleton (issue #760) — so the
+   * session owns no global state and tests can drive it against a fresh `createAppStore()`. Production
+   * passes the app-wide `appStore` (ide.tsx).
+   */
+  store: AppStore;
 
   // Diagnostics / status DOM refs (looked up by ide.ts via el(...) and passed in).
   status: HTMLElement;
@@ -200,7 +207,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   // and the tree can badge files with errors. Reads/writes go through the slice via these helpers so the
   // strip panel (which subscribes to the slice) stays in sync; the accessors exposed on the session
   // delegate here. See the module header.
-  const diagFor = (uri: string): LspDiagnostic[] => appStore.getState().diagnosticsFor(uri);
+  const diagFor = (uri: string): LspDiagnostic[] => deps.store.getState().diagnosticsFor(uri);
 
   // The registered downstream onChange callback (ide.ts: welcome.hide / buffer+dirty / onDocEdited /
   // renderTree). The session's own onChange does the editor↔LSP sync, then invokes this with the
@@ -233,7 +240,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     // deepest node containing the caret (source → tree navigation) — the status-bar write is unchanged.
     onCursor: (line, col) => {
       deps.sbCursor.textContent = `Ln ${line}, Col ${col}`;
-      appStore.getState().setCursor(line, col);
+      deps.store.getState().setCursor(line, col);
     },
     onHover: hover,
     onCompletion: completion,
@@ -344,7 +351,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   function renderStripPanel(): void {
     render(
       <DiagnosticsStripPanel
-        store={appStore}
+        store={deps.store}
         activeUri={deps.activeUri}
         onGoto={(line, col) => editor.goto(line, col)}
         // Scope-to-context (#1188 / ADR 0009): when a bounded context is active, the strip shows that
@@ -385,7 +392,7 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
 
   function renderDiagnostics(uri: string, diags: LspDiagnostic[]): void {
     // Write the slice first — the strip panel subscribes to it and re-renders the rows + its count.
-    appStore.getState().setDiagnostics(uri, diags);
+    deps.store.getState().setDiagnostics(uri, diags);
     if (uri === deps.activeUri()) paintActive(diags);
   }
 
@@ -398,15 +405,15 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   }
 
   function dropDiagnostics(uri: string): void {
-    appStore.getState().dropDiagnostics(uri);
+    deps.store.getState().dropDiagnostics(uri);
   }
 
   function renameDiagnostics(oldUri: string, newUri: string): void {
-    appStore.getState().renameDiagnostics(oldUri, newUri);
+    deps.store.getState().renameDiagnostics(oldUri, newUri);
   }
 
   function clearDiagnostics(): void {
-    appStore.getState().clearDiagnostics();
+    deps.store.getState().clearDiagnostics();
   }
 
   // --- LSP subscriptions -----------------------------------------------------
