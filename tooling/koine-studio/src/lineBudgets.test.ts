@@ -169,7 +169,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // surface loaders (Generated preview, diagrams, glossary, left-rail model, ADR/Notes docs, Source
   // Control, Events/Relationships, Compatibility check) consolidated onto the docViews slice and
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
-  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 894 },
+  // Raised 894 → 897: #1352 (shared lifecycleGuard primitive) migrated this file's hand-rolled
+  // disposed/seq state onto createLifecycleGuard(), landing on `main` concurrently with the generated
+  // file-tree feature's own growth of this file (both merged in the same PR that hit this ceiling
+  // first). Measured end-state (897).
+  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 897 },
   // Lowered 736 → 731: the #985 whole-branch code-review's dead-code finding — `ensureTerminal`/
   // `ensureReview` were declared on `CenterDeckControllerDeps` and passed in by the facade, but never
   // actually called (the real Terminal/Review dispatch lives entirely in the injected
