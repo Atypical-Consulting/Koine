@@ -2225,7 +2225,21 @@ public sealed class KoineLanguageService
     /// <para>The identity references are further scoped to the root's OWN bounded context (#565): two
     /// UNRELATED contexts may each declare a type literally named <c>&lt;oldName&gt;Id</c>, and
     /// <see cref="WorkspaceIndex.FindReferences"/> matches by bare token text, so without this scoping the
-    /// co-rename would also rewrite the other context's same-named, unrelated identity type.</para>
+    /// co-rename would also rewrite the other context's same-named, unrelated identity type. The scope
+    /// check is by each occurrence's ACTUAL enclosing <c>context { }</c> block — resolved by token
+    /// position via <see cref="TokenLocator.EnclosingContextName"/>, the same mechanism
+    /// <see cref="PrepareTypeHierarchy"/> uses to disambiguate a same-named declaration across contexts
+    /// (#389) — not by whether the occurrence's FILE happens to also register the id name: the grammar
+    /// allows more than one <c>context { }</c> per file, so a per-file namespace-presence check cannot
+    /// tell which of two same-file context blocks a specific occurrence belongs to (a code-review finding
+    /// on #565). A reference reached only via an <c>import</c> of another context's <c>&lt;Root&gt;Id</c>
+    /// is intentionally EXCLUDED even though the modeller wrote the import: the <c>*Id</c> convention is
+    /// always emitted locally, independently, by whichever context references it (see
+    /// <see cref="ModelIndex.ResolveReference"/>'s <c>*Id convention: emitted locally, no import</c> rule,
+    /// and <see cref="ResolveTargetContext"/>'s same-context-first resolution) — an importing context's
+    /// own <c>&lt;Root&gt;Id</c> reference names ITS OWN independently-generated identity type, never the
+    /// imported context's, so co-renaming it would rewrite an unrelated local declaration based on
+    /// coincidental same-text, exactly the bug this scoping fixes.</para>
     /// </summary>
     private static IReadOnlyList<RenameEdit>? IdentityCoRenameEdits(
         KoineCompilation compilation, string activeUri, string oldName, string newName, Symbol? resolvedTarget)
@@ -2291,23 +2305,34 @@ public sealed class KoineLanguageService
         // file the rename was invoked from — its declaration and every cross-file `: <Root>Id` use rename.
         IReadOnlyList<Reference> idRefs = compilation.WorkspaceIndex.FindReferences(activeUri, oldIdName, offset: null, enclosingType: null);
 
-        // #565: scope those references to the root's OWN owning context (the context the per-file model
-        // above actually found it declared in) — `FindReferences` is a workspace-wide TEXT match, so an
-        // unrelated context that happens to declare its own same-named `<oldName>Id` would otherwise be
-        // swept in too. A reference is kept only when ITS OWN file, considered as that same context, also
-        // recognizes `oldIdName` (its declaration or a same-context `: <Root>Id` use) — `NamespaceOfTypeIn`
-        // is populated for both cases (ModelIndex step 3c), so this keeps every same-context, cross-file
-        // occurrence (#550) while dropping a different context's coincidentally same-named identity type.
+        // #565: scope those references to the root's OWN owning context — by the ACTUAL context block
+        // each occurrence's token lexically sits within (resolved by position, below), not by whether the
+        // occurrence's FILE happens to also register the id name. `FindReferences` is a workspace-wide
+        // TEXT match, so an unrelated context's coincidentally same-named `<oldName>Id` — even one
+        // declared in the SAME file as the root's own context — would otherwise be swept in too.
         if (rootModel.Index.DeclaringContextsOf(oldName).FirstOrDefault() is { } ownerContext)
         {
             idRefs = idRefs
-                .Where(r => compilation.SemanticModelFor(r.Uri) is { } refModel
-                    && refModel.Index.NamespaceOfTypeIn(ownerContext, oldIdName) is not null)
+                .Where(r => string.Equals(EnclosingContextOf(compilation, r), ownerContext, StringComparison.Ordinal))
                 .ToList();
         }
 
         return idRefs.Count == 0 ? null : idRefs.Select(r => new RenameEdit(r, newIdName)).ToList();
     }
+
+    /// <summary>
+    /// The bounded context name the token at <paramref name="r"/> lexically sits within — a pure,
+    /// position-based lexical scan (never depends on a successful parse), reusing the exact
+    /// <see cref="TokenLocator.EnclosingContextName"/> resolution <see cref="PrepareTypeHierarchy"/>
+    /// already established for disambiguating a same-named declaration across bounded contexts (#389).
+    /// Distinguishes two <c>context { }</c> blocks in the SAME file by the occurrence's actual position,
+    /// unlike a per-file namespace-presence check (which cannot tell them apart). Null when the
+    /// occurrence's file is unknown or it lexically sits outside any context block.
+    /// </summary>
+    private static string? EnclosingContextOf(KoineCompilation compilation, Reference r) =>
+        compilation.Documents.TryGetValue(r.Uri, out var source)
+            ? TokenLocator.Locate(source, r.Line - 1, r.StartColumn, navigation: true).EnclosingContextName
+            : null;
 
     /// <summary>
     /// A preview-shaped rename: the same cross-file edits as <see cref="RenameAt(IReadOnlyDictionary{string,string},string,int,int,string)"/>,

@@ -855,6 +855,89 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void RenameEdits_does_not_corename_a_DIFFERENT_same_file_contexts_same_named_id_type()
+    {
+        // Code-review finding #1 on #565: the grammar allows more than one `context { }` block per
+        // FILE (`program: programMember*`). If context Ordering's root Order (`identified by OrderId`)
+        // and an UNRELATED context Billing (which separately declares its OWN `value OrderId { ... }`)
+        // are declared in the very SAME file, a per-file "does this file's own context set register the
+        // name" check cannot tell which of the two context blocks a specific OrderId occurrence belongs
+        // to — it would see the file recognizes "OrderId" under context Ordering and sweep in EVERY
+        // occurrence in the file, including Billing's. The co-rename must be scoped by the ACTUAL
+        // context block each occurrence's token lexically sits within, not by file-level presence.
+        var src =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n" +
+            "context Billing {\n" +
+            "  value OrderId { code: String }\n" +
+            "}\n";
+        var entityLine = src.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Ordering's own OrderId (inside the Ordering block) co-renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
+        // … but Billing's unrelated, same-named OrderId — declared in the SAME file, a DIFFERENT
+        // context block — must NOT be touched: no edit should target Billing's `value OrderId` line.
+        var billingLine = src.Split('\n').ToList().FindIndex(l => l.Contains("value OrderId"));
+        edits.ShouldNotContain(e => e.Occurrence.Line - 1 == billingLine);
+    }
+
+    [Fact]
+    public void RenameEdits_does_not_corename_a_different_contexts_id_reached_only_via_import()
+    {
+        // Code-review finding #2 on #565: does an EXPLICIT `import Ordering.{ OrderId }` in an unrelated
+        // context make that context's own `OrderId` reference "the same identity" as Ordering's root's,
+        // so it should co-rename too? No: Koine's `<Root>Id` convention is emitted LOCALLY, independently,
+        // by whichever context references it — verified by the generated C# (each context gets its own
+        // `<Context>/ValueObjects/OrderId.cs`, regardless of any import) and by ModelIndex.ResolveReference's
+        // own "*Id convention: emitted locally, no import" rule, plus the #389 type-hierarchy precedent
+        // (ResolveTargetContext resolves an id-convention name to the REFERENCING context first, before
+        // ever consulting imports). So Shipping's `order: OrderId` field, even with the import, names
+        // Shipping's OWN independently-generated OrderId — co-renaming it would rewrite an unrelated
+        // context's own local identity type based on coincidental same-text, exactly the #565 bug in a
+        // different guise. This test locks in the CORRECT (exclusion) behavior.
+        var ordering =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var shipping =
+            "context Shipping {\n" +
+            "  import Ordering.{ OrderId }\n" +
+            "  value Parcel { order: OrderId }\n" +
+            "}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///shipping.koi"] = shipping,
+        };
+        var entityLine = ordering.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Ordering's own OrderId co-renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        // … but Shipping's own (independently-emitted) OrderId reference is left completely untouched,
+        // even though it's reached via an explicit import.
+        edits.ShouldNotContain(e => e.Occurrence.Uri == "file:///shipping.koi");
+    }
+
+    [Fact]
     public void RenameEdits_does_not_corename_a_non_conventional_identity()
     {
         // The root's identity is the primitive Guid, not <Root>Id — so there is nothing to co-rename and,
