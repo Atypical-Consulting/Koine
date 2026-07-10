@@ -2,7 +2,7 @@
 
 /* --- split body --- */
 /* Six tracks (3-column shell + tool-window stripe): one left sidebar (--koi-leftrail-w, holds Files +
-   Explorer + Overview + Documentation), its 6px resizer, the center (1fr), the center/inspector 6px
+   Explorer + Overview + Documentation), its 1px resizer, the center (1fr), the center/inspector 1px
    resizer, the right inspector (--koi-inspector-w), and the always-on right-edge tool-window stripe
    (--koi-rstrip-w, #500). */
 #split {
@@ -14,8 +14,8 @@
   flex: 1 1 auto;
   display: grid;
   grid-template-columns:
-    var(--koi-leftrail-w, 280px) 6px
-    1fr 6px var(--koi-inspector-w, 320px) var(--koi-rstrip-w, 2.25rem);
+    var(--koi-leftrail-w, 280px) 1px
+    1fr 1px var(--koi-inspector-w, 320px) var(--koi-rstrip-w, 2.25rem);
   min-height: 0;
 }
 
@@ -86,12 +86,12 @@
    zeros its mirrored leading tracks instead, so the reclaim works whichever edge the inspector docks to. */
 #split.right-collapsed {
   grid-template-columns:
-    var(--koi-leftrail-w, 280px) 6px
+    var(--koi-leftrail-w, 280px) 1px
     1fr 0 0 var(--koi-rstrip-w, 2.25rem);
 }
 #split[data-siderail-side='left'].right-collapsed {
   grid-template-columns:
-    0 0 1fr 6px var(--koi-leftrail-w, 280px) var(--koi-rstrip-w, 2.25rem);
+    0 0 1fr 1px var(--koi-leftrail-w, 280px) var(--koi-rstrip-w, 2.25rem);
 }
 #split.right-collapsed #right,
 #split.right-collapsed #split-resizer {
@@ -106,7 +106,7 @@
 #split.left-collapsed {
   grid-template-columns:
     var(--koi-rstrip-w, 2.25rem) 0
-    1fr 6px var(--koi-inspector-w, 320px) var(--koi-rstrip-w, 2.25rem);
+    1fr 1px var(--koi-inspector-w, 320px) var(--koi-rstrip-w, 2.25rem);
 }
 #split.left-collapsed.right-collapsed {
   grid-template-columns:
@@ -126,8 +126,8 @@
    see ide.tsx; the grid itself reflows immediately.) */
 #split[data-siderail-side='left'] {
   grid-template-columns:
-    var(--koi-inspector-w, 320px) 6px
-    1fr 6px var(--koi-leftrail-w, 280px) var(--koi-rstrip-w, 2.25rem);
+    var(--koi-inspector-w, 320px) 1px
+    1fr 1px var(--koi-leftrail-w, 280px) var(--koi-rstrip-w, 2.25rem);
 }
 #split[data-siderail-side='left'] #right {
   grid-column: 1;
@@ -151,7 +151,7 @@
    tracks under siderail-left); the combined template, higher-specificity, wins when both are set. */
 #split[data-siderail-side='left'].left-collapsed {
   grid-template-columns:
-    var(--koi-inspector-w, 320px) 6px
+    var(--koi-inspector-w, 320px) 1px
     1fr 0 var(--koi-rstrip-w, 2.25rem) var(--koi-rstrip-w, 2.25rem);
 }
 #split[data-siderail-side='left'].left-collapsed.right-collapsed {
@@ -166,9 +166,9 @@
   border-right: 1px solid var(--koi-line);
 }
 
-/* --- split resizer handle (the 6px grid track in #split) --- */
+/* --- split resizer handle (the 1px grid track in #split) --- */
 .koi-resizer {
-  width: 6px;
+  width: 1px;
   cursor: col-resize;
   background: var(--koi-line);
   border: none;
@@ -181,7 +181,7 @@
 /* Horizontal variant: a full-width handle that resizes the panel above/below it. */
 .koi-resizer-y {
   width: 100%;
-  height: 6px;
+  height: 1px;
   cursor: row-resize;
   align-self: auto;
 }
