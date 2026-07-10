@@ -25,6 +25,10 @@ public class DemoBuildTests
     private const string NoTypeScriptToolchainNotice =
         "No tsc/node toolchain (set KOINE_TSC/KOINE_NODE) -- CI runs this for real.";
 
+    /// <summary>Notice shown when no Python toolchain (mypy + a Python interpreter) is available locally.</summary>
+    private const string NoPythonToolchainNotice =
+        "No mypy/python toolchain (set KOINE_MYPY/KOINE_PYTHON) -- CI runs this for real.";
+
     /// <summary>
     /// R#1073 acceptance for the TypeScript target: <c>demo/typescript/run.sh</c> regenerates
     /// <c>templates/starters/ordering</c> to TypeScript, type-checks the emitted sources plus the
@@ -35,6 +39,17 @@ public class DemoBuildTests
     [Fact]
     public void TypeScript_demo_builds_runs_and_asserts() =>
         RunDemo("typescript", TypeScriptToolchainAvailable, NoTypeScriptToolchainNotice);
+
+    /// <summary>
+    /// R#1073 acceptance for the Python target: <c>demo/python/run.sh</c> regenerates
+    /// <c>templates/starters/ordering</c> to Python, type-checks the generated package plus the
+    /// hand-written driver under <c>mypy --strict</c>, and runs the driver under Python — which asserts
+    /// the outcomes itself and exits non-zero on any failed assertion. Skipped (not failed) only when no
+    /// mypy/python toolchain is present locally.
+    /// </summary>
+    [Fact]
+    public void Python_demo_builds_runs_and_asserts() =>
+        RunDemo("python", PythonToolchainAvailable, NoPythonToolchainNotice);
 
     /// <summary>
     /// Shells <c>demo/&lt;demoDir&gt;/run.sh</c> from the repo root, ALWAYS (regardless of toolchain
@@ -85,6 +100,63 @@ public class DemoBuildTests
             return true;
         }
 
+        return FindOnPath(command) is not null;
+    }
+
+    /// <summary>
+    /// Whether a Python toolchain (mypy + a Python 3.11+ interpreter) is available, probed the same way
+    /// <see cref="Conformance.PythonConformanceTests"/> does through <see cref="TestSupport"/>'s internal
+    /// resolvers (<c>ResolvePython</c> / <c>ResolveMypy</c>): the interpreter resolves via an explicit
+    /// <c>KOINE_PYTHON</c> override, else the first of <c>python3.13</c>/<c>python3.12</c>/
+    /// <c>python3.11</c>/<c>python3</c>/<c>python</c> found on <c>PATH</c>; mypy resolves via an explicit
+    /// <c>KOINE_MYPY</c> override, else a direct <c>mypy</c> on <c>PATH</c>, else actually launching
+    /// <c>&lt;python&gt; -m mypy --version</c> against the resolved interpreter (mypy may be installed
+    /// only into that interpreter's site-packages, not exposed as its own <c>PATH</c> entry).
+    /// </summary>
+    private static bool PythonToolchainAvailable() =>
+        ResolvePythonBinary() is { } python && MypyResolves(python);
+
+    private static string? ResolvePythonBinary()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_PYTHON") is { Length: > 0 } overridePython)
+        {
+            return overridePython;
+        }
+
+        foreach (string name in new[] { "python3.13", "python3.12", "python3.11", "python3", "python" })
+        {
+            if (FindOnPath(name) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool MypyResolves(string python)
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_MYPY") is { Length: > 0 })
+        {
+            return true;
+        }
+
+        if (FindOnPath("mypy") is not null)
+        {
+            return true;
+        }
+
+        return TestSupport.RunProcess(python, new[] { "-m", "mypy", "--version" }) is { ExitCode: 0 };
+    }
+
+    /// <summary>
+    /// The first existing path for <paramref name="command"/> on <c>PATH</c> (trying the Windows
+    /// <c>.cmd</c>/<c>.exe</c> suffixes too), or <c>null</c> when none exists. A tiny, dependency-free
+    /// mirror of <c>TestSupport</c>'s private <c>OnPath</c> — shared by every per-language probe in this
+    /// file, present and future.
+    /// </summary>
+    private static string? FindOnPath(string command)
+    {
         string[] names = OperatingSystem.IsWindows()
             ? [command + ".cmd", command + ".exe", command]
             : [command];
@@ -93,6 +165,6 @@ public class DemoBuildTests
 
         return dirs
             .SelectMany(dir => names.Select(name => Path.Combine(dir, name)))
-            .Any(File.Exists);
+            .FirstOrDefault(File.Exists);
     }
 }

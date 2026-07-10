@@ -1,0 +1,11 @@
+# Regenerated on every run.sh — never commit the generated tree.
+/generated/
+
+# mypy's incremental type-check cache, written wherever it runs (here and inside generated/).
+.mypy_cache/
+**/.mypy_cache/
+
+# Python bytecode cache, if the driver is ever run without -B / PYTHONDONTWRITEBYTECODE.
+__pycache__/
+**/__pycache__/
+*.pyc
