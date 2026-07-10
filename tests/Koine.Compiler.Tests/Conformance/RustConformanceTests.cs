@@ -943,4 +943,189 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1311, Task 1 — the compound-operand coercion wrap (#1293) only fired for an arithmetic
+    /// operator (<c>isArithmetic</c>-gated), but <c>WriteBinary</c> computes <c>coerceLeft</c>/
+    /// <c>coerceRight</c> unconditionally for every binary operator, including comparisons. A comparison
+    /// whose operand is a mismatched-shape conditional (a bare <c>Int</c> identifier vs. a nested
+    /// <c>Int</c> arithmetic expression, both needing to widen against a <c>Decimal</c> sibling) fell
+    /// through to the un-fixed per-leaf <c>coerceTo</c> path, reproducing #1293's exact bug for
+    /// comparison operators.
+    /// </summary>
+    [Fact]
+    public void Comparison_operand_with_mismatched_branch_shapes_is_coerced_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    flatFee: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    isSpecial: Bool\n" +
+            "    exceedsTax: Bool = (if isSpecial then baseAmount + surcharge else flatFee) > taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the whole conditional is coerced ONCE, outside
+        // the if/else — never per-branch (which left the two branches with different Rust types), and
+        // the comparison itself still borrows (no `.clone()` on either branch, per #1282).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain(
+            "Decimal::from(if self.is_special { self.base_amount + self.surcharge } else { self.flat_fee }) > self.tax_rate");
+        rust.ShouldNotContain(".flat_fee.clone()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1311, Task 2 — an EMITTER fix, not a validator one (decided against a <c>KOI0217</c>-style
+    /// diagnostic): <c>TypeResolver.VisitConditional</c> already widens a conditional's two directly
+    /// differently-typed branches (one <c>Int</c>, one <c>Decimal</c>) to their common <c>Decimal</c>
+    /// type (#975) — a legitimate, sanctioned pattern every other target already lowers correctly (C#'s
+    /// implicit numeric conversion, TS/Python's dynamic numerics). Rejecting it at the validator level
+    /// would regress a working cross-target feature to fix a Rust-only rendering gap. The actual bug:
+    /// because the conditional's own AGGREGATE type is already the widened <c>Decimal</c>, the outer
+    /// <c>coerceTo</c> comparison in <c>WriteArithmeticOperand</c> never mismatches, so no wrap fires at
+    /// all — each branch renders in its own raw, unreconciled Rust type (<c>i64</c> vs <c>Decimal</c> in
+    /// the same <c>if</c>/<c>else</c>).
+    /// </summary>
+    [Fact]
+    public void Conditional_operand_with_branches_disagreeing_with_each_other_is_reconciled()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    flatFee: Decimal\n" +
+            "    taxRate: Decimal\n" +
+            "    isSpecial: Bool\n" +
+            "    tax: Decimal = (if isSpecial then baseAmount else flatFee) * taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Int branch is widened to Decimal so both
+        // branches of the if/else share the same Rust type (Decimal is Copy in this emitter, so the
+        // Decimal branch needs no `.clone()`).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("if self.is_special { Decimal::from(self.base_amount) } else { self.flat_fee }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1311, Task 3 — the root-cause class: a nested <c>BinaryExpr</c> used DIRECTLY as one side
+    /// of an arithmetic operator (not nested inside a conditional/let/guard) fell into
+    /// <c>WriteOperand</c>'s pre-existing <c>case BinaryExpr: WriteBinary(...)</c>, which ignores
+    /// <c>coerceTo</c> entirely — the same gap #1293's own issue named but scoped away from. Widening
+    /// <c>WriteArithmeticOperand</c>'s compound-shape recognition to also catch a bare <c>BinaryExpr</c>
+    /// operand routes it through the same "render uncoerced, wrap the whole rendered text once" path.
+    /// </summary>
+    [Fact]
+    public void Bare_binary_operand_needing_coercion_is_wrapped_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    total: Decimal = (baseAmount + surcharge) + taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the nested Int sum is coerced ONCE, as a whole
+        // — not silently dropped.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Decimal::from(self.base_amount + self.surcharge) + self.tax_rate");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Code-review finding on #1311, Task 1 — a comparison operand's compound (conditional/let/guard)
+    /// branches must STILL be cloned/normalized when a leaf is a non-Copy place (<c>String</c>, or a
+    /// non-Copy value object), even though the comparison OPERATOR itself only ever borrows. The
+    /// normalization isn't there to satisfy the operator; it's there because the <c>if</c>/<c>else</c>
+    /// BLOCK's own tail position is a move-out-of-<c>&amp;self</c> position regardless of what consumes
+    /// the block's result afterward. Gating it off for every comparison (<c>isArithmetic</c>-keyed) broke
+    /// this for any non-Copy leaf — Int/Decimal never surfaced it since both are <c>Copy</c>.
+    /// </summary>
+    [Fact]
+    public void Comparison_operand_conditional_with_noncopy_string_branches_is_still_normalized()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Item {\n" +
+            "    primary: String\n" +
+            "    secondary: String\n" +
+            "    flag: Bool\n" +
+            "    isMatch: Bool = (if flag then primary else secondary) == \"x\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): each non-Copy String branch must still be
+        // normalized to an owned String so the if/else block itself type/borrow-checks.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("if self.flag { self.primary.to_string() } else { self.secondary.to_string() }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Sibling of <see cref="Comparison_operand_conditional_with_noncopy_string_branches_is_still_normalized"/>
+    /// for a non-Copy VALUE OBJECT place (not a String) — confirms the fix isn't String-special-cased.
+    /// </summary>
+    [Fact]
+    public void Comparison_operand_conditional_with_noncopy_valueobject_branches_is_still_cloned()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    other: Money\n" +
+            "    flag: Bool\n" +
+            "    isMatch: Bool = (if flag then a else b) == other\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): each non-Copy Money branch must still be cloned
+        // so the if/else block itself type/borrow-checks; the bare `other` operand still borrows
+        // (no `.clone()`), per #1282, since it's used directly by the comparison, not as a block tail.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("(if self.flag { self.a.clone() } else { self.b.clone() }) == self.other");
+        rust.ShouldNotContain("self.other.clone()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

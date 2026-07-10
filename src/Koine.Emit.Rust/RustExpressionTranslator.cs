@@ -313,22 +313,24 @@ internal sealed class RustExpressionTranslator
     /// <summary>
     /// Writes an operand of the general (non-quantity) arithmetic path — the sibling of
     /// <see cref="WriteQuantityOperand"/> for <c>+</c>/<c>-</c>/<c>*</c>/<c>/</c> on plain value objects
-    /// (and a quantity's <c>*</c>/<c>/</c>, which never goes through the quantity guard). A simple place
-    /// is written bare-or-cloned exactly as before; a compound expression (e.g. a conditional) must
-    /// itself evaluate to an owned value before the operator can consume it, so it is parenthesized and
-    /// its leaf places are cloned via <see cref="WriteOwnedOperand"/> (#1282, generalizing #1268).
-    /// Comparisons/logical operators (<paramref name="isArithmetic"/> false) borrow and are left as the
-    /// pre-existing un-cloned rendering.
+    /// (and a quantity's <c>*</c>/<c>/</c>, which never goes through the quantity guard), and of every
+    /// comparison operator (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;</c>/<c>&gt;=</c>/<c>==</c>/<c>!=</c>) too,
+    /// since <see cref="WriteBinary"/> computes <paramref name="coerceTo"/> unconditionally for every
+    /// binary operator, not just arithmetic ones (#1311, extending #1293).
     /// <para>
-    /// <paramref name="coerceTo"/> is deliberately NOT threaded into the <see cref="WriteOwnedOperand"/>
-    /// render: <see cref="Write"/>'s dispatch only honors a <c>coerceTo</c> hint for a bare
-    /// <c>IdentifierExpr</c>/<c>LiteralExpr</c> leaf, so threading it into every branch left a compound
-    /// (nested-arithmetic, member-access, call) branch un-coerced while its bare-identifier sibling got
-    /// wrapped — two different Rust types in the same <c>if</c>/<c>else</c>, a real <c>cargo check</c>
-    /// E0308 (#1293). Instead each branch renders with its own natural type, and — mirroring
-    /// <c>RustEmitter.ValueObjects.WriteDerived</c>'s <c>NumericCoercionWrap</c> precedent — the WHOLE
-    /// rendered compound expression is wrapped in a single outer <c>Decimal::from(...)</c> when its own
-    /// inferred <paramref name="type"/> differs from <paramref name="coerceTo"/>.
+    /// A simple place is written bare-or-cloned exactly as before (clone only for a non-Copy arithmetic
+    /// operand — comparisons always borrow, per #1282: the operator itself auto-refs a bare place, so no
+    /// move occurs). A compound expression (conditional/let/guard) OR a bare non-leaf expression (a
+    /// nested <c>BinaryExpr</c> used directly, not nested inside a conditional — #1311, Task 3:
+    /// <see cref="WriteOperand"/>'s own <c>BinaryExpr</c> case ignores <paramref name="coerceTo"/>
+    /// entirely) renders via <see cref="WriteOwnedOperand"/>, which ALWAYS clones a non-Copy leaf place
+    /// regardless of <paramref name="isArithmetic"/> — unlike the bare-place case, a conditional/let
+    /// block's tail position is a move-out-of-<c>&amp;self</c> position no matter what consumes the
+    /// block's result afterward, so skipping the clone for a comparison operand would leave the BLOCK
+    /// itself failing to borrow-check (E0507), not just the outer operator. Then — mirroring
+    /// <c>RustEmitter.ValueObjects.WriteDerived</c>'s <c>NumericCoercionWrap</c> precedent — wraps the
+    /// WHOLE rendered expression once in <c>Decimal::from(...)</c> when its own inferred
+    /// <paramref name="type"/> differs from <paramref name="coerceTo"/>.
     /// </para>
     /// <para>
     /// This deliberately does NOT call <c>NumericCoercionWrap</c> itself (#1293, Task 2): that helper is
@@ -342,20 +344,16 @@ internal sealed class RustExpressionTranslator
     /// routing through a helper built for a different, wider contract.
     /// </para>
     /// <para>
-    /// Scope (#1293 fixed exactly this slice, not the whole <c>coerceTo</c>-dispatch gap): this wrap only
-    /// fires for a <b>compound</b> (<c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>) operand of an
-    /// <b>arithmetic</b> (<paramref name="isArithmetic"/>) operator whose branches share one numeric type
-    /// that itself mismatches <paramref name="coerceTo"/>. A comparison operator's mismatched-shape
-    /// operand, a conditional whose branches disagree with EACH OTHER (not just with the expected type —
-    /// widened to a single type by <c>TypeResolver</c> before this method ever runs), and a bare
-    /// non-compound operand (a nested <c>BinaryExpr</c>/<c>CallExpr</c>/<c>MemberAccessExpr</c> used
-    /// directly, not nested inside a conditional) are adjacent, still-open instances of the same
-    /// underlying <c>Write()</c>-dispatch gap, tracked separately rather than folded into this fix.
+    /// Scope (#1293 fixed the compound-arithmetic slice; #1311 extended it to comparisons, a conditional's
+    /// own disagreeing branches — see <see cref="WriteReconciledBranch"/> — and a bare <c>BinaryExpr</c>
+    /// operand): a bare <c>MemberAccessExpr</c>/<c>CallExpr</c> operand used directly (not nested in a
+    /// conditional) is the one still-open instance of the same underlying <c>Write()</c>-dispatch gap,
+    /// tracked separately as #1316 rather than folded into this fix.
     /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
     {
-        if (isArithmetic && expr is ConditionalExpr or LetExpr or GuardExpr)
+        if (expr is ConditionalExpr or LetExpr or GuardExpr or BinaryExpr)
         {
             // The wrap decision depends only on `coerceTo`/`type` (known up front), not on the rendered
             // text, so the prefix is picked before rendering and `WriteOwnedOperand` writes straight into
@@ -375,20 +373,24 @@ internal sealed class RustExpressionTranslator
     /// Writes an expression so it evaluates to an owned value, recursing into a conditional's branches
     /// (including nested conditionals) so a leaf place a branch would otherwise move out of
     /// <c>&amp;self</c> is cloned instead — the block-expression dual of <see cref="WriteOperandValue"/>
-    /// (#1268). Shared by the quantity <c>+</c>/<c>-</c> guard, the general arithmetic path (#1282), a
-    /// bare conditional/let derived-member body (<see cref="RustExpressionTranslator.TranslateOwned"/>,
-    /// #1282), and a <c>CoalesceExpr</c> arm (<see cref="WriteOperandValue"/>, #1282).
+    /// (#1268). Shared by the quantity <c>+</c>/<c>-</c> guard, the general arithmetic/comparison path
+    /// (#1282, #1311), a bare conditional/let derived-member body
+    /// (<see cref="RustExpressionTranslator.TranslateOwned"/>, #1282), and a <c>CoalesceExpr</c> arm
+    /// (<see cref="WriteOperandValue"/>, #1282). Always clones/normalizes a non-Copy leaf place — this is
+    /// unconditional (not gated by whether the caller is arithmetic or a comparison), because a
+    /// conditional/let block's own tail position requires an owned value to type/borrow-check regardless
+    /// of what the surrounding operator does with the block's result (#1311).
     /// </summary>
-    private void WriteOwnedOperand(Expr expr, StringBuilder sb, TypeRef? coerceTo = null)
+    private void WriteOwnedOperand(Expr expr, StringBuilder sb)
     {
         if (expr is ConditionalExpr cond)
         {
             var condBuf = new StringBuilder();
             Write(cond.Condition, condBuf, null);
             sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
-            WriteOwnedOperand(cond.Then, sb, coerceTo);
+            WriteReconciledBranch(cond.Then, cond.Else, sb);
             sb.Append(" } else { ");
-            WriteOwnedOperand(cond.Else, sb, coerceTo);
+            WriteReconciledBranch(cond.Else, cond.Then, sb);
             sb.Append(" }");
             return;
         }
@@ -397,7 +399,7 @@ internal sealed class RustExpressionTranslator
         {
             List<string> pushed = WriteLetBindings(let.Bindings, sb, cloneNonCopyPlaces: true);
             var bodyBuf = new StringBuilder();
-            WriteOwnedOperand(let.Body, bodyBuf, coerceTo);
+            WriteOwnedOperand(let.Body, bodyBuf);
             sb.Append(StripOuterParens(bodyBuf.ToString()));
             sb.Append(" }");
             PopLocals(pushed);
@@ -408,11 +410,42 @@ internal sealed class RustExpressionTranslator
         {
             // `when` is a semantic-only disambiguation with no runtime Rust representation (mirrors
             // Write's GuardExpr case) — the owned-value treatment belongs to the guarded body.
-            WriteOwnedOperand(g.Body, sb, coerceTo);
+            WriteOwnedOperand(g.Body, sb);
             return;
         }
 
-        WriteOwnedLeaf(expr, sb, coerceTo);
+        WriteOwnedLeaf(expr, sb);
+    }
+
+    /// <summary>
+    /// Writes one conditional branch, individually widened to <c>Decimal</c> when its own inferred type
+    /// is <c>Int</c> while the SIBLING branch is <c>Decimal</c>. <see cref="TypeResolver"/> already
+    /// widens the conditional's own aggregate type to the wider of the two branches (#975), so the outer
+    /// <c>coerceTo</c> comparison in <see cref="WriteArithmeticOperand"/> never sees a mismatch here —
+    /// each branch still renders in its own native Rust type, so an unreconciled Int/Decimal pair emits
+    /// two different types in the same <c>if</c>/<c>else</c> (a real <c>cargo check</c> E0308, #1311).
+    /// Reconciling per-branch (rather than a single wrap around the whole conditional) is required
+    /// because the branches disagree with EACH OTHER, not with an externally supplied <c>coerceTo</c>.
+    /// Fixed here in the emitter (not the semantic validator): the widened Int/Decimal conditional is a
+    /// legitimate, cross-target-sanctioned pattern (#975) — this is a Rust-only rendering gap, not a
+    /// modeling error.
+    /// </summary>
+    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    {
+        TypeScope scope = EffectiveScope();
+        TypeRef? branchType = _resolver.Infer(branch, scope);
+        TypeRef? siblingType = _resolver.Infer(sibling, scope);
+        var needsWiden = branchType?.Name == "Int" && siblingType?.Name == "Decimal";
+        if (needsWiden)
+        {
+            sb.Append("Decimal::from(");
+        }
+
+        WriteOwnedOperand(branch, sb);
+        if (needsWiden)
+        {
+            sb.Append(')');
+        }
     }
 
     /// <summary>
@@ -426,11 +459,11 @@ internal sealed class RustExpressionTranslator
     /// after <see cref="StripOuterParens"/> has removed its enclosing parens would bind to the
     /// concatenation's last operand instead of the whole expression.
     /// </summary>
-    private void WriteOwnedLeaf(Expr expr, StringBuilder sb, TypeRef? coerceTo)
+    private void WriteOwnedLeaf(Expr expr, StringBuilder sb)
     {
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
         var bodyBuf = new StringBuilder();
-        Write(expr, bodyBuf, coerceTo);
+        Write(expr, bodyBuf, null);
         sb.Append(StripOuterParens(bodyBuf.ToString()));
 
         var isPlace = expr is IdentifierExpr or MemberAccessExpr;
