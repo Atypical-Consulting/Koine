@@ -69,3 +69,9 @@ export { WorkspaceProblemsBadge, type WorkspaceProblemsSlice } from './component
 // slice of host state; the host-side classification/derivation stays in koine-studio's adapters
 // (src/store/readableStores.ts).
 export { UnsavedIndicator, type UnsavedIndicatorSlice } from './components/UnsavedIndicator';
+export {
+  DiagnosticsStripPanel,
+  type DiagnosticsStripSlice,
+  type DiagnosticsStripRow,
+  type DiagnosticsStripRange,
+} from './components/DiagnosticsStripPanel';

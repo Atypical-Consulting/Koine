@@ -1,6 +1,10 @@
 import type { StoreApi } from 'zustand/vanilla';
+import type { DiagnosticsStripRow, DiagnosticsStripSlice } from '@atypical/koine-ui';
 import type { AppState } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
+import { isAllContexts } from '@/model/activeContext';
+import { severityErrorOrWarning } from '@/lsp/severity';
+import type { LspDiagnostic } from '@/lsp/lsp';
 import { shallowEqual, zustandToReadableStore } from '@/store/readableStoreAdapter';
 
 // The concrete `ReadableStore<T>` adapters for the koine-ui host-adapter components (issues #944 and
@@ -81,5 +85,112 @@ function problemsSliceEqual(a: ProblemsSlice, b: ProblemsSlice): boolean {
     a.fileCount === b.fileCount &&
     a.parts.length === b.parts.length &&
     a.parts.every((part, i) => part === b.parts[i])
+  );
+}
+
+/** The bounded context a source file denotes — its `.koi` stem, lowercased — or null for a non-`.koi`
+ *  uri. One `.koi` file is one bounded context (the stem convention the Files-tree scope emphasis uses).
+ *  Moved here from DiagnosticsStripPanel.tsx with the #1244 extraction: which files belong to a context
+ *  is Koine Studio domain logic, so it lives in this adapter, not in the koine-ui panel. */
+function koiStemOfUri(uri: string): string | null {
+  const slash = uri.lastIndexOf('/');
+  const base = (slash >= 0 ? uri.slice(slash + 1) : uri).toLowerCase();
+  return base.endsWith('.koi') ? base.slice(0, -'.koi'.length) : null;
+}
+
+/**
+ * Adapts the app store's diagnostics + active-context slices to `DiagnosticsStripPanel`'s generic
+ * `ReadableStore<DiagnosticsStripSlice>` — already scoped, ordered, classified and counted, so the
+ * panel never sees `LspDiagnostic`, the `.koi`-stem context convention, or severity numbers.
+ *
+ * Scope-to-context (#1188 / ADR 0009): pass `scope` and the slice follows the active bounded context —
+ * when a REAL context is active, `rows` span that context's files' diagnostics (matched by `.koi` stem,
+ * in first-seen uri order — the slice preserves it), each pre-labelled via `scope.uriLabel` for the
+ * panel's cross-file row prefix. Absent `scope`, or under *All contexts*, the slice is the ACTIVE
+ * file's diagnostics, byte-for-byte the old active-file strip.
+ *
+ * `activeUri` is read LIVE inside the selector (it's editor wiring, not store state): a `getState()`
+ * after a file switch reflects the new file even without a store write — which is what lets
+ * editorSession's paintActive re-render the mounted panel synchronously on a switch (the panel re-reads
+ * `getState()` during render). Row classification goes through `severityErrorOrWarning` (the shared
+ * severity bucketing, which the strip's row colour always used: only severity 2 is a warn row) while
+ * the COUNT goes through `diagnosticsSummary` (which drops info/hint) joined with the strip's ` · ` —
+ * exactly the pre-extraction pairing.
+ *
+ * Same known tradeoff as `createWorkspaceProblemsStore` above: the adapter's listener re-runs this
+ * selector on EVERY app-store write; `stripSliceEqual`'s element-wise rows comparison (fresh array of
+ * fresh row objects per call — the #944 `parts` footgun again) still keeps unrelated writes from
+ * notifying, but not from recomputing. Acceptable at this scale (a linear scan of one file's — or one
+ * context's — diagnostics per write).
+ */
+export function createDiagnosticsStripStore(
+  store: StoreApi<AppState>,
+  opts: {
+    /** The editor's live active-file uri (editorSession's `deps.activeUri` — not store state). */
+    activeUri: () => string;
+    /** Scope-to-context support (#1188 / ADR 0009). Absent → the slice never scopes. */
+    scope?: {
+      /** A short file label for a scoped, cross-file row (its relPath / basename). */
+      uriLabel: (uri: string) => string;
+    };
+  },
+) {
+  const row = (uri: string, d: LspDiagnostic, label?: string): DiagnosticsStripRow => ({
+    uri,
+    label,
+    severity: severityErrorOrWarning(d.severity),
+    range: d.range,
+    message: d.message,
+    code: d.code,
+  });
+  return zustandToReadableStore(
+    store,
+    (s): DiagnosticsStripSlice => {
+      const scoped = opts.scope != null && !isAllContexts(s.activeContext);
+      const rows: DiagnosticsStripRow[] = [];
+      const diags: LspDiagnostic[] = [];
+      if (scoped) {
+        const context = s.activeContext.toLowerCase();
+        for (const [uri, ds] of Object.entries(s.diagnosticsByUri)) {
+          if (koiStemOfUri(uri) !== context) continue;
+          for (const d of ds) {
+            rows.push(row(uri, d, opts.scope!.uriLabel(uri)));
+            diags.push(d);
+          }
+        }
+      } else {
+        const uri = opts.activeUri();
+        for (const d of s.diagnosticsByUri[uri] ?? []) {
+          rows.push(row(uri, d));
+          diags.push(d);
+        }
+      }
+      const { kind, parts } = diagnosticsSummary(diags);
+      // Clean ⇒ the literal 'clean' sentinel; otherwise join the shared parts with ' · ' (the strip's join).
+      return { scoped, rows, count: kind === 'clean' ? 'clean' : parts.join(' · '), kind };
+    },
+    stripSliceEqual,
+  );
+}
+
+/** Element-wise rows comparison (`range` by reference — diagnostics are reference-stable in the store
+ *  until re-pushed) plus `Object.is` on the scalars — same rationale as `problemsSliceEqual` above. */
+function stripSliceEqual(a: DiagnosticsStripSlice, b: DiagnosticsStripSlice): boolean {
+  return (
+    a.scoped === b.scoped &&
+    a.kind === b.kind &&
+    a.count === b.count &&
+    a.rows.length === b.rows.length &&
+    a.rows.every((r, i) => {
+      const o = b.rows[i];
+      return (
+        r.uri === o.uri &&
+        r.label === o.label &&
+        r.severity === o.severity &&
+        r.range === o.range &&
+        r.message === o.message &&
+        r.code === o.code
+      );
+    })
   );
 }

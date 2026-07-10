@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'vitest';
 import { createAppStore } from '@/store/index';
 import {
+  createDiagnosticsStripStore,
   createHistoryControlsStore,
   createUnsavedIndicatorStore,
   createWorkspaceProblemsStore,
 } from '@/store/readableStores';
 import type { Buffer } from '@/shell/workspaceController';
+import type { LspDiagnostic } from '@/lsp/lsp';
+import { ALL_CONTEXTS } from '@/model/activeContext';
 
 // Pins the REAL wiring end-to-end (a real createAppStore(), not a mock ReadableStore) so a change to the
 // app store's shape or to diagnosticsSummary's classification is caught here — the koine-ui side
@@ -137,5 +140,113 @@ describe('createWorkspaceProblemsStore', () => {
     store.getState().setNavAltitude('tactical'); // unrelated slice; diagnostics unchanged
 
     expect(calls).toBe(0);
+  });
+});
+
+describe('createDiagnosticsStripStore', () => {
+  // One error diagnostic on (0-based) line 2, column 3; the panel renders it 1-based as "error 3:4".
+  const err = (msg: string): LspDiagnostic => ({
+    range: { start: { line: 2, character: 3 }, end: { line: 2, character: 4 } },
+    message: msg,
+    severity: 1,
+  });
+  const warn = (msg: string): LspDiagnostic => ({
+    range: { start: { line: 5, character: 0 }, end: { line: 5, character: 6 } },
+    message: msg,
+    severity: 2,
+  });
+  const uriLabel = (uri: string): string => uri.split('/').pop()!;
+
+  test('unscoped (no scope option): the ACTIVE file’s rows, unlabelled, with the strip’s count wording', () => {
+    const store = createAppStore();
+    const readable = createDiagnosticsStripStore(store, { activeUri: () => 'file:///a.koi' });
+    expect(readable.getState()).toEqual({ scoped: false, rows: [], count: 'clean', kind: 'clean' });
+
+    const boom = err('boom');
+    store.getState().setDiagnostics('file:///a.koi', [boom, warn('meh')]);
+    store.getState().setDiagnostics('file:///b.koi', [err('elsewhere')]); // a different file — not shown
+
+    const slice = readable.getState();
+    expect(slice.scoped).toBe(false);
+    // The shared diagnosticsSummary wording, joined with the strip's ' · ' (byte-for-byte renderStrip).
+    expect(slice.count).toBe('1 error · 1 warning');
+    expect(slice.kind).toBe('error');
+    expect(slice.rows).toEqual([
+      { uri: 'file:///a.koi', severity: 'error', range: boom.range, message: 'boom', code: undefined },
+      expect.objectContaining({ severity: 'warning', message: 'meh' }),
+    ]);
+    expect(slice.rows[0].label).toBeUndefined();
+  });
+
+  test('a real active context (with scope) follows THAT context’s files — not the active file (ADR 0009)', () => {
+    const store = createAppStore();
+    // The OPEN file is Ordering, but the scope is Billing — the strip must follow the CONTEXT.
+    store.getState().setActiveContext('Billing');
+    const readable = createDiagnosticsStripStore(store, {
+      activeUri: () => 'file:///Ordering.koi',
+      scope: { uriLabel },
+    });
+    store.getState().setDiagnostics('file:///Billing.koi', [err('billing boom')]);
+    store.getState().setDiagnostics('file:///Ordering.koi', [err('ordering boom')]);
+
+    const slice = readable.getState();
+    expect(slice.scoped).toBe(true);
+    expect(slice.count).toBe('1 error');
+    // Only Billing's — Ordering is a different context, and it's the OPEN file. Scoped rows are labelled.
+    expect(slice.rows.length).toBe(1);
+    expect(slice.rows[0]).toEqual(
+      expect.objectContaining({ uri: 'file:///Billing.koi', label: 'Billing.koi', message: 'billing boom' }),
+    );
+  });
+
+  test('All contexts (with scope provided) still yields the ACTIVE file’s slice, byte-for-byte', () => {
+    const store = createAppStore(); // activeContext defaults to ALL_CONTEXTS
+    expect(store.getState().activeContext).toBe(ALL_CONTEXTS);
+    const readable = createDiagnosticsStripStore(store, {
+      activeUri: () => 'file:///Ordering.koi',
+      scope: { uriLabel },
+    });
+    store.getState().setDiagnostics('file:///Billing.koi', [err('billing')]);
+    store.getState().setDiagnostics('file:///Ordering.koi', [err('ordering')]);
+
+    const slice = readable.getState();
+    expect(slice.scoped).toBe(false);
+    expect(slice.rows.length).toBe(1);
+    expect(slice.rows[0].message).toBe('ordering'); // the active file
+    expect(slice.rows[0].label).toBeUndefined(); // unscoped rows are NOT file-labelled
+  });
+
+  test('the selector reads activeUri LIVE — getState() after a file switch reflects the new file', () => {
+    const store = createAppStore();
+    let active = 'file:///a.koi';
+    const readable = createDiagnosticsStripStore(store, { activeUri: () => active });
+    store.getState().setDiagnostics('file:///a.koi', [err('a boom')]);
+    store.getState().setDiagnostics('file:///b.koi', [warn('b meh')]);
+    expect(readable.getState().rows[0].message).toBe('a boom');
+
+    // The active-file switch happens OUTSIDE the store; the next read must still see it (this is what
+    // lets editorSession's paintActive repaint the mounted panel synchronously on a file switch).
+    active = 'file:///b.koi';
+    expect(readable.getState().rows[0].message).toBe('b meh');
+    expect(readable.getState().count).toBe('1 warning');
+  });
+
+  test('does NOT notify on an unrelated write once diagnostics exist (rows are rebuilt fresh per read)', () => {
+    const store = createAppStore();
+    store.getState().setDiagnostics('file:///a.koi', [err('boom')]);
+    const readable = createDiagnosticsStripStore(store, { activeUri: () => 'file:///a.koi' });
+    let calls = 0;
+    readable.subscribe(() => calls++);
+
+    store.getState().setNavAltitude('tactical'); // unrelated slice; diagnostics unchanged
+    expect(calls).toBe(0);
+
+    // A real diagnostics change for the selected file DOES notify.
+    store.getState().setDiagnostics('file:///a.koi', [err('boom'), warn('meh')]);
+    expect(calls).toBe(1);
+
+    // A push for a DIFFERENT file leaves the unscoped active-file slice untouched — no notification.
+    store.getState().setDiagnostics('file:///b.koi', [err('elsewhere')]);
+    expect(calls).toBe(1);
   });
 });

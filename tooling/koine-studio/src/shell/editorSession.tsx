@@ -23,7 +23,8 @@ import { isNarrowViewport } from '@/shared/breakpoint';
 import { diagnosticsInRange } from '@/shell/ideUtils';
 import type { AppStore } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
-import { DiagnosticsStripPanel } from '@/diagnostics/DiagnosticsStripPanel';
+import { DiagnosticsStripPanel } from '@atypical/koine-ui';
+import { createDiagnosticsStripStore } from '@/store/readableStores';
 import type { ChangeSet, Text } from '@codemirror/state';
 import type { ReviewThread } from '@/review/reviewStore';
 import type {
@@ -337,26 +338,30 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     deps.sbProblemsWarnings.textContent = `⚠ ${warnings}`;
   }
 
-  // Mount (and re-render) the diagnostics strip as a Preact panel into #diag-body. The panel reads the
-  // app store's diagnostics slice for the live activeUri, so it owns the strip rows + its own count text;
-  // the row click drives the same editor.goto the old imperative rows did. The panel self-subscribes to
-  // the slice, but paintActive also re-renders it synchronously on each active-file push — Preact's
-  // top-level render() reconciles into the same #diag-body node, so the host keeps its identity and the
-  // strip repaints immediately (the same synchronous behavior the old imperative renderStrip had). It is
-  // mounted lazily on the first paint (NOT at construction) because deps.activeUri() — read during the
-  // panel's render — may close over wiring (e.g. ide.ts's workspace) that isn't assigned yet here.
+  // Mount (and re-render) the diagnostics strip as a Preact panel into #diag-body. The panel (from
+  // @atypical/koine-ui since #1244) reads its slice through this adapted ReadableStore — the adapter's
+  // selector derives scoping/rows/count from the diagnostics slice + the live activeUri, so the panel
+  // owns the strip rows + its own count text; the row click drives the same editor.goto the old
+  // imperative rows did. Scope-to-context (#1188 / ADR 0009) rides in the adapter: when a bounded
+  // context is active, the strip shows that context's files' diagnostics. Building the adapter here is
+  // safe — its selector (which reads deps.activeUri()) only runs on getState()/store writes, not now.
+  const stripStore = createDiagnosticsStripStore(deps.store, {
+    activeUri: () => deps.activeUri(),
+    scope: { uriLabel: deps.uriLabel },
+  });
+  // The panel self-subscribes to the slice, but paintActive also re-renders it synchronously on each
+  // active-file push — Preact's top-level render() reconciles into the same #diag-body node, so the host
+  // keeps its identity, and the panel re-reads the adapted store during render, so the strip repaints
+  // immediately (the same synchronous behavior the old imperative renderStrip had). It is mounted lazily
+  // on the first paint (NOT at construction) because deps.activeUri() — read during the panel's render —
+  // may close over wiring (e.g. ide.ts's workspace) that isn't assigned yet here.
   function renderStripPanel(): void {
     render(
       <DiagnosticsStripPanel
-        store={deps.store}
-        activeUri={deps.activeUri}
+        store={stripStore}
         onGoto={(line, col) => editor.goto(line, col)}
-        // Scope-to-context (#1188 / ADR 0009): when a bounded context is active, the strip shows that
-        // context's files' diagnostics; a cross-file row opens its file via the existing navigate seam.
-        scope={{
-          uriLabel: deps.uriLabel,
-          onOpen: (uri, range) => deps.onNavigate({ uri, range }),
-        }}
+        // A scoped, cross-file row opens its file via the existing navigate seam.
+        onOpen={(uri, range) => deps.onNavigate({ uri, range })}
         // The Problems tab pill mirrors the panel's own (scope-aware) count (#1203) — one computation,
         // two mirrors. The status-bar counts stay active-file via renderStatusBarProblems.
         countEl={deps.diagCount}

@@ -1024,3 +1024,64 @@
   outline: 2px solid var(--koi-accent);
   outline-offset: 2px;
 }
+
+/* ---------------------------------------------------------------------------------------------------
+ * DiagnosticsStripPanel (ported from Koine Studio's src/styles/components/_diagnostics.scss — issue
+ * #1244, third-tranche host-adapter migration). COPIED, not moved: the `.diag*` row/empty classes are
+ * also rendered by non-migrating Studio panels (the review threads' `.diag-panel` box shares the
+ * vocabulary, and the static #diag-body/#diag-count chrome keeps its own rules), so Studio's SCSS
+ * partial stays untouched and authoritative for the app. Only the classes THIS panel's markup renders
+ * are copied — the strip rows and the empty state; the outer bottom-panel chrome stays Studio's.
+ * --------------------------------------------------------------------------------------------------- */
+
+.diag {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--koi-ink-soft);
+  padding: var(--koi-space-1) 7px;
+  border-radius: var(--koi-radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.diag::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--koi-radius-pill);
+  background: currentColor;
+}
+
+.diag:hover {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+}
+
+.diag-err {
+  color: var(--koi-error);
+}
+
+.diag-warn {
+  color: var(--koi-hl-number);
+}
+
+.diag-empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--koi-muted);
+  padding: var(--koi-space-1) 7px;
+  font-style: italic;
+}
+
+.diag-empty::before {
+  content: '✓';
+  font-style: normal;
+  color: var(--koi-hl-string);
+}
