@@ -153,7 +153,13 @@ public sealed partial class RustEmitter
         : type is { Name: "String", IsOptional: false } ? access + ".to_string()"
         : access + ".clone()";
 
-    /// <summary>Owns a derived projection expression (wrapped so the suffix binds the whole expression).</summary>
+    /// <summary>
+    /// Owns a derived projection expression (wrapped so the suffix binds the whole expression). Gates
+    /// the <c>.to_string()</c> choice through the shared <see cref="UnderlyingType"/> helper (#1350) —
+    /// still combined with an explicit <c>!type.IsOptional</c> guard here, since (unlike
+    /// <see cref="WriteDerived"/>'s sites) this call site has no <c>Some(...)</c>-wrap step yet for an
+    /// optional-declared projected field (#1349, pending).
+    /// </summary>
     private static string OwnDerived(string rendered, TypeRef type, RustTypeMapper typeMapper)
     {
         if (typeMapper.IsCopy(type))
@@ -161,7 +167,8 @@ public sealed partial class RustEmitter
             return rendered;
         }
 
-        var suffix = type is { Name: "String", IsOptional: false } ? ".to_string()" : ".clone()";
+        var underlyingType = UnderlyingType(type);
+        var suffix = !type.IsOptional && underlyingType is { Name: "String" } ? ".to_string()" : ".clone()";
         return "(" + rendered + ")" + suffix;
     }
 
