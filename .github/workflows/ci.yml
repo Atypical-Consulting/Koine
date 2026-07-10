@@ -17,6 +17,8 @@ concurrency:
 
 jobs:
   build-and-test:
+    # Skip draft PRs — they're not ready for review/merge yet, so don't burn CI minutes on every push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     # Backstop so a hung step (stalled restore, wedged toolchain fetch) fails fast instead
     # of running to the 6-hour default. Cold build+test+demo lands well under this.

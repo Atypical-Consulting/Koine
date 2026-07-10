@@ -15,6 +15,8 @@ permissions:
 
 jobs:
   lint-pr-title:
+    # Skip draft PRs — a draft's title isn't final yet, so don't flag it before the author is ready.
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       # SHA-pinned: this runs under pull_request_target with `pull-requests: write`, so a
