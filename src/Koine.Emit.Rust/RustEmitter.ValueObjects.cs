@@ -10,7 +10,9 @@ namespace Koine.Compiler;
 /// <c>Copy</c> types, by <c>&amp;str</c>/<c>&amp;T</c> otherwise), constant-default members are set
 /// inside <c>new</c>, and derived (computed) members become get-only methods. Demand-driven operators
 /// (scalar <c>Mul</c>/<c>Div</c>, additive <c>Add</c>/subtractive <c>Sub</c>) are emitted only where the
-/// model actually uses them (mirroring the C#/Python emitters). A <c>quantity</c> additionally gets unit-checked
+/// model actually uses them (mirroring the C#/Python emitters) and build their result through that same
+/// smart constructor, so a declared <c>invariant</c> holds for an operator's result too (#1270).
+/// A <c>quantity</c> additionally gets unit-checked
 /// <c>add</c>/<c>sub</c> (returning <c>Result</c>) and a scalar <c>scale</c>.
 /// </summary>
 public sealed partial class RustEmitter
@@ -78,7 +80,7 @@ public sealed partial class RustEmitter
         if (scalars is { Count: > 0 }
             && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
         {
-            WriteScalarOp(sb, name, stored, scalars, "*");
+            WriteScalarOp(sb, name, required, scalars, "*");
         }
         // `Div` is the division dual of `Mul` (#879, follow-up to the C# emitter's #832):
         // demand-generated only where the model actually divides this value object by a scalar
@@ -87,7 +89,7 @@ public sealed partial class RustEmitter
         if (divScalars is { Count: > 0 }
             && stored.Any(m => m.Type.Name is "Int" or "Decimal"))
         {
-            WriteScalarOp(sb, name, stored, divScalars, "/");
+            WriteScalarOp(sb, name, required, divScalars, "/");
         }
 
         if (!vo.IsQuantity)
@@ -102,11 +104,11 @@ public sealed partial class RustEmitter
             bool needsSub = needs?.BinaryOps.Contains(BinaryOp.Sub) ?? false;
             if (needsAdd)
             {
-                WriteAdditiveOp(sb, name, stored, "+");
+                WriteAdditiveOp(sb, name, required, "+");
             }
             if (needsSub)
             {
-                WriteAdditiveOp(sb, name, stored, "-");
+                WriteAdditiveOp(sb, name, required, "-");
             }
         }
     }
@@ -293,61 +295,90 @@ public sealed partial class RustEmitter
     // ----------------------------------------------------------------------
 
     /// <summary>A scalar <c>Mul</c>/<c>Div</c> (e.g. <c>Money * quantity</c> or <c>fee / 2</c>): applies
-    /// <paramref name="op"/> to each numeric field, carries the rest. <paramref name="op"/> is <c>"*"</c> or <c>"/"</c>.</summary>
-    private void WriteScalarOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, IReadOnlySet<string> scalars, string op)
+    /// <paramref name="op"/> to each numeric field, carries the rest, and rebuilds through the validating
+    /// constructor (#1270). <paramref name="op"/> is <c>"*"</c> or <c>"/"</c>.</summary>
+    private void WriteScalarOp(
+        StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlySet<string> scalars, string op)
     {
         bool isDiv = op == "/";
         var trait = isDiv ? "Div" : "Mul";
         var fn = isDiv ? "div" : "mul";
-        var param = isDiv ? "divisor" : "factor";
+        var param = OperandName(required, isDiv ? "divisor" : "factor");
 
         foreach (var (rustFactor, isDecimal) in ScalarFactors(scalars))
         {
+            var args = required.Select(m => ScaleField(m, "self." + RustNaming.Field(m.Name), param, isDecimal, op));
+
             sb.Append('\n');
             sb.Append("impl std::ops::").Append(trait).Append('<').Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
             sb.Append(Indent).Append("type Output = ").Append(name).Append(";\n");
             sb.Append(Indent).Append("fn ").Append(fn).Append("(self, ").Append(param).Append(": ").Append(rustFactor).Append(") -> ").Append(name).Append(" {\n");
-            sb.Append(Indent).Append(Indent).Append(name).Append(" {\n");
-            foreach (Member m in fields)
-            {
-                var f = RustNaming.Field(m.Name);
-                sb.Append(Indent).Append(Indent).Append(Indent).Append(f).Append(": ")
-                  .Append(ScaleField(m, "self." + f, param, isDecimal, op)).Append(",\n");
-            }
-            sb.Append(Indent).Append(Indent).Append("}\n");
+            WriteValidatingConstruction(sb, name, args, op);
             sb.Append(Indent).Append("}\n");
             sb.Append("}\n");
         }
     }
 
     /// <summary>An additive <c>Add</c>/<c>Sub</c> (for <c>sum</c> folds and plain value-object arithmetic,
-    /// #887): applies <paramref name="op"/> to each numeric field pairwise, carries the rest from self.
-    /// <paramref name="op"/> is <c>"+"</c> or <c>"-"</c>.</summary>
-    private void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> fields, string op)
+    /// #887): applies <paramref name="op"/> to each numeric field pairwise, carries the rest from self, and
+    /// rebuilds through the validating constructor (#1270). <paramref name="op"/> is <c>"+"</c> or <c>"-"</c>.</summary>
+    private void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> required, string op)
     {
         bool isSub = op == "-";
         var trait = isSub ? "Sub" : "Add";
         var fn = isSub ? "sub" : "add";
+        var other = OperandName(required, "other");
+
+        var args = required.Select(m =>
+        {
+            var f = RustNaming.Field(m.Name);
+            return m.Type.Name is "Int" or "Decimal"
+                ? m.Type.IsOptional
+                    ? $"self.{f}.zip({other}.{f}).map(|(a, b)| a {op} b)"
+                    : $"self.{f} {op} {other}.{f}"
+                : "self." + f;
+        });
 
         sb.Append('\n');
         sb.Append("impl std::ops::").Append(trait).Append(" for ").Append(name).Append(" {\n");
         sb.Append(Indent).Append("type Output = ").Append(name).Append(";\n");
-        sb.Append(Indent).Append("fn ").Append(fn).Append("(self, other: ").Append(name).Append(") -> ").Append(name).Append(" {\n");
-        sb.Append(Indent).Append(Indent).Append(name).Append(" {\n");
-        foreach (Member m in fields)
-        {
-            var f = RustNaming.Field(m.Name);
-            var value = m.Type.Name is "Int" or "Decimal"
-                ? m.Type.IsOptional
-                    ? $"self.{f}.zip(other.{f}).map(|(a, b)| a {op} b)"
-                    : $"self.{f} {op} other.{f}"
-                : "self." + f;
-            sb.Append(Indent).Append(Indent).Append(Indent).Append(f).Append(": ").Append(value).Append(",\n");
-        }
-        sb.Append(Indent).Append(Indent).Append("}\n");
+        sb.Append(Indent).Append("fn ").Append(fn).Append("(self, ").Append(other).Append(": ").Append(name).Append(") -> ").Append(name).Append(" {\n");
+        WriteValidatingConstruction(sb, name, args, op);
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
     }
+
+    /// <summary>
+    /// The shared body of a demand-driven operator: rebuild the result through the value object's own
+    /// validating constructor so every declared <c>invariant</c> runs on it, exactly as it would on a
+    /// hand-written <c>Name::new(...)</c> (#1270). Before this, both writers emitted a raw
+    /// <c>Name { field: ... }</c> struct literal, which skips <c>new</c> entirely — so
+    /// <c>Money::new(dec(10)).unwrap() * -20</c> silently produced a negative <c>Money</c>.
+    /// <para>
+    /// The <c>std::ops</c> traits are infallible by contract — <c>Mul::Output</c> cannot be a
+    /// <c>Result</c> without breaking operator chaining (<c>fee * 2 / 3</c>) and the <c>koine_sum</c>
+    /// fold, whose <c>T: std::ops::Add&lt;Output = T&gt;</c> bound a <c>Result</c>-returning <c>Add</c>
+    /// would no longer satisfy — so a violated invariant surfaces as a panic carrying the
+    /// <c>DomainError</c>. That is the exact Rust analogue of the C# emitter's <c>=&gt; new Money(args)</c>,
+    /// whose constructor <em>throws</em> on the same violation, and it mirrors how the emitted runtime
+    /// already panics on an unrepresentable narrowing (<c>dec_to_i64</c>). Callers wanting a
+    /// <c>Result</c> keep the ordinary route: <c>Name::new(...)</c> itself.
+    /// </para>
+    /// </summary>
+    private static void WriteValidatingConstruction(StringBuilder sb, string name, IEnumerable<string> args, string op)
+    {
+        sb.Append(Indent).Append(Indent).Append(name).Append("::new(").Append(string.Join(", ", args)).Append(")\n");
+        sb.Append(Indent).Append(Indent).Append(Indent)
+          .Append(".expect(\"").Append(name).Append(": `").Append(op).Append("` violated an invariant\")\n");
+    }
+
+    /// <summary>
+    /// The operator's operand parameter name, underscore-prefixed when no constructor parameter is
+    /// numeric — every numeric field then carries a constant default, so the validating constructor
+    /// re-derives it and the operand is genuinely unread. Keeps the emitted crate warning-free.
+    /// </summary>
+    private static string OperandName(IReadOnlyList<Member> required, string name) =>
+        required.Any(m => m.Type.Name is "Int" or "Decimal") ? name : "_" + name;
 
     /// <summary>A quantity's unit-checked <c>add</c>/<c>sub</c> (returning Result) and scalar <c>scale</c>.</summary>
     private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> fields)
