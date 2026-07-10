@@ -454,10 +454,13 @@ internal sealed class RustExpressionTranslator
         {
             var condBuf = new StringBuilder();
             Write(cond.Condition, condBuf, null);
+            TypeScope scope = EffectiveScope();
+            TypeRef? thenType = _resolver.Infer(cond.Then, scope);
+            TypeRef? elseType = _resolver.Infer(cond.Else, scope);
             sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
-            WriteReconciledBranch(cond.Then, cond.Else, sb);
+            WriteReconciledBranch(cond.Then, thenType, cond.Else, elseType, sb);
             sb.Append(" } else { ");
-            WriteReconciledBranch(cond.Else, cond.Then, sb);
+            WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
             sb.Append(" }");
             return;
         }
@@ -509,13 +512,13 @@ internal sealed class RustExpressionTranslator
     /// must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>. <c>needsOptionalWiden</c>
     /// never composes with <c>needsSomeWrap</c>: <c>needsSomeWrap</c> also requires the branch itself to
     /// be non-optional, so a branch that is already <c>Option</c>-shaped (<c>needsOptionalWiden</c>)
-    /// never needs the extra <c>Some(...)</c> wrap.
+    /// never needs the extra <c>Some(...)</c> wrap. <paramref name="branchType"/>/<paramref name="siblingType"/>
+    /// are inferred once by the caller (<see cref="WriteOwnedOperand"/>) and passed in rather than
+    /// re-inferred here — <c>Then</c>/<c>Else</c> would otherwise each be walked twice per conditional
+    /// (#1345).
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
     {
-        TypeScope scope = EffectiveScope();
-        TypeRef? branchType = _resolver.Infer(branch, scope);
-        TypeRef? siblingType = _resolver.Infer(sibling, scope);
         var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
         var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
         var needsSomeWrap = branchType is { IsOptional: false } && siblingType is { IsOptional: true };
