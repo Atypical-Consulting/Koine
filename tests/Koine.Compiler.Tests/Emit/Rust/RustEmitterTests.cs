@@ -354,6 +354,96 @@ public class RustEmitterTests
         rust.ShouldNotContain("{ Decimal::from(self.amount) } else");
     }
 
+    private const string CoalesceBothOperandsOptionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            fallback: Int?
+            total: Int? = bonus ?? fallback
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1333: a <c>CoalesceExpr</c> (<c>a ?? b</c>) whose right operand <c>b</c> is itself
+    /// optional must render <c>.or_else(...)</c> — an <c>Option&lt;T&gt;</c>-preserving fallback — not
+    /// <c>.unwrap_or_else(...)</c>, which force-unwraps to a bare <c>T</c> and fails a real
+    /// <c>cargo check</c> <c>E0308</c> (the closure returns <c>Option&lt;T&gt;</c>, not <c>T</c>).
+    /// </summary>
+    [Fact]
+    public void Value_object_coalesce_with_optional_right_operand_renders_or_else()
+    {
+        var result = new KoineCompiler().Compile(CoalesceBothOperandsOptionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
+        rust.ShouldContain("self.bonus.clone().or_else(|| self.fallback.clone())");
+        rust.ShouldNotContain(".unwrap_or_else(");
+    }
+
+    private const string CoalesceNonOptionalRightOperandModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            total: Int = bonus ?? 0
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Regression guard (issue #1333): a <c>CoalesceExpr</c> whose right operand is non-optional (the
+    /// pre-existing, already-correct case) must keep rendering <c>.unwrap_or_else(...)</c> unchanged.
+    /// Must pass both before and after the fix.
+    /// </summary>
+    [Fact]
+    public void Value_object_coalesce_with_non_optional_right_operand_keeps_unwrap_or_else()
+    {
+        var result = new KoineCompiler().Compile(CoalesceNonOptionalRightOperandModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> i64 {");
+        rust.ShouldContain("self.bonus.clone().unwrap_or_else(|| 0)");
+    }
+
+    private const string NestedCoalesceBothOptionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            fallback: Int?
+            backup: Int?
+            total: Int? = bonus ?? (fallback ?? backup)
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1333 edge case: a nested <c>CoalesceExpr</c> as the right operand of an outer coalesce
+    /// (<c>bonus ?? (fallback ?? backup)</c>) must pick <c>.or_else(...)</c> at BOTH levels — the outer
+    /// method-name choice depends on the inner coalesce's own inferred optionality, and
+    /// <c>WriteOperandValue</c>'s leaf-place clone logic must not append a spurious <c>.clone()</c> after
+    /// the inner coalesce's rendered call chain (a <c>CoalesceExpr</c> is not an <c>IdentifierExpr</c>/
+    /// <c>MemberAccessExpr</c> place).
+    /// </summary>
+    [Fact]
+    public void Value_object_coalesce_with_nested_optional_coalesce_right_operand_renders_or_else_at_both_levels()
+    {
+        var result = new KoineCompiler().Compile(NestedCoalesceBothOptionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
+        rust.ShouldContain("self.bonus.clone().or_else(|| self.fallback.clone().or_else(|| self.backup.clone()))");
+        rust.ShouldNotContain(".unwrap_or_else(");
+    }
+
     private const string OptionalDerivedTrimOwnershipModel = """
         context Shop {
           value Person {

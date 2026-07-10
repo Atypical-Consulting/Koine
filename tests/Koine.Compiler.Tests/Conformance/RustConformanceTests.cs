@@ -1747,6 +1747,61 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1333: a <c>CoalesceExpr</c> (<c>a ?? b</c>) whose right operand is itself optional must
+    /// render <c>.or_else(...)</c>, not <c>.unwrap_or_else(...)</c> — the latter force-unwraps to a bare
+    /// <c>T</c> while the closure actually returns <c>Option&lt;T&gt;</c>, a real <c>cargo check</c>
+    /// <c>E0308</c>. Exercises all four presence combinations (present/absent on each side) at runtime,
+    /// not just that it compiles.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_both_operands_optional_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    fallback: Int?\n" +
+            "    total: Int? = bonus ?? fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1333 edge case: a nested <c>CoalesceExpr</c> as the right operand of an outer coalesce
+    /// (<c>bonus ?? (fallback ?? backup)</c>) must render <c>.or_else(...)</c> at both levels and compile
+    /// cleanly — the outer method-name choice depends on the inner coalesce's own inferred optionality.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_nested_optional_coalesce_right_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    fallback: Int?\n" +
+            "    backup: Int?\n" +
+            "    total: Int? = bonus ?? (fallback ?? backup)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1332: an optional-declared <c>String?</c> derived member whose bare body ends in
     /// <c>.trim()</c> must own the result (<c>.to_string()</c>) before <c>WriteDerived</c>'s
     /// <c>Some(...)</c>-wrap is applied, or the emitted crate does not compile — the accessor's
