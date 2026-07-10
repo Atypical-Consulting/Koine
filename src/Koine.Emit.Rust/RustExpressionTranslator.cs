@@ -660,7 +660,13 @@ internal sealed class RustExpressionTranslator
         }
     }
 
-    private void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo, TypeRef? ownType = null)
+    /// <summary>
+    /// Internal (not private) so <c>Koine.Compiler.Tests</c> can call it directly with the exact
+    /// argument shape <see cref="Write"/>'s own <c>IdentifierExpr</c> case uses — that call site is
+    /// unreachable from any real <c>.koi</c> model today (#1355), so this is the only way to pin its
+    /// behavior independent of <see cref="WriteOperand"/>'s already-covered path.
+    /// </summary>
+    internal void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo, TypeRef? ownType = null)
     {
         // (1) Local (lambda/command/factory parameter, let binding): verbatim snake_case.
         if (_locals.Contains(name))
