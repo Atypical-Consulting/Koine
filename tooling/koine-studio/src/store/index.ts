@@ -30,6 +30,15 @@ export type AppState = SelectionSlice &
   DiagramsSlice &
   ChatSlice;
 
+/**
+ * Convention (issue #760): controllers/panels take an injected `AppStore` (a parameter or a `deps`
+ * field), never the `appStore` singleton below, directly — so tests and Storybook stories can build
+ * their own `createAppStore()` in isolation. Only the composition root (`main.ts`, `ide.tsx`), the
+ * `useAppStore` React binding, and the small allowlisted set of entry points pinned by
+ * `storeInjection.convention.test.ts` may import the singleton itself.
+ */
+export type AppStore = StoreApi<AppState>;
+
 export function createAppStore(): StoreApi<AppState> {
   return createStore<AppState>((set, get) => ({
     ...createSelectionSlice(set, get),
