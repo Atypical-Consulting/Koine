@@ -158,6 +158,26 @@ describe('SortableTable', () => {
     expect(values()).toEqual(['2', '10']);
   });
 
+  // Regression (issue #1382): rows are keyed on their stable rowLabel, NOT their post-sort position, so
+  // a sort click lets Preact match old and new rows by identity and REORDER the existing <tr> DOM nodes.
+  // A positional key (`${i}:${label}`) changes on nearly every sort, forcing an unmount/remount of every
+  // row — needless DOM churn for a component shared by all the model tables.
+  test('sorting reorders the existing row DOM nodes instead of remounting them', () => {
+    const { container } = render(
+      <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
+    );
+    const before = Array.from(container.querySelectorAll('tbody tr'));
+    expect(before.map((r) => r.querySelector('td')!.textContent)).toEqual(['Bravo', 'alpha']);
+
+    act(() => container.querySelectorAll('thead th')[0].querySelector('button')!.click()); // ascending by Name
+
+    const after = Array.from(container.querySelectorAll('tbody tr'));
+    expect(after.map((r) => r.querySelector('td')!.textContent)).toEqual(['alpha', 'Bravo']);
+    // The very same <tr> nodes, by reference, now in swapped positions — reordered, not torn down.
+    expect(after[0]).toBe(before[1]);
+    expect(after[1]).toBe(before[0]);
+  });
+
   test('has no accessibility violations', async () => {
     const { container } = render(
       <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,

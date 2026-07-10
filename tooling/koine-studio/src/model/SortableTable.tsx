@@ -76,9 +76,9 @@ export function SortableTable<T extends { span: SourceSpan | null }>(props: {
         </tr>
       </thead>
       <tbody>
-        {view.map((row, i) => (
+        {view.map((row) => (
           <SortableTableRow
-            key={`${i}:${rowLabel(row)}`}
+            key={rowLabel(row)}
             row={row}
             columns={columns}
             rowLabel={rowLabel}
