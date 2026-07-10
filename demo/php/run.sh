@@ -20,13 +20,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GENERATED_DIR="$SCRIPT_DIR/generated"
 
-echo "==> [1/4] Regenerating PHP from templates/starters/ordering"
-rm -rf "$GENERATED_DIR"
-dotnet run --project "$REPO_ROOT/src/Koine.Cli" -- build "$REPO_ROOT/templates/starters/ordering" \
-  --target php --out "$GENERATED_DIR"
-
-# --- Toolchain gate: honor the same KOINE_PHP/KOINE_PHPSTAN overrides + resolution order the
-# Conformance/ suites use (TestSupport.ResolvePhp / ResolvePhpStan):
+# --- Toolchain gate (checked BEFORE the regenerate step below): honor the same KOINE_PHP/KOINE_PHPSTAN
+# overrides + resolution order the Conformance/ suites use (TestSupport.ResolvePhp / ResolvePhpStan),
+# and exit fast when the toolchain is absent instead of paying for a multi-second CLI regenerate that
+# would only be thrown away.
 #   php:     $KOINE_PHP override -> 'php' on PATH
 #   phpstan: $KOINE_PHPSTAN override -> 'phpstan' on PATH -> <repo root>/vendor/bin/phpstan
 PHP_BIN=""
@@ -50,6 +47,11 @@ if [ -z "$PHP_BIN" ] || [ -z "$PHPSTAN_BIN" ]; then
   echo "Install PHP 8.1+ and phpstan (composer require --dev phpstan/phpstan), or set KOINE_PHP/KOINE_PHPSTAN -- CI runs this for real." >&2
   exit 3
 fi
+
+echo "==> [1/4] Regenerating PHP from templates/starters/ordering"
+rm -rf "$GENERATED_DIR"
+dotnet run --project "$REPO_ROOT/src/Koine.Cli" -- build "$REPO_ROOT/templates/starters/ordering" \
+  --target php --out "$GENERATED_DIR"
 
 echo "==> [2/4] Syntax-checking every emitted file plus the driver under php -l"
 while IFS= read -r -d '' php_file; do

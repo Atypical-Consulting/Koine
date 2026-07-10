@@ -36,22 +36,23 @@ use koine_domain::koine_runtime::Decimal;
 use koine_domain::ordering::{Order, OrderId, OrderLine, OrderStatus, ProductId};
 use std::str::FromStr;
 
-/// Records a failed assertion on `failures` and prints it to stderr; never panics, so every
-/// assertion in this driver runs and is reported, mirroring the sibling TypeScript/Python/PHP
-/// drivers' `assert`/`check` helpers.
-fn check(failures: &mut i32, condition: bool, message: &str) {
-    if !condition {
-        *failures += 1;
-        eprintln!("ASSERTION FAILED: {message}");
-    }
-}
-
 fn dec(text: &str) -> Decimal {
     Decimal::from_str(text).unwrap_or_else(|e| panic!("invalid decimal literal {text:?}: {e}"))
 }
 
 fn main() {
     let mut failures = 0i32;
+
+    // Records a failed assertion on `failures` and prints it to stderr; never panics, so every
+    // assertion in this driver runs and is reported, mirroring the sibling TypeScript/Python/PHP
+    // drivers' `assert`/`check` helpers. A closure capturing `failures` by mutable reference, so
+    // call sites read the same as those siblings' -- no extra threaded argument.
+    let mut check = |condition: bool, message: &str| {
+        if !condition {
+            failures += 1;
+            eprintln!("ASSERTION FAILED: {message}");
+        }
+    };
 
     // --- OrderLine: the derived `subtotal()` must equal unit_price * quantity. ---
     let widget = ProductId::new("11111111-1111-4111-8111-111111111111");
@@ -63,12 +64,10 @@ fn main() {
         .expect("line2 declares no invariants, so construction cannot fail");
 
     check(
-        &mut failures,
         line1.subtotal() == dec("39.98"),
         &format!("line1.subtotal should be 39.98 (2 * 19.99), got {}", line1.subtotal()),
     );
     check(
-        &mut failures,
         line2.subtotal() == dec("13.50"),
         &format!("line2.subtotal should be 13.50 (3 * 4.50), got {}", line2.subtotal()),
     );
@@ -80,7 +79,6 @@ fn main() {
         .expect("draft_order declares no invariants, so construction cannot fail");
 
     check(
-        &mut failures,
         draft_order.status() == OrderStatus::Draft,
         &format!(
             "a freshly constructed order should default to Draft, got {:?}",
@@ -88,17 +86,14 @@ fn main() {
         ),
     );
     check(
-        &mut failures,
         draft_order.lines().len() == 2,
         &format!("order should carry both lines, got {}", draft_order.lines().len()),
     );
     check(
-        &mut failures,
         draft_order.lines()[0] == line1,
         "the first line should round-trip by value equality",
     );
     check(
-        &mut failures,
         draft_order.lines()[1] == line2,
         "the second line should round-trip by value equality",
     );
@@ -109,7 +104,6 @@ fn main() {
     let same_id_different_lines = Order::new(order_id.clone(), vec![line1.clone()])
         .expect("same_id_different_lines declares no invariants, so construction cannot fail");
     check(
-        &mut failures,
         draft_order == same_id_different_lines,
         "two Order instances with the same id must be equal regardless of their lines contents \
          (entity identity)",
@@ -119,7 +113,6 @@ fn main() {
     let different_order = Order::new(different_order_id, vec![line1.clone(), line2.clone()])
         .expect("different_order declares no invariants, so construction cannot fail");
     check(
-        &mut failures,
         draft_order != different_order,
         "two Order instances with different ids must not be equal",
     );
@@ -129,27 +122,22 @@ fn main() {
     // in an Order) and mutually distinguishable, and round-trip through the generated
     // `from_name`/`from_value` lookups and the `match_` exhaustive dispatch. ---
     check(
-        &mut failures,
         OrderStatus::from_name("Placed") == Some(OrderStatus::Placed),
         "from_name(\"Placed\") should resolve to OrderStatus::Placed",
     );
     check(
-        &mut failures,
         OrderStatus::from_name("Nope") == None,
         "from_name of an unknown name should return None",
     );
     check(
-        &mut failures,
         OrderStatus::from_value(2) == Some(OrderStatus::Shipped),
         "from_value(2) should resolve to OrderStatus::Shipped",
     );
     check(
-        &mut failures,
         OrderStatus::from_value(99) == None,
         "from_value of an unknown ordinal should return None",
     );
     check(
-        &mut failures,
         OrderStatus::Draft != OrderStatus::Placed,
         "Draft and Placed must be distinguishable status values",
     );
@@ -161,7 +149,6 @@ fn main() {
         || "unexpected-cancelled",
     );
     check(
-        &mut failures,
         matched == "shipped",
         &format!("OrderStatus::match_ should route Shipped to its 'shipped' case, got '{matched}'"),
     );

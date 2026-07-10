@@ -16,7 +16,7 @@
 
 import { Order } from '../generated/Ordering/Order.js';
 import { OrderLine } from '../generated/Ordering/value-objects/OrderLine.js';
-import { OrderId, OrderIdNew } from '../generated/Ordering/value-objects/OrderId.js';
+import { OrderIdNew } from '../generated/Ordering/value-objects/OrderId.js';
 import { ProductId } from '../generated/Ordering/value-objects/ProductId.js';
 import { OrderStatus, OrderStatusMatch } from '../generated/Ordering/enums/OrderStatus.js';
 import { Decimal } from '../generated/runtime.js';

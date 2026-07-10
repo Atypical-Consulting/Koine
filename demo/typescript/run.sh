@@ -20,12 +20,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GENERATED_DIR="$SCRIPT_DIR/generated"
 BUILD_DIR="$SCRIPT_DIR/.build"
 
-echo "==> [1/4] Regenerating TypeScript from templates/starters/ordering"
-rm -rf "$GENERATED_DIR"
-dotnet run --project "$REPO_ROOT/src/Koine.Cli" -- build "$REPO_ROOT/templates/starters/ordering" \
-  --target typescript --out "$GENERATED_DIR"
-
-# --- Toolchain gate: honor the same KOINE_TSC/KOINE_NODE overrides the Conformance/ suites do. ---
+# --- Toolchain gate (checked BEFORE the regenerate step below): honor the same KOINE_TSC/KOINE_NODE
+# overrides the Conformance/ suites do, and exit fast when the toolchain is absent instead of paying
+# for a multi-second CLI regenerate that would only be thrown away. ---
 TSC_BIN="${KOINE_TSC:-tsc}"
 NODE_BIN="${KOINE_NODE:-node}"
 
@@ -40,19 +37,18 @@ if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
   exit 3
 fi
 
+echo "==> [1/4] Regenerating TypeScript from templates/starters/ordering"
+rm -rf "$GENERATED_DIR"
+dotnet run --project "$REPO_ROOT/src/Koine.Cli" -- build "$REPO_ROOT/templates/starters/ordering" \
+  --target typescript --out "$GENERATED_DIR"
+
 echo "==> [2/4] Type-checking the generated sources + driver under the shipped tsconfig.json"
 ( cd "$SCRIPT_DIR" && "$TSC_BIN" -p tsconfig.json )
 
-echo "==> [3/4] Transpiling to JavaScript"
+echo "==> [3/4] Transpiling to JavaScript (tsconfig.build.json: the same tsconfig.json, with noEmit off)"
 rm -rf "$BUILD_DIR"
+( cd "$SCRIPT_DIR" && "$TSC_BIN" -p tsconfig.build.json )
 mkdir -p "$BUILD_DIR"
-TS_FILES=$(cd "$SCRIPT_DIR" && find generated src -name '*.ts')
-# --ignoreConfig: a tsconfig.json sits right here (for editors/`npm run typecheck`), but this
-# invocation passes an explicit file list with its own flags, so silence tsc's TS5112 refusal to
-# run both at once.
-# shellcheck disable=SC2086
-( cd "$SCRIPT_DIR" && "$TSC_BIN" --target ES2022 --module ESNext --moduleResolution bundler --strict \
-    --skipLibCheck --ignoreConfig --outDir "$BUILD_DIR" $TS_FILES )
 
 # The emitted TypeScript uses ESM with extensionless relative imports (e.g. `from '../../runtime'`);
 # Node's own ESM resolver requires an explicit extension, so register a resolve hook that appends

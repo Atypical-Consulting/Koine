@@ -11,12 +11,13 @@ namespace Koine.Compiler.Tests;
 /// <para>
 /// Every demo's <c>run.sh</c> follows one contract: exit <c>0</c> on a clean generate+build+run+assert,
 /// exit <c>3</c> as the toolchain-absent sentinel, non-zero on a real failure. <see cref="RunDemo"/>
-/// shells that script and funnels the toolchain-presence decision through
-/// <see cref="TestSupport.RequireOrSkip(bool, string)"/> — exactly like every <c>Conformance/</c> suite —
-/// so a missing toolchain is a <c>Skipped</c> result locally and a hard <c>Failed</c> under
-/// <c>KOINE_REQUIRE_CONFORMANCE</c> (CI, which installs every toolchain and runs this for real). The
-/// script itself is ALWAYS run first, independent of the gate: a demo whose <c>run.sh</c> is missing or
-/// broken must show up as a real failure once past the gate, not a false Skip.
+/// shells that script (via <c>bash</c>, PATH-resolved) ALWAYS, independent of the toolchain gate — a
+/// demo whose <c>run.sh</c> is missing must show up as a real assertion failure, never a false Skip —
+/// and then funnels BOTH the toolchain-presence decision and whether the script could even be launched
+/// (e.g. no <c>bash</c> on <c>PATH</c>) through <see cref="TestSupport.RequireOrSkip(bool, string)"/> —
+/// exactly like every <c>Conformance/</c> suite — so either gap is a <c>Skipped</c> result locally and a
+/// hard <c>Failed</c> under <c>KOINE_REQUIRE_CONFORMANCE</c> (CI, which installs every toolchain and a
+/// shell and runs this for real).
 /// </para>
 /// </summary>
 public class DemoBuildTests
@@ -86,11 +87,14 @@ public class DemoBuildTests
     /// <summary>
     /// Shells <c>demo/&lt;demoDir&gt;/run.sh</c> from the repo root, ALWAYS (regardless of toolchain
     /// presence — a demo whose script is missing or broken must surface as a real failure once past the
-    /// gate, never a silent Skip), then funnels the toolchain-presence decision through
-    /// <see cref="TestSupport.RequireOrSkip(bool, string)"/>, and — only once past that gate, i.e. only
-    /// when the toolchain IS present — asserts the script exited zero. Shared by every per-language demo
-    /// fact in this file (and every later-added one): each language only supplies its own toolchain probe
-    /// and notice.
+    /// gate, never a silent Skip), then folds both the toolchain-presence probe AND whether the script
+    /// could even be launched into a single <see cref="TestSupport.RequireOrSkip(bool, string)"/> gate —
+    /// so a machine with no <c>bash</c> on <c>PATH</c> degrades to a clean local Skip (and a hard Failed
+    /// under <c>KOINE_REQUIRE_CONFORMANCE</c> / CI) exactly like every other toolchain-absence case,
+    /// rather than a hard crash on a null process result. Only once past that gate, i.e. only when the
+    /// toolchain IS present and the script DID launch, does it assert the script exited zero. Shared by
+    /// every per-language demo fact in this file (and every later-added one): each language only
+    /// supplies its own toolchain probe and notice.
     /// </summary>
     private static void RunDemo(string demoDir, Func<bool> toolchainAvailable, string notice)
     {
@@ -98,10 +102,9 @@ public class DemoBuildTests
         string script = Path.Combine(repoRoot, "demo", demoDir, "run.sh");
         File.Exists(script).ShouldBeTrue($"expected a run.sh for the '{demoDir}' demo at {script}");
 
-        TestSupport.ProcessRun? run = TestSupport.RunProcess("/bin/bash", new[] { script }, workingDirectory: repoRoot);
-        run.ShouldNotBeNull($"could not launch demo/{demoDir}/run.sh (is /bin/bash available?)");
+        TestSupport.ProcessRun? run = TestSupport.RunProcess("bash", new[] { script }, workingDirectory: repoRoot);
 
-        TestSupport.RequireOrSkip(toolchainAvailable(), notice);
+        TestSupport.RequireOrSkip(toolchainAvailable() && run is not null, notice);
 
         int exitCode = run!.Value.ExitCode;
         exitCode.ShouldBe(0,
@@ -110,132 +113,43 @@ public class DemoBuildTests
     }
 
     /// <summary>
-    /// Whether a TypeScript toolchain (tsc + node) is available, probed the same way
-    /// <see cref="Conformance.TypeScriptConformanceTests"/> does through <see cref="TestSupport"/>'s
-    /// internal resolvers: an explicit <c>KOINE_TSC</c>/<c>KOINE_NODE</c> override always wins, otherwise
-    /// a same-named binary on <c>PATH</c>.
+    /// Whether a TypeScript toolchain (tsc + node) is available, resolved by calling
+    /// <see cref="TestSupport.ResolveTsc"/> / <see cref="TestSupport.ResolveNode"/> directly — the same
+    /// resolvers <see cref="Conformance.TypeScriptConformanceTests"/> uses, including the repo-local
+    /// <c>tsc</c> / <c>npx --no-install</c> fallback tiers, so this probe never diverges from what those
+    /// tests (and CI) actually resolve.
     /// </summary>
     private static bool TypeScriptToolchainAvailable() =>
-        ToolResolves("KOINE_TSC", "tsc") && ToolResolves("KOINE_NODE", "node");
+        TestSupport.ResolveTsc() is not null && TestSupport.ResolveNode() is not null;
 
     /// <summary>
-    /// True when <paramref name="command"/> is resolvable: an explicit <paramref name="envVar"/> override
-    /// (assumed valid, exactly like every <c>TestSupport</c> resolver) or a same-named binary on
-    /// <c>PATH</c> (trying the Windows <c>.cmd</c>/<c>.exe</c> suffixes too). A tiny, dependency-free
-    /// mirror of <c>TestSupport</c>'s private <c>OnPath</c> — shared by every per-language probe in this
-    /// file, present and future.
-    /// </summary>
-    private static bool ToolResolves(string envVar, string command)
-    {
-        if (Environment.GetEnvironmentVariable(envVar) is { Length: > 0 })
-        {
-            return true;
-        }
-
-        return FindOnPath(command) is not null;
-    }
-
-    /// <summary>
-    /// Whether a Python toolchain (mypy + a Python 3.11+ interpreter) is available, probed the same way
-    /// <see cref="Conformance.PythonConformanceTests"/> does through <see cref="TestSupport"/>'s internal
-    /// resolvers (<c>ResolvePython</c> / <c>ResolveMypy</c>): the interpreter resolves via an explicit
-    /// <c>KOINE_PYTHON</c> override, else the first of <c>python3.13</c>/<c>python3.12</c>/
-    /// <c>python3.11</c>/<c>python3</c>/<c>python</c> found on <c>PATH</c>; mypy resolves via an explicit
-    /// <c>KOINE_MYPY</c> override, else a direct <c>mypy</c> on <c>PATH</c>, else actually launching
-    /// <c>&lt;python&gt; -m mypy --version</c> against the resolved interpreter (mypy may be installed
-    /// only into that interpreter's site-packages, not exposed as its own <c>PATH</c> entry).
+    /// Whether a Python toolchain (mypy + a Python 3.11+ interpreter) is available, resolved by calling
+    /// <see cref="TestSupport.ResolvePython"/> / <see cref="TestSupport.ResolveMypy"/> directly — the
+    /// same resolvers <see cref="Conformance.PythonConformanceTests"/> uses, including the "actually
+    /// launch it and require exit 0" checks those resolvers perform, so this probe never reports a
+    /// toolchain as available when the real resolver would call it absent.
     /// </summary>
     private static bool PythonToolchainAvailable() =>
-        ResolvePythonBinary() is { } python && MypyResolves(python);
-
-    private static string? ResolvePythonBinary()
-    {
-        if (Environment.GetEnvironmentVariable("KOINE_PYTHON") is { Length: > 0 } overridePython)
-        {
-            return overridePython;
-        }
-
-        foreach (string name in new[] { "python3.13", "python3.12", "python3.11", "python3", "python" })
-        {
-            if (FindOnPath(name) is { } found)
-            {
-                return found;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool MypyResolves(string python)
-    {
-        if (Environment.GetEnvironmentVariable("KOINE_MYPY") is { Length: > 0 })
-        {
-            return true;
-        }
-
-        if (FindOnPath("mypy") is not null)
-        {
-            return true;
-        }
-
-        return TestSupport.RunProcess(python, new[] { "-m", "mypy", "--version" }) is { ExitCode: 0 };
-    }
+        TestSupport.ResolvePython() is not null && TestSupport.ResolveMypy() is not null;
 
     /// <summary>
-    /// Whether a PHP toolchain (phpstan + a PHP interpreter) is available, probed the same way
-    /// <see cref="Conformance.PhpConformanceTests"/> does through <see cref="TestSupport"/>'s internal
-    /// resolvers (<c>ResolvePhp</c> / <c>ResolvePhpStan</c>): the interpreter resolves via an explicit
-    /// <c>KOINE_PHP</c> override, else a direct <c>php</c> on <c>PATH</c>; phpstan resolves via an
-    /// explicit <c>KOINE_PHPSTAN</c> override, else a direct <c>phpstan</c> on <c>PATH</c>, else
-    /// <c>vendor/bin/phpstan</c> found by walking up from the repo root.
+    /// Whether a PHP toolchain (phpstan + a PHP interpreter) is available, resolved by calling
+    /// <see cref="TestSupport.ResolvePhp"/> / <see cref="TestSupport.ResolvePhpStan"/> directly — the
+    /// same resolvers <see cref="Conformance.PhpConformanceTests"/> uses, including the "actually launch
+    /// it and require exit 0" check those resolvers perform, so a stray non-executable
+    /// <c>vendor/bin/phpstan</c> is correctly reported as absent here too.
     /// </summary>
     private static bool PhpToolchainAvailable() =>
-        ToolResolves("KOINE_PHP", "php") && PhpStanResolves();
-
-    private static bool PhpStanResolves()
-    {
-        if (Environment.GetEnvironmentVariable("KOINE_PHPSTAN") is { Length: > 0 })
-        {
-            return true;
-        }
-
-        if (FindOnPath("phpstan") is not null)
-        {
-            return true;
-        }
-
-        string repoRoot = TestSupport.RepoPath(".");
-        return File.Exists(Path.Combine(repoRoot, "vendor", "bin", "phpstan"));
-    }
+        TestSupport.ResolvePhp() is not null && TestSupport.ResolvePhpStan() is not null;
 
     /// <summary>
-    /// Whether a Rust toolchain (cargo) is available, probed the same way
-    /// <see cref="Conformance.RustConformanceTests"/> does through <see cref="TestSupport"/>'s
-    /// internal <c>ResolveCargo</c> resolver: an explicit <c>KOINE_CARGO</c> override always wins,
-    /// otherwise a same-named <c>cargo</c> binary on <c>PATH</c>. Unlike <see cref="TestSupport.CompileRust"/>,
+    /// Whether a Rust toolchain (cargo) is available, resolved by calling
+    /// <see cref="TestSupport.ResolveCargo"/> directly — the same resolver
+    /// <see cref="Conformance.RustConformanceTests"/> uses. Unlike <see cref="TestSupport.CompileRust"/>,
     /// this probe does not additionally require the dependency fetch to succeed offline — an absent
     /// registry is a <c>run.sh</c>-level failure the demo's own <c>cargo run</c> surfaces directly,
     /// not a silent Skip.
     /// </summary>
     private static bool RustToolchainAvailable() =>
-        ToolResolves("KOINE_CARGO", "cargo");
-
-    /// <summary>
-    /// The first existing path for <paramref name="command"/> on <c>PATH</c> (trying the Windows
-    /// <c>.cmd</c>/<c>.exe</c> suffixes too), or <c>null</c> when none exists. A tiny, dependency-free
-    /// mirror of <c>TestSupport</c>'s private <c>OnPath</c> — shared by every per-language probe in this
-    /// file, present and future.
-    /// </summary>
-    private static string? FindOnPath(string command)
-    {
-        string[] names = OperatingSystem.IsWindows()
-            ? [command + ".cmd", command + ".exe", command]
-            : [command];
-        string[] dirs = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
-
-        return dirs
-            .SelectMany(dir => names.Select(name => Path.Combine(dir, name)))
-            .FirstOrDefault(File.Exists);
-    }
+        TestSupport.ResolveCargo() is not null;
 }

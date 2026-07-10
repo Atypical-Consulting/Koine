@@ -19,13 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 GENERATED_DIR="$SCRIPT_DIR/generated"
 
-echo "==> [1/4] Regenerating Python from templates/starters/ordering"
-rm -rf "$GENERATED_DIR"
-dotnet run --project "$REPO_ROOT/src/Koine.Cli" -- build "$REPO_ROOT/templates/starters/ordering" \
-  --target python --out "$GENERATED_DIR"
-
-# --- Toolchain gate: honor the same KOINE_PYTHON/KOINE_MYPY overrides + resolution order the
-# Conformance/ suites use (TestSupport.ResolvePython / ResolveMypy):
+# --- Toolchain gate (checked BEFORE the regenerate step below): honor the same KOINE_PYTHON/KOINE_MYPY
+# overrides + resolution order the Conformance/ suites use (TestSupport.ResolvePython / ResolveMypy),
+# and exit fast when the toolchain is absent instead of paying for a multi-second CLI regenerate that
+# would only be thrown away.
 #   python:  $KOINE_PYTHON override -> python3.13 -> python3.12 -> python3.11 -> python3 -> python
 #   mypy:    $KOINE_MYPY override -> 'mypy' on PATH -> '<resolved python> -m mypy'
 PYTHON_BIN=""
@@ -54,6 +51,11 @@ if [ -z "$PYTHON_BIN" ] || [ "${#MYPY_CMD[@]}" -eq 0 ]; then
   echo "Install Python 3.11+ and mypy (pip install mypy), or set KOINE_MYPY/KOINE_PYTHON -- CI runs this for real." >&2
   exit 3
 fi
+
+echo "==> [1/4] Regenerating Python from templates/starters/ordering"
+rm -rf "$GENERATED_DIR"
+dotnet run --project "$REPO_ROOT/src/Koine.Cli" -- build "$REPO_ROOT/templates/starters/ordering" \
+  --target python --out "$GENERATED_DIR"
 
 echo "==> [2/4] Type-checking the generated package under mypy --strict (via its shipped mypy.ini)"
 ( cd "$GENERATED_DIR" && "${MYPY_CMD[@]}" --config-file mypy.ini . )
