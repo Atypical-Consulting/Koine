@@ -265,21 +265,31 @@ export function SourceControlPanel(props: {
 
   // Discard is DESTRUCTIVE — `git restore`/`git clean` throw the working-tree bytes away for good — so
   // both Discard controls (per-row and group Discard-all, #1151) route through an explicit confirm;
-  // declining aborts with no git call. A confirmed discard runs through the same mutate() reload as
-  // every other mutation, so the groups re-derive from the post-discard repository and a git failure
-  // lands in the existing actionError alert.
-  const onDiscard = (paths: string[]) => {
+  // declining aborts with no git call. The copy adapts to what actually happens: a tracked change is
+  // REVERTED, but an untracked file has no index/HEAD state to revert to — discarding it DELETES it
+  // from disk, and the dialog must say so. A confirmed discard runs through the same mutate() reload
+  // as every other mutation, so the groups re-derive from the post-discard repository and a git
+  // failure lands in the existing actionError alert.
+  const onDiscard = (paths: string[], opts: { untracked: boolean; group?: string }) => {
     if (paths.length === 0) return; // defensive — an empty group renders no Discard-all at all
+    const single = paths.length === 1;
+    const copy = opts.untracked
+      ? {
+          title: single ? 'Delete untracked file?' : 'Delete untracked files?',
+          message: single
+            ? `Delete ${paths[0]}? This untracked file will be permanently removed.`
+            : `Delete all ${paths.length} untracked files in ${opts.group}? Each file will be permanently removed.`,
+          confirmLabel: single ? 'Delete file' : 'Delete all',
+        }
+      : {
+          title: 'Discard changes?',
+          message: single
+            ? `Discard changes to ${paths[0]}? This reverts your edits and can't be undone.`
+            : `Discard all ${paths.length} changes in ${opts.group}? This reverts every listed file and can't be undone.`,
+          confirmLabel: single ? 'Discard changes' : 'Discard all',
+        };
     void (async () => {
-      const ok = await koiConfirm({
-        title: 'Discard changes?',
-        message: `Discard changes to ${
-          paths.length === 1 ? paths[0] : `${paths.length} files`
-        }? This reverts your edits and can't be undone.`,
-        confirmLabel: 'Discard',
-        cancelLabel: 'Cancel',
-        danger: true,
-      });
+      const ok = await koiConfirm({ ...copy, cancelLabel: 'Cancel', danger: true });
       if (!ok) return; // declined — the working tree survives untouched
       await mutate(() => git.gitDiscard(folderToken, paths));
     })();
@@ -596,7 +606,7 @@ export function SourceControlPanel(props: {
               title="Discard changes"
               aria-label={`Discard ${f.relPath} changes`}
               disabled={busy}
-              onClick={() => onDiscard([f.relPath])}
+              onClick={() => onDiscard([f.relPath], { untracked: f.status === 'untracked' })}
             >
               <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
@@ -692,7 +702,7 @@ export function SourceControlPanel(props: {
                   title="Discard all changes"
                   aria-label="Discard all changes"
                   disabled={busy}
-                  onClick={() => onDiscard(paths)}
+                  onClick={() => onDiscard(paths, { untracked: label === UNTRACKED_LABEL, group: label })}
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M6.5 3h3M3.5 4.5h9M11.5 4.5l-.5 8a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1l-.5-8" />

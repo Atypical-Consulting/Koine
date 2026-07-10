@@ -543,6 +543,78 @@ describe('SourceControlPanel — Discard controls (#1151)', () => {
     // The staged copy is untouched — group discard only covers the group's own paths.
     await waitFor(() => expect(group(view.container, 'Staged Changes')!.textContent).toContain('a.koi'));
   });
+
+  test('discarding an UNTRACKED row asks with delete wording and removes the file on confirm', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([{ relPath: 'c.koi', staged: false, status: 'untracked' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Discard c.koi changes' }));
+
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['c.koi']));
+    // An untracked file has no index/HEAD state to revert to — discard means DELETE, and the confirm
+    // copy must say so instead of the tracked-file "revert your edits" phrasing.
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.message).toContain('c.koi');
+    expect(req.message).toMatch(/permanently removed/i);
+    expect(req.message).not.toMatch(/revert/i);
+    expect(req.confirmLabel).toMatch(/delete/i);
+    // The confirmed delete removes the file on the next gitStatus → the Untracked group empties away.
+    await waitFor(() => expect(group(view.container, 'Untracked')).toBeNull());
+  });
+
+  test('the Untracked group Discard-all asks with group-level delete wording', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+      { relPath: 'd.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Untracked')).not.toBeNull());
+    fireEvent.click(
+      within(group(view.container, 'Untracked')!).getByRole('button', { name: /Discard all changes/i }),
+    );
+
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['c.koi', 'd.koi']));
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.message).toMatch(/2 untracked files/i);
+    expect(req.message).toMatch(/permanently/i);
+  });
+
+  test('a failed gitDiscard surfaces the action-error alert and leaves the group intact', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    git.gitDiscard.mockRejectedValue(new Error('restore failed'));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Discard b.koi changes' }));
+
+    // The rejection lands in the same role="alert" every other mutation uses…
+    const alert = await view.findByRole('alert');
+    expect(alert.textContent).toContain('restore failed');
+    // …and the untouched file stays listed (no reload wiped the group on failure).
+    expect(group(view.container, 'Changes')!.textContent).toContain('b.koi');
+  });
+
+  test('the enabled Discard controls stay axe-clean and expose live (non-"coming soon") names', async () => {
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await waitFor(() => expect(group(view.container, 'Changes')).not.toBeNull());
+
+    // Both per-row Discards and both group Discard-alls (Changes + Untracked) are live buttons.
+    const discards = view.getAllByRole('button', { name: /^Discard / }) as HTMLButtonElement[];
+    expect(discards.length).toBe(4);
+    for (const b of discards) {
+      expect(b.disabled).toBe(false);
+      expect(b.getAttribute('aria-label')).not.toMatch(/coming soon/i);
+    }
+
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
 });
 
 describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
