@@ -10,7 +10,6 @@
 // in, never the reverse — importing back would be a cycle). The host DOM node (`#panel-contextmap`) and
 // the two navigation side-effects a graph-node click can trigger (filter to a context, jump to its `.koi`
 // declaration) are injected, so this panel never reaches into the facade's own `deps`.
-import { render } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import type { ContextMapResult, DiagramEdge, DiagramNode, SourceSpan } from '@/lsp/lsp';
@@ -21,6 +20,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { readRaw, writeRaw } from '@/shell/storage';
 import { escapeHtml, formatAclMapping, renderContextMapHtml } from '@/shell/ideUtils';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
+import { docMessage } from '@/shell/inspector/shared';
 
 /** The narrow LSP surface this panel needs — just the strategic context-map fetch. A structural subset
  *  of `InspectorControllerLsp`, defined locally (not imported) so this module never depends on the
@@ -77,18 +77,6 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
   function disposeContextMapGraph(): void {
     contextMapGraphHandle?.dispose();
     contextMapGraphHandle = null;
-  }
-
-  // Write a status/empty/error message imperatively into the host — mirrors inspectorController's own
-  // `docMessage` (this host never holds a Preact tree, so the render(null, …) unmount is a harmless no-op
-  // here too; kept for parity with the shared helper's contract in case that ever changes).
-  function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
-    render(null, view);
-    view.innerHTML = '';
-    const p = document.createElement('p');
-    p.className = kind === 'error' ? 'doc-error' : 'muted';
-    p.textContent = text;
-    view.appendChild(p);
   }
 
   // The hover tooltip for a relation edge (a context node's name is already on its box, so → null there).

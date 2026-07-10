@@ -12,9 +12,9 @@
 // `@/shell/inspectorController` (the facade wires it in, never the reverse) and never imports the other
 // task modules (contextMapPanel.tsx / activeContextController.ts / surfaceLoaders.tsx) — sub-modules
 // don't import each other; only the facade wires cross-module effects, here via the injected `hooks`.
-// `visibleCenters()` is this module's OWN small copy of the pure `deck` read (matching surfaceLoaders'
-// established precedent, #985 Task 3's module doc) rather than an injected accessor — it needs nothing
-// outside the public store.
+// The pure `deck` read behind `visibleCenters()` and the resize crossing detection are the store/facade-
+// free `inspector/shared` helpers (#1262 — formerly this module's own copies of surfaceLoaders'/the
+// facade's); this module binds them to its own store read / listener rather than injecting an accessor.
 //
 // Every DOM host this module touches is looked up here (its own `domById`/`domQueryAll` calls), never
 // injected — unlike Task 1/3's single/plural `host(s)` field, this module owns dozens of chrome nodes, so
@@ -38,6 +38,7 @@ import {
 } from '@atypical/koine-ui';
 import { isNarrowViewport } from '@/shared/breakpoint';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
+import { createNarrowCrossHandler, visibleCenters as deckVisibleCenters } from '@/shell/inspector/shared';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { readRaw, writeRaw } from '@/shell/storage';
 import {
@@ -270,13 +271,11 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   const activeOutput = (): OutputTab => store.getState().output as OutputTab;
   const activeBottomTab = (): BottomTab => store.getState().bottom;
 
-  // The center surfaces visible under the current deck state — a pure read of the shared store's `deck`
-  // field, computed locally rather than injected (mirrors surfaceLoaders' own copy, #985 Task 3's module
-  // doc): it needs nothing facade-private, so a small deliberate duplication beats a hook.
+  // The center surfaces visible under the current deck state — the shared pure `deck` read (#1262,
+  // formerly this module's own copy), bound to this module's store here so the public zero-arg
+  // `visibleCenters()` contract is unchanged.
   function visibleCenters(): CenterView[] {
-    const { deck } = store.getState();
-    if (deck.mode === 'overview') return ['visual', 'technical', 'output', 'docs'];
-    return deck.secondary ? [deck.primary, deck.secondary] : [deck.primary];
+    return deckVisibleCenters(store.getState().deck);
   }
 
   // Pure chrome: surface the active center panel + its technical sub-view and mark the tabs, all read
@@ -637,17 +636,11 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   // --- viewport-resize cross handler (#475) -----------------------------------
   // Below $bp-narrow the reading-heavy Documentation view defaults the bottom strip collapsed; re-evaluate
   // on a narrow↔wide CROSS (rotate/resize) without clobbering an explicit user preference
-  // (applyDefaultDiagCollapsed is itself gated on that). Tracks its own last-narrow-ness so a resize TICK
-  // that doesn't cross the breakpoint is a no-op — mirroring the facade's OWN (still facade-owned, for the
-  // inspector-sheet #221 concern) resize cross-guard; each module tracks this independently rather than
-  // sharing a flag, the same duplication precedent as `visibleCenters()`.
-  let wasNarrow = isNarrowViewport();
-  function onViewportResize(): void {
-    const narrow = isNarrowViewport();
-    if (narrow === wasNarrow) return; // not a cross — ignore the keyboard/address-bar resize churn
-    wasNarrow = narrow;
-    applyDefaultDiagCollapsed();
-  }
+  // (applyDefaultDiagCollapsed is itself gated on that). The crossing detection (ignore every resize TICK
+  // that doesn't cross the breakpoint) is the shared createNarrowCrossHandler (#1262); this module keeps
+  // its OWN handler + `resize` listener — independent crossing state from the facade's (still
+  // facade-owned) inspector-sheet #221 cross handler, never a shared flag.
+  const onViewportResize = createNarrowCrossHandler(() => applyDefaultDiagCollapsed());
 
   // --- boot --------------------------------------------------------------------
   // Boot the center chrome into the restored center pane (no fetch) + mount the Deck. The center is

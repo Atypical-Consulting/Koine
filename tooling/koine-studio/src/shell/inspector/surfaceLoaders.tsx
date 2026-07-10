@@ -53,6 +53,7 @@ import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
+import { contextWorkspaceKey, docMessage, visibleCenters as deckVisibleCenters } from '@/shell/inspector/shared';
 import {
   applyOutputTreeEmphasis,
   ensureOutputScaffold,
@@ -210,34 +211,11 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   // touching a dead host.
   const lifecycle = createLifecycleGuard();
 
-  // The center surfaces visible under the current deck state — a pure read of the shared store's `deck`
-  // field, computed locally rather than injected: it needs nothing facade-private (mirrors the facade's
-  // OWN `visibleCenters`, which stays there too for its chrome functions — a small, deliberate duplication
-  // of a 4-line pure function rather than a hook, matching contextMapPanel/activeContextController's own
-  // preference for reading public store fields directly over wrapping them in injected accessors).
+  // The center surfaces visible under the current deck state — the shared pure `deck` read (#1262,
+  // formerly this module's own copy, mirroring centerDeckController's), bound to this module's store here
+  // so the loaders' zero-arg call sites are unchanged.
   function visibleCenters(): CenterView[] {
-    const { deck } = store.getState();
-    if (deck.mode === 'overview') return ['visual', 'technical', 'output', 'docs'];
-    return deck.secondary ? [deck.primary, deck.secondary] : [deck.primary];
-  }
-
-  /** The per-workspace storage key for the active scope's diagram layout — mirrors Task 2's own
-   *  `contextWorkspaceKey` (both independently derive it from the same injected `folderRootToken`, rather
-   *  than this module importing Task 2's). */
-  function contextWorkspaceKey(): string {
-    return deps.folderRootToken() || 'scratch';
-  }
-
-  // Write a status/empty/error message imperatively into a host that may currently hold a Preact tree —
-  // mirrors the facade's own `docMessage` (and contextMapPanel's copy of it): unmounting any prior Preact
-  // tree FIRST is load-bearing so a raw innerHTML write and the reconciler never fight over the same node.
-  function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'error' = 'muted'): void {
-    render(null, view);
-    view.innerHTML = '';
-    const p = document.createElement('p');
-    p.className = kind === 'error' ? 'doc-error' : 'muted';
-    p.textContent = text;
-    view.appendChild(p);
+    return deckVisibleCenters(store.getState().deck);
   }
 
   // The Preact counterpart to docMessage: paint a panel into a host that may currently hold the raw
@@ -408,7 +386,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       // Scope persisted node positions to this workspace so a folder restores its own manual layout, and
       // inject the matching layout store: a committable koine.layout.json at the folder root when one is
       // open, else browser storage (web/scratch mode).
-      setDiagramPersistScope(contextWorkspaceKey());
+      setDiagramPersistScope(contextWorkspaceKey(deps.folderRootToken()));
       setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
       // renderDiagrams itself suspends again internally (a dynamic import, a layout-store load) before it
       // mounts into diagramsView — its own `isCurrent` gate must also see the lifecycle guard's disposed
