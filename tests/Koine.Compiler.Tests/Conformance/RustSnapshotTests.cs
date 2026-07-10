@@ -1203,6 +1203,104 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// A read model whose projected (derived) field is optional-declared with a <c>.trim()</c>-yielding
+    /// body (<c>nickname</c>), alongside a non-optional-declared sibling with the same body (<c>slug</c>).
+    /// </summary>
+    private const string OptionalDerivedStringReadModelFixture = """
+        context Shop {
+          aggregate Shop root Person {
+            entity Person identified by PersonId {
+              name: String
+            }
+          }
+
+          readmodel PersonSummary from Person {
+            id
+            nickname: String? = name.trim
+            slug:     String  = name.trim
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1349: <c>OwnDerived</c> — the read-model dual of <c>WriteDerived</c> (#1332) — must own an
+    /// optional-declared <c>String?</c> projected field's <c>.trim()</c>-yielding borrowed <c>&amp;str</c>
+    /// body via <c>.to_string()</c> (gated on the field's underlying, non-optional declared type, not the
+    /// declared type itself) and <c>Some(...)</c>-wrap the owned result — not the bare <c>.clone()</c> a
+    /// borrowed <c>&amp;str</c> cannot satisfy against a declared <c>Option&lt;String&gt;</c>. <c>slug</c>
+    /// is the non-optional-declared sibling, pinned unchanged alongside the fix.
+    /// </summary>
+    [Fact]
+    public void Rust_read_model_optional_derived_string_field_owns_and_wraps_trim_result()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedStringReadModelFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("nickname: Some((src.name().trim()).to_string()),");
+        shop.ShouldContain("slug: (src.name().trim()).to_string(),");
+        shop.ShouldNotContain("(src.name().trim()).clone()");
+    }
+
+    /// <summary>
+    /// Three more <c>OwnDerived</c> shapes beyond the <c>.trim()</c> case: an optional-declared projected
+    /// field whose body is a bare (no method call at all) String passthrough of a non-optional source
+    /// member (<c>bareName</c>), one that passes through an ALREADY optional-declared String source member
+    /// verbatim (<c>passthrough</c>), and the Copy-typed dual of the latter — a bare passthrough of an
+    /// already optional-declared <c>Int</c> member (<c>bonusOut</c>).
+    /// </summary>
+    private const string OptionalDerivedStringEdgeCasesFixture = """
+        context Shop {
+          aggregate Shop root Person {
+            entity Person identified by PersonId {
+              name:       String
+              middleName: String?
+              bonus:      Int?
+            }
+          }
+
+          readmodel PersonSummary from Person {
+            id
+            bareName:    String? = name
+            passthrough: String? = middleName
+            bonusOut:    Int?    = bonus
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1349 code-review finding: gating <c>OwnDerived</c>'s owning suffix on the projection body's
+    /// text (e.g. an <c>.EndsWith(".trim()")</c> check) is too narrow — a bare String passthrough with no
+    /// method call at all (<c>bareName</c>) renders the same borrowed-<c>&amp;str</c> accessor
+    /// (<c>src.name()</c>) and needs the same <c>.to_string()</c> ownership + <c>Some(...)</c>-wrap, or
+    /// the emitted crate fails to compile just like the original <c>.trim()</c> case. Conversely, a
+    /// projection that passes through ANOTHER already-optional-declared source member — String
+    /// (<c>passthrough</c>) or Copy-typed (<c>bonusOut</c>) alike — is already <c>Option&lt;...&gt;</c>-shaped
+    /// at its accessor (e.g. <c>src.middle_name() -&gt; &amp;Option&lt;String&gt;</c>,
+    /// <c>src.bonus() -&gt; &amp;Option&lt;i64&gt;</c>) regardless of the underlying type's String-ness or
+    /// Copy-ness — gating the Copy fast-path on the field's OWN (optional-stripped)
+    /// <c>underlyingType</c> rather than <paramref name="bodyType"/>'s own optionality would wrongly treat
+    /// that borrowed <c>&amp;Option&lt;...&gt;</c> as an already-owned Copy value and emit it completely
+    /// unwrapped. Both must be owned via a plain <c>.clone()</c> with NO <c>.to_string()</c> rewrite and NO
+    /// <c>Some(...)</c>-wrap (double-wrapping an already-<c>Option</c>-shaped value would itself fail to
+    /// compile).
+    /// </summary>
+    [Fact]
+    public void Rust_read_model_optional_derived_field_owns_bare_string_and_passes_through_optional_body_unwrapped()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedStringEdgeCasesFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("bare_name: Some((src.name()).to_string()),");
+        shop.ShouldContain("passthrough: (src.middle_name()).clone(),");
+        shop.ShouldNotContain("Some((src.middle_name()).clone())");
+        shop.ShouldContain("bonus_out: (src.bonus()).clone(),");
+        shop.ShouldNotContain("Some((src.bonus()).clone())");
+        shop.ShouldNotContain("bonus_out: src.bonus(),");
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {
