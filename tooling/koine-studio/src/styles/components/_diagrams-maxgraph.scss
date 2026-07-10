@@ -157,10 +157,22 @@ $ddd-kinds: (
 }
 
 /* Cross-highlight the node matching the current selection (#142, Task 4). The class is toggled by
-   inspectorController.applySelectionHighlight via the `.koi-svg-node[data-qname]` hook on the label. */
+   inspectorController.applySelectionHighlight via the `.koi-svg-node[data-qname]` hook on the label.
+   `.koi-node` sets `overflow: hidden` to clip its label text, which ALSO clips an *outer* box-shadow
+   entirely (#1294, the same bug #1210 fixed for `.is-scoped` below) — so the ring must be `inset` to
+   live inside the border box instead. */
 .koi-node.is-selected {
   border-color: var(--koi-accent);
-  box-shadow: 0 0 0 2px var(--koi-accent);
+  box-shadow: inset 0 0 0 2px var(--koi-accent);
+}
+
+/* A `[data-kind='context']` node's own fill/border IS `--koi-accent` (see the tile rule above), so a
+   same-colour selection ring would have ~1.0 contrast against its own background — swap to
+   `--koi-on-accent` for that one kind, mirroring #1210's contrast fix for the neighbouring `.is-scoped`
+   ring. Every other kind's fill is `--koi-ddd-*`, which already contrasts fine against `--koi-accent`. */
+.koi-node--simple[data-kind='context'].is-selected {
+  border-color: var(--koi-on-accent);
+  box-shadow: inset 0 0 0 2px var(--koi-on-accent);
 }
 
 /* Focus the active bounded-context scope on the Context Map (#1188, ADR 0009): the node for the context
