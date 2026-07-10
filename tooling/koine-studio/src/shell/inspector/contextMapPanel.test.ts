@@ -26,6 +26,9 @@ function makeOnNavigate() {
   return { setActiveContext: vi.fn(), gotoSourceSpan: vi.fn() };
 }
 
+/** A `renderContextMapGraph` call intercepted mid-flight, letting a test settle it after asserting on `isCurrent()`. */
+type CapturedRender = { isCurrent: () => boolean; resolve: (h: maxgraphRenderer.ContextMapGraphHandle | null) => void };
+
 /** Let queued microtask-chained loader promises settle (mirrors inspectorController.test.ts's flush). */
 async function flush(): Promise<void> {
   for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -112,7 +115,7 @@ describe('createContextMapPanel — superseded paint bails via the render seq', 
     const lsp = makeLsp();
     const host = makeHost();
 
-    const captured: Array<{ isCurrent: () => boolean; resolve: (h: maxgraphRenderer.ContextMapGraphHandle | null) => void }> = [];
+    const captured: CapturedRender[] = [];
     vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
     vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(
       async (_stage, _graph, isCurrent) =>
@@ -399,7 +402,7 @@ describe('createContextMapPanel — disposing mid-getMaxGraph skips the post-awa
     const host = makeHost();
     const lsp = makeLsp();
 
-    let captured: { isCurrent: () => boolean; resolve: (h: maxgraphRenderer.ContextMapGraphHandle | null) => void } | undefined;
+    let captured: CapturedRender | undefined;
     vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
     vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(
       async (container, _graph, isCurrent) =>
