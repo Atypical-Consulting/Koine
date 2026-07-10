@@ -29,6 +29,10 @@ public class DemoBuildTests
     private const string NoPythonToolchainNotice =
         "No mypy/python toolchain (set KOINE_MYPY/KOINE_PYTHON) -- CI runs this for real.";
 
+    /// <summary>Notice shown when no PHP toolchain (phpstan + a PHP interpreter) is available locally.</summary>
+    private const string NoPhpToolchainNotice =
+        "No phpstan/php toolchain (set KOINE_PHPSTAN/KOINE_PHP) -- CI runs this for real.";
+
     /// <summary>
     /// R#1073 acceptance for the TypeScript target: <c>demo/typescript/run.sh</c> regenerates
     /// <c>templates/starters/ordering</c> to TypeScript, type-checks the emitted sources plus the
@@ -50,6 +54,17 @@ public class DemoBuildTests
     [Fact]
     public void Python_demo_builds_runs_and_asserts() =>
         RunDemo("python", PythonToolchainAvailable, NoPythonToolchainNotice);
+
+    /// <summary>
+    /// R#1073 acceptance for the PHP target: <c>demo/php/run.sh</c> regenerates
+    /// <c>templates/starters/ordering</c> to PHP, runs <c>php -l</c> over every emitted file plus the
+    /// hand-written driver, type-checks the lot under <c>phpstan analyse --level max</c>, and runs the
+    /// driver under <c>php</c> — which asserts the outcomes itself and exits non-zero on any failed
+    /// assertion. Skipped (not failed) only when no phpstan/php toolchain is present locally.
+    /// </summary>
+    [Fact]
+    public void Php_demo_builds_runs_and_asserts() =>
+        RunDemo("php", PhpToolchainAvailable, NoPhpToolchainNotice);
 
     /// <summary>
     /// Shells <c>demo/&lt;demoDir&gt;/run.sh</c> from the repo root, ALWAYS (regardless of toolchain
@@ -147,6 +162,33 @@ public class DemoBuildTests
         }
 
         return TestSupport.RunProcess(python, new[] { "-m", "mypy", "--version" }) is { ExitCode: 0 };
+    }
+
+    /// <summary>
+    /// Whether a PHP toolchain (phpstan + a PHP interpreter) is available, probed the same way
+    /// <see cref="Conformance.PhpConformanceTests"/> does through <see cref="TestSupport"/>'s internal
+    /// resolvers (<c>ResolvePhp</c> / <c>ResolvePhpStan</c>): the interpreter resolves via an explicit
+    /// <c>KOINE_PHP</c> override, else a direct <c>php</c> on <c>PATH</c>; phpstan resolves via an
+    /// explicit <c>KOINE_PHPSTAN</c> override, else a direct <c>phpstan</c> on <c>PATH</c>, else
+    /// <c>vendor/bin/phpstan</c> found by walking up from the repo root.
+    /// </summary>
+    private static bool PhpToolchainAvailable() =>
+        ToolResolves("KOINE_PHP", "php") && PhpStanResolves();
+
+    private static bool PhpStanResolves()
+    {
+        if (Environment.GetEnvironmentVariable("KOINE_PHPSTAN") is { Length: > 0 })
+        {
+            return true;
+        }
+
+        if (FindOnPath("phpstan") is not null)
+        {
+            return true;
+        }
+
+        string repoRoot = TestSupport.RepoPath(".");
+        return File.Exists(Path.Combine(repoRoot, "vendor", "bin", "phpstan"));
     }
 
     /// <summary>

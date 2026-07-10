@@ -1,0 +1,12 @@
+{
+    "name": "koine/demo-php",
+    "description": "Runnable demo: templates/starters/ordering regenerated to PHP, driven and self-checked end-to-end.",
+    "type": "project",
+    "private": true,
+    "require": {
+        "php": ">=8.1"
+    },
+    "scripts": {
+        "demo": "bash run.sh"
+    }
+}

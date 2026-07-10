@@ -1,0 +1,10 @@
+# Regenerated on every run.sh — never commit the generated tree.
+/generated/
+
+# Composer dependency tree / lockfile, if a contributor ever runs `composer install` here.
+/vendor/
+composer.lock
+
+# PHPStan's incremental result cache, if it's ever run with caching enabled.
+.phpstan.cache/
+**/.phpstan.cache/
