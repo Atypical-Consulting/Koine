@@ -825,4 +825,44 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1311, Task 1 — the compound-operand coercion wrap (#1293) only fired for an arithmetic
+    /// operator (<c>isArithmetic</c>-gated), but <c>WriteBinary</c> computes <c>coerceLeft</c>/
+    /// <c>coerceRight</c> unconditionally for every binary operator, including comparisons. A comparison
+    /// whose operand is a mismatched-shape conditional (a bare <c>Int</c> identifier vs. a nested
+    /// <c>Int</c> arithmetic expression, both needing to widen against a <c>Decimal</c> sibling) fell
+    /// through to the un-fixed per-leaf <c>coerceTo</c> path, reproducing #1293's exact bug for
+    /// comparison operators.
+    /// </summary>
+    [Fact]
+    public void Comparison_operand_with_mismatched_branch_shapes_is_coerced_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    flatFee: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    isSpecial: Bool\n" +
+            "    exceedsTax: Bool = (if isSpecial then baseAmount + surcharge else flatFee) > taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the whole conditional is coerced ONCE, outside
+        // the if/else — never per-branch (which left the two branches with different Rust types), and
+        // the comparison itself still borrows (no `.clone()` on either branch, per #1282).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain(
+            "Decimal::from(if self.is_special { self.base_amount + self.surcharge } else { self.flat_fee }) > self.tax_rate");
+        rust.ShouldNotContain(".flat_fee.clone()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
