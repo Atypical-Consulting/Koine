@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { EventsPanel } from '@/model/EventsPanel';
@@ -111,5 +111,44 @@ describe('EventsPanel — Table | Flow toggle (#270)', () => {
     const { container } = render(<EventsPanel store={store} graph={graph} handlers={{ goto: () => {} }} />);
     act(() => flowBtn(container).click());
     expect(await axe(container)).toHaveNoViolations();
+  });
+});
+
+// Moved from modelTables.test.ts's `renderEventsTable` describe block when #992 task 3 retired that
+// pure-DOM builder in favor of the shared SortableTable — these assert the Events table's SPECIFIC
+// column set, empty-state text, and the select-to-inspect (`onActivate` → `handlers.onSelect`) wiring;
+// generic table behavior (keyboard access, aria-label, sort toggling, spanless rows) is covered once,
+// generically, by SortableTable.test.tsx.
+describe('EventsPanel — table (moved from modelTables.test.ts)', () => {
+  test('renders the Event · Type · Published By · Bounded Context · When columns, with an em dash for an undocumented event', () => {
+    const store = createAppStore();
+    const { container } = render(<EventsPanel store={store} graph={graph} handlers={{ goto: () => {} }} />);
+    const headers = Array.from(container.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['Event', 'Type', 'Published By', 'Bounded Context', 'When']);
+    const firstRow = Array.from(container.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
+    expect(firstRow).toEqual(['OrderPlaced', 'Domain', 'Order', 'Sales', '—']); // undocumented → em dash
+  });
+
+  test('a row click invokes goto with the row’s span AND onSelect with the event’s qualifiedName + context (loads the inspector)', () => {
+    const goto = vi.fn();
+    const onSelect = vi.fn();
+    const store = createAppStore();
+    const { container } = render(<EventsPanel store={store} graph={graph} handlers={{ goto, onSelect }} />);
+    (container.querySelectorAll('tbody tr')[0] as HTMLElement).click();
+    expect(goto).toHaveBeenCalledWith(graph.nodes.find((n) => n.qualifiedName === 'Sales.OrderPlaced')!.sourceSpan);
+    expect(onSelect).toHaveBeenCalledWith('Sales.OrderPlaced', 'Sales');
+  });
+
+  test('empty input renders the Events-specific empty-state text (no table)', () => {
+    const noEvents: DiagramGraph = {
+      nodes: [node('Order', 'Order', 'aggregate-root', 'Sales.Order', span(3))],
+      edges: [],
+    };
+    const store = createAppStore();
+    const { container } = render(<EventsPanel store={store} graph={noEvents} handlers={{ goto: () => {} }} />);
+    expect(container.querySelector('table')).toBeNull();
+    expect(container.querySelector('.koi-table-empty')!.textContent).toBe(
+      'No events yet — add a domain or integration event to your model.',
+    );
   });
 });
