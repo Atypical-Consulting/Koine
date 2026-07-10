@@ -781,6 +781,31 @@ export function init(hooks: IdeHooks = {}): () => void {
     openFolderBtn.title = 'Opening a folder needs a Chromium-based browser (try Chrome or Edge)';
   }
 
+  // Grey out the workspace-opening controls while a lock op is queued/running (#1275). The lock already
+  // serializes these entry points; without this the serialization is ILLEGIBLE — the Open-folder handler
+  // holds the lock across the native picker, so a queued op just looks like a hang. #btn-new's click is
+  // wired by commandWiring, but its busy chrome is lock-derived state owned here beside the lock. On
+  // idle, Open-folder restores the capability gate captured just above (a drained queue must not
+  // resurrect a button a folder-less host permanently disabled). Unsubscribed via lifecycleBoot's
+  // disposers so a torn-down IDE can't be notified.
+  const newModelBtn = domById<HTMLButtonElement>('btn-new');
+  const openFolderIdleDisabled = openFolderBtn.disabled;
+  const openFolderIdleTitle = openFolderBtn.title;
+  const unsubWorkspaceOpBusy = workspaceOpLock.onBusyChanged((busy) => {
+    newModelBtn.disabled = busy;
+    openFolderBtn.disabled = busy || openFolderIdleDisabled;
+    for (const btn of [newModelBtn, openFolderBtn]) {
+      if (busy) {
+        btn.setAttribute('aria-disabled', 'true');
+        btn.title = 'Waiting for the current workspace operation to finish…';
+      } else {
+        btn.removeAttribute('aria-disabled');
+        btn.removeAttribute('title');
+      }
+    }
+    if (!busy && openFolderIdleTitle) openFolderBtn.title = openFolderIdleTitle;
+  });
+
   async function openFolder(): Promise<void> {
     if (!platform.canOpenFolders) {
       setStatus('opening a folder needs a Chromium-based browser', 'error');
@@ -1422,6 +1447,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     openUri,
     overlayOpen: () => overlays.overlayOpen(),
     toggleFileTree: () => layoutController.toggleFileTree(),
+    // Gates the new-model / open-folder commands (palette + chords) while a workspace-open op is
+    // queued or running (#1275) — the same lock-derived state that greys the toolbar buttons above.
+    workspaceOpBusy: () => workspaceOpLock.busy(),
     // Spotlight launcher seams (#1143): the joined model index, the host git surface, and the
     // open-file-and-reveal navigation the per-result quick actions dispatch to.
     modelIndex: () => controller.ensureModelIndex(),
@@ -1493,6 +1521,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       editorKeys: () => disposeEditorKeys(),
       statusBar: () => statusBar.dispose(),
       explorer: () => explorer.dispose(),
+      workspaceOpBusy: () => unsubWorkspaceOpBusy(),
     },
   });
 

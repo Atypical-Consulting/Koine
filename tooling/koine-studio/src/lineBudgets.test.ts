@@ -103,7 +103,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // deliberately-unlocked closures handed to createLifecycleBoot to `newModelUnlocked`/`openFolderUnlocked`.
   // The growth is the facade + the comments naming the deadlock exception. Measured end-state — the
   // facade must live here, beside the lock and above every consumer, so this cannot be extracted.
-  { file: 'src/shell/ide.tsx', maxLines: 1502 },
+  // Raised 1502 → 1531: #1275 item 2 surfaces the lock's busy state — the onBusyChanged subscription
+  // that greys out #btn-new/#btn-open-folder (aria-disabled + explanatory title, restoring the
+  // capability gate on idle), the `workspaceOpBusy` CommandWiringDeps seam, and the disposer that
+  // releases the subscription at teardown. Lock-derived chrome wired at the composition root beside
+  // the lock it reads. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1531 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.

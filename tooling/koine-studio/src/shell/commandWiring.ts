@@ -67,6 +67,12 @@ export interface CommandWiringDeps {
   /** True while the palette or a modal dialog is open — global chords don't fire through an overlay. */
   overlayOpen(): boolean;
   toggleFileTree(): void;
+  /**
+   * True while a workspace-opening operation is queued or running (workspaceOpLock.busy, #1275). Gates
+   * the `new-model` / `open-folder` commands — palette entries, chords, and toolbar dispatch — so a
+   * busy lock reads as "unavailable right now" instead of silently queueing another workspace swap.
+   */
+  workspaceOpBusy(): boolean;
 
   // --- Spotlight launcher seams (#1143) -------------------------------------
   // The launcher's live catalog + per-result effects reach the shell through these thunks (the same
@@ -129,9 +135,13 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       { id: 'redo', title: 'Redo', hint: 'mod+Shift+Z', group: 'Edit', run: () => deps.history.redo() },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void deps.format() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => deps.goHome() },
-      { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void deps.openFolder() },
+      // new-model / open-folder are when()-gated on the workspace-open lock (#1275): while an op is
+      // queued or running they leave the palette and their run()/chord dispatch is a guarded no-op.
+      // The lock still serializes everything (the gate closes no race); this only makes the wait
+      // legible instead of stacking silent deferred swaps behind e.g. an open native picker.
+      { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void deps.openFolder(), when: () => !deps.workspaceOpBusy() },
       { id: 'search', title: 'Search across files…', hint: 'mod+Shift+F', group: 'Edit', run: () => deps.search.focus() },
-      { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void deps.requestNewModel() },
+      { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void deps.requestNewModel(), when: () => !deps.workspaceOpBusy() },
       { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void deps.workspace.saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void deps.copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void deps.controller.runCheck() },
@@ -416,11 +426,14 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       e.preventDefault();
       deps.search.toggle();
     } else if (mod && e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+      // Dispatched through the registry (not deps.openFolder() directly) so the chord shares the
+      // catalog entry's when() gate — a busy workspace-open lock makes it a guarded no-op (#1275).
       e.preventDefault();
-      void deps.openFolder();
+      registry.run('open-folder');
     } else if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
+      // Same registry dispatch as open-folder above, for the same busy gate (#1275).
       e.preventDefault();
-      void deps.requestNewModel();
+      registry.run('new-model');
     } else if (mod && e.key === ',') {
       e.preventDefault();
       deps.openSettings();

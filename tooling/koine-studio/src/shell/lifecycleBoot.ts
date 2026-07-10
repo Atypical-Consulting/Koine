@@ -101,6 +101,9 @@ export interface LifecycleBootDeps {
     /** Clear the explorer's pending filter debounce, close its floating menu, and detach its root el so
      *  its persistent listeners and deferred applyFilter can't fire after teardown. (#980) */
     explorer(): void;
+    /** Release the workspaceOpLock busy subscription (the New/Open-folder toolbar greying, #1275) so a
+     *  queue draining after teardown can't notify a torn-down IDE. Order-independent of the others. */
+    workspaceOpBusy(): void;
   };
 }
 
@@ -356,6 +359,7 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       deps.disposers.editorKeys();
       deps.disposers.statusBar();
       deps.disposers.explorer();
+      deps.disposers.workspaceOpBusy();
     },
   };
 }

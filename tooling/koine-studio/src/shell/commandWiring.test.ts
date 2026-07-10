@@ -94,6 +94,8 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     openUri: vi.fn(),
     overlayOpen: vi.fn(() => false),
     toggleFileTree: vi.fn(),
+    // The workspace-open lock's busy probe (#1275): false = idle, the non-racing common case.
+    workspaceOpBusy: vi.fn(() => false),
     // Spotlight launcher seams (#1143): an empty model index, no git, a no-op reveal.
     modelIndex: vi.fn(async () => ({ glossary: { entries: [] }, byQn: new Map(), qnByCtxName: new Map() })),
     canUseGit: false,
@@ -437,6 +439,51 @@ describe('commandWiring', () => {
       vi.mocked(canStopCompile).mockReturnValue(true);
       wiring.run('stop-compile'); // enabled ⇒ fires
       expect(stopRunawayCompile).toHaveBeenCalledOnce();
+    });
+  });
+
+  // #1275: while a workspace-opening op is queued or running, the commands that would enqueue ANOTHER
+  // workspace swap are gated — the palette hides them, run() no-ops, and the chords fall through — so
+  // the serialization the lock enforces is legible instead of piling silent deferred clicks onto it.
+  describe('workspace-open busy gating (#1275)', () => {
+    it('no-ops the new-model and open-folder commands (run() + chords) while workspaceOpBusy()', () => {
+      const deps = makeDeps({ workspaceOpBusy: vi.fn(() => true) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      wiring.run('new-model');
+      wiring.run('open-folder');
+      expect(deps.requestNewModel).not.toHaveBeenCalled();
+      expect(deps.openFolder).not.toHaveBeenCalled();
+
+      // The chords dispatch through the same registry entries, so the busy gate covers them too.
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      window.dispatchEvent(key({ key: 'o', ctrlKey: true, shiftKey: true }));
+      expect(deps.requestNewModel).not.toHaveBeenCalled();
+      expect(deps.openFolder).not.toHaveBeenCalled();
+
+      // …and the palette / launcher lists mark them unavailable (filtered, like every when()-gated command).
+      const ids = wiring.getCommands().map((c) => c.id);
+      expect(ids).not.toContain('new-model');
+      expect(ids).not.toContain('open-folder');
+    });
+
+    it('re-reads the busy probe live: an idle lock restores both commands', () => {
+      let busy = true;
+      const deps = makeDeps({ workspaceOpBusy: vi.fn(() => busy) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      expect(wiring.getCommands().map((c) => c.id)).not.toContain('new-model');
+
+      busy = false; // the queue drained
+      const ids = wiring.getCommands().map((c) => c.id);
+      expect(ids).toContain('new-model');
+      expect(ids).toContain('open-folder');
+      wiring.run('open-folder');
+      expect(deps.openFolder).toHaveBeenCalledOnce();
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      expect(deps.requestNewModel).toHaveBeenCalledOnce();
     });
   });
 
