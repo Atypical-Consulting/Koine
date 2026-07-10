@@ -373,7 +373,7 @@ internal sealed class ExpressionChecker
             return; // same declared type
         }
 
-        var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+        var verb = DescribeBinaryOp(b.Op).Verb;
         if (leftDecl is { IsQuantity: true } && rightDecl is { IsQuantity: true })
         {
             Report(DiagnosticCodes.QuantityTypeMismatch,
@@ -493,29 +493,33 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        var verb = b.Op == BinaryOp.Mul ? "multiply" : "divide";
+        var verb = DescribeBinaryOp(b.Op).Verb;
         Report(DiagnosticCodes.ValueObjectMulDivMismatch,
             $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; no target ever generates a "
             + "'*'/'/' operator between two value-like operands, even of the SAME declared type", b);
     }
 
     /// <summary>
-    /// #1290: an entity's (or aggregate's) <c>+</c>/<c>-</c> has no lowering in ANY target — unlike a
-    /// value object/quantity, which at least supports same-declared-type addition/subtraction in some
-    /// cases (<see cref="CheckValueObjectTypeMismatch"/>), an entity NEVER has a generated arithmetic
-    /// operator, regardless of what the other operand is. <see cref="TypeResolver.IsValueLike"/> returns
-    /// <c>false</c> for <see cref="TypeKind.Entity"/>/<see cref="TypeKind.Aggregate"/>, so
-    /// <see cref="CheckValueObjectTypeMismatch"/> bails out entirely as soon as either operand is an
-    /// entity — entity-typed fields are legal Koine syntax (an entity may own value objects, enums,
-    /// primitives, and child entities of its own aggregate as fields, per
-    /// <c>ReferenceDisciplineAnalyzer.CheckEntityReferences</c>), so a <c>derived</c> member referencing
-    /// such a field via <c>+</c>/<c>-</c> previously compiled with zero diagnostics and failed downstream
-    /// with a real C# CS0019 (this issue's own repro) or a Rust E0308. Reject it here, target-agnostically,
-    /// before any emitter ever sees the expression — unconditionally of the other operand's type: unlike
+    /// #1290/#1300: an entity's (or aggregate's) <c>+</c>/<c>-</c>/<c>*</c>/<c>/</c> has no lowering in
+    /// ANY target — unlike a value object/quantity, which at least supports same-declared-type
+    /// addition/subtraction (<see cref="CheckValueObjectTypeMismatch"/>) or scalar scaling
+    /// (<see cref="CheckValueObjectScalarArithmetic"/>) in some cases, an entity NEVER has a generated
+    /// arithmetic operator for ANY binary operator, regardless of what the other operand is.
+    /// <see cref="TypeResolver.IsValueLike"/> returns <c>false</c> for
+    /// <see cref="TypeKind.Entity"/>/<see cref="TypeKind.Aggregate"/>, so
+    /// <see cref="CheckValueObjectTypeMismatch"/> and <see cref="CheckValueObjectScalarArithmetic"/> both
+    /// bail out entirely as soon as either operand is an entity — entity-typed fields are legal Koine
+    /// syntax (an entity may own value objects, enums, primitives, and child entities of its own
+    /// aggregate as fields, per <c>ReferenceDisciplineAnalyzer.CheckEntityReferences</c>), so a
+    /// <c>derived</c> member referencing such a field via any of <c>+</c>/<c>-</c>/<c>*</c>/<c>/</c>
+    /// previously compiled with zero diagnostics and failed downstream with a real C# CS0019 (#1290's and
+    /// this issue's own repros) or a Rust E0308. Reject it here, target-agnostically, before any emitter
+    /// ever sees the expression — unconditionally of the other operand's type: unlike
     /// <see cref="CheckValueObjectTypeMismatch"/>'s same-declared-type early return, entity-vs-entity of
-    /// the SAME type is ALSO rejected, since entities have no <c>+</c>/<c>-</c> operator regardless of a
-    /// type match. <c>==</c>/<c>!=</c> (identity comparison) is untouched — this check only looks at
-    /// <see cref="BinaryOp.Add"/>/<see cref="BinaryOp.Sub"/>.
+    /// the SAME type is ALSO rejected, since entities have no arithmetic operator regardless of a type
+    /// match. <c>==</c>/<c>!=</c> (identity comparison) is untouched — this check only looks at
+    /// <see cref="BinaryOp.Add"/>/<see cref="BinaryOp.Sub"/>/<see cref="BinaryOp.Mul"/>/
+    /// <see cref="BinaryOp.Div"/>.
     ///
     /// Both operands are resolved via <see cref="ResolveDecl"/> — the SAME context-aware resolution
     /// <see cref="ResolveValueObject"/> and #1266/#1284 already established.
@@ -527,11 +531,15 @@ internal sealed class ExpressionChecker
     /// parameter typed with an aggregate's name is NOT covered by <c>ReferenceDisciplineAnalyzer</c> at
     /// all (it only guards entity fields, value-object members, domain-event fields, and
     /// command/factory parameters) — so this disjunct is this check's ONLY guard against an
-    /// aggregate-typed <c>operation</c> parameter reaching <c>+</c>/<c>-</c>.
+    /// aggregate-typed <c>operation</c> parameter reaching any of these operators.
+    ///
+    /// #1300 widened this from Add/Sub-only to also cover Mul/Div, reusing KOI0220 rather than a new
+    /// code — it's one semantic concept ("entities/aggregates never have a generated arithmetic
+    /// operator"), not four.
     /// </summary>
     private void CheckEntityOperandArithmetic(BinaryExpr b, TypeScope scope)
     {
-        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub))
+        if (b.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div))
         {
             return;
         }
@@ -550,7 +558,7 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+        (string verb, string symbol) = DescribeBinaryOp(b.Op);
         var culprit = leftKind is not null && rightKind is not null
             ? $"'{left.Name}' ({leftKind}) and '{right.Name}' ({rightKind})"
             : leftKind is not null
@@ -558,7 +566,7 @@ internal sealed class ExpressionChecker
                 : $"'{right.Name}' ({rightKind})";
         Report(DiagnosticCodes.EntityOperandArithmetic,
             $"cannot {verb} '{left.Name}' and '{right.Name}'; {culprit} — entities and aggregates never "
-            + "have a generated '+'/'-' operator, regardless of the other operand", b);
+            + $"have a generated '{symbol}' operator, regardless of the other operand", b);
     }
 
     /// <summary>"entity"/"aggregate" for <see cref="DiagnosticCodes.EntityOperandArithmetic"/>'s
@@ -569,6 +577,17 @@ internal sealed class ExpressionChecker
         EntityDecl => "entity",
         AggregateDecl => "aggregate",
         _ => null
+    };
+
+    /// <summary>The plain-English verb and operator symbol for a binary arithmetic
+    /// <paramref name="op"/> (Add/Sub/Mul/Div), shared by every diagnostic message in this file that
+    /// names the offending operator.</summary>
+    private static (string Verb, string Symbol) DescribeBinaryOp(BinaryOp op) => op switch
+    {
+        BinaryOp.Add => ("add", "+"),
+        BinaryOp.Sub => ("subtract", "-"),
+        BinaryOp.Mul => ("multiply", "*"),
+        _ => ("divide", "/"),
     };
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)

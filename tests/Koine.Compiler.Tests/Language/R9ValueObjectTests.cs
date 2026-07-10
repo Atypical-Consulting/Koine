@@ -973,6 +973,199 @@ public class R9ValueObjectTests
     }
 
     // ======================================================================
+    // #1300 — the */÷ sibling gap #1290's own code-review pass found but left out of its own
+    // +/- -only scope: entities and aggregates never have ANY generated arithmetic operator, so
+    // */÷ with an entity-typed operand is just as unreachable in any target as +/- was.
+    // CheckEntityOperandArithmetic's guard now covers all four operators.
+    // ======================================================================
+
+    /// <summary>Shared fixture: two Items (entity), same declared type, combined via <paramref
+    /// name="op"/> on line 6 (this issue's own repro, at its default `*`).</summary>
+    private static string SameTypeEntitySrc(string op = "*") =>
+        "context Shop {\n" +
+        "  aggregate CartAgg root Cart {\n" +
+        "    entity Cart identified by CartId {\n" +
+        "      item1: Item\n" +
+        "      item2: Item\n" +
+        $"      bad: Item = item1 {op} item2\n" +
+        "    }\n" +
+        "    entity Item identified by ItemId {\n" +
+        "      name: String\n" +
+        "    }\n" +
+        "  }\n" +
+        "}\n";
+
+    /// <summary>Shared fixture: a cross-aggregate reference (the `or AggregateDecl` disjunct)
+    /// combined with a value object via <paramref name="op"/> on line 9.</summary>
+    private static string AggregateOperandSrc(string op = "*") =>
+        "context Sales {\n" +
+        "  value Money {\n" +
+        "    amount: Decimal\n" +
+        "  }\n" +
+        "  aggregate Orders root Order {\n" +
+        "    entity Order identified by OrderId {\n" +
+        "      related: Customers\n" +
+        "      fee:     Money\n" +
+        $"      bad:     Money = related {op} fee\n" +
+        "    }\n" +
+        "  }\n" +
+        "  aggregate Customers root Customer {\n" +
+        "    entity Customer identified by CustomerId {\n" +
+        "      name: String\n" +
+        "    }\n" +
+        "  }\n" +
+        "}\n";
+
+    [Fact]
+    public void Same_type_entity_multiplication_is_also_rejected()
+    {
+        // This issue's own repro: `item1 * item2`, both Item (entity), same declared type. Message
+        // assertions lock the verb/symbol pairing so a Mul/Div transposition in DescribeBinaryOp
+        // would fail this test.
+        var result = new KoineCompiler().Compile(SameTypeEntitySrc("*"), new CSharpEmitter());
+        result.Success.ShouldBeFalse();
+
+        var diag = result.Diagnostics.Single(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+        diag.Message.ShouldContain("Item");
+        diag.Message.ShouldContain("multiply");
+        diag.Message.ShouldContain("'*'");
+        diag.Line.ShouldBe(6); // the `bad: Item = item1 * item2` line
+    }
+
+    [Fact]
+    public void Entity_divided_by_entity_of_the_same_type_is_rejected()
+    {
+        var diag = Diagnose(SameTypeEntitySrc("/")).Single(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+        diag.Message.ShouldContain("divide");
+        diag.Message.ShouldContain("'/'");
+    }
+
+    [Fact]
+    public void Entity_multiplied_by_scalar_is_rejected()
+    {
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item: Item
+                  bad:  Item = item * 2
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Scalar_divided_by_entity_is_rejected()
+    {
+        // `2 / item` — reversed operand order, scalar on the LEFT.
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item: Item
+                  bad:  Item = 2 / item
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Value_object_multiplied_by_entity_is_rejected_regardless_of_operand_order()
+    {
+        // `fee * item` — reversed operand order, value object on the LEFT. Mirrors
+        // Value_object_plus_entity_is_rejected_regardless_of_operand_order's +/- coverage of the
+        // same order-independence, for `*`.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+              }
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item: Item
+                  fee:  Money
+                  bad:  Money = fee * item
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_typed_operand_is_also_rejected_via_mul()
+    {
+        // Mirrors Aggregate_typed_operand_is_also_rejected (the +/- coverage for the `or
+        // AggregateDecl` disjunct) but via `*` — an aggregate has no generated arithmetic
+        // operator either, for any binary operator.
+        Diagnose(AggregateOperandSrc("*")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_typed_operand_is_also_rejected_via_div()
+    {
+        Diagnose(AggregateOperandSrc("/")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Value_object_scalar_scaling_remains_unaffected_by_the_widened_entity_check()
+    {
+        // KOI0215/KOI0216 (CheckValueObjectScalarArithmetic) still exclusively owns
+        // value-object-vs-scalar */÷ scaling; widening CheckEntityOperandArithmetic to Mul/Div
+        // must NOT also trip KOI0220 for a model with no entity/aggregate operand at all.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                doubled: Money = fee * 2
+                halved:  Money = fee / 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Entity_mul_div_operand_arithmetic_is_rejected_before_reaching_any_code_emitter()
+    {
+        var src = SameTypeEntitySrc("*");
+        var compiler = new KoineCompiler();
+        AssertRejected(compiler.Compile(src, new CSharpEmitter()));
+        AssertRejected(compiler.Compile(src, new TypeScriptEmitter()));
+        AssertRejected(compiler.Compile(src, new PythonEmitter()));
+        AssertRejected(compiler.Compile(src, new PhpEmitter()));
+        AssertRejected(compiler.Compile(src, new RustEmitter()));
+        AssertRejected(compiler.Compile(src, new JavaEmitter()));
+        AssertRejected(compiler.Compile(src, new KotlinEmitter()));
+
+        static void AssertRejected(CompileResult result)
+        {
+            result.Success.ShouldBeFalse();
+            result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+            result.Files.ShouldBeEmpty();
+        }
+    }
+
+    // ======================================================================
     // Regressions found by the R9 review
     // ======================================================================
 
