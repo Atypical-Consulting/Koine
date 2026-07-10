@@ -373,7 +373,7 @@ internal sealed class ExpressionChecker
             return; // same declared type
         }
 
-        var verb = b.Op == BinaryOp.Add ? "add" : "subtract";
+        var verb = DescribeBinaryOp(b.Op).Verb;
         if (leftDecl is { IsQuantity: true } && rightDecl is { IsQuantity: true })
         {
             Report(DiagnosticCodes.QuantityTypeMismatch,
@@ -493,7 +493,7 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        var verb = b.Op == BinaryOp.Mul ? "multiply" : "divide";
+        var verb = DescribeBinaryOp(b.Op).Verb;
         Report(DiagnosticCodes.ValueObjectMulDivMismatch,
             $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; no target ever generates a "
             + "'*'/'/' operator between two value-like operands, even of the SAME declared type", b);
@@ -533,10 +533,9 @@ internal sealed class ExpressionChecker
     /// command/factory parameters) — so this disjunct is this check's ONLY guard against an
     /// aggregate-typed <c>operation</c> parameter reaching any of these operators.
     ///
-    /// #1300 widened this from Add/Sub-only to also cover Mul/Div — entities have no scalar-scaling
-    /// escape hatch the way value objects do, so the same "no generated operator, period" rule applies
-    /// uniformly across all four binary arithmetic operators. Reuses KOI0220 (not a new code) since it's
-    /// one semantic concept ("entities/aggregates never have a generated arithmetic operator"), not four.
+    /// #1300 widened this from Add/Sub-only to also cover Mul/Div, reusing KOI0220 rather than a new
+    /// code — it's one semantic concept ("entities/aggregates never have a generated arithmetic
+    /// operator"), not four.
     /// </summary>
     private void CheckEntityOperandArithmetic(BinaryExpr b, TypeScope scope)
     {
@@ -559,13 +558,7 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        (string verb, string symbol) = b.Op switch
-        {
-            BinaryOp.Add => ("add", "+"),
-            BinaryOp.Sub => ("subtract", "-"),
-            BinaryOp.Mul => ("multiply", "*"),
-            _ => ("divide", "/"),
-        };
+        (string verb, string symbol) = DescribeBinaryOp(b.Op);
         var culprit = leftKind is not null && rightKind is not null
             ? $"'{left.Name}' ({leftKind}) and '{right.Name}' ({rightKind})"
             : leftKind is not null
@@ -584,6 +577,17 @@ internal sealed class ExpressionChecker
         EntityDecl => "entity",
         AggregateDecl => "aggregate",
         _ => null
+    };
+
+    /// <summary>The plain-English verb and operator symbol for a binary arithmetic
+    /// <paramref name="op"/> (Add/Sub/Mul/Div), shared by every diagnostic message in this file that
+    /// names the offending operator.</summary>
+    private static (string Verb, string Symbol) DescribeBinaryOp(BinaryOp op) => op switch
+    {
+        BinaryOp.Add => ("add", "+"),
+        BinaryOp.Sub => ("subtract", "-"),
+        BinaryOp.Mul => ("multiply", "*"),
+        _ => ("divide", "/"),
     };
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
