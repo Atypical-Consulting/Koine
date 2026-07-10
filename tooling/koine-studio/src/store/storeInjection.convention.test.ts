@@ -51,6 +51,20 @@ describe('store injection convention (issue #760)', () => {
       .filter((f) => IMPORT_SINGLETON_RE.test(readFileSync(f, 'utf8')))
       .map((f) => relative(ROOT, f).split(sep).join('/'))
       .sort();
-    expect(importers).toEqual(ALLOWLIST);
+    // Custom failure message: the bare array diff Vitest prints below is accurate but doesn't say
+    // *what to do about it*, so spell that out for whoever breaks this next.
+    const message =
+      `store injection convention (issue #760) violated.\n\n` +
+      `Controllers and panels must take the store as an injected dependency (\`store: AppStore\`), ` +
+      `not read the \`appStore\` singleton directly — see src/shell/inspectorController.tsx, ` +
+      `src/model/domainNavigator.ts, src/shell/guardedLoad.ts for the pattern.\n\n` +
+      `Only the files listed in ALLOWLIST above may \`import { appStore } from '@/store'\`. If the ` +
+      `diff below shows a NEW file, either:\n` +
+      `  1. inject the store instead of importing the singleton, or\n` +
+      `  2. if this really is composition-root/binding code, add it to ALLOWLIST here with a ` +
+      `comment explaining why.\n` +
+      `If the diff shows a file MISSING that you just converted to injection, remove it from ` +
+      `ALLOWLIST alongside the conversion.`;
+    expect(importers, message).toEqual(ALLOWLIST);
   });
 });

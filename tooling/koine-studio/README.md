@@ -108,6 +108,30 @@ a vitest guard that fails if a new `import { appStore } from '@/store'` appears 
 pattern as the `Platform`-port seam guard above. Growing or shrinking that allowlist is a deliberate,
 reviewed edit to the test, not an incidental one.
 
+Beyond the composition root and the `useAppStore` binding, the allowlist currently has **12 entries**
+(`storeInjection.convention.test.ts`'s `ALLOWLIST` array is the source of truth — read it there rather
+than trusting this paragraph to stay in sync). They fall into three groups:
+
+- **Composition root / binding** (already covered above): `src/main.ts`, `src/shell/ide.tsx`,
+  `src/store/hooks.ts`.
+- **Already injectable, singleton only as a default value**: `src/ai/aiPanel.ts`,
+  `src/shell/explorer.tsx`, `src/shell/ExplorerPanel.tsx` take the store as a parameter/prop and fall
+  back to the singleton (e.g. `props.store ?? appStore`) only when the caller doesn't supply one — they
+  already support injection, so converting them further is lower priority than a hardcoded read.
+- **Un-converted holdouts** — hardcoded ambient reads (`appStore.getState()`/`.subscribe()`) with no
+  injection point at all, the same shape `src/shell/editorSession.tsx` was in before this issue
+  converted it: `src/settings/settingsPage.tsx`, `src/settings/theme.ts`, `src/shell/lifecycleBoot.ts`,
+  `src/shell/canvasWrite.tsx`, `src/shell/layout.ts`, `src/diagrams/diagramContract.ts`. Converting
+  these six is **opportunistic** future work — alongside the `ide.tsx` decomposition and issue #480 —
+  not a big-bang sweep done as part of this issue; the lasting value delivered here is the guard test
+  plus finishing the one holdout (`editorSession.tsx`) this issue was actually scoped to fix.
+
+Separately, dozens of files import *types* (`AppState`, `AppStore`) or the `createAppStore` factory
+from `@/store`/`@/store/index` without touching the singleton — 32 non-test files, as counted at the
+time of writing. Those are sanctioned and out of scope for this convention: the guard test only
+pattern-matches an `import { appStore … }` singleton import, not other named imports from the module,
+so a type-only or factory import never trips it and needs no allowlist entry.
+
 ## How it works
 
 - The Rust host (`src-tauri/src/lib.rs`) spawns the Koine LSP lazily on the `lsp_start`
