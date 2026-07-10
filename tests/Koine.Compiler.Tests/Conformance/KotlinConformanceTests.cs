@@ -232,6 +232,164 @@ public class KotlinConformanceTests
     }
 
     /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in numeric
+    /// type (a non-optional <c>Int</c> branch against a <c>Decimal</c> sibling) must widen the <c>Int</c>
+    /// branch to <c>java.math.BigDecimal.valueOf(...)</c> so both <c>if</c>/<c>else</c> arms share a type —
+    /// Kotlin's <c>if</c>-expression (like Java's ternary) infers a least-upper-bound type across both arms
+    /// that a bare <c>Long</c>/<c>BigDecimal</c> mismatch does not resolve to something assignable to the
+    /// target <c>BigDecimal</c> member. Before the fix this emitted an unreconciled
+    /// <c>if (flag) this.amount else this.amountDecimal</c> that <c>kotlinc</c> rejects.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_emits_compiling_kotlin()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    amountDecimal: Decimal\n" +
+            "    total: Decimal = if amount > 0 then amount else amountDecimal\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("java.math.BigDecimal.valueOf(");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in
+    /// optionality (a non-optional branch against an optional sibling of the SAME underlying type) is
+    /// already <c>kotlinc</c>-clean with no emitter change: Kotlin's <c>if</c>-expression infers <c>T?</c>
+    /// as the least-upper-bound of a <c>T</c> arm and a <c>T?</c> arm, and a plain non-nullable <c>T</c> is
+    /// directly assignable wherever <c>T?</c> is expected — unlike Rust's <c>Option&lt;T&gt;</c> or Java's
+    /// <c>Optional&lt;T&gt;</c>, which are distinct nominal types that need an explicit wrap. This guards
+    /// that Kotlin keeps taking the no-op path (no wrap emitted) for this shape.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_optionality_only_mismatch_emits_compiling_kotlin()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    total: Int? = if amount > 0 then amount else bonus\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344 (the issue's exact repro): a <c>ConditionalExpr</c> derived-member body whose branches
+    /// disagree in BOTH numeric type and optionality at once — a non-optional <c>Decimal</c> branch against
+    /// an optional <c>Int</c> sibling — must null-safe-map-widen the optional <c>Int</c> branch
+    /// (<c>?.let { java.math.BigDecimal.valueOf(it) }</c>) so both <c>if</c>/<c>else</c> arms are
+    /// <c>BigDecimal?</c>-compatible; the non-optional <c>Decimal</c> branch needs no wrap since Kotlin's
+    /// <c>if</c>-expression LUB already widens <c>BigDecimal</c>/<c>BigDecimal?</c> to <c>BigDecimal?</c>.
+    /// Before the fix Kotlin rendered a bare <c>if (cond) this.decimalAmount else this.intBonus</c> — a
+    /// <c>BigDecimal</c> against a bare <c>Long?</c> — which <c>kotlinc</c> rejects.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_emits_compiling_kotlin()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    decimalAmount: Decimal\n" +
+            "    intBonus: Int?\n" +
+            "    total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("?.let { java.math.BigDecimal.valueOf(it) }");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: the <c>needsWiden</c> widen must apply against an OPTIONAL <c>Decimal?</c> sibling too
+    /// (not just a non-optional one) — a non-optional <c>Int</c> branch against a <c>Decimal?</c> sibling
+    /// must still widen to <c>java.math.BigDecimal.valueOf(...)</c>; no further wrap is needed on either
+    /// arm since Kotlin's <c>if</c>-expression LUB already widens a bare <c>BigDecimal</c> next to a
+    /// <c>BigDecimal?</c> sibling to <c>BigDecimal?</c>. Mirrors the Rust/Java <c>Cash</c> fixture's
+    /// widen+wrap composition case (Kotlin, like TypeScript, never needs the wrap half — see
+    /// <see cref="Conditional_branch_optionality_only_mismatch_emits_compiling_kotlin"/>).
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_against_optional_sibling_emits_compiling_kotlin()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Cash {\n" +
+            "    amount: Int\n" +
+            "    bonusAmount: Decimal?\n" +
+            "    total: Decimal? = if amount > 0 then amount else bonusAmount\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var cash = result.Files.Single(f => f.RelativePath.EndsWith("Cash.kt", StringComparison.Ordinal)).Contents;
+        cash.ShouldContain("java.math.BigDecimal.valueOf(");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1344: a nested <c>ConditionalExpr</c> used as one branch of an outer conditional must itself
+    /// reconcile its own two arms BEFORE the outer branch is emitted, so the inner <c>if</c>-expression's
+    /// inferred (joined, #975) type lines up with the outer sibling's type. Here the inner <c>if</c> widens
+    /// <c>amount</c> (<c>Int</c>) against <c>bonus</c> (<c>Decimal</c>) to <c>Decimal</c>, which then
+    /// already matches the outer <c>else</c> branch <c>fallback: Decimal</c> with no further outer-level
+    /// reconciliation needed.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_nested_conditional_emits_compiling_kotlin()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Decimal\n" +
+            "    fallback: Decimal\n" +
+            "    total: Decimal = if amount > 0 then (if amount > 10 then amount else bonus) else fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("java.math.BigDecimal.valueOf(");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a genuine
     /// <c>kotlinc</c> check. We take a well-formed emit and corrupt one file with a deliberate syntax error;
     /// the compile must FAIL.
