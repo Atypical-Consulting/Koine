@@ -116,7 +116,8 @@ public sealed partial class RustEmitter
                 fieldType = f.Type!;
                 var expectedEnum = emit.Index.Classify(fieldType.Name) == TypeKind.Enum ? fieldType.Name : null;
                 var rendered = RustExpressionTranslator.StripOuterParens(translator.Translate(f.Projection, expectedEnum));
-                rhs = OwnDerived(rendered, fieldType, typeMapper);
+                var bodyType = translator.InferType(f.Projection);
+                rhs = OwnDerived(rendered, fieldType, bodyType, typeMapper);
             }
 
             fields.Add((RustNaming.Field(f.Name), typeMapper.Map(fieldType), rhs));
@@ -153,16 +154,24 @@ public sealed partial class RustEmitter
         : type is { Name: "String", IsOptional: false } ? access + ".to_string()"
         : access + ".clone()";
 
-    /// <summary>Owns a derived projection expression (wrapped so the suffix binds the whole expression).</summary>
-    private static string OwnDerived(string rendered, TypeRef type, RustTypeMapper typeMapper)
+    /// <summary>
+    /// Owns a derived projection expression (wrapped so the suffix binds the whole expression), gated on
+    /// the field's underlying (non-optional) declared type — not <paramref name="type"/> directly, or an
+    /// optional-declared field's borrowed-<c>&amp;str</c> <c>.trim()</c> body would fall through to a
+    /// no-op <c>.clone()</c> (#1332's <c>WriteDerived</c> fix, applied here to <c>OwnDerived</c>, its
+    /// read-model dual). <c>Some(...)</c>-wraps the owned result when <paramref name="type"/> is optional
+    /// and the projection's own inferred <paramref name="bodyType"/> is non-optional — mirroring
+    /// <see cref="SomeWrapIfNeeded"/> (#1329) — so an always-present projected value still reaches the
+    /// declared <c>Option&lt;...&gt;</c> accessor shape.
+    /// </summary>
+    private static string OwnDerived(string rendered, TypeRef type, TypeRef? bodyType, RustTypeMapper typeMapper)
     {
-        if (typeMapper.IsCopy(type))
-        {
-            return rendered;
-        }
+        var underlyingType = type.IsOptional ? type with { IsOptional = false } : type;
+        var owned = typeMapper.IsCopy(underlyingType) ? rendered
+            : underlyingType is { Name: "String" } ? "(" + rendered + ").to_string()"
+            : "(" + rendered + ").clone()";
 
-        var suffix = type is { Name: "String", IsOptional: false } ? ".to_string()" : ".clone()";
-        return "(" + rendered + ")" + suffix;
+        return SomeWrapIfNeeded(owned, type, bodyType);
     }
 
     /// <summary>The members a read model projects from (an entity adds the synthetic <c>id</c> unless it declares its own).</summary>
