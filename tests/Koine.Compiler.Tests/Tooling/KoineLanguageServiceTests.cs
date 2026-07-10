@@ -740,13 +740,18 @@ public class KoineLanguageServiceTests
         var entityLine = src.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         // The root itself renames to the new name …
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // … and its convention-linked identity type OrderId co-renames to PurchaseOrderId.
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
+        // #565 follow-up: the co-rename outcome is authoritative structured data on the result itself —
+        // Applied, with no left-behind id name — not something a caller has to re-derive from rendered text.
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+        result.LeftBehindIdName.ShouldBeNull();
 
         // The Id co-rename is the additive part of RenameEditsAt: the lower-level RenameAt (which renames
         // a single symbol uniformly) only touches the root, never the OrderId identity type.
@@ -778,12 +783,14 @@ public class KoineLanguageServiceTests
         var refLine = shipping.Split('\n')[1];
         var col = refLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(docs, "file:///shipping.koi", line: 1, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(docs, "file:///shipping.koi", line: 1, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // The OrderId co-rename fires even though shipping.koi doesn't declare the root.
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
     }
 
     [Fact]
@@ -811,13 +818,15 @@ public class KoineLanguageServiceTests
         var entityLine = ordering.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // Both the declaration (ordering.koi) AND the cross-file reference (ordering2.koi) co-rename.
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering2.koi");
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
     }
 
     [Fact]
@@ -844,14 +853,17 @@ public class KoineLanguageServiceTests
         var entityLine = ordering.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // Ordering's own OrderId co-renames …
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
         // … but Billing's unrelated, same-named OrderId is left completely untouched.
         edits.ShouldNotContain(e => e.Occurrence.Uri == "file:///billing.koi");
+        // Ordering's own co-rename applied cleanly — Billing's unrelated name never enters the outcome.
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
     }
 
     [Fact]
@@ -879,9 +891,10 @@ public class KoineLanguageServiceTests
         var entityLine = src.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // Ordering's own OrderId (inside the Ordering block) co-renames …
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
@@ -889,6 +902,7 @@ public class KoineLanguageServiceTests
         // context block — must NOT be touched: no edit should target Billing's `value OrderId` line.
         var billingLine = src.Split('\n').ToList().FindIndex(l => l.Contains("value OrderId"));
         edits.ShouldNotContain(e => e.Occurrence.Line - 1 == billingLine);
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
     }
 
     [Fact]
@@ -926,15 +940,17 @@ public class KoineLanguageServiceTests
         var entityLine = ordering.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // Ordering's own OrderId co-renames …
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
         // … but Shipping's own (independently-emitted) OrderId reference is left completely untouched,
         // even though it's reached via an explicit import.
         edits.ShouldNotContain(e => e.Occurrence.Uri == "file:///shipping.koi");
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
     }
 
     [Fact]
@@ -953,13 +969,17 @@ public class KoineLanguageServiceTests
         var entityLine = src.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // No fabricated <New>Id edit, and the Guid primitive is left alone.
         edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId");
         edits.ShouldNotContain(e => e.NewText == "Guid");
+        // No convention-linked id to begin with — the outcome is null (not "left behind").
+        result.IdCoRename.ShouldBeNull();
+        result.LeftBehindIdName.ShouldBeNull();
     }
 
     [Fact]
@@ -979,11 +999,17 @@ public class KoineLanguageServiceTests
         var entityLine = src.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId"); // collision → Id left unchanged
+        // #565 follow-up: the collision is reported as authoritative structured data — LeftBehind, with
+        // the left-behind id's (unchanged) name — instead of Studio having to re-derive it from rendered
+        // text (a rendered "id: OrderId" row + an "aggregate root" stereotype match).
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.LeftBehind);
+        result.LeftBehindIdName.ShouldBe("OrderId");
     }
 
     [Fact]
@@ -999,11 +1025,14 @@ public class KoineLanguageServiceTests
         var voLine = src.Split('\n')[1];
         var col = voLine.IndexOf("OrderId", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "RefId");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "RefId");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         // Every edit is the ordinary rename to RefId — no spurious suffixed co-rename text.
         edits.ShouldAllBe(e => e.NewText == "RefId");
+        // Not an aggregate root at all — the outcome is null, never "left behind".
+        result.IdCoRename.ShouldBeNull();
     }
 
     [Fact]
@@ -1025,13 +1054,16 @@ public class KoineLanguageServiceTests
         var enumLine = src.Split('\n')[1];
         var col = enumLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "Foo");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "Foo");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         // The enum member renames …
         edits.ShouldContain(e => e.NewText == "Foo");
         // … but the unrelated aggregate-root identity OrderId is left untouched (no spurious FooId).
         edits.ShouldNotContain(e => e.NewText == "FooId");
+        // The cursor resolved to the enum member, not the root — the outcome is null, never "left behind".
+        result.IdCoRename.ShouldBeNull();
     }
 
     // ---- Linked editing ---------------------------------------------------

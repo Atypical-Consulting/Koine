@@ -44,31 +44,35 @@ public static partial class CompilerInterop
 
     /// <summary>
     /// Workspace edit that renames the name under the cursor to <paramref name="newName"/> across the
-    /// merged workspace: <c>{ changes: { uri: TextEdit[] } }</c>, or the JSON literal <c>null</c> when
-    /// no rename applies (cursor not on a renameable name, invalid identifier, or unchanged). When the
-    /// renamed symbol is an aggregate root entity with a convention-linked <c>&lt;Root&gt;Id</c> identity,
-    /// the edit also co-renames that identity type to <c>&lt;newName&gt;Id</c> (#550).
+    /// merged workspace: <c>{ changes: { uri: TextEdit[] }, idCoRename, leftBehindIdName }</c>, or the
+    /// JSON literal <c>null</c> when no rename applies (cursor not on a renameable name, invalid
+    /// identifier, or unchanged). When the renamed symbol is an aggregate root entity with a
+    /// convention-linked <c>&lt;Root&gt;Id</c> identity, the edit also co-renames that identity type to
+    /// <c>&lt;newName&gt;Id</c> (#550) — <c>idCoRename</c>/<c>leftBehindIdName</c> report that co-rename's
+    /// authoritative outcome (<see cref="Koine.Compiler.Services.IdCoRenameOutcome"/>) so Koine Studio's
+    /// status note doesn't have to re-derive it from rendered text (#565 follow-up).
     /// </summary>
     [JSExport]
     public static string Rename(string filesJson, string activeUri, int line, int character, string newName)
     {
         try
         {
-            var edits = LanguageService.RenameEditsAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character, newName);
-            if (edits is null)
+            var result = LanguageService.RenameEditsAt(GetWarmCompilation(DeserializeFiles(filesJson)), activeUri, line, character, newName);
+            if (result is null)
             {
                 return "null";
             }
 
             // Each occurrence carries its OWN newText: the root takes newName, while a co-renamed
             // aggregate-root identity type takes <newName>Id (#550).
-            var changes = edits
+            var changes = result.Edits
                 .GroupBy(e => e.Occurrence.Uri, StringComparer.Ordinal)
                 .ToDictionary(
                     g => g.Key,
                     g => g.Select(e => new WTextEdit(RangeOf(e.Occurrence), e.NewText)).ToArray(),
                     StringComparer.Ordinal);
-            return JsonSerializer.Serialize(new WWorkspaceEdit(changes), LangJson.Default.WWorkspaceEdit);
+            var edit = new WWorkspaceEdit(changes, result.IdCoRename?.ToString(), result.LeftBehindIdName);
+            return JsonSerializer.Serialize(edit, LangJson.Default.WWorkspaceEdit);
         }
         catch
         {

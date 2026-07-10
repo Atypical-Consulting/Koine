@@ -422,32 +422,60 @@ describe('renderChangeHistory', () => {
   });
 });
 
-describe('renameStatusMessage (#550)', () => {
-  const edit = (...newTexts: string[]): WorkspaceEdit => ({
-    changes: {
-      'file:///t.koi': newTexts.map<TextEdit>((newText) => ({ range, newText })),
-    },
+describe('renameStatusMessage (#550; #565 follow-up: reads the authoritative signal, not rendered text)', () => {
+  // Only the `changes` map — the co-rename OUTCOME (`idCoRename`/`leftBehindIdName`) is set per-test,
+  // separately, so each test controls exactly what the authoritative signal says.
+  const changesOnly = (...newTexts: string[]): Record<string, TextEdit[]> => ({
+    'file:///t.koi': newTexts.map<TextEdit>((newText) => ({ range, newText })),
   });
 
-  test('nothing to flag when the convention-linked id WAS co-renamed', () => {
-    // fullElement is the aggregate root Order with an `id: OrderId` property.
-    const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit('PurchaseOrder', 'PurchaseOrderId'));
-    expect(msg).toBeNull();
+  test('nothing to flag when the outcome is Applied', () => {
+    const edit: WorkspaceEdit = { changes: changesOnly('PurchaseOrder', 'PurchaseOrderId'), idCoRename: 'Applied' };
+    expect(renameStatusMessage(fullElement, 'PurchaseOrder', edit)).toBeNull();
   });
 
-  test('flags the left-behind id when the root renamed but its <Root>Id did not', () => {
-    // A collision / ambiguous link left OrderId behind: the edit renames only the root.
-    const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit('PurchaseOrder'));
+  test('flags the left-behind id when the outcome is LeftBehind — same message text as before the #565 follow-up', () => {
+    const edit: WorkspaceEdit = { changes: changesOnly('PurchaseOrder'), idCoRename: 'LeftBehind', leftBehindIdName: 'OrderId' };
+    const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit);
     expect(msg).toBe('Renamed Order → PurchaseOrder; id type OrderId left unchanged');
   });
 
-  test('nothing to flag for a non-root element even without a co-rename', () => {
-    const entity: InspectorElement = { ...fullElement, stereotype: 'entity', properties: [{ text: 'id: OrderId', computed: false }] };
-    expect(renameStatusMessage(entity, 'Purchase', edit('Purchase'))).toBeNull();
+  test('nothing to flag when the outcome is absent (no convention-linked id to begin with)', () => {
+    const edit: WorkspaceEdit = { changes: changesOnly('Purchase') };
+    expect(renameStatusMessage(fullElement, 'Purchase', edit)).toBeNull();
   });
 
-  test('nothing to flag for a root whose identity is non-conventional', () => {
-    const root: InspectorElement = { ...fullElement, properties: [{ text: 'id: Guid', computed: false }] };
-    expect(renameStatusMessage(root, 'PurchaseOrder', edit('PurchaseOrder'))).toBeNull();
+  test('nothing to flag when the outcome is explicitly null over the wire (not applicable)', () => {
+    const edit: WorkspaceEdit = { changes: changesOnly('Purchase'), idCoRename: null };
+    expect(renameStatusMessage(fullElement, 'Purchase', edit)).toBeNull();
+  });
+
+  test('flags LeftBehind even when the element renders nothing like a convention-linked aggregate root', () => {
+    // Neither an 'aggregate root' stereotype nor an `id: <X>Id` property row — the OLD rendered-text
+    // heuristic would have bailed out at the very first check. The signal is authoritative: it still
+    // flags, and the left-behind name comes straight off the wire field (deliberately NOT
+    // `${element.name}Id`), proving the message isn't re-derived from the element at all.
+    const notObviouslyARoot: InspectorElement = {
+      ...fullElement,
+      stereotype: 'entity',
+      properties: [{ text: 'total: Money', computed: false }],
+    };
+    const edit: WorkspaceEdit = { changes: changesOnly('Purchase'), idCoRename: 'LeftBehind', leftBehindIdName: 'LegacyOrderId' };
+    const msg = renameStatusMessage(notObviouslyARoot, 'Purchase', edit);
+    expect(msg).toBe('Renamed Order → Purchase; id type LegacyOrderId left unchanged');
+  });
+
+  test('flags LeftBehind even when `changes` contains a *Id-shaped newText the OLD heuristic would have read as "co-renamed"', () => {
+    // The old code derived the decision by scanning `changes` for a `newText === \`${newName}Id\``
+    // match — here that exact text ("PurchaseOrderId") IS present, which would have suppressed the
+    // warning under the old implementation. The authoritative outcome says LeftBehind, so the warning
+    // must still fire: this is the direct proof `changes` is no longer consulted for the decision.
+    const edit: WorkspaceEdit = {
+      changes: changesOnly('PurchaseOrder', 'PurchaseOrderId'),
+      idCoRename: 'LeftBehind',
+      leftBehindIdName: 'OrderId',
+    };
+    const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit);
+    expect(msg).toBe('Renamed Order → PurchaseOrder; id type OrderId left unchanged');
   });
 });
