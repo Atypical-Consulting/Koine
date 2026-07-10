@@ -610,10 +610,47 @@ describe('commandWiring', () => {
         title: 'a.koi',
         sub: 'src',
         file: 'file:///ws/src/a.koi',
+        relPath: 'src/a.koi',
       } as unknown as CatalogEntry;
       capturedActionDeps.openFileChanges(entry);
       // Selects Source Control AND carries the file's workspace-relative path as the focus target…
       expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
+    });
+
+    it('openFileChanges reads the entry\'s first-class relPath, never re-deriving it from sub+title (#1204)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      // sub/title deliberately DISAGREE with relPath: the display split may be reformatted freely
+      // (truncated dir, decorated basename) without changing the Source-Control focus key.
+      const entry = {
+        id: 'file:x',
+        cat: 'file',
+        title: 'a.koi · modified',
+        sub: '…/deeply/nested',
+        file: 'file:///ws/src/a.koi',
+        relPath: 'src/a.koi',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openFileChanges(entry);
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
+    });
+
+    it('openFileChanges degrades to opening the panel without a focus key when relPath is missing (#1204)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'file:x',
+        cat: 'file',
+        title: 'a.koi',
+        sub: 'src',
+        file: 'file:///ws/src/a.koi',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openFileChanges(entry);
+      // Same degrade shape as viewCommit's missing hash: the panel still opens, just without scrolling.
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control');
     });
 
     it('viewCommit focuses the specific commit in Source Control, not just the panel (#1165)', () => {

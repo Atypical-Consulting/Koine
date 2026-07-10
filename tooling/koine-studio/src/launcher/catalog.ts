@@ -28,6 +28,10 @@ export interface CatalogEntry {
   keywords?: string;
   /** Workspace-relative file path (files, and symbols/events sourced from a file). */
   file?: string;
+  /** The workspace-relative path (file entries, #1204): the identity key Source-Control file rows are
+   * keyed on. First-class — carried whole from `buildCatalog`'s `fileEntries` — so consumers (the
+   * open-changes focus handoff) never re-derive it from the `sub`/`title` display split. */
+  relPath?: string;
   /** Commit sha (commit-category entries). */
   hash?: string;
   /** Rule sub-kind: `'rule'` (an invariant), `'state'` (an enum member), or `'transition'` (a real

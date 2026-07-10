@@ -286,11 +286,14 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     openFile: (entry) => {
       if (entry.file) deps.openUri(entry.file);
     },
-    // Open the SPECIFIC file's diff in Source Control (#1165), not just the panel. The workspace-relative
-    // path is reconstructed from the entry's dir (`sub`) + basename (`title`) — the same path the panel's
-    // file rows key on — since the catalog only carries the file uri.
+    // Open the SPECIFIC file's diff in Source Control (#1165), not just the panel. The entry carries the
+    // workspace-relative path first-class (`relPath`, #1204) — the same path the panel's file rows key
+    // on — so the focus key is read directly, never re-derived from the `sub`/`title` display split. An
+    // entry without one degrades to opening the panel without scrolling (viewCommit's missing-hash shape).
     openFileChanges: (entry) =>
-      deps.controller.selectRight('source-control', { file: entry.sub ? `${entry.sub}/${entry.title}` : entry.title }),
+      entry.relPath
+        ? deps.controller.selectRight('source-control', { file: entry.relPath })
+        : deps.controller.selectRight('source-control'),
     // Reveal the file in the OS file manager (#1165), capability-gated on the host — never a
     // platform.kind / token pattern-match. A host that can't reveal (the browser) degrades to an honest
     // toast instead of the old misleading "open the file in the editor".
