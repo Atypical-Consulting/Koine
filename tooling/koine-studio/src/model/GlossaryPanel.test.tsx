@@ -213,5 +213,74 @@ describe('GlossaryPanel', () => {
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: 'Currency' }), 'Committed via Ctrl+Enter.');
       expect(currencyRow.querySelector('.koi-gloss-input')).toBeNull();
     });
+
+    test('Save trims leading/trailing whitespace before displaying the committed text', () => {
+      const onSave = vi.fn();
+      const store = createAppStore();
+      const { container } = render(
+        <GlossaryPanel store={store} model={editorModel} handlers={{ ...noopHandlers, onSave }} />,
+      );
+      const currencyRow = entryRow(container, 2); // undocumented enum
+      fireEvent.click(within(currencyRow).getByRole('button', { name: 'Add description for Currency' }));
+      const input = within(currencyRow).getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.input(input, { target: { value: '  padded with whitespace  ' } });
+      fireEvent.click(within(currencyRow).getByRole('button', { name: 'Save description for Currency' }));
+
+      // The read view shows the trimmed text (matching the old renderDescription's `.trim() || null`).
+      expect(currencyRow.querySelector('.koi-gloss-doc')!.textContent).toBe('padded with whitespace');
+    });
+
+    // Regression test for the review finding: GlossaryPanel is only remounted on a debounced (350ms)
+    // onDocEdited reload, tab-open, or scroll-to-term — never as an in-place props update right after
+    // Save. So `entry.doc` (the prop) can still hold the pre-save text when the user re-opens Edit and
+    // hits Cancel within that window. Cancel must revert to what this row itself last committed, not to
+    // the (stale) prop — otherwise it silently discards the just-completed Save.
+    test('Cancel after a Save reverts to the just-saved value, not the stale entry.doc prop (#992 review)', () => {
+      const onSave = vi.fn();
+      const store = createAppStore();
+      const { container } = render(
+        <GlossaryPanel store={store} model={editorModel} handlers={{ ...noopHandlers, onSave }} />,
+      );
+      const moneyRow = entryRow(container, 1); // documented: entry.doc = 'A monetary amount.'
+
+      // Save a new description. The `entry.doc` prop is untouched (no remount) — only the row's own
+      // `draft` state reflects the new text, simulating the real debounce/LSP-round-trip window.
+      fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
+      let input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.input(input, { target: { value: 'A freshly saved amount.' } });
+      fireEvent.click(within(moneyRow).getByRole('button', { name: 'Save description for Money' }));
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: 'Money' }), 'A freshly saved amount.');
+      expect(moneyRow.querySelector('.koi-gloss-doc')!.textContent).toBe('A freshly saved amount.');
+
+      // Re-open Edit on the same row (still no remount — same stale entry.doc prop) and Cancel.
+      fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
+      input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      expect(input.value).toBe('A freshly saved amount.'); // seeded from the just-saved value, not the prop
+      fireEvent.click(within(moneyRow).getByRole('button', { name: 'Cancel editing description for Money' }));
+
+      // Must still show the just-saved text — NOT revert to the stale prop ('A monetary amount.').
+      expect(moneyRow.querySelector('.koi-gloss-doc')!.textContent).toBe('A freshly saved amount.');
+    });
+
+    test('Escape after a Save reverts to the just-saved value, not the stale entry.doc prop (#992 review)', () => {
+      const onSave = vi.fn();
+      const store = createAppStore();
+      const { container } = render(
+        <GlossaryPanel store={store} model={editorModel} handlers={{ ...noopHandlers, onSave }} />,
+      );
+      const moneyRow = entryRow(container, 1); // documented: entry.doc = 'A monetary amount.'
+
+      fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
+      let input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.input(input, { target: { value: 'A freshly saved amount.' } });
+      fireEvent.click(within(moneyRow).getByRole('button', { name: 'Save description for Money' }));
+
+      fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
+      input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.input(input, { target: { value: 'a discarded second draft' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+
+      expect(moneyRow.querySelector('.koi-gloss-doc')!.textContent).toBe('A freshly saved amount.');
+    });
   });
 });
