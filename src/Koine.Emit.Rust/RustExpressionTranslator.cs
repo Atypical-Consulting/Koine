@@ -427,9 +427,28 @@ internal sealed class RustExpressionTranslator
 
         if (expr is MemberAccessExpr or CallExpr or UnaryExpr && needsWrap)
         {
-            sb.Append("Decimal::from(");
+            // Mirrors the compound-operand branch's needsMapWrap above: an optional operand's rendering
+            // is already `Option<...>` (or a reference to one, for an accessor call), so a bare
+            // `Decimal::from(...)` prefix around it doesn't compile (E0277) — map inside the Option
+            // instead (#1354, closing the same #1343/#1347 defect class for this remaining call site).
+            var needsMapWrap = type is { IsOptional: true };
+
+            if (!needsMapWrap)
+            {
+                sb.Append("Decimal::from(");
+            }
+
             WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
-            sb.Append(')');
+
+            if (!needsMapWrap)
+            {
+                sb.Append(')');
+            }
+            else
+            {
+                sb.Append(".map(Decimal::from)");
+            }
+
             return;
         }
 
