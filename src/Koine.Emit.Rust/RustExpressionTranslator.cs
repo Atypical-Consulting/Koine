@@ -454,11 +454,13 @@ internal sealed class RustExpressionTranslator
     /// <c>coerceTo</c>. Fixed here in the emitter (not the semantic validator): a widened or
     /// optional-joined conditional is a legitimate, cross-target-sanctioned pattern (#975) — this is a
     /// Rust-only rendering gap, not a modeling error. The <c>needsWiden</c>/<c>needsOptionalWiden</c>
-    /// widen cases are mutually exclusive (they key off the same branch's own optionality), and either
-    /// composes with <c>needsSomeWrap</c> as <c>Some(Decimal::from(...))</c> (wrap outside, widen
-    /// inside) — the value must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>.
-    /// <c>needsOptionalWiden</c> never composes with <c>needsSomeWrap</c>: the former requires the
-    /// branch itself to be optional, the latter requires it to be non-optional.
+    /// widen cases are mutually exclusive (they key off the same branch's own optionality: the former
+    /// requires it non-optional, the latter requires it optional). <c>needsWiden</c> composes with
+    /// <c>needsSomeWrap</c> as <c>Some(Decimal::from(...))</c> (wrap outside, widen inside) — the value
+    /// must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>. <c>needsOptionalWiden</c>
+    /// never composes with <c>needsSomeWrap</c>: <c>needsSomeWrap</c> also requires the branch itself to
+    /// be non-optional, so a branch that is already <c>Option</c>-shaped (<c>needsOptionalWiden</c>)
+    /// never needs the extra <c>Some(...)</c> wrap.
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
