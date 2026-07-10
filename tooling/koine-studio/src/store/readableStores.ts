@@ -3,14 +3,35 @@ import type { AppState } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 import { shallowEqual, zustandToReadableStore } from '@/store/readableStoreAdapter';
 
-// The concrete `ReadableStore<T>` adapters for the two koine-ui host-adapter prototype targets (issue
-// #944) — kept out of ide.tsx (the line-budget-guarded call site, `lineBudgets.test.ts`) as their own
+// The concrete `ReadableStore<T>` adapters for the koine-ui host-adapter components (issues #944 and
+// #1244) — kept out of ide.tsx (the line-budget-guarded call site, `lineBudgets.test.ts`) as their own
 // small, independently testable module, matching the file's existing decomposition pattern (see e.g.
 // `workspaceBuffers.ts`/`workspaceMutations.ts`).
 
 /** Adapts the app store's history slice to `HistoryControls`' generic `ReadableStore<HistoryControlsSlice>`. */
 export function createHistoryControlsStore(store: StoreApi<AppState>) {
   return zustandToReadableStore(store, (s) => ({ canUndo: s.canUndo, canRedo: s.canRedo }), shallowEqual);
+}
+
+/**
+ * Adapts the workspace slice's buffer Map to `UnsavedIndicator`'s generic
+ * `ReadableStore<UnsavedIndicatorSlice>`, counting the dirty buffers down to one primitive so the
+ * component never sees Koine Studio's `Buffer` shape. Counting from the SNAPSHOT the listener receives
+ * (not via the slice's own `dirtyCount()` method, which closes over the store's live `get`) keeps each
+ * notification consistent with the state that produced it. `shallowEqual` doubles as the "only notify
+ * when the total actually changed" gate the pre-extraction component kept with its own `last` check —
+ * the common no-op buffer write (e.g. a text edit on an already-dirty file) never repaints the pill.
+ */
+export function createUnsavedIndicatorStore(store: StoreApi<AppState>) {
+  return zustandToReadableStore(
+    store,
+    (s) => {
+      let dirtyCount = 0;
+      for (const b of s.buffers.values()) if (b.dirty) dirtyCount++;
+      return { dirtyCount };
+    },
+    shallowEqual,
+  );
 }
 
 /**

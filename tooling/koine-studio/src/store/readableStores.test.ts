@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { createAppStore } from '@/store/index';
-import { createHistoryControlsStore, createWorkspaceProblemsStore } from '@/store/readableStores';
+import {
+  createHistoryControlsStore,
+  createUnsavedIndicatorStore,
+  createWorkspaceProblemsStore,
+} from '@/store/readableStores';
+import type { Buffer } from '@/shell/workspaceController';
 
 // Pins the REAL wiring end-to-end (a real createAppStore(), not a mock ReadableStore) so a change to the
 // app store's shape or to diagnosticsSummary's classification is caught here — the koine-ui side
@@ -34,6 +39,54 @@ describe('createHistoryControlsStore', () => {
     store.getState().setHistoryState({ canUndo: true, canRedo: true });
     expect(calls).toBe(1);
     expect(seen).toEqual({ canUndo: true, canRedo: true });
+  });
+});
+
+describe('createUnsavedIndicatorStore', () => {
+  // Build the real Buffer (uri, path, relPath, name, text, dirty, rootToken) and seed the whole
+  // store-owned buffer Map (#982): the slice keys buffers by uri, so build the Map from each buffer's
+  // own uri and set it wholesale.
+  const buf = (uri: string, dirty: boolean): Buffer => ({
+    uri,
+    path: uri,
+    relPath: uri,
+    name: uri,
+    text: '',
+    dirty,
+    rootToken: '',
+  });
+  const seed = (...bufs: Buffer[]): Map<string, Buffer> => new Map(bufs.map((b) => [b.uri, b]));
+
+  test('getState() counts the dirty buffers from the workspace slice', () => {
+    const store = createAppStore();
+    const readable = createUnsavedIndicatorStore(store);
+    expect(readable.getState()).toEqual({ dirtyCount: 0 });
+
+    store.setState({ buffers: seed(buf('a', true), buf('b', true), buf('c', false)) });
+    expect(readable.getState()).toEqual({ dirtyCount: 2 });
+  });
+
+  test('notifies on a dirty-count change and not on a write that leaves the count unchanged', () => {
+    const store = createAppStore();
+    const readable = createUnsavedIndicatorStore(store);
+    let seen: unknown;
+    let calls = 0;
+    readable.subscribe((s) => {
+      seen = s;
+      calls++;
+    });
+
+    store.getState().setNavAltitude('tactical'); // unrelated slice
+    expect(calls).toBe(0);
+
+    store.setState({ buffers: seed(buf('a', true)) });
+    expect(calls).toBe(1);
+    expect(seen).toEqual({ dirtyCount: 1 });
+
+    // A buffer-set churn that keeps the dirty total identical (the common no-op repaint the ORIGINAL
+    // component gated with its own `last` check) must not notify — the adapter owns that gate now.
+    store.setState({ buffers: seed(buf('b', true), buf('c', false)) });
+    expect(calls).toBe(1);
   });
 });
 

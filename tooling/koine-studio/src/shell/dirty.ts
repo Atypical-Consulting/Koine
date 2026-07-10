@@ -1,15 +1,7 @@
 // Pure helpers over the open-buffer set, factored out of the IDE shell so unsaved-work tracking
-// (the global dirty indicator, the unload guard) is unit-testable without a DOM or a live editor.
-// No imports, no app state.
-
-/**
- * The document title for `count` unsaved files: a `• ` prefix signals unsaved work, like a native
- * editor's modified-title dot. Idempotent — never double-prefixes an already-marked base.
- */
-export function titleWithDirty(base: string, count: number): string {
-  const clean = base.replace(/^• /, '');
-  return count > 0 ? `• ${clean}` : clean;
-}
+// (the unload guard) is unit-testable without a DOM or a live editor. No imports, no app state.
+// (`titleWithDirty` — the dirty-title bullet — moved to @atypical/koine-ui with its only consumer,
+// the UnsavedIndicator panel, in the #1244 third-tranche migration.)
 
 /** The slice of a `BeforeUnloadEvent` the guard touches, so it's testable with a plain fake. */
 export interface UnloadEvent {

@@ -1,19 +1,45 @@
 import { useEffect } from 'preact/hooks';
-import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '@/store/index';
-import { titleWithDirty } from '@/shell/dirty';
+import type { ReadableStore } from '../host/store';
+
+/**
+ * The slice `UnsavedIndicator` needs from a host's workspace state: the number of open buffers with
+ * unsaved changes. Deliberately NOT the host's buffer collection itself — how a "dirty buffer" is
+ * modelled (Koine Studio's `Buffer` map on the workspace slice) is host domain state; the host's
+ * adapter selector counts it down to this one primitive (see koine-studio's
+ * `createUnsavedIndicatorStore` in `src/store/readableStores.ts`).
+ */
+export interface UnsavedIndicatorSlice {
+  /** How many open buffers currently have unsaved changes. */
+  dirtyCount: number;
+}
+
+/**
+ * The document title for `count` unsaved files: a `• ` prefix signals unsaved work, like a native
+ * editor's modified-title dot. Idempotent — never double-prefixes an already-marked base. Moved here
+ * from koine-studio's `src/shell/dirty.ts` with the component (issue #1244) — this component is its
+ * only consumer, so the title wording keeps a single home.
+ */
+export function titleWithDirty(base: string, count: number): string {
+  const clean = base.replace(/^• /, '');
+  return count > 0 ? `• ${clean}` : clean;
+}
 
 // The global unsaved-work indicator as a Preact panel (#193). It drives the existing static
 // `#unsaved-indicator` button: the "N unsaved" pill text, its hidden state + aria-label, and the
-// document title's `• ` bullet (via the pure `titleWithDirty`). The button itself stays the index.html
+// document title's `• ` bullet (via the pure `titleWithDirty`). The button itself stays the host page's
 // element (so its id/class and the controller's `el(...)` lookups are untouched) — this component owns
 // it through a direct store subscription rather than a child tree, so the imperative DOM and the
 // reconciler never fight over the node, AND the pill/title update SYNCHRONOUSLY with the buffer-set
 // change (Preact's batched re-render is async; the unsaved indicator must repaint in the same tick the
-// edit lands, matching the old imperative refreshDirtyIndicator). The click wires Save-all. Replaces
-// ide.ts's imperative refreshDirtyIndicator DOM writes.
+// edit lands, matching the old imperative refreshDirtyIndicator). The click wires Save-all.
+//
+// Moved from `koine-studio/src/shell/UnsavedIndicator.tsx` (issue #1244, third-tranche extraction): the
+// component used to subscribe to the whole app store and count the dirty buffers itself; it now depends
+// on `ReadableStore<UnsavedIndicatorSlice>` (issue #944's host-adapter contract), so counting — and the
+// "only notify when the count actually changed" gate that keeps the common no-op write from repainting —
+// live in the host's adapter instead.
 export function UnsavedIndicator(props: {
-  store: StoreApi<AppState>;
+  store: ReadableStore<UnsavedIndicatorSlice>;
   host: HTMLButtonElement;
   baseTitle: string;
   onSaveAll: () => void;
@@ -29,7 +55,8 @@ export function UnsavedIndicator(props: {
 
   // Subscribe to the dirty count and drive the host button + title synchronously on every change.
   // Mirrors the exact strings the old imperative refreshDirtyIndicator produced ("N unsaved",
-  // "Save N unsaved file(s)", "• <title>"). Applied once immediately, then on each store change.
+  // "Save N unsaved file(s)", "• <title>"). Applied once immediately, then on each store change —
+  // the ReadableStore contract makes each notification a REAL change, so no last-value gate is needed.
   useEffect(() => {
     // Keep the host button labelled in BOTH states so it's never label-less. The button is the static
     // index.html element, visible before this effect first runs; storybook's a11y addon (axe) can race
@@ -51,25 +78,10 @@ export function UnsavedIndicator(props: {
         host.hidden = true;
       }
     };
-    const countOf = (b: AppState['buffers']): number => {
-      let n = 0;
-      for (const x of b.values()) if (x.dirty) n++;
-      return n;
-    };
-    let last = countOf(store.getState().buffers);
-    apply(last);
-    // The slice methods close over the store's live `get`, so `prev.dirtyCount()` would read the
-    // CURRENT buffers — compute from each snapshot's own `buffers` map instead, and only repaint when
-    // the dirty total actually changed (the common no-op render skips the title/DOM writes).
-    return store.subscribe((s) => {
-      const n = countOf(s.buffers);
-      if (n !== last) {
-        last = n;
-        apply(n);
-      }
-    });
+    apply(store.getState().dirtyCount);
+    return store.subscribe((s) => apply(s.dirtyCount));
   }, [store, host, baseTitle]);
 
-  // The button lives in index.html; this component owns it via effects, so it renders no tree of its own.
+  // The button lives in the host page; this component owns it via effects, so it renders no tree of its own.
   return null;
 }

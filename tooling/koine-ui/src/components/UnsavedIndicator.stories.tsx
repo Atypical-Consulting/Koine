@@ -1,27 +1,24 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { expect, waitFor } from 'storybook/test';
-import type { StoreApi } from 'zustand/vanilla';
-import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
-import type { Buffer } from '@/shell/workspaceController';
-import { createAppStore, type AppState } from '@/store/index';
+import { UnsavedIndicator, type UnsavedIndicatorSlice } from './UnsavedIndicator';
+import type { ReadableStore } from '../host/store';
 
 // The global unsaved-work indicator. It renders no tree of its own (returns null) — instead it OWNS a
-// static index.html `<button id="unsaved-indicator">` via effects, driving its "N unsaved" text/aria/hidden
-// state and the document title's bullet from the dirty-buffer count. To make it visible in isolation, the
-// stories build that host button, mount it into the canvas, and seed the store's buffers before render so
-// the component's effect paints the pill on first commit.
+// static host `<button class="unsaved-indicator">` via effects, driving its "N unsaved" text/aria/hidden
+// state and the document title's bullet from the host's dirty-buffer count. Dirty state arrives through
+// the `ReadableStore<UnsavedIndicatorSlice>` host-adapter contract (issue #944); this Storybook file
+// mocks that contract directly, matching UnsavedIndicator.test.tsx's `createMockUnsavedStore`. To make
+// the pill visible in isolation, the story builds the host button, mounts it into the canvas, and seeds
+// the slice before render so the component's effect paints the pill on first commit.
 
-const buf = (uri: string, dirty: boolean): Buffer => ({
-  uri,
-  path: uri,
-  relPath: uri,
-  name: uri,
-  text: '',
-  dirty,
-  rootToken: '',
-});
+function readableStoreOf(initial: UnsavedIndicatorSlice): ReadableStore<UnsavedIndicatorSlice> {
+  return {
+    getState: () => initial,
+    subscribe: () => () => {},
+  };
+}
 
-/** The static index.html host the indicator drives: a `<button class="unsaved-indicator">`. */
+/** The static host button the indicator drives: a `<button class="unsaved-indicator">`. */
 function makeHost(): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
@@ -31,8 +28,8 @@ function makeHost(): HTMLButtonElement {
 
 // Render the null-rendering indicator alongside the host button it owns. The host is appended to a wrapper
 // via a ref (so the pill is visible on the canvas); the component's effect — which runs after commit —
-// drives the host's text/aria/hidden from the seeded buffers.
-function mount(store: StoreApi<AppState>) {
+// drives the host's text/aria/hidden from the seeded slice.
+function mount(store: ReadableStore<UnsavedIndicatorSlice>) {
   const host = makeHost();
   return (
     <div>
@@ -53,7 +50,7 @@ const meta = {
   // Defaults satisfy the (all-required) props for the type; every story uses `render` to build its own
   // host button + seeded store, so these placeholders are never actually mounted.
   args: {
-    store: createAppStore(),
+    store: readableStoreOf({ dirtyCount: 0 }),
     host: makeHost(),
     baseTitle: 'Koine Studio',
     onSaveAll: () => {},
@@ -63,25 +60,13 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// Only the meaningful, visible state is storied: two dirty buffers (plus a clean one) → the pill shows
-// "2 unsaved" and the title gains a bullet. The inverse "all saved → pill hidden" state renders an empty
-// `hidden` button (nothing to look at) and is already covered by UnsavedIndicator.test.tsx, so it earns no
-// story here.
+// Only the meaningful, visible state is storied: two dirty buffers → the pill shows "2 unsaved" and the
+// title gains a bullet. The inverse "all saved → pill hidden" state renders an empty `hidden` button
+// (nothing to look at) and is already covered by UnsavedIndicator.test.tsx, so it earns no story here.
 
-/** Two dirty buffers (plus a clean one): the pill shows "2 unsaved" and the title gains a bullet. */
+/** Two dirty buffers: the pill shows "2 unsaved" and the title gains a bullet. */
 export const Unsaved: Story = {
-  render: () => {
-    const store = createAppStore();
-    // Seed the store-owned buffer Map (#982), keyed by uri.
-    store.setState({
-      buffers: new Map([
-        ['file:///ordering.koi', buf('file:///ordering.koi', true)],
-        ['file:///billing.koi', buf('file:///billing.koi', true)],
-        ['file:///shipping.koi', buf('file:///shipping.koi', false)],
-      ]),
-    });
-    return mount(store);
-  },
+  render: () => mount(readableStoreOf({ dirtyCount: 2 })),
   // The indicator returns null and drives the host button's text + aria-label from a deferred effect, so
   // the button is momentarily empty after first commit. Await the effect's paint here — `play` runs before
   // the a11y `afterEach` — so axe never races the empty button into a spurious `button-name` violation.

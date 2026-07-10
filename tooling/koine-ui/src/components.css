@@ -976,3 +976,51 @@
 .koi-problems-badge[data-kind='warn'] {
   color: var(--koi-hl-number);
 }
+
+/* ---------------------------------------------------------------------------------------------------
+ * UnsavedIndicator (ported from Koine Studio's src/styles/components/_statusbar.scss — issue #1244,
+ * third-tranche host-adapter migration). COPIED, not moved, same rationale as the rest of this file:
+ * the `.unsaved-indicator` button itself is Koine Studio's static index.html element (the component
+ * only OWNS it via effects), so Studio's own SCSS partial stays untouched and authoritative for the
+ * app; this copy is what styles the pill in this package's own Storybook / a standalone consumer.
+ * --------------------------------------------------------------------------------------------------- */
+
+/* Global unsaved-work indicator: a clickable amber pill in the status bar beside the validity/problems
+   readout, shown when any open file has unsaved changes, triggering Save-all. Reuses the warning hue
+   (--koi-hl-number) so it reads as "attention", consistent with the diagnostics warn colour. */
+.unsaved-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+  letter-spacing: 0.2px;
+  padding: 1px var(--koi-space-1-5);
+  border-radius: var(--koi-radius-pill);
+  cursor: pointer;
+  color: var(--koi-hl-number);
+  border: 1px solid color-mix(in srgb, var(--koi-hl-number) 45%, var(--koi-line));
+  background: color-mix(in srgb, var(--koi-hl-number) 12%, transparent);
+}
+
+/* The element carries the `hidden` attribute when clean; honour it over the inline-flex above. */
+.unsaved-indicator[hidden] {
+  display: none;
+}
+
+.unsaved-indicator::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--koi-radius-pill);
+  background: var(--koi-hl-number);
+}
+
+.unsaved-indicator:hover {
+  background: color-mix(in srgb, var(--koi-hl-number) 20%, transparent);
+}
+
+.unsaved-indicator:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 2px;
+}
