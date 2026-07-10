@@ -80,4 +80,37 @@ public class RustEmitterTests
         rust.ShouldContain("label: \"std\".to_string(),");
         rust.ShouldNotContain("label: \"std\",");
     }
+
+    private const string EntityConstantDefaultCoercionModel = """
+        context Shop {
+          entity Product identified by ProductId {
+            amount: Decimal
+            taxRate: Decimal = 2
+            label: String = "std"
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1324: an entity's constant-default field must be coerced/owned to its declared Rust type
+    /// in the smart constructor's <c>let</c>-binding loop — the entity dual of #1319's value-object fix.
+    /// A <c>Decimal</c> field defaulted to a bare <c>Int</c> literal, or a <c>String</c> field defaulted
+    /// to a string literal, otherwise binds a raw uncoerced local that is a real <c>cargo check</c>
+    /// <c>E0308</c> at the struct-literal field-init site.
+    /// </summary>
+    [Fact]
+    public void Entity_constant_default_fields_coerce_to_their_declared_rust_type()
+    {
+        var result = new KoineCompiler().Compile(EntityConstantDefaultCoercionModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("let tax_rate = Decimal::from(2);");
+        rust.ShouldNotContain("let tax_rate = 2;");
+
+        rust.ShouldContain("let label = \"std\".to_string();");
+        rust.ShouldNotContain("let label = \"std\";");
+    }
 }
