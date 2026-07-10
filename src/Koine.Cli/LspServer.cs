@@ -1393,8 +1393,9 @@ internal sealed class LspServer
         // Route through the per-occurrence edit service method: each occurrence carries its OWN newText,
         // so an aggregate-root rename can co-rename its convention-linked <Root>Id identity type in the
         // same edit (#550) — the root takes newName, the identity type takes <newName>Id. The result's
-        // IdCoRename outcome is not surfaced over this stdio protocol today (only the WASM interop path
-        // Koine Studio's browser host uses plumbs it — see CompilerInterop.LanguageService.Editing.cs).
+        // IdCoRename outcome is surfaced below (idCoRename/leftBehindIdName), mirroring the WASM interop
+        // path Koine Studio's browser host uses (CompilerInterop.LanguageService.Editing.cs) so the
+        // desktop stdio host reports the same authoritative outcome instead of leaving it undefined.
         var result = _ls.RenameEditsAt(_compilation, uri, line, ch, newName);
         if (result is null)
         {
@@ -1414,7 +1415,12 @@ internal sealed class LspServer
                 .ToArray();
         }
 
-        return new Dictionary<string, object?> { ["changes"] = changes };
+        return new Dictionary<string, object?>
+        {
+            ["changes"] = changes,
+            ["idCoRename"] = result.IdCoRename?.ToString(),
+            ["leftBehindIdName"] = result.LeftBehindIdName,
+        };
     }
 
     private object? LinkedEditingRangeResultJson(JsonElement root)

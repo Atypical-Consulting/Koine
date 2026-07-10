@@ -725,6 +725,57 @@ public class LspServerTests
     }
 
     [Fact]
+    public void Rename_surfaces_idCoRename_applied_for_an_aggregate_root_co_rename()
+    {
+        // The default Studio scaffold: aggregate Sales whose root entity Order is `identified by OrderId`.
+        // Mirrors KoineLanguageServiceTests.RenameEdits_corenames_an_aggregate_roots_convention_linked_id_type
+        // (#565 follow-up): the desktop stdio LSP must surface the SAME idCoRename/leftBehindIdName fields
+        // the WASM interop path (CompilerInterop.LanguageService.Editing.cs) emits, not silently omit them.
+        var doc =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var entityLine = doc.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Rename("file:///t.koi", 2, col, "PurchaseOrder"));
+
+        TryResultForId(output, 23, out var result).ShouldBeTrue();
+        result.GetProperty("idCoRename").GetString().ShouldBe("Applied");
+        result.GetProperty("leftBehindIdName").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public void Rename_surfaces_idCoRename_leftBehind_when_the_new_id_name_collides()
+    {
+        // PurchaseOrderId already names a type, so co-renaming OrderId -> PurchaseOrderId would collide.
+        // Mirrors KoineLanguageServiceTests.RenameEdits_does_not_corename_when_the_new_id_name_collides
+        // (#565 follow-up): the desktop stdio LSP must report the SAME LeftBehind outcome + left-behind
+        // id name the WASM interop path emits.
+        var doc =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "  value PurchaseOrderId { code: String }\n" +
+            "}\n";
+        var entityLine = doc.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var output = RunSession(Initialize(), DidOpen("file:///t.koi", doc), Rename("file:///t.koi", 2, col, "PurchaseOrder"));
+
+        TryResultForId(output, 23, out var result).ShouldBeTrue();
+        result.GetProperty("idCoRename").GetString().ShouldBe("LeftBehind");
+        result.GetProperty("leftBehindIdName").GetString().ShouldBe("OrderId");
+    }
+
+    [Fact]
     public void Rename_with_invalid_identifier_returns_null_result()
     {
         var doc = "context C {\n  value Money { amount: Decimal }\n}\n";
