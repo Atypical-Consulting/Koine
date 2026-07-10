@@ -166,9 +166,9 @@ internal sealed class KotlinExpressionTranslator
                 sb.Append("if (");
                 WriteTopLevel(cond.Condition, sb);
                 sb.Append(") ");
-                Write(cond.Then, sb);
+                WriteReconciledBranch(cond.Then, cond.Else, sb);
                 sb.Append(" else ");
-                Write(cond.Else, sb);
+                WriteReconciledBranch(cond.Else, cond.Then, sb);
                 break;
             case CoalesceExpr co:
                 // The left is nullable (T?); Koine `l ?? r` -> Kotlin elvis `l ?: r`, yielding the non-null T.
@@ -210,6 +210,56 @@ internal sealed class KotlinExpressionTranslator
 
         sb.Append(un.Op == UnaryOp.Not ? '!' : '-');
         WriteAtom(un.Operand, sb);
+    }
+
+    /// <summary>
+    /// Writes one <c>if</c>/<c>else</c> branch, reconciling it against its SIBLING branch's type so both
+    /// arms agree — Koine's semantic validator (and <see cref="TypeResolver"/>, #975) legitimately lets a
+    /// conditional's two branches differ in numeric type (<c>Int</c>/<c>Decimal</c>) and/or optionality,
+    /// widening the conditional's own joined type accordingly, but Kotlin's <c>if</c>-expression (like
+    /// Java's ternary, which this method mirrors) infers a least-upper-bound type across both arms: an
+    /// unreconciled <c>Long</c>/<c>BigDecimal</c> pair infers an unhelpful common supertype that does not
+    /// assign to the target <c>BigDecimal</c> member — a real <c>kotlinc</c> type-mismatch (#1344). A
+    /// branch is <c>java.math.BigDecimal.valueOf(...)</c>-widened when its own inferred type is a
+    /// non-optional <c>Int</c> (<c>Long</c>) while the SIBLING branch is <c>Decimal</c>, and
+    /// null-safe-map-widened (<c>?.let { java.math.BigDecimal.valueOf(it) }</c>) when its own inferred type
+    /// is an OPTIONAL <c>Int</c> while the SIBLING branch is <c>Decimal</c> — the branch's own rendering is
+    /// already <c>Long?</c>-shaped, so a bare <c>BigDecimal.valueOf(...)</c> wrap around a nullable receiver
+    /// does not compile; mapping inside the nullable chain is required instead. <c>needsWiden</c> and
+    /// <c>needsOptionalWiden</c> are mutually exclusive (they key off the same branch's own optionality).
+    /// <b>Unlike Java/Rust, Kotlin needs no <c>needsSomeWrap</c> analogue</b>: Kotlin's <c>if</c>-expression
+    /// least-upper-bound computation already infers <c>T?</c> when one arm is <c>T</c> and the sibling arm
+    /// is <c>T?</c> of the SAME underlying type (after any widen above) — a plain non-nullable <c>T</c> is
+    /// directly assignable wherever <c>T?</c> is expected, so an optionality-only mismatch (or a widen
+    /// composed with a sibling-optional mismatch, e.g. the <c>Cash</c> fixture in
+    /// <c>KotlinConformanceTests</c>) needs no extra wrap on either arm — confirmed by the accompanying
+    /// conformance tests compiling with a real <c>kotlinc</c> when available.
+    /// </summary>
+    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    {
+        TypeScope scope = EffectiveScope();
+        TypeRef? branchType = _resolver.Infer(branch, scope);
+        TypeRef? siblingType = _resolver.Infer(sibling, scope);
+        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
+        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
+
+        if (needsWiden)
+        {
+            // Reuses the same BigDecimal-position widening WriteBinary already applies to a plain
+            // arithmetic/comparison operand, so a literal `0` branch gets its BigDecimal.ZERO shortcut here
+            // too, instead of a hand-rolled BigDecimal.valueOf(...) wrap drifting from that convention.
+            WriteBigDecimalOperand(branch, branchType, sb);
+            return;
+        }
+
+        if (needsOptionalWiden)
+        {
+            WriteAtom(branch, sb);
+            sb.Append("?.let { java.math.BigDecimal.valueOf(it) }");
+            return;
+        }
+
+        Write(branch, sb);
     }
 
     /// <summary>Writes an operand as an atom: a compound (binary/conditional/coalesce) is parenthesized so it composes safely as a receiver or a unary/argument operand.</summary>

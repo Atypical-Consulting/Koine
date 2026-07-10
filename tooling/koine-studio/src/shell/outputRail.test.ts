@@ -1,5 +1,7 @@
-import { describe, expect, test, vi } from 'vitest';
-import { ensureOutputScaffold, renderOutputCrumb, renderOutputRail, type OutputRailFile } from '@/shell/outputRail';
+import { describe, expect, test } from 'vitest';
+import { applyOutputTreeEmphasis, ensureOutputScaffold, renderOutputCrumb, renderOutputRailHead } from '@/shell/outputRail';
+import { createGeneratedFileTree } from '@/shell/output/generatedFileTree';
+import type { EmitFile } from '@/lsp/protocol';
 
 function host(): HTMLElement {
   const el = document.createElement('div');
@@ -8,11 +10,11 @@ function host(): HTMLElement {
   return el;
 }
 
-const FILES: OutputRailFile[] = [
-  { path: 'Ordering/Order.cs', kind: 'aggregate', loc: 74 },
-  { path: 'Ordering/Money.cs', kind: 'value', loc: 46 },
-  { path: 'Kitchen/Ticket.cs', kind: 'aggregate', loc: 61 },
-  { path: 'runtime/KoineRuntime.cs', kind: null, loc: 112 },
+const FILES: EmitFile[] = [
+  { path: 'Ordering/Order.cs', contents: 'x'.repeat(74) },
+  { path: 'Ordering/Money.cs', contents: 'x'.repeat(46) },
+  { path: 'Kitchen/Ticket.cs', contents: 'x'.repeat(61) },
+  { path: 'runtime/KoineRuntime.cs', contents: 'x'.repeat(112) },
 ];
 
 describe('ensureOutputScaffold', () => {
@@ -33,90 +35,106 @@ describe('ensureOutputScaffold', () => {
     expect(previewEl.querySelectorAll('.out2')).toHaveLength(1);
     expect(b.code).toBe(a.code);
   });
-});
 
-describe('renderOutputRail', () => {
-  test('groups files by context (top-level folder) in first-seen order', () => {
-    const s = ensureOutputScaffold(host());
-    renderOutputRail(s, FILES, null, 'C#', () => {});
-    const ctxs = Array.from(s.rail.querySelectorAll('.out-ctx')).map((e) => e.textContent);
-    expect(ctxs).toEqual(['Ordering', 'Kitchen', 'runtime']);
-    expect(s.rail.querySelectorAll('.out-file')).toHaveLength(4);
+  test('builds a railHead ("N files" count header) above the tree inside .out-rail', () => {
+    const previewEl = host();
+    const s = ensureOutputScaffold(previewEl);
+    expect(s.railHead.classList.contains('out-railhead')).toBe(true);
+    expect(s.rail.contains(s.railHead)).toBe(true);
   });
 
-  test('renders a head count, per-file line count, and tints the dot by DDD kind', () => {
-    const s = ensureOutputScaffold(host());
-    renderOutputRail(s, FILES, null, 'C#', () => {});
-    expect(s.rail.querySelector('.out-railhead b')?.textContent).toBe('4 files');
-    const first = s.rail.querySelector('.out-file') as HTMLElement;
-    expect(first.querySelector('.fname')?.textContent).toBe('Order.cs'); // basename only
-    expect(first.querySelector('.floc')?.textContent).toBe('74');
-    expect(first.dataset.tip).toBe('Ordering/Order.cs'); // the tooltip carries the full path
-    expect(first.dataset.key).toBe('74 lines');
-    expect(first.style.getPropertyValue('--fc')).toContain('--koi-ddd-aggregate');
-    // A file with no stereotype falls back to a neutral dot.
-    const runtime = s.rail.querySelectorAll('.out-file')[3] as HTMLElement;
-    expect(runtime.style.getPropertyValue('--fc')).toContain('--koi-muted');
-  });
-
-  test('marks the selected file and routes clicks', () => {
-    const s = ensureOutputScaffold(host());
-    const onSelect = vi.fn();
-    renderOutputRail(s, FILES, 'Ordering/Money.cs', 'C#', onSelect);
-    const on = s.rail.querySelectorAll('.out-file.on');
-    expect(on).toHaveLength(1);
-    expect((on[0] as HTMLElement).querySelector('.fname')?.textContent).toBe('Money.cs');
-    (s.rail.querySelectorAll('.out-file')[2] as HTMLButtonElement).click();
-    expect(onSelect).toHaveBeenCalledWith('Kitchen/Ticket.cs');
+  test('.out-rail carries a static role="region" + aria-label (never bare of an accessible role/name, even before the tree has any of its own — fixes the tablist-containing-a-tree nesting without reintroducing the original "no role at all" gap)', () => {
+    const previewEl = host();
+    const s = ensureOutputScaffold(previewEl);
+    expect(s.rail.getAttribute('role')).toBe('region');
+    expect(s.rail.getAttribute('aria-label')).toBe('Generated files');
   });
 });
 
-describe('renderOutputRail — scope emphasis (ADR 0009)', () => {
-  const ctxByName = (rail: HTMLElement, name: string): HTMLElement =>
-    Array.from(rail.querySelectorAll('.out-ctx')).find(
-      (e) => e.querySelector('.out-ctx-name')?.textContent === name,
-    ) as HTMLElement;
-
-  test('emphasises the active context group and de-emphasises the rest — never hiding any', () => {
+describe('renderOutputRailHead', () => {
+  test('shows the file count', () => {
     const s = ensureOutputScaffold(host());
-    renderOutputRail(s, FILES, null, 'C#', () => {}, 'Ordering');
-    // Every group + file is still rendered — emphasis, not hiding (the whole-model overview survives).
-    expect(s.rail.querySelectorAll('.out-ctx')).toHaveLength(3);
-    expect(s.rail.querySelectorAll('.out-file')).toHaveLength(4);
-
-    const ordering = ctxByName(s.rail, 'Ordering');
-    expect(ordering.classList.contains('on')).toBe(true);
-    expect(ordering.classList.contains('dim')).toBe(false);
-    // A non-colour active marker (its text) so the scope reads without relying on hue (WCAG AA).
-    expect(ordering.querySelector('.out-ctx-active')?.textContent).toBe('active');
-    expect(s.rail.querySelectorAll('.out-ctx-active')).toHaveLength(1); // only the active group
-
-    expect(ctxByName(s.rail, 'Kitchen').classList.contains('dim')).toBe(true);
-    expect(ctxByName(s.rail, 'runtime').classList.contains('dim')).toBe(true);
-
-    // The active group's files stay plain; the other groups' files de-emphasise.
-    const dimFiles = Array.from(s.rail.querySelectorAll('.out-file.dim')).map(
-      (e) => (e as HTMLElement).querySelector('.fname')?.textContent,
-    );
-    expect(dimFiles).toEqual(['Ticket.cs', 'KoineRuntime.cs']);
+    renderOutputRailHead(s, 12);
+    expect(s.railHead.textContent).toBe('12 files');
   });
 
-  test('All contexts (scope omitted) leaves every group plain', () => {
+  test('singular file count has no trailing "s"', () => {
     const s = ensureOutputScaffold(host());
-    renderOutputRail(s, FILES, null, 'C#', () => {}); // activeContext omitted → null
-    expect(s.rail.querySelector('.out-ctx.on')).toBeNull();
-    expect(s.rail.querySelector('.out-ctx.dim')).toBeNull();
-    expect(s.rail.querySelector('.out-ctx-active')).toBeNull();
-    expect(s.rail.querySelector('.out-file.dim')).toBeNull();
+    renderOutputRailHead(s, 1);
+    expect(s.railHead.textContent).toBe('1 file');
   });
 
-  test('a scope matching no emitted group emphasises nothing — a graceful no-op', () => {
+  test('a zero count clears the header (the empty/error output states)', () => {
     const s = ensureOutputScaffold(host());
-    renderOutputRail(s, FILES, null, 'C#', () => {}, 'Shipping'); // no Shipping/ output
-    expect(s.rail.querySelector('.out-ctx.on')).toBeNull();
-    expect(s.rail.querySelector('.out-ctx.dim')).toBeNull(); // NOT the whole rail dimmed
-    expect(s.rail.querySelector('.out-ctx-active')).toBeNull();
-    expect(s.rail.querySelector('.out-file.dim')).toBeNull();
+    renderOutputRailHead(s, 4);
+    renderOutputRailHead(s, 0);
+    expect(s.railHead.textContent).toBe('');
+  });
+});
+
+describe('applyOutputTreeEmphasis (ADR 0009) — replaces renderOutputRail\'s scope emphasis over the tree', () => {
+  // Builds a real generated-file tree (via the Task 2 widget) over FILES so these tests exercise the
+  // actual top-level treeitem shape (`[role="treeitem"][aria-level="1"]`, keyed by `data-path`) rather
+  // than a hand-rolled fixture.
+  function tree(): HTMLElement {
+    const t = createGeneratedFileTree({ onSelect: () => {} });
+    t.setFiles(FILES);
+    return t.element;
+  }
+  const topLevel = (root: HTMLElement): HTMLElement[] =>
+    Array.from(root.querySelectorAll<HTMLElement>('[role="treeitem"][aria-level="1"]'));
+  const byPath = (root: HTMLElement, path: string): HTMLElement =>
+    topLevel(root).find((e) => e.dataset.path === path) as HTMLElement;
+
+  test('emphasises the matching top-level node and de-emphasises the rest — never hiding any', () => {
+    const root = tree();
+    applyOutputTreeEmphasis(root, 'Ordering');
+    // Every top-level row is still rendered — emphasis, not hiding (the whole-model overview survives).
+    expect(topLevel(root)).toHaveLength(3); // Ordering, Kitchen, runtime (folders, one per top-level path)
+
+    expect(byPath(root, 'Ordering').classList.contains('on')).toBe(true);
+    expect(byPath(root, 'Ordering').classList.contains('dim')).toBe(false);
+    expect(byPath(root, 'Kitchen').classList.contains('dim')).toBe(true);
+    expect(byPath(root, 'Kitchen').classList.contains('on')).toBe(false);
+    expect(byPath(root, 'runtime').classList.contains('dim')).toBe(true);
+    expect(byPath(root, 'runtime').classList.contains('on')).toBe(false);
+
+    // WCAG AA non-color signal (ADR 0009): the active scope must not rely on color/hue alone.
+    expect(byPath(root, 'Ordering').getAttribute('aria-current')).toBe('true');
+    expect(byPath(root, 'Kitchen').getAttribute('aria-current')).toBeNull();
+    expect(byPath(root, 'runtime').getAttribute('aria-current')).toBeNull();
+  });
+
+  test('All contexts (activeContext null) leaves every top-level node plain', () => {
+    const root = tree();
+    applyOutputTreeEmphasis(root, null);
+    for (const el of topLevel(root)) {
+      expect(el.classList.contains('on')).toBe(false);
+      expect(el.classList.contains('dim')).toBe(false);
+      expect(el.getAttribute('aria-current')).toBeNull();
+    }
+  });
+
+  test('a scope matching no top-level node emphasises nothing — a graceful no-op', () => {
+    const root = tree();
+    applyOutputTreeEmphasis(root, 'Shipping'); // no Shipping/ output
+    for (const el of topLevel(root)) {
+      expect(el.classList.contains('on')).toBe(false);
+      expect(el.classList.contains('dim')).toBe(false); // NOT the whole tree dimmed
+      expect(el.getAttribute('aria-current')).toBeNull();
+    }
+  });
+
+  test('re-applying with a different context clears the previous emphasis first', () => {
+    const root = tree();
+    applyOutputTreeEmphasis(root, 'Ordering');
+    applyOutputTreeEmphasis(root, 'Kitchen');
+    expect(byPath(root, 'Ordering').classList.contains('on')).toBe(false);
+    expect(byPath(root, 'Ordering').classList.contains('dim')).toBe(true);
+    expect(byPath(root, 'Kitchen').classList.contains('on')).toBe(true);
+    expect(byPath(root, 'Kitchen').classList.contains('dim')).toBe(false);
+    expect(byPath(root, 'Ordering').getAttribute('aria-current')).toBeNull();
+    expect(byPath(root, 'Kitchen').getAttribute('aria-current')).toBe('true');
   });
 });
 

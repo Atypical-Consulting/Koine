@@ -1,3 +1,5 @@
+@use '../abstracts' as a;
+
 // Deck center chrome, tightened to concept-7 "Flush". The two-row Deck v2 chrome (deck-bar + per-card
 // deck-head) collapses into ONE 34px spine (the DeckSpine component, in @atypical/koine-ui — the spine +
 // card + tooltip CSS is mirrored in that package's components.css for Storybook). In focus the stage goes
@@ -577,107 +579,81 @@
   }
 }
 
-.out-ctx {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--koi-muted);
-  padding: 9px 12px 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-
-  &::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 2px;
-    background: var(--koi-line);
-  }
-}
-
-.out-file {
-  all: unset;
-  box-sizing: border-box;
-  width: 100%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 12px 5px 24px;
-  font-size: 12px;
-  color: var(--koi-ink-soft);
-  border-left: 2px solid transparent;
-
-  .fdot {
-    width: 7px;
-    height: 7px;
-    border-radius: 2px;
-    background: var(--fc, var(--koi-muted));
-    flex: 0 0 auto;
+// The tree itself (`shell/output/generatedFileTree.ts`, #871 Task 2): bare `[role="treeitem"]` rows with
+// no CSS classes of their own, so every rule below targets the real DOM attributes it sets — `data-kind`,
+// `aria-level`, `aria-selected` — rather than the flat rail's old per-row classes (`.out-ctx`/`.out-file`,
+// removed above along with their `.on`/`.dim` variants: none of those classes are rendered anymore).
+.generated-file-tree {
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
 
-  .fname {
-    font-family: var(--koi-font-mono);
-    font-size: 11.5px;
+  [role='treeitem'] {
+    display: block;
+    box-sizing: border-box;
+    cursor: pointer;
+    // Depth-based indentation keyed off the `aria-level` Task 2 sets on every row (1 = top-level): each
+    // row carries this SAME 12px left padding, and — because a folder row wraps its children in a nested
+    // `<ul role="group">` (Task 2's own recursive shape) — a deeper row's box sits inside its ancestors'
+    // already-indented content, so the 12px compounds ONCE per level automatically (12/24/36/48px for
+    // levels 1-4) without a per-level override. An explicit escalating `[aria-level="N"] { padding-left:
+    // Npx }` here would DOUBLE-compound on top of this nesting and blow out a deep row's indent well past
+    // the 240px rail — a handful of folders deep is exactly where that bug would bite.
+    padding: 5px 12px;
+    font-size: 12px;
+    color: var(--koi-ink-soft);
+    border-left: 2px solid transparent;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+
+    &:hover {
+      background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
+      color: var(--koi-fg);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--koi-accent);
+      outline-offset: -2px;
+    }
   }
 
-  .floc {
-    margin-left: auto;
-    font-size: 10px;
-    color: var(--koi-muted);
-    opacity: 0.7;
+  [data-kind='folder'] {
+    font-weight: 600;
   }
 
-  &:hover {
-    background: color-mix(in srgb, var(--koi-fg) 6%, transparent);
-    color: var(--koi-fg);
+  [data-kind='file'] {
+    font-family: var(--koi-font-mono);
+    font-size: 11.5px;
   }
 
-  &.on {
+  // The selected FILE row (single-select — set by generatedFileTree.ts's selectFile). Same visual intent
+  // as the old flat rail's `.out-file.on`: an accent left-border + a tinted background.
+  [aria-selected='true'] {
     background: color-mix(in srgb, var(--koi-ddd-event) 14%, transparent);
     color: var(--koi-fg);
     border-left-color: var(--koi-ddd-event);
   }
 
-  &:focus-visible {
-    outline: 2px solid var(--koi-accent);
-    outline-offset: -2px;
+  // Scope emphasis (ADR 0009 — the Output rail obeys the active bounded-context scope by EMPHASIS, never
+  // hiding), applied to TOP-LEVEL rows only (applyOutputTreeEmphasis in outputRail.ts): the active scope
+  // is marked `.on`, every other top-level row `.dim`med. The whole-model overview survives; a
+  // de-emphasised row restores on hover so it stays usable. Same visual intent as the old `.out-ctx.on`/
+  // `.out-ctx.dim`, retargeted onto the tree's own rows.
+  [role='treeitem'].on {
+    color: var(--koi-fg);
+    border-left-color: var(--koi-accent);
   }
-}
 
-// Scope emphasis (ADR 0009 — the Output rail obeys the active bounded-context scope by EMPHASIS, never
-// hiding): the active context's group is marked `.on`, the others `.dim`med. The whole-model overview
-// survives; a de-emphasised row restores on hover so it stays usable.
-.out-ctx.on {
-  color: var(--koi-fg);
+  [role='treeitem'].dim {
+    opacity: 0.5;
 
-  &::before {
-    background: var(--koi-accent);
+    &:hover {
+      opacity: 1;
+    }
   }
-}
-
-// The active marker: a non-colour signal (its text) so the active scope reads without relying on hue.
-.out-ctx-active {
-  margin-left: auto;
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  color: var(--koi-accent);
-  border: 1px solid color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
-  border-radius: var(--koi-radius-pill);
-  padding: 1px 6px;
-}
-
-.out-ctx.dim,
-.out-file.dim {
-  opacity: 0.5;
-}
-
-.out-file.dim:hover {
-  opacity: 1;
 }
 
 .out-view {
@@ -761,6 +737,22 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden; // the CodeMirror OutputView scrolls internally
+}
+
+// Narrow viewports (phone width): the two-pane [rail][viewer] grid stacks vertically instead of side by
+// side — matches how the other Studio panels fold at this breakpoint (_settings.scss's category rail,
+// _leftrail.scss's navigator). Both panes keep their OWN independent scroll (`.out-rail`'s existing
+// `overflow: auto` + koi-scroll, `.out-code`'s CodeMirror scroller), just stacked instead of side-by-side.
+@media (max-width: a.$bp-narrow) {
+  .out2 {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(96px, 34%) minmax(0, 1fr);
+  }
+
+  .out-rail {
+    border-right: none;
+    border-bottom: 1px solid var(--koi-line);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
