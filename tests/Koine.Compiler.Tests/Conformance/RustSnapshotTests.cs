@@ -1203,6 +1203,46 @@ public class RustSnapshotTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// A read model whose projected (derived) field is optional-declared with a <c>.trim()</c>-yielding
+    /// body (<c>nickname</c>), alongside a non-optional-declared sibling with the same body (<c>slug</c>).
+    /// </summary>
+    private const string OptionalDerivedStringReadModelFixture = """
+        context Shop {
+          aggregate Shop root Person {
+            entity Person identified by PersonId {
+              name: String
+            }
+          }
+
+          readmodel PersonSummary from Person {
+            id
+            nickname: String? = name.trim
+            slug:     String  = name.trim
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1349: <c>OwnDerived</c> — the read-model dual of <c>WriteDerived</c> (#1332) — must own an
+    /// optional-declared <c>String?</c> projected field's <c>.trim()</c>-yielding borrowed <c>&amp;str</c>
+    /// body via <c>.to_string()</c> (gated on the field's underlying, non-optional declared type, not the
+    /// declared type itself) and <c>Some(...)</c>-wrap the owned result — not the bare <c>.clone()</c> a
+    /// borrowed <c>&amp;str</c> cannot satisfy against a declared <c>Option&lt;String&gt;</c>. <c>slug</c>
+    /// is the non-optional-declared sibling, pinned unchanged alongside the fix.
+    /// </summary>
+    [Fact]
+    public void Rust_read_model_optional_derived_string_field_owns_and_wraps_trim_result()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedStringReadModelFixture, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal)).Contents;
+        shop.ShouldContain("nickname: Some((src.name().trim()).to_string()),");
+        shop.ShouldContain("slug: (src.name().trim()).to_string(),");
+        shop.ShouldNotContain("(src.name().trim()).clone()");
+    }
+
     /// <summary>Reads a template under <c>templates/</c> by walking up to the repo root (the <c>.git</c> dir).</summary>
     private static string? FindTemplate(string relativePath)
     {

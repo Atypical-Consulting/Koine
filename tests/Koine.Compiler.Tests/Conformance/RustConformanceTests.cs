@@ -1967,4 +1967,38 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1349: the read-model dual of #1332's <c>WriteDerived</c> fix — <c>OwnDerived</c> must own an
+    /// optional-declared <c>String?</c> projected field's <c>.trim()</c>-yielding borrowed <c>&amp;str</c>
+    /// body via <c>.to_string()</c> and <c>Some(...)</c>-wrap it, or the emitted crate does not compile
+    /// (<c>E0308</c>: <c>Option&lt;String&gt;</c> expected, <c>&amp;str</c> found via a no-op
+    /// <c>.clone()</c>). <c>slug</c> is the non-optional-declared sibling, along for the ride to pin its
+    /// baseline compile alongside the fix.
+    /// </summary>
+    [Fact]
+    public void Read_model_optional_derived_string_field_with_trim_body_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  aggregate Shop root Person {\n" +
+            "    entity Person identified by PersonId {\n" +
+            "      name: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel PersonSummary from Person {\n" +
+            "    id\n" +
+            "    nickname: String? = name.trim\n" +
+            "    slug: String = name.trim\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
