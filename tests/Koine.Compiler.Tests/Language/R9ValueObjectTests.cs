@@ -595,6 +595,167 @@ public class R9ValueObjectTests
     }
 
     // ======================================================================
+    // #1290 — an entity-typed operand in binary +/- (the Non-goal #1284 flagged for follow-up)
+    // ======================================================================
+
+    private const string EntityVsValueObjectSrc = """
+        context Shop {
+          value Money {
+            amount: Decimal
+          }
+          aggregate CartAgg root Cart {
+            entity Cart identified by CartId {
+              item: Item
+              fee: Money
+              bad: Money = item + fee
+            }
+            entity Item identified by ItemId {
+              name: String
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Entity_plus_value_object_is_rejected()
+    {
+        var result = new KoineCompiler().Compile(EntityVsValueObjectSrc, new CSharpEmitter());
+        result.Success.ShouldBeFalse();
+
+        var diag = result.Diagnostics.Single(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+        diag.Message.ShouldContain("Item");
+        diag.Message.ShouldContain("Money");
+    }
+
+    [Fact]
+    public void Entity_minus_value_object_is_rejected()
+    {
+        Diagnose(EntityVsValueObjectSrc.Replace("item + fee", "item - fee"))
+            .ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Value_object_plus_entity_is_rejected_regardless_of_operand_order()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+              }
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item: Item
+                  fee:  Money
+                  bad:  Money = fee + item
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Same_type_entity_addition_is_also_rejected()
+    {
+        // Unlike CheckValueObjectTypeMismatch's same-declared-type early return, entity-vs-entity of the
+        // SAME type is ALSO rejected here — entities never have a `+`/`-` operator regardless of a type
+        // match.
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item1: Item
+                  item2: Item
+                  bad:   Item = item1 + item2
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Entity_identity_comparison_remains_valid_and_unaffected()
+    {
+        // `==`/`!=` (identity comparison) is legitimate and untouched by this check — scoped to `+`/`-`.
+        // Asserts a fully clean compile (not just "no KOI0220"), so an unrelated typo in the fixture
+        // can't make this pass vacuously.
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item1: Item
+                  item2: Item
+                  same:  Bool = item1 == item2
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Aggregate_typed_operand_is_also_rejected()
+    {
+        // Coverage for the `or AggregateDecl` disjunct in CheckEntityOperandArithmetic — a field can
+        // legally be typed with an AGGREGATE's own bare name (not just an entity's), e.g. this
+        // cross-aggregate reference (also separately flagged by KOI1602/EntityReferencesForeignAggregate,
+        // per DddReferenceDisciplineTests.An_entity_field_typed_as_an_aggregate_is_reported) or a
+        // domain-service `operation` parameter that ReferenceDisciplineAnalyzer doesn't cover at all.
+        // Either way, an aggregate has no generated '+'/'-' operator either.
+        const string src = """
+            context Sales {
+              value Money {
+                amount: Decimal
+              }
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  related: Customers
+                  fee:     Money
+                  bad:     Money = related + fee
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Entity_operand_arithmetic_is_rejected_before_reaching_any_code_emitter()
+    {
+        var src = EntityVsValueObjectSrc;
+        var compiler = new KoineCompiler();
+        AssertRejected(compiler.Compile(src, new CSharpEmitter()));
+        AssertRejected(compiler.Compile(src, new TypeScriptEmitter()));
+        AssertRejected(compiler.Compile(src, new PythonEmitter()));
+        AssertRejected(compiler.Compile(src, new PhpEmitter()));
+        AssertRejected(compiler.Compile(src, new RustEmitter()));
+        AssertRejected(compiler.Compile(src, new JavaEmitter()));
+        AssertRejected(compiler.Compile(src, new KotlinEmitter()));
+
+        static void AssertRejected(CompileResult result)
+        {
+            result.Success.ShouldBeFalse();
+            result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+            result.Files.ShouldBeEmpty();
+        }
+    }
+
+    // ======================================================================
     // Regressions found by the R9 review
     // ======================================================================
 
