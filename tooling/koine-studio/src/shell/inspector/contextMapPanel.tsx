@@ -201,6 +201,9 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
   // render (a later toggle/refresh) bail before it touches the DOM; the prior graph handle is disposed first.
   async function paintContextMap(): Promise<void> {
     const seq = ++contextMapRenderSeq;
+    // Shared by the async gate below AND both post-await tails, so the two halves of the guard
+    // (disposal + supersession) can't drift apart again (#1261).
+    const isCurrent = () => !disposed && seq === contextMapRenderSeq;
     disposeContextMapGraph();
     const { stage, details } = ensureContextMapSkeleton();
     for (const b of host.querySelectorAll<HTMLButtonElement>('.ctxmap-tab')) {
@@ -226,7 +229,7 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
       // just the local seq, or a resolving mount still lands (and wires live handlers) in a torn-down host
       // (#1002). paintContextMap is reached both from load()'s guardedLoad render callback and from a live
       // setContextMapMode toggle, so this fix covers both call paths uniformly.
-      contextMapGraphHandle = await renderContextMapGraph(stage, graph, () => !disposed && seq === contextMapRenderSeq, {
+      contextMapGraphHandle = await renderContextMapGraph(stage, graph, isCurrent, {
         // A context-node click both FILTERS the workspace to that bounded context (only when it's a
         // real, known context — a synthetic dangling endpoint isn't a valid scope) AND JUMPS to its
         // `.koi` declaration (#290). The graph node carries the declaration span, so we reuse the same
@@ -243,9 +246,9 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
         onAfterRender: () => emphasiseContextMapScope(),
       });
       // Focus the active context's node once the graph is mounted (ADR 0009 / #1188).
-      if (seq === contextMapRenderSeq) emphasiseContextMapScope();
+      if (isCurrent()) emphasiseContextMapScope();
     } catch (e) {
-      if (seq === contextMapRenderSeq) docMessage(stage, 'Could not render the context-map graph: ' + String(e), 'error');
+      if (isCurrent()) docMessage(stage, 'Could not render the context-map graph: ' + String(e), 'error');
     }
   }
 
