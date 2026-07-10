@@ -30,6 +30,7 @@ export type GitSurface = Pick<
   | 'gitStage'
   | 'gitUnstage'
   | 'gitCommit'
+  | 'gitPush'
   | 'gitBranches'
   | 'gitCheckout'
   | 'gitLog'
@@ -260,6 +261,10 @@ export function SourceControlPanel(props: {
 
   const onStage = (relPath: string) => void mutate(() => git.gitStage(folderToken, [relPath]));
   const onUnstage = (relPath: string) => void mutate(() => git.gitUnstage(folderToken, [relPath]));
+  // Push through the same mutate() path every other op uses: the follow-up reload re-reads status, so
+  // the ahead count tracks the pushed repository, and a git refusal (non-fast-forward, auth, offline)
+  // lands in the existing actionError alert.
+  const onPush = () => void mutate(() => git.gitPush(folderToken));
 
   const onCheckout = (branch: string) => {
     if (!status || branch === status.branch) return;
@@ -409,6 +414,10 @@ export function SourceControlPanel(props: {
   const commitDisabled = busy || committing || message.trim().length === 0 || !hasStaged;
   // Surface the current branch even when it isn't in the local list (detached HEAD / fresh branch).
   const branchOptions = status && !branches.includes(status.branch) ? [status.branch, ...branches] : branches;
+  // The branch's upstream-tracking data (#1150): the tracked ref + real ahead/behind counts, or null
+  // when the branch has no upstream (detached HEAD / fresh branch / no remote) — the panel keys the
+  // whole sync readout + push affordance off this DATA, never off the platform kind.
+  const upstream = status?.upstream ?? null;
   // The recent-commit log is collapsible through the same `collapsedGroups`/`toggleGroup` infra the file
   // groups use — its section carries `collapsed` when its label is in the set (the CSS hides the list).
   const logCollapsed = collapsedGroups.has(RECENT_COMMITS_LABEL);
@@ -433,9 +442,10 @@ export function SourceControlPanel(props: {
 
   // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
   // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits);
-  // the DEFERRED items render disabled because their Platform git op doesn't exist yet — each is a tracked
-  // sibling follow-up of #1146/#1142: Discard-all/revert, and the pull/push/fetch sync ops the ahead/behind
-  // readout also awaits. Disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
+  // the DEFERRED items render disabled — each a tracked sibling follow-up of #1146/#1142: Discard-all
+  // (#1151) and the pull/fetch ops have no Platform git op yet, and wiring THIS menu's Push item to the
+  // gitPush op the sync bar now invokes (#1150) rides along with that sync-menu follow-up. Disabled
+  // (never a live-but-inert no-op) matches the panel's placeholder convention.
   const openOverflowMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     const unstagedPaths = [...unstaged, ...untracked].map((f) => f.relPath);
@@ -480,10 +490,11 @@ export function SourceControlPanel(props: {
   };
 
   // Build + toggle the split-commit caret menu (#1153). Both items are DEFERRED placeholders: Amend needs a
-  // new `git commit --amend` Platform op, and Commit & Push depends on the same push op the ahead/behind
-  // sync readout is waiting on — each a tracked sibling follow-up. They render disabled (never a live-but-
-  // inert no-op); the plain Commit action stays the split button itself. The caret is openable so the menu
-  // is discoverable, disabled only while the composer is busy (the same gate the message box uses).
+  // new `git commit --amend` Platform op, and Commit & Push — though gitPush itself now exists (#1150) —
+  // is a compound commit-then-push flow still awaiting its wiring; each a tracked sibling follow-up. They
+  // render disabled (never a live-but-inert no-op); the plain Commit action stays the split button itself.
+  // The caret is openable so the menu is discoverable, disabled only while the composer is busy (the same
+  // gate the message box uses).
   const openCaretMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     const items: FloatingMenuItem[] = [
@@ -742,26 +753,48 @@ export function SourceControlPanel(props: {
         ) : (
           <span class="koi-sc-branch koi-sc-branch-name">{status?.branch ?? '…'}</span>
         )}
-        {/* Best-effort ahead/behind READOUT — GitStatus carries no upstream counts, so it reads 0/0 until
-            real sync wiring lands (a follow-up). A non-interactive readout (not a button): there is no
-            push action to invoke, so a labelled button would announce a dead control to AT users. The
-            compact ↑/↓ glyphs are aria-hidden; an sr-only sentence carries the meaning. */}
-        <div class="koi-sc-sync" title={`0 ahead · 0 behind origin/${status?.branch ?? 'main'}`}>
-          <span class="koi-sr-only">0 commits ahead of, 0 behind origin/{status?.branch ?? 'main'}</span>
-          <span class="ahead" aria-hidden="true">
-            <i>↑</i>0
-          </span>
-          <span class="sep" aria-hidden="true">
-            ·
-          </span>
-          <span class="behind" aria-hidden="true">
-            <i>↓</i>0
-          </span>
-          <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M13 8a5 5 0 1 1-1.5-3.6" />
-            <path d="M13 2.5V5h-2.5" />
-          </svg>
-        </div>
+        {/* Ahead/behind sync readout + push (#1150), driven by status.upstream: real counts and a live
+            push button when the branch tracks an upstream; a plain "No upstream" hint — never fake 0/0
+            counts, never a dead disabled button announced to AT users — when it doesn't. The compact
+            ↑/↓ glyphs are aria-hidden; an sr-only sentence carries the meaning. Rendered only once
+            status resolves so the loading frame shows neither counts nor a misleading hint. */}
+        {status &&
+          (upstream ? (
+            <>
+              <div class="koi-sc-sync" title={`${upstream.ahead} ahead · ${upstream.behind} behind ${upstream.ref}`}>
+                <span class="koi-sr-only">
+                  {upstream.ahead} commits ahead of, {upstream.behind} behind {upstream.ref}
+                </span>
+                <span class="ahead" aria-hidden="true">
+                  <i>↑</i>
+                  {upstream.ahead}
+                </span>
+                <span class="sep" aria-hidden="true">
+                  ·
+                </span>
+                <span class="behind" aria-hidden="true">
+                  <i>↓</i>
+                  {upstream.behind}
+                </span>
+              </div>
+              <button
+                type="button"
+                class={`koi-sc-push${upstream.ahead > 0 ? ' has-ahead' : ''}`}
+                title={`Push to ${upstream.ref}`}
+                aria-label={`Push to ${upstream.ref}`}
+                disabled={busy}
+                onClick={onPush}
+              >
+                <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 12.5v-8M4.5 8 8 4.5 11.5 8" />
+                </svg>
+              </button>
+            </>
+          ) : (
+            <div class="koi-sc-sync koi-sc-sync-none" title="This branch isn’t tracking an upstream">
+              No upstream
+            </div>
+          ))}
       </div>
 
       {actionError && (

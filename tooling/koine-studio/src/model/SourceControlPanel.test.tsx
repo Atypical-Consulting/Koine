@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
-import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus } from '@/host/types';
+import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, GitUpstream } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
 import { axe } from 'vitest-axe';
 
@@ -21,10 +21,12 @@ const TOKEN = 'file:///work';
 // gitCommit clears it, so each mutation genuinely moves the file between groups on the next gitStatus
 // re-fetch — exactly as the real desktop host would. gitStatus returns a fresh snapshot every call, and
 // every method is a vi.fn so a test can assert the exact call. `satisfies GitSurface` keeps the concrete
-// Mock types so `.mock`/`toHaveBeenCalledWith` stay available on the returned object.
-function makeGit(initial: GitFile[]) {
+// Mock types so `.mock`/`toHaveBeenCalledWith` stay available on the returned object. `upstream` seeds
+// the snapshot's upstream-tracking data (#1150) — defaulted to an in-sync origin/main so most tests see
+// the counts + push affordance; pass null for a branch with no upstream.
+function makeGit(initial: GitFile[], upstream: GitUpstream | null = { ref: 'origin/main', ahead: 0, behind: 0 }) {
   let files: GitFile[] = initial.map((f) => ({ ...f }));
-  const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })) });
+  const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })), upstream });
   return {
     canUseGit: true,
     gitStatus: vi.fn(async () => snapshot()),
@@ -42,6 +44,7 @@ function makeGit(initial: GitFile[]) {
     gitCommit: vi.fn(async () => {
       files = [];
     }),
+    gitPush: vi.fn(async () => {}),
     gitBranches: vi.fn(async () => ['main', 'feature']),
     gitCheckout: vi.fn(async () => {}),
     gitLog: vi.fn(
@@ -172,6 +175,70 @@ describe('SourceControlPanel', () => {
 
     // The Refresh action is still present as an accessible button.
     expect(view.getByRole('button', { name: /Refresh/i })).toBeTruthy();
+  });
+
+  test('renders the REAL upstream ahead/behind counts and an accessible push action (#1150)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 2, behind: 1 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+
+    // The readout shows the snapshot's real counts, not a hard-coded 0/0…
+    const sync = view.container.querySelector('.koi-sc-sync')!;
+    expect(sync.textContent).toContain('↑2');
+    expect(sync.textContent).toContain('↓1');
+    // …and the sr-only sentence names the upstream ref with the same numbers.
+    expect(sync.textContent).toContain('2 commits ahead of, 1 behind origin/main');
+
+    // The push affordance is a real button, named for its target ref.
+    const push = view.getByRole('button', { name: 'Push to origin/main' }) as HTMLButtonElement;
+    expect(push.disabled).toBe(false);
+  });
+
+  test('clicking Push runs gitPush through mutate and re-fetches status (#1150)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 2, behind: 0 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const push = await view.findByRole('button', { name: 'Push to origin/main' });
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+    fireEvent.click(push);
+
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
+    // The mutate() follow-up reload re-reads status, so the counts track the pushed repository.
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+  });
+
+  test('a rejected push surfaces as the action-error alert, not a crash (#1150)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    git.gitPush.mockRejectedValue(new Error('non-fast-forward'));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Push to origin/main' }));
+
+    const alert = await view.findByRole('alert');
+    expect(alert.textContent).toContain('non-fast-forward');
+  });
+
+  test('no upstream: no counts, no push button — a hint instead of a fake 0/0 (#1150)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+
+    // The readout slot shows a plain no-upstream hint — never fake ↑0/↓0 counts…
+    const sync = view.container.querySelector('.koi-sc-sync')!;
+    expect(sync.textContent).toMatch(/no upstream/i);
+    expect(sync.textContent).not.toContain('↑');
+    expect(sync.textContent).not.toContain('↓');
+    // …and no push button (a dead control would still be announced to AT users).
+    expect(view.queryByRole('button', { name: /^Push to / })).toBeNull();
+
+    // The branch bar stays accessibility-clean in the no-upstream state too.
+    expect(await axe(view.container.querySelector('.koi-sc-branchbar')!)).toHaveNoViolations();
   });
 
   test('a file focus opens the targeted file\'s diff, not just the panel (#1165)', async () => {
@@ -370,6 +437,7 @@ describe('SourceControlPanel', () => {
       gitStage: vi.fn(),
       gitUnstage: vi.fn(),
       gitCommit: vi.fn(),
+      gitPush: vi.fn(),
       gitBranches: vi.fn(async () => ['main']),
       gitCheckout: vi.fn(),
       gitLog: vi.fn(async () => [] as GitLogEntry[]),
