@@ -3,6 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { type Adr, type AdrStatus, parseAdr, renderAdr } from '@/docs/adr';
 import type { AdrFile, NoteFile } from '@/docs/docsStore';
 import { MdHtml } from '@/docs/MdHtml';
+import { useCommittableField } from '@/shared/useCommittableField';
 
 // The ADR & Notes documentation surface (#147, #193) as real JSX (#992 task 5) — replaces the retired
 // `docsPanel.ts` pure-DOM builders (`renderAdrPanel`/`renderNotesPanel`) with `<AdrPanel>`/`<NotesPanel>`,
@@ -165,10 +166,9 @@ function AdrReadSection(props: { label: string; body: string; renderMarkdown: (m
  * One ADR row: `#N · Title` (toggles the detail) + a status badge, both refreshing in place on save — no
  * host reload. `adr` is local state seeded from `file.adr`: editing produces a fresh parsed `Adr` (with
  * the FILENAME-owned `number` preserved, never the body's own heading number) that both persists via
- * `onSaveAdr` and updates this row's own read view immediately. `draft` is the textarea's own controlled
- * value (a GlossaryPanel-style pattern), so Cancel/Escape never need to re-derive a revert target from a
- * possibly-stale prop — it simply discards the uncommitted `draft` and falls back to the already-committed
- * `adr` state.
+ * `onSaveAdr` and updates this row's own read view immediately. The editor's draft/editing/revert
+ * wiring is a `useCommittableField` over the canonical `renderAdr(adr)` text (see
+ * `@/shared/useCommittableField` for the commit/revert contract).
  */
 function AdrRow(props: {
   file: AdrFile;
@@ -178,27 +178,21 @@ function AdrRow(props: {
 }) {
   const { file, handlers, canWrite, renderMarkdown } = props;
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [adr, setAdr] = useState<Adr>(file.adr);
-  const [draft, setDraft] = useState('');
+  const { editing, draft, setDraft, openEditor, commit: save, cancel: cancelEdit } = useCommittableField({
+    committedValue: renderAdr(adr),
+    onCommit: (next) => {
+      // The number is owned by the filename, not the body — preserve it across an edit.
+      const edited = { ...parseAdr(next), number: file.number };
+      handlers.onSaveAdr(file, edited);
+      setAdr(edited); // refresh the row head (title + badge) without a full-panel reload
+    },
+  });
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (editing) textareaRef.current?.focus();
   }, [editing]);
-
-  const openEditor = (): void => {
-    setDraft(renderAdr(adr));
-    setEditing(true);
-  };
-  const cancelEdit = (): void => setEditing(false);
-  const save = (): void => {
-    // The number is owned by the filename, not the body — preserve it across an edit.
-    const edited = { ...parseAdr(draft), number: file.number };
-    handlers.onSaveAdr(file, edited);
-    setAdr(edited); // refresh the row head (title + badge) without a full-panel reload
-    setEditing(false);
-  };
 
   return (
     <div class="koi-docs-item">
@@ -295,6 +289,9 @@ type NoteLoadStatus = 'idle' | 'loading' | 'loaded' | 'error';
  * re-fetches (closing drops the loaded body, mirroring the old `noteRow`'s `detail = null` / fresh
  * `onReadNote` call on each open — no cross-open cache). `requestId` guards a superseded fetch (a close
  * immediately followed by a reopen, or a fast double-click) from landing after a newer one already did.
+ * The editor's draft/editing/revert wiring is a `useCommittableField` over the loaded `body` (see
+ * `@/shared/useCommittableField` for the commit/revert contract — including how the asynchronously
+ * arriving body refreshes the idle draft so Edit always opens on the freshly loaded text).
  */
 function NoteRow(props: {
   file: NoteFile;
@@ -307,8 +304,13 @@ function NoteRow(props: {
   const [status, setStatus] = useState<NoteLoadStatus>('idle');
   const [body, setBody] = useState('');
   const [errorText, setErrorText] = useState('');
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
+  const { editing, draft, setDraft, openEditor, commit: save, cancel: cancelEdit } = useCommittableField({
+    committedValue: body,
+    onCommit: (next) => {
+      handlers.onSaveNote(file, next);
+      setBody(next); // update in place; the host does not reload for an edit
+    },
+  });
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const requestId = useRef(0);
   const alive = useRef(true);
@@ -323,12 +325,13 @@ function NoteRow(props: {
   const toggle = (): void => {
     if (open) {
       setOpen(false);
-      setEditing(false);
+      cancelEdit(); // closing always leaves edit mode (matches the old explicit setEditing(false))
       setStatus('idle');
       return;
     }
+    // No edit-mode reset needed here: the close branch above (the only way back to closed) already
+    // cancelled, so `editing` is structurally false when reopening.
     setOpen(true);
-    setEditing(false);
     setStatus('loading');
     const id = ++requestId.current;
     handlers
@@ -343,17 +346,6 @@ function NoteRow(props: {
         setErrorText('Could not read note: ' + String(e));
         setStatus('error');
       });
-  };
-
-  const openEditor = (): void => {
-    setDraft(body);
-    setEditing(true);
-  };
-  const cancelEdit = (): void => setEditing(false);
-  const save = (): void => {
-    handlers.onSaveNote(file, draft);
-    setBody(draft); // update in place; the host does not reload for an edit
-    setEditing(false);
   };
 
   return (
