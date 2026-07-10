@@ -25,7 +25,6 @@ const ALLOWLIST = [
   'src/settings/settingsPage.tsx',
   'src/settings/theme.ts',
   'src/shell/canvasWrite.tsx',
-  'src/shell/editorSession.tsx',
   'src/shell/explorer.tsx',
   'src/shell/ExplorerPanel.tsx',
   'src/shell/ide.tsx',

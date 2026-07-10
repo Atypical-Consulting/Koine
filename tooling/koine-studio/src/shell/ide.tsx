@@ -390,6 +390,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     lineWrap: settings.wordWrap,
     minimap: settings.enableMinimap,
     lsp,
+    store: appStore,
     status: statusEl,
     diagCount: diagCountEl,
     diagBody: diagBodyEl,
