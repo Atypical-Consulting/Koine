@@ -319,18 +319,20 @@ internal sealed class RustExpressionTranslator
     /// binary operator, not just arithmetic ones (#1311, extending #1293).
     /// <para>
     /// A simple place is written bare-or-cloned exactly as before (clone only for a non-Copy arithmetic
-    /// operand — comparisons always borrow, per #1282). A compound expression (conditional/let/guard)
-    /// renders each branch in its own natural type via <see cref="WriteOwnedOperand"/> (cloning
+    /// operand — comparisons always borrow, per #1282). A compound expression (conditional/let/guard) OR
+    /// a bare non-leaf expression (a nested <c>BinaryExpr</c> used directly, not nested inside a
+    /// conditional — #1311, Task 3: <see cref="WriteOperand"/>'s own <c>BinaryExpr</c> case ignores
+    /// <paramref name="coerceTo"/> entirely) renders via <see cref="WriteOwnedOperand"/> (cloning
     /// non-Copy leaf places only when <paramref name="isArithmetic"/>, since arithmetic consumes
     /// ownership but a comparison borrows), then — mirroring
     /// <c>RustEmitter.ValueObjects.WriteDerived</c>'s <c>NumericCoercionWrap</c> precedent — wraps the
-    /// WHOLE rendered compound expression once in <c>Decimal::from(...)</c> when its own inferred
+    /// WHOLE rendered expression once in <c>Decimal::from(...)</c> when its own inferred
     /// <paramref name="type"/> differs from <paramref name="coerceTo"/>.
     /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
     {
-        if (expr is ConditionalExpr or LetExpr or GuardExpr)
+        if (expr is ConditionalExpr or LetExpr or GuardExpr or BinaryExpr)
         {
             var needsWrap = coerceTo is not null && type?.Name != coerceTo.Name;
             sb.Append(needsWrap ? "Decimal::from(" : "(");

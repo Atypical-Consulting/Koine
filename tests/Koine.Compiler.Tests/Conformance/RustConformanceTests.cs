@@ -905,4 +905,38 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1311, Task 3 — the root-cause class: a nested <c>BinaryExpr</c> used DIRECTLY as one side
+    /// of an arithmetic operator (not nested inside a conditional/let/guard) fell into
+    /// <c>WriteOperand</c>'s pre-existing <c>case BinaryExpr: WriteBinary(...)</c>, which ignores
+    /// <c>coerceTo</c> entirely — the same gap #1293's own issue named but scoped away from. Widening
+    /// <c>WriteArithmeticOperand</c>'s compound-shape recognition to also catch a bare <c>BinaryExpr</c>
+    /// operand routes it through the same "render uncoerced, wrap the whole rendered text once" path.
+    /// </summary>
+    [Fact]
+    public void Bare_binary_operand_needing_coercion_is_wrapped_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    total: Decimal = (baseAmount + surcharge) + taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the nested Int sum is coerced ONCE, as a whole
+        // — not silently dropped.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Decimal::from(self.base_amount + self.surcharge) + self.tax_rate");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
