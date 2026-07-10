@@ -1,19 +1,12 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
-import {
-  buildInspectorElement,
-  renameStatusMessage,
-  renderInspector,
-  renderChangeHistory,
-  type InspectorElement,
-  type InspectorHandlers,
-} from '@/model/inspector';
-import type { ChangeEntry } from '@/host/gitHistory';
+import { describe, expect, test } from 'vitest';
+import { buildInspectorElement, formatHistoryDate, renameStatusMessage, type InspectorElement } from '@/model/inspector';
 import type { DiagramNode, GlossaryEntry, ModelMember, Range } from '@/lsp/lsp';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/protocol';
 
-afterEach(() => {
-  document.body.innerHTML = '';
-});
+// The presentation layer (the pure-DOM `renderInspector`/`renderChangeHistory` builders and their
+// tests) moved to `PropertiesPanel.test.tsx` as real JSX (#992) — this file now pins only the
+// wire-decoupled pure layer that survives: the glossary/diagram-node join, the rename-status message,
+// and the change-history date formatter.
 
 const range: Range = { start: { line: 4, character: 2 }, end: { line: 4, character: 9 } };
 
@@ -36,147 +29,6 @@ const fullElement: InspectorElement = {
   repository: 'OrderRepository',
   nameRange: range,
 };
-
-const noop: InspectorHandlers = { onGoto: () => {} };
-
-// Characterization safety net (issue #1162): pins constructKey's end-to-end DOM behaviour — including
-// its palette-or-'type' fallback — via the rendered root's dataset.kind. Exercises paths dddKind.test.ts's
-// cross-check doesn't cover (e.g. `service`/an unknown kind falling back to `type`).
-describe('renderInspector dataset.kind (constructKey) — characterization (issue #1162)', () => {
-  test.each([
-    ['aggregate', 'aggregate'],
-    ['quantity', 'value'],
-    ['integration event', 'integration-event'],
-    ['service', 'type'],
-    ['unknown-kind', 'type'],
-  ])('renderInspector(kind: %s).dataset.kind === %s', (kind, expected) => {
-    const el = renderInspector({ ...fullElement, kind }, noop);
-    expect(el.dataset.kind).toBe(expected);
-  });
-});
-
-describe('renderInspector', () => {
-  test('renders an empty state when nothing is selected', () => {
-    const el = renderInspector(null, noop);
-    // The padded .koi-inspector root wraps the shared rail empty state (renderRailEmpty — the same
-    // builder the Rules/Notes tabs use), so the three tabs share one margin and one markup.
-    expect(el.classList.contains('koi-inspector')).toBe(true);
-    expect(el.querySelector('.koi-rview-empty')).not.toBeNull();
-    expect(el.querySelector('.koi-rview-empty-title')!.textContent).toBe('Properties');
-    expect(el.textContent).toMatch(/select an element/i);
-  });
-
-  test('renders the header with name and stereotype badge', () => {
-    const el = renderInspector(fullElement, noop);
-    expect(el.querySelector('.koi-inspector-name')!.textContent).toBe('Order');
-    expect(el.querySelector('.koi-inspector-stereotype')!.textContent).toBe('aggregate root');
-  });
-
-  test('falls back to the kind when there is no stereotype', () => {
-    const el = renderInspector({ ...fullElement, stereotype: null }, noop);
-    expect(el.querySelector('.koi-inspector-stereotype')!.textContent).toBe('aggregate');
-  });
-
-  test('renders the description in an editable textarea', () => {
-    const el = renderInspector(fullElement, noop);
-    const desc = el.querySelector<HTMLTextAreaElement>('.koi-inspector-desc')!;
-    expect(desc.tagName).toBe('TEXTAREA');
-    expect(desc.value).toBe('A customer order.');
-  });
-
-  test('renders an editable Name field seeded with the element name', () => {
-    const el = renderInspector(fullElement, noop);
-    const name = el.querySelector<HTMLInputElement>('.koi-inspector-input')!;
-    expect(name.value).toBe('Order');
-  });
-
-  test('committing a changed name calls onRename; an unchanged/blank name does not', () => {
-    const onRename = vi.fn();
-    const el = renderInspector(fullElement, { onGoto: () => {}, onRename });
-    document.body.appendChild(el);
-    const name = el.querySelector<HTMLInputElement>('.koi-inspector-input')!;
-    name.value = 'PurchaseOrder';
-    name.dispatchEvent(new Event('blur'));
-    expect(onRename).toHaveBeenCalledWith(fullElement, 'PurchaseOrder');
-
-    onRename.mockClear();
-    name.value = 'Order'; // back to the original
-    name.dispatchEvent(new Event('blur'));
-    expect(onRename).not.toHaveBeenCalled();
-  });
-
-  test('editing the description calls onSaveDescription on blur', () => {
-    const onSaveDescription = vi.fn();
-    const el = renderInspector(fullElement, { onGoto: () => {}, onSaveDescription });
-    document.body.appendChild(el);
-    const desc = el.querySelector<HTMLTextAreaElement>('.koi-inspector-desc')!;
-    desc.value = 'An order placed by a customer.';
-    desc.dispatchEvent(new Event('blur'));
-    expect(onSaveDescription).toHaveBeenCalledWith(fullElement, 'An order placed by a customer.');
-  });
-
-  test('lists every property, behavior, invariant, published event, and the repository', () => {
-    const el = renderInspector(fullElement, noop);
-    const text = el.textContent ?? '';
-    for (const s of ['submit(): void', 'cancel(): void', 'total >= 0', 'OrderPlaced', 'OrderRepository']) {
-      expect(text).toContain(s);
-    }
-    // Properties render as a two-column table (name | type), not colon-joined list rows.
-    const rows = Array.from(el.querySelectorAll('.koi-inspector-table tr')).map((tr) =>
-      Array.from(tr.querySelectorAll('th, td')).map((c) => c.textContent),
-    );
-    expect(rows).toEqual([
-      ['id', 'OrderId'],
-      ['total', 'Money'],
-    ]);
-    // Section headers are present for the populated compartments.
-    const headers = Array.from(el.querySelectorAll('.koi-inspector-section-title')).map((n) => n.textContent);
-    expect(headers).toEqual(
-      expect.arrayContaining(['Properties', 'Behaviors', 'Invariants', 'Published Events', 'Repository']),
-    );
-  });
-
-  test('renders properties as row-scoped table headers and keeps a colon-less name in the name column', () => {
-    const el = renderInspector(
-      {
-        ...fullElement,
-        properties: [
-          { text: 'id: OrderId', computed: false },
-          { text: 'archived', computed: false },
-        ],
-      },
-      noop,
-    );
-    const rows = Array.from(el.querySelectorAll<HTMLTableRowElement>('.koi-inspector-table tr'));
-    expect(rows.map((tr) => tr.querySelector('th')?.textContent)).toEqual(['id', 'archived']);
-    expect(rows.map((tr) => tr.querySelector('th')?.getAttribute('scope'))).toEqual(['row', 'row']);
-    expect(rows.map((tr) => tr.querySelector('td')?.textContent)).toEqual(['OrderId', '']);
-  });
-
-  test('omits empty compartments', () => {
-    const lean: InspectorElement = {
-      ...fullElement,
-      behaviors: [],
-      invariants: [],
-      publishedEvents: [],
-      repository: null,
-    };
-    const el = renderInspector(lean, noop);
-    const headers = Array.from(el.querySelectorAll('.koi-inspector-section-title')).map((n) => n.textContent);
-    expect(headers).toContain('Properties');
-    expect(headers).not.toContain('Behaviors');
-    expect(headers).not.toContain('Invariants');
-    expect(headers).not.toContain('Repository');
-  });
-
-  test('clicking the name jumps to its declaration range', () => {
-    const onGoto = vi.fn();
-    const el = renderInspector(fullElement, { onGoto });
-    document.body.appendChild(el);
-    el.querySelector<HTMLButtonElement>('.koi-inspector-name')!.click();
-    expect(onGoto).toHaveBeenCalledWith(range);
-  });
-});
 
 describe('buildInspectorElement', () => {
   const entry: GlossaryEntry = {
@@ -273,7 +125,7 @@ describe('buildInspectorElement', () => {
     expect(built.values).toEqual(['Draft', 'Placed']);
   });
 
-  test('includes computed members in properties, flagged and rendered italic', () => {
+  test('includes computed members in properties, flagged', () => {
     const computedNode: DiagramNode = {
       ...node,
       members: [
@@ -286,139 +138,6 @@ describe('buildInspectorElement', () => {
       { text: 'quantity: Int', computed: false },
       { text: 'subtotal: Int', computed: true },
     ]);
-
-    const el = renderInspector(built, { onGoto: () => {} });
-    const rows = Array.from(el.querySelectorAll<HTMLTableRowElement>('.koi-inspector-table tr'));
-    const computedRows = rows.filter((tr) => tr.classList.contains('koi-inspector-row-computed'));
-    expect(computedRows.map((tr) => tr.querySelector('th')?.textContent)).toEqual(['subtotal']);
-    expect(computedRows[0].querySelector('td')?.textContent).toBe('Int');
-    // The plain field row is NOT marked computed.
-    const fieldRow = rows.find((tr) => tr.querySelector('th')?.textContent === 'quantity');
-    expect(fieldRow?.classList.contains('koi-inspector-row-computed')).toBe(false);
-  });
-});
-
-describe('property editing (authoring)', () => {
-  const editableElement: InspectorElement = {
-    ...fullElement,
-    properties: [
-      { text: 'id: OrderId', computed: false },
-      { text: 'total: Money', computed: false },
-      { text: 'subtotal: Int', computed: true },
-    ],
-  };
-
-  function editingHandlers(): InspectorHandlers & Record<string, ReturnType<typeof vi.fn>> {
-    return {
-      onGoto: vi.fn(),
-      onAddProperty: vi.fn(),
-      onRemoveProperty: vi.fn(),
-      onRenameProperty: vi.fn(),
-      onChangeType: vi.fn(),
-    } as never;
-  }
-
-  test('non-computed rows become editable inputs; a computed row stays read-only', () => {
-    const el = renderInspector(editableElement, editingHandlers());
-    const editableRows = el.querySelectorAll('.koi-inspector-row-editable');
-    expect(editableRows.length).toBe(2); // id, total — NOT the computed subtotal
-    // The computed row carries no input (it is an expression, not an editable field).
-    const computed = el.querySelector('.koi-inspector-row-computed')!;
-    expect(computed.querySelector('input')).toBeNull();
-    expect(computed.querySelector('.koi-inspector-prop-name')!.textContent).toBe('subtotal');
-  });
-
-  test('committing a changed property name calls onRenameProperty with the old + new names', () => {
-    const h = editingHandlers();
-    const el = renderInspector(editableElement, h);
-    document.body.appendChild(el);
-    const firstRow = el.querySelector('.koi-inspector-row-editable')!;
-    const nameInput = firstRow.querySelector<HTMLInputElement>('.koi-inspector-prop-name input')!;
-    nameInput.value = 'identifier';
-    nameInput.dispatchEvent(new Event('blur'));
-    expect(h.onRenameProperty).toHaveBeenCalledWith(editableElement, 'id', 'identifier');
-  });
-
-  test('committing a changed property type calls onChangeType', () => {
-    const h = editingHandlers();
-    const el = renderInspector(editableElement, h);
-    document.body.appendChild(el);
-    const firstRow = el.querySelector('.koi-inspector-row-editable')!;
-    const typeInput = firstRow.querySelector<HTMLInputElement>('.koi-inspector-prop-type input')!;
-    typeInput.value = 'OrderNumber';
-    typeInput.dispatchEvent(new Event('blur'));
-    expect(h.onChangeType).toHaveBeenCalledWith(editableElement, 'id', 'OrderNumber');
-  });
-
-  test('an unchanged property input does not fire an edit', () => {
-    const h = editingHandlers();
-    const el = renderInspector(editableElement, h);
-    document.body.appendChild(el);
-    const nameInput = el.querySelector<HTMLInputElement>('.koi-inspector-row-editable .koi-inspector-prop-name input')!;
-    nameInput.dispatchEvent(new Event('blur')); // value untouched
-    expect(h.onRenameProperty).not.toHaveBeenCalled();
-  });
-
-  test('the delete button calls onRemoveProperty with the property name', () => {
-    const h = editingHandlers();
-    const el = renderInspector(editableElement, h);
-    const del = el.querySelector<HTMLButtonElement>('.koi-inspector-row-editable .koi-inspector-prop-delete')!;
-    del.click();
-    expect(h.onRemoveProperty).toHaveBeenCalledWith(editableElement, 'id');
-  });
-
-  test('the add-property row calls onAddProperty once both fields are filled (and ignores a blank one)', () => {
-    const h = editingHandlers();
-    const el = renderInspector(editableElement, h);
-    const name = el.querySelector<HTMLInputElement>('.koi-inspector-add-name')!;
-    const type = el.querySelector<HTMLInputElement>('.koi-inspector-add-type')!;
-    const add = el.querySelector<HTMLButtonElement>('.koi-inspector-add-btn')!;
-
-    add.click(); // both empty → no-op
-    expect(h.onAddProperty).not.toHaveBeenCalled();
-
-    name.value = 'quantity';
-    type.value = 'Int';
-    add.click();
-    expect(h.onAddProperty).toHaveBeenCalledWith(editableElement, 'quantity', 'Int');
-  });
-
-  test('with no editing handlers the Properties table stays read-only (no inputs, no add row)', () => {
-    const el = renderInspector(editableElement, { onGoto: () => {} });
-    expect(el.querySelector('.koi-inspector-row-editable')).toBeNull();
-    expect(el.querySelector('.koi-inspector-prop-input')).toBeNull();
-    expect(el.querySelector('.koi-inspector-add-prop')).toBeNull();
-  });
-});
-
-describe('renderChangeHistory', () => {
-  const entries: ChangeEntry[] = [
-    { sha: 'a1b2c3d', author: 'Alice Dupont', date: '2026-06-20T10:30:00+02:00', message: 'Add the Rule invariant' },
-    { sha: 'e4f5g6h', author: 'Bob', date: '2026-05-01T09:00:00Z', message: 'Introduce Order aggregate' },
-  ];
-
-  test('is hidden (null) when history is unavailable or empty', () => {
-    expect(renderChangeHistory(null)).toBeNull();
-    expect(renderChangeHistory([])).toBeNull();
-  });
-
-  test('renders one row per commit, newest first, as author · date over the message', () => {
-    const el = renderChangeHistory(entries)!;
-    expect(el).not.toBeNull();
-    expect(el.querySelector('.koi-inspector-section-title')!.textContent).toBe('Change history');
-
-    const rows = Array.from(el.querySelectorAll('.koi-inspector-history-item'));
-    expect(rows.length).toBe(2);
-    // The author date is shown as its YYYY-MM-DD calendar day (locale-free), with author and message.
-    expect(rows[0].querySelector('.koi-inspector-history-meta')!.textContent).toBe('Alice Dupont · 2026-06-20');
-    expect(rows[0].querySelector('.koi-inspector-history-message')!.textContent).toBe('Add the Rule invariant');
-    expect(rows[1].querySelector('.koi-inspector-history-meta')!.textContent).toBe('Bob · 2026-05-01');
-  });
-
-  test('carries each commit SHA on the row for a later jump-to-commit', () => {
-    const el = renderChangeHistory(entries)!;
-    const shas = Array.from(el.querySelectorAll('.koi-inspector-history-item')).map((n) => (n as HTMLElement).dataset.sha);
-    expect(shas).toEqual(['a1b2c3d', 'e4f5g6h']);
   });
 });
 
@@ -477,5 +196,16 @@ describe('renameStatusMessage (#550; #565 follow-up: reads the authoritative sig
     };
     const msg = renameStatusMessage(fullElement, 'PurchaseOrder', edit);
     expect(msg).toBe('Renamed Order → PurchaseOrder; id type OrderId left unchanged');
+  });
+});
+
+describe('formatHistoryDate', () => {
+  test('strips an ISO-8601 timestamp down to its YYYY-MM-DD calendar day', () => {
+    expect(formatHistoryDate('2026-06-20T10:30:00+02:00')).toBe('2026-06-20');
+    expect(formatHistoryDate('2026-05-01T09:00:00Z')).toBe('2026-05-01');
+  });
+
+  test('passes a non-ISO-shaped value through unchanged', () => {
+    expect(formatHistoryDate('not-a-date')).toBe('not-a-date');
   });
 });

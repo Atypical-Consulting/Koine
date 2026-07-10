@@ -1,14 +1,11 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import {
   extractEventFlow,
   extractEvents,
   extractRelationships,
   mergeDiagramGraphs,
   mergeGraphsForView,
-  renderEventsTable,
-  renderRelationshipsTable,
   type EventRow,
-  type RelationRow,
 } from '@/model/modelTables';
 import type { DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
 
@@ -396,133 +393,5 @@ describe('mergeDiagramGraphs extractor pipeline', () => {
       'OrderPlaced:domain:Order',
       'OrderShipped:integration:Sales',
     ]);
-  });
-});
-
-describe('renderEventsTable', () => {
-  const rows: EventRow[] = [
-    { name: 'OrderPlaced', qualifiedName: 'Sales.OrderPlaced', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
-    { name: 'OrderShipped', qualifiedName: 'Sales.OrderShipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
-  ];
-
-  test('renders a header row and one body row per event, with the spec’s columns', () => {
-    const el = renderEventsTable(rows, { goto: () => {} });
-    const headers = Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent);
-    expect(headers).toEqual(['Event', 'Type', 'Published By', 'Bounded Context', 'When']);
-    expect(el.querySelectorAll('tbody tr')).toHaveLength(2);
-    const firstRow = Array.from(el.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
-    expect(firstRow).toEqual(['OrderPlaced', 'Domain', 'Order', 'Sales', '—']); // empty `when` shows an em dash
-    const second = Array.from(el.querySelectorAll('tbody tr')[1].querySelectorAll('td')).map((td) => td.textContent);
-    expect(second).toEqual(['OrderShipped', 'Integration', 'Sales', 'Sales', '—']);
-  });
-
-  test('a row click invokes goto with the row’s span', () => {
-    const goto = vi.fn();
-    const el = renderEventsTable(rows, { goto });
-    document.body.appendChild(el);
-    (el.querySelectorAll('tbody tr')[1] as HTMLElement).click();
-    expect(goto).toHaveBeenCalledWith(rows[1].span);
-  });
-
-  test('Enter on a focused row invokes goto (keyboard access)', () => {
-    const goto = vi.fn();
-    const el = renderEventsTable(rows, { goto });
-    document.body.appendChild(el);
-    const row = el.querySelectorAll('tbody tr')[0] as HTMLElement;
-    expect(row.tabIndex).toBe(0);
-    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect(goto).toHaveBeenCalledWith(rows[0].span);
-  });
-
-  test('navigable rows carry an aria-label naming the jump-to-source action', () => {
-    const el = renderEventsTable(rows, { goto: () => {} });
-    const row = el.querySelectorAll('tbody tr')[0] as HTMLElement;
-    expect(row.getAttribute('aria-label')).toBe('Jump to source: OrderPlaced');
-  });
-
-  test('a row click also invokes onSelect with the event’s qualifiedName + context (loads the inspector)', () => {
-    const onSelect = vi.fn();
-    const el = renderEventsTable(rows, { goto: () => {}, onSelect });
-    document.body.appendChild(el);
-    (el.querySelectorAll('tbody tr')[0] as HTMLElement).click();
-    expect(onSelect).toHaveBeenCalledWith('Sales.OrderPlaced', 'Sales');
-  });
-
-  test('empty input renders an empty-state element (no table rows)', () => {
-    const el = renderEventsTable([], { goto: () => {} });
-    expect(el.querySelector('tbody tr')).toBeNull();
-    expect(el.classList.contains('koi-table-empty')).toBe(true);
-  });
-
-  test('clicking a column header sorts rows by that column, toggling direction', () => {
-    const unsorted: EventRow[] = [
-      { name: 'Shipped', qualifiedName: 'Sales.Shipped', type: 'integration', publishedBy: 'Sales', context: 'Sales', when: '', span: span(20) },
-      { name: 'Placed', qualifiedName: 'Sales.Placed', type: 'domain', publishedBy: 'Order', context: 'Sales', when: '', span: span(12) },
-    ];
-    const el = renderEventsTable(unsorted, { goto: () => {} });
-    document.body.appendChild(el);
-    const eventHeader = el.querySelectorAll('thead th')[0];
-    const names = () => Array.from(el.querySelectorAll('tbody tr')).map((r) => r.querySelector('td')!.textContent);
-
-    eventHeader.querySelector('button')!.click(); // ascending
-    expect(names()).toEqual(['Placed', 'Shipped']);
-    expect(eventHeader.getAttribute('aria-sort')).toBe('ascending');
-
-    eventHeader.querySelector('button')!.click(); // descending
-    expect(names()).toEqual(['Shipped', 'Placed']);
-    expect(eventHeader.getAttribute('aria-sort')).toBe('descending');
-  });
-
-  test('sorting preserves click-to-source on the re-ordered rows', () => {
-    const goto = vi.fn();
-    const el = renderEventsTable(rows, { goto });
-    document.body.appendChild(el);
-    el.querySelectorAll('thead th')[0].querySelector('button')!.click();
-    (el.querySelectorAll('tbody tr')[0] as HTMLElement).click();
-    expect(goto).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('renderRelationshipsTable', () => {
-  // Both rows are STRUCTURAL (the only kind the table renders now); the second lacks a span (both
-  // endpoints undocumented) so it renders plain, exercising the spanless-row path.
-  const rows: RelationRow[] = [
-    { source: 'Order', relation: 'contains', target: 'OrderItem', contexts: ['Sales'], span: span(8) },
-    { source: 'Order', relation: 'references', target: 'Customer', contexts: ['Sales'], span: null },
-  ];
-
-  test('renders a header row and one body row per relation, with the spec’s columns', () => {
-    const el = renderRelationshipsTable(rows, { goto: () => {} });
-    const headers = Array.from(el.querySelectorAll('thead th')).map((th) => th.textContent);
-    expect(headers).toEqual(['Source', 'Relation', 'Target', 'Contexts']);
-    expect(el.querySelectorAll('tbody tr')).toHaveLength(2);
-    const withSpan = Array.from(el.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
-    expect(withSpan).toEqual(['Order', 'contains', 'OrderItem', 'Sales']);
-    const spanless = Array.from(el.querySelectorAll('tbody tr')[1].querySelectorAll('td')).map((td) => td.textContent);
-    expect(spanless).toEqual(['Order', 'references', 'Customer', 'Sales']);
-  });
-
-  test('a row with a span is click-to-source', () => {
-    const goto = vi.fn();
-    const el = renderRelationshipsTable(rows, { goto });
-    document.body.appendChild(el);
-    (el.querySelectorAll('tbody tr')[0] as HTMLElement).click();
-    expect(goto).toHaveBeenCalledWith(rows[0].span);
-  });
-
-  test('a spanless row is not clickable', () => {
-    const goto = vi.fn();
-    const el = renderRelationshipsTable(rows, { goto });
-    document.body.appendChild(el);
-    const tr = el.querySelectorAll('tbody tr')[1] as HTMLElement;
-    expect(tr.classList.contains('koi-row-link')).toBe(false);
-    tr.click();
-    expect(goto).not.toHaveBeenCalled();
-  });
-
-  test('empty input renders an empty-state element', () => {
-    const el = renderRelationshipsTable([], { goto: () => {} });
-    expect(el.querySelector('tbody tr')).toBeNull();
-    expect(el.classList.contains('koi-table-empty')).toBe(true);
   });
 });

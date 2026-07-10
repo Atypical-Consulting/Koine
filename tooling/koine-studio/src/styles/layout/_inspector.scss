@@ -1,8 +1,9 @@
 @use '../abstracts' as a;
 
-/* --- right inspector rail: Propriétés / Règles / Notes ---
-   The element inspector (renderInspector) is dedicated to "Propriétés"; Règles/Notes are placeholder
-   tabs that mirror the mockup chrome until a follow-up builds them. */
+/* --- right inspector rail: Properties ---
+   The element inspector (PropertiesPanel, `src/model/PropertiesPanel.tsx`) is the rail's sole surface.
+   The former Règles/Notes tabs were retired in #730: invariants now surface in the Properties panel's
+   Invariants section, and model Notes live in the center Deck's Docs surface. */
 #right {
   display: flex;
   flex-direction: column;

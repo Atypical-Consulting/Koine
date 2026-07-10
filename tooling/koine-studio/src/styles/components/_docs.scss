@@ -119,7 +119,10 @@
   }
 
   &.is-accepted {
-    color: var(--koi-ok, #16a34a);
+    // #16a34a only cleared 4.12:1 against this pill's tinted background (axe requires 4.5:1
+    // for normal text) — #22c55e keeps the same "accepted" green family with enough luminance
+    // to clear the threshold; the background tint is unaffected.
+    color: var(--koi-ok, #22c55e);
     background: color-mix(in srgb, var(--koi-ok, #16a34a) 18%, transparent);
   }
 

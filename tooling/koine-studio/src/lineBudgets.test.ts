@@ -169,11 +169,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // surface loaders (Generated preview, diagrams, glossary, left-rail model, ADR/Notes docs, Source
   // Control, Events/Relationships, Compatibility check) consolidated onto the docViews slice and
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
-  // Raised 894 → 897: #1352 (shared lifecycleGuard primitive) migrated this file's hand-rolled
-  // disposed/seq state onto createLifecycleGuard(), landing on `main` concurrently with the generated
-  // file-tree feature's own growth of this file (both merged in the same PR that hit this ceiling
-  // first). Measured end-state (897).
-  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 897 },
+  // Raised 894 → 922: three changes touch this file across this merge. #871 (browse generated output
+  // file-by-file via a file tree) grows the Generated-preview loader; #992 (Docs pages JSX conversion)
+  // rewires loadAdr/loadNotes to mount <AdrPanel>/<NotesPanel> via the existing renderPanel pattern
+  // instead of the retired renderAdrPanel/renderNotesPanel DOM builders; #1352 (shared lifecycleGuard
+  // primitive) migrates this file's hand-rolled disposed/seq state onto createLifecycleGuard(), touching
+  // every disposed-check call site. Measured end-state after merging all three (903), ceil(903 × 1.02) = 922.
+  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 922 },
   // Lowered 736 → 731: the #985 whole-branch code-review's dead-code finding — `ensureTerminal`/
   // `ensureReview` were declared on `CenterDeckControllerDeps` and passed in by the facade, but never
   // actually called (the real Terminal/Review dispatch lives entirely in the injected

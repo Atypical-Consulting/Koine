@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { RelationshipsPanel } from '@/model/RelationshipsPanel';
@@ -61,5 +61,58 @@ describe('RelationshipsPanel', () => {
       <RelationshipsPanel store={store} graph={graph} handlers={{ goto: () => {} }} />,
     );
     expect(await axe(container)).toHaveNoViolations();
+  });
+});
+
+// Moved from modelTables.test.ts's `renderRelationshipsTable` describe block when #992 task 3 retired
+// that pure-DOM builder in favor of the shared SortableTable — these assert the Relationships table's
+// SPECIFIC column set, empty-state text, and that a structural row lacking a span (both endpoints
+// undocumented) renders plain / isn't clickable; generic table behavior (keyboard access, aria-label,
+// sort toggling) is covered once, generically, by SortableTable.test.tsx.
+describe('RelationshipsPanel — table (moved from modelTables.test.ts)', () => {
+  test('renders the Source · Relation · Target · Contexts columns', () => {
+    const store = createAppStore();
+    const { container } = render(
+      <RelationshipsPanel store={store} graph={graph} handlers={{ goto: () => {} }} />,
+    );
+    const headers = Array.from(container.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['Source', 'Relation', 'Target', 'Contexts']);
+    const firstRow = Array.from(container.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map(
+      (td) => td.textContent,
+    );
+    expect(firstRow).toEqual(['Order', 'contains', 'OrderItem', 'Sales']);
+  });
+
+  test('a row with a span is click-to-source; a spanless structural row renders plain and is not clickable', () => {
+    // Neither Customer nor its relation to Order carries a source span (both endpoints undocumented) —
+    // extractRelationships falls back to `from.sourceSpan ?? to.sourceSpan`, both null here.
+    const spanlessGraph: DiagramGraph = {
+      nodes: [
+        node('Order', 'Order', 'aggregate-root', 'Sales.Order'),
+        node('Customer', 'Customer', 'entity', 'Sales.Customer'),
+      ],
+      edges: [edge('Order', 'Customer', 'references')],
+    };
+    const goto = vi.fn();
+    const store = createAppStore();
+    const { container } = render(
+      <RelationshipsPanel store={store} graph={spanlessGraph} handlers={{ goto }} />,
+    );
+    const tr = container.querySelectorAll('tbody tr')[0] as HTMLElement;
+    expect(tr.classList.contains('koi-row-link')).toBe(false);
+    tr.click();
+    expect(goto).not.toHaveBeenCalled();
+  });
+
+  test('empty input renders the Relationships-specific empty-state text (no table)', () => {
+    const noRelations: DiagramGraph = { nodes: [], edges: [] };
+    const store = createAppStore();
+    const { container } = render(
+      <RelationshipsPanel store={store} graph={noRelations} handlers={{ goto: () => {} }} />,
+    );
+    expect(container.querySelector('table')).toBeNull();
+    expect(container.querySelector('.koi-table-empty')!.textContent).toBe(
+      'No structural relationships yet — add an aggregate or an entity reference to your model.',
+    );
   });
 });

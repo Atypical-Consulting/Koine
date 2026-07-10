@@ -6,12 +6,28 @@ import type { DiagramGraph } from '@/lsp/lsp';
 import {
   extractEventFlow,
   extractEvents,
-  renderEventsTable,
   type EventFlowNode,
+  type EventRow,
   type TableHandlers,
 } from '@/model/modelTables';
+import { SortableTable, type SortableTableColumn } from '@/model/SortableTable';
 import { scopeGraph } from '@/model/activeContext';
 import { renderEventFlowGraph, type EventFlowGraphHandle } from '@/diagrams/diagrams';
+
+const EM_DASH = '—';
+
+/** The Events table's columns: Event · Type · Published By · Bounded Context · When (issue #144). */
+const EVENT_COLUMNS: SortableTableColumn<EventRow>[] = [
+  { header: 'Event', get: (r) => r.name },
+  {
+    header: 'Type',
+    get: (r) => (r.type === 'integration' ? 'Integration' : 'Domain'),
+    cellClass: (r) => `koi-evt-type koi-evt-${r.type}`,
+  },
+  { header: 'Published By', get: (r) => r.publishedBy },
+  { header: 'Bounded Context', get: (r) => r.context },
+  { header: 'When', get: (r) => r.when || EM_DASH },
+];
 
 // The bottom-panel Events view as a Preact panel (#193, #144, #146, #270). It subscribes to the
 // `activeContext` slice and narrows the merged diagram graph to that bounded context, then renders it two
@@ -52,16 +68,19 @@ export function EventsPanel(props: {
         </button>
       </div>
       {view === 'table' ? (
-        // The table stays the existing pure DOM builder, mounted through a callback ref so the imperative
-        // renderer (sortable headers, click-to-source rows) is reused untouched; it re-runs on every render
-        // with the freshly-scoped rows, so the table tracks the scope.
-        <div
-          class="koi-events-mount"
-          ref={(host: HTMLElement | null) => {
-            if (!host) return;
-            host.replaceChildren(renderEventsTable(extractEvents(scopeGraph(props.graph, scope)), props.handlers));
-          }}
-        />
+        <div class="koi-events-mount">
+          <SortableTable
+            rows={extractEvents(scopeGraph(props.graph, scope))}
+            columns={EVENT_COLUMNS}
+            emptyText="No events yet — add a domain or integration event to your model."
+            rowLabel={(r) => r.name}
+            handlers={props.handlers}
+            // Clicking an event row also selects it, so the Properties inspector loads it (issue
+            // follow-up): the bottom Events table is a list of event nodes; clicking one should inspect
+            // it, like the diagram.
+            onActivate={(r) => props.handlers.onSelect?.(r.qualifiedName, r.context)}
+          />
+        </div>
       ) : (
         <EventFlowView graph={props.graph} scope={scope} />
       )}

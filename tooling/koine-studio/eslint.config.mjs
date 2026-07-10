@@ -22,6 +22,16 @@ const INSERT_ADJACENT_HTML_SELECTOR = {
   message: 'insertAdjacentHTML is an XSS sink. Use textContent/el()/JSX or an allow-listed island; only already-trusted/escaped markup, behind a justified disable.',
 };
 
+// The JSX form of the same sink (final #992 review, Finding 3). Only `src/docs/MdHtml.tsx` and
+// `src/ai/components/MdHtml.tsx` are sanctioned (each is documented as THE ONLY permitted site for
+// its subsystem, behind a renderer that HTML-escapes the whole input up front) — both turn this
+// selector back off below. Everywhere else, a new raw-HTML site must not slip in past the
+// assignment/call bans above.
+const DANGEROUS_HTML_JSX_SELECTOR = {
+  selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+  message: 'dangerouslySetInnerHTML is an XSS sink. Compose the sanctioned MdHtml component (src/docs/MdHtml.tsx or src/ai/components/MdHtml.tsx) instead of adding a new raw-HTML site.',
+};
+
 // Hand-rolled disposed flag (#1352): the six lifecycle-owning modules that used to declare
 // `let disposed = false` now share createLifecycleGuard(). A bare re-roll loses the guard's
 // idempotent dispose()/isDisposed() contract, so it's banned; use createLifecycleGuard() from
@@ -47,7 +57,7 @@ const SEQ_COUNTER_SELECTOR = {
 // each override hand-listing which selectors it wants included (an opt-in list silently drifts: a future
 // 5th selector added to ALL_SELECTORS applies everywhere by default here, with no override needing an edit
 // unless it specifically wants to exempt the new one).
-const ALL_SELECTORS = [INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR, DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR];
+const ALL_SELECTORS = [INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR, DANGEROUS_HTML_JSX_SELECTOR, DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR];
 function selectorsExcept(...excluded) {
   return ALL_SELECTORS.filter((s) => !excluded.includes(s));
 }
@@ -109,6 +119,18 @@ export default tseslint.config(
       'no-restricted-syntax': ['error', ...selectorsExcept(SEQ_COUNTER_SELECTOR)],
     },
   },
+  // Sanctioned dangerouslySetInnerHTML sites (final #992 review, Finding 3): the ONLY two files permitted
+  // to use the JSX `dangerouslySetInnerHTML` attribute banned above. Each is documented in its own file
+  // as THE ONLY permitted raw-HTML site for its subsystem — `src/docs/MdHtml.tsx` for the Docs (ADR/Notes)
+  // pages (#992 task 5), `src/ai/components/MdHtml.tsx` for assistant content (#990) — and both render
+  // behind a Markdown renderer that HTML-escapes the whole input up front before any formatting, so no raw
+  // markup can reach the DOM (see each file's header comment, and `MdHtml.test.tsx` for the pinned
+  // hostile-input regression). A THIRD site must not slip in silently: this is a two-entry allow-list, not
+  // a wildcard — any other file adding `dangerouslySetInnerHTML` stays fully gated by the rule above.
+  {
+    files: ['src/docs/MdHtml.tsx', 'src/ai/components/MdHtml.tsx'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
   // Permanent imperative islands (CONTRIBUTING non-goals): CodeMirror (editor), maxGraph
   // (diagrams-maxgraph), and the host seam build DOM imperatively by nature — innerHTML there is
   // inherent to the library boundary, not a migration debt, so the ban is permanently off for them.
@@ -143,10 +165,6 @@ export default tseslint.config(
       'src/settings/prefsControls.ts',
       'src/settings/prefsSections/editor.ts',
     ],
-    rules: { 'no-restricted-syntax': 'off' },
-  },
-  {
-    files: ['src/docs/docsPanel.ts', 'src/model/glossary.ts'], // retired by #992 (pure-DOM model/docs builders → JSX)
     rules: { 'no-restricted-syntax': 'off' },
   },
   {

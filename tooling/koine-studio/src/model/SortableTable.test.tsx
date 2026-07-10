@@ -1,0 +1,205 @@
+import { describe, expect, test, vi } from 'vitest';
+import { act, render } from '@testing-library/preact';
+import { axe } from 'vitest-axe';
+import { SortableTable, type SortableTableColumn } from '@/model/SortableTable';
+import type { SourceSpan } from '@/lsp/lsp';
+
+// SortableTable<T> is the shared table the Events/Relationships panels render into (issue #992 task 3):
+// it replaces the pure-DOM renderTable/buildRow builder that used to rebuild the whole <table> (wiping
+// sort state) on every call. Rows/columns are generic; the only contract is a `span` field for
+// click/keyboard jump-to-source (mirrors the old renderTable<T extends { span: SourceSpan | null }>).
+
+interface Row {
+  name: string;
+  value: string;
+  span: SourceSpan | null;
+}
+
+const span = (line: number): SourceSpan => ({
+  file: 'file:///m.koi',
+  line,
+  column: 3,
+  endLine: line,
+  endColumn: 9,
+  offset: 0,
+  length: 6,
+});
+
+const columns: SortableTableColumn<Row>[] = [
+  { header: 'Name', get: (r) => r.name },
+  { header: 'Value', get: (r) => r.value, cellClass: () => 'koi-value-cell' },
+];
+
+const rows: Row[] = [
+  { name: 'Bravo', value: '2', span: span(20) },
+  { name: 'alpha', value: '10', span: span(10) },
+];
+
+describe('SortableTable', () => {
+  test('renders a header row and one body row per input row, with the given columns', () => {
+    const { container } = render(
+      <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
+    );
+    const headers = Array.from(container.querySelectorAll('thead th')).map((th) => th.textContent);
+    expect(headers).toEqual(['Name', 'Value']);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+    const firstRow = Array.from(container.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map((td) => td.textContent);
+    expect(firstRow).toEqual(['Bravo', '2']);
+    // A column's cellClass is applied to its <td>.
+    expect(container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[1].classList.contains('koi-value-cell')).toBe(
+      true,
+    );
+  });
+
+  test('empty rows render the koi-table-empty paragraph, not a table', () => {
+    const { container } = render(
+      <SortableTable rows={[]} columns={columns} emptyText="No rows yet." rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
+    );
+    expect(container.querySelector('table')).toBeNull();
+    const empty = container.querySelector('p.koi-table-empty');
+    expect(empty).not.toBeNull();
+    expect(empty!.textContent).toBe('No rows yet.');
+  });
+
+  test('a row with a span is a focusable .koi-row-link firing goto on click', () => {
+    const goto = vi.fn();
+    const { container } = render(
+      <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto }} />,
+    );
+    const tr = container.querySelectorAll('tbody tr')[0] as HTMLElement;
+    expect(tr.classList.contains('koi-row-link')).toBe(true);
+    expect(tr.tabIndex).toBe(0);
+    expect(tr.getAttribute('aria-label')).toBe('Jump to source: Bravo');
+    tr.click();
+    expect(goto).toHaveBeenCalledWith(rows[0].span);
+  });
+
+  test('Enter and Space on a focused row both invoke goto (keyboard access)', () => {
+    const goto = vi.fn();
+    const { container } = render(
+      <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto }} />,
+    );
+    const tr = container.querySelectorAll('tbody tr')[0] as HTMLElement;
+    tr.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(goto).toHaveBeenCalledTimes(1);
+    tr.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    expect(goto).toHaveBeenCalledTimes(2);
+  });
+
+  test('a spanless row renders plain: no .koi-row-link, not focusable, click is a no-op', () => {
+    const goto = vi.fn();
+    const spanless: Row[] = [{ name: 'Plain', value: '1', span: null }];
+    const { container } = render(
+      <SortableTable rows={spanless} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto }} />,
+    );
+    const tr = container.querySelectorAll('tbody tr')[0] as HTMLElement;
+    expect(tr.classList.contains('koi-row-link')).toBe(false);
+    expect(tr.tabIndex).not.toBe(0);
+    tr.click();
+    expect(goto).not.toHaveBeenCalled();
+  });
+
+  test('an onActivate handler fires alongside goto even on a spanless row', () => {
+    const onActivate = vi.fn();
+    const spanless: Row[] = [{ name: 'Plain', value: '1', span: null }];
+    const { container } = render(
+      <SortableTable
+        rows={spanless}
+        columns={columns}
+        emptyText="none"
+        rowLabel={(r) => r.name}
+        handlers={{ goto: () => {} }}
+        onActivate={onActivate}
+      />,
+    );
+    const tr = container.querySelectorAll('tbody tr')[0] as HTMLElement;
+    // onActivate makes even a spanless row navigable (mirrors the Events table's select-to-inspect row).
+    expect(tr.classList.contains('koi-row-link')).toBe(true);
+    tr.click();
+    expect(onActivate).toHaveBeenCalledWith(spanless[0]);
+  });
+
+  test('clicking a column header sorts rows by that column (numeric-aware, case-insensitive) and toggles direction', () => {
+    const { container } = render(
+      <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
+    );
+    const nameHeader = container.querySelectorAll('thead th')[0];
+    const names = () => Array.from(container.querySelectorAll('tbody tr')).map((r) => r.querySelector('td')!.textContent);
+
+    expect(nameHeader.getAttribute('aria-sort')).toBe('none');
+
+    act(() => nameHeader.querySelector('button')!.click()); // ascending — case-insensitive: 'alpha' < 'Bravo'
+    expect(names()).toEqual(['alpha', 'Bravo']);
+    expect(nameHeader.getAttribute('aria-sort')).toBe('ascending');
+
+    act(() => nameHeader.querySelector('button')!.click()); // descending
+    expect(names()).toEqual(['Bravo', 'alpha']);
+    expect(nameHeader.getAttribute('aria-sort')).toBe('descending');
+  });
+
+  test('sorts numerically, not lexicographically, on a numeric-looking column', () => {
+    const numericRows: Row[] = [
+      { name: 'ten', value: '10', span: null },
+      { name: 'two', value: '2', span: null },
+    ];
+    const { container } = render(
+      <SortableTable
+        rows={numericRows}
+        columns={columns}
+        emptyText="none"
+        rowLabel={(r) => r.name}
+        handlers={{ goto: () => {} }}
+      />,
+    );
+    const valueHeader = container.querySelectorAll('thead th')[1];
+    act(() => valueHeader.querySelector('button')!.click()); // ascending
+    // Lexicographic sort would put '10' before '2'; numeric-aware sort puts 2 before 10.
+    const values = () => Array.from(container.querySelectorAll('tbody tr')).map((r) => r.querySelectorAll('td')[1].textContent);
+    expect(values()).toEqual(['2', '10']);
+  });
+
+  test('has no accessibility violations', async () => {
+    const { container } = render(
+      <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  // The one intentional behavioral delta of this task (#992 task 3): the OLD renderTable rebuilt the
+  // whole <table> (via a callback ref) on every host render, which reset any in-progress sort back to
+  // 'none'. SortableTable owns its sort state via useState, so a re-render that hands it a NEW rows array
+  // (the underlying data changed, e.g. a scope/model change) — but keeps the component MOUNTED — must
+  // keep the current sort selection, re-applying it to the new rows instead of wiping it.
+  test('sort selection survives a re-render with new rows (delta from the old rebuild-the-DOM behavior)', () => {
+    const { container, rerender } = render(
+      <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
+    );
+    const nameHeader = () => container.querySelectorAll('thead th')[0];
+    const names = () => Array.from(container.querySelectorAll('tbody tr')).map((r) => r.querySelector('td')!.textContent);
+
+    act(() => nameHeader().querySelector('button')!.click()); // ascending by Name
+    expect(names()).toEqual(['alpha', 'Bravo']);
+    expect(nameHeader().getAttribute('aria-sort')).toBe('ascending');
+
+    // New data arrives (a different rows array — same shape, new content) while the table stays mounted.
+    const nextRows: Row[] = [
+      { name: 'Charlie', value: '3', span: span(30) },
+      { name: 'delta', value: '4', span: span(40) },
+    ];
+    act(() => {
+      rerender(
+        <SortableTable
+          rows={nextRows}
+          columns={columns}
+          emptyText="none"
+          rowLabel={(r) => r.name}
+          handlers={{ goto: () => {} }}
+        />,
+      );
+    });
+
+    // The sort selection (ascending by Name) persisted and re-applies to the new rows.
+    expect(nameHeader().getAttribute('aria-sort')).toBe('ascending');
+    expect(names()).toEqual(['Charlie', 'delta']);
+  });
+});
