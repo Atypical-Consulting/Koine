@@ -218,6 +218,12 @@ function AdrRow(props: {
                 aria-label={`Markdown for ADR ${file.number}: ${adr.title}`}
                 value={draft}
                 onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelEdit(); // the hook's cancel: revert-and-close, same path as the Cancel button
+                  }
+                }}
               />
               <div class="koi-docs-actions">
                 <button type="button" class="koi-docs-save" onClick={save}>
