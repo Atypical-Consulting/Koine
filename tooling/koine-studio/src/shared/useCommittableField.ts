@@ -58,7 +58,7 @@ export function useCommittableField(params: {
     if (editing) return; // never clobber an in-progress edit or its open-time revert target
     committedRef.current = committedValue;
     setDraft(committedValue);
-  });
+  }, [committedValue, editing]);
 
   return {
     editing,
