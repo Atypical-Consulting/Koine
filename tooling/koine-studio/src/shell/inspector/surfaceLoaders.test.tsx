@@ -333,6 +333,105 @@ describe('createSurfaceLoaders — preview/diagrams keep their own seq disciplin
   });
 });
 
+// --- (e) the Generated facet browses output file-by-file via the tree, not the old flat rail (#871 Task 3) ---
+describe('createSurfaceLoaders — the Generated file tree replaces the flat rail (#871 Task 3)', () => {
+  test('loadPreview() mounts every emitted file into the tree and shows the FIRST file in the viewer (not a concatenated blob)', async () => {
+    const { hosts, lsp, output, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [
+        { path: 'Billing/Money.cs', contents: '// money' },
+        { path: 'Billing/Invoice.cs', contents: '// invoice' },
+      ],
+      diagnostics: [],
+      error: null,
+    });
+
+    await loaders.loadPreview();
+
+    // hosts.preview is a REAL <div id="view-preview"> (makeHosts()) that ensureOutputScaffold/the tree
+    // mount into for real — query it directly rather than the mocked LSP call.
+    const items = hosts.preview.querySelectorAll('[role="treeitem"]');
+    expect(items).toHaveLength(3); // the "Billing" folder row + its two file rows
+    const fileRows = Array.from(items).filter((el) => (el as HTMLElement).dataset.kind === 'file');
+    // The tree sorts files alphabetically within a folder — Invoice.cs before Money.cs — independent of
+    // the emitted array's order.
+    expect(fileRows.map((el) => (el as HTMLElement).dataset.path)).toEqual(['Billing/Invoice.cs', 'Billing/Money.cs']);
+
+    // The viewer shows the FIRST file in the EMITTED array (Money.cs), not the tree's sorted order, and
+    // not a concatenated blob of both.
+    expect(output.setContent).toHaveBeenLastCalledWith('// money', 'csharp');
+  });
+
+  test('a re-emit that still contains the previously-selected path keeps it selected', async () => {
+    const { hosts, lsp, output, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [
+        { path: 'Billing/Money.cs', contents: '// money v1' },
+        { path: 'Billing/Invoice.cs', contents: '// invoice v1' },
+      ],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+
+    // Select Money.cs via a real click on its treeitem — mirrors a user click routing through the
+    // tree's onSelect (wired to showOutputFile), not a reach into module-private state.
+    const moneyRow = Array.from(hosts.preview.querySelectorAll<HTMLElement>('[role="treeitem"][data-kind="file"]')).find(
+      (el) => el.dataset.path === 'Billing/Money.cs',
+    )!;
+    moneyRow.click();
+    expect(output.setContent).toHaveBeenLastCalledWith('// money v1', 'csharp');
+
+    // Re-emit with the SAME path still present (contents changed) — the selection survives the reload.
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [
+        { path: 'Billing/Money.cs', contents: '// money v2' },
+        { path: 'Billing/Invoice.cs', contents: '// invoice v2' },
+      ],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+
+    expect(output.setContent).toHaveBeenLastCalledWith('// money v2', 'csharp');
+  });
+
+  test('a re-emit where the previously-selected path is gone falls back to the first file', async () => {
+    const { hosts, lsp, output, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [
+        { path: 'Billing/Money.cs', contents: '// money v1' },
+        { path: 'Billing/Invoice.cs', contents: '// invoice v1' },
+      ],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+
+    const moneyRow = Array.from(hosts.preview.querySelectorAll<HTMLElement>('[role="treeitem"][data-kind="file"]')).find(
+      (el) => el.dataset.path === 'Billing/Money.cs',
+    )!;
+    moneyRow.click();
+    expect(output.setContent).toHaveBeenLastCalledWith('// money v1', 'csharp');
+
+    // Re-emit WITHOUT Money.cs — the previously-selected path no longer exists, so the viewer falls
+    // back to the (new) first file.
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [{ path: 'Billing/Invoice.cs', contents: '// invoice v2' }],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+
+    expect(output.setContent).toHaveBeenLastCalledWith('// invoice v2', 'csharp');
+  });
+});
+
 // --- additional coverage: the other moved loaders, in isolation ---
 describe('createSurfaceLoaders — loadModel wires the injected hooks (ensureModelIndex/onModelIndexRebuilt/ensureDomainNavigator stay facade-owned)', () => {
   test('mounts/reloads the Domain navigator, awaits the model index, then repaints via onModelIndexRebuilt and marks the token loaded', async () => {

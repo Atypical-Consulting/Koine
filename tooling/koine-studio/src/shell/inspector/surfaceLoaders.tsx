@@ -52,13 +52,9 @@ import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
-import {
-  ensureOutputScaffold,
-  renderOutputCrumb,
-  renderOutputRail,
-  type OutputRailFile,
-  type OutputScaffold,
-} from '@/shell/outputRail';
+import { applyOutputTreeEmphasis, ensureOutputScaffold, renderOutputCrumb, type OutputScaffold } from '@/shell/outputRail';
+import { createGeneratedFileTree } from '@/shell/output/generatedFileTree';
+import type { EmitFile } from '@/lsp/protocol';
 import type { BottomTab, CenterView } from '@/store/slices/uiChrome';
 import type {
   CheckResult,
@@ -255,11 +251,14 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   };
   const targetLabel = (t: string): string => TARGET_LABEL[t] ?? t.toUpperCase();
 
-  // The Output surface's "Generated" facet: a per-file rail beside a single-file viewer (concept-7
-  // "Flush"). The scaffold is idempotent (ensureOutputScaffold), so this and the facade's own OutputView
-  // mount can both build it, in either order.
+  // The Output surface's "Generated" facet: a nested folder tree (#871) beside a single-file viewer
+  // (concept-7 "Flush"). The scaffold is idempotent (ensureOutputScaffold), so this and the facade's own
+  // OutputView mount can both build it, in either order. The tree is built once and mounted into the rail
+  // right after the scaffold — mirrors how `copyBtn` below is appended into `outputScaffold.crumb`.
   const outputScaffold: OutputScaffold = ensureOutputScaffold(hosts.preview);
-  let outputFiles: (OutputRailFile & { contents: string })[] = [];
+  const outputTree = createGeneratedFileTree({ onSelect: showOutputFile });
+  outputScaffold.rail.appendChild(outputTree.element);
+  let lastFiles: EmitFile[] = [];
   let selectedOutputPath: string | null = null;
   let lastPreview = '';
   let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
@@ -284,40 +283,32 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
 
   // The effective emit target now lives ONLY in the shared store's `emitTarget` slice (#923's top-bar
   // mirror) — there is no more closure-local `currentTarget` shadowing it. `setTarget` writes through
-  // `setEmitTarget` and every reader below (`loadPreview`, `paintOutputRail`, `showOutputFile`,
-  // `onPreviewTargetChanged`) reads `store.getState().emitTarget` fresh, so the preview loader and the
-  // top-bar selector / status-bar echo can never drift apart.
+  // `setEmitTarget` and every reader below (`loadPreview`, `showOutputFile`, `onPreviewTargetChanged`)
+  // reads `store.getState().emitTarget` fresh, so the preview loader and the top-bar selector /
+  // status-bar echo can never drift apart.
   function setTarget(target: PreviewTarget): void {
     store.getState().setEmitTarget(target);
   }
 
-  // Paint the output rail from the current emit result + the active scope (ADR 0009: the rail obeys the
-  // scope by EMPHASIS, never hiding). `null` for the *All contexts* case leaves every group plain.
-  function paintOutputRail(): void {
-    const scope = store.getState().activeContext;
-    const emphasis = isAllContexts(scope) ? null : scope;
-    renderOutputRail(outputScaffold, outputFiles, selectedOutputPath, targetLabel(store.getState().emitTarget), showOutputFile, emphasis);
-  }
-
-  // Show one generated file in the viewer and reflect it in the rail + crumb + Copy button.
+  // Show one generated file in the viewer and reflect it in the tree + crumb + Copy button.
   function showOutputFile(path: string): void {
-    const f = outputFiles.find((x) => x.path === path);
+    const f = lastFiles.find((x) => x.path === path);
     if (!f) return;
     selectedOutputPath = path;
     output.setContent(f.contents, store.getState().emitTarget);
     lastPreview = f.contents;
     copyBtn.disabled = false;
     renderOutputCrumb(outputScaffold, path, targetLabel(store.getState().emitTarget));
-    paintOutputRail();
+    outputTree.selectPath(path);
   }
 
-  // Clear the rail/crumb/viewer to a message (error / empty / failure states).
+  // Clear the tree/crumb/viewer to a message (error / empty / failure states).
   function clearOutput(message: string): void {
-    outputFiles = [];
+    lastFiles = [];
     selectedOutputPath = null;
     lastPreview = '';
     copyBtn.disabled = true;
-    paintOutputRail();
+    outputTree.setFiles([]); // hides the tree entirely (Task 2's empty-input behavior)
     renderOutputCrumb(outputScaffold, null, '');
     output.setContent(message, 'plain');
   }
@@ -332,7 +323,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   async function loadPreview(): Promise<void> {
     const seq = ++previewSeq;
     const token = store.getState().currentToken('preview');
-    if (!outputFiles.length) output.setContent('// generating preview…', 'plain');
+    if (!lastFiles.length) output.setContent('// generating preview…', 'plain');
     try {
       const res = await lsp.emitPreview(store.getState().emitTarget);
       if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
@@ -342,14 +333,10 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       } else if (!res.files.length) {
         clearOutput('// no files emitted (fix diagnostics first)');
       } else {
-        outputFiles = res.files.map((f) => ({
-          path: f.path,
-          contents: f.contents,
-          kind: f.kind ?? null,
-          loc: f.contents.length ? f.contents.split('\n').length : 0,
-        }));
-        const keep = selectedOutputPath && outputFiles.some((f) => f.path === selectedOutputPath);
-        showOutputFile(keep ? selectedOutputPath! : outputFiles[0].path);
+        lastFiles = res.files;
+        outputTree.setFiles(lastFiles); // BEFORE showOutputFile, so selectPath has nodes to find
+        const keep = selectedOutputPath && lastFiles.some((f) => f.path === selectedOutputPath);
+        showOutputFile(keep ? selectedOutputPath! : lastFiles[0].path);
       }
       store.getState().markLoaded('preview', token);
     } catch (e) {
@@ -827,11 +814,13 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     if (store.getState().right === 'syntax-tree' && store.getState().isStale('syntax-tree')) hooks.loadSyntaxTree();
   }
 
-  // Repaint the Output rail's scope EMPHASIS (ADR 0009) from the already-fetched preview, without a
+  // Repaint the Output tree's scope EMPHASIS (ADR 0009) from the already-fetched preview, without a
   // re-emit — the facade's `rerenderScopedSurfaces` calls this after a scope change (a pure re-filter, not
   // a model edit, so the preview's CONTENT is deliberately not re-emitted).
   function refreshOutputRailScope(): void {
-    if (outputFiles.length) paintOutputRail();
+    if (!lastFiles.length) return;
+    const scope = store.getState().activeContext;
+    applyOutputTreeEmphasis(outputTree.element, isAllContexts(scope) ? null : scope);
   }
 
   // Cancel any pending debounce timers and drop this module's own store subscription. The IDE runs for the
