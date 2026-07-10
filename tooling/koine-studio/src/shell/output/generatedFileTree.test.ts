@@ -273,6 +273,85 @@ describe('createGeneratedFileTree', () => {
     });
   });
 
+  // ADR-0009 scope emphasis over the tree's TOP-LEVEL (bounded-context) rows — owned by the tree itself
+  // (#1363; the logic previously lived in outputRail.ts's applyOutputTreeEmphasis, reaching into this
+  // widget's DOM from outside). Scenarios ported verbatim from outputRail.test.ts's emphasis block.
+  describe('emphasizeTopLevel (ADR 0009)', () => {
+    // Three top-level entries (two bounded-context folders + the shared runtime folder) — the shape the
+    // scope emphasis operates over.
+    function scopedFiles(): EmitFile[] {
+      return [
+        emitFile('Ordering/Order.cs'),
+        emitFile('Ordering/Money.cs'),
+        emitFile('Kitchen/Ticket.cs'),
+        emitFile('runtime/KoineRuntime.cs'),
+      ];
+    }
+    const topLevel = (el: HTMLElement): HTMLElement[] =>
+      Array.from(el.querySelectorAll<HTMLElement>('[role="treeitem"][aria-level="1"]'));
+    const byPath = (el: HTMLElement, path: string): HTMLElement =>
+      topLevel(el).find((e) => e.dataset.path === path) as HTMLElement;
+
+    it('emphasises the matching top-level node and de-emphasises the rest — never hiding any', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel('Ordering');
+      // Every top-level row is still rendered — emphasis, not hiding (the whole-model overview survives).
+      expect(topLevel(element)).toHaveLength(3); // Ordering, Kitchen, runtime (folders, one per top-level path)
+
+      expect(byPath(element, 'Ordering').classList.contains('on')).toBe(true);
+      expect(byPath(element, 'Ordering').classList.contains('dim')).toBe(false);
+      expect(byPath(element, 'Kitchen').classList.contains('dim')).toBe(true);
+      expect(byPath(element, 'Kitchen').classList.contains('on')).toBe(false);
+      expect(byPath(element, 'runtime').classList.contains('dim')).toBe(true);
+      expect(byPath(element, 'runtime').classList.contains('on')).toBe(false);
+
+      // WCAG AA non-color signal (ADR 0009): the active scope must not rely on color/hue alone.
+      expect(byPath(element, 'Ordering').getAttribute('aria-current')).toBe('true');
+      expect(byPath(element, 'Kitchen').getAttribute('aria-current')).toBeNull();
+      expect(byPath(element, 'runtime').getAttribute('aria-current')).toBeNull();
+    });
+
+    it('All contexts (activeContext null) leaves every top-level node plain', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel(null);
+      for (const el of topLevel(element)) {
+        expect(el.classList.contains('on')).toBe(false);
+        expect(el.classList.contains('dim')).toBe(false);
+        expect(el.getAttribute('aria-current')).toBeNull();
+      }
+    });
+
+    it('a scope matching no top-level node emphasises nothing — a graceful no-op', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel('Shipping'); // no Shipping/ output
+      for (const el of topLevel(element)) {
+        expect(el.classList.contains('on')).toBe(false);
+        expect(el.classList.contains('dim')).toBe(false); // NOT the whole tree dimmed
+        expect(el.getAttribute('aria-current')).toBeNull();
+      }
+    });
+
+    it('re-applying with a different context clears the previous emphasis first', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel('Ordering');
+      emphasizeTopLevel('Kitchen');
+      expect(byPath(element, 'Ordering').classList.contains('on')).toBe(false);
+      expect(byPath(element, 'Ordering').classList.contains('dim')).toBe(true);
+      expect(byPath(element, 'Kitchen').classList.contains('on')).toBe(true);
+      expect(byPath(element, 'Kitchen').classList.contains('dim')).toBe(false);
+      expect(byPath(element, 'Ordering').getAttribute('aria-current')).toBeNull();
+      expect(byPath(element, 'Kitchen').getAttribute('aria-current')).toBe('true');
+    });
+  });
+
   it('has no accessibility violations', async () => {
     const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
     setFiles(sampleFiles());

@@ -54,13 +54,7 @@ import { guardedLoad } from '@/shell/guardedLoad';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 import { contextWorkspaceKey, docMessage, visibleCenters as deckVisibleCenters } from '@/shell/inspector/shared';
-import {
-  applyOutputTreeEmphasis,
-  ensureOutputScaffold,
-  renderOutputCrumb,
-  renderOutputRailHead,
-  type OutputScaffold,
-} from '@/shell/outputRail';
+import { ensureOutputScaffold, renderOutputCrumb, renderOutputRailHead, type OutputScaffold } from '@/shell/outputRail';
 import { createGeneratedFileTree } from '@/shell/output/generatedFileTree';
 import type { EmitFile } from '@/lsp/protocol';
 import type { BottomTab, CenterView } from '@/store/slices/uiChrome';
@@ -835,7 +829,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   function refreshOutputRailScope(): void {
     if (!lastFiles.length) return;
     const scope = store.getState().activeContext;
-    applyOutputTreeEmphasis(outputTree.element, isAllContexts(scope) ? null : scope);
+    outputTree.emphasizeTopLevel(isAllContexts(scope) ? null : scope);
   }
 
   // Cancel any pending debounce timers and drop this module's own store subscription. The IDE runs for the

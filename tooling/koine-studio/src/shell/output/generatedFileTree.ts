@@ -45,6 +45,23 @@ export interface GeneratedFileTree {
    * in the current tree (absent entirely, or a folder path).
    */
   selectPath(path: string): boolean;
+  /**
+   * Apply ADR-0009 scope emphasis to the tree's TOP-LEVEL rows (the bounded-context folders/files,
+   * matched by path): the row whose path matches `activeContext` is marked `.on` and every other
+   * top-level row `.dim`, so the active scope reads without hiding anything (the whole-model overview
+   * stays browsable). Any previous emphasis is cleared first. `activeContext` of `null` (the *All
+   * contexts* case), or a scope that matches no top-level path, leaves every row neutral — a graceful
+   * no-op, the same behavior the old flat rail had.
+   *
+   * The matched row also gets `aria-current="true"` (cleared from every other top-level row first) —
+   * the `.on`/`.dim` classes alone are a COLOR-only signal (border-color + opacity), which fails WCAG
+   * AA's "don't rely on color alone" for the active-scope indicator this same ADR-0009 concern is
+   * enforced for elsewhere in this exact codebase: `inspectorController.tsx` (a leading `✓`) and
+   * `contextMapPanel.tsx`'s `emphasiseContextMapScope` (`aria-current="true"`, the pattern mirrored
+   * here). Owned by the tree itself (#1363) — it used to live in outputRail.ts, reaching into this
+   * widget's rendered DOM from outside.
+   */
+  emphasizeTopLevel(activeContext: string | null): void;
 }
 
 /**
@@ -291,5 +308,24 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     return true;
   }
 
-  return { element, setFiles, selectPath };
+  function emphasizeTopLevel(activeContext: string | null): void {
+    // The top-level rows are exactly the tree `<ul>`'s direct `<li>` children — the widget's own
+    // structure, no attribute-selector re-derivation needed (setFiles builds them as `buildRow(node, 1)`).
+    const topLevel = Array.from(tree.children) as HTMLElement[];
+    for (const el of topLevel) {
+      el.classList.remove('on', 'dim');
+      el.removeAttribute('aria-current');
+    }
+
+    const matches = activeContext !== null && topLevel.some((el) => el.dataset.path === activeContext);
+    if (!matches) return;
+
+    for (const el of topLevel) {
+      const isActive = el.dataset.path === activeContext;
+      el.classList.add(isActive ? 'on' : 'dim');
+      if (isActive) el.setAttribute('aria-current', 'true');
+    }
+  }
+
+  return { element, setFiles, selectPath, emphasizeTopLevel };
 }

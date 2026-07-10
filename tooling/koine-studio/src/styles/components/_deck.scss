@@ -638,7 +638,7 @@
   }
 
   // Scope emphasis (ADR 0009 — the Output rail obeys the active bounded-context scope by EMPHASIS, never
-  // hiding), applied to TOP-LEVEL rows only (applyOutputTreeEmphasis in outputRail.ts): the active scope
+  // hiding), applied to TOP-LEVEL rows only (emphasizeTopLevel in generatedFileTree.ts): the active scope
   // is marked `.on`, every other top-level row `.dim`med. The whole-model overview survives; a
   // de-emphasised row restores on hover so it stays usable. Same visual intent as the old `.out-ctx.on`/
   // `.out-ctx.dim`, retargeted onto the tree's own rows.

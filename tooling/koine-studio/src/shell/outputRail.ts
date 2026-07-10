@@ -1,11 +1,11 @@
 // The Generated-preview surface's supporting DOM pieces: the `[rail][crumb + code]` scaffold that hosts
-// a per-file browser beside a single-file viewer (concept-7 "Flush"), plus the ADR-0009 scope-emphasis
-// pass over that browser's top-level (bounded-context) rows. Clicking a file drives the existing
+// a per-file browser beside a single-file viewer (concept-7 "Flush"). Clicking a file drives the existing
 // read-only CodeMirror `OutputView` (no new editor). The file browser itself — grouping files into a
-// nested folder tree, rendering, selection — is `shell/output/generatedFileTree.ts` (#871 Task 2); it
-// used to be a flat, context-grouped rail rendered here (`renderOutputRail`, #871 Task 3 replaced it with
-// the real tree), so this module now only builds the surrounding scaffold, paints the breadcrumb, and
-// applies scope emphasis to whatever tree fills `.out-rail`.
+// nested folder tree, rendering, selection, and the ADR-0009 scope-emphasis pass over its top-level
+// (bounded-context) rows (`emphasizeTopLevel`, #1363; formerly this module's `applyOutputTreeEmphasis`)
+// — is `shell/output/generatedFileTree.ts` (#871 Task 2); it used to be a flat, context-grouped rail
+// rendered here (`renderOutputRail`, #871 Task 3 replaced it with the real tree), so this module now only
+// builds the surrounding scaffold and paints the breadcrumb.
 //
 // The scaffold is built imperatively INSIDE the existing `#view-preview` host (rather than in index.html)
 // so it needs no markup change and degrades gracefully in the controller's DOM-fixture tests: it's
@@ -80,37 +80,6 @@ export function renderOutputRailHead(scaffold: OutputScaffold, count: number): v
   const b = document.createElement('b');
   b.textContent = `${count} file${count === 1 ? '' : 's'}`;
   scaffold.railHead.appendChild(b);
-}
-
-/**
- * Apply ADR-0009 scope emphasis to the Generated file tree's TOP-LEVEL rows (the bounded-context
- * folders/files — `[role="treeitem"][aria-level="1"]`, matched by `data-path`): the row whose path
- * matches `activeContext` is marked `.on` and every other top-level row `.dim`, so the active scope reads
- * without hiding anything (the whole-model overview stays browsable). Any previous emphasis is cleared
- * first. `activeContext` of `null` (the *All contexts* case), or a scope that matches no top-level path,
- * leaves every row neutral — a graceful no-op, the same behavior the old flat rail had.
- *
- * Code-review fix: the matched row also gets `aria-current="true"` (cleared from every other top-level
- * row first) — the `.on`/`.dim` classes alone are a COLOR-only signal (border-color + opacity), which
- * fails WCAG AA's "don't rely on color alone" for the active-scope indicator this same ADR-0009 concern
- * is enforced for elsewhere in this exact codebase: `inspectorController.tsx` (a leading `✓`) and
- * `contextMapPanel.tsx`'s `emphasiseContextMapScope` (`aria-current="true"`, the pattern mirrored here).
- */
-export function applyOutputTreeEmphasis(treeRoot: HTMLElement, activeContext: string | null): void {
-  const topLevel = Array.from(treeRoot.querySelectorAll<HTMLElement>('[role="treeitem"][aria-level="1"]'));
-  for (const el of topLevel) {
-    el.classList.remove('on', 'dim');
-    el.removeAttribute('aria-current');
-  }
-
-  const matches = activeContext !== null && topLevel.some((el) => el.dataset.path === activeContext);
-  if (!matches) return;
-
-  for (const el of topLevel) {
-    const isActive = el.dataset.path === activeContext;
-    el.classList.add(isActive ? 'on' : 'dim');
-    if (isActive) el.setAttribute('aria-current', 'true');
-  }
 }
 
 /** Update the breadcrumb (path segments + a language chip). Pass `null` to clear it (error/empty states). */
