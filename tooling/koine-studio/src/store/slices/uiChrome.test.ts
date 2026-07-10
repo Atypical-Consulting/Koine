@@ -187,6 +187,26 @@ describe('uiChrome railAxis / diagCollapsed / contextMapView (#983)', () => {
     expect(s.getState().diagCollapsedPref).toBe(false);
   });
 
+  test('revealDiagTransient expands the strip WITHOUT touching an explicit collapsed preference (#1095)', () => {
+    const s = make();
+    s.getState().setDiagCollapsed(true); // the user explicitly chose "collapsed" (pref recorded)
+    s.getState().revealDiagTransient(); // tab-click auto-expand: a transient runtime reveal...
+    expect(s.getState().diagCollapsed).toBe(false); // ...the strip is revealed...
+    expect(s.getState().diagCollapsedPref).toBe(true); // ...but the saved choice is untouched (never persists)
+  });
+
+  test('revealDiagTransient is a no-op when the strip is already expanded (#1095)', () => {
+    const s = make();
+    expect(s.getState().diagCollapsed).toBe(false);
+    let notified = 0;
+    const unsubscribe = s.subscribe(() => notified++);
+    s.getState().revealDiagTransient();
+    unsubscribe();
+    expect(notified).toBe(0); // guarded: no state transition fires at all
+    expect(s.getState().diagCollapsed).toBe(false);
+    expect(s.getState().diagCollapsedPref).toBeNull();
+  });
+
   test('contextMapView defaults to graph and setContextMapView round-trips', () => {
     const s = make();
     expect(s.getState().contextMapView).toBe('graph');

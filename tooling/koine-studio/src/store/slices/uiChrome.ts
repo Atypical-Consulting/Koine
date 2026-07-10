@@ -249,6 +249,10 @@ export interface UiChromeSlice {
   /** Apply the viewport-aware DEFAULT collapse state (#475) — RUNTIME-ONLY, and a NO-OP once the user has
    *  an explicit preference (`diagCollapsedPref !== null`), so a saved choice is never overridden. */
   applyDiagCollapsedDefault(v: boolean): void;
+  /** TRANSIENT reveal of the bottom strip (#1095): the bottom-tab auto-expand. Flips ONLY the runtime
+   *  flag to expanded — never `diagCollapsedPref` — so it doesn't persist and a reload restores the saved
+   *  choice; a no-op when the strip is already expanded. */
+  revealDiagTransient(): void;
   setContextMapView(v: ContextMapView): void;
   setPanelSide(v: PanelSide): void;
   /** Flip the bottom panel's dock edge (bottom↔right), like `toggleRightCollapsed` flips its flag. */
@@ -378,6 +382,11 @@ export function createUiChromeSlice(
     applyDiagCollapsedDefault: (v) => {
       if (get().diagCollapsedPref !== null) return;
       set({ diagCollapsed: v });
+    },
+    // The tab-click auto-expand (#1095): reveal transiently, moving ONLY the runtime flag — never the
+    // preference — so it never persists; guarded so it's a strict no-op when already expanded.
+    revealDiagTransient: () => {
+      if (get().diagCollapsed) set({ diagCollapsed: false });
     },
     setContextMapView: (v) => set({ contextMapView: v }),
     setPanelSide: (v) => set({ panelSide: v }),
