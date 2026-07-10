@@ -146,10 +146,15 @@ internal sealed class RustExpressionTranslator
                 sb.Append(" }");
                 break;
             case CoalesceExpr co:
-                // `l ?? r` -> `l.clone().unwrap_or_else(|| r)` (l is an Option<T>; result is T).
+                // `l ?? r` -> `l.clone().unwrap_or_else(|| r)` (l is an Option<T>; result is T) when `r`
+                // is non-optional, or `l.clone().or_else(|| r)` (result stays Option<T>) when `r` is
+                // itself optional — force-unwrapping there would lose the "still absent" case and fail a
+                // real `cargo check` E0308 (#1333). Infer `r`'s type once and hand it to
+                // WriteOperandValue, which would otherwise re-infer the same node.
                 WriteOperandValue(co.Left, sb);
-                sb.Append(".unwrap_or_else(|| ");
-                WriteOperandValue(co.Right, sb);
+                TypeRef? rightType = _resolver.Infer(co.Right, EffectiveScope());
+                sb.Append(rightType?.IsOptional == true ? ".or_else(|| " : ".unwrap_or_else(|| ");
+                WriteOperandValue(co.Right, sb, rightType);
                 sb.Append(')');
                 break;
             case MemberAccessExpr ma:
@@ -437,27 +442,38 @@ internal sealed class RustExpressionTranslator
 
     /// <summary>
     /// Writes one conditional branch, individually widened to <c>Decimal</c> when its own inferred type
-    /// is <c>Int</c> while the SIBLING branch is <c>Decimal</c>, and/or <c>Some(...)</c>-wrapped when its
-    /// own inferred type is non-optional while the SIBLING branch is optional. <see cref="TypeResolver"/>
+    /// is a non-optional <c>Int</c> while the SIBLING branch is <c>Decimal</c>, map-widened
+    /// (<c>.map(Decimal::from)</c>) when its own inferred type is an OPTIONAL <c>Int</c> while the
+    /// SIBLING branch is <c>Decimal</c> (#1335 — the branch's owned rendering is already
+    /// <c>Option&lt;i64&gt;</c>, so a bare <c>Decimal::from(...)</c> prefix does not compile; mapping
+    /// inside the <c>Option</c> is required instead), and/or <c>Some(...)</c>-wrapped when its own
+    /// inferred type is non-optional while the SIBLING branch is optional. <see cref="TypeResolver"/>
     /// already widens the conditional's own aggregate type to the wider/optional-joined type of the two
     /// branches (#975), so the outer <c>coerceTo</c> comparison in <see cref="WriteArithmeticOperand"/>
     /// (and <c>WriteDerived</c>'s own whole-body <c>Some(...)</c>-wrap decision, #1329) never sees a
     /// mismatch here — each branch still renders in its own native Rust type/optionality, so an
     /// unreconciled pair emits two different types in the same <c>if</c>/<c>else</c> (a real
-    /// <c>cargo check</c> E0308: numeric — #1311; optionality — #1331). Reconciling per-branch (rather
-    /// than a single wrap around the whole conditional) is required because the branches disagree with
-    /// EACH OTHER, not with an externally supplied <c>coerceTo</c>. Fixed here in the emitter (not the
-    /// semantic validator): a widened or optional-joined conditional is a legitimate,
-    /// cross-target-sanctioned pattern (#975) — this is a Rust-only rendering gap, not a modeling error.
-    /// The two reconciliations compose as <c>Some(Decimal::from(...))</c> (wrap outside, widen inside) —
-    /// the value must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>.
+    /// <c>cargo check</c> E0308: numeric — #1311; optionality — #1331; optional numeric — #1335).
+    /// Reconciling per-branch (rather than a single wrap around the whole conditional) is required
+    /// because the branches disagree with EACH OTHER, not with an externally supplied
+    /// <c>coerceTo</c>. Fixed here in the emitter (not the semantic validator): a widened or
+    /// optional-joined conditional is a legitimate, cross-target-sanctioned pattern (#975) — this is a
+    /// Rust-only rendering gap, not a modeling error. The <c>needsWiden</c>/<c>needsOptionalWiden</c>
+    /// widen cases are mutually exclusive (they key off the same branch's own optionality: the former
+    /// requires it non-optional, the latter requires it optional). <c>needsWiden</c> composes with
+    /// <c>needsSomeWrap</c> as <c>Some(Decimal::from(...))</c> (wrap outside, widen inside) — the value
+    /// must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>. <c>needsOptionalWiden</c>
+    /// never composes with <c>needsSomeWrap</c>: <c>needsSomeWrap</c> also requires the branch itself to
+    /// be non-optional, so a branch that is already <c>Option</c>-shaped (<c>needsOptionalWiden</c>)
+    /// never needs the extra <c>Some(...)</c> wrap.
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
         TypeScope scope = EffectiveScope();
         TypeRef? branchType = _resolver.Infer(branch, scope);
         TypeRef? siblingType = _resolver.Infer(sibling, scope);
-        var needsWiden = branchType?.Name == "Int" && siblingType?.Name == "Decimal";
+        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
+        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
         var needsSomeWrap = branchType is { IsOptional: false } && siblingType is { IsOptional: true };
 
         if (needsSomeWrap)
@@ -474,6 +490,11 @@ internal sealed class RustExpressionTranslator
         if (needsWiden)
         {
             sb.Append(')');
+        }
+
+        if (needsOptionalWiden)
+        {
+            sb.Append(".map(Decimal::from)");
         }
 
         if (needsSomeWrap)
@@ -515,9 +536,11 @@ internal sealed class RustExpressionTranslator
     /// Writes an expression as an owned value (used for coalesce arms): cloned when it is a place. A
     /// compound (conditional/let/guard) arm routes through <see cref="WriteOwnedOperand"/> instead, so a
     /// leaf place a branch would otherwise move out of <c>&amp;self</c> is cloned too (#1282) — the
-    /// non-compound case below is unchanged.
+    /// non-compound case below is unchanged. <paramref name="knownType"/> lets a caller that already
+    /// inferred <paramref name="expr"/>'s type (e.g. to pick a coalesce combinator, #1333) pass it
+    /// through instead of paying a second <see cref="TypeResolver.Infer"/> walk for the same node.
     /// </summary>
-    private void WriteOperandValue(Expr expr, StringBuilder sb)
+    private void WriteOperandValue(Expr expr, StringBuilder sb, TypeRef? knownType = null)
     {
         if (expr is ConditionalExpr or LetExpr or GuardExpr)
         {
@@ -525,7 +548,7 @@ internal sealed class RustExpressionTranslator
             return;
         }
 
-        TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+        TypeRef? type = knownType ?? _resolver.Infer(expr, EffectiveScope());
         var clone = IsNonCopyPlace(expr, type);
         Write(expr, sb, null);
         if (clone)
