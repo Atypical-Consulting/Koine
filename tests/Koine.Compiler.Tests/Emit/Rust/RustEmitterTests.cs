@@ -371,8 +371,10 @@ public class RustEmitterTests
     /// only recognized a non-optional-declared <c>String</c> member (<c>m.Type is { Name: "String",
     /// IsOptional: false }</c>), so an optional-declared sibling fell through to the generic
     /// <c>.clone()</c> fallback, which is a no-op on a borrowed <c>&amp;str</c> — a real <c>cargo
-    /// check</c> <c>E0308</c>. The non-optional-declared case (<c>slug</c>) must keep rendering exactly
-    /// as before.
+    /// check</c> <c>E0308</c>. <c>slug</c> is the non-optional-declared sibling: the condition change
+    /// is a no-op for it (<c>underlyingType == m.Type</c> when not optional), so it isn't exercising the
+    /// fix itself — it pins the pre-existing, previously-uncovered baseline rendering so a future change
+    /// to this branch can't silently regress it too.
     /// </summary>
     [Fact]
     public void Value_object_optional_derived_member_with_trim_body_owns_the_result()
