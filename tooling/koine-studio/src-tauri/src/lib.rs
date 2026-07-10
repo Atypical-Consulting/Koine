@@ -1155,6 +1155,14 @@ fn git_commit(dir: String, message: String) -> Result<(), String> {
     run_git(&dir, &["commit", "-m", &message]).map(|_| ())
 }
 
+/// Push the current branch to its configured upstream (a bare `git push`). The panel offers push
+/// only when [`git_status`] reported an upstream, which is exactly what a bare push targets. `Err`
+/// (git's trimmed stderr) when there is no upstream or git refuses — non-fast-forward, auth, offline.
+#[tauri::command]
+fn git_push(dir: String) -> Result<(), String> {
+    run_git(&dir, &["push"]).map(|_| ())
+}
+
 /// Revert the commit `sha` (`git revert --no-edit <sha>`), recording a new commit that undoes it.
 /// A revert is a FORWARD commit — it never rewrites history — so it is safe on a shared branch.
 /// `--no-edit` keeps it non-interactive (git's default `Revert "<subject>"` message). `Err` (git's
@@ -2222,6 +2230,7 @@ pub fn run() {
             git_stage,
             git_unstage,
             git_commit,
+            git_push,
             git_revert,
             git_init,
             git_branches,
@@ -3324,6 +3333,47 @@ mod tests {
         assert_eq!(up.r#ref, "up");
         assert_eq!(up.ahead, 2);
         assert_eq!(up.behind, 1);
+    }
+
+    #[test]
+    fn git_push_pushes_the_current_branch_to_its_upstream_and_clears_ahead() {
+        // A bare local "remote" plus a work repo whose main tracks it — no network involved.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "origin", &remote_path]);
+        repo.git(&["push", "-u", "origin", "main"]);
+
+        // A new local commit → 1 ahead of origin/main.
+        repo.write("f.txt", "2\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c2"]);
+        let before = git_status(repo.path()).unwrap().upstream.expect("tracks origin/main");
+        assert_eq!(before.r#ref, "origin/main");
+        assert_eq!(before.ahead, 1);
+
+        // Push → the upstream has the commit and the next status reads a truthful 0/0.
+        git_push(repo.path()).unwrap();
+        let after = git_status(repo.path()).unwrap().upstream.expect("still tracking");
+        assert_eq!(after.ahead, 0);
+        assert_eq!(after.behind, 0);
+    }
+
+    #[test]
+    fn git_push_errors_when_the_branch_has_no_upstream() {
+        // No upstream configured → git refuses and the trimmed stderr surfaces as the Err the panel
+        // shows (the UI never offers push here — status.upstream is None — but the command stays honest).
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+
+        assert!(git_push(repo.path()).is_err());
     }
 
     #[test]
