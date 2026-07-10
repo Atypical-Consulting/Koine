@@ -154,11 +154,15 @@ public sealed partial class RustEmitter
         : access + ".clone()";
 
     /// <summary>
-    /// Owns a derived projection expression (wrapped so the suffix binds the whole expression). Gates
-    /// the <c>.to_string()</c> choice through the shared <see cref="UnderlyingType"/> helper (#1350) —
-    /// still combined with an explicit <c>!type.IsOptional</c> guard here, since (unlike
-    /// <see cref="WriteDerived"/>'s sites) this call site has no <c>Some(...)</c>-wrap step yet for an
-    /// optional-declared projected field (#1349, pending).
+    /// Owns a derived projection expression (wrapped so the suffix binds the whole expression).
+    /// Deliberately NOT routed through the shared <see cref="UnderlyingType"/> helper (#1350): this
+    /// gate still requires the field to be non-optional-declared, because this call site has no
+    /// <c>Some(...)</c>-wrap step yet for an optional-declared projected field (#1349, pending) —
+    /// since <see cref="UnderlyingType"/> only ever strips <c>IsOptional</c> and never changes
+    /// <c>Name</c>, routing this check through it while still separately testing
+    /// <c>!type.IsOptional</c> would be a no-op that only adds an allocation and a maintenance trap.
+    /// Adopt the helper here once #1349 lands the underlying-type gate + <c>Some(...)</c>-wrap this
+    /// site is still missing.
     /// </summary>
     private static string OwnDerived(string rendered, TypeRef type, RustTypeMapper typeMapper)
     {
@@ -167,8 +171,7 @@ public sealed partial class RustEmitter
             return rendered;
         }
 
-        var underlyingType = UnderlyingType(type);
-        var suffix = !type.IsOptional && underlyingType is { Name: "String" } ? ".to_string()" : ".clone()";
+        var suffix = type is { Name: "String", IsOptional: false } ? ".to_string()" : ".clone()";
         return "(" + rendered + ")" + suffix;
     }
 
