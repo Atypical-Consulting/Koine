@@ -2222,6 +2222,10 @@ public sealed class KoineLanguageService
     /// <para><paramref name="resolvedTarget"/> is the symbol the cursor actually resolved to; the
     /// co-rename gates on it being the aggregate root entity's OWN declaration, so a same-named non-root
     /// symbol (an enum member, value object, command, … sharing the root's text) never fires it (#621).</para>
+    /// <para>The identity references are further scoped to the root's OWN bounded context (#565): two
+    /// UNRELATED contexts may each declare a type literally named <c>&lt;oldName&gt;Id</c>, and
+    /// <see cref="WorkspaceIndex.FindReferences"/> matches by bare token text, so without this scoping the
+    /// co-rename would also rewrite the other context's same-named, unrelated identity type.</para>
     /// </summary>
     private static IReadOnlyList<RenameEdit>? IdentityCoRenameEdits(
         KoineCompilation compilation, string activeUri, string oldName, string newName, Symbol? resolvedTarget)
@@ -2229,8 +2233,10 @@ public sealed class KoineLanguageService
         // Resolve the aggregate's OWN root entity across the WHOLE workspace, not just the active file: a
         // rename can be invoked from a reference in a different file than the one declaring the root
         // (R13/R14 multi-file), and an aggregate's root entity lives in that aggregate's nested types —
-        // `AggregateDecl.RootEntity()` resolves it precisely (never a same-named non-root entity).
+        // `AggregateDecl.RootEntity()` resolves it precisely (never a same-named non-root entity). The
+        // per-file model that resolved it is kept alongside it so its owning context can be looked up below.
         EntityDecl? root = null;
+        SemanticModel? rootModel = null;
         foreach (var uri in compilation.Uris)
         {
             if (compilation.SemanticModelFor(uri) is not { } model)
@@ -2238,18 +2244,20 @@ public sealed class KoineLanguageService
                 continue;
             }
 
-            root = model.Index.AllTypes()
+            var candidate = model.Index.AllTypes()
                 .OfType<AggregateDecl>()
                 .Where(a => a.RootName == oldName)
                 .Select(a => a.RootEntity())
                 .FirstOrDefault(e => e is not null);
-            if (root is not null)
+            if (candidate is not null)
             {
+                root = candidate;
+                rootModel = model;
                 break;
             }
         }
 
-        if (root is null)
+        if (root is null || rootModel is null)
         {
             return null;
         }
@@ -2282,6 +2290,22 @@ public sealed class KoineLanguageService
         // Resolve the identity type workspace-wide (offset: null) so the co-rename is independent of which
         // file the rename was invoked from — its declaration and every cross-file `: <Root>Id` use rename.
         IReadOnlyList<Reference> idRefs = compilation.WorkspaceIndex.FindReferences(activeUri, oldIdName, offset: null, enclosingType: null);
+
+        // #565: scope those references to the root's OWN owning context (the context the per-file model
+        // above actually found it declared in) — `FindReferences` is a workspace-wide TEXT match, so an
+        // unrelated context that happens to declare its own same-named `<oldName>Id` would otherwise be
+        // swept in too. A reference is kept only when ITS OWN file, considered as that same context, also
+        // recognizes `oldIdName` (its declaration or a same-context `: <Root>Id` use) — `NamespaceOfTypeIn`
+        // is populated for both cases (ModelIndex step 3c), so this keeps every same-context, cross-file
+        // occurrence (#550) while dropping a different context's coincidentally same-named identity type.
+        if (rootModel.Index.DeclaringContextsOf(oldName).FirstOrDefault() is { } ownerContext)
+        {
+            idRefs = idRefs
+                .Where(r => compilation.SemanticModelFor(r.Uri) is { } refModel
+                    && refModel.Index.NamespaceOfTypeIn(ownerContext, oldIdName) is not null)
+                .ToList();
+        }
+
         return idRefs.Count == 0 ? null : idRefs.Select(r => new RenameEdit(r, newIdName)).ToList();
     }
 

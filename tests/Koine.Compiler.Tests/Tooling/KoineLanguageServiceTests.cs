@@ -787,6 +787,74 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void RenameEdits_corenames_the_id_across_other_files_of_the_SAME_context()
+    {
+        // #565 regression guard: context Ordering is split across two files (R13/R14 multi-file). The
+        // root + its identity declaration live in ordering.koi; ordering2.koi merely REFERENCES OrderId
+        // from the SAME context. Renaming the root must still co-rename that cross-file reference too —
+        // this is the existing #550 multi-file behavior and must not regress when the co-rename is
+        // scoped to the root's own context.
+        var ordering =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var ordering2 = "context Ordering {\n  value Receipt { order: OrderId }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///ordering2.koi"] = ordering2,
+        };
+        var entityLine = ordering.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Both the declaration (ordering.koi) AND the cross-file reference (ordering2.koi) co-rename.
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering2.koi");
+    }
+
+    [Fact]
+    public void RenameEdits_does_not_corename_an_unrelated_contexts_same_named_id_type()
+    {
+        // #565: context Ordering's root Order is `identified by OrderId`; a wholly UNRELATED context
+        // Billing happens to declare its OWN type literally named OrderId too. Renaming Ordering's root
+        // must co-rename ONLY Ordering's own OrderId — Billing's same-named OrderId must be untouched,
+        // even though WorkspaceIndex.FindReferences matches by bare token text across the workspace.
+        var ordering =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var billing = "context Billing {\n  value OrderId { code: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///billing.koi"] = billing,
+        };
+        var entityLine = ordering.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var edits = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Ordering's own OrderId co-renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        // … but Billing's unrelated, same-named OrderId is left completely untouched.
+        edits.ShouldNotContain(e => e.Occurrence.Uri == "file:///billing.koi");
+    }
+
+    [Fact]
     public void RenameEdits_does_not_corename_a_non_conventional_identity()
     {
         // The root's identity is the primitive Guid, not <Root>Id — so there is nothing to co-rename and,
