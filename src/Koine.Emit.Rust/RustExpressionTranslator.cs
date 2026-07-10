@@ -254,11 +254,42 @@ internal sealed class RustExpressionTranslator
         TypeRef? coerceLeft = rightType?.Name == "Decimal" && leftType?.Name == "Int" ? Decimal() : null;
         TypeRef? coerceRight = leftType?.Name == "Decimal" && rightType?.Name == "Int" ? Decimal() : null;
 
+        // An optional Int coerced toward Decimal maps inside its Option (EmitCoerced/
+        // WriteArithmeticOperand's compound wrap) rather than widening in place, so it stays
+        // Option-shaped — the opposite side must then itself become `Some(...)`-wrapped when it isn't
+        // already optional, or the two sides of the operator render as mismatched `Option<Decimal>` /
+        // `Decimal` types (#1343 — mirrors WriteReconciledBranch's needsSomeWrap, #1335, applied here to
+        // binary operands rather than conditional branches). Gated on the same coerceLeft/coerceRight
+        // Int-vs-Decimal condition, so this never touches an unrelated type mismatch. In practice only
+        // reachable via `==`/`!=`: the semantic validator's IsUnguardedOptional diagnostic already
+        // rejects an unguarded optional arithmetic/relational operand.
+        var someWrapLeft = coerceRight is not null && rightType is { IsOptional: true } && leftType is { IsOptional: false };
+        var someWrapRight = coerceLeft is not null && leftType is { IsOptional: true } && rightType is { IsOptional: false };
+
         // Value-object arithmetic (e.g. Money * quantity) consumes `self` via std::ops, so a non-Copy
         // operand must evaluate to an owned value; comparisons borrow and need no clone.
+        if (someWrapLeft)
+        {
+            sb.Append("Some(");
+        }
+
         WriteArithmeticOperand(bin.Left, sb, EnumTypeName(bin.Right), coerceLeft, isArithmetic, leftType);
+        if (someWrapLeft)
+        {
+            sb.Append(')');
+        }
+
         sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+        if (someWrapRight)
+        {
+            sb.Append("Some(");
+        }
+
         WriteArithmeticOperand(bin.Right, sb, EnumTypeName(bin.Left), coerceRight, isArithmetic, rightType);
+        if (someWrapRight)
+        {
+            sb.Append(')');
+        }
 
         if (parenthesize)
         {
@@ -266,7 +297,7 @@ internal sealed class RustExpressionTranslator
         }
     }
 
-    private void WriteOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool clone)
+    private void WriteOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool clone, TypeRef? ownType = null)
     {
         switch (expr)
         {
@@ -274,7 +305,7 @@ internal sealed class RustExpressionTranslator
                 WriteBinary(bin, sb, parenthesize: true);
                 break;
             case IdentifierExpr id:
-                WriteIdentifier(id.Name, sb, enumHint, coerceTo);
+                WriteIdentifier(id.Name, sb, enumHint, coerceTo, ownType);
                 if (clone)
                 {
                     sb.Append(".clone()");
@@ -366,11 +397,21 @@ internal sealed class RustExpressionTranslator
 
         if (expr is ConditionalExpr or LetExpr or GuardExpr or BinaryExpr)
         {
+            // An optional operand's owned rendering is already `Option<...>` — a bare `Decimal::from(...)`
+            // prefix around it doesn't compile (E0277), so map inside the Option instead (#1343, mirrors
+            // WriteReconciledBranch's needsOptionalWiden, #1335).
+            var needsMapWrap = needsWrap && type is { IsOptional: true };
+
             // The prefix is picked before rendering and `WriteOwnedOperand` writes straight into `sb` —
             // no intermediate buffer needed.
-            sb.Append(needsWrap ? "Decimal::from(" : "(");
+            sb.Append(needsWrap && !needsMapWrap ? "Decimal::from(" : "(");
             WriteOwnedOperand(expr, sb);
             sb.Append(')');
+            if (needsMapWrap)
+            {
+                sb.Append(".map(Decimal::from)");
+            }
+
             return;
         }
 
@@ -384,7 +425,7 @@ internal sealed class RustExpressionTranslator
             return;
         }
 
-        WriteOperand(expr, sb, enumHint, coerceTo, clone);
+        WriteOperand(expr, sb, enumHint, coerceTo, clone, type);
     }
 
     /// <summary>
@@ -609,12 +650,12 @@ internal sealed class RustExpressionTranslator
         }
     }
 
-    private void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo)
+    private void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo, TypeRef? ownType = null)
     {
         // (1) Local (lambda/command/factory parameter, let binding): verbatim snake_case.
         if (_locals.Contains(name))
         {
-            EmitCoerced(sb, coerceTo, () => sb.Append(RustNaming.Field(name)));
+            EmitCoerced(sb, coerceTo, ownType, () => sb.Append(RustNaming.Field(name)));
             return;
         }
 
@@ -646,7 +687,7 @@ internal sealed class RustExpressionTranslator
         // a derived member reads via its accessor), bare `<snake>` in a constructor/invariant.
         if (_memberNames.Contains(name))
         {
-            EmitCoerced(sb, coerceTo, () =>
+            EmitCoerced(sb, coerceTo, ownType, () =>
             {
                 if (_mode == NameMode.Property)
                 {
@@ -678,19 +719,30 @@ internal sealed class RustExpressionTranslator
         sb.Append(RustNaming.Field(name));
     }
 
-    /// <summary>Wraps an emitted Int identifier in <c>Decimal::from(…)</c> when a Decimal is expected.</summary>
-    private static void EmitCoerced(StringBuilder sb, TypeRef? coerceTo, Action emit)
+    /// <summary>
+    /// Wraps an emitted Int identifier in <c>Decimal::from(…)</c> when a Decimal is expected — or, when
+    /// the identifier's own <paramref name="ownType"/> is itself optional, maps inside the Option instead
+    /// (<c>.map(Decimal::from)</c>): a bare <c>Decimal::from(...)</c> around an <c>Option&lt;i64&gt;</c>
+    /// operand does not compile (#1343, mirrors WriteReconciledBranch's needsOptionalWiden, #1335).
+    /// </summary>
+    private static void EmitCoerced(StringBuilder sb, TypeRef? coerceTo, TypeRef? ownType, Action emit)
     {
-        if (coerceTo?.Name == "Decimal")
-        {
-            sb.Append("Decimal::from(");
-            emit();
-            sb.Append(')');
-        }
-        else
+        if (coerceTo?.Name != "Decimal")
         {
             emit();
+            return;
         }
+
+        if (ownType is { IsOptional: true })
+        {
+            emit();
+            sb.Append(".map(Decimal::from)");
+            return;
+        }
+
+        sb.Append("Decimal::from(");
+        emit();
+        sb.Append(')');
     }
 
     private void WriteMemberAccess(MemberAccessExpr ma, StringBuilder sb)
