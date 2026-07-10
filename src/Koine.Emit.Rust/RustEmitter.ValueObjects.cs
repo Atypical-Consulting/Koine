@@ -420,8 +420,7 @@ public sealed partial class RustEmitter
         // fixing. So fall back to the pre-#1318 raw-literal construction for just this edge case,
         // preserving the shape (and thus the compilability) call sites already depend on; the common —
         // and only sensible — case still gets the validating-constructor fix below.
-        bool canRouteThroughNew =
-            required.Any(m => ReferenceEquals(m, amount)) && required.Any(m => ReferenceEquals(m, unit));
+        bool canRouteThroughNew = !HasConstantDefault(amount) && !HasConstantDefault(unit);
 
         string RawLiteral(string amtExpr) =>
             name + " {\n" + string.Concat(stored.Select(m =>
