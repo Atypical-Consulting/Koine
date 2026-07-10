@@ -141,7 +141,7 @@ public sealed partial class RustEmitter
                 // here or cargo rejects the struct literal as E0308 (#1319). An optional field's literal
                 // default is always a bare underlying-type literal (Koine has no Option-literal syntax),
                 // so it's coerced against the underlying type and then Some(...)-wrapped (#1325).
-                var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
+                var underlyingType = UnderlyingType(m.Type);
                 if (NumericCoercionWrap(underlyingType, translator.InferType(m.Initializer!)) is { } wrap)
                 {
                     defaultValue = $"{wrap}({defaultValue})";
@@ -252,7 +252,7 @@ public sealed partial class RustEmitter
         // OWN inferred type isn't itself optional (#1329): a body that can itself yield an optional value
         // (e.g. a conditional whose branches reference other optional fields) is already Option-shaped
         // and must render exactly as today, or wrapping it here would double-wrap it.
-        var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
+        var underlyingType = UnderlyingType(m.Type);
 
         // A bare conditional/let/guard body (no arithmetic operator at all) has its own recursive
         // owned-value dispatch — a leaf place a branch would otherwise move out of `&self` must be
@@ -340,6 +340,16 @@ public sealed partial class RustEmitter
         }
         return declared.Name == "Decimal" ? "Decimal::from" : "crate::koine_runtime::dec_to_i64";
     }
+
+    /// <summary>
+    /// The non-optional view of a possibly-optional-declared type — gate ownership/coercion checks on
+    /// this, never on <paramref name="declared"/> directly, or an optional-declared member's own bare
+    /// or defaulted value falls through to the wrong branch (#1319/#1324, #1325, #1332: the same
+    /// missing-underlying-type-check shape, independently discovered three times before this helper
+    /// existed).
+    /// </summary>
+    private static TypeRef UnderlyingType(TypeRef declared) =>
+        declared.IsOptional ? declared with { IsOptional = false } : declared;
 
     // ----------------------------------------------------------------------
     // Demand-driven operators
