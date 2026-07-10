@@ -353,4 +353,62 @@ public class RustEmitterTests
         rust.ShouldNotContain("Decimal::from(Some(");
         rust.ShouldNotContain("{ Decimal::from(self.amount) } else");
     }
+
+    private const string ConditionalOptionalIntWidenBranchModel = """
+        context Shop {
+          value Money {
+            decimalAmount: Decimal
+            intBonus: Int?
+            total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1335: a <c>ConditionalExpr</c> derived-member body whose numeric-widen-needing branch
+    /// (a bare <c>Int</c>-named type) is itself <b>optional</b> (<c>Int?</c>), while its sibling is a
+    /// non-optional <c>Decimal</c>, must render as <c>&lt;owned rendering&gt;.map(Decimal::from)</c> —
+    /// not the bare <c>Decimal::from(...)</c> prefix, which is invalid for an <c>Option&lt;i64&gt;</c>
+    /// operand and does not produce the <c>Option&lt;Decimal&gt;</c> the arm's type requires.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(ConditionalOptionalIntWidenBranchModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if self.decimal_amount > Decimal::from(0i64) { Some(self.decimal_amount) } else { self.int_bonus.clone().map(Decimal::from) }");
+        rust.ShouldNotContain("Decimal::from(self.int_bonus");
+    }
+
+    private const string ConditionalOptionalIntWidenBothOptionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonusDecimal: Decimal?
+            bonusInt: Int?
+            total: Decimal? = if amount > 0 then bonusDecimal else bonusInt
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1335: the same optional-Int-widen-needing branch, but its sibling is ITSELF optional
+    /// (<c>Decimal?</c>, not a bare <c>Decimal</c>) — the branch still needs
+    /// <c>.map(Decimal::from)</c> to reach <c>Option&lt;Decimal&gt;</c>, matching the sibling's own
+    /// already-<c>Option</c>-shaped rendering (no <c>Some(...)</c> involved on either side).
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_maps_against_an_optional_decimal_sibling()
+    {
+        var result = new KoineCompiler().Compile(ConditionalOptionalIntWidenBothOptionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if self.amount > 0 { self.bonus_decimal.clone() } else { self.bonus_int.clone().map(Decimal::from) }");
+        rust.ShouldNotContain("Decimal::from(self.bonus_int");
+    }
 }
