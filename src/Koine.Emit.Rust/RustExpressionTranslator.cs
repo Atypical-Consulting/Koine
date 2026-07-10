@@ -433,20 +433,16 @@ internal sealed class RustExpressionTranslator
             // instead (#1354, closing the same #1343/#1347 defect class for this remaining call site).
             var needsMapWrap = type is { IsOptional: true };
 
-            if (!needsMapWrap)
+            if (needsMapWrap)
             {
-                sb.Append("Decimal::from(");
-            }
-
-            WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
-
-            if (!needsMapWrap)
-            {
-                sb.Append(')');
+                WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+                sb.Append(".map(Decimal::from)");
             }
             else
             {
-                sb.Append(".map(Decimal::from)");
+                sb.Append("Decimal::from(");
+                WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+                sb.Append(')');
             }
 
             return;
