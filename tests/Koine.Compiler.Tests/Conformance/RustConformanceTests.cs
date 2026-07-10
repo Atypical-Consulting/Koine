@@ -1747,6 +1747,35 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1332: an optional-declared <c>String?</c> derived member whose bare body ends in
+    /// <c>.trim()</c> must own the result (<c>.to_string()</c>) before <c>WriteDerived</c>'s
+    /// <c>Some(...)</c>-wrap is applied, or the emitted crate does not compile — the accessor's
+    /// declared return type is <c>Option&lt;String&gt;</c>, but a borrowed <c>&amp;str</c> (from
+    /// <c>.clone()</c> on the <c>.trim()</c> result) fails to unify with it (<c>E0308</c>). <c>slug</c>
+    /// is the non-optional-declared sibling, along for the ride to pin its (unchanged, previously
+    /// conformance-untested) baseline compile alongside the fix.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_trim_body_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Person {\n" +
+            "    name: String\n" +
+            "    nickname: String? = name.trim\n" +
+            "    slug: String = name.trim\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1335: a <c>ConditionalExpr</c> derived-member body whose numeric-widen-needing branch is
     /// itself optional (<c>Int?</c>) must render as <c>.map(Decimal::from)</c> — both against a
     /// non-optional <c>Decimal</c> sibling and against an optional <c>Decimal?</c> sibling — or the
