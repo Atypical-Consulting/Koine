@@ -245,6 +245,15 @@ public sealed partial class RustEmitter
         var field = RustNaming.Field(m.Name);
         string body;
 
+        // The underlying (non-optional) view of the declared type — mirrors the constant-default sites'
+        // pattern (#1319/#1325). An optional-declared member's bare or conditional body may itself be a
+        // bare, always-present value of a narrower/different (or even same) numeric type, which needs
+        // coercing against this underlying type and Some(...)-wrapping below — but only when the body's
+        // OWN inferred type isn't itself optional (#1329): a body that can itself yield an optional value
+        // (e.g. a conditional whose branches reference other optional fields) is already Option-shaped
+        // and must render exactly as today, or wrapping it here would double-wrap it.
+        var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
+
         // A bare conditional/let/guard body (no arithmetic operator at all) has its own recursive
         // owned-value dispatch — a leaf place a branch would otherwise move out of `&self` must be
         // cloned, which neither the clone/`to_string` handling below (it only recognizes a bare
@@ -253,23 +262,27 @@ public sealed partial class RustEmitter
         if (m.Initializer is ConditionalExpr or LetExpr or GuardExpr)
         {
             body = translator.TranslateOwned(m.Initializer!, EnumExpectedRef(m, typeMapper));
-            if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } ownedWrap)
+            TypeRef? ownedBodyType = translator.InferType(m.Initializer!);
+            if (NumericCoercionWrap(underlyingType, ownedBodyType) is { } ownedWrap)
             {
                 body = $"{ownedWrap}({body})";
             }
+            body = SomeWrapIfNeeded(body, m.Type, ownedBodyType);
         }
         else
         {
             body = RustExpressionTranslator.StripOuterParens(
                 translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Property, EnumExpectedRef(m, typeMapper)));
+            TypeRef? bodyType = translator.InferType(m.Initializer!);
 
-            // Reconcile the body's inferred numeric type with the declared type. Rust has no implicit
-            // numeric widening, so an `Int`-inferred body in a `-> Decimal` getter (a widening C# does
-            // for free) must be wrapped in `Decimal::from(...)` or rustc rejects it as E0308 (#961) — the
-            // derived-member dual of the scalar-operator coercion #937 fixed. Takes precedence over the
-            // clone/`to_string` cases below (the wrapped value is always a `Copy` primitive, so no clone
-            // is owed).
-            if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
+            // Reconcile the body's inferred numeric type with the declared (underlying) type. Rust has no
+            // implicit numeric widening, so an `Int`-inferred body in a `-> Decimal` getter (a widening C#
+            // does for free) must be wrapped in `Decimal::from(...)` or rustc rejects it as E0308 (#961) —
+            // the derived-member dual of the scalar-operator coercion #937 fixed. Takes precedence over
+            // the clone/`to_string` cases below (the wrapped value is always a `Copy` primitive, so no
+            // clone is owed). Coercing against `underlyingType` (rather than `m.Type`) extends this to an
+            // optional-declared member's bare, always-present numeric body (#1329).
+            if (NumericCoercionWrap(underlyingType, bodyType) is { } wrap)
             {
                 body = $"{wrap}({body})";
             }
@@ -283,6 +296,8 @@ public sealed partial class RustEmitter
             {
                 body += ".clone()";
             }
+
+            body = SomeWrapIfNeeded(body, m.Type, bodyType);
         }
 
         WriteDoc(sb, m.Doc, Indent);
@@ -291,6 +306,18 @@ public sealed partial class RustEmitter
         sb.Append(Indent).Append(Indent).Append(body).Append('\n');
         sb.Append(Indent).Append("}\n");
     }
+
+    /// <summary>
+    /// Wraps <paramref name="body"/> in <c>Some(...)</c> when <paramref name="declared"/> is optional and
+    /// <paramref name="bodyType"/> is itself definitely non-optional — an always-present value rendered
+    /// against an <c>Option&lt;...&gt;</c>-returning accessor. Left unchanged when <paramref name="bodyType"/>
+    /// is optional (or unknown), since such a body may already render as <c>Option</c>-shaped and a second
+    /// wrap here would double-wrap it (#1329). Shared by <see cref="WriteDerived"/>'s two coercion call
+    /// sites (the bare-body branch and the <c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>
+    /// owned-value branch).
+    /// </summary>
+    private static string SomeWrapIfNeeded(string body, TypeRef declared, TypeRef? bodyType) =>
+        declared.IsOptional && bodyType is { IsOptional: false } ? $"Some({body})" : body;
 
     /// <summary>
     /// The Rust conversion function to wrap a derived member's body in when its inferred numeric type

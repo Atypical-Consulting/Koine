@@ -178,4 +178,120 @@ public class RustEmitterTests
         rust.ShouldContain("let label = Some(\"std\".to_string());");
         rust.ShouldNotContain("let label = \"std\";");
     }
+
+    private const string OptionalDerivedNarrowerNumericModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            surcharge: Int
+            total: Decimal? = amount + surcharge
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1329: an optional-declared derived member (<c>Decimal?</c>) whose bare body infers to a
+    /// narrower/different numeric type (<c>Int</c>) must be coerced to the declared underlying type
+    /// <i>and</i> <c>Some(...)</c>-wrapped — <c>NumericCoercionWrap</c>'s existing <c>declared.IsOptional</c>
+    /// short-circuit otherwise left it entirely uncoerced and unwrapped, a real <c>cargo check</c>
+    /// <c>E0308</c> (bare <c>i64</c> body against a declared <c>Option&lt;Decimal&gt;</c> return type).
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_bare_narrower_numeric_body_coerces_and_wraps()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedNarrowerNumericModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<Decimal> {");
+        rust.ShouldContain("Some(Decimal::from(self.amount + self.surcharge))");
+        rust.ShouldNotContain("{\n        self.amount + self.surcharge\n");
+    }
+
+    private const string OptionalDerivedSameTypeNumericModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            surcharge: Int
+            total: Int? = amount + surcharge
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1329: an optional-declared derived member whose bare body already infers to the SAME
+    /// underlying numeric type (<c>Int?</c> declared, <c>Int</c> body) needs no numeric coercion — but
+    /// still needs the <c>Some(...)</c> wrap, since the accessor's declared return type is
+    /// <c>Option&lt;i64&gt;</c> while the bare body is a plain <c>i64</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_bare_same_type_numeric_body_wraps_without_coercion()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedSameTypeNumericModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
+        rust.ShouldContain("Some(self.amount + self.surcharge)");
+        rust.ShouldNotContain("{\n        self.amount + self.surcharge\n");
+    }
+
+    private const string OptionalDerivedConditionalNumericModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            total: Decimal? = if amount > 0 then amount else 0
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1329: the owned-value (<c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>) coercion
+    /// site needs the identical treatment as the bare-body site — a conditional whose branches are both
+    /// non-optional numeric, assigned to a wider optional declared type, must coerce the whole rendered
+    /// conditional and <c>Some(...)</c>-wrap it.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_conditional_numeric_body_coerces_and_wraps()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedConditionalNumericModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<Decimal> {");
+        rust.ShouldContain("Some(Decimal::from(if self.amount > 0 { self.amount } else { 0 }))");
+    }
+
+    private const string OptionalDerivedAlreadyOptionalConditionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            fallback: Int?
+            total: Int? = if amount > 0 then bonus else fallback
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Regression guard (issue #1329): a <c>ConditionalExpr</c>-bodied derived member whose branches are
+    /// THEMSELVES optional (both <c>bonus</c> and <c>fallback</c> are <c>Int?</c>) must keep rendering
+    /// exactly as today — no additional <c>Some(...)</c> wrap around the whole conditional, which would
+    /// double-wrap an already-<c>Option</c>-shaped body. Must pass both before and after the fix.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_already_optional_conditional_body_stays_unwrapped()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedAlreadyOptionalConditionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
+        rust.ShouldContain("if self.amount > 0 { self.bonus.clone() } else { self.fallback.clone() }");
+        rust.ShouldNotContain("Some(if self.amount > 0");
+    }
 }
