@@ -25,8 +25,10 @@ beforeAll(async () => {
   oneLine = css.replace(/\s+/g, '');
   rule = oneLine.match(/\.koi-ctxmap-graph\.koi-node\.is-scoped\{([^}]*)\}/)?.[1] ?? '';
   selectedRule = oneLine.match(/\.koi-node\.is-selected\{([^}]*)\}/)?.[1] ?? '';
+  // `context`, `value` and `value-object` share one on-accent-ring rule (grouped selector), so this
+  // matches from the first selector in the group through to the closing brace.
   selectedContextRule =
-    oneLine.match(/\.koi-node--simple\[data-kind=context\]\.is-selected\{([^}]*)\}/)?.[1] ?? '';
+    oneLine.match(/\.koi-node--simple\[data-kind=context\]\.is-selected(?:,[^{]*)?\{([^}]*)\}/)?.[1] ?? '';
 });
 
 describe('.koi-ctxmap-graph .koi-node.is-scoped — the active-context focus ring (#1210)', () => {
@@ -63,16 +65,25 @@ describe('.koi-node.is-selected — the domain-canvas selection cross-highlight 
   test('a [data-kind=\'context\'] node gets an on-accent ring, since its own fill IS --koi-accent', () => {
     // .koi-node--simple[data-kind='context'] fills/borders itself in var(--koi-accent) — a same-colour
     // ring on that one kind would have ~1.0 contrast against its own background, same as #1210's
-    // .is-scoped ring did before its fix. Every other kind's fill is --koi-ddd-*, which already
-    // contrasts fine against --koi-accent, so only the context override needs --koi-on-accent.
+    // .is-scoped ring did before its fix.
     expect(oneLine, 'the context-kind override rule must exist').toContain(
-      '.koi-node--simple[data-kind=context].is-selected{',
+      '.koi-node--simple[data-kind=context].is-selected,',
     );
     expect(selectedContextRule, 'the override ring must also be inset').toContain(
       'box-shadow:inset0002pxvar(--koi-on-accent)',
     );
     expect(selectedContextRule, 'the override ring must not use the tile-fill colour').not.toContain(
       'var(--koi-accent)',
+    );
+  });
+
+  test('[data-kind=\'value\'] and [data-kind=\'value-object\'] nodes also get an on-accent ring', () => {
+    // --koi-ddd-value (#5aa9f0) is a near-exact match for dark theme's --koi-accent (#5aa9ff) — a
+    // ~1.0-contrast collision discovered by code review, not a hue different enough to "already
+    // contrast fine" the way the other --koi-ddd-* kinds do. Both the fielded (.koi-node--class) and
+    // empty (.koi-node--simple) render shapes share this override, so the selector is bare `.koi-node`.
+    expect(oneLine, 'the value-kind override must be grouped into the same rule').toContain(
+      '.koi-node[data-kind=value].is-selected,.koi-node[data-kind=value-object].is-selected{',
     );
   });
 });

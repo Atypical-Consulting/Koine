@@ -169,8 +169,12 @@ $ddd-kinds: (
 /* A `[data-kind='context']` node's own fill/border IS `--koi-accent` (see the tile rule above), so a
    same-colour selection ring would have ~1.0 contrast against its own background — swap to
    `--koi-on-accent` for that one kind, mirroring #1210's contrast fix for the neighbouring `.is-scoped`
-   ring. Every other kind's fill is `--koi-ddd-*`, which already contrasts fine against `--koi-accent`. */
-.koi-node--simple[data-kind='context'].is-selected {
+   ring. `value`/`value-object` need the same swap: `--koi-ddd-value` (#5aa9f0) is a near-exact match for
+   dark theme's `--koi-accent` (#5aa9ff) — a ~1.0-contrast collision, not just a "close enough" hue.
+   Every other kind's `--koi-ddd-*` fill is a distinct enough hue to contrast fine against `--koi-accent`. */
+.koi-node--simple[data-kind='context'].is-selected,
+.koi-node[data-kind='value'].is-selected,
+.koi-node[data-kind='value-object'].is-selected {
   border-color: var(--koi-on-accent);
   box-shadow: inset 0 0 0 2px var(--koi-on-accent);
 }
