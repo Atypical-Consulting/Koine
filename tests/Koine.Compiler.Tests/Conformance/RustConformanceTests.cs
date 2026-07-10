@@ -1305,4 +1305,42 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1316, Task 2 (probe) — a bare <c>CallExpr</c> (an accessor-style collection call, e.g.
+    /// <c>lines.sum(l =&gt; l.amount)</c>) used DIRECTLY as one side of an arithmetic operator, needing
+    /// Int-&gt;Decimal coercion. Confirms (or refutes) whether <c>WriteOperand</c>'s <c>default:
+    /// Write(expr, sb, coerceTo)</c> branch — which dispatches to <c>WriteCall(call, sb)</c>, a method
+    /// that never consults <c>coerceTo</c> — has the same defect as the <c>MemberAccessExpr</c> case
+    /// fixed in Task 1.
+    /// </summary>
+    [Fact]
+    public void Bare_call_operand_needing_coercion_is_wrapped_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value LineItem {\n" +
+            "    amount: Int\n" +
+            "  }\n" +
+            "  value Invoice {\n" +
+            "    items: List<LineItem>\n" +
+            "    taxRate: Decimal\n" +
+            "    total: Decimal = items.sum(i => i.amount) + taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Int-typed sum() call is coerced ONCE, as a
+        // whole — not silently dropped.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain(
+            "Decimal::from(crate::koine_runtime::koine_sum(self.items.iter().map(|i| i.amount())))" +
+            " + self.tax_rate");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
