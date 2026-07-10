@@ -319,14 +319,34 @@ internal sealed class RustExpressionTranslator
     /// its leaf places are cloned via <see cref="WriteOwnedOperand"/> (#1282, generalizing #1268).
     /// Comparisons/logical operators (<paramref name="isArithmetic"/> false) borrow and are left as the
     /// pre-existing un-cloned rendering.
+    /// <para>
+    /// <paramref name="coerceTo"/> is deliberately NOT threaded into the <see cref="WriteOwnedOperand"/>
+    /// render: <see cref="Write"/>'s dispatch only honors a <c>coerceTo</c> hint for a bare
+    /// <c>IdentifierExpr</c>/<c>LiteralExpr</c> leaf, so threading it into every branch left a compound
+    /// (nested-arithmetic, member-access, call) branch un-coerced while its bare-identifier sibling got
+    /// wrapped — two different Rust types in the same <c>if</c>/<c>else</c>, a real <c>cargo check</c>
+    /// E0308 (#1293). Instead each branch renders with its own natural type, and — mirroring
+    /// <c>RustEmitter.ValueObjects.WriteDerived</c>'s <c>NumericCoercionWrap</c> precedent — the WHOLE
+    /// rendered compound expression is wrapped in a single outer <c>Decimal::from(...)</c> when its own
+    /// inferred <paramref name="type"/> differs from <paramref name="coerceTo"/>.
+    /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
     {
         if (isArithmetic && expr is ConditionalExpr or LetExpr or GuardExpr)
         {
-            sb.Append('(');
-            WriteOwnedOperand(expr, sb, coerceTo);
-            sb.Append(')');
+            var operandBuf = new StringBuilder();
+            WriteOwnedOperand(expr, operandBuf);
+
+            if (coerceTo is not null && type?.Name != coerceTo.Name)
+            {
+                sb.Append("Decimal::from(").Append(operandBuf).Append(')');
+            }
+            else
+            {
+                sb.Append('(').Append(operandBuf).Append(')');
+            }
+
             return;
         }
 
