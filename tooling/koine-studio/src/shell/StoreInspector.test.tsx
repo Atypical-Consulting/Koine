@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { act, render } from '@testing-library/preact';
+import { act, fireEvent, render } from '@testing-library/preact';
 import { createAppStore } from '@/store/index';
 import { StoreInspector } from '@/shell/StoreInspector';
 import type { LspDiagnostic } from '@/lsp/lsp';
@@ -7,6 +7,14 @@ import { axe } from 'vitest-axe';
 
 const field = (c: Element, name: string) =>
   c.querySelector(`[data-field="${name}"]`)!.textContent;
+
+// Click the "Raw state" summary: happy-dom implements native <details> semantics, so the click flips
+// `open` and dispatches the `toggle` event the component listens for (one call opens, the next closes).
+const toggleRawState = (c: Element) => {
+  act(() => {
+    fireEvent.click(c.querySelector('.koi-store-inspector-raw summary')!);
+  });
+};
 
 const err: LspDiagnostic = {
   range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
@@ -39,9 +47,21 @@ describe('StoreInspector', () => {
     expect(field(container, 'problems')).toContain('1 error');
   });
 
-  test('exposes the full store as a collapsible raw-state snapshot', () => {
+  test('renders no raw dump while the details is collapsed (the default)', () => {
     const store = createAppStore();
     const { container } = render(<StoreInspector store={store} />);
+
+    // Collapsed by default: the summary is offered, but the dump — and the full-store serialization
+    // behind it — must not exist until the user actually expands it (#1134).
+    expect(container.querySelector('.koi-store-inspector-raw summary')).not.toBeNull();
+    expect(container.querySelector('[data-field="rawState"]')).toBeNull();
+  });
+
+  test('exposes the full store as a raw-state snapshot once the details is opened', () => {
+    const store = createAppStore();
+    const { container } = render(<StoreInspector store={store} />);
+
+    toggleRawState(container);
 
     const raw = container.querySelector('[data-field="rawState"]');
     expect(raw).not.toBeNull();
@@ -51,11 +71,24 @@ describe('StoreInspector', () => {
     expect(raw!.textContent).not.toContain('setActiveContext');
   });
 
+  test('closing the details removes the dump again', () => {
+    const store = createAppStore();
+    const { container } = render(<StoreInspector store={store} />);
+
+    toggleRawState(container); // open…
+    expect(container.querySelector('[data-field="rawState"]')).not.toBeNull();
+
+    toggleRawState(container); // …and close: the dump (and its whole-store subscription) unmounts.
+    expect(container.querySelector('[data-field="rawState"]')).toBeNull();
+  });
+
   test('raw snapshot tracks slices the curated rows do not subscribe to', () => {
     const store = createAppStore();
     const { container } = render(<StoreInspector store={store} />);
 
-    // canUndo/canRedo (History slice) feed no curated row; the dump must still repaint when they
+    toggleRawState(container);
+
+    // canUndo/canRedo (History slice) feed no curated row; the open dump must still repaint when they
     // change — otherwise the "whole store" snapshot silently goes stale.
     act(() => {
       store.getState().setHistoryState({ canUndo: true, canRedo: false });

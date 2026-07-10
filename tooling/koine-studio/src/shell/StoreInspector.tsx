@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { useState } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import type { AppState } from '@/store/index';
@@ -30,11 +31,12 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
   const docViews = useStore(s, (st) => st.docViews);
   // The chat slice is replaced wholesale on every mutation, so its reference is the repaint signal.
   const chat = useStore(s, (st) => st.chat);
-  // Subscribe to the whole state for the raw dump below: the curated scalars above don't cover every
-  // slice (e.g. History's canUndo/canRedo), so relying on them alone would leave the snapshot stale on
-  // a change to an unsubscribed field. Zustand replaces the top-level state object on every set(), so
-  // this identity selector repaints on ANY change — making the dump track the full store.
-  const fullState = useStore(s, (st) => st);
+  // Serializing the whole store is the EXPENSIVE part of this overlay (every open buffer's text, the
+  // whole chat transcript), and the raw-state <details> below is collapsed by default — so the dump
+  // lives in a child component mounted only while the details is open (#1134). While collapsed, this
+  // overlay costs only the cheap curated selectors above. The details element owns its own open state;
+  // its toggle event just mirrors it into rawOpen so the child mounts/unmounts with it.
+  const [rawOpen, setRawOpen] = useState(false);
 
   let dirty = 0;
   for (const b of buffers.values()) if (b.dirty) dirty++;
@@ -44,21 +46,6 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
     .join('  ');
   const msgs = chat.messages.length;
   const chatSummary = `${chat.status}, ${msgs} message${msgs === 1 ? '' : 's'}, ${chat.changeSet ? chat.changeSet.phase.kind : '—'}`;
-
-  // The curated rows above are a summary; this dumps the WHOLE store so nothing is hidden. fullState
-  // (the identity-selected snapshot) keeps it tracking every change; drop the function-valued setters
-  // so only data shows.
-  const rawState = JSON.stringify(
-    fullState,
-    (_key, value) => {
-      if (typeof value === 'function') return undefined; // drop the setters — only data shows
-      // The store-owned buffer set is a Map (#982); JSON.stringify renders a Map as `{}`, so expand it to
-      // a plain object so the raw dump keeps showing the open buffers keyed by uri.
-      if (value instanceof Map) return Object.fromEntries(value);
-      return value;
-    },
-    2,
-  );
 
   const row = (label: string, fieldName: string, value: ComponentChildren) => (
     <>
@@ -84,10 +71,35 @@ export function StoreInspector(props: { store: StoreApi<AppState> }) {
         {row('Doc views', 'docViews', docViewSummary)}
         {row('Assistant', 'chat', chatSummary)}
       </dl>
-      <details class="koi-store-inspector-raw">
+      <details
+        class="koi-store-inspector-raw"
+        onToggle={(e) => setRawOpen(e.currentTarget.open)}
+      >
         <summary>Raw state</summary>
-        <pre data-field="rawState">{rawState}</pre>
+        {rawOpen && <RawStateDump store={s} />}
       </details>
     </div>
   );
+}
+
+// The curated rows are a summary; this dumps the WHOLE store so nothing is hidden. It subscribes to
+// the whole state because the curated scalars don't cover every slice (e.g. History's canUndo/canRedo),
+// so relying on them alone would leave the snapshot stale on a change to an unsubscribed field. Zustand
+// replaces the top-level state object on every set(), so the identity selector repaints on ANY change —
+// making the dump track the full store. Mounted only while the raw-state <details> is open (#1134), so
+// the collapsed default never pays for the whole-store serialization.
+function RawStateDump(props: { store: StoreApi<AppState> }) {
+  const fullState = useStore(props.store, (st) => st);
+  const rawState = JSON.stringify(
+    fullState,
+    (_key, value) => {
+      if (typeof value === 'function') return undefined; // drop the setters — only data shows
+      // The store-owned buffer set is a Map (#982); JSON.stringify renders a Map as `{}`, so expand it to
+      // a plain object so the raw dump keeps showing the open buffers keyed by uri.
+      if (value instanceof Map) return Object.fromEntries(value);
+      return value;
+    },
+    2,
+  );
+  return <pre data-field="rawState">{rawState}</pre>;
 }
