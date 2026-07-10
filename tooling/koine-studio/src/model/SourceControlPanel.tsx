@@ -13,8 +13,8 @@ import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuIte
 // methods reject (see {@link Platform}); the desktop host runs a real `git`, but a non-repo folder makes
 // `gitStatus` REJECT. The panel handles both: `canUseGit === false` paints a "desktop only" empty state
 // and makes NO git calls, and a rejected status paints a "not a git repository" empty state — neither
-// crashes. After every mutation (stage / unstage / commit / checkout) it RE-FETCHES status (and the log
-// after a commit) so the groups and recent-commit list track the repository.
+// crashes. After every mutation (stage / unstage / discard / commit / checkout) it RE-FETCHES status
+// (and the log after a commit) so the groups and recent-commit list track the repository.
 
 /**
  * The slice of {@link Platform} the panel calls — narrowed to the git surface so a test can hand it a
@@ -29,6 +29,7 @@ export type GitSurface = Pick<
   | 'gitNumstat'
   | 'gitStage'
   | 'gitUnstage'
+  | 'gitDiscard'
   | 'gitCommit'
   | 'gitPush'
   | 'gitBranches'
@@ -261,6 +262,28 @@ export function SourceControlPanel(props: {
 
   const onStage = (relPath: string) => void mutate(() => git.gitStage(folderToken, [relPath]));
   const onUnstage = (relPath: string) => void mutate(() => git.gitUnstage(folderToken, [relPath]));
+
+  // Discard is DESTRUCTIVE — `git restore`/`git clean` throw the working-tree bytes away for good — so
+  // both Discard controls (per-row and group Discard-all, #1151) route through an explicit confirm;
+  // declining aborts with no git call. A confirmed discard runs through the same mutate() reload as
+  // every other mutation, so the groups re-derive from the post-discard repository and a git failure
+  // lands in the existing actionError alert.
+  const onDiscard = (paths: string[]) => {
+    if (paths.length === 0) return; // defensive — an empty group renders no Discard-all at all
+    void (async () => {
+      const ok = await koiConfirm({
+        title: 'Discard changes?',
+        message: `Discard changes to ${
+          paths.length === 1 ? paths[0] : `${paths.length} files`
+        }? This reverts your edits and can't be undone.`,
+        confirmLabel: 'Discard',
+        cancelLabel: 'Cancel',
+        danger: true,
+      });
+      if (!ok) return; // declined — the working tree survives untouched
+      await mutate(() => git.gitDiscard(folderToken, paths));
+    })();
+  };
   // Push through the same mutate() path every other op uses: the follow-up reload re-reads status, so
   // the ahead count tracks the pushed repository, and a git refusal (non-fast-forward, auth, offline)
   // lands in the existing actionError alert.
@@ -442,10 +465,10 @@ export function SourceControlPanel(props: {
 
   // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
   // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits);
-  // the DEFERRED items render disabled — each a tracked sibling follow-up of #1146/#1142: Discard-all
-  // (#1151) and the pull/fetch ops have no Platform git op yet, and wiring THIS menu's Push item to the
-  // gitPush op the sync bar now invokes (#1150) rides along with that sync-menu follow-up. Disabled
-  // (never a live-but-inert no-op) matches the panel's placeholder convention.
+  // the DEFERRED items render disabled — each a tracked sibling follow-up of #1146/#1142: the pull/fetch
+  // ops have no Platform git op yet, and wiring this menu's Discard-all / Push items to the gitDiscard
+  // (#1151) / gitPush (#1150) ops the panel controls now invoke rides along with that menu-wiring
+  // follow-up. Disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
   const openOverflowMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     const unstagedPaths = [...unstaged, ...untracked].map((f) => f.relPath);
@@ -552,9 +575,8 @@ export function SourceControlPanel(props: {
               <span class="none">·</span>
             )}
           </span>
-          {/* Row actions, revealed on row hover / keyboard focus. Open changes + Stage/Unstage are wired;
-              Discard is a disabled placeholder — the Platform git surface exposes no discard/revert op, so
-              wiring it is a tracked follow-up (see the panel's design handoff). */}
+          {/* Row actions, revealed on row hover / keyboard focus: Open changes, the confirm-gated
+              Discard (#1151 — destructive, so it always asks first), and Stage/Unstage. */}
           <div class="koi-sc-row-actions">
             <button
               type="button"
@@ -571,9 +593,10 @@ export function SourceControlPanel(props: {
             <button
               type="button"
               class="koi-sc-ract danger"
-              title="Discard changes (coming soon)"
-              aria-label={`Discard ${f.relPath} changes (coming soon)`}
-              disabled
+              title="Discard changes"
+              aria-label={`Discard ${f.relPath} changes`}
+              disabled={busy}
+              onClick={() => onDiscard([f.relPath])}
             >
               <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
@@ -620,8 +643,8 @@ export function SourceControlPanel(props: {
   // A named group landmark (`<section aria-label>`) for one bucket of files, omitted entirely when empty
   // so the rail doesn't carry hollow headers — the test relies on this to prove a file moved groups. Its
   // head is a collapse toggle (chevron + label + count pill) plus a hover/focus-revealed action cluster:
-  // Stage all / Unstage all are wired through `mutate`; Discard all is a disabled placeholder (the git
-  // surface exposes no discard/revert op — wiring it is a tracked follow-up).
+  // Stage all / Unstage all are wired through `mutate`; Discard all (#1151) passes the whole group's
+  // paths through the confirm-gated onDiscard.
   const fileGroup = (label: string, list: GitFile[]) => {
     if (list.length === 0) return null;
     const isStaged = list.every((f) => f.staged);
@@ -661,14 +684,15 @@ export function SourceControlPanel(props: {
               </button>
             ) : (
               <>
-                {/* Discard has no backing Platform git op — render it as a disabled placeholder for visual
-                    fidelity; wiring Discard/Revert is a tracked follow-up (see the panel's design handoff). */}
+                {/* Group discard (#1151): every path of this group through the confirm-gated onDiscard —
+                    destructive, so it always asks before touching the working tree. */}
                 <button
                   type="button"
                   class="koi-sc-gact danger"
-                  title="Discard all changes (coming soon)"
-                  aria-label="Discard all changes (coming soon)"
-                  disabled
+                  title="Discard all changes"
+                  aria-label="Discard all changes"
+                  disabled={busy}
+                  onClick={() => onDiscard(paths)}
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M6.5 3h3M3.5 4.5h9M11.5 4.5l-.5 8a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1l-.5-8" />

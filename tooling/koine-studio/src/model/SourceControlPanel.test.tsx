@@ -44,6 +44,11 @@ function makeGit(initial: GitFile[], upstream: GitUpstream | null = { ref: 'orig
     gitCommit: vi.fn(async () => {
       files = [];
     }),
+    // A confirmed discard removes each path's change from the backing model — a reverted tracked file
+    // and a deleted untracked one both vanish from the next gitStatus snapshot, as on the real host.
+    gitDiscard: vi.fn(async (_token: string, paths: string[]) => {
+      files = files.filter((f) => !paths.includes(f.relPath));
+    }),
     gitPush: vi.fn(async () => {}),
     gitBranches: vi.fn(async () => ['main', 'feature']),
     gitCheckout: vi.fn(async () => {}),
@@ -336,14 +341,15 @@ describe('SourceControlPanel', () => {
     await waitFor(() => expect(git.gitUnstage).toHaveBeenCalledWith(TOKEN, ['a.koi', 'd.koi']));
   });
 
-  test('the non-staged group renders a disabled Discard-all placeholder (unwired)', async () => {
+  test('the non-staged group renders a live, enabled Discard-all control (#1151)', async () => {
     const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
 
     const discardAll = (await view.findByRole('button', {
       name: /Discard all changes/i,
     })) as HTMLButtonElement;
-    expect(discardAll.disabled).toBe(true);
+    expect(discardAll.disabled).toBe(false);
+    expect(discardAll.getAttribute('aria-label')).not.toMatch(/coming soon/i);
   });
 
   test('typing a message and clicking Commit calls gitCommit with the message', async () => {
@@ -436,6 +442,7 @@ describe('SourceControlPanel', () => {
       gitNumstat: vi.fn(async () => [] as GitNumstatEntry[]),
       gitStage: vi.fn(),
       gitUnstage: vi.fn(),
+      gitDiscard: vi.fn(),
       gitCommit: vi.fn(),
       gitPush: vi.fn(),
       gitBranches: vi.fn(async () => ['main']),
@@ -482,6 +489,59 @@ describe('SourceControlPanel', () => {
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByRole('region', { name: 'Staged Changes' });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SourceControlPanel — Discard controls (#1151)', () => {
+  beforeEach(() => {
+    vi.mocked(koiConfirm).mockReset();
+  });
+
+  test('a confirmed row Discard calls gitDiscard with that path and re-fetches status', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const discard = (await view.findByRole('button', { name: 'Discard b.koi changes' })) as HTMLButtonElement;
+    expect(discard.disabled).toBe(false);
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+    fireEvent.click(discard);
+
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi']));
+    expect(koiConfirm).toHaveBeenCalledTimes(1);
+    // The mutate() follow-up reload re-reads status, so the reverted file leaves its group.
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+    await waitFor(() => expect(group(view.container, 'Changes')).toBeNull());
+  });
+
+  test('declining the confirm aborts the discard — NO gitDiscard call, the change survives', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(false);
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Discard b.koi changes' }));
+
+    await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) discard microtask flush
+    expect(git.gitDiscard).not.toHaveBeenCalled();
+    expect(group(view.container, 'Changes')!.textContent).toContain('b.koi');
+  });
+
+  test('a confirmed group Discard-all passes every path of that group', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'modified' },
+      { relPath: 'a.koi', staged: true, status: 'modified' }, // staged — NOT part of the Changes group
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Changes')).not.toBeNull());
+    fireEvent.click(within(group(view.container, 'Changes')!).getByRole('button', { name: /Discard all changes/i }));
+
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi', 'c.koi']));
+    // The staged copy is untouched — group discard only covers the group's own paths.
+    await waitFor(() => expect(group(view.container, 'Staged Changes')!.textContent).toContain('a.koi'));
   });
 });
 

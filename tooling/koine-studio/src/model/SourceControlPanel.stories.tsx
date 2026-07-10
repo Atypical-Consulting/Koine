@@ -36,6 +36,7 @@ function makeGit(
     gitNumstat: async () => numstat.map((e) => ({ ...e })),
     gitStage: async () => {},
     gitUnstage: async () => {},
+    gitDiscard: async () => {},
     gitCommit: async () => {},
     gitPush: async () => {},
     gitBranches: async () => ['main', 'feature/scm'],
