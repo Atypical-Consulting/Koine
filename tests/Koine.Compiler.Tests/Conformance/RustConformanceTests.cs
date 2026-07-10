@@ -1564,4 +1564,34 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1324: an entity's constant-default field must be coerced to its declared Rust type in the
+    /// smart constructor's <c>let</c>-binding loop — the entity dual of #1319's value-object fix — or the
+    /// emitted crate does not compile at all. Before the fix, a <c>Decimal</c> field defaulted to an
+    /// <c>Int</c> literal bound the raw literal (<c>let tax_rate = 2;</c>, expected <c>Decimal</c>) and a
+    /// <c>String</c> field defaulted to a string literal bound a borrowed <c>&amp;str</c> (<c>let label =
+    /// "std";</c>, expected <c>String</c>) — both real <c>cargo check</c> <c>E0308</c>s at the
+    /// struct-literal field-init site.
+    /// </summary>
+    [Fact]
+    public void Entity_constant_default_decimal_and_string_fields_emit_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal = 2\n" +
+            "    label: String = \"std\"\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

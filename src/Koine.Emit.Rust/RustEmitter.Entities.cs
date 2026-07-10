@@ -83,8 +83,24 @@ public sealed partial class RustEmitter
         // Defaulted members are bound as locals (so invariants can see them) before the checks.
         foreach (Member m in defaulted)
         {
+            var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
+
+            // Reconcile the default's inferred type with the field's declared type — the entity dual of
+            // the value-object smart constructor's coercion (#1319). Rust has no implicit numeric
+            // widening or &str->String coercion, so a Decimal field defaulted to an Int literal, or a
+            // String field defaulted to a string literal, must be owned/widened here or the later
+            // struct-literal field-init site (`tax_rate,`) is rejected as E0308 (#1324).
+            if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
+            {
+                defaultValue = $"{wrap}({defaultValue})";
+            }
+            else if (m.Type is { Name: "String", IsOptional: false } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
+            {
+                defaultValue += ".to_string()";
+            }
+
             body.Append(Indent).Append(Indent).Append("let ").Append(RustNaming.Field(m.Name)).Append(" = ")
-                .Append(translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index)))
+                .Append(defaultValue)
                 .Append(";\n");
         }
 
