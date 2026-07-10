@@ -346,9 +346,13 @@ internal sealed class RustExpressionTranslator
     /// <para>
     /// Scope (#1293 fixed the compound-arithmetic slice; #1311 extended it to comparisons, a conditional's
     /// own disagreeing branches — see <see cref="WriteReconciledBranch"/> — and a bare <c>BinaryExpr</c>
-    /// operand): a bare <c>MemberAccessExpr</c>/<c>CallExpr</c> operand used directly (not nested in a
-    /// conditional) is the one still-open instance of the same underlying <c>Write()</c>-dispatch gap,
-    /// tracked separately as #1316 rather than folded into this fix.
+    /// operand): #1316 closed the last instance, a bare <c>MemberAccessExpr</c>/<c>CallExpr</c> operand
+    /// used directly (not nested in a conditional). Unlike the compound shapes above, a member access or
+    /// call is already a tight-binding primary with no delimiting needed for precedence, so it is wrapped
+    /// in `Decimal::from(...)` ONLY when coercion is actually needed — reusing
+    /// <see cref="WriteOwnedOperand"/>'s "compound" treatment unconditionally would wrap even the
+    /// no-coercion case in bare <c>(...)</c> (a plain accessor call has no self-enclosing parens for
+    /// <see cref="StripOuterParens"/> to remove), regressing every currently-passing shape.
     /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
@@ -366,6 +370,15 @@ internal sealed class RustExpressionTranslator
         }
 
         var clone = isArithmetic && IsNonCopyPlace(expr, type);
+
+        if (expr is MemberAccessExpr or CallExpr && coerceTo is not null && type?.Name != coerceTo.Name)
+        {
+            sb.Append("Decimal::from(");
+            WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+            sb.Append(')');
+            return;
+        }
+
         WriteOperand(expr, sb, enumHint, coerceTo, clone);
     }
 
