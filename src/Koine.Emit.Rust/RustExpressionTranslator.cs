@@ -341,23 +341,29 @@ internal sealed class RustExpressionTranslator
     /// Int-opposite-a-Decimal check) — so a second, narrower <c>Decimal::from</c> literal is clearer than
     /// routing through a helper built for a different, wider contract.
     /// </para>
+    /// <para>
+    /// Scope (#1293 fixed exactly this slice, not the whole <c>coerceTo</c>-dispatch gap): this wrap only
+    /// fires for a <b>compound</b> (<c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>) operand of an
+    /// <b>arithmetic</b> (<paramref name="isArithmetic"/>) operator whose branches share one numeric type
+    /// that itself mismatches <paramref name="coerceTo"/>. A comparison operator's mismatched-shape
+    /// operand, a conditional whose branches disagree with EACH OTHER (not just with the expected type —
+    /// widened to a single type by <c>TypeResolver</c> before this method ever runs), and a bare
+    /// non-compound operand (a nested <c>BinaryExpr</c>/<c>CallExpr</c>/<c>MemberAccessExpr</c> used
+    /// directly, not nested inside a conditional) are adjacent, still-open instances of the same
+    /// underlying <c>Write()</c>-dispatch gap, tracked separately rather than folded into this fix.
+    /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
     {
         if (isArithmetic && expr is ConditionalExpr or LetExpr or GuardExpr)
         {
-            var operandBuf = new StringBuilder();
-            WriteOwnedOperand(expr, operandBuf);
-
-            if (coerceTo is not null && type?.Name != coerceTo.Name)
-            {
-                sb.Append("Decimal::from(").Append(operandBuf).Append(')');
-            }
-            else
-            {
-                sb.Append('(').Append(operandBuf).Append(')');
-            }
-
+            // The wrap decision depends only on `coerceTo`/`type` (known up front), not on the rendered
+            // text, so the prefix is picked before rendering and `WriteOwnedOperand` writes straight into
+            // `sb` — no intermediate buffer needed.
+            var needsWrap = coerceTo is not null && type?.Name != coerceTo.Name;
+            sb.Append(needsWrap ? "Decimal::from(" : "(");
+            WriteOwnedOperand(expr, sb);
+            sb.Append(')');
             return;
         }
 
