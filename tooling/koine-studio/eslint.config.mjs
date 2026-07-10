@@ -5,6 +5,63 @@ import reactHooks from 'eslint-plugin-react-hooks';
 // load-bearing safety conventions (void-prefixed promises, domById, escape-before-innerHTML, and the
 // react-hooks rules) rather than a full style regime — tsc + review stay authoritative for style.
 // Type-aware rules run against tsconfig.json (include: ["src"]) via parserOptions.projectService.
+
+// Any `x.innerHTML = …` / `x.outerHTML = …` (and `+=`). The escape-before-innerHTML contract
+// (editor/markdown.ts) lives outside the type system, so these HTML-injection sinks are banned
+// by default: use textContent / el() / JSX, or renderMarkdown output behind a justified
+// same-line disable, or an allow-listed island below.
+const INNER_HTML_ASSIGN_SELECTOR = {
+  selector: "AssignmentExpression[left.property.name=/^(inner|outer)HTML$/]",
+  message: 'Assigning innerHTML/outerHTML is an XSS sink. Use textContent/el()/JSX; renderMarkdown output only, behind a justified disable; imperative islands are allow-listed in eslint.config.mjs.',
+};
+
+// The same sink in call form. No prod site exists today (grep-verified); banned so a new one
+// can't slip in past the assignment ban above.
+const INSERT_ADJACENT_HTML_SELECTOR = {
+  selector: "CallExpression[callee.property.name='insertAdjacentHTML']",
+  message: 'insertAdjacentHTML is an XSS sink. Use textContent/el()/JSX or an allow-listed island; only already-trusted/escaped markup, behind a justified disable.',
+};
+
+// The JSX form of the same sink (final #992 review, Finding 3). Only `src/docs/MdHtml.tsx` and
+// `src/ai/components/MdHtml.tsx` are sanctioned (each is documented as THE ONLY permitted site for
+// its subsystem, behind a renderer that HTML-escapes the whole input up front) — both turn this
+// selector back off below. Everywhere else, a new raw-HTML site must not slip in past the
+// assignment/call bans above.
+const DANGEROUS_HTML_JSX_SELECTOR = {
+  selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+  message: 'dangerouslySetInnerHTML is an XSS sink. Compose the sanctioned MdHtml component (src/docs/MdHtml.tsx or src/ai/components/MdHtml.tsx) instead of adding a new raw-HTML site.',
+};
+
+// Hand-rolled disposed flag (#1352): the six lifecycle-owning modules that used to declare
+// `let disposed = false` now share createLifecycleGuard(). A bare re-roll loses the guard's
+// idempotent dispose()/isDisposed() contract, so it's banned; use createLifecycleGuard() from
+// @/shared/lifecycleGuard instead.
+const DISPOSED_FLAG_SELECTOR = {
+  selector: "VariableDeclarator[id.name='disposed'][init.value=false]",
+  message: 'Hand-rolled `let disposed = false` is banned (#1352). Use createLifecycleGuard() from @/shared/lifecycleGuard instead.',
+};
+
+// Hand-rolled monotonic sequence counter (#1352): same migration as the disposed flag above —
+// createLifecycleGuard() also owns the request/async-sequence counter previously hand-rolled as
+// `let xSeq = 0`.
+const SEQ_COUNTER_SELECTOR = {
+  selector: "VariableDeclarator[id.name=/Seq$/][init.value=0]",
+  message: 'Hand-rolled `let xSeq = 0` sequence counter is banned (#1352). Use createLifecycleGuard() from @/shared/lifecycleGuard instead.',
+};
+
+// Every syntax selector this gate can enforce, in one place. Several per-file overrides below need to
+// re-declare `no-restricted-syntax` for a file that's exempt from SOME but not all of these — ESLint flat
+// config REPLACES a rule's array per matching file rather than merging across blocks, so an override can't
+// just turn one selector off. `selectorsExcept(...)` expresses that override as "everything except the
+// named exceptions" — an opt-out list, matching this file's existing allow-list idiom below — instead of
+// each override hand-listing which selectors it wants included (an opt-in list silently drifts: a future
+// 5th selector added to ALL_SELECTORS applies everywhere by default here, with no override needing an edit
+// unless it specifically wants to exempt the new one).
+const ALL_SELECTORS = [INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR, DANGEROUS_HTML_JSX_SELECTOR, DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR];
+function selectorsExcept(...excluded) {
+  return ALL_SELECTORS.filter((s) => !excluded.includes(s));
+}
+
 export default tseslint.config(
   {
     files: ['src/**/*.{ts,tsx}'],
@@ -26,31 +83,40 @@ export default tseslint.config(
         property: 'getElementById',
         message: 'Use domById (src/shared/domById.ts) so a missing #id throws loudly instead of a silent null.',
       }],
-      'no-restricted-syntax': [
-        'error',
-        {
-          // Any `x.innerHTML = …` / `x.outerHTML = …` (and `+=`). The escape-before-innerHTML contract
-          // (editor/markdown.ts) lives outside the type system, so these HTML-injection sinks are banned
-          // by default: use textContent / el() / JSX, or renderMarkdown output behind a justified
-          // same-line disable, or an allow-listed island below.
-          selector: "AssignmentExpression[left.property.name=/^(inner|outer)HTML$/]",
-          message: 'Assigning innerHTML/outerHTML is an XSS sink. Use textContent/el()/JSX; renderMarkdown output only, behind a justified disable; imperative islands are allow-listed in eslint.config.mjs.',
-        },
-        {
-          // The same sink in call form. No prod site exists today (grep-verified); banned so a new one
-          // can't slip in past the assignment ban above.
-          selector: "CallExpression[callee.property.name='insertAdjacentHTML']",
-          message: 'insertAdjacentHTML is an XSS sink. Use textContent/el()/JSX or an allow-listed island; only already-trusted/escaped markup, behind a justified disable.',
-        },
-        {
-          // The JSX form of the same sink. Only `src/docs/MdHtml.tsx` and `src/ai/components/MdHtml.tsx`
-          // are sanctioned (each is documented as THE ONLY permitted site for its subsystem, behind a
-          // renderer that HTML-escapes the whole input up front) — both turn this selector back off below.
-          // Everywhere else, a new raw-HTML site must not slip in past the assignment/call bans above.
-          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
-          message: 'dangerouslySetInnerHTML is an XSS sink. Compose the sanctioned MdHtml component (src/docs/MdHtml.tsx or src/ai/components/MdHtml.tsx) instead of adding a new raw-HTML site.',
-        },
-      ],
+      'no-restricted-syntax': ['error', ...ALL_SELECTORS],
+    },
+  },
+  // src/shared/lifecycleGuard.ts is the primitive itself: it legitimately declares `let disposed = false`
+  // and its own sequence counter (`let current = 0`) inside the implementation. Exempt it from the two
+  // #1352 selectors only — the XSS-sink bans still apply.
+  {
+    files: ['src/shared/lifecycleGuard.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', ...selectorsExcept(DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR)],
+    },
+  },
+  // src/shell/statusBar.tsx hand-rolls the exact same "am I still mounted" disposed flag as the six
+  // controllers migrated onto createLifecycleGuard() — lifecycleGuard.ts's own header comment calls this
+  // out by name as "the same disposed-only shape but out of this issue's scope — tracked as a follow-up
+  // rather than folded in here." So the disposed-flag selector is scoped off for just this file's existing
+  // declaration until that follow-up converts it; the Seq-counter selector stays active here (this file
+  // has no `…Seq` pattern today, so nothing depends on it being off).
+  {
+    files: ['src/shell/statusBar.tsx'],
+    rules: {
+      'no-restricted-syntax': ['error', ...selectorsExcept(DISPOSED_FLAG_SELECTOR)],
+    },
+  },
+  // src/ai/ai.ts's `toolCallSeq` and src/shared/ids.ts's `idSeq` are plain monotonic id-minting counters
+  // (correlating UI tool-call start/end events, and generating a no-crypto fallback unique id,
+  // respectively) — not the createLifecycleGuard staleness sequence, which is minted via createSequence()
+  // and compared post-await through isCurrent(). They only collide with the #1352 Seq selector on name
+  // shape (`…Seq` initialized to 0); the disposed-flag selector still applies to both files (neither has
+  // that pattern today).
+  {
+    files: ['src/ai/ai.ts', 'src/shared/ids.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', ...selectorsExcept(SEQ_COUNTER_SELECTOR)],
     },
   },
   // Sanctioned dangerouslySetInnerHTML sites (final #992 review, Finding 3): the ONLY two files permitted
@@ -68,6 +134,10 @@ export default tseslint.config(
   // Permanent imperative islands (CONTRIBUTING non-goals): CodeMirror (editor), maxGraph
   // (diagrams-maxgraph), and the host seam build DOM imperatively by nature — innerHTML there is
   // inherent to the library boundary, not a migration debt, so the ban is permanently off for them.
+  // This blanket 'off' also happens to cover src/host/browser/wasm.ts's `let loaderSeq = 0` (a plain
+  // id-minting counter, same shape as ai.ts's/ids.ts's exempted ones above) — noted here so a future
+  // narrowing of this block doesn't unexpectedly trip the #1352 Seq selector on it with no exemption on
+  // record; add wasm.ts to a selectorsExcept(SEQ_COUNTER_SELECTOR) override at that point if needed.
   {
     files: ['src/editor/**', 'src/diagrams/diagrams-maxgraph.ts', 'src/host/**'],
     rules: { 'no-restricted-syntax': 'off' },
@@ -101,8 +171,14 @@ export default tseslint.config(
     // retired across the arc: #991 (domain navigator) + #992 (Properties/docs panels); file also decomposed by #985
     // (the sub-modules it's being split into — src/shell/inspector/** — inherit the SAME exemption while
     // they still carry the moved-verbatim imperative DOM building; each shrinks/drops out as it converts).
+    //
+    // These six inspector modules were already migrated onto createLifecycleGuard() (#1352), so the
+    // disposed/Seq selectors must still apply here even while the (unrelated, still-open) innerHTML
+    // exemption stands — hence excluding only the innerHTML pair rather than turning the whole rule off.
     files: ['src/shell/inspectorController.tsx', 'src/shell/inspector/**'],
-    rules: { 'no-restricted-syntax': 'off' },
+    rules: {
+      'no-restricted-syntax': ['error', ...selectorsExcept(INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR)],
+    },
   },
   // Tests & stories: the deliberate fire-and-forget promises in vitest fixtures and Storybook play
   // functions are a documented follow-up (fix the ~93 by awaiting), not a prod convention breach.

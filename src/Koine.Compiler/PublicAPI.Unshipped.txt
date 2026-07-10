@@ -137,6 +137,9 @@ Koine.Compiler.Services.EmitResult.Diagnostics.init -> void
 Koine.Compiler.Services.EmitResult.EmitResult(string? Koine, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Diagnostics.Diagnostic!>! Diagnostics) -> void
 Koine.Compiler.Services.EmitResult.Koine.get -> string?
 Koine.Compiler.Services.EmitResult.Koine.init -> void
+Koine.Compiler.Services.IdCoRenameOutcome
+Koine.Compiler.Services.IdCoRenameOutcome.Applied = 0 -> Koine.Compiler.Services.IdCoRenameOutcome
+Koine.Compiler.Services.IdCoRenameOutcome.LeftBehind = 1 -> Koine.Compiler.Services.IdCoRenameOutcome
 Koine.Compiler.Services.InlayHint
 Koine.Compiler.Services.InlayHint.Character.get -> int
 Koine.Compiler.Services.InlayHint.Character.init -> void
@@ -160,8 +163,8 @@ Koine.Compiler.Services.KoineLanguageService.OutgoingCalls(Koine.Compiler.Servic
 Koine.Compiler.Services.KoineLanguageService.PrepareCallHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CallHierarchyItem!>!
 Koine.Compiler.Services.KoineLanguageService.PrepareTypeHierarchy(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
 Koine.Compiler.Services.KoineLanguageService.RefactorsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int startLine, int startChar, int endLine, int endChar) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.CodeActionEdit!>!
-Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
-Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>?
+Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenameResult?
+Koine.Compiler.Services.KoineLanguageService.RenameEditsAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenameResult?
 Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(Koine.Compiler.Services.KoineCompilation! compilation, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
 Koine.Compiler.Services.KoineLanguageService.RenamePreviewAt(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! documents, string! activeUri, int line, int character, string! newName) -> Koine.Compiler.Services.RenamePreview?
 Koine.Compiler.Services.KoineLanguageService.Subtypes(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.TypeHierarchyItem! item) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.TypeHierarchyItem!>!
@@ -217,6 +220,14 @@ Koine.Compiler.Services.RenamePreview.Files.init -> void
 Koine.Compiler.Services.RenamePreview.NewName.get -> string!
 Koine.Compiler.Services.RenamePreview.NewName.init -> void
 Koine.Compiler.Services.RenamePreview.RenamePreview(string! NewName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>! Files) -> void
+Koine.Compiler.Services.RenameResult
+Koine.Compiler.Services.RenameResult.Edits.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>!
+Koine.Compiler.Services.RenameResult.Edits.init -> void
+Koine.Compiler.Services.RenameResult.IdCoRename.get -> Koine.Compiler.Services.IdCoRenameOutcome?
+Koine.Compiler.Services.RenameResult.IdCoRename.init -> void
+Koine.Compiler.Services.RenameResult.LeftBehindIdName.get -> string?
+Koine.Compiler.Services.RenameResult.LeftBehindIdName.init -> void
+Koine.Compiler.Services.RenameResult.RenameResult(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>! Edits, Koine.Compiler.Services.IdCoRenameOutcome? IdCoRename, string? LeftBehindIdName) -> void
 Koine.Compiler.Services.ScenarioService
 Koine.Compiler.Services.SemanticTokenModifier.Aggregate = 1 -> Koine.Compiler.Services.SemanticTokenModifier
 Koine.Compiler.Services.SemanticTokenModifier.Command = 7 -> Koine.Compiler.Services.SemanticTokenModifier
@@ -630,6 +641,9 @@ Koine.Compiler.Services.RenameFileChanges.Equals(Koine.Compiler.Services.RenameF
 Koine.Compiler.Services.RenamePreview.<Clone>$() -> Koine.Compiler.Services.RenamePreview!
 Koine.Compiler.Services.RenamePreview.Deconstruct(out string! NewName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameFileChanges!>! Files) -> void
 Koine.Compiler.Services.RenamePreview.Equals(Koine.Compiler.Services.RenamePreview? other) -> bool
+Koine.Compiler.Services.RenameResult.<Clone>$() -> Koine.Compiler.Services.RenameResult!
+Koine.Compiler.Services.RenameResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.RenameEdit!>! Edits, out Koine.Compiler.Services.IdCoRenameOutcome? IdCoRename, out string? LeftBehindIdName) -> void
+Koine.Compiler.Services.RenameResult.Equals(Koine.Compiler.Services.RenameResult? other) -> bool
 Koine.Compiler.Services.SelectionRange.<Clone>$() -> Koine.Compiler.Services.SelectionRange!
 Koine.Compiler.Services.SelectionRange.Deconstruct(out Koine.Compiler.Ast.SourceSpan Range, out Koine.Compiler.Services.SelectionRange? Parent) -> void
 Koine.Compiler.Services.SelectionRange.Equals(Koine.Compiler.Services.SelectionRange? other) -> bool
@@ -1099,6 +1113,9 @@ override Koine.Compiler.Services.RenameFileChanges.ToString() -> string!
 override Koine.Compiler.Services.RenamePreview.Equals(object? obj) -> bool
 override Koine.Compiler.Services.RenamePreview.GetHashCode() -> int
 override Koine.Compiler.Services.RenamePreview.ToString() -> string!
+override Koine.Compiler.Services.RenameResult.Equals(object? obj) -> bool
+override Koine.Compiler.Services.RenameResult.GetHashCode() -> int
+override Koine.Compiler.Services.RenameResult.ToString() -> string!
 override Koine.Compiler.Services.SelectionRange.Equals(object? obj) -> bool
 override Koine.Compiler.Services.SelectionRange.GetHashCode() -> int
 override Koine.Compiler.Services.SelectionRange.ToString() -> string!
@@ -1450,6 +1467,8 @@ static Koine.Compiler.Services.RenameFileChanges.operator !=(Koine.Compiler.Serv
 static Koine.Compiler.Services.RenameFileChanges.operator ==(Koine.Compiler.Services.RenameFileChanges? left, Koine.Compiler.Services.RenameFileChanges? right) -> bool
 static Koine.Compiler.Services.RenamePreview.operator !=(Koine.Compiler.Services.RenamePreview? left, Koine.Compiler.Services.RenamePreview? right) -> bool
 static Koine.Compiler.Services.RenamePreview.operator ==(Koine.Compiler.Services.RenamePreview? left, Koine.Compiler.Services.RenamePreview? right) -> bool
+static Koine.Compiler.Services.RenameResult.operator !=(Koine.Compiler.Services.RenameResult? left, Koine.Compiler.Services.RenameResult? right) -> bool
+static Koine.Compiler.Services.RenameResult.operator ==(Koine.Compiler.Services.RenameResult? left, Koine.Compiler.Services.RenameResult? right) -> bool
 static Koine.Compiler.Services.SelectionRange.operator !=(Koine.Compiler.Services.SelectionRange? left, Koine.Compiler.Services.SelectionRange? right) -> bool
 static Koine.Compiler.Services.SelectionRange.operator ==(Koine.Compiler.Services.SelectionRange? left, Koine.Compiler.Services.SelectionRange? right) -> bool
 static Koine.Compiler.Services.SemanticToken.operator !=(Koine.Compiler.Services.SemanticToken left, Koine.Compiler.Services.SemanticToken right) -> bool

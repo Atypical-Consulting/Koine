@@ -37,6 +37,7 @@ import {
   lstripAxisButtonsSelector,
 } from '@atypical/koine-ui';
 import { isNarrowViewport } from '@/shared/breakpoint';
+import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { readRaw, writeRaw } from '@/shell/storage';
 import {
@@ -186,10 +187,10 @@ export function centerDeckInitialChrome(
 export function createCenterDeckController(options: CenterDeckControllerOptions): CenterDeckController {
   const { store, editor, deps, hooks } = options;
 
-  // Mirrors the facade's own `disposed` gate (#1002): no async work of consequence lives in this module
-  // (every fetch is behind an injected hook a sibling module already guards), but the flag still gates the
-  // debounced notify-flash timer and the resize listener the same way the facade's own gate does.
-  let disposed = false;
+  // Mirrors the facade's own lifecycle guard (#1002): no async work of consequence lives in this module
+  // (every fetch is behind an injected hook a sibling module already guards), but the guard still gates the
+  // debounced notify-flash timer and the resize listener the same way the facade's own guard does.
+  const lifecycle = createLifecycleGuard();
 
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via domById()) ---
   const settingsPanelEl = document.getElementById('center-panel-settings'); // eslint-disable-line no-restricted-properties -- intentionally optional: absent from desktop-only test fixtures; applyCenterChrome skips the overlay toggle
@@ -493,7 +494,7 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
     // Remove the marker after the animation duration so the cue resets and can re-fire on the next
     // selection without the animation-play-state sticking around.
     notifyTimer = setTimeout(() => {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       btn.classList.remove('rstrip-notify');
     }, 800);
   }
@@ -682,7 +683,7 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   window.addEventListener('resize', onViewportResize);
 
   function dispose(): void {
-    disposed = true;
+    lifecycle.dispose();
     clearTimeout(notifyTimer); // #648: clear the stripe-flash timer so it can't touch a torn-down DOM node
     // Drop the deck/facet subscription — its callback re-applies the center chrome + lazy-loads, which
     // must not fire into a torn-down host after dispose. Unmount the deck Preact trees too so their window

@@ -305,7 +305,7 @@ internal sealed class RustExpressionTranslator
         }
     }
 
-    private void WriteOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool clone, TypeRef? ownType = null)
+    private void WriteOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool clone)
     {
         switch (expr)
         {
@@ -313,7 +313,7 @@ internal sealed class RustExpressionTranslator
                 WriteBinary(bin, sb, parenthesize: true);
                 break;
             case IdentifierExpr id:
-                WriteIdentifier(id.Name, sb, enumHint, coerceTo, ownType);
+                WriteIdentifier(id.Name, sb, enumHint, coerceTo);
                 if (clone)
                 {
                     sb.Append(".clone()");
@@ -427,13 +427,28 @@ internal sealed class RustExpressionTranslator
 
         if (expr is MemberAccessExpr or CallExpr or UnaryExpr && needsWrap)
         {
-            sb.Append("Decimal::from(");
-            WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
-            sb.Append(')');
+            // Mirrors the compound-operand branch's needsMapWrap above: an optional operand's rendering
+            // is already `Option<...>` (or a reference to one, for an accessor call), so a bare
+            // `Decimal::from(...)` prefix around it doesn't compile (E0277) — map inside the Option
+            // instead (#1354, closing the same #1343/#1347 defect class for this remaining call site).
+            var needsMapWrap = type is { IsOptional: true };
+
+            if (needsMapWrap)
+            {
+                WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+                sb.Append(".map(Decimal::from)");
+            }
+            else
+            {
+                sb.Append("Decimal::from(");
+                WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+                sb.Append(')');
+            }
+
             return;
         }
 
-        WriteOperand(expr, sb, enumHint, coerceTo, clone, type);
+        WriteOperand(expr, sb, enumHint, coerceTo, clone);
     }
 
     /// <summary>
@@ -663,11 +678,25 @@ internal sealed class RustExpressionTranslator
         }
     }
 
-    private void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo, TypeRef? ownType = null)
+    /// <summary>
+    /// Internal (not private) so <c>Koine.Compiler.Tests</c> can call it directly with the exact
+    /// argument shape <see cref="Write"/>'s own <c>IdentifierExpr</c> case uses — that call site is
+    /// unreachable from any real <c>.koi</c> model today (#1355), so this is the only way to pin its
+    /// behavior independent of <see cref="WriteOperand"/>'s already-covered path.
+    /// <para>
+    /// Resolves the identifier's own optionality internally (locals via <c>_localTypes</c>, members via
+    /// <see cref="TypeResolver.Infer"/>) rather than depending on a caller-supplied <c>ownType</c> — the
+    /// two call sites (this one and <see cref="WriteOperand"/>'s) can no longer silently diverge, since
+    /// neither threads its own type through anymore (#1355, closes the gap #1347 patched at only one of
+    /// the two sites).
+    /// </para>
+    /// </summary>
+    internal void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo)
     {
         // (1) Local (lambda/command/factory parameter, let binding): verbatim snake_case.
         if (_locals.Contains(name))
         {
+            TypeRef? ownType = _localTypes.GetValueOrDefault(name);
             EmitCoerced(sb, coerceTo, ownType, () => sb.Append(RustNaming.Field(name)));
             return;
         }
@@ -700,6 +729,10 @@ internal sealed class RustExpressionTranslator
         // a derived member reads via its accessor), bare `<snake>` in a constructor/invariant.
         if (_memberNames.Contains(name))
         {
+            // Only worth resolving when EmitCoerced can actually use it (its own Decimal-coerceTo
+            // gate) — every OTHER member-identifier write (the overwhelming majority) would otherwise
+            // pay a TypeResolver walk whose result is immediately discarded.
+            TypeRef? ownType = coerceTo?.Name == "Decimal" ? InferType(new IdentifierExpr(name)) : null;
             EmitCoerced(sb, coerceTo, ownType, () =>
             {
                 if (_mode == NameMode.Property)

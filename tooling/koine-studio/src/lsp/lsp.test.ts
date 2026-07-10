@@ -330,6 +330,41 @@ describe('KoineLsp syntax tree (#890)', () => {
   });
 });
 
+// #565 follow-up: KoineLsp.handle() resolves a request's raw `msg.result` object verbatim (see
+// responder() above) — there is no per-method field allowlist/remapping on the client side. So once
+// EITHER server backend (the desktop `koine lsp` stdio child, LspServer.cs's RenameResultJson, or the
+// in-browser WASM CompilerInterop.Rename) starts putting `idCoRename`/`leftBehindIdName` on a
+// `textDocument/rename` response, the client hands them straight to the caller unchanged — proving
+// Koine Studio needs no transport-specific plumbing for renameStatusMessage (model/inspector.ts) to see
+// them on BOTH hosts identically.
+describe('KoineLsp rename (#565 follow-up)', () => {
+  test('forwards idCoRename/leftBehindIdName through verbatim, alongside changes', async () => {
+    const wire = {
+      changes: { [URI]: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: 'PurchaseOrder' }] },
+      idCoRename: 'LeftBehind',
+      leftBehindIdName: 'OrderId',
+    };
+    const { lsp, sent } = responder(() => wire);
+    const res = await lsp.rename(0, 0, 'PurchaseOrder');
+    const req = lastReq(sent, 'textDocument/rename');
+    expect(req.params).toEqual({ textDocument: { uri: URI }, position: { line: 0, character: 0 }, newName: 'PurchaseOrder' });
+    expect(res).toEqual(wire);
+  });
+
+  test('a result with no co-rename outcome (idCoRename absent) still forwards the changes', async () => {
+    const wire = { changes: { [URI]: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: 'Cash' }] } };
+    const { lsp } = responder(() => wire);
+    const res = await lsp.rename(0, 0, 'Cash');
+    expect(res).toEqual(wire);
+    expect(res?.idCoRename).toBeUndefined();
+  });
+
+  test('maps a null result (no rename applies) to null', async () => {
+    const { lsp } = responder(() => null);
+    expect(await lsp.rename(0, 0, '1Bad')).toBeNull();
+  });
+});
+
 describe('KoineLsp capability queries', () => {
   test('emitTargets() sends a document-independent koine/emitTargets request (#282)', () => {
     vi.useFakeTimers(); // the request stays pending (no server here); keep its 15s timeout off the real clock.

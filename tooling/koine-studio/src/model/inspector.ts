@@ -139,26 +139,23 @@ export function buildInspectorElement(
  * NOT — an ambiguous link or a name collision left the id behind — this flags that the id type was left
  * unchanged, so the user isn't silently left with a mismatched `OrderId` on a `PurchaseOrder`. Every other
  * case (a plain rename, or a root whose co-rename did happen) has nothing worth surfacing.
+ *
+ * The decision reads `edit.idCoRename`/`edit.leftBehindIdName` — the compiler's own authoritative
+ * outcome of that co-rename (Koine.Compiler.Services.IdCoRenameOutcome, #565 follow-up) — instead of
+ * RE-DERIVING it from rendered text (a rendered `id: <X>Id` property row plus an `aggregate root`
+ * stereotype label). That re-derivation used to silently stop firing whenever either rendered string's
+ * shape changed; reading the server's own outcome can't drift from what it actually decided.
  */
 export function renameStatusMessage(
-  element: Pick<InspectorElement, 'name' | 'properties' | 'stereotype'>,
+  element: Pick<InspectorElement, 'name'>,
   newName: string,
   edit: WorkspaceEdit,
 ): string | null {
-  // Only aggregate roots carry a convention-linked identity type worth co-renaming.
-  if (element.stereotype !== 'aggregate root') {
+  if (edit.idCoRename !== 'LeftBehind') {
     return null;
   }
 
-  const oldId = `${element.name}Id`;
-  const hasConventionId = element.properties.some((p) => p.text === `id: ${oldId}`);
-  if (!hasConventionId) {
-    return null;
-  }
-
-  const newId = `${newName}Id`;
-  const coRenamed = Object.values(edit.changes).some((edits) => edits.some((e) => e.newText === newId));
-  return coRenamed ? null : `Renamed ${element.name} → ${newName}; id type ${oldId} left unchanged`;
+  return `Renamed ${element.name} → ${newName}; id type ${edit.leftBehindIdName} left unchanged`;
 }
 
 /**

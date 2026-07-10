@@ -13,6 +13,7 @@ import { constructForKind, constructIcon, countsByContext, type ModelOutlineHand
 import { filterGlossaryModel, isAllContexts } from '@/model/activeContext';
 import { createFloatingMenu } from '@atypical/koine-ui';
 import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
+import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 
@@ -350,11 +351,11 @@ export function mountDomainNavigator(
   // loaded (a loading placeholder shows). A monotonic seq drops a superseded fetch (last write wins).
   // `tree` is the structured model graph the TACTICAL view walks (best-effort: `null` if it failed).
   let cache: { model: GlossaryModel; relLinks: number; tree: ModelNode | null } | null = null;
-  let fetchSeq = 0;
-  // Set as unmount()'s first statement, mirroring contextMapPanel.tsx's `dispose()` shape (#1261):
-  // the seq check alone only drops a fetch superseded by a NEWER doFetch()/reload() call, not one whose
-  // owning navigator was torn down outright while it was in flight.
-  let disposed = false;
+  const lifecycle = createLifecycleGuard();
+  const fetchGen = lifecycle.createSequence();
+  // lifecycle.dispose() is called as unmount()'s first statement, mirroring contextMapPanel.tsx's
+  // `dispose()` shape (#1261): the seq check alone only drops a fetch superseded by a NEWER
+  // doFetch()/reload() call, not one whose owning navigator was torn down outright while it was in flight.
 
   // True only WHILE the in-navigator drill sets the scope+altitude together (onOpenContext below). It lets
   // the store subscription tell that drill apart from an EXTERNAL `activeContext` change (the top-bar scope
@@ -464,10 +465,11 @@ export function mountDomainNavigator(
   }
 
   async function doFetch(seed?: DomainNavigatorSeed): Promise<void> {
-    const seq = ++fetchSeq;
-    // !disposed: the navigator was unmounted outright while this fetch was in flight. seq === fetchSeq:
-    // no NEWER doFetch()/reload() call superseded this one. Either alone is insufficient (#1308).
-    const isCurrent = () => !disposed && seq === fetchSeq;
+    const seq = fetchGen.next();
+    // fetchGen.isCurrent(seq) is false if EITHER the navigator was unmounted outright while this fetch
+    // was in flight, OR a newer doFetch()/reload() call superseded this one — either alone is
+    // insufficient (#1308).
+    const isCurrent = () => fetchGen.isCurrent(seq);
     try {
       // The model graph is fetched alongside the strategic data (and degrades to an empty tactical tree
       // on its own failure) so a drill-in repaints synchronously from cache, like every other altitude.
@@ -515,7 +517,7 @@ export function mountDomainNavigator(
   return {
     reload: (seed) => void doFetch(seed),
     unmount: () => {
-      disposed = true; // must be first: doFetch()'s post-await tail consults this via isCurrent()
+      lifecycle.dispose(); // must be first: doFetch()'s post-await tail consults this via isCurrent()
       closeLeafMenu(false); // a torn-down host must not leave an orphaned floating menu + global listeners
       unsubscribe();
     },

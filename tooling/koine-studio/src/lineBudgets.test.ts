@@ -158,7 +158,9 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Frozen 2026-07-09 at 281 LOC, ceil(281 × 1.02) = 287. #985 Task 1's new sibling — the Context Map
   // panel (maxGraph handle lifecycle, Graph/Table toggle, hover tooltip, ADR 0009 scope-focus repaint)
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
-  { file: 'src/shell/inspector/contextMapPanel.tsx', maxLines: 287 },
+  // Raised 287 → 288: #1352 migrated this panel's hand-rolled disposed/seq lifecycle pattern onto the
+  // shared createLifecycleGuard() primitive, adding one new import line. Measured end-state (288).
+  { file: 'src/shell/inspector/contextMapPanel.tsx', maxLines: 288 },
   // Frozen 2026-07-09 at 254 LOC, ceil(254 × 1.02) = 260. #985 Task 2's new sibling — the #146
   // bounded-context scope switcher (handle, per-workspace persist/restore, status-bar sync, context-list
   // refresh) extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
@@ -167,11 +169,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // surface loaders (Generated preview, diagrams, glossary, left-rail model, ADR/Notes docs, Source
   // Control, Events/Relationships, Compatibility check) consolidated onto the docViews slice and
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
-  // Raised 894 → 918: #871 (browse generated output file-by-file via a file tree) and #992 (Docs pages
-  // JSX conversion — rewires loadAdr/loadNotes to mount <AdrPanel>/<NotesPanel> via the existing
-  // renderPanel pattern) both touch this file and landed together in this merge. Measured end-state
-  // (900), ceil(900 × 1.02) = 918.
-  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 918 },
+  // Raised 894 → 922: three changes touch this file across this merge. #871 (browse generated output
+  // file-by-file via a file tree) grows the Generated-preview loader; #992 (Docs pages JSX conversion)
+  // rewires loadAdr/loadNotes to mount <AdrPanel>/<NotesPanel> via the existing renderPanel pattern
+  // instead of the retired renderAdrPanel/renderNotesPanel DOM builders; #1352 (shared lifecycleGuard
+  // primitive) migrates this file's hand-rolled disposed/seq state onto createLifecycleGuard(), touching
+  // every disposed-check call site. Measured end-state after merging all three (903), ceil(903 × 1.02) = 922.
+  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 922 },
   // Lowered 736 → 731: the #985 whole-branch code-review's dead-code finding — `ensureTerminal`/
   // `ensureReview` were declared on `CenterDeckControllerDeps` and passed in by the facade, but never
   // actually called (the real Terminal/Review dispatch lives entirely in the injected

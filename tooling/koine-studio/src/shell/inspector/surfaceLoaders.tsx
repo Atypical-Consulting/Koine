@@ -11,7 +11,7 @@
 // guardedLoad-vs-seq (see `shell/guardedLoad.ts`'s doc comment): the glossary, model, ADR/Notes, Source
 // Control, and Events/Relationships loaders gate on the docViews slice's per-key stale TOKEN (guardedLoad,
 // or an equivalent hand-rolled check for the ones with a bespoke shape). The diagram and preview loaders
-// deliberately do NOT — each keeps its OWN local monotonic `seq` (diagramsSeq / previewSeq), because a
+// deliberately do NOT — each keeps its OWN local monotonic sequence (diagramsGen / previewGen), because a
 // theme flip or a destination-language switch must re-render WITHOUT bumping the docViews token (bumping
 // it would also force every SIBLING doc — the other of the preview/diagram pair — to invalidate, which a
 // theme flip or a language switch must not do). Preserve this split; do not collapse it into one mechanism.
@@ -52,6 +52,7 @@ import { AdrPanel, NotesPanel, type DocsPanelHandlers } from '@/docs/DocsPanels'
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
+import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 import {
   applyOutputTreeEmphasis,
   ensureOutputScaffold,
@@ -204,9 +205,10 @@ export interface SurfaceLoaders {
 export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoaders {
   const { store, lsp, output, platform, hosts, deps, hooks } = options;
 
-  // Mirrors the facade's own `disposed` gate (#1002): set as dispose()'s first statement, so a loader
-  // continuation racing teardown (or a debounced repaint) observes it before touching a dead host.
-  let disposed = false;
+  // Mirrors the facade's own lifecycle guard (#1002): lifecycle.dispose() is called as dispose()'s first
+  // statement, so a loader continuation racing teardown (or a debounced repaint) observes it before
+  // touching a dead host.
+  const lifecycle = createLifecycleGuard();
 
   // The center surfaces visible under the current deck state — a pure read of the shared store's `deck`
   // field, computed locally rather than injected: it needs nothing facade-private (mirrors the facade's
@@ -341,19 +343,20 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
 
   // Fetch the DocsEmitter output (Mermaid-in-Markdown) and render it. The loaded/stale GATE is the
   // docViews slice's 'preview' key (markLoaded only takes if the captured token is still current). A local
-  // monotonic `previewSeq` is kept ALONGSIDE it because a destination-language switch re-emits WITHOUT
-  // bumping the slice token (see the module doc's guardedLoad-vs-seq split): the seq drops a stale emit a
-  // newer call (edit or target switch) superseded. The prior output stays on screen across a refresh (only
-  // the very first load shows a placeholder) so live typing never flashes the pane empty.
-  let previewSeq = 0;
+  // monotonic sequence (`previewGen`) is kept ALONGSIDE it because a destination-language switch re-emits
+  // WITHOUT bumping the slice token (see the module doc's guardedLoad-vs-seq split): the seq drops a stale
+  // emit a newer call (edit or target switch) superseded. The prior output stays on screen across a
+  // refresh (only the very first load shows a placeholder) so live typing never flashes the pane empty.
+  const previewGen = lifecycle.createSequence();
   async function loadPreview(): Promise<void> {
-    const seq = ++previewSeq;
+    const seq = previewGen.next();
     const token = store.getState().currentToken('preview');
     if (!lastFiles.length) output.setContent('// generating preview…', 'plain');
     try {
       const res = await lsp.emitPreview(store.getState().emitTarget);
-      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
-      if (seq !== previewSeq) return;
+      // isCurrent() already folds in disposed — torn down mid-fetch (#1002) or superseded by a newer
+      // call, either way no repaint on behalf of a dead/stale controller.
+      if (!previewGen.isCurrent(seq)) return;
       if (res.error) {
         clearOutput('// emit error\n' + res.error);
       } else if (!res.files.length) {
@@ -368,8 +371,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       }
       store.getState().markLoaded('preview', token);
     } catch (e) {
-      if (disposed) return;
-      if (seq !== previewSeq) return;
+      if (!previewGen.isCurrent(seq)) return;
       clearOutput('// preview request failed\n' + String(e));
     }
   }
@@ -387,18 +389,19 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   }
 
   // --- live diagrams ---------------------------------------------------------
-  // The loaded/stale GATE is the docViews slice's 'diagrams' key. A local monotonic `diagramsSeq` is kept
-  // ALONGSIDE it because a theme flip / refresh re-renders the diagram WITHOUT bumping the slice token
-  // (those aren't model edits) — see the module doc's guardedLoad-vs-seq split.
-  let diagramsSeq = 0;
+  // The loaded/stale GATE is the docViews slice's 'diagrams' key. A local monotonic sequence (`diagramsGen`)
+  // is kept ALONGSIDE it because a theme flip / refresh re-renders the diagram WITHOUT bumping the slice
+  // token (those aren't model edits) — see the module doc's guardedLoad-vs-seq split.
+  const diagramsGen = lifecycle.createSequence();
   async function loadDiagrams(): Promise<void> {
-    const seq = ++diagramsSeq;
+    const seq = diagramsGen.next();
     const token = store.getState().currentToken('diagrams');
     docMessage(hosts.diagrams, 'Rendering diagrams…');
     try {
       const res = await lsp.livingDocs();
-      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
-      if (seq !== diagramsSeq) return;
+      // isCurrent() already folds in disposed — torn down mid-fetch (#1002) or superseded by a newer
+      // call, either way no repaint on behalf of a dead/stale controller.
+      if (!diagramsGen.isCurrent(seq)) return;
       // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
       // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
       const files = scopeDocsFiles(res.files, store.getState().activeContext);
@@ -408,14 +411,14 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       setDiagramPersistScope(contextWorkspaceKey());
       setDiagramLayoutStore(createLayoutStore(platform, deps.folderRootToken()));
       // renderDiagrams itself suspends again internally (a dynamic import, a layout-store load) before it
-      // mounts into diagramsView — its own `isCurrent` gate must also see `disposed`, not just the local
-      // seq, or a resolving mount still lands in the torn-down host (#1002).
-      await renderDiagrams(hosts.diagrams, files, currentTheme(), () => !disposed && seq === diagramsSeq);
-      if (disposed) return; // the render above can itself suspend — re-check before markLoaded
-      if (seq === diagramsSeq) store.getState().markLoaded('diagrams', token);
+      // mounts into diagramsView — its own `isCurrent` gate must also see the lifecycle guard's disposed
+      // state, not just the local seq, or a resolving mount still lands in the torn-down host (#1002).
+      await renderDiagrams(hosts.diagrams, files, currentTheme(), () => diagramsGen.isCurrent(seq));
+      // The render above can itself suspend — re-check before marking loaded (isCurrent() covers both
+      // disposed-mid-render and superseded-mid-render).
+      if (diagramsGen.isCurrent(seq)) store.getState().markLoaded('diagrams', token);
     } catch (e) {
-      if (disposed) return;
-      if (seq === diagramsSeq) docMessage(hosts.diagrams, 'Diagrams request failed: ' + String(e), 'error');
+      if (diagramsGen.isCurrent(seq)) docMessage(hosts.diagrams, 'Diagrams request failed: ' + String(e), 'error');
     }
   }
 
@@ -454,7 +457,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     await guardedLoad({
       store,
       key: 'glossary',
-      isDisposed: () => disposed,
+      isDisposed: lifecycle.isDisposed,
       loading: () => docMessage(hosts.glossary, 'Loading glossary…'),
       fetch: () => lsp.glossaryModel(),
       render: (model) => {
@@ -499,11 +502,11 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     hooks.ensureDomainNavigator();
     try {
       await hooks.ensureModelIndex();
-      if (disposed) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
+      if (lifecycle.isDisposed()) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
       hooks.onModelIndexRebuilt();
       store.getState().markLoaded('model', token);
     } catch (e) {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       deps.setStatus('Model request failed: ' + String(e), 'error');
     }
   }
@@ -541,14 +544,14 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     docMessage(target, 'Loading decisions…');
     try {
       const adrs = await docsStore.listAdrs();
-      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
+      if (lifecycle.isDisposed()) return; // torn down mid-fetch (#1002) — no write into the dead host
       renderPanel(
         target,
         <AdrPanel data={{ canWrite: docsStore.canWrite, adrs, notes: [], renderMarkdown }} handlers={docsHandlers(docsStore)} />,
       );
       adrLoaded = true;
     } catch (e) {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       docMessage(target, 'Decisions request failed: ' + String(e), 'error');
     }
   }
@@ -560,14 +563,14 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     docMessage(target, 'Loading notes…');
     try {
       const notes = await docsStore.listNotes();
-      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
+      if (lifecycle.isDisposed()) return; // torn down mid-fetch (#1002) — no write into the dead host
       renderPanel(
         target,
         <NotesPanel data={{ canWrite: docsStore.canWrite, adrs: [], notes, renderMarkdown }} handlers={docsHandlers(docsStore)} />,
       );
       notesLoaded = true;
     } catch (e) {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       docMessage(target, 'Notes request failed: ' + String(e), 'error');
     }
   }
@@ -684,7 +687,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     await guardedLoad({
       store,
       key: 'events',
-      isDisposed: () => disposed,
+      isDisposed: lifecycle.isDisposed,
       loading: () => docMessage(hosts.events, 'Loading events…'),
       fetch: () => bottomGraph(),
       render: (graph) =>
@@ -696,7 +699,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     await guardedLoad({
       store,
       key: 'relationships',
-      isDisposed: () => disposed,
+      isDisposed: lifecycle.isDisposed,
       loading: () => docMessage(hosts.relationships, 'Loading relationships…'),
       fetch: () => bottomGraph(),
       render: (graph) =>
@@ -752,12 +755,12 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     try {
       folder = await platform.pickFolder('Select baseline model folder');
     } catch (e) {
-      if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
+      if (lifecycle.isDisposed()) return; // torn down mid-fetch (#1002) — no write into the dead host
       docMessage(hosts.check, 'Could not open the folder picker: ' + String(e), 'error');
       store.getState().setOutput('compatibility');
       return;
     }
-    if (disposed) return;
+    if (lifecycle.isDisposed()) return;
     if (!folder) return; // cancelled — abort silently
     store.getState().setOutput('compatibility');
     docMessage(hosts.check, 'Checking against baseline…');
@@ -766,16 +769,16 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       const baselineSources = platform.compatNeedsInProcessSources
         ? await platform.readFolderSources(folder)
         : undefined;
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       const res = await lsp.check(folder, baselineSources);
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       if (res.error) {
         docMessage(hosts.check, 'Compatibility check failed: ' + res.error, 'error');
         return;
       }
       hosts.check.innerHTML = `<div class="koi-md">${renderMarkdown(renderCheckMarkdown(res))}</div>`;
     } catch (e) {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       docMessage(hosts.check, 'Check request failed: ' + String(e), 'error');
     }
   }
@@ -819,14 +822,14 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   // An edit makes the model-derived surfaces stale. Mark them dirty and (debounced) repaint the live ones
   // — the always-visible left rail plus the active center view — so they track the model without a manual
   // refresh. Rides the docViews slice's OWN 350ms debounce (`scheduleRefresh`, `store/slices/docViews.ts`)
-  // rather than a local timer — this is that mechanism's first production caller. The `disposed` guard
-  // inside the scheduled callback is what makes dispose() "cancel" the pending refresh: scheduleRefresh's
+  // rather than a local timer — this is that mechanism's first production caller. The `lifecycle.isDisposed()`
+  // guard inside the scheduled callback is what makes dispose() "cancel" the pending refresh: scheduleRefresh's
   // timer is store-owned (no separate cancel handle), so a torn-down module leaves its own callback inert
   // instead, exactly like `guardedLoad`'s `isDisposed` checks.
   function onDocEdited(): void {
     invalidateDocViews();
     store.getState().scheduleRefresh(() => {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       void hooks.refreshContextList();
       refreshActiveSurfaces();
     });
@@ -862,7 +865,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   // controllers into one shared happy-dom; disposing between boots stops a deferred repaint from firing
   // into a torn-down environment.
   function dispose(): void {
-    disposed = true;
+    lifecycle.dispose();
     copyFile.cancelReset();
     copyAll.cancelReset();
     clearTimeout(bottomPanelDebounce);
