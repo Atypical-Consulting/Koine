@@ -122,6 +122,46 @@ function makeNameCollisionIndex() {
   return buildModelIndex(glossary, { files: [] });
 }
 
+/** Two distinct elements (different `qualifiedName`) whose Properties tables each contain a field
+ *  named "code" (different types) — reproduces the same #992 task-4-review write-leak class, but for
+ *  a property row's name/type editors rather than the General section: a focus-retaining selection
+ *  change between two elements that happen to share a PROPERTY name must still remount that property's
+ *  row (it's keyed on the owning element's identity combined with the property's own identity, not on
+ *  the property name/type alone). */
+function makePropertyNameCollisionIndex() {
+  const glossary: GlossaryModel = {
+    entries: [
+      { id: 'Sales', name: 'Sales', kind: 'context', context: 'Sales', qualifiedName: 'Sales', doc: null, nameRange: range },
+      { id: 'Sales.Order', name: 'Order', kind: 'aggregate', context: 'Sales', qualifiedName: 'Sales.Order', doc: null, nameRange: range },
+      { id: 'Sales.Payment', name: 'Payment', kind: 'aggregate', context: 'Sales', qualifiedName: 'Sales.Payment', doc: null, nameRange: range },
+    ] satisfies GlossaryEntry[],
+  };
+  const orderNode: DiagramNode = {
+    id: 'Sales.Order',
+    label: 'Order',
+    kind: 'aggregate',
+    qualifiedName: 'Sales.Order',
+    sourceSpan: null,
+    stereotype: 'aggregate root',
+    members: [{ text: 'code: OrderCode', kind: 'field' }],
+  };
+  const paymentNode: DiagramNode = {
+    id: 'Sales.Payment',
+    label: 'Payment',
+    kind: 'aggregate',
+    qualifiedName: 'Sales.Payment',
+    sourceSpan: null,
+    stereotype: 'aggregate root',
+    members: [{ text: 'code: PaymentCode', kind: 'field' }],
+  };
+  const file: DocsFile = {
+    path: 'docs/x.md',
+    contents: '',
+    diagrams: [{ caption: 'c', kind: 'aggregate', mermaid: '', graph: { nodes: [orderNode, paymentNode], edges: [] } }],
+  };
+  return buildModelIndex(glossary, { files: [file] });
+}
+
 const handlers: InspectorHandlers = { onGoto: () => {} };
 
 /** Render the panel over `makeRichIndex()` with `h`, then select Sales.Order (flushed via act()). */
@@ -527,6 +567,45 @@ describe('PropertiesPanel', () => {
       expect(container.querySelector('.koi-inspector-table')!.classList.contains('koi-inspector-table-editable')).toBe(
         false,
       );
+    });
+
+    // Final #992 review, Finding 1: EditablePropertyRow (and its nested EditableRow name/type inputs)
+    // used to be keyed on the property's own name/type VALUE, not on the OWNING ELEMENT's identity —
+    // the same write-leak class the General section's Name/Description fields were fixed for (task-4
+    // review, commit 4631c4d7). Two elements with a same-named property reused the same row/input across
+    // a focus-retaining selection change (no blur in between), so an uncommitted edit typed for the first
+    // element could commit onto the second on blur. Keying on `${element.qualifiedName}:${name}` forces
+    // a remount on any selection change while staying stable across re-renders of the SAME element/property.
+    test('remounts (resets) a property row on a focus-retaining selection change to a different element sharing the same property name (cross-element property write-leak regression, final #992 review Finding 1)', () => {
+      const store = createAppStore();
+      const index = makePropertyNameCollisionIndex();
+      const onRenameProperty = vi.fn();
+      const { container } = render(
+        <PropertiesPanel store={store} index={index} handlers={{ onGoto: () => {}, onRenameProperty }} />,
+      );
+      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+
+      const nameInput = () =>
+        container.querySelector<HTMLInputElement>('.koi-inspector-row-editable .koi-inspector-prop-name input')!;
+      expect(nameInput().value).toBe('code');
+
+      // Type into Order's "code" name field WITHOUT blurring.
+      act(() => nameInput().focus());
+      nameInput().value = 'renamedByOrder';
+      act(() => {
+        nameInput().dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      // Selection moves to a DIFFERENT element (Payment) that happens to have a property with the SAME
+      // name ("code") — no blur fired in between, simulating a focus-retaining selection change.
+      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
+
+      const inputAfter = nameInput();
+      expect(inputAfter.value).toBe('code'); // reset to Payment's own "code", not Order's stale typed text
+
+      // Blurring now must not attribute Order's uncommitted text to Payment.
+      act(() => inputAfter.blur());
+      expect(onRenameProperty).not.toHaveBeenCalled();
     });
   });
 

@@ -259,9 +259,13 @@ function AdrRow(props: {
 
 /** The Decisions page: the ADR list, with create/edit gated by `canWrite`. (Split from the former
  *  combined Docs panel, #174 — Notes are their own page; see {@link NotesPanel}.) Rows are keyed on the
- *  ADR's own `number` (filename-owned, stable identity) — never on list position or title — so a reload
- *  that re-sorts/re-fetches the list doesn't leak one row's open/edit state onto another (#992 review
- *  precedent set by PropertiesPanel's Name/Description fields, task 4). */
+ *  file's `token` (the workspace path — an opaque host read/write token, unique per file) — never on
+ *  list position, title, or the ADR's own `number` — so a reload that re-sorts/re-fetches the list
+ *  doesn't leak one row's open/edit state onto another (#992 review precedent set by PropertiesPanel's
+ *  Name/Description fields, task 4). `number` alone is NOT safe to key on: `docsStore.ts`'s `listAdrs`
+ *  falls back to `parseAdrNumberFromFilename(file.name) ?? 0` for any ADR file whose name lacks a
+ *  numeric prefix, so two such files collide on `number: 0` and would otherwise conflate their
+ *  expanded/editing state (final #992 review, Finding 2). */
 export function AdrPanel(props: { data: DocsPanelData; handlers: DocsPanelHandlers }) {
   const { data, handlers } = props;
   return (
@@ -277,7 +281,7 @@ export function AdrPanel(props: { data: DocsPanelData; handlers: DocsPanelHandle
         onCreate={handlers.onCreateAdr}
       >
         {data.adrs.map((file) => (
-          <AdrRow key={file.number} file={file} handlers={handlers} canWrite={data.canWrite} renderMarkdown={data.renderMarkdown} />
+          <AdrRow key={file.token} file={file} handlers={handlers} canWrite={data.canWrite} renderMarkdown={data.renderMarkdown} />
         ))}
       </DocsSection>
     </DocsRoot>

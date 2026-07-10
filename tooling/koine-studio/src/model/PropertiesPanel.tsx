@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
@@ -66,7 +66,10 @@ export function PropertiesPanel(props: {
   const element: InspectorElement | null = hit
     ? buildInspectorElement(hit.element.entry, hit.element.node, hit.element.modelMembers)
     : null;
-  const knownTypes = knownTypesFrom(props.index);
+  // Memoized: knownTypesFrom scans the whole glossary and only depends on `index`, which changes far
+  // less often than `selection` — the slice that drives most of this panel's re-renders (efficiency
+  // finding, final #992 review).
+  const knownTypes = useMemo(() => knownTypesFrom(props.index), [props.index]);
 
   // Per-element git change history (#150): fetched asynchronously (the desktop host shells out to git)
   // and rendered once it resolves, so the synchronous panel paint isn't blocked. A null/empty result
@@ -305,7 +308,18 @@ function PropertyTable(props: {
           {items.map((item) => {
             const [name, type] = splitPropText(item.text);
             return editable && !item.computed ? (
-              <EditablePropertyRow key={name} element={element} handlers={handlers} name={name} type={type} />
+              // Keyed on the OWNING ELEMENT's identity combined with the property's own name — never on
+              // the property name alone. Two elements with a same-named property used to reuse the same
+              // row (and its uncommitted DOM input value) across a focus-retaining selection change, the
+              // same write-leak class the General section's Name/Description fields were fixed for
+              // (task-4 review, commit 4631c4d7; see `EditablePropertyRow`'s doc comment).
+              <EditablePropertyRow
+                key={`${element.qualifiedName}:${name}`}
+                element={element}
+                handlers={handlers}
+                name={name}
+                type={type}
+              />
             ) : (
               <ReadonlyPropertyRow
                 key={name || item.text}
@@ -343,7 +357,20 @@ function ReadonlyPropertyRow(props: { name: string; type: string; computed: bool
   );
 }
 
-/** An editable property row: name + type inputs (commit a rename / change-type) and a delete button. */
+/**
+ * An editable property row: name + type inputs (commit a rename / change-type) and a delete button.
+ * Both nested `EditableRow`s are keyed on a composite of the OWNING ELEMENT's stable identity
+ * (`element.qualifiedName`) and the property's own identity (`name`) — never on the field's own value
+ * alone, and never on `name` alone either (a property name isn't guaranteed unique across elements).
+ * Keying by value only (the pre-fix behaviour) let a focus-retaining selection change to a DIFFERENT
+ * element that happens to have a same-named property skip the remount, leaving the previous element's
+ * uncommitted text in the DOM — and a subsequent blur, now closed over the NEW element, would write
+ * that stale text to the wrong element (final #992 review, Finding 1 — the same bug class the General
+ * section's Name/Description fields were fixed for; task-4 review, commit 4631c4d7). The type field's
+ * key additionally includes `type` itself, preserving `EditableRow`'s original by-value remount (a
+ * genuine external type change for the SAME property still refreshes the field), while the name field's
+ * key needs no separate value component since a rename already changes `name`, which is part of the key.
+ */
 function EditablePropertyRow(props: {
   element: InspectorElement;
   handlers: InspectorHandlers;
@@ -351,11 +378,12 @@ function EditablePropertyRow(props: {
   type: string;
 }) {
   const { element, handlers, name, type } = props;
+  const identity = `${element.qualifiedName}:${name}`;
   return (
     <tr class="koi-inspector-row koi-inspector-row-editable">
       <th scope="row" class="koi-inspector-prop-name">
         <EditableRow
-          key={name}
+          key={identity}
           value={name}
           ariaLabel={`Name of property ${name}`}
           onCommit={(next) => handlers.onRenameProperty?.(element, name, next)}
@@ -363,7 +391,7 @@ function EditablePropertyRow(props: {
       </th>
       <td class="koi-inspector-prop-type">
         <EditableRow
-          key={type}
+          key={`${identity}:${type}`}
           value={type}
           ariaLabel={`Type of property ${name}`}
           list={TYPE_OPTIONS_ID}

@@ -219,6 +219,44 @@ describe('AdrPanel', () => {
     expect(namesAfter[1].getAttribute('aria-expanded')).toBe('false');
   });
 
+  // Final #992 review, Finding 2: `docsStore.ts`'s `listAdrs` falls back to `number: 0` for any ADR
+  // markdown file whose name lacks a numeric prefix (`parseAdrNumberFromFilename(file.name) ?? 0`), so
+  // two such files collide on the same `number`. Rows used to be keyed on `file.number`, conflating
+  // their expanded/editing state; `file.token` (the workspace path) is unique per file regardless of a
+  // number collision. Mirrors the "rows are keyed by stable identity" swap-order test above, but with
+  // two files that share the SAME (colliding) number instead of two distinct numbers.
+  it('rows stay keyed by file token, not number, when two ADR files collide on number 0 (no numeric filename prefix)', () => {
+    const handlers = makeHandlers();
+    const a: AdrFile = {
+      token: 'WS/docs/adr/context.md',
+      name: 'context.md',
+      number: 0,
+      adr: { number: 0, title: 'Context', status: 'proposed', context: 'ctx-a', decision: 'dec-a', consequences: 'con-a' },
+    };
+    const b: AdrFile = {
+      token: 'WS/docs/adr/decision-log.md',
+      name: 'decision-log.md',
+      number: 0,
+      adr: { number: 0, title: 'Decision log', status: 'proposed', context: 'ctx-b', decision: 'dec-b', consequences: 'con-b' },
+    };
+    const { container, rerender } = render(<AdrPanel data={full({ adrs: [a, b] })} handlers={handlers} />);
+    const names = () => Array.from(container.querySelectorAll<HTMLButtonElement>('.koi-docs-name'));
+
+    // Expand "Decision log" (currently the second row).
+    fireEvent.click(names()[1]);
+    expect(names()[1].getAttribute('aria-expanded')).toBe('true');
+
+    // Re-render with fresh AdrFile objects (new identity, SAME colliding number 0 for both), swapped order.
+    const bFresh: AdrFile = { ...b, adr: { ...b.adr } };
+    const aFresh: AdrFile = { ...a, adr: { ...a.adr } };
+    rerender(<AdrPanel data={full({ adrs: [bFresh, aFresh] })} handlers={handlers} />);
+
+    const namesAfter = names();
+    expect(namesAfter[0].textContent).toBe('#0 · Decision log');
+    expect(namesAfter[0].getAttribute('aria-expanded')).toBe('true'); // followed by token, not index or number
+    expect(namesAfter[1].getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('round-trips an ADR through the editor textarea contents (canonical (de)serialization)', () => {
     const md = '# 5. Adopt CQRS\n\n- Status: proposed\n\n## Context\n\nc\n\n## Decision\n\nd\n\n## Consequences\n\ne\n';
     expect(parseAdr(md).title).toBe('Adopt CQRS');
