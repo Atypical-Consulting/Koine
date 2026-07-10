@@ -429,6 +429,15 @@ export interface Platform {
   gitUnstage(folderToken: string, relPaths: string[]): Promise<void>;
 
   /**
+   * Discard the working-tree changes of the given paths under the workspace folder — REVERT a tracked
+   * path to its index/HEAD state (`git restore`/`git checkout --`) and REMOVE an untracked one
+   * (`git clean`). This is DESTRUCTIVE and not recoverable — the working-tree bytes are gone — so
+   * callers MUST confirm with the user first. Resolves once the working tree is reverted; rejects on
+   * git failure. Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitDiscard(folderToken: string, relPaths: string[]): Promise<void>;
+
+  /**
    * Commit the currently-staged changes of the workspace folder with `message` (`git commit -m`).
    * Resolves once the commit is recorded; rejects when nothing is staged or git fails. Desktop only;
    * the browser stub rejects. Callers must check {@link canUseGit} first.

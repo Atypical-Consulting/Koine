@@ -182,6 +182,9 @@ class FakePlatform implements Platform {
   gitUnstage(): Promise<void> {
     return this.gitUnavailable();
   }
+  gitDiscard(): Promise<void> {
+    return this.gitUnavailable();
+  }
   gitCommit(): Promise<void> {
     return this.gitUnavailable();
   }

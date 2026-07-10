@@ -481,6 +481,12 @@ export class TauriPlatform implements Platform {
     return invoke('git_unstage', { dir: folderToken, relPaths }) as Promise<void>;
   }
 
+  /** Discard the worktree changes of the given paths — revert tracked ones, DELETE untracked ones.
+   *  Destructive and unrecoverable; the caller (the Source Control panel) confirms before invoking. */
+  gitDiscard(folderToken: string, relPaths: string[]): Promise<void> {
+    return invoke('git_discard', { dir: folderToken, relPaths }) as Promise<void>;
+  }
+
   /** Commit the currently-staged changes with `message` (`git commit -m`). */
   gitCommit(folderToken: string, message: string): Promise<void> {
     return invoke('git_commit', { dir: folderToken, message }) as Promise<void>;

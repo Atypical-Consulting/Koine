@@ -52,6 +52,11 @@ describe('TauriPlatform git surface', () => {
     expect(invokeMock).toHaveBeenCalledWith('git_unstage', { dir: '/work', relPaths: ['a.koi'] });
   });
 
+  it('gitDiscard invokes git_discard with { dir, relPaths }', async () => {
+    await new TauriPlatform().gitDiscard('/work', ['a.koi']);
+    expect(invokeMock).toHaveBeenCalledWith('git_discard', { dir: '/work', relPaths: ['a.koi'] });
+  });
+
   it('gitCommit invokes git_commit with { dir, message }', async () => {
     await new TauriPlatform().gitCommit('/work', 'feat: add aggregate');
     expect(invokeMock).toHaveBeenCalledWith('git_commit', { dir: '/work', message: 'feat: add aggregate' });
