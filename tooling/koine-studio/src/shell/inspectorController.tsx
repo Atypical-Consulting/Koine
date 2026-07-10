@@ -804,8 +804,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function applySelectionHighlight(): void {
     const sel = selection.get();
     const hit = sel && modelIndex ? lookupElement(modelIndex, sel.qualifiedName) : null;
-    // The outline leaves' `is-selected` cross-highlight is owned by the left-rail Domain navigator
-    // (it subscribes to the store's `selection` slice); this function only drives the SVG-node side.
+    // There is no outline-leaf `is-selected` cross-highlight to drive today: the `.koi-model-leaf`
+    // bridge that once needed one lived in `ModelOutlinePanel.tsx`, deleted as dead code (mounted
+    // nowhere) by #1180/#1189 before this file's own #985 split. The live left-rail tree,
+    // `domainNavigator.ts`, subscribes only to `navAltitude`/`activeContext`/`outlineFilter` — not
+    // `selection` — and has no `is-selected` class of its own. This function only drives the SVG-node
+    // side (the diagram).
     const ctxName = hit ? `${hit.element.entry.context}.${hit.element.entry.name}` : null;
     // Scope to the primary diagram SVG — the minimap (#145) clones the node layer as a decorative
     // thumbnail, so an unscoped query would also (wrongly) highlight the clone.

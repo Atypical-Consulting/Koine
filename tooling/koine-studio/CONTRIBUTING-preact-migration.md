@@ -126,17 +126,55 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
 > with the issue that retires it (#978). The hand-run grep below stays as a quick cross-check, not the
 > source of truth: `grep -rE 'innerHTML|document\.createElement' src/shell | grep -v '\.test\.' | wc -l`.
 > The remaining sites are the intentional imperative islands below (CodeMirror, maxGraph, the
-> `src/host` seam, and inspectorController's direct DOM writes) — not chrome shells. (The all-files
-> count is higher because the migrated panels' tests now seed their hosts via Preact
-> `render`/`createElement`.)
+> `src/host` seam, and — since #985 split `inspectorController.tsx` into `src/shell/inspector/**` —
+> that subfolder's own direct DOM writers: `contextMapPanel.tsx` (the Context Map facet, #146) and
+> `surfaceLoaders.tsx` (the Compatibility-check paint and the shared loading/error `docMessage` helper).
+> `inspectorController.tsx` itself carries none anymore. Not chrome shells. (The all-files count is
+> higher because the migrated panels' tests now seed their hosts via Preact `render`/`createElement`.)
 
 - **Already Preact (reference patterns — do not redo):** `HistoryControls`, `UnsavedIndicator`,
   `CompilingIndicator`, `MobileZoneBar`, `StoreInspector`, `inspectorSheet`; `src/model/PropertiesPanel`,
-  `RelationshipsPanel`, `EventsPanel`, `GlossaryPanel`, `ModelOutlinePanel`, `ContextBreadcrumb`,
-  `SourceControlPanel`; `src/docs/DocsPanelHost`; the assistant chat —
+  `RelationshipsPanel`, `EventsPanel`, `GlossaryPanel` (genuinely JSX since #992 — see below);
+  `SourceControlPanel`; `src/docs/DocsPanelHost` (+ `DocsPanels.tsx`'s `AdrPanel`/`NotesPanel` and
+  `MdHtml`, also genuinely JSX since #992); the assistant chat —
   `src/ai/components/AssistantChat.tsx` (+ `Transcript`, `ChangeSetPanel`, `Composer`, `MdHtml`) over the
   `chat` slice (#984/#990); the file explorer — `src/shell/ExplorerPanel.tsx` (+ `ExplorerItem`,
   `explorerModel.ts`) over the `uiChrome` slice's `explorerFilter`/`explorerCollapsed` fields (#989).
+
+> **The model/docs panels finished their arc in #992.** `PropertiesPanel`, `RelationshipsPanel` /
+> `EventsPanel` (via the shared `SortableTable` component), `GlossaryPanel`, and the Docs pages
+> (`DocsPanelHost` mounting `DocsPanels.tsx`'s `AdrPanel`/`NotesPanel`, markdown confined to one
+> `MdHtml` component) were listed above even before #992, but each was really a callback-ref bridge
+> — a Preact-rendered shell whose ref callback called a pure-DOM `render*(data, handlers) → HTMLElement`
+> builder and `replaceChildren`'d the result into the host. #992 (tasks 1, 3, 4, 5) retired every one of
+> those builders (`renderInspector`, `renderTable`/`buildRow`, `renderGlossary`/`renderEntry`,
+> `docsPanel.ts`'s `renderAdrPanel`/`renderNotesPanel`) in favor of real JSX trees mounted with an
+> ordinary `render(<Panel .../>, host)`. One payoff went with the `PropertiesPanel` builder specifically:
+> the synthetic `'commit'` `CustomEvent` its old row inputs dispatched (every editable field now takes an
+> ordinary `onCommit` callback prop instead) — and the `railEmpty` helper it used for its own empty state
+> is gone too. The callback-ref bridge pattern itself is retired for these panels — a callback ref now
+> only *captures a host node* for a controller to `render()` into (see `DocsPanelHost.tsx`), never to
+> hand off to a string/DOM builder.
+>
+> **`ModelOutlinePanel`/`ContextBreadcrumb` are gone from this list — not converted, deleted.** Both were
+> already dead code before #992 started: mounted nowhere in the live app (imported only by their own
+> tests/stories — the left-rail Domain navigator, `domainNavigator.ts`, had already superseded
+> `ModelOutlinePanel`, and #923 had already superseded `ContextBreadcrumb`'s top-bar scope `<select>`
+> with the status-bar Context segment). Unrelated upstream cleanup deleted both components outright
+> before this branch existed — #1180 removed `ModelOutlinePanel.tsx`/`ContextBreadcrumb.tsx` (+ their
+> stories/tests) as dead code, and #1189 then removed the DOM builder (`renderModelOutline` in
+> `modelOutline.ts`) that #1180's removal had orphaned. `ModelOutlinePanel.tsx` was also where the OTHER
+> post-render DOM pass this arc set out to kill lived: a `querySelectorAll('.koi-model-leaf')` +
+> `classList.toggle('is-selected', …)` loop re-marking selection after every rebuild. #1180's dead-code
+> removal deleted that pass along with the panel — it hadn't been running in the live app for a while.
+> So this plan's own task 2, which would have converted `ModelOutlinePanel`/`ContextBreadcrumb` to JSX
+> and deleted that cross-highlight pass, found nothing left to do and was a no-op — #992 did not convert
+> these two, because there was nothing left to convert. `modelOutline.ts` survives only for the pure
+> helpers the Domain navigator (`domainNavigator.ts`, itself out of #992's scope) still imports —
+> `constructIcon`, `constructForKind`, `countsByContext` — including the one remaining
+> `document.createElement` call in the whole `src/model/*` module set (`constructIcon`), which is fine:
+> it's a Domain-navigator leaf icon, not a model/docs panel builder.
+
 - **Migrated in #759:** the **right strip** → `src/shell/RightStrip.tsx`; the **left rail** →
   `src/shell/LeftRail.tsx`; the **AI-Chat host** → `src/shell/AssistantView.tsx` (a thin Preact host
   around the imperative `aiPanel`); the **export menu** → `src/diagrams/ExportMenu.tsx`; the capability

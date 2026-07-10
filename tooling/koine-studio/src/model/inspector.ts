@@ -8,9 +8,10 @@
 //   • `glossaryModel` entry → name, kind, context, description (`doc`), jump-to-source `nameRange`.
 //   • `livingDocs` `DiagramNode` → stereotype + member rows (properties = `field`, behaviors =
 //     `method`, values = `value`).
-// Invariants / published events / repository are NOT on the wire today (they are not `DiagramNode`
-// members), so the element fields are optional and the panel renders those compartments only when a
-// future minimal emitter change populates them — the layout is forward-compatible.
+// Invariants ARE on the wire (`DiagramNode.invariants`, joined in by `buildInspectorElement` below);
+// published events and repository are NOT (no `DiagramNode` field carries them yet). All three element
+// fields stay optional regardless, so the panel renders those compartments only when populated — the
+// layout is forward-compatible with a future minimal emitter change for the other two.
 import type { DiagramNode, GlossaryEntry, ModelMember, Range, SourceSpan } from '@/lsp/lsp';
 import type { WorkspaceEdit } from '@/lsp/protocol';
 import type { ChangeEntry } from '@/host/gitHistory';
@@ -41,7 +42,7 @@ export interface InspectorElement {
   behaviors: string[];
   /** Enum value rows (the member names). */
   values: string[];
-  /** Invariant expressions — reserved; not yet on the wire. */
+  /** Invariant expressions, joined from the diagram node's `invariants` when present; undefined when the node carries none. */
   invariants?: string[];
   /** Published domain event names — reserved; not yet on the wire. */
   publishedEvents?: string[];
