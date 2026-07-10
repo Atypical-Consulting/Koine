@@ -787,6 +787,30 @@ public class R9ValueObjectTests
         Diagnose(MulDivMixSrc("*") + otherContext).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
     }
 
+    [Fact]
+    public void Value_object_mul_div_mismatch_is_rejected_before_reaching_any_code_emitter()
+    {
+        // #1291's own cross-target coverage, mirroring #1266/#1284's Task 2: the check lives in
+        // Semantics/ (KoineCompiler.Compile validates BEFORE ever calling IEmitter.Emit), so it must
+        // reject the mismatched model for every code emitter identically.
+        var src = MulDivMixSrc("*");
+        var compiler = new KoineCompiler();
+        AssertRejected(compiler.Compile(src, new CSharpEmitter()));
+        AssertRejected(compiler.Compile(src, new TypeScriptEmitter()));
+        AssertRejected(compiler.Compile(src, new PythonEmitter()));
+        AssertRejected(compiler.Compile(src, new PhpEmitter()));
+        AssertRejected(compiler.Compile(src, new RustEmitter()));
+        AssertRejected(compiler.Compile(src, new JavaEmitter()));
+        AssertRejected(compiler.Compile(src, new KotlinEmitter()));
+
+        static void AssertRejected(CompileResult result)
+        {
+            result.Success.ShouldBeFalse();
+            result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectMulDivMismatch);
+            result.Files.ShouldBeEmpty();
+        }
+    }
+
     // ======================================================================
     // #1290 — an entity-typed operand in binary +/- (the Non-goal #1284 flagged for follow-up)
     // ======================================================================
