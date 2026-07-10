@@ -23,6 +23,8 @@ jobs:
   # Desktop build/test on all 3 OSes via the reusable workflow. bundle/publish stay false in CI:
   # this reproduces the prior inline `studio` job exactly (no installers produced or uploaded).
   studio-desktop:
+    # Skip draft PRs — they're not ready for review/merge yet, so don't burn CI minutes on every push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     uses: ./.github/workflows/studio-build.yml
     with:
       bundle: false
@@ -33,6 +35,8 @@ jobs:
   # static assets. This is the build the docs-site deploy folds into /Koine/studio/.
   studio-web:
     name: studio (web)
+    # Skip draft PRs — they're not ready for review/merge yet, so don't burn CI minutes on every push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     # Backstop against a hung step (see the matrix job above); wasm workload install
     # plus the web bundle finish in a couple of minutes warm, well under this cap.
