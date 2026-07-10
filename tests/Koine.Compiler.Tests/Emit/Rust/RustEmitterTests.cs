@@ -294,4 +294,63 @@ public class RustEmitterTests
         rust.ShouldContain("if self.amount > 0 { self.bonus.clone() } else { self.fallback.clone() }");
         rust.ShouldNotContain("Some(if self.amount > 0");
     }
+
+    private const string ConditionalBranchOptionalityMismatchModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            total: Int? = if amount > 0 then amount else bonus
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1331: a <c>ConditionalExpr</c> derived-member body whose two branches disagree in
+    /// optionality (a bare non-optional <c>amount: Int</c> branch against an optional <c>bonus: Int?</c>
+    /// sibling) must <c>Some(...)</c>-wrap the non-optional branch so both <c>if</c>/<c>else</c> arms
+    /// share the same Rust type — <c>WriteReconciledBranch</c> previously only reconciled a numeric
+    /// (Int→Decimal) mismatch between branches, never an optionality one, a real <c>cargo check</c>
+    /// <c>E0308</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_conditional_branch_with_optionality_mismatch_some_wraps_the_non_optional_branch()
+    {
+        var result = new KoineCompiler().Compile(ConditionalBranchOptionalityMismatchModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if self.amount > 0 { Some(self.amount) } else { self.bonus.clone() }");
+        rust.ShouldNotContain("{ self.amount } else");
+    }
+
+    private const string ConditionalBranchOptionalityAndNumericMismatchModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonusAmount: Decimal?
+            total: Decimal? = if amount > 0 then amount else bonusAmount
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1331: when the non-optional branch also needs the existing numeric Int→Decimal widen, the
+    /// two reconciliations must compose in the correct nesting order — <c>Some(Decimal::from(...))</c>,
+    /// not <c>Decimal::from(Some(...))</c> (the latter is not valid Rust, since <c>Decimal::from</c>
+    /// doesn't accept an <c>Option&lt;Decimal&gt;</c>).
+    /// </summary>
+    [Fact]
+    public void Value_object_conditional_branch_with_optionality_and_numeric_mismatch_composes_wrap_and_widen()
+    {
+        var result = new KoineCompiler().Compile(ConditionalBranchOptionalityAndNumericMismatchModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if self.amount > 0 { Some(Decimal::from(self.amount)) } else { self.bonus_amount.clone() }");
+        rust.ShouldNotContain("Decimal::from(Some(");
+        rust.ShouldNotContain("{ Decimal::from(self.amount) } else");
+    }
 }

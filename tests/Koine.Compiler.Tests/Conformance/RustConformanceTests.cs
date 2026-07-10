@@ -1714,4 +1714,35 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1331: a <c>ConditionalExpr</c> derived-member body whose branches disagree in optionality
+    /// must render both <c>if</c>/<c>else</c> arms in the same Rust type — the non-optional branch
+    /// <c>Some(...)</c>-wrapped to match its optional sibling, composing with the existing numeric
+    /// Int→Decimal widen when both apply to the same branch — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_optionality_mismatch_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    total: Int? = if amount > 0 then amount else bonus\n" +
+            "  }\n" +
+            "  value Cash {\n" +
+            "    amount: Int\n" +
+            "    bonusAmount: Decimal?\n" +
+            "    total: Decimal? = if amount > 0 then amount else bonusAmount\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
