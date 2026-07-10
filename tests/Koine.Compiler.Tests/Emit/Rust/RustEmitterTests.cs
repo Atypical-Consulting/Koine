@@ -48,4 +48,36 @@ public class RustEmitterTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         result.Files.ShouldNotBeNull();
     }
+
+    private const string ConstantDefaultCoercionModel = """
+        context Shop {
+          value Money {
+            amount: Decimal
+            taxRate: Decimal = 2
+            label: String = "std"
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1319: a value object's constant-default field must be coerced/owned to its declared Rust
+    /// type in the smart constructor's <c>Ok(Self { ... })</c> literal — a <c>Decimal</c> field defaulted
+    /// to a bare <c>Int</c> literal, or a <c>String</c> field defaulted to a string literal, otherwise
+    /// emits a raw uncoerced initializer that is a real <c>cargo check</c> <c>E0308</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_constant_default_fields_coerce_to_their_declared_rust_type()
+    {
+        var result = new KoineCompiler().Compile(ConstantDefaultCoercionModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("tax_rate: Decimal::from(2),");
+        rust.ShouldNotContain("tax_rate: 2,");
+
+        rust.ShouldContain("label: \"std\".to_string(),");
+        rust.ShouldNotContain("label: \"std\",");
+    }
 }
