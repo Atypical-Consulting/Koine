@@ -629,6 +629,14 @@
     font-size: 11.5px;
   }
 
+  // A collapsed folder hides its children via CSS alone (#1366): the JS writes ONLY `aria-expanded` on
+  // the folder row (generatedFileTree.ts's setFolderExpanded) and this rule derives visibility from it —
+  // no parallel `.hidden` write to keep in sync. `display: none` on the nearest collapsed ancestor's
+  // group hides the whole subtree, so nested collapsed folders need no extra handling.
+  [role='treeitem'][aria-expanded='false'] > [role='group'] {
+    display: none;
+  }
+
   // The selected FILE row (single-select — set by generatedFileTree.ts's selectFile). Same visual intent
   // as the old flat rail's `.out-file.on`: an accent left-border + a tinted background.
   [aria-selected='true'] {

@@ -12,8 +12,11 @@
 // other Studio tree. Deliberately NOT a port of domainNavigator's/explorer's full machinery (drag-drop,
 // rename, context menus, filtering) — this is a small, self-contained widget over one pure interface.
 //
-// A folder row toggles `aria-expanded` (and hides/reveals its `<ul role="group">`) on click or
-// Enter/Space; a file row sets `aria-selected="true"` (clearing any prior selection — single-select)
+// A folder row toggles `aria-expanded` on click or Enter/Space — that ONE attribute is the sole
+// source of truth for collapse state (#1366): the stylesheet (`_deck.scss`) hides a collapsed folder's
+// `<ul role="group">` via `[role="treeitem"][aria-expanded="false"] > [role="group"] { display: none }`,
+// so the JS never writes a parallel `.hidden` that could drift out of sync. A file row sets
+// `aria-selected="true"` (clearing any prior selection — single-select)
 // and fires `onSelect(path)`. `setFiles` always rebuilds from scratch (a fresh `buildFileTree` call), so
 // a prior SELECTION never survives a rebuild — the caller re-asserts it via `selectPath` if it wants a
 // file to stay marked selected across a recompile. Collapsed-folder state, however, DOES survive a
@@ -76,11 +79,9 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   const tree = document.createElement('ul');
   element.appendChild(tree);
 
-  // path -> its <li role="treeitem"> in the CURRENT render, and folder <li> -> its own nested
-  // <ul role="group">, so click/selectPath/toggle resolve in O(1) instead of walking the DOM. Both
-  // reset on every setFiles() rebuild.
+  // path -> its <li role="treeitem"> in the CURRENT render, so click/selectPath/toggle resolve in O(1)
+  // instead of walking the DOM. Reset on every setFiles() rebuild.
   let byPath = new Map<string, HTMLElement>();
-  let folderGroups = new Map<HTMLElement, HTMLUListElement>();
 
   /** Every treeitem in the current render, in DOM/visual order — the one `querySelectorAll` both
    *  {@link visibleTreeItems} and {@link setRovingItem} derive from, so a call that needs both the full
@@ -156,11 +157,10 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
 
   /** Set a folder's expanded state directly (rather than toggling from its current state) — shared by
    *  `toggleFolder` (click/Enter/Space) and `navFor`'s `expand`/`collapse` (ArrowRight/ArrowLeft), which
-   *  each already know which direction they want rather than needing a flip. */
+   *  each already know which direction they want rather than needing a flip. `aria-expanded` is the ONLY
+   *  write (#1366): CSS derives the child group's visibility from it (see the module header). */
   function setFolderExpanded(li: HTMLElement, expanded: boolean): void {
     li.setAttribute('aria-expanded', String(expanded));
-    const group = folderGroups.get(li);
-    if (group) group.hidden = !expanded;
   }
 
   function toggleFolder(li: HTMLElement): void {
@@ -248,7 +248,6 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       group.setAttribute('role', 'group');
       for (const child of node.children) group.appendChild(buildRow(child, level + 1));
       li.appendChild(group);
-      folderGroups.set(li, group);
     } else {
       li.setAttribute('aria-selected', 'false');
     }
@@ -275,7 +274,6 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     }
 
     byPath = new Map();
-    folderGroups = new Map();
     const nodes = buildFileTree(files);
 
     if (nodes.length === 0) {
@@ -305,12 +303,11 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     const li = byPath.get(path);
     if (!li || li.dataset.kind !== 'file') return false;
 
-    // Expand every ancestor folder so the newly-selected file stays visible.
+    // Expand every ancestor folder so the newly-selected file stays visible (aria-expanded alone —
+    // CSS derives the child group's visibility from it, #1366).
     let ancestor = li.parentElement?.closest<HTMLElement>('[role="treeitem"]') ?? null;
     while (ancestor) {
       ancestor.setAttribute('aria-expanded', 'true');
-      const group = folderGroups.get(ancestor);
-      if (group) group.hidden = false;
       ancestor = ancestor.parentElement?.closest<HTMLElement>('[role="treeitem"]') ?? null;
     }
 

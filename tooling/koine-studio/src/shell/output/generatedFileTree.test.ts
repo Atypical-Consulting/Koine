@@ -22,6 +22,15 @@ function treeitems(el: HTMLElement): HTMLElement[] {
   return Array.from(el.querySelectorAll<HTMLElement>('[role="treeitem"]'));
 }
 
+/** Whether a row is collapsed away per the CSS-driven contract (#1366): some ANCESTOR folder row carries
+ *  `aria-expanded="false"` — the exact DOM state the stylesheet's
+ *  `[role="treeitem"][aria-expanded="false"] > [role="group"] { display: none; }` rule keys off.
+ *  (vitest/happy-dom doesn't apply real CSS cascade, so tests assert the attribute state the rule reads.)
+ *  Ancestor-only on purpose: a collapsed folder's OWN row stays visible — only its descendants hide. */
+function collapsedAway(el: HTMLElement): boolean {
+  return Boolean(el.parentElement?.closest('[role="treeitem"][aria-expanded="false"]'));
+}
+
 describe('createGeneratedFileTree', () => {
   it('renders a [role="tree"] with one [role="treeitem"] per tree node', () => {
     const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
@@ -89,15 +98,27 @@ describe('createGeneratedFileTree', () => {
     const folder = element.querySelector<HTMLElement>('[data-path="Billing"]')!;
     const child = element.querySelector<HTMLElement>('[data-path="Billing/Order.cs"]')!;
     expect(folder.getAttribute('aria-expanded')).toBe('true');
-    expect(child.closest('[hidden]')).toBeNull();
+    expect(collapsedAway(child)).toBe(false);
 
     folder.click();
     expect(folder.getAttribute('aria-expanded')).toBe('false');
-    expect(child.closest('[hidden]')).not.toBeNull();
+    expect(collapsedAway(child)).toBe(true);
 
     folder.click();
     expect(folder.getAttribute('aria-expanded')).toBe('true');
-    expect(child.closest('[hidden]')).toBeNull();
+    expect(collapsedAway(child)).toBe(false);
+  });
+
+  // #1366: child visibility is CSS-driven from `aria-expanded` alone — collapsing must NOT write the old
+  // `.hidden` dual-write onto the child `<ul role="group">`; the stylesheet's
+  // `.generated-file-tree [role="treeitem"][aria-expanded="false"] > [role="group"]` rule owns hiding.
+  it('collapsing a folder writes aria-expanded only — never [hidden] on its child group', () => {
+    const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
+    setFiles(sampleFiles());
+
+    element.querySelector<HTMLElement>('[data-path="Billing"]')!.click(); // collapse Billing/
+
+    expect(element.querySelector('[role="group"][hidden]')).toBeNull();
   });
 
   it('setFiles rebuilds the tree from scratch, dropping any prior selection', () => {
@@ -129,9 +150,9 @@ describe('createGeneratedFileTree', () => {
     const rebuiltFolder = element.querySelector<HTMLElement>('[data-path="Billing"]')!;
     expect(rebuiltFolder.getAttribute('aria-expanded')).toBe('false');
     const child = element.querySelector<HTMLElement>('[data-path="Billing/Order.cs"]')!;
-    expect(child.closest('[hidden]')).not.toBeNull();
+    expect(collapsedAway(child)).toBe(true);
     // The unrelated new node is unaffected — still visible.
-    expect(element.querySelector<HTMLElement>('[data-path="New.cs"]')!.closest('[hidden]')).toBeNull();
+    expect(collapsedAway(element.querySelector<HTMLElement>('[data-path="New.cs"]')!)).toBe(false);
   });
 
   it('a folder path that no longer exists after setFiles simply loses its (moot) collapsed state', () => {
@@ -150,6 +171,8 @@ describe('createGeneratedFileTree', () => {
       const onSelect = vi.fn();
       const { element, setFiles, selectPath } = createGeneratedFileTree({ onSelect });
       setFiles(sampleFiles());
+      // Collapse Billing/ first so selectPath's ancestor re-expansion is actually exercised.
+      element.querySelector<HTMLElement>('[data-path="Billing"]')!.click();
 
       const result = selectPath('Billing/ValueObjects/Money.cs');
 
@@ -157,8 +180,8 @@ describe('createGeneratedFileTree', () => {
       expect(onSelect).not.toHaveBeenCalled();
       const money = element.querySelector<HTMLElement>('[data-path="Billing/ValueObjects/Money.cs"]')!;
       expect(money.getAttribute('aria-selected')).toBe('true');
-      // its ancestor folders must be expanded so the newly-selected file stays visible
-      expect(money.closest('[hidden]')).toBeNull();
+      // its ancestor folders must be (re-)expanded so the newly-selected file stays visible
+      expect(collapsedAway(money)).toBe(false);
     });
 
     it('returns false for a path absent from the current tree', () => {
