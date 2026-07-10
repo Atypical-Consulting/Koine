@@ -11,9 +11,10 @@ import { useAppStore } from '@/store/hooks';
 // create/save reloads can paint into it); thereafter it asks the controller to reload ONLY when the
 // folder token actually changes — never on a re-render driven by an unrelated parent paint, and never
 // on the initial empty-folder mount (the controller's lazy tab-open path owns that first paint). The
-// controller's `load`/`onMount` paint the pure `renderAdrPanel` / `renderNotesPanel` into the node;
-// this component only governs WHEN it reloads. Mounted through a callback ref so the imperative
-// renderer and the Preact reconciler never fight over the same node.
+// controller's `load`/`onMount` paint the real `<AdrPanel>` / `<NotesPanel>` JSX (#992 task 5, via
+// surfaceLoaders.tsx's `renderPanel` unmount-first helper) into the node; this component only governs
+// WHEN it reloads. Mounted through a callback ref so that imperative (re)paint and the Preact reconciler
+// never fight over the same node.
 export function DocsPanelHost(props: {
   store: StoreApi<AppState>;
   /** Hand the controller the mount node on first mount (capture only — no fetch). */

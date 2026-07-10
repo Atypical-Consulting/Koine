@@ -78,12 +78,6 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
-    // src/model/glossary.ts dropped out when GlossaryPanel converted to real JSX (#992 task 1, the
-    // renderGlossary DOM builder retired); docsPanel.ts stays exempted until its own #992 task converts it.
-    files: ['src/docs/docsPanel.ts'],
-    rules: { 'no-restricted-syntax': 'off' },
-  },
-  {
     // retired across the arc: #991 (domain navigator) + #992 (Properties/docs panels); file also decomposed by #985
     // (the sub-modules it's being split into — src/shell/inspector/** — inherit the SAME exemption while
     // they still carry the moved-verbatim imperative DOM building; each shrinks/drops out as it converts).

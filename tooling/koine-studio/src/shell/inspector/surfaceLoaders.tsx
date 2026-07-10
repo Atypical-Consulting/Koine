@@ -48,7 +48,7 @@ import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { SourceControlPanel, type SourceControlFocus } from '@/model/SourceControlPanel';
 import type { ModelIndex } from '@/model/modelIndex';
 import { createDocsStore } from '@/docs/docsStore';
-import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs/docsPanel';
+import { AdrPanel, NotesPanel, type DocsPanelHandlers } from '@/docs/DocsPanels';
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
@@ -527,7 +527,10 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     try {
       const adrs = await docsStore.listAdrs();
       if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
-      target.replaceChildren(renderAdrPanel({ canWrite: docsStore.canWrite, adrs, notes: [], renderMarkdown }, docsHandlers(docsStore)));
+      renderPanel(
+        target,
+        <AdrPanel data={{ canWrite: docsStore.canWrite, adrs, notes: [], renderMarkdown }} handlers={docsHandlers(docsStore)} />,
+      );
       adrLoaded = true;
     } catch (e) {
       if (disposed) return;
@@ -543,7 +546,10 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     try {
       const notes = await docsStore.listNotes();
       if (disposed) return; // torn down mid-fetch (#1002) — no write into the dead host
-      target.replaceChildren(renderNotesPanel({ canWrite: docsStore.canWrite, adrs: [], notes, renderMarkdown }, docsHandlers(docsStore)));
+      renderPanel(
+        target,
+        <NotesPanel data={{ canWrite: docsStore.canWrite, adrs: [], notes, renderMarkdown }} handlers={docsHandlers(docsStore)} />,
+      );
       notesLoaded = true;
     } catch (e) {
       if (disposed) return;
