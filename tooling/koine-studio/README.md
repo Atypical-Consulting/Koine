@@ -104,9 +104,10 @@ directly (see `src/shell/inspectorController.tsx`, `src/model/domainNavigator.ts
 Only the composition root (`src/main.ts`, `src/shell/ide.tsx`), the `useAppStore` React binding
 (`src/store/hooks.ts`), and a small, explicitly reviewed set of other entry points construct or import
 the singleton directly. That set is pinned exactly by `src/store/storeInjection.convention.test.ts`,
-a vitest guard that fails if a new `import { appStore } from '@/store'` appears anywhere else — same
-pattern as the `Platform`-port seam guard above. Growing or shrinking that allowlist is a deliberate,
-reviewed edit to the test, not an incidental one.
+a vitest guard that fails if a new `import { appStore } from '@/store'` appears anywhere else — the
+same walk-and-regex characterization-guard shape as the `Platform`-port seam guard above, though this
+one pins an exact allowlist rather than requiring zero offenders. Growing or shrinking that allowlist
+is a deliberate, reviewed edit to the test, not an incidental one.
 
 Beyond the composition root and the `useAppStore` binding, the allowlist currently has **12 entries**
 (`storeInjection.convention.test.ts`'s `ALLOWLIST` array is the source of truth — read it there rather

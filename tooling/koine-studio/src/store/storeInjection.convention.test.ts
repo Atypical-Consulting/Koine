@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walkSourceFiles } from '@/testUtils/walkSourceFiles';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = join(__dirname, '..'); // tooling/koine-studio/src
@@ -37,17 +38,9 @@ const ALLOWLIST = [
 // (`import { appStore, type AppState } from …` etc.) and across a wrapped multi-line import.
 const IMPORT_SINGLETON_RE = /import\s*\{[^}]*\bappStore\b[^}]*\}\s*from\s*['"]@\/store(?:\/index)?['"]/;
 
-function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) return walk(p);
-    return /\.(ts|tsx)$/.test(name) && !/\.(test|spec|stories)\./.test(name) ? [p] : [];
-  });
-}
-
 describe('store injection convention (issue #760)', () => {
   it('only the documented allowlist imports the appStore singleton', () => {
-    const importers = walk(SRC)
+    const importers = walkSourceFiles(SRC, { excludeFile: /\.(test|spec|stories)\./ })
       .filter((f) => IMPORT_SINGLETON_RE.test(readFileSync(f, 'utf8')))
       .map((f) => relative(ROOT, f).split(sep).join('/'))
       .sort();
