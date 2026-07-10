@@ -407,6 +407,26 @@ describe('NotesPanel', () => {
     expect(container.querySelector('.koi-docs-prose')?.textContent).toContain('Step one.');
   });
 
+  // #1383: Escape in the body editor is the keyboard path to the exact revert-and-close the Cancel
+  // button performs (both call the hook's `cancel`) — matching GlossaryEntryRow's Escape convention.
+  it('Escape in the note editor discards the draft and returns to the (unchanged) read view', async () => {
+    const handlers = makeHandlers();
+    const { container } = render(
+      <NotesPanel data={full({ notes: [noteFile('release-process.md', 'Release process')] })} handlers={handlers} />,
+    );
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-name')!);
+    await vi.waitFor(() => expect(container.querySelector('.koi-docs-prose')).not.toBeNull());
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-edit')!);
+    const textarea = container.querySelector<HTMLTextAreaElement>('.koi-docs-input')!;
+    fireEvent.input(textarea, { target: { value: 'garbage draft' } });
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+
+    expect(handlers.onSaveNote).not.toHaveBeenCalled();
+    expect(container.querySelector('.koi-docs-input')).toBeNull();
+    expect(container.querySelector('.koi-docs-prose')?.textContent).toContain('Step one.');
+  });
+
   it('closing and reopening a note re-fetches (no stale cache) and re-collapses cleanly', async () => {
     const handlers = makeHandlers();
     const { container } = render(<NotesPanel data={full({ notes: [noteFile('x.md', 'X')] })} handlers={handlers} />);
