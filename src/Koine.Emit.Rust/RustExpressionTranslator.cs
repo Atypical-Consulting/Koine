@@ -362,9 +362,9 @@ internal sealed class RustExpressionTranslator
             var condBuf = new StringBuilder();
             Write(cond.Condition, condBuf, null);
             sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
-            WriteOwnedOperand(cond.Then, sb, clone);
+            WriteReconciledBranch(cond.Then, cond.Else, sb, clone);
             sb.Append(" } else { ");
-            WriteOwnedOperand(cond.Else, sb, clone);
+            WriteReconciledBranch(cond.Else, cond.Then, sb, clone);
             sb.Append(" }");
             return;
         }
@@ -389,6 +389,37 @@ internal sealed class RustExpressionTranslator
         }
 
         WriteOwnedLeaf(expr, sb, clone);
+    }
+
+    /// <summary>
+    /// Writes one conditional branch, individually widened to <c>Decimal</c> when its own inferred type
+    /// is <c>Int</c> while the SIBLING branch is <c>Decimal</c>. <see cref="TypeResolver"/> already
+    /// widens the conditional's own aggregate type to the wider of the two branches (#975), so the outer
+    /// <c>coerceTo</c> comparison in <see cref="WriteArithmeticOperand"/> never sees a mismatch here —
+    /// each branch still renders in its own native Rust type, so an unreconciled Int/Decimal pair emits
+    /// two different types in the same <c>if</c>/<c>else</c> (a real <c>cargo check</c> E0308, #1311).
+    /// Reconciling per-branch (rather than a single wrap around the whole conditional) is required
+    /// because the branches disagree with EACH OTHER, not with an externally supplied <c>coerceTo</c>.
+    /// Fixed here in the emitter (not the semantic validator): the widened Int/Decimal conditional is a
+    /// legitimate, cross-target-sanctioned pattern (#975) — this is a Rust-only rendering gap, not a
+    /// modeling error.
+    /// </summary>
+    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb, bool clone)
+    {
+        TypeScope scope = EffectiveScope();
+        TypeRef? branchType = _resolver.Infer(branch, scope);
+        TypeRef? siblingType = _resolver.Infer(sibling, scope);
+        var needsWiden = branchType?.Name == "Int" && siblingType?.Name == "Decimal";
+        if (needsWiden)
+        {
+            sb.Append("Decimal::from(");
+        }
+
+        WriteOwnedOperand(branch, sb, clone);
+        if (needsWiden)
+        {
+            sb.Append(')');
+        }
     }
 
     /// <summary>

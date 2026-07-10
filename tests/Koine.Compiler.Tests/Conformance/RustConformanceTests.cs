@@ -865,4 +865,44 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1311, Task 2 — an EMITTER fix, not a validator one (decided against a <c>KOI0217</c>-style
+    /// diagnostic): <c>TypeResolver.VisitConditional</c> already widens a conditional's two directly
+    /// differently-typed branches (one <c>Int</c>, one <c>Decimal</c>) to their common <c>Decimal</c>
+    /// type (#975) — a legitimate, sanctioned pattern every other target already lowers correctly (C#'s
+    /// implicit numeric conversion, TS/Python's dynamic numerics). Rejecting it at the validator level
+    /// would regress a working cross-target feature to fix a Rust-only rendering gap. The actual bug:
+    /// because the conditional's own AGGREGATE type is already the widened <c>Decimal</c>, the outer
+    /// <c>coerceTo</c> comparison in <c>WriteArithmeticOperand</c> never mismatches, so no wrap fires at
+    /// all — each branch renders in its own raw, unreconciled Rust type (<c>i64</c> vs <c>Decimal</c> in
+    /// the same <c>if</c>/<c>else</c>).
+    /// </summary>
+    [Fact]
+    public void Conditional_operand_with_branches_disagreeing_with_each_other_is_reconciled()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    flatFee: Decimal\n" +
+            "    taxRate: Decimal\n" +
+            "    isSpecial: Bool\n" +
+            "    tax: Decimal = (if isSpecial then baseAmount else flatFee) * taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Int branch is widened to Decimal so both
+        // branches of the if/else share the same Rust type (Decimal is Copy in this emitter, so the
+        // Decimal branch needs no `.clone()`).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("if self.is_special { Decimal::from(self.base_amount) } else { self.flat_fee }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
