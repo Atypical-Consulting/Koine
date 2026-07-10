@@ -1304,6 +1304,63 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1318 edge case: a quantity's <c>unit</c> member carrying a constant default is absent from
+    /// <c>required</c>, so <c>WriteQuantityOps</c> cannot hand <c>Weight::new(...)</c> a caller-supplied
+    /// unit for it — an earlier version of the #1318 fix bailed out of emitting <c>add</c>/<c>sub</c>/
+    /// <c>scale</c> entirely in this case, but <c>RustExpressionTranslator.WriteBinary</c> unconditionally
+    /// lowers a quantity's <c>+</c>/<c>-</c> to a call to those methods regardless — a real <c>cargo</c>
+    /// <c>E0599</c> (no method named `add` found). This asserts the fallback path (a raw-literal
+    /// construction, matching pre-#1318 behavior for just this edge case) still emits and compiles
+    /// working <c>add</c>/<c>sub</c>/<c>scale</c>, so a quantity's <c>+</c> lowering never targets a
+    /// missing method. (Constant-defaulting a quantity's amount/unit is domain-nonsensical and not
+    /// rejected by semantics, so this only proves the emitter degrades safely rather than compiles
+    /// meaningfully — see the code comment in <c>WriteQuantityOps</c>.)
+    /// </summary>
+    [Fact]
+    public void Quantity_with_constant_default_unit_still_compiles_add_sub_scale()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit = Kilograms\n" +
+            "  }\n" +
+            "  value Combo {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    total: Weight = a + b\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Weight;
+
+            #[test]
+            fn add_still_combines_amounts() {
+                let a = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
+                let b = Weight::new(Decimal::from(3)).expect("3 is a valid Weight");
+                assert_eq!(a.add(&b).unwrap(), Weight::new(Decimal::from(5)).unwrap());
+            }
+
+            #[test]
+            fn scale_still_scales_the_amount() {
+                let w = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
+                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6)).unwrap());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1316, Task 1 — a bare <c>MemberAccessExpr</c> (a nested value object's member read through
     /// its accessor, e.g. <c>base.amount</c>) used DIRECTLY as one side of an arithmetic operator falls
     /// into <c>WriteOperand</c>'s <c>default: Write(expr, sb, coerceTo)</c> branch, which dispatches to

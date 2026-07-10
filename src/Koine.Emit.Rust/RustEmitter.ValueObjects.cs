@@ -402,18 +402,34 @@ public sealed partial class RustEmitter
     {
         Member? amount = stored.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
         Member? unit = stored.FirstOrDefault(m => !ReferenceEquals(m, amount) && !m.Type.IsOptional);
-        if (amount is null || unit is null
-            || !required.Any(m => ReferenceEquals(m, amount)) || !required.Any(m => ReferenceEquals(m, unit)))
+        if (amount is null || unit is null)
         {
-            // A constant-default `amount`/`unit` is absent from `required`, so `new(...)` can't be
-            // handed the combined/scaled value for it — bail rather than emit a call `new` won't
-            // accept (#1318). Neither case appears in practice (a quantity's core amount/unit carrying
-            // a constant default), so this only guards against emitting broken Rust.
             return;
         }
 
         var amt = RustNaming.Field(amount.Name);
         var u = RustNaming.Field(unit.Name);
+
+        // A constant-default `amount`/`unit` is absent from `required`, so `new(...)` can't be handed
+        // the combined/scaled value for it — that field is domain-nonsensical for a quantity anyway
+        // (its whole point is a per-instance amount and a checked-but-real unit), but semantics doesn't
+        // reject it (#1318's stated scope is emitter-local, not `Semantics/`). `RustExpressionTranslator`
+        // unconditionally lowers a quantity's `+`/`-` to `.add`/`.sub`, so silently emitting NEITHER
+        // method here — as an earlier version of this fix did — leaves the call site calling a method
+        // that no longer exists (a real `cargo` E0599), which is worse than the invariant gap #1318 is
+        // fixing. So fall back to the pre-#1318 raw-literal construction for just this edge case,
+        // preserving the shape (and thus the compilability) call sites already depend on; the common —
+        // and only sensible — case still gets the validating-constructor fix below.
+        bool canRouteThroughNew =
+            required.Any(m => ReferenceEquals(m, amount)) && required.Any(m => ReferenceEquals(m, unit));
+
+        string RawLiteral(string amtExpr) =>
+            name + " {\n" + string.Concat(stored.Select(m =>
+            {
+                var f = RustNaming.Field(m.Name);
+                var v = ReferenceEquals(m, amount) ? amtExpr : "self." + f;
+                return Indent + Indent + Indent + f + ": " + v + ",\n";
+            })) + Indent + Indent + "}";
 
         // Builds the `Name::new(...)` argument list over `required`, in declared order, substituting
         // `amtExpr` for the amount field. The `&self` receiver means any other non-`Copy` carried field
@@ -440,14 +456,30 @@ public sealed partial class RustEmitter
             sb.Append(Indent).Append(Indent).Append(Indent)
               .Append("return Err(DomainError::UnitMismatch { type_name: \"").Append(name).Append("\" });\n");
             sb.Append(Indent).Append(Indent).Append("}\n");
-            sb.Append(Indent).Append(Indent).Append(name).Append("::new(")
-              .Append(string.Join(", ", NewArgs($"self.{amt} {op} other.{amt}"))).Append(")\n");
+            var amtExpr = $"self.{amt} {op} other.{amt}";
+            if (canRouteThroughNew)
+            {
+                sb.Append(Indent).Append(Indent).Append(name).Append("::new(")
+                  .Append(string.Join(", ", NewArgs(amtExpr))).Append(")\n");
+            }
+            else
+            {
+                sb.Append(Indent).Append(Indent).Append("Ok(").Append(RawLiteral(amtExpr)).Append(")\n");
+            }
             sb.Append(Indent).Append("}\n\n");
         }
 
         sb.Append(Indent).Append("/// Scales the amount by a factor, carrying the unit.\n");
         sb.Append(Indent).Append("pub fn scale(&self, factor: Decimal) -> ").Append(name).Append(" {\n");
-        WriteValidatingConstruction(sb, name, NewArgs($"self.{amt} * factor"), "scale");
+        var scaleExpr = $"self.{amt} * factor";
+        if (canRouteThroughNew)
+        {
+            WriteValidatingConstruction(sb, name, NewArgs(scaleExpr), "scale");
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append(RawLiteral(scaleExpr)).Append('\n');
+        }
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
     }
