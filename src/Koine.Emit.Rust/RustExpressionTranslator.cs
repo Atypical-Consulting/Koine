@@ -146,9 +146,12 @@ internal sealed class RustExpressionTranslator
                 sb.Append(" }");
                 break;
             case CoalesceExpr co:
-                // `l ?? r` -> `l.clone().unwrap_or_else(|| r)` (l is an Option<T>; result is T).
+                // `l ?? r` -> `l.clone().unwrap_or_else(|| r)` (l is an Option<T>; result is T) when `r`
+                // is non-optional, or `l.clone().or_else(|| r)` (result stays Option<T>) when `r` is
+                // itself optional — force-unwrapping there would lose the "still absent" case and fail a
+                // real `cargo check` E0308 (#1333).
                 WriteOperandValue(co.Left, sb);
-                sb.Append(".unwrap_or_else(|| ");
+                sb.Append(IsOptional(co.Right) ? ".or_else(|| " : ".unwrap_or_else(|| ");
                 WriteOperandValue(co.Right, sb);
                 sb.Append(')');
                 break;
