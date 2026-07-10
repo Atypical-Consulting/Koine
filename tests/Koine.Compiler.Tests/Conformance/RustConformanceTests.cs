@@ -1233,4 +1233,114 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1316, Task 1 — a bare <c>MemberAccessExpr</c> (a nested value object's member read through
+    /// its accessor, e.g. <c>base.amount</c>) used DIRECTLY as one side of an arithmetic operator falls
+    /// into <c>WriteOperand</c>'s <c>default: Write(expr, sb, coerceTo)</c> branch, which dispatches to
+    /// <c>WriteMemberAccess(ma, sb)</c> — a method that never consults <c>coerceTo</c> at all. The
+    /// generated `total` getter silently drops the Int-&gt;Decimal coercion (`self.base.amount() +
+    /// self.tax_rate`), a real <c>cargo check</c> E0277 (no `Add&lt;Decimal&gt;` impl for `i64`).
+    /// </summary>
+    [Fact]
+    public void Bare_member_access_operand_needing_coercion_is_wrapped_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "  }\n" +
+            "  value Invoice {\n" +
+            "    base: Money\n" +
+            "    taxRate: Decimal\n" +
+            "    total: Decimal = base.amount + taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Int member read through its accessor is
+        // coerced ONCE, as a whole — not silently dropped.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Decimal::from(self.base.amount()) + self.tax_rate");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Sibling guard for the currently-passing (no-coercion-needed) shape: a bare <c>MemberAccessExpr</c>
+    /// arithmetic operand whose type already matches its sibling must render byte-identical to before
+    /// this fix — no gratuitous outer parens. This is the primary regression risk the issue calls out:
+    /// naively widening the compound-shape wrap (used for <c>ConditionalExpr</c>/<c>LetExpr</c>/
+    /// <c>GuardExpr</c>/<c>BinaryExpr</c>, which all need delimiting) to a <c>MemberAccessExpr</c> would
+    /// wrap even the no-coercion case in bare <c>(...)</c>, since a plain accessor call
+    /// (<c>self.base.amount()</c>) has no self-enclosing parens for <c>StripOuterParens</c> to remove.
+    /// </summary>
+    [Fact]
+    public void Bare_member_access_operand_needing_no_coercion_renders_unwrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "  }\n" +
+            "  value Invoice {\n" +
+            "    base: Money\n" +
+            "    surcharge: Int\n" +
+            "    total: Int = base.amount + surcharge\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.base.amount() + self.surcharge");
+        rust.ShouldNotContain("(self.base.amount())");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1316, Task 2 (probe) — a bare <c>CallExpr</c> (an accessor-style collection call, e.g.
+    /// <c>lines.sum(l =&gt; l.amount)</c>) used DIRECTLY as one side of an arithmetic operator, needing
+    /// Int-&gt;Decimal coercion. Confirms (or refutes) whether <c>WriteOperand</c>'s <c>default:
+    /// Write(expr, sb, coerceTo)</c> branch — which dispatches to <c>WriteCall(call, sb)</c>, a method
+    /// that never consults <c>coerceTo</c> — has the same defect as the <c>MemberAccessExpr</c> case
+    /// fixed in Task 1.
+    /// </summary>
+    [Fact]
+    public void Bare_call_operand_needing_coercion_is_wrapped_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value LineItem {\n" +
+            "    amount: Int\n" +
+            "  }\n" +
+            "  value Invoice {\n" +
+            "    items: List<LineItem>\n" +
+            "    taxRate: Decimal\n" +
+            "    total: Decimal = items.sum(i => i.amount) + taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Int-typed sum() call is coerced ONCE, as a
+        // whole — not silently dropped.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain(
+            "Decimal::from(crate::koine_runtime::koine_sum(self.items.iter().map(|i| i.amount())))" +
+            " + self.tax_rate");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

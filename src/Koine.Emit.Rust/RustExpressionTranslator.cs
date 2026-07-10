@@ -346,19 +346,28 @@ internal sealed class RustExpressionTranslator
     /// <para>
     /// Scope (#1293 fixed the compound-arithmetic slice; #1311 extended it to comparisons, a conditional's
     /// own disagreeing branches — see <see cref="WriteReconciledBranch"/> — and a bare <c>BinaryExpr</c>
-    /// operand): a bare <c>MemberAccessExpr</c>/<c>CallExpr</c> operand used directly (not nested in a
-    /// conditional) is the one still-open instance of the same underlying <c>Write()</c>-dispatch gap,
-    /// tracked separately as #1316 rather than folded into this fix.
+    /// operand): #1316 closed a bare <c>MemberAccessExpr</c>/<c>CallExpr</c> operand used directly (not
+    /// nested in a conditional). Unlike the compound shapes above, a member access or call is already a
+    /// tight-binding primary with no delimiting needed for precedence, so it is wrapped in
+    /// <c>Decimal::from(...)</c> ONLY when coercion is actually needed — reusing
+    /// <see cref="WriteOwnedOperand"/>'s "compound" treatment unconditionally would wrap even the
+    /// no-coercion case in bare <c>(...)</c> (a plain accessor call has no self-enclosing parens for
+    /// <see cref="StripOuterParens"/> to remove), regressing every currently-passing shape. A bare
+    /// <c>UnaryExpr</c> operand (e.g. <c>-baseAmount</c>) has the identical defect — <c>WriteUnary</c>
+    /// also never consults <paramref name="coerceTo"/> — but is a separate, not-yet-fixed instance of the
+    /// same family, tracked as #1321.
     /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
     {
+        // The wrap decision depends only on `coerceTo`/`type` (known up front), not on the rendered
+        // text, so it's computed once and shared by both branches below that need it.
+        var needsWrap = coerceTo is not null && type?.Name != coerceTo.Name;
+
         if (expr is ConditionalExpr or LetExpr or GuardExpr or BinaryExpr)
         {
-            // The wrap decision depends only on `coerceTo`/`type` (known up front), not on the rendered
-            // text, so the prefix is picked before rendering and `WriteOwnedOperand` writes straight into
-            // `sb` — no intermediate buffer needed.
-            var needsWrap = coerceTo is not null && type?.Name != coerceTo.Name;
+            // The prefix is picked before rendering and `WriteOwnedOperand` writes straight into `sb` —
+            // no intermediate buffer needed.
             sb.Append(needsWrap ? "Decimal::from(" : "(");
             WriteOwnedOperand(expr, sb);
             sb.Append(')');
@@ -366,6 +375,15 @@ internal sealed class RustExpressionTranslator
         }
 
         var clone = isArithmetic && IsNonCopyPlace(expr, type);
+
+        if (expr is MemberAccessExpr or CallExpr && needsWrap)
+        {
+            sb.Append("Decimal::from(");
+            WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+            sb.Append(')');
+            return;
+        }
+
         WriteOperand(expr, sb, enumHint, coerceTo, clone);
     }
 
