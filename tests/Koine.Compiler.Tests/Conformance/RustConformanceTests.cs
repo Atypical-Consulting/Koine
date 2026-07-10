@@ -1235,6 +1235,132 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1318, sibling of #1270: a <c>quantity</c>'s inherent <c>add</c>/<c>sub</c>/<c>scale</c>
+    /// (<c>WriteQuantityOps</c>) built their result via a local <c>Construct(...)</c> helper that emitted
+    /// a raw <c>Weight { amount: …, unit: self.unit }</c> struct literal — bypassing <c>Weight::new</c>
+    /// and, with it, every declared <c>invariant</c>. Emitted-shape assertions alone would have passed
+    /// against the old raw-literal code just as happily, so this runs the emitted crate under
+    /// <c>cargo test</c>: a valid <c>sub</c>/<c>scale</c> still yields the expected value, while a
+    /// <c>sub</c> that goes negative now surfaces as <c>Err</c> (composing with the existing unit check)
+    /// and a <c>scale</c> by a negative factor now panics through <c>Weight::new</c>'s invariant guard
+    /// instead of silently producing a negative amount.
+    /// </summary>
+    [Fact]
+    public void Quantity_add_sub_scale_enforce_invariants_at_runtime()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "    invariant amount >= 0 \"a weight cannot be negative\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{MassUnit, Weight};
+
+            /// A subtraction that stays non-negative still yields the difference.
+            #[test]
+            fn sub_preserves_a_valid_value() {
+                let big = Weight::new(Decimal::from(5), MassUnit::Kilograms).expect("5 is a valid Weight");
+                let small = Weight::new(Decimal::from(1), MassUnit::Kilograms).expect("1 is a valid Weight");
+                assert_eq!(big.sub(&small).unwrap(), Weight::new(Decimal::from(4), MassUnit::Kilograms).unwrap());
+            }
+
+            /// A subtraction that goes negative must surface as an Err, not a negative Weight.
+            #[test]
+            fn sub_enforces_the_invariant() {
+                let small = Weight::new(Decimal::from(1), MassUnit::Kilograms).expect("1 is a valid Weight");
+                let big = Weight::new(Decimal::from(5), MassUnit::Kilograms).expect("5 is a valid Weight");
+                assert!(small.sub(&big).is_err());
+            }
+
+            /// A scale that stays non-negative still yields the scaled value.
+            #[test]
+            fn scale_preserves_a_valid_value() {
+                let w = Weight::new(Decimal::from(2), MassUnit::Kilograms).expect("2 is a valid Weight");
+                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6), MassUnit::Kilograms).unwrap());
+            }
+
+            /// Scaling by a negative factor violates the invariant and must panic, not silently succeed.
+            #[test]
+            #[should_panic(expected = "a weight cannot be negative")]
+            fn scale_enforces_the_invariant() {
+                let w = Weight::new(Decimal::from(1), MassUnit::Kilograms).expect("1 is a valid Weight");
+                let _ = w.scale(Decimal::from(-5));
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1318 edge case: a quantity's <c>unit</c> member carrying a constant default is absent from
+    /// <c>required</c>, so <c>WriteQuantityOps</c> cannot hand <c>Weight::new(...)</c> a caller-supplied
+    /// unit for it — an earlier version of the #1318 fix bailed out of emitting <c>add</c>/<c>sub</c>/
+    /// <c>scale</c> entirely in this case, but <c>RustExpressionTranslator.WriteBinary</c> unconditionally
+    /// lowers a quantity's <c>+</c>/<c>-</c> to a call to those methods regardless — a real <c>cargo</c>
+    /// <c>E0599</c> (no method named `add` found). This asserts the fallback path (a raw-literal
+    /// construction, matching pre-#1318 behavior for just this edge case) still emits and compiles
+    /// working <c>add</c>/<c>sub</c>/<c>scale</c>, so a quantity's <c>+</c> lowering never targets a
+    /// missing method. (Constant-defaulting a quantity's amount/unit is domain-nonsensical and not
+    /// rejected by semantics, so this only proves the emitter degrades safely rather than compiles
+    /// meaningfully — see the code comment in <c>WriteQuantityOps</c>.)
+    /// </summary>
+    [Fact]
+    public void Quantity_with_constant_default_unit_still_compiles_add_sub_scale()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit = Kilograms\n" +
+            "  }\n" +
+            "  value Combo {\n" +
+            "    a: Weight\n" +
+            "    b: Weight\n" +
+            "    total: Weight = a + b\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Weight;
+
+            #[test]
+            fn add_still_combines_amounts() {
+                let a = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
+                let b = Weight::new(Decimal::from(3)).expect("3 is a valid Weight");
+                assert_eq!(a.add(&b).unwrap(), Weight::new(Decimal::from(5)).unwrap());
+            }
+
+            #[test]
+            fn scale_still_scales_the_amount() {
+                let w = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
+                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6)).unwrap());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1316, Task 1 — a bare <c>MemberAccessExpr</c> (a nested value object's member read through
     /// its accessor, e.g. <c>base.amount</c>) used DIRECTLY as one side of an arithmetic operator falls
     /// into <c>WriteOperand</c>'s <c>default: Write(expr, sb, coerceTo)</c> branch, which dispatches to
