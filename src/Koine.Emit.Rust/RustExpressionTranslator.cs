@@ -319,13 +319,50 @@ internal sealed class RustExpressionTranslator
     /// its leaf places are cloned via <see cref="WriteOwnedOperand"/> (#1282, generalizing #1268).
     /// Comparisons/logical operators (<paramref name="isArithmetic"/> false) borrow and are left as the
     /// pre-existing un-cloned rendering.
+    /// <para>
+    /// <paramref name="coerceTo"/> is deliberately NOT threaded into the <see cref="WriteOwnedOperand"/>
+    /// render: <see cref="Write"/>'s dispatch only honors a <c>coerceTo</c> hint for a bare
+    /// <c>IdentifierExpr</c>/<c>LiteralExpr</c> leaf, so threading it into every branch left a compound
+    /// (nested-arithmetic, member-access, call) branch un-coerced while its bare-identifier sibling got
+    /// wrapped — two different Rust types in the same <c>if</c>/<c>else</c>, a real <c>cargo check</c>
+    /// E0308 (#1293). Instead each branch renders with its own natural type, and — mirroring
+    /// <c>RustEmitter.ValueObjects.WriteDerived</c>'s <c>NumericCoercionWrap</c> precedent — the WHOLE
+    /// rendered compound expression is wrapped in a single outer <c>Decimal::from(...)</c> when its own
+    /// inferred <paramref name="type"/> differs from <paramref name="coerceTo"/>.
+    /// </para>
+    /// <para>
+    /// This deliberately does NOT call <c>NumericCoercionWrap</c> itself (#1293, Task 2): that helper is
+    /// <c>private</c> on the sibling <c>RustEmitter</c> class, which already depends on this translator
+    /// (<c>RustEmitter.ValueObjects.WriteDerived</c> calls <c>Translate</c>/<c>TranslateOwned</c>) — a
+    /// call the other way would invert that dependency. It also solves a different, narrower problem: a
+    /// declared-member-type-vs-body mismatch that can go either widening (<c>Int</c>→<c>Decimal</c>) or
+    /// narrowing (<c>Decimal</c>→<c>Int</c>, defensive/normally validator-rejected), whereas
+    /// <paramref name="coerceTo"/> here is always <c>Decimal</c> (set only by <see cref="WriteBinary"/>'s
+    /// Int-opposite-a-Decimal check) — so a second, narrower <c>Decimal::from</c> literal is clearer than
+    /// routing through a helper built for a different, wider contract.
+    /// </para>
+    /// <para>
+    /// Scope (#1293 fixed exactly this slice, not the whole <c>coerceTo</c>-dispatch gap): this wrap only
+    /// fires for a <b>compound</b> (<c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>) operand of an
+    /// <b>arithmetic</b> (<paramref name="isArithmetic"/>) operator whose branches share one numeric type
+    /// that itself mismatches <paramref name="coerceTo"/>. A comparison operator's mismatched-shape
+    /// operand, a conditional whose branches disagree with EACH OTHER (not just with the expected type —
+    /// widened to a single type by <c>TypeResolver</c> before this method ever runs), and a bare
+    /// non-compound operand (a nested <c>BinaryExpr</c>/<c>CallExpr</c>/<c>MemberAccessExpr</c> used
+    /// directly, not nested inside a conditional) are adjacent, still-open instances of the same
+    /// underlying <c>Write()</c>-dispatch gap, tracked separately rather than folded into this fix.
+    /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
     {
         if (isArithmetic && expr is ConditionalExpr or LetExpr or GuardExpr)
         {
-            sb.Append('(');
-            WriteOwnedOperand(expr, sb, coerceTo);
+            // The wrap decision depends only on `coerceTo`/`type` (known up front), not on the rendered
+            // text, so the prefix is picked before rendering and `WriteOwnedOperand` writes straight into
+            // `sb` — no intermediate buffer needed.
+            var needsWrap = coerceTo is not null && type?.Name != coerceTo.Name;
+            sb.Append(needsWrap ? "Decimal::from(" : "(");
+            WriteOwnedOperand(expr, sb);
             sb.Append(')');
             return;
         }

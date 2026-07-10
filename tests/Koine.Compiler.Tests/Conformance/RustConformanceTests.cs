@@ -825,4 +825,122 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1293 — a conditional operand of the general arithmetic path whose two branches are
+    /// themselves mismatched in <b>shape</b> (a bare <c>Int</c> identifier vs. a nested <c>Int</c>
+    /// arithmetic expression) only got the identifier branch <c>Decimal::from(...)</c>-coerced:
+    /// <c>Write()</c>'s dispatch only honors <c>coerceTo</c> for a bare <c>IdentifierExpr</c>/<c>LiteralExpr</c>
+    /// leaf, so the nested-arithmetic branch kept its raw <c>i64</c> type and the generated <c>if</c>/<c>else</c>
+    /// had two different Rust types — a real <c>cargo check</c> E0308, even though the compiler reported
+    /// success. Discovered during code review of #1282; confirmed pre-existing on <c>main</c> as well.
+    /// </summary>
+    [Fact]
+    public void Conditional_operand_with_mismatched_branch_shapes_is_coerced_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    flatFee: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    isSpecial: Bool\n" +
+            "    tax: Decimal = (if isSpecial then baseAmount + surcharge else flatFee) * taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the whole conditional is coerced ONCE, outside
+        // the if/else — never per-branch (which left the two branches with different Rust types).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain(
+            "Decimal::from(if self.is_special { self.base_amount + self.surcharge } else { self.flat_fee })");
+        rust.ShouldNotContain("Decimal::from(self.flat_fee)");
+        rust.ShouldNotContain("Decimal::from(self.base_amount + self.surcharge)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1293, Task 2 — the compound-operand coercion wrap must also reach a <c>let</c>-bound
+    /// mismatched-type value, not just a bare conditional: <c>WriteArithmeticOperand</c>'s compound
+    /// branch matches <c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c> alike, so the same
+    /// whole-expression <c>Decimal::from(...)</c> wrap must apply when the mismatched conditional is
+    /// itself wrapped in a <c>let</c>.
+    /// </summary>
+    [Fact]
+    public void Let_operand_with_mismatched_branch_shapes_is_coerced_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    flatFee: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    isSpecial: Bool\n" +
+            "    tax: Decimal = (let picked = (if isSpecial then baseAmount + surcharge else flatFee) in picked) * taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the whole let-block is coerced ONCE, outside its
+        // braces — never per-branch inside the nested conditional.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain(
+            "Decimal::from({ let picked = if self.is_special { self.base_amount + self.surcharge } else { self.flat_fee }; picked })");
+        rust.ShouldNotContain("Decimal::from(self.flat_fee)");
+        rust.ShouldNotContain("Decimal::from(self.base_amount + self.surcharge)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1293, Task 2 — the <c>when</c>-guarded sibling of
+    /// <see cref="Conditional_operand_with_mismatched_branch_shapes_is_coerced_once_as_a_whole"/>: a
+    /// <c>GuardExpr</c> wrapping a mismatched-type conditional must also get the whole-expression wrap.
+    /// <c>when</c> is semantic-only (no runtime Rust representation), so the rendered shape is identical
+    /// to the bare-conditional case — this test guards that <c>WriteArithmeticOperand</c>'s
+    /// <c>GuardExpr</c> dispatch reaches the same wrap path, not that the guard adds new Rust syntax.
+    /// </summary>
+    [Fact]
+    public void Guarded_conditional_operand_with_mismatched_branch_shapes_is_coerced_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    flatFee: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    isSpecial: Bool\n" +
+            "    active: Bool\n" +
+            "    tax: Decimal = ((if isSpecial then baseAmount + surcharge else flatFee) when active) * taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the whole guarded conditional is coerced ONCE,
+        // never per-branch.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain(
+            "Decimal::from(if self.is_special { self.base_amount + self.surcharge } else { self.flat_fee })");
+        rust.ShouldNotContain("Decimal::from(self.flat_fee)");
+        rust.ShouldNotContain("Decimal::from(self.base_amount + self.surcharge)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
