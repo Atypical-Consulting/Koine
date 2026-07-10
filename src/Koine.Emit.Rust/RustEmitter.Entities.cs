@@ -85,18 +85,27 @@ public sealed partial class RustEmitter
         {
             var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
 
-            // Reconcile the default's inferred type with the field's declared type — the entity dual of
-            // the value-object smart constructor's coercion (#1319). Rust has no implicit numeric
-            // widening or &str->String coercion, so a Decimal field defaulted to an Int literal, or a
-            // String field defaulted to a string literal, must be owned/widened here or the later
-            // struct-literal field-init site (`tax_rate,`) is rejected as E0308 (#1324).
-            if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
+            // Reconcile the default's inferred type with the field's declared (underlying, if optional)
+            // type — the entity dual of the value-object smart constructor's coercion (#1319). Rust has
+            // no implicit numeric widening or &str->String coercion, so a Decimal field defaulted to an
+            // Int literal, or a String field defaulted to a string literal, must be owned/widened here or
+            // the later struct-literal field-init site (`tax_rate,`) is rejected as E0308 (#1324). An
+            // optional field's literal default is always a bare underlying-type literal (Koine has no
+            // Option-literal syntax), so it's coerced against the underlying type and then Some(...)-
+            // wrapped (#1325).
+            var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
+            if (NumericCoercionWrap(underlyingType, translator.InferType(m.Initializer!)) is { } wrap)
             {
                 defaultValue = $"{wrap}({defaultValue})";
             }
-            else if (m.Type is { Name: "String", IsOptional: false } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
+            else if (underlyingType is { Name: "String" } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
             {
                 defaultValue += ".to_string()";
+            }
+
+            if (m.Type.IsOptional)
+            {
+                defaultValue = $"Some({defaultValue})";
             }
 
             body.Append(Indent).Append(Indent).Append("let ").Append(RustNaming.Field(m.Name)).Append(" = ")

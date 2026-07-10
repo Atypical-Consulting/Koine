@@ -1594,4 +1594,60 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1325: an <b>optional</b> value-object constant-default field must be
+    /// <c>Some(...)</c>-wrapped (and, when needed, coerced) in the smart constructor, or the emitted
+    /// crate does not compile. Before the fix, an <c>Option&lt;Decimal&gt;</c> field defaulted to an
+    /// <c>Int</c> literal emitted the raw literal (<c>tax_rate: 2</c>, expected
+    /// <c>Option&lt;Decimal&gt;</c>) and an <c>Option&lt;String&gt;</c> field defaulted to a string
+    /// literal emitted a borrowed <c>&amp;str</c> (<c>label: "std"</c>, expected
+    /// <c>Option&lt;String&gt;</c>) — both real <c>cargo check</c> <c>E0308</c>s.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_constant_default_decimal_and_string_fields_emit_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    label: String? = \"std\"\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1325: an <b>optional</b> entity constant-default field must be <c>Some(...)</c>-wrapped
+    /// (and, when needed, coerced) in the smart constructor's <c>let</c>-binding loop — the entity dual
+    /// of the value-object case above — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Entity_optional_constant_default_decimal_and_string_fields_emit_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    label: String? = \"std\"\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
