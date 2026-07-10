@@ -410,4 +410,37 @@ public class RustEmitterTests
         rust.ShouldContain("pub fn total(&self) -> i64 {");
         rust.ShouldContain("self.bonus.clone().unwrap_or_else(|| 0)");
     }
+
+    private const string NestedCoalesceBothOptionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            fallback: Int?
+            backup: Int?
+            total: Int? = bonus ?? (fallback ?? backup)
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1333 edge case: a nested <c>CoalesceExpr</c> as the right operand of an outer coalesce
+    /// (<c>bonus ?? (fallback ?? backup)</c>) must pick <c>.or_else(...)</c> at BOTH levels — the outer
+    /// method-name choice depends on the inner coalesce's own inferred optionality, and
+    /// <c>WriteOperandValue</c>'s leaf-place clone logic must not append a spurious <c>.clone()</c> after
+    /// the inner coalesce's rendered call chain (a <c>CoalesceExpr</c> is not an <c>IdentifierExpr</c>/
+    /// <c>MemberAccessExpr</c> place).
+    /// </summary>
+    [Fact]
+    public void Value_object_coalesce_with_nested_optional_coalesce_right_operand_renders_or_else_at_both_levels()
+    {
+        var result = new KoineCompiler().Compile(NestedCoalesceBothOptionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
+        rust.ShouldContain("self.bonus.clone().or_else(|| self.fallback.clone().or_else(|| self.backup.clone()))");
+        rust.ShouldNotContain(".unwrap_or_else(");
+    }
 }

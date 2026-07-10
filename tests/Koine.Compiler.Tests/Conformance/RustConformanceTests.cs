@@ -1773,4 +1773,31 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1333 edge case: a nested <c>CoalesceExpr</c> as the right operand of an outer coalesce
+    /// (<c>bonus ?? (fallback ?? backup)</c>) must render <c>.or_else(...)</c> at both levels and compile
+    /// cleanly — the outer method-name choice depends on the inner coalesce's own inferred optionality.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_nested_optional_coalesce_right_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    fallback: Int?\n" +
+            "    backup: Int?\n" +
+            "    total: Int? = bonus ?? (fallback ?? backup)\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
