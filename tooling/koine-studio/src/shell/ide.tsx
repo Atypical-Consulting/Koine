@@ -785,25 +785,23 @@ export function init(hooks: IdeHooks = {}): () => void {
   // serializes these entry points; without this the serialization is ILLEGIBLE — the Open-folder handler
   // holds the lock across the native picker, so a queued op just looks like a hang. #btn-new's click is
   // wired by commandWiring, but its busy chrome is lock-derived state owned here beside the lock. On
-  // idle, Open-folder restores the capability gate captured just above (a drained queue must not
-  // resurrect a button a folder-less host permanently disabled). Unsubscribed via lifecycleBoot's
-  // disposers so a torn-down IDE can't be notified.
+  // idle, EACH button restores the idle title captured just below — for Open-folder that includes the
+  // capability gate (a drained queue must not resurrect a button a folder-less host permanently
+  // disabled). Unsubscribed via lifecycleBoot's disposers so a torn-down IDE can't be notified.
   const newModelBtn = domById<HTMLButtonElement>('btn-new');
+  const newModelIdleTitle = newModelBtn.title;
   const openFolderIdleDisabled = openFolderBtn.disabled;
   const openFolderIdleTitle = openFolderBtn.title;
   const unsubWorkspaceOpBusy = workspaceOpLock.onBusyChanged((busy) => {
+    const busyTitle = 'Waiting for the current workspace operation to finish…';
     newModelBtn.disabled = busy;
     openFolderBtn.disabled = busy || openFolderIdleDisabled;
+    newModelBtn.title = busy ? busyTitle : newModelIdleTitle;
+    openFolderBtn.title = busy ? busyTitle : openFolderIdleTitle;
     for (const btn of [newModelBtn, openFolderBtn]) {
-      if (busy) {
-        btn.setAttribute('aria-disabled', 'true');
-        btn.title = 'Waiting for the current workspace operation to finish…';
-      } else {
-        btn.removeAttribute('aria-disabled');
-        btn.removeAttribute('title');
-      }
+      if (busy) btn.setAttribute('aria-disabled', 'true');
+      else btn.removeAttribute('aria-disabled');
     }
-    if (!busy && openFolderIdleTitle) openFolderBtn.title = openFolderIdleTitle;
   });
 
   async function openFolder(): Promise<void> {

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { render } from 'preact';
 import { DocsPanelHost, type DocsPanelHostSlice } from './DocsPanelHost';
-import type { ReadableStore } from '../host/store';
+import { readableStoreOf } from '../host/storeTestUtils';
 
 // A folder-derived Documentation page host. In Koine Studio the controller (surfaceLoaders.tsx)
 // captures the mount node on first mount and paints the real <AdrPanel>/<NotesPanel> JSX into it via
@@ -10,13 +10,7 @@ import type { ReadableStore } from '../host/store';
 // here there is no controller and no docs pages, so `onMount` paints a small representative fixture so
 // the host's capture-then-paint contract is visible. The story never changes `folderRootToken`, so the
 // `load` reload path doesn't fire; it's wired to the same painter to document the folder-change contract.
-
-function readableStoreOf(initial: DocsPanelHostSlice): ReadableStore<DocsPanelHostSlice> {
-  return {
-    getState: () => initial,
-    subscribe: () => () => {},
-  };
-}
+// The store is the shared `readableStoreOf` double (host/storeTestUtils).
 
 function paintFixture(host: HTMLElement): void {
   render(
@@ -36,7 +30,7 @@ const meta = {
   component: DocsPanelHost,
   parameters: { layout: 'padded' },
   args: {
-    store: readableStoreOf({ folderRootToken: 'WS' }),
+    store: readableStoreOf<DocsPanelHostSlice>({ folderRootToken: 'WS' }),
     onMount: paintFixture,
     load: paintFixture,
   },

@@ -33,6 +33,12 @@ export interface CommittableField {
   commit: () => void;
   /** Reverts the draft to the internal last-committed value (never a prop) and exits edit mode. */
   cancel: () => void;
+  /** The editor's keydown handler: Escape → `preventDefault()` + {@link cancel} (the same
+   *  revert-and-close path as the Cancel button); every other key falls through untouched. Callers
+   *  with extra editor shortcuts (e.g. Glossary's Ctrl/Cmd+Enter → commit) handle theirs first and
+   *  delegate the rest here. Typed on the two members it reads so a test can drive it with a plain
+   *  object; any real (Preact-targeted) KeyboardEvent satisfies it. */
+  editorOnKeyDown: (e: Pick<KeyboardEvent, 'key' | 'preventDefault'>) => void;
 }
 
 export function useCommittableField(params: {
@@ -60,6 +66,11 @@ export function useCommittableField(params: {
     setDraft(committedValue);
   }, [committedValue, editing]);
 
+  const cancel = (): void => {
+    setDraft(committedRef.current); // the internal ref — never a (possibly stale) prop
+    setEditing(false);
+  };
+
   return {
     editing,
     draft,
@@ -77,9 +88,12 @@ export function useCommittableField(params: {
       setDraft(trimmed); // read-view display semantics: show the trimmed committed text
       setEditing(false);
     },
-    cancel: (): void => {
-      setDraft(committedRef.current); // the internal ref — never a (possibly stale) prop
-      setEditing(false);
+    cancel,
+    editorOnKeyDown: (e): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancel();
+      }
     },
   };
 }

@@ -112,4 +112,25 @@ describe('useCommittableField', () => {
     expect(result.current.draft).toBe('second load');
     expect(result.current.editing).toBe(false);
   });
+
+  // The hook-owned editor keydown (code-review fix): Escape prevents the default and takes the SAME
+  // revert-and-close path as the Cancel button; any other key falls through untouched.
+  test('editorOnKeyDown: Escape → preventDefault + cancel; other keys fall through', () => {
+    const { result, onCommit } = setup('committed');
+    act(() => result.current.openEditor());
+    act(() => result.current.setDraft('a discarded draft'));
+
+    const other = { key: 'Enter', preventDefault: vi.fn() };
+    act(() => result.current.editorOnKeyDown(other));
+    expect(other.preventDefault).not.toHaveBeenCalled();
+    expect(result.current.editing).toBe(true); // untouched — still editing, draft intact
+    expect(result.current.draft).toBe('a discarded draft');
+
+    const escape = { key: 'Escape', preventDefault: vi.fn() };
+    act(() => result.current.editorOnKeyDown(escape));
+    expect(escape.preventDefault).toHaveBeenCalledTimes(1);
+    expect(result.current.editing).toBe(false);
+    expect(result.current.draft).toBe('committed'); // reverted to the open-time capture
+    expect(onCommit).not.toHaveBeenCalled();
+  });
 });

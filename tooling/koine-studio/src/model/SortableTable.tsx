@@ -34,12 +34,19 @@ export function SortableTable<T extends { span: SourceSpan | null }>(props: {
   emptyText: string;
   /** The row's name for the jump-to-source `aria-label`/`title` (e.g. an event's name). */
   rowLabel: (row: T) => string;
+  /** The row's identity key — MUST be unique across `rows` (Preact's keyed-children contract; duplicate
+   *  sibling keys are undefined behavior, e.g. focus landing on the wrong row after a sort). Defaults to
+   *  `rowLabel`, which is only safe when labels are unique; the Events table labels rows with the SIMPLE
+   *  event name, which repeats across bounded contexts under the "All contexts" scope (Koine allows
+   *  same-named events in different contexts, R13.2), so callers like it pass a qualified key. */
+  rowKey?: (row: T) => string;
   handlers: TableHandlers;
   /** Fired (in addition to `handlers.goto`) when a row is activated — e.g. the Events table selects the
    *  row so the Properties inspector loads it. */
   onActivate?: (row: T) => void;
 }) {
   const { rows, columns, emptyText, rowLabel, handlers, onActivate } = props;
+  const rowKey = props.rowKey ?? rowLabel;
   const [sort, setSort] = useState<{ col: number; dir: 1 | -1 }>({ col: UNSORTED, dir: 1 });
 
   if (!rows.length) {
@@ -78,7 +85,7 @@ export function SortableTable<T extends { span: SourceSpan | null }>(props: {
       <tbody>
         {view.map((row) => (
           <SortableTableRow
-            key={rowLabel(row)}
+            key={rowKey(row)}
             row={row}
             columns={columns}
             rowLabel={rowLabel}

@@ -2,35 +2,18 @@ import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { HistoryControls, type HistoryControlsSlice } from './HistoryControls';
-import type { ReadableStore } from '../host/store';
+import { createTestReadableStore } from '../host/storeTestUtils';
 
-// A plain ReadableStore<HistoryControlsSlice> test double — koine-ui is store-free, so this mocks the
-// contract directly instead of pulling in koine-studio's real Zustand store (which the ORIGINAL
+// The shared ReadableStore<T> test double (host/storeTestUtils) — koine-ui is store-free, so it mocks
+// the contract directly instead of pulling in koine-studio's real Zustand store (which the ORIGINAL
 // koine-studio-side test used via createAppStore()).
-function createMockHistoryStore(initial: HistoryControlsSlice): ReadableStore<HistoryControlsSlice> & {
-  set(next: HistoryControlsSlice): void;
-} {
-  let state = initial;
-  const listeners = new Set<(state: HistoryControlsSlice) => void>();
-  return {
-    getState: () => state,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    set(next) {
-      state = next;
-      for (const listener of listeners) listener(next);
-    },
-  };
-}
 
 const undoBtn = (c: Element) => c.querySelector('[data-role="undo"]') as HTMLButtonElement;
 const redoBtn = (c: Element) => c.querySelector('[data-role="redo"]') as HTMLButtonElement;
 
 describe('HistoryControls', () => {
   test('both buttons start disabled on a fresh store', () => {
-    const store = createMockHistoryStore({ canUndo: false, canRedo: false });
+    const store = createTestReadableStore<HistoryControlsSlice>({ canUndo: false, canRedo: false });
     const { container } = render(
       <HistoryControls store={store} onUndo={() => {}} onRedo={() => {}} undoTitle="Undo" redoTitle="Redo" />,
     );
@@ -39,7 +22,7 @@ describe('HistoryControls', () => {
   });
 
   test('canUndo/canRedo toggle the disabled state', () => {
-    const store = createMockHistoryStore({ canUndo: false, canRedo: false });
+    const store = createTestReadableStore<HistoryControlsSlice>({ canUndo: false, canRedo: false });
     const { container } = render(
       <HistoryControls store={store} onUndo={() => {}} onRedo={() => {}} undoTitle="Undo" redoTitle="Redo" />,
     );
@@ -52,7 +35,7 @@ describe('HistoryControls', () => {
   });
 
   test('clicks call the handlers', () => {
-    const store = createMockHistoryStore({ canUndo: true, canRedo: true });
+    const store = createTestReadableStore<HistoryControlsSlice>({ canUndo: true, canRedo: true });
     const onUndo = vi.fn();
     const onRedo = vi.fn();
     const { container } = render(
@@ -65,7 +48,7 @@ describe('HistoryControls', () => {
   });
 
   test('has no accessibility violations', async () => {
-    const store = createMockHistoryStore({ canUndo: true, canRedo: true });
+    const store = createTestReadableStore<HistoryControlsSlice>({ canUndo: true, canRedo: true });
     const { container } = render(
       <HistoryControls store={store} onUndo={() => {}} onRedo={() => {}} undoTitle="Undo" redoTitle="Redo" />,
     );

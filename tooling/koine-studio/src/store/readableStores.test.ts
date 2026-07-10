@@ -250,6 +250,56 @@ describe('createDiagnosticsStripStore', () => {
     store.getState().setDiagnostics('file:///b.koi', [err('elsewhere')]);
     expect(calls).toBe(1);
   });
+
+  // Pins the selector's 3-key reference memo (code-review fix): while (diagnosticsByUri, activeContext,
+  // live activeUri()) are all unchanged the selector must serve the SAME slice object — no rows rebuild
+  // on an unrelated store write — and a change to any key must recompute a fresh slice.
+  test('memoizes on (diagnosticsByUri, activeContext, activeUri): same inputs → same slice reference', () => {
+    const store = createAppStore();
+    let active = 'file:///a.koi';
+    const readable = createDiagnosticsStripStore(store, { activeUri: () => active });
+    store.getState().setDiagnostics('file:///a.koi', [err('boom')]);
+
+    const first = readable.getState();
+    store.getState().setNavAltitude('tactical'); // unrelated write: all three keys unchanged
+    expect(readable.getState()).toBe(first); // reference-equal — the cached slice, not a rebuild
+
+    // A diagnostics change replaces diagnosticsByUri (immutably — slices/diagnostics.ts) → new slice.
+    store.getState().setDiagnostics('file:///a.koi', [err('boom'), warn('meh')]);
+    const second = readable.getState();
+    expect(second).not.toBe(first);
+    expect(second.rows.length).toBe(2);
+    expect(readable.getState()).toBe(second); // and the new slice is itself served from the memo
+
+    // An active-file switch changes the live activeUri() VALUE → new slice (the paintActive contract:
+    // the memo must never serve the old file's rows after a switch, even without a store write).
+    active = 'file:///b.koi';
+    const third = readable.getState();
+    expect(third).not.toBe(second);
+    expect(third.rows).toEqual([]);
+  });
+
+  test('memoizes across activeContext too: a scope change recomputes, an unrelated write does not', () => {
+    const store = createAppStore();
+    const readable = createDiagnosticsStripStore(store, {
+      activeUri: () => 'file:///Ordering.koi',
+      scope: { uriLabel },
+    });
+    store.getState().setDiagnostics('file:///Billing.koi', [err('billing boom')]);
+    store.getState().setDiagnostics('file:///Ordering.koi', [err('ordering boom')]);
+
+    const allContexts = readable.getState();
+    expect(readable.getState()).toBe(allContexts);
+
+    store.getState().setActiveContext('Billing'); // key 2: the activeContext value
+    const scoped = readable.getState();
+    expect(scoped).not.toBe(allContexts);
+    expect(scoped.scoped).toBe(true);
+    expect(scoped.rows[0].message).toBe('billing boom');
+
+    store.getState().setNavAltitude('tactical'); // unrelated write again → memo hit
+    expect(readable.getState()).toBe(scoped);
+  });
 });
 
 describe('createDocsPanelHostStore', () => {

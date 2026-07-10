@@ -6,6 +6,8 @@ import { isAllContexts } from '@/model/activeContext';
 import { severityErrorOrWarning } from '@/lsp/severity';
 import type { LspDiagnostic } from '@/lsp/lsp';
 import { shallowEqual, zustandToReadableStore } from '@/store/readableStoreAdapter';
+import { koiStem } from '@/shell/explorerModel';
+import { basename } from '@/shared/path';
 
 // The concrete `ReadableStore<T>` adapters for the koine-ui host-adapter components (issues #944 and
 // #1244) — kept out of ide.tsx (the line-budget-guarded call site, `lineBudgets.test.ts`) as their own
@@ -99,16 +101,6 @@ export function createDocsPanelHostStore(store: StoreApi<AppState>) {
   return zustandToReadableStore(store, (s) => ({ folderRootToken: s.folderRootToken }), shallowEqual);
 }
 
-/** The bounded context a source file denotes — its `.koi` stem, lowercased — or null for a non-`.koi`
- *  uri. One `.koi` file is one bounded context (the stem convention the Files-tree scope emphasis uses).
- *  Moved here from DiagnosticsStripPanel.tsx with the #1244 extraction: which files belong to a context
- *  is Koine Studio domain logic, so it lives in this adapter, not in the koine-ui panel. */
-function koiStemOfUri(uri: string): string | null {
-  const slash = uri.lastIndexOf('/');
-  const base = (slash >= 0 ? uri.slice(slash + 1) : uri).toLowerCase();
-  return base.endsWith('.koi') ? base.slice(0, -'.koi'.length) : null;
-}
-
 /**
  * Adapts the app store's diagnostics + active-context slices to `DiagnosticsStripPanel`'s generic
  * `ReadableStore<DiagnosticsStripSlice>` — already scoped, ordered, classified and counted, so the
@@ -128,11 +120,23 @@ function koiStemOfUri(uri: string): string | null {
  * the COUNT goes through `diagnosticsSummary` (which drops info/hint) joined with the strip's ` · ` —
  * exactly the pre-extraction pairing.
  *
- * Same known tradeoff as `createWorkspaceProblemsStore` above: the adapter's listener re-runs this
- * selector on EVERY app-store write; `stripSliceEqual`'s element-wise rows comparison (fresh array of
- * fresh row objects per call — the #944 `parts` footgun again) still keeps unrelated writes from
- * notifying, but not from recomputing. Acceptable at this scale (a linear scan of one file's — or one
- * context's — diagnostics per write).
+ * Unlike `createWorkspaceProblemsStore` above (which recomputes on every store write and relies solely
+ * on its equality gate), this selector is wrapped in a 3-key reference memo: the last
+ * (`s.diagnosticsByUri`, `s.activeContext`, live `activeUri()` value) triple is cached alongside its
+ * slice, and while all three are unchanged the cached slice is returned as-is — no rows rebuild, no
+ * re-classification on unrelated store writes. `diagnosticsByUri` is replaced immutably on every
+ * diagnostics mutation (see slices/diagnostics.ts), so its reference is a sound key; keying on the
+ * live `activeUri()` VALUE preserves the paintActive synchronous-fresh-read contract above — a file
+ * switch changes the key and recomputes on the very next `getState()`. `stripSliceEqual` stays as the
+ * notification gate for the recompute paths.
+ *
+ * Known narrow edge of the memo: a `scope.uriLabel` output change with all three keys unchanged (e.g.
+ * a workspace-root change that re-derives relPath labels without any diagnostics push) would serve the
+ * cached slice with the old labels — pre-memo, the recompute-per-write meant the equality gate noticed
+ * the label diff on the next store write and notified. `opts` carries no root/label-version token to
+ * fold into the key today; in practice a root change is followed by diagnostics re-pushes (a new
+ * `diagnosticsByUri` reference), which recompute anyway. Fold a label-version key in if that ever
+ * stops holding.
  */
 export function createDiagnosticsStripStore(
   store: StoreApi<AppState>,
@@ -154,31 +158,59 @@ export function createDiagnosticsStripStore(
     message: d.message,
     code: d.code,
   });
+  // The 3-key reference memo — see the doc comment above for why these three keys are sound (and the
+  // one known uriLabel edge they don't cover).
+  let memo:
+    | {
+        byUri: Record<string, LspDiagnostic[]>;
+        context: string;
+        activeUri: string;
+        slice: DiagnosticsStripSlice;
+      }
+    | undefined;
   return zustandToReadableStore(
     store,
     (s): DiagnosticsStripSlice => {
+      const activeUri = opts.activeUri();
+      if (
+        memo != null &&
+        memo.byUri === s.diagnosticsByUri &&
+        memo.context === s.activeContext &&
+        memo.activeUri === activeUri
+      ) {
+        return memo.slice;
+      }
       const scoped = opts.scope != null && !isAllContexts(s.activeContext);
       const rows: DiagnosticsStripRow[] = [];
       const diags: LspDiagnostic[] = [];
       if (scoped) {
         const context = s.activeContext.toLowerCase();
         for (const [uri, ds] of Object.entries(s.diagnosticsByUri)) {
-          if (koiStemOfUri(uri) !== context) continue;
+          // Which files belong to a context is Koine Studio domain logic (one `.koi` file is one
+          // bounded context): route through the canonical `koiStem` over the uri's trailing segment,
+          // the same stem convention the Files-tree scope emphasis matches against.
+          if (koiStem(basename(uri)) !== context) continue;
           for (const d of ds) {
             rows.push(row(uri, d, opts.scope!.uriLabel(uri)));
             diags.push(d);
           }
         }
       } else {
-        const uri = opts.activeUri();
-        for (const d of s.diagnosticsByUri[uri] ?? []) {
-          rows.push(row(uri, d));
+        for (const d of s.diagnosticsByUri[activeUri] ?? []) {
+          rows.push(row(activeUri, d));
           diags.push(d);
         }
       }
       const { kind, parts } = diagnosticsSummary(diags);
       // Clean ⇒ the literal 'clean' sentinel; otherwise join the shared parts with ' · ' (the strip's join).
-      return { scoped, rows, count: kind === 'clean' ? 'clean' : parts.join(' · '), kind };
+      const slice: DiagnosticsStripSlice = {
+        scoped,
+        rows,
+        count: kind === 'clean' ? 'clean' : parts.join(' · '),
+        kind,
+      };
+      memo = { byUri: s.diagnosticsByUri, context: s.activeContext, activeUri, slice };
+      return slice;
     },
     stripSliceEqual,
   );

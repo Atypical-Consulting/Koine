@@ -159,6 +159,43 @@ describe('EventsPanel — table (moved from modelTables.test.ts)', () => {
     expect(onSelect).toHaveBeenCalledWith('Sales.OrderPlaced', 'Sales');
   });
 
+  // Regression (#1382 follow-up): rows are keyed on the QUALIFIED event name, not the simple-name label.
+  // Koine allows same-named events in different bounded contexts (per-context uniqueness, R13.2) and the
+  // default "All contexts" scope renders them in ONE tbody — with label keys the duplicate sibling keys
+  // made a sort cross-wire the rows, so the focused row could activate the OTHER context's declaration.
+  test('same-named events in two contexts keep their own DOM row across a sort and activate their own declaration', () => {
+    const goto = vi.fn();
+    const dupGraph: DiagramGraph = {
+      nodes: [
+        node('SalesOrder', 'Order', 'aggregate-root', 'Sales.Order', span(3)),
+        node('SalesPlaced', 'OrderPlaced', 'event', 'Sales.OrderPlaced', span(12)),
+        node('BillingInvoice', 'Invoice', 'aggregate-root', 'Billing.Invoice', span(30)),
+        node('BillingPlaced', 'OrderPlaced', 'event', 'Billing.OrderPlaced', span(42)),
+      ],
+      edges: [edge('SalesOrder', 'SalesPlaced'), edge('BillingInvoice', 'BillingPlaced')],
+    };
+    const store = createAppStore();
+    const { container } = render(<EventsPanel store={store} graph={dupGraph} handlers={{ goto }} />);
+    const before = Array.from(container.querySelectorAll('tbody tr'));
+    // Both same-named events render, in graph order (Sales first).
+    expect(before.map((r) => r.querySelector('td')!.textContent)).toEqual(['OrderPlaced', 'OrderPlaced']);
+    expect(before.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Sales', 'Billing']);
+
+    // Sort ascending by Bounded Context: Billing < Sales.
+    act(() => container.querySelectorAll('thead th')[3].querySelector('button')!.click());
+
+    const after = Array.from(container.querySelectorAll('tbody tr'));
+    expect(after.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Billing', 'Sales']);
+    // The qualified keys let Preact match each row to ITS old <tr> — reordered, never cross-wired…
+    expect(after[0]).toBe(before[1]);
+    expect(after[1]).toBe(before[0]);
+    // …so activating the Billing row jumps to BILLING's declaration, not Sales'.
+    (after[0] as HTMLElement).click();
+    expect(goto).toHaveBeenCalledWith(
+      dupGraph.nodes.find((n) => n.qualifiedName === 'Billing.OrderPlaced')!.sourceSpan,
+    );
+  });
+
   test('empty input renders the Events-specific empty-state text (no table)', () => {
     const noEvents: DiagramGraph = {
       nodes: [node('Order', 'Order', 'aggregate-root', 'Sales.Order', span(3))],

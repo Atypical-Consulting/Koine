@@ -265,13 +265,20 @@ export function SourceControlPanel(props: {
 
   // Discard is DESTRUCTIVE — `git restore`/`git clean` throw the working-tree bytes away for good — so
   // both Discard controls (per-row and group Discard-all, #1151) route through an explicit confirm;
-  // declining aborts with no git call. The copy adapts to what actually happens: a tracked change is
-  // REVERTED, but an untracked file has no index/HEAD state to revert to — discarding it DELETES it
-  // from disk, and the dialog must say so. A confirmed discard runs through the same mutate() reload
-  // as every other mutation, so the groups re-derive from the post-discard repository and a git
-  // failure lands in the existing actionError alert.
-  const onDiscard = (paths: string[], opts: { untracked: boolean; group?: string }) => {
-    if (paths.length === 0) return; // defensive — an empty group renders no Discard-all at all
+  // declining aborts with no git call. Discard is offered only for NON-STAGED rows/groups (the staged
+  // group header withholds Discard-all, and the per-row control mirrors that). The copy adapts to what
+  // actually happens: a tracked change is REVERTED, but an untracked file has no index/HEAD state to
+  // revert to — discarding it DELETES it from disk, and the dialog must say so. The panel already knows
+  // each row's tracked/untracked split (`f.status`), so it hands the host the two buckets EXPLICITLY —
+  // tracked paths go to `git restore --worktree`, untracked ones to `git clean -f`, with no host-side
+  // re-derivation that could mis-bucket a path (see {@link Platform.gitDiscard}). A confirmed discard
+  // runs through the same mutate() reload as every other mutation, so the groups re-derive from the
+  // post-discard repository and a git failure lands in the existing actionError alert.
+  const onDiscard = (files: GitFile[], opts: { untracked: boolean; group?: string }) => {
+    if (files.length === 0) return; // defensive — an empty group renders no Discard-all at all
+    const trackedPaths = files.filter((f) => f.status !== 'untracked').map((f) => f.relPath);
+    const untrackedPaths = files.filter((f) => f.status === 'untracked').map((f) => f.relPath);
+    const paths = files.map((f) => f.relPath);
     const single = paths.length === 1;
     const copy = opts.untracked
       ? {
@@ -291,7 +298,7 @@ export function SourceControlPanel(props: {
     void (async () => {
       const ok = await koiConfirm({ ...copy, cancelLabel: 'Cancel', danger: true });
       if (!ok) return; // declined — the working tree survives untouched
-      await mutate(() => git.gitDiscard(folderToken, paths));
+      await mutate(() => git.gitDiscard(folderToken, trackedPaths, untrackedPaths));
     })();
   };
   // Push through the same mutate() path every other op uses: the follow-up reload re-reads status, so
@@ -600,18 +607,23 @@ export function SourceControlPanel(props: {
                 <circle cx="8" cy="8" r="1.8" />
               </svg>
             </button>
-            <button
-              type="button"
-              class="koi-sc-ract danger"
-              title="Discard changes"
-              aria-label={`Discard ${f.relPath} changes`}
-              disabled={busy}
-              onClick={() => onDiscard([f.relPath], { untracked: f.status === 'untracked' })}
-            >
-              <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
-              </svg>
-            </button>
+            {/* Discard only on NON-STAGED rows — mirroring the group headers, where the staged group
+                withholds Discard-all. A staged row's "discard" would silently revert only the worktree
+                delta (not the staged change the row actually shows) — a data-loss trap, so no control. */}
+            {!f.staged && (
+              <button
+                type="button"
+                class="koi-sc-ract danger"
+                title="Discard changes"
+                aria-label={`Discard ${f.relPath} changes`}
+                disabled={busy}
+                onClick={() => onDiscard([f], { untracked: f.status === 'untracked' })}
+              >
+                <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
+                </svg>
+              </button>
+            )}
             {f.staged ? (
               <button
                 type="button"
@@ -654,7 +666,7 @@ export function SourceControlPanel(props: {
   // so the rail doesn't carry hollow headers — the test relies on this to prove a file moved groups. Its
   // head is a collapse toggle (chevron + label + count pill) plus a hover/focus-revealed action cluster:
   // Stage all / Unstage all are wired through `mutate`; Discard all (#1151) passes the whole group's
-  // paths through the confirm-gated onDiscard.
+  // files through the confirm-gated onDiscard (which splits them into tracked/untracked buckets).
   const fileGroup = (label: string, list: GitFile[]) => {
     if (list.length === 0) return null;
     const isStaged = list.every((f) => f.staged);
@@ -702,7 +714,7 @@ export function SourceControlPanel(props: {
                   title="Discard all changes"
                   aria-label="Discard all changes"
                   disabled={busy}
-                  onClick={() => onDiscard(paths, { untracked: label === UNTRACKED_LABEL, group: label })}
+                  onClick={() => onDiscard(list, { untracked: label === UNTRACKED_LABEL, group: label })}
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M6.5 3h3M3.5 4.5h9M11.5 4.5l-.5 8a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1l-.5-8" />

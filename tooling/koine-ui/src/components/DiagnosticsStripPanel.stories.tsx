@@ -4,19 +4,13 @@ import {
   type DiagnosticsStripRow,
   type DiagnosticsStripSlice,
 } from './DiagnosticsStripPanel';
-import type { ReadableStore } from '../host/store';
+import { readableStoreOf } from '../host/storeTestUtils';
 
 // The editor's diagnostics strip: a `clean` / `N error(s) · M warning(s)` count plus one clickable row
 // per diagnostic. Rows/count arrive already scoped, classified and formatted through the
 // `ReadableStore<DiagnosticsStripSlice>` host-adapter contract (issue #944); this Storybook file mocks
-// that contract directly, matching DiagnosticsStripPanel.test.tsx's `createMockStripStore`.
-
-function readableStoreOf(initial: DiagnosticsStripSlice): ReadableStore<DiagnosticsStripSlice> {
-  return {
-    getState: () => initial,
-    subscribe: () => () => {},
-  };
-}
+// that contract directly via the shared `readableStoreOf` double (host/storeTestUtils), matching
+// DiagnosticsStripPanel.test.tsx's `createTestReadableStore`.
 
 // One diagnostic on (0-based) line 2, col 3 → the strip renders it 1-based as "<sev> 3:4".
 const err = (message: string): DiagnosticsStripRow => ({
@@ -37,7 +31,7 @@ const meta = {
   component: DiagnosticsStripPanel,
   parameters: { layout: 'padded' },
   args: {
-    store: readableStoreOf({ scoped: false, rows: [], count: 'clean', kind: 'clean' }),
+    store: readableStoreOf<DiagnosticsStripSlice>({ scoped: false, rows: [], count: 'clean', kind: 'clean' }),
     onGoto: () => {},
   },
 } satisfies Meta<typeof DiagnosticsStripPanel>;
@@ -51,7 +45,7 @@ export const Clean: Story = {};
 /** A mix of errors and warnings on the active file: the count summarises them and each gets a row. */
 export const WithDiagnostics: Story = {
   args: {
-    store: readableStoreOf({
+    store: readableStoreOf<DiagnosticsStripSlice>({
       scoped: false,
       rows: [err('Unknown type `OrderId`'), warn('Unused value object')],
       count: '1 error · 1 warning',
@@ -63,7 +57,7 @@ export const WithDiagnostics: Story = {
 /** Scoped to a bounded context (ADR 0009 / #1188): rows span the context's files, each file-labelled. */
 export const ScopedToContext: Story = {
   args: {
-    store: readableStoreOf({
+    store: readableStoreOf<DiagnosticsStripSlice>({
       scoped: true,
       rows: [
         { ...err('Unknown type `OrderId`'), uri: 'file:///Billing.koi', label: 'Billing.koi' },

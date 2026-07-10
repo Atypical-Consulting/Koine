@@ -39,6 +39,12 @@ export function RelationshipsPanel(props: {
         columns={RELATIONSHIP_COLUMNS}
         emptyText="No structural relationships yet — add an aggregate or an entity reference to your model."
         rowLabel={(r) => `${r.source} ${r.relation} ${r.target}`}
+        // Key rows on the context-qualified edge, not the unqualified label: under "All contexts" two
+        // bounded contexts may each declare the same-named pair (e.g. `Order contains OrderItem` in Sales
+        // AND in Billing — type names are only unique per context, R13.2). Unique per render: structural
+        // rows come from each context's single class diagram, whose builder (DocsEmitter.ContextClassModel)
+        // dedupes to ONE edge per source→target pair and dedupes node names within the context.
+        rowKey={(r) => `${r.contexts.join('>')}:${r.source}:${r.relation}:${r.target}`}
         handlers={props.handlers}
       />
     </div>

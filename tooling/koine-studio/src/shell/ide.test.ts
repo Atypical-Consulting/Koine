@@ -386,8 +386,8 @@ const APP_HTML = `
       <header id="toolbar">
         <button type="button" id="btn-home" class="brand"><span class="brand-logo"></span><span class="brand-text"><span class="brand-name">Koine</span><span class="brand-eyebrow">Studio</span></span></button>
         <div class="iconset" role="toolbar">
-          <button type="button" id="btn-new" class="t-ico">New</button>
-          <button type="button" id="btn-open-folder" class="t-ico">Open</button>
+          <button type="button" id="btn-new" class="t-ico" title="Start a new empty model (prompts if you have unsaved changes)">New</button>
+          <button type="button" id="btn-open-folder" class="t-ico" title="Open a folder of .koi models">Open</button>
           <div id="history-controls-host"></div>
         </div>
         <button type="button" id="palette-hint" class="cmd palette-hint"><span class="cmd-kbd" data-role="cmd-kbd"></span></button>
@@ -978,7 +978,10 @@ describe('ide init() — workspace-opening controls grey out while an op is in f
       expect(btn.disabled).toBe(false);
       expect(btn.hasAttribute('aria-disabled')).toBe(false);
     }
-    expect(newBtn.title).toBe('');
+    // Idle restores EACH button's static index.html tooltip — the busy title must not linger, and the
+    // idle title must not be stripped (every boot fires busy→idle, so a strip would be permanent).
+    expect(newBtn.title).toBe('Start a new empty model (prompts if you have unsaved changes)');
+    expect(openBtn.title).toBe('Open a folder of .koi models');
   });
 
   // The busy flag must clear on a REJECTED op — the lock already releases; a toolbar stuck disabled

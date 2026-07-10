@@ -104,6 +104,46 @@ describe('RelationshipsPanel — table (moved from modelTables.test.ts)', () => 
     expect(goto).not.toHaveBeenCalled();
   });
 
+  // Regression (#1382 follow-up): rows are keyed on the CONTEXT-QUALIFIED edge, not the unqualified
+  // `source relation target` label. Type names are only unique per bounded context (R13.2), so under
+  // "All contexts" two contexts can each hold e.g. `Order contains OrderItem` — with label keys the
+  // duplicate sibling keys made a sort cross-wire the rows, so the focused row could jump to the OTHER
+  // context's declaration.
+  test('the same-named relation in two contexts keeps its own DOM row across a sort and jumps to its own source', () => {
+    const goto = vi.fn();
+    const dupGraph: DiagramGraph = {
+      nodes: [
+        node('SalesOrder', 'Order', 'aggregate-root', 'Sales.Order', span(3)),
+        node('SalesItem', 'OrderItem', 'value-object', 'Sales.OrderItem', span(8)),
+        node('BillingOrder', 'Order', 'aggregate-root', 'Billing.Order', span(20)),
+        node('BillingItem', 'OrderItem', 'value-object', 'Billing.OrderItem', span(24)),
+      ],
+      edges: [edge('SalesOrder', 'SalesItem'), edge('BillingOrder', 'BillingItem')],
+    };
+    const store = createAppStore();
+    const { container } = render(
+      <RelationshipsPanel store={store} graph={dupGraph} handlers={{ goto }} />,
+    );
+    const before = Array.from(container.querySelectorAll('tbody tr'));
+    // Both same-labelled relations render, in graph order (Sales first).
+    expect(before.map((r) => r.querySelector('td')!.textContent)).toEqual(['Order', 'Order']);
+    expect(before.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Sales', 'Billing']);
+
+    // Sort ascending by Contexts: Billing < Sales.
+    act(() => container.querySelectorAll('thead th')[3].querySelector('button')!.click());
+
+    const after = Array.from(container.querySelectorAll('tbody tr'));
+    expect(after.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Billing', 'Sales']);
+    // The composite context-qualified keys let Preact match each row to ITS old <tr> — never cross-wired…
+    expect(after[0]).toBe(before[1]);
+    expect(after[1]).toBe(before[0]);
+    // …so activating the Billing row jumps to BILLING's Order declaration, not Sales'.
+    (after[0] as HTMLElement).click();
+    expect(goto).toHaveBeenCalledWith(
+      dupGraph.nodes.find((n) => n.qualifiedName === 'Billing.Order')!.sourceSpan,
+    );
+  });
+
   test('empty input renders the Relationships-specific empty-state text (no table)', () => {
     const noRelations: DiagramGraph = { nodes: [], edges: [] };
     const store = createAppStore();

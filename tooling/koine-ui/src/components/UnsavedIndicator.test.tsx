@@ -2,29 +2,12 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { titleWithDirty, UnsavedIndicator, type UnsavedIndicatorSlice } from './UnsavedIndicator';
-import type { ReadableStore } from '../host/store';
+import { createTestReadableStore } from '../host/storeTestUtils';
 
-// A plain ReadableStore<UnsavedIndicatorSlice> test double — koine-ui is store-free, so this mocks the
-// contract directly instead of pulling in koine-studio's real Zustand store (which the ORIGINAL
+// The shared ReadableStore<T> test double (host/storeTestUtils) — koine-ui is store-free, so it mocks
+// the contract directly instead of pulling in koine-studio's real Zustand store (which the ORIGINAL
 // koine-studio-side test used via createAppStore() + a seeded buffer Map). The dirty-count derivation
 // from the buffer set is the host adapter's job, pinned in koine-studio's readableStores.test.ts.
-function createMockUnsavedStore(initial: UnsavedIndicatorSlice): ReadableStore<UnsavedIndicatorSlice> & {
-  set(next: UnsavedIndicatorSlice): void;
-} {
-  let state = initial;
-  const listeners = new Set<(state: UnsavedIndicatorSlice) => void>();
-  return {
-    getState: () => state,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    set(next) {
-      state = next;
-      for (const listener of listeners) listener(next);
-    },
-  };
-}
 
 // The static index.html host the indicator drives: a <button id="unsaved-indicator" hidden>.
 function host(): HTMLButtonElement {
@@ -61,7 +44,7 @@ describe('titleWithDirty', () => {
 describe('UnsavedIndicator', () => {
   test('shows the "N unsaved" pill for the dirty count and hides when all clean', () => {
     const button = host();
-    const store = createMockUnsavedStore({ dirtyCount: 0 });
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 0 });
     document.title = 'Koine Studio';
 
     act(() => {
@@ -95,7 +78,7 @@ describe('UnsavedIndicator', () => {
 
   test('clicking the pill calls onSaveAll', () => {
     const button = host();
-    const store = createMockUnsavedStore({ dirtyCount: 1 });
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 1 });
     const onSaveAll = vi.fn();
 
     act(() => {
@@ -108,7 +91,7 @@ describe('UnsavedIndicator', () => {
 
   test('has no accessibility violations', async () => {
     const button = host();
-    const store = createMockUnsavedStore({ dirtyCount: 2 });
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 2 });
     act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
     });
@@ -117,7 +100,7 @@ describe('UnsavedIndicator', () => {
 
   test('keeps a baseline aria-label even with no unsaved buffers (so the button is never label-less)', () => {
     const button = host();
-    const store = createMockUnsavedStore({ dirtyCount: 0 });
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 0 });
 
     // Mount with zero dirty buffers: the pill is hidden, but the host button must still carry a
     // non-empty baseline aria-label. axe (storybook's a11y addon on macOS CI, #747) can otherwise race

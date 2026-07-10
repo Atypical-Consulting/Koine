@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { type Adr, type AdrStatus, parseAdr, renderAdr } from '@/docs/adr';
 import type { AdrFile, NoteFile } from '@/docs/docsStore';
@@ -179,8 +179,11 @@ function AdrRow(props: {
   const { file, handlers, canWrite, renderMarkdown } = props;
   const [open, setOpen] = useState(false);
   const [adr, setAdr] = useState<Adr>(file.adr);
-  const { editing, draft, setDraft, openEditor, commit: save, cancel: cancelEdit } = useCommittableField({
-    committedValue: renderAdr(adr),
+  // Memoized so an unrelated re-render doesn't re-serialize the ADR body; safe because the hook
+  // compares committedValue by string equality, not reference.
+  const committed = useMemo(() => renderAdr(adr), [adr]);
+  const { editing, draft, setDraft, openEditor, editorOnKeyDown, commit: save, cancel: cancelEdit } = useCommittableField({
+    committedValue: committed,
     onCommit: (next) => {
       // The number is owned by the filename, not the body — preserve it across an edit.
       const edited = { ...parseAdr(next), number: file.number };
@@ -218,12 +221,8 @@ function AdrRow(props: {
                 aria-label={`Markdown for ADR ${file.number}: ${adr.title}`}
                 value={draft}
                 onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelEdit(); // the hook's cancel: revert-and-close, same path as the Cancel button
-                  }
-                }}
+                // Escape → the hook's cancel: revert-and-close, same path as the Cancel button.
+                onKeyDown={editorOnKeyDown}
               />
               <div class="koi-docs-actions">
                 <button type="button" class="koi-docs-save" onClick={save}>
@@ -310,7 +309,7 @@ function NoteRow(props: {
   const [status, setStatus] = useState<NoteLoadStatus>('idle');
   const [body, setBody] = useState('');
   const [errorText, setErrorText] = useState('');
-  const { editing, draft, setDraft, openEditor, commit: save, cancel: cancelEdit } = useCommittableField({
+  const { editing, draft, setDraft, openEditor, editorOnKeyDown, commit: save, cancel: cancelEdit } = useCommittableField({
     committedValue: body,
     onCommit: (next) => {
       handlers.onSaveNote(file, next);
@@ -375,12 +374,8 @@ function NoteRow(props: {
                   aria-label={`Markdown for note: ${file.title}`}
                   value={draft}
                   onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      cancelEdit(); // the hook's cancel: revert-and-close, same path as the Cancel button
-                    }
-                  }}
+                  // Escape → the hook's cancel: revert-and-close, same path as the Cancel button.
+                  onKeyDown={editorOnKeyDown}
                 />
                 <div class="koi-docs-actions">
                   <button type="button" class="koi-docs-save" onClick={save}>

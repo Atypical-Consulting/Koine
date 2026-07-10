@@ -53,6 +53,6 @@ describe('BrowserPlatform git capability', () => {
 
   it('degrades gitDiscard to an async rejection, same as every other git* stub', async () => {
     const platform: Platform = new BrowserPlatform();
-    await expect(platform.gitDiscard('any-folder-token', ['a.koi'])).rejects.toBeInstanceOf(Error);
+    await expect(platform.gitDiscard('any-folder-token', ['a.koi'], ['b.koi'])).rejects.toBeInstanceOf(Error);
   });
 });

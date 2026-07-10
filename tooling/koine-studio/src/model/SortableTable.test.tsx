@@ -178,6 +178,47 @@ describe('SortableTable', () => {
     expect(after[1]).toBe(before[0]);
   });
 
+  // Regression (#1382 follow-up): rowLabel is NOT necessarily unique — the Events table labels rows with
+  // the SIMPLE event name, and the default "All contexts" scope renders every context's rows in one tbody
+  // while Koine allows same-named events/types in different contexts (per-context uniqueness, R13.2).
+  // Duplicate sibling keys are undefined behavior under Preact's keyed-children contract — concretely the
+  // focused row could come to represent the OTHER same-named row after a sort — so a caller passes an
+  // explicit `rowKey` (a qualified/composite identity) and the table keys rows on THAT, not the label.
+  test('rowKey keys same-labelled rows distinctly: both render and keep DOM identity across a sort', () => {
+    interface KeyedRow extends Row {
+      key: string;
+    }
+    const dupRows: KeyedRow[] = [
+      { name: 'OrderPlaced', value: '2', span: span(20), key: 'Sales.OrderPlaced' },
+      { name: 'OrderPlaced', value: '1', span: span(10), key: 'Billing.OrderPlaced' },
+    ];
+    // Re-typed so T infers as KeyedRow (a Row-typed column set would pin T to Row and reject `r.key`).
+    const dupColumns: SortableTableColumn<KeyedRow>[] = columns;
+    const { container } = render(
+      <SortableTable
+        rows={dupRows}
+        columns={dupColumns}
+        emptyText="none"
+        rowLabel={(r) => r.name}
+        rowKey={(r) => r.key}
+        handlers={{ goto: () => {} }}
+      />,
+    );
+    const before = Array.from(container.querySelectorAll('tbody tr'));
+    // Both same-labelled rows render.
+    expect(before.map((r) => r.querySelector('td')!.textContent)).toEqual(['OrderPlaced', 'OrderPlaced']);
+    expect(before.map((r) => r.querySelectorAll('td')[1].textContent)).toEqual(['2', '1']);
+
+    act(() => container.querySelectorAll('thead th')[1].querySelector('button')!.click()); // ascending by Value
+
+    const after = Array.from(container.querySelectorAll('tbody tr'));
+    expect(after.map((r) => r.querySelectorAll('td')[1].textContent)).toEqual(['1', '2']);
+    // The very same <tr> nodes, by reference, in swapped positions: the distinct keys let Preact match
+    // each row to ITS old DOM node — neither row was remounted or cross-wired to its same-named sibling.
+    expect(after[0]).toBe(before[1]);
+    expect(after[1]).toBe(before[0]);
+  });
+
   test('has no accessibility violations', async () => {
     const { container } = render(
       <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,

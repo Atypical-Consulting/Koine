@@ -6,35 +6,13 @@ import {
   type DiagnosticsStripRow,
   type DiagnosticsStripSlice,
 } from './DiagnosticsStripPanel';
-import type { ReadableStore } from '../host/store';
+import { createTestReadableStore } from '../host/storeTestUtils';
 
-// A plain ReadableStore<DiagnosticsStripSlice> test double — koine-ui is store-free, so this mocks the
-// contract directly instead of pulling in koine-studio's real Zustand store (which the ORIGINAL
+// The shared ReadableStore<T> test double (host/storeTestUtils) — koine-ui is store-free, so it mocks
+// the contract directly instead of pulling in koine-studio's real Zustand store (which the ORIGINAL
 // koine-studio-side test used via createAppStore() + setDiagnostics). The scoping/counting derivation
 // (which files belong to the active context, the count wording) is the host adapter's job, pinned in
 // koine-studio's readableStores.test.ts; this file covers only what the component renders from a slice.
-function createMockStripStore(initial: DiagnosticsStripSlice): ReadableStore<DiagnosticsStripSlice> & {
-  set(next: DiagnosticsStripSlice): void;
-  /** Mutate the backing state WITHOUT notifying — models a host-side change between notifications. */
-  silentSet(next: DiagnosticsStripSlice): void;
-} {
-  let state = initial;
-  const listeners = new Set<(state: DiagnosticsStripSlice) => void>();
-  return {
-    getState: () => state,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    set(next) {
-      state = next;
-      for (const listener of listeners) listener(next);
-    },
-    silentSet(next) {
-      state = next;
-    },
-  };
-}
 
 const CLEAN: DiagnosticsStripSlice = { scoped: false, rows: [], count: 'clean', kind: 'clean' };
 
@@ -49,7 +27,7 @@ const errRow = (msg: string, overrides: Partial<DiagnosticsStripRow> = {}): Diag
 
 describe('DiagnosticsStripPanel', () => {
   test('shows "clean" with no rows, then the count + a row when the slice changes', () => {
-    const store = createMockStripStore(CLEAN);
+    const store = createTestReadableStore<DiagnosticsStripSlice>(CLEAN);
     const { container } = render(<DiagnosticsStripPanel store={store} onGoto={() => {}} />);
 
     // No diagnostics yet → the exact strip strings: count is "clean", body says "No diagnostics."
@@ -71,7 +49,7 @@ describe('DiagnosticsStripPanel', () => {
   });
 
   test('a warning row uses the warn class/word and a code is prefixed "CODE: "', () => {
-    const store = createMockStripStore({
+    const store = createTestReadableStore<DiagnosticsStripSlice>({
       scoped: false,
       rows: [errRow('meh', { severity: 'warning', code: 'KOI042' })],
       count: '1 warning',
@@ -86,7 +64,7 @@ describe('DiagnosticsStripPanel', () => {
 
   test('clicking an unscoped row calls onGoto with the 1-based line:col', () => {
     const onGoto = vi.fn();
-    const store = createMockStripStore({
+    const store = createTestReadableStore<DiagnosticsStripSlice>({
       scoped: false,
       rows: [errRow('boom')],
       count: '1 error',
@@ -101,7 +79,7 @@ describe('DiagnosticsStripPanel', () => {
   test('a scoped row is file-labelled and opens ITS file via onOpen (ADR 0009 / #1188)', () => {
     const onOpen = vi.fn();
     const row = errRow('billing boom', { uri: 'file:///Billing.koi', label: 'Billing.koi' });
-    const store = createMockStripStore({ scoped: true, rows: [row], count: '1 error', kind: 'error' });
+    const store = createTestReadableStore<DiagnosticsStripSlice>({ scoped: true, rows: [row], count: '1 error', kind: 'error' });
     const { container } = render(
       <DiagnosticsStripPanel store={store} onGoto={() => {}} onOpen={onOpen} />,
     );
@@ -115,7 +93,7 @@ describe('DiagnosticsStripPanel', () => {
   });
 
   test('mirrors its count into an injected countEl (the Problems tab pill, #1203)', () => {
-    const store = createMockStripStore(CLEAN);
+    const store = createTestReadableStore<DiagnosticsStripSlice>(CLEAN);
     const countEl = document.createElement('span');
     const { container } = render(
       <DiagnosticsStripPanel store={store} onGoto={() => {}} countEl={countEl} />,
@@ -141,7 +119,7 @@ describe('DiagnosticsStripPanel', () => {
     // The host (editorSession's paintActive) re-renders the mounted panel SYNCHRONOUSLY on an
     // active-file switch — a change the store may not notify for (the adapter's selector reads the
     // live activeUri). The panel must re-read getState() during render, not serve a cached slice.
-    const store = createMockStripStore(CLEAN);
+    const store = createTestReadableStore<DiagnosticsStripSlice>(CLEAN);
     const ui = () => <DiagnosticsStripPanel store={store} onGoto={() => {}} />;
     const { container, rerender } = render(ui());
     expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('clean');
@@ -153,7 +131,7 @@ describe('DiagnosticsStripPanel', () => {
   });
 
   test('has no accessibility violations', async () => {
-    const store = createMockStripStore({
+    const store = createTestReadableStore<DiagnosticsStripSlice>({
       scoped: false,
       rows: [errRow('boom')],
       count: '1 error',

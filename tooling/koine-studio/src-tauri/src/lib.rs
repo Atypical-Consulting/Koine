@@ -936,12 +936,15 @@ struct GitNumstatEntry {
 
 /// Run `git -C <dir> <args…>` and return its stdout, or an `Err` shaped like `git_log_for_range`:
 /// a spawn failure (git not installed) → `git-unavailable: …`; a non-zero exit → the trimmed
-/// stderr. The thin core every source-control command shares.
+/// stderr. The thin core every source-control command shares. `GIT_TERMINAL_PROMPT=0` makes a
+/// network command that would ask for credentials (push/clone against an authed remote) FAIL FAST
+/// with a surfaced `Err` instead of hanging forever on a prompt no terminal will ever answer.
 fn run_git(dir: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(dir)
         .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| format!("git-unavailable: {e}"))?;
     if !output.status.success() {
@@ -1148,38 +1151,31 @@ fn git_unstage(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
     run_git(&dir, &args).map(|_| ())
 }
 
-/// Discard the working-tree changes of `rel_paths` — DESTRUCTIVE and unrecoverable, which is why the
-/// TS caller (the Source Control panel) always confirms with the user first. A tracked path is
-/// REVERTED to its index state (`git restore --worktree -- <paths…>` — so a partially-staged file
-/// keeps its staged copy) and an untracked one is DELETED from disk (`git clean -f -- <paths…>`).
-/// The two commands are deliberately conservative: each path goes to exactly one of them (`git
-/// ls-files` says which are tracked — `restore` errors on an untracked pathspec and `clean` skips
-/// tracked ones), both are always scoped by an explicit `--` pathspec, and an empty list is a no-op
-/// up front — so a discard can never touch a file the caller didn't name. `Err` (git's trimmed
-/// stderr) when any step fails.
+/// Discard the working-tree changes of the given paths — DESTRUCTIVE and unrecoverable, which is why
+/// the TS caller (the Source Control panel) always confirms with the user first. Each `tracked_paths`
+/// entry is REVERTED to its index state (`git restore --worktree -- <paths…>` — so a partially-staged
+/// file keeps its staged copy) and each `untracked_paths` entry is DELETED from disk
+/// (`git clean -f -- <paths…>`). The CALLER supplies the tracked/untracked split — the panel already
+/// knows each row's status, and deriving the split here via `git ls-files` both wasted a subprocess
+/// and SILENTLY no-opped on a C-quoted (non-ASCII) filename: ls-files quotes such a path, the quoted
+/// output never matches the raw pathspec, the file lands in the clean bucket, and `clean -f` skips
+/// tracked files while exiting 0 — so the discard did nothing and reported success. Both commands are
+/// always scoped by an explicit `--` pathspec and an empty call is a no-op up front — so a discard
+/// can never touch a file the caller didn't name. `Err` (git's trimmed stderr) when any step fails.
 #[tauri::command]
-fn git_discard(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
-    if rel_paths.is_empty() {
+fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<String>) -> Result<(), String> {
+    if tracked_paths.is_empty() && untracked_paths.is_empty() {
         return Ok(()); // never run an unscoped restore/clean
     }
 
-    // The index knows which of the requested paths are tracked; everything else is untracked.
-    let mut ls_args: Vec<&str> = vec!["ls-files", "--"];
-    ls_args.extend(rel_paths.iter().map(String::as_str));
-    let ls_out = run_git(&dir, &ls_args)?;
-    let tracked: std::collections::HashSet<&str> = ls_out.lines().collect();
-
-    let (tracked_paths, untracked_paths): (Vec<&str>, Vec<&str>) =
-        rel_paths.iter().map(String::as_str).partition(|p| tracked.contains(p));
-
     if !tracked_paths.is_empty() {
         let mut args: Vec<&str> = vec!["restore", "--worktree", "--"];
-        args.extend(tracked_paths.iter().copied());
+        args.extend(tracked_paths.iter().map(String::as_str));
         run_git(&dir, &args)?;
     }
     if !untracked_paths.is_empty() {
         let mut args: Vec<&str> = vec!["clean", "-f", "--"];
-        args.extend(untracked_paths.iter().copied());
+        args.extend(untracked_paths.iter().map(String::as_str));
         run_git(&dir, &args)?;
     }
     Ok(())
@@ -1195,7 +1191,9 @@ fn git_commit(dir: String, message: String) -> Result<(), String> {
 /// Push the current branch to its configured upstream (a bare `git push`). The panel offers push
 /// only when [`git_status`] reported an upstream, which is exactly what a bare push targets. `Err`
 /// (git's trimmed stderr) when there is no upstream or git refuses — non-fast-forward, auth, offline.
-#[tauri::command]
+/// `(async)` moves this network-bound command onto a background thread (Tauri's sync thread pool),
+/// so a slow or unreachable remote can never freeze the webview's main thread.
+#[tauri::command(async)]
 fn git_push(dir: String) -> Result<(), String> {
     run_git(&dir, &["push"]).map(|_| ())
 }
@@ -1275,8 +1273,9 @@ fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, St
 /// `..`) so the clone can never escape `parent_dir`; otherwise the name is derived from the url's
 /// last path segment with a trailing `.git` stripped (`…/repo.git` and `git@h:o/repo.git` → `repo`).
 /// `Err` (git's stderr) when the url is unreachable, and `Err` up front when `dir_name` — or the
-/// derived name — is unusable.
-#[tauri::command]
+/// derived name — is unusable. `(async)` moves this network-bound command onto a background thread
+/// (Tauri's sync thread pool), so a slow clone can never freeze the webview's main thread.
+#[tauri::command(async)]
 fn git_clone(url: String, parent_dir: String, dir_name: Option<String>) -> Result<String, String> {
     let dest_name = clone_dest_name(&url, dir_name.as_deref())?;
 
@@ -3543,8 +3542,9 @@ mod tests {
         assert!(has_file(&before.files, "t.txt", false, "modified"), "{:?}", before.files);
         assert!(has_file(&before.files, "u.txt", false, "untracked"), "{:?}", before.files);
 
-        // One mixed call handles both kinds — exactly what a group Discard-all sends.
-        git_discard(repo.path(), vec!["t.txt".to_string(), "u.txt".to_string()]).unwrap();
+        // One mixed call handles both kinds — exactly what a group Discard-all sends: the caller
+        // supplies the tracked/untracked split (the panel knows each row's status).
+        git_discard(repo.path(), vec!["t.txt".to_string()], vec!["u.txt".to_string()]).unwrap();
 
         // The tracked file is reverted to its committed content…
         assert_eq!(std::fs::read_to_string(repo.dir.join("t.txt")).unwrap(), "base\n");
@@ -3570,7 +3570,8 @@ mod tests {
         repo.git(&["add", "p.txt"]);
         repo.write("p.txt", "3\n");
 
-        git_discard(repo.path(), vec!["p.txt".to_string()]).unwrap();
+        // The partially-staged file is TRACKED, so the panel sends it in the tracked bucket.
+        git_discard(repo.path(), vec!["p.txt".to_string()], vec![]).unwrap();
 
         // The worktree reverts to the INDEX content (the staged "2"), never all the way to HEAD's "1"…
         assert_eq!(std::fs::read_to_string(repo.dir.join("p.txt")).unwrap(), "2\n");
@@ -3582,12 +3583,13 @@ mod tests {
 
     #[test]
     fn git_discard_with_no_paths_is_a_no_op_and_errors_on_a_non_git_dir() {
-        // An empty list is a defensive no-op — it must not shell out to a bare `git clean`/`restore`
-        // (unscoped, those would touch the whole tree), so it succeeds even outside a repo.
+        // An empty-total call is a defensive no-op — it must not shell out to a bare `git clean`/
+        // `restore` (unscoped, those would touch the whole tree), so it succeeds even outside a repo.
         let plain = TempRepo::new();
-        assert!(git_discard(plain.path(), vec![]).is_ok());
-        // With paths, a non-repo dir surfaces git's error like every other git_* command.
-        assert!(git_discard(plain.path(), vec!["x.txt".to_string()]).is_err());
+        assert!(git_discard(plain.path(), vec![], vec![]).is_ok());
+        // With paths in EITHER bucket, a non-repo dir surfaces git's error like every other git_* command.
+        assert!(git_discard(plain.path(), vec!["x.txt".to_string()], vec![]).is_err());
+        assert!(git_discard(plain.path(), vec![], vec!["x.txt".to_string()]).is_err());
     }
 
     #[test]

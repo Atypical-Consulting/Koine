@@ -1,34 +1,17 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { DocsPanelHost, type DocsPanelHostSlice } from './DocsPanelHost';
-import type { ReadableStore } from '../host/store';
+import { createTestReadableStore } from '../host/storeTestUtils';
 
-// A plain ReadableStore<DocsPanelHostSlice> test double — koine-ui is store-free, so this mocks the
-// contract directly instead of pulling in koine-studio's real Zustand store. The token derivation
+// The shared ReadableStore<T> test double (host/storeTestUtils) — koine-ui is store-free, so it mocks
+// the contract directly instead of pulling in koine-studio's real Zustand store. The token derivation
 // (`roots[0] ?? ''`) is the host's workspace slice's job, pinned in koine-studio's tests; this file
 // covers the host component's capture-then-reload-on-change contract, which had no direct unit
 // coverage on the koine-studio side (it was pinned only through controller integration tests).
-function createMockDocsStore(initial: DocsPanelHostSlice): ReadableStore<DocsPanelHostSlice> & {
-  set(next: DocsPanelHostSlice): void;
-} {
-  let state = initial;
-  const listeners = new Set<(state: DocsPanelHostSlice) => void>();
-  return {
-    getState: () => state,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    set(next) {
-      state = next;
-      for (const listener of listeners) listener(next);
-    },
-  };
-}
 
 describe('DocsPanelHost', () => {
   test('first mount CAPTURES the node via onMount without fetching (the lazy tab-open path owns that paint)', () => {
-    const store = createMockDocsStore({ folderRootToken: 'WS-A' });
+    const store = createTestReadableStore<DocsPanelHostSlice>({ folderRootToken: 'WS-A' });
     const onMount = vi.fn();
     const load = vi.fn();
     const { container } = render(<DocsPanelHost store={store} onMount={onMount} load={load} />);
@@ -41,7 +24,7 @@ describe('DocsPanelHost', () => {
   });
 
   test('a folder-token change reloads into the SAME captured node; an unchanged token never does', () => {
-    const store = createMockDocsStore({ folderRootToken: 'WS-A' });
+    const store = createTestReadableStore<DocsPanelHostSlice>({ folderRootToken: 'WS-A' });
     const onMount = vi.fn();
     const load = vi.fn();
     const { container } = render(<DocsPanelHost store={store} onMount={onMount} load={load} />);

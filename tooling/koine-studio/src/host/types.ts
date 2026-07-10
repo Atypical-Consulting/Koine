@@ -429,13 +429,18 @@ export interface Platform {
   gitUnstage(folderToken: string, relPaths: string[]): Promise<void>;
 
   /**
-   * Discard the working-tree changes of the given paths under the workspace folder — REVERT a tracked
-   * path to its index/HEAD state (`git restore`/`git checkout --`) and REMOVE an untracked one
-   * (`git clean`). This is DESTRUCTIVE and not recoverable — the working-tree bytes are gone — so
-   * callers MUST confirm with the user first. Resolves once the working tree is reverted; rejects on
-   * git failure. Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   * Discard the working-tree changes of the given paths under the workspace folder — REVERT each
+   * `trackedPaths` entry to its index state (`git restore --worktree`) and REMOVE each
+   * `untrackedPaths` entry from disk (`git clean -f`). The CALLER supplies the tracked/untracked
+   * split — the Source Control panel already knows each row's status — and the host runs each bucket
+   * verbatim: deriving the split host-side (via `git ls-files`) wasted a subprocess and SILENTLY
+   * no-opped on a C-quoted (non-ASCII) filename, where the quoted ls-files output never matched the
+   * raw path and `clean -f` then skipped the actually-tracked file while exiting 0. This is
+   * DESTRUCTIVE and not recoverable — the working-tree bytes are gone — so callers MUST confirm with
+   * the user first. Resolves once the working tree is reverted; rejects on git failure. Desktop only;
+   * the browser stub rejects. Callers must check {@link canUseGit} first.
    */
-  gitDiscard(folderToken: string, relPaths: string[]): Promise<void>;
+  gitDiscard(folderToken: string, trackedPaths: string[], untrackedPaths: string[]): Promise<void>;
 
   /**
    * Commit the currently-staged changes of the workspace folder with `message` (`git commit -m`).

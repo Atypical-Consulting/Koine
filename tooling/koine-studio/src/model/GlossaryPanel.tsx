@@ -86,7 +86,7 @@ export function GlossaryPanel(props: {
  */
 function GlossaryEntryRow(props: { entry: GlossaryEntry; handlers: GlossaryHandlers }) {
   const { entry, handlers } = props;
-  const { editing, draft, setDraft, openEditor, commit, cancel } = useCommittableField({
+  const { editing, draft, setDraft, openEditor, editorOnKeyDown, commit, cancel } = useCommittableField({
     committedValue: entry.doc?.trim() ?? '',
     onCommit: (next) => handlers.onSave(entry, next),
   });
@@ -131,9 +131,8 @@ function GlossaryEntryRow(props: { entry: GlossaryEntry; handlers: GlossaryHandl
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                   e.preventDefault();
                   commit();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  cancel();
+                } else {
+                  editorOnKeyDown(e); // Escape → the hook's revert-and-close cancel
                 }
               }}
             />

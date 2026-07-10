@@ -2,21 +2,16 @@ import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { expect, waitFor } from 'storybook/test';
 import { UnsavedIndicator, type UnsavedIndicatorSlice } from './UnsavedIndicator';
 import type { ReadableStore } from '../host/store';
+import { readableStoreOf } from '../host/storeTestUtils';
 
 // The global unsaved-work indicator. It renders no tree of its own (returns null) — instead it OWNS a
 // static host `<button class="unsaved-indicator">` via effects, driving its "N unsaved" text/aria/hidden
 // state and the document title's bullet from the host's dirty-buffer count. Dirty state arrives through
 // the `ReadableStore<UnsavedIndicatorSlice>` host-adapter contract (issue #944); this Storybook file
-// mocks that contract directly, matching UnsavedIndicator.test.tsx's `createMockUnsavedStore`. To make
-// the pill visible in isolation, the story builds the host button, mounts it into the canvas, and seeds
-// the slice before render so the component's effect paints the pill on first commit.
-
-function readableStoreOf(initial: UnsavedIndicatorSlice): ReadableStore<UnsavedIndicatorSlice> {
-  return {
-    getState: () => initial,
-    subscribe: () => () => {},
-  };
-}
+// mocks that contract directly via the shared `readableStoreOf` double (host/storeTestUtils), matching
+// UnsavedIndicator.test.tsx's `createTestReadableStore`. To make the pill visible in isolation, the
+// story builds the host button, mounts it into the canvas, and seeds the slice before render so the
+// component's effect paints the pill on first commit.
 
 /** The static host button the indicator drives: a `<button class="unsaved-indicator">`. */
 function makeHost(): HTMLButtonElement {
@@ -50,7 +45,7 @@ const meta = {
   // Defaults satisfy the (all-required) props for the type; every story uses `render` to build its own
   // host button + seeded store, so these placeholders are never actually mounted.
   args: {
-    store: readableStoreOf({ dirtyCount: 0 }),
+    store: readableStoreOf<UnsavedIndicatorSlice>({ dirtyCount: 0 }),
     host: makeHost(),
     baseTitle: 'Koine Studio',
     onSaveAll: () => {},
@@ -66,7 +61,7 @@ type Story = StoryObj<typeof meta>;
 
 /** Two dirty buffers: the pill shows "2 unsaved" and the title gains a bullet. */
 export const Unsaved: Story = {
-  render: () => mount(readableStoreOf({ dirtyCount: 2 })),
+  render: () => mount(readableStoreOf<UnsavedIndicatorSlice>({ dirtyCount: 2 })),
   // The indicator returns null and drives the host button's text + aria-label from a deferred effect, so
   // the button is momentarily empty after first commit. Await the effect's paint here — `play` runs before
   // the a11y `afterEach` — so axe never races the empty button into a spurious `button-name` violation.
