@@ -815,7 +815,7 @@ public class PythonConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var rendered = TestSupport.Render(result.Files);
-        rendered.ShouldContain("Decimal(self.int_bonus) if self.int_bonus is not None else None");
+        rendered.ShouldContain("Decimal(__koine_v) if (__koine_v := self.int_bonus) is not None else None");
 
         AssertStrictlyTypeChecks(result.Files);
     }
@@ -876,6 +876,40 @@ public class PythonConformanceTests
 
         var rendered = TestSupport.Render(result.Files);
         rendered.ShouldContain("Decimal(self.amount)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1344 code-review follow-up: <c>needsOptionalWiden</c>'s branch must type-check under
+    /// <c>mypy --strict</c> even when the branch itself is a COMPOUND expression (here a nested
+    /// <c>ConditionalExpr</c>), not just a bare identifier/attribute access. <c>is not None</c> can only
+    /// narrow a simple name/attribute chain, not a re-occurring arbitrary sub-expression — an earlier
+    /// version of this fix duplicated the branch's rendered text into both the guard and the value
+    /// position, which mypy could narrow for a bare field (the other <c>needsOptionalWiden</c> tests above)
+    /// but rejected for this nested-conditional shape with "Argument 1 to &quot;Decimal&quot; has
+    /// incompatible type". Binding the branch once via a walrus fixes both the narrowing and the
+    /// double-evaluation.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_over_compound_branch_typechecks_under_strict()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                decimalField: Decimal
+                flag: Bool
+                bonus1: Int?
+                bonus2: Int?
+                total: Decimal? = if decimalField > 0 then (if flag then bonus1 else bonus2) else decimalField
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal(__koine_v) if (__koine_v := (self.bonus1 if self.flag else self.bonus2)) is not None else None");
 
         AssertStrictlyTypeChecks(result.Files);
     }

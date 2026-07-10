@@ -288,9 +288,13 @@ internal sealed class PythonExpressionTranslator
     /// Writes one <c>ConditionalExpr</c> branch, individually widened to <c>Decimal</c> when its own
     /// inferred type is a non-optional <c>Int</c> while the SIBLING branch is <c>Decimal</c>
     /// (<c>Decimal(...)</c>), or null-check-widened when its own inferred type is an OPTIONAL <c>Int</c>
-    /// while the SIBLING branch is <c>Decimal</c> (<c>(Decimal(x) if x is not None else None)</c> — Python
-    /// has no <c>Option.map</c>, so the widen is an inline conditional expression that passes <c>None</c>
-    /// through and widens the present value). <see cref="TypeResolver"/> already widens the conditional's
+    /// while the SIBLING branch is <c>Decimal</c> (<c>(Decimal(__koine_v) if (__koine_v := x) is not None
+    /// else None)</c> — Python has no <c>Option.map</c>, so the widen is an inline conditional expression
+    /// that passes <c>None</c> through and widens the present value, bound via a walrus so <c>x</c> is
+    /// evaluated exactly once and <c>mypy --strict</c> can narrow it — narrowing only works on a simple
+    /// name/attribute chain, not a duplicated arbitrary sub-expression, so a compound branch like a nested
+    /// conditional needs the binding regardless of the single-evaluation win). <see cref="TypeResolver"/>
+    /// already widens the conditional's
     /// own aggregate type to the wider/optional-joined type of the two branches (#975), so an unreconciled
     /// pair emits two disagreeing types in the same ternary — a real <c>mypy --strict</c> "Incompatible
     /// return value type" (issue #1344; the numeric-only case, the optional-numeric case, and both at
@@ -308,9 +312,7 @@ internal sealed class PythonExpressionTranslator
     /// conclusion for their own structural-union optional shapes).
     /// </para>
     /// <c>needsWiden</c> and <c>needsOptionalWiden</c> are mutually exclusive (they key off the same
-    /// branch's own optionality). The branch expression is written twice for <c>needsOptionalWiden</c>
-    /// (the <c>None</c> guard and the widened value) — safe because this sublanguage's expressions are
-    /// pure, the same duplication the <c>CoalesceExpr</c> lowering above already relies on.
+    /// branch's own optionality).
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
@@ -330,11 +332,13 @@ internal sealed class PythonExpressionTranslator
 
         if (needsOptionalWiden)
         {
-            sb.Append("(Decimal(");
+            // A walrus binding (not a duplicated `<branch>`, unlike the CoalesceExpr lowering above) —
+            // `is not None` can only type-narrow a simple name/attribute chain under `mypy --strict`, not
+            // an arbitrary re-occurring sub-expression, so a compound branch (e.g. a nested conditional)
+            // needs a name to narrow on regardless of the double-evaluation cost.
+            sb.Append("(Decimal(__koine_v) if (__koine_v := ");
             Write(branch, sb);
-            sb.Append(") if ");
-            Write(branch, sb);
-            sb.Append(" is not None else None)");
+            sb.Append(") is not None else None)");
             return;
         }
 

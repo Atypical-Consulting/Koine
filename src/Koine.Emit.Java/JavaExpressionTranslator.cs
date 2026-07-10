@@ -271,14 +271,14 @@ internal sealed class JavaExpressionTranslator
 
         if (needsWiden)
         {
-            sb.Append("java.math.BigDecimal.valueOf(");
+            // Reuses the same BigDecimal-position widening WriteBinary already applies to a plain
+            // arithmetic/comparison operand, so a literal `0` branch gets its BigDecimal.ZERO shortcut here
+            // too, instead of a hand-rolled BigDecimal.valueOf(...) wrap drifting from that convention.
+            WriteBigDecimalOperand(branch, branchType, sb);
         }
-
-        Write(branch, sb);
-
-        if (needsWiden)
+        else
         {
-            sb.Append(')');
+            Write(branch, sb);
         }
 
         if (needsOptionalWiden)
