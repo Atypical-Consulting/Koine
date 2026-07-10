@@ -159,4 +159,90 @@ public class ParsingTests
         error.Line.ShouldBeGreaterThan(0);
         error.Column.ShouldBeGreaterThan(0);
     }
+
+    [Fact]
+    // Regression for #1298: an `aggregate` declaration missing its required `root <Entity>` clause
+    // used to crash the compiler with an unhandled NullReferenceException — BuildAggregate
+    // unconditionally dereferenced the (absent, on a recovered parse) second Identifier token. The
+    // real syntax error is already reported by the parser; the builder visitor must not throw on
+    // top of it.
+    public void Aggregate_missing_root_clause_yields_a_syntax_diagnostic_not_a_throw()
+    {
+        const string source =
+            "context Shop {\n  value Money {\n    amount: Decimal\n  }\n  aggregate CartAgg {\n"
+            + "    entity Cart identified by CartId {\n      fee: Money\n    }\n  }\n}\n";
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    // Positive-regression companion to the above: a well-formed aggregate with its `root` clause
+    // present must parse exactly as before — no diagnostic, no behavior change.
+    public void Aggregate_with_root_clause_parses_without_syntax_errors()
+    {
+        const string source =
+            "context Shop {\n  value Money {\n    amount: Decimal\n  }\n  aggregate CartAgg root Cart {\n"
+            + "    entity Cart identified by CartId {\n      fee: Money\n    }\n  }\n}\n";
+
+        var (model, diagnostics) = new KoineCompiler().Parse(source, "t.koi");
+
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+        model.Contexts.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    // Same bug class as #1298, found by auditing sibling Build* methods: `entityDecl` also has a
+    // second mandatory Identifier (`identified by <Id>`) that BuildEntity dereferenced unconditionally.
+    public void Entity_missing_identified_by_clause_yields_a_syntax_diagnostic_not_a_throw()
+    {
+        const string source = "context C {\n  entity Cart {\n    fee: Int\n  }\n}\n";
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    // Same bug class as #1298: `policyDecl` also has a second mandatory Identifier (`when <Event>`)
+    // that BuildPolicy dereferenced unconditionally.
+    public void Policy_missing_when_clause_yields_a_syntax_diagnostic_not_a_throw()
+    {
+        const string source = "context C {\n  policy NotifyOnPlaced then Notification.record()\n}\n";
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    // Same bug class as #1298: `specDecl` requires a `typeName` after `on` that BuildSpec
+    // dereferenced unconditionally.
+    public void Spec_missing_on_type_clause_yields_a_syntax_diagnostic_not_a_throw()
+    {
+        const string source = "context C {\n  spec IsLarge = total > 100\n}\n";
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    // Same bug class as #1298: `readmodelDecl` requires a `typeName` after `from` that
+    // BuildReadModel dereferenced unconditionally.
+    public void Readmodel_missing_from_type_clause_yields_a_syntax_diagnostic_not_a_throw()
+    {
+        const string source = "context C {\n  readmodel OrderSummary {\n  }\n}\n";
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
 }
