@@ -1,0 +1,8 @@
+# Regenerated on every run.sh — never commit the generated tree.
+/generated/
+
+# Transient build output run.sh transpiles the demo into before executing it.
+/.build/
+
+# Node dependency tree, if a contributor ever runs `npm install` here.
+/node_modules/
