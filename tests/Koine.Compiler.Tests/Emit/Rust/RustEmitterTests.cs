@@ -113,4 +113,69 @@ public class RustEmitterTests
         rust.ShouldContain("let label = \"std\".to_string();");
         rust.ShouldNotContain("let label = \"std\";");
     }
+
+    private const string OptionalConstantDefaultCoercionModel = """
+        context Shop {
+          value Money {
+            amount: Decimal
+            taxRate: Decimal? = 2
+            label: String? = "std"
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1325: an <b>optional</b> value-object constant-default field must be coerced to its
+    /// declared underlying Rust type <i>and</i> <c>Some(...)</c>-wrapped in the smart constructor's
+    /// <c>Ok(Self { ... })</c> literal — #1319 only handles the non-optional case, so an
+    /// <c>Option&lt;Decimal&gt;</c>/<c>Option&lt;String&gt;</c> field defaulted to a bare literal is
+    /// otherwise left completely uncoerced, a real <c>cargo check</c> <c>E0308</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_constant_default_fields_coerce_and_some_wrap()
+    {
+        var result = new KoineCompiler().Compile(OptionalConstantDefaultCoercionModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("tax_rate: Some(Decimal::from(2)),");
+        rust.ShouldNotContain("tax_rate: 2,");
+
+        rust.ShouldContain("label: Some(\"std\".to_string()),");
+        rust.ShouldNotContain("label: \"std\",");
+    }
+
+    private const string OptionalEntityConstantDefaultCoercionModel = """
+        context Shop {
+          entity Product identified by ProductId {
+            amount: Decimal
+            taxRate: Decimal? = 2
+            label: String? = "std"
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1325: an <b>optional</b> entity constant-default field must be coerced to its declared
+    /// underlying Rust type <i>and</i> <c>Some(...)</c>-wrapped in the smart constructor's <c>let</c>-
+    /// binding loop — the entity dual of the value-object fix above; #1324 only handles the non-optional
+    /// case.
+    /// </summary>
+    [Fact]
+    public void Entity_optional_constant_default_fields_coerce_and_some_wrap()
+    {
+        var result = new KoineCompiler().Compile(OptionalEntityConstantDefaultCoercionModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("let tax_rate = Some(Decimal::from(2));");
+        rust.ShouldNotContain("let tax_rate = 2;");
+
+        rust.ShouldContain("let label = Some(\"std\".to_string());");
+        rust.ShouldNotContain("let label = \"std\";");
+    }
 }
