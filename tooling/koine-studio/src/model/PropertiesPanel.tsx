@@ -349,17 +349,14 @@ function ReadonlyPropertyRow(props: { name: string; type: string; computed: bool
 
 /**
  * An editable property row: name + type inputs (commit a rename / change-type) and a delete button.
- * Both nested `EditableRow`s are keyed on a composite of the OWNING ELEMENT's stable identity
- * (`element.qualifiedName`) and the property's own identity (`name`) — never on the field's own value
- * alone, and never on `name` alone either (a property name isn't guaranteed unique across elements).
- * Keying by value only (the pre-fix behaviour) let a focus-retaining selection change to a DIFFERENT
- * element that happens to have a same-named property skip the remount, leaving the previous element's
- * uncommitted text in the DOM — and a subsequent blur, now closed over the NEW element, would write
- * that stale text to the wrong element (final #992 review, Finding 1 — the same bug class the General
- * section's Name/Description fields were fixed for; task-4 review, commit 4631c4d7). The type field's
- * key additionally includes `type` itself, preserving `EditableRow`'s original by-value remount (a
- * genuine external type change for the SAME property still refreshes the field), while the name field's
- * key needs no separate value component since a rename already changes `name`, which is part of the key.
+ * Both nested `EditableRow`s take a composite identity of the OWNING ELEMENT's stable identity
+ * (`element.qualifiedName`) and the property's own identity (`name`) — never the field's own value
+ * alone, and never `name` alone either (a property name isn't guaranteed unique across elements): see
+ * `useEditableField`'s contract for the cross-element write-leak class this closes (final #992 review,
+ * Finding 1). The type field's identity additionally includes `type` itself, preserving the original
+ * by-value remount (a genuine external type change for the SAME property still refreshes the field),
+ * while the name field's identity needs no separate value component since a rename already changes
+ * `name`, which is part of the identity.
  */
 function EditablePropertyRow(props: {
   element: InspectorElement;
@@ -373,7 +370,7 @@ function EditablePropertyRow(props: {
     <tr class="koi-inspector-row koi-inspector-row-editable">
       <th scope="row" class="koi-inspector-prop-name">
         <EditableRow
-          key={identity}
+          identity={identity}
           value={name}
           ariaLabel={`Name of property ${name}`}
           onCommit={(next) => handlers.onRenameProperty?.(element, name, next)}
@@ -381,7 +378,7 @@ function EditablePropertyRow(props: {
       </th>
       <td class="koi-inspector-prop-type">
         <EditableRow
-          key={`${identity}:${type}`}
+          identity={`${identity}:${type}`}
           value={type}
           ariaLabel={`Type of property ${name}`}
           list={TYPE_OPTIONS_ID}
@@ -406,39 +403,29 @@ function EditablePropertyRow(props: {
 }
 
 /**
- * A small, uncontrolled text input: Enter blurs, Escape reverts to `value` and blurs, and a changed,
- * non-blank value commits (trimmed) on blur via `onCommit` — an unchanged/blank value is silently
- * reset instead. Replaces the old `propInput` DOM builder and the synthetic `commit` `CustomEvent` it
- * dispatched (#992) — the caller now gets an ordinary callback. Keyed by its caller on `value` (see
- * `EditablePropertyRow`) so a genuine prop change (not just local typing) remounts the field with the
- * fresh `defaultValue`.
+ * A small, uncontrolled text input over `useEditableField` (see `@/shared/useEditableField` for the
+ * full commit-on-blur/Enter, revert-on-Escape, identity-change-reset contract). Replaces the old
+ * `propInput` DOM builder and the synthetic `commit` `CustomEvent` it dispatched (#992) — the caller
+ * now gets an ordinary callback, and passes a stable `identity` (see `EditablePropertyRow`) so a
+ * genuine identity change (not just local typing) remounts/resets the field with the fresh value.
  */
-function EditableRow(props: { value: string; ariaLabel: string; onCommit: (next: string) => void; list?: string }) {
-  const { value, ariaLabel, onCommit, list } = props;
+function EditableRow(props: {
+  identity: string;
+  value: string;
+  ariaLabel: string;
+  onCommit: (next: string) => void;
+  list?: string;
+}) {
+  const { identity, value, ariaLabel, onCommit, list } = props;
+  const field = useEditableField<HTMLInputElement>({ identity, value, onCommit });
   return (
     <input
+      {...field}
       type="text"
       class="koi-inspector-prop-input"
       spellcheck={false}
       aria-label={ariaLabel}
       list={list}
-      defaultValue={value}
-      onKeyDown={(e) => {
-        const input = e.currentTarget as HTMLInputElement;
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          input.blur();
-        } else if (e.key === 'Escape') {
-          input.value = value;
-          input.blur();
-        }
-      }}
-      onBlur={(e) => {
-        const input = e.currentTarget as HTMLInputElement;
-        const next = input.value.trim();
-        if (next && next !== value) onCommit(next);
-        else input.value = value;
-      }}
     />
   );
 }
