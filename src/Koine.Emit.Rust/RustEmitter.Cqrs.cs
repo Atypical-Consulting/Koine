@@ -155,21 +155,42 @@ public sealed partial class RustEmitter
         : access + ".clone()";
 
     /// <summary>
-    /// Owns a derived projection expression (wrapped so the suffix binds the whole expression), gated on
-    /// the field's underlying (non-optional) declared type — not <paramref name="type"/> directly, or an
-    /// optional-declared field's borrowed-<c>&amp;str</c> <c>.trim()</c> body would fall through to a
-    /// no-op <c>.clone()</c> (#1332's <c>WriteDerived</c> fix, applied here to <c>OwnDerived</c>, its
-    /// read-model dual). <c>Some(...)</c>-wraps the owned result when <paramref name="type"/> is optional
-    /// and the projection's own inferred <paramref name="bodyType"/> is non-optional — mirroring
+    /// Owns a derived projection expression (wrapped so the suffix binds the whole expression). When the
+    /// projection's own inferred <paramref name="bodyType"/> is itself optional (e.g. a bare reference to
+    /// another optional-declared source member), its accessor already returns a reference to an
+    /// <c>Option&lt;...&gt;</c> regardless of the underlying type's Copy-ness, so it's always owned via
+    /// <c>.clone()</c> — <c>.to_string()</c> would not type-check against <c>&amp;Option&lt;String&gt;</c>.
+    /// Otherwise, a non-optional String body (a bare accessor returning <c>&amp;str</c>, a <c>.trim()</c>
+    /// chain, a concatenation, ...) is owned via <c>.to_string()</c> — safe whether the rendered
+    /// expression is a borrowed <c>&amp;str</c> or an already-owned <c>String</c> (#1332's
+    /// <c>WriteDerived</c> fix, generalized here to <c>OwnDerived</c>, its read-model dual, beyond just
+    /// the <c>.trim()</c> shape since a read-model projection's body isn't restricted to it). Any other
+    /// non-Copy body is <c>.clone()</c>d out of its accessor reference. Gated on <paramref name="bodyType"/>
+    /// (falling back to the field's underlying, non-optional declared type when inference can't determine
+    /// it) — not <paramref name="type"/> directly, which would misclassify an optional-declared field
+    /// whose body is a non-optional bare String. <c>Some(...)</c>-wraps the owned result when
+    /// <paramref name="type"/> is optional and <paramref name="bodyType"/> is non-optional — mirroring
     /// <see cref="SomeWrapIfNeeded"/> (#1329) — so an always-present projected value still reaches the
     /// declared <c>Option&lt;...&gt;</c> accessor shape.
     /// </summary>
     private static string OwnDerived(string rendered, TypeRef type, TypeRef? bodyType, RustTypeMapper typeMapper)
     {
         var underlyingType = type.IsOptional ? type with { IsOptional = false } : type;
-        var owned = typeMapper.IsCopy(underlyingType) ? rendered
-            : underlyingType is { Name: "String" } ? "(" + rendered + ").to_string()"
-            : "(" + rendered + ").clone()";
+
+        string owned;
+        if (bodyType is { IsOptional: true })
+        {
+            owned = "(" + rendered + ").clone()";
+        }
+        else if (typeMapper.IsCopy(underlyingType))
+        {
+            owned = rendered;
+        }
+        else
+        {
+            var isString = (bodyType ?? underlyingType) is { Name: "String" };
+            owned = isString ? "(" + rendered + ").to_string()" : "(" + rendered + ").clone()";
+        }
 
         return SomeWrapIfNeeded(owned, type, bodyType);
     }

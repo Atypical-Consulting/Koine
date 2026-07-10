@@ -2001,4 +2001,76 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1349's edge-case follow-through: a <c>Copy</c>-typed (<c>Decimal</c>) optional-declared
+    /// read-model projected field must be <c>Some(...)</c>-wrapped WITHOUT a spurious <c>.clone()</c> —
+    /// <c>OwnDerived</c>'s ownership gate must short-circuit on the field's underlying (non-optional) Copy
+    /// type before the wrap decision, or the emitted crate does not compile (a bare <c>.clone()</c> on an
+    /// already-<c>Decimal</c> body doesn't itself break compilation, but the missing <c>Some(...)</c> does
+    /// — <c>E0308</c>: <c>Option&lt;Decimal&gt;</c> expected, <c>Decimal</c> found).
+    /// </summary>
+    [Fact]
+    public void Read_model_optional_derived_copy_typed_field_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  aggregate Shop root Money {\n" +
+            "    entity Money identified by MoneyId {\n" +
+            "      amount: Decimal\n" +
+            "      surcharge: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel MoneySummary from Money {\n" +
+            "    id\n" +
+            "    total: Decimal? = amount + surcharge\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1349 code-review finding: a text-based (e.g. <c>.EndsWith(".trim()")</c>) gate on
+    /// <c>OwnDerived</c>'s owning suffix is too narrow — a bare String passthrough with no method call at
+    /// all needs the same <c>.to_string()</c> + <c>Some(...)</c>-wrap treatment as a <c>.trim()</c> body.
+    /// Conversely, a projection that passes through another already-optional-declared source member — a
+    /// String or a Copy-typed <c>Int</c> alike — is already <c>Option&lt;...&gt;</c>-shaped at its accessor
+    /// and must be owned via a plain <c>.clone()</c> with no <c>.to_string()</c> rewrite and no
+    /// <c>Some(...)</c>-wrap, regardless of the underlying type's Copy-ness.
+    /// </summary>
+    [Fact]
+    public void Read_model_optional_derived_field_bare_and_optional_passthrough_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  aggregate Shop root Person {\n" +
+            "    entity Person identified by PersonId {\n" +
+            "      name: String\n" +
+            "      middleName: String?\n" +
+            "      bonus: Int?\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel PersonSummary from Person {\n" +
+            "    id\n" +
+            "    bareName: String? = name\n" +
+            "    passthrough: String? = middleName\n" +
+            "    bonusOut: Int? = bonus\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
