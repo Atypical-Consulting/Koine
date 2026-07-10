@@ -533,10 +533,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             };
         }
 
-        // `when <Identifier>` is the event; the policy's own name is Identifier(0). On a recovered
-        // (error) parse a missing `when <Event>` clause leaves the second Identifier context absent;
-        // fall back to an empty placeholder rather than throwing (mirrors BuildAggregate, #1298).
-        return new PolicyDecl(ctx.Identifier(0).GetText(), ctx.Identifier(1)?.GetText() ?? string.Empty, reaction)
+        // `when <Identifier>` is the event; the policy's own name is Identifier(0). NameOf already
+        // tolerates the second Identifier context being absent on a recovered (error) parse of a
+        // missing `when <Event>` clause (#1298).
+        return new PolicyDecl(ctx.Identifier(0).GetText(), NameOf(ctx.Identifier(1)), reaction)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier(0)),
@@ -647,10 +647,9 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         var factories = Map(ctx.factoryDecl(), BuildFactory);
 
         var name = ctx.Identifier(0).GetText();
-        // On a recovered (error) parse a missing `identified by <Identity>` clause leaves the second
-        // Identifier context absent; fall back to an empty placeholder rather than throwing (mirrors
-        // BuildAggregate, #1298).
-        var identityName = ctx.Identifier(1)?.GetText() ?? string.Empty;
+        // NameOf already tolerates the second Identifier context being absent on a recovered (error)
+        // parse of a missing `identified by <Identity>` clause (#1298).
+        var identityName = NameOf(ctx.Identifier(1));
         (IdentityStrategy strategy, var backing) = BuildIdentityStrategy(ctx.identityStrategy());
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
@@ -848,10 +847,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         }
 
         var name = ctx.Identifier(0).GetText();
-        // On a recovered (error) parse, a missing `root <Entity>` clause leaves the second
-        // Identifier context absent; fall back to an empty placeholder rather than throwing (#1298).
-        // The real syntax error is already reported by the parser.
-        var rootName = ctx.Identifier(1)?.GetText() ?? string.Empty;
+        // NameOf already tolerates the second Identifier context being absent on a recovered (error)
+        // parse of a missing `root <Entity>` clause (#1298). The real syntax error is reported
+        // separately by the parser's error listener.
+        var rootName = NameOf(ctx.Identifier(1));
         var versioned = ctx.VERSIONED() is not null;
         var (since, deprecated) = ReadAnnotations(ctx.annotation());
 
