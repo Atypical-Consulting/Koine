@@ -1745,4 +1745,36 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1335: a <c>ConditionalExpr</c> derived-member body whose numeric-widen-needing branch is
+    /// itself optional (<c>Int?</c>) must render as <c>.map(Decimal::from)</c> — both against a
+    /// non-optional <c>Decimal</c> sibling and against an optional <c>Decimal?</c> sibling — or the
+    /// emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    decimalAmount: Decimal\n" +
+            "    intBonus: Int?\n" +
+            "    total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus\n" +
+            "  }\n" +
+            "  value Cash {\n" +
+            "    amount: Int\n" +
+            "    bonusDecimal: Decimal?\n" +
+            "    bonusInt: Int?\n" +
+            "    total: Decimal? = if amount > 0 then bonusDecimal else bonusInt\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
