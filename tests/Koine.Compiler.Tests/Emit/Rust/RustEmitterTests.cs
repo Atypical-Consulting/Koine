@@ -504,4 +504,36 @@ public class RustEmitterTests
         rust.ShouldContain("self.a.map(Decimal::from) == self.d");
         rust.ShouldNotContain("Some(");
     }
+
+    private const string NonOptionalIntComparedToOptionalDecimalModel = """
+        context Shop {
+          value Money {
+            c: Decimal?
+            a: Int
+            isEq: Bool = c == a
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343 code-review finding: the mirror of the bare-identifier case above — here the
+    /// Int-named operand (<c>a</c>) is NOT optional, but the opposite, already-<c>Decimal</c>-named
+    /// operand (<c>c</c>) IS optional (<c>Decimal?</c>). The Int side still widens bare (no
+    /// <c>.map(...)</c> needed, since it isn't itself optional), but the widened result must now become
+    /// <c>Some(...)</c>-wrapped to match its optional sibling — composing as <c>Some(Decimal::from(...))</c>
+    /// (wrap outside, widen inside), the same nesting order #1331 established for
+    /// <c>WriteReconciledBranch</c>. <c>someWrapLeft</c>/<c>someWrapRight</c> must key off EACH side's own
+    /// optionality, not off which side happens to be the Int-named one.
+    /// </summary>
+    [Fact]
+    public void Non_optional_int_compared_to_optional_decimal_some_wraps_the_widened_side()
+    {
+        var result = new KoineCompiler().Compile(NonOptionalIntComparedToOptionalDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.c == Some(Decimal::from(self.a))");
+        rust.ShouldNotContain("Decimal::from(Some(");
+    }
 }

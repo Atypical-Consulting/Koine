@@ -256,15 +256,18 @@ internal sealed class RustExpressionTranslator
 
         // An optional Int coerced toward Decimal maps inside its Option (EmitCoerced/
         // WriteArithmeticOperand's compound wrap) rather than widening in place, so it stays
-        // Option-shaped — the opposite side must then itself become `Some(...)`-wrapped when it isn't
-        // already optional, or the two sides of the operator render as mismatched `Option<Decimal>` /
-        // `Decimal` types (#1343 — mirrors WriteReconciledBranch's needsSomeWrap, #1335, applied here to
-        // binary operands rather than conditional branches). Gated on the same coerceLeft/coerceRight
-        // Int-vs-Decimal condition, so this never touches an unrelated type mismatch. In practice only
-        // reachable via `==`/`!=`: the semantic validator's IsUnguardedOptional diagnostic already
-        // rejects an unguarded optional arithmetic/relational operand.
-        var someWrapLeft = coerceRight is not null && rightType is { IsOptional: true } && leftType is { IsOptional: false };
-        var someWrapRight = coerceLeft is not null && leftType is { IsOptional: true } && rightType is { IsOptional: false };
+        // Option-shaped; symmetrically, an already-optional Decimal side stays Option-shaped regardless
+        // of coercion. Either way, whichever side ends up non-optional after coercion must itself become
+        // `Some(...)`-wrapped when its sibling is optional, or the two sides of the operator render as
+        // mismatched `Option<Decimal>` / `Decimal` types (#1343 — mirrors WriteReconciledBranch's
+        // needsSomeWrap, #1335, applied here to binary operands rather than conditional branches). Keyed
+        // on each side's OWN optionality (not on which side happens to be the Int-named one), so it
+        // fires both when the Int side is optional and when the already-Decimal side is optional.
+        // Gated on `coerceLeft`/`coerceRight` involvement so this never touches an unrelated type
+        // mismatch outside the Int-vs-Decimal coercion this issue scopes to.
+        var involvesDecimalCoercion = coerceLeft is not null || coerceRight is not null;
+        var someWrapLeft = involvesDecimalCoercion && leftType is { IsOptional: false } && rightType is { IsOptional: true };
+        var someWrapRight = involvesDecimalCoercion && rightType is { IsOptional: false } && leftType is { IsOptional: true };
 
         // Value-object arithmetic (e.g. Money * quantity) consumes `self` via std::ops, so a non-Copy
         // operand must evaluate to an owned value; comparisons borrow and need no clone.

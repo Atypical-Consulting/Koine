@@ -1857,4 +1857,30 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1343 code-review finding: the mirror of the bare-identifier case above — a non-optional
+    /// <c>Int</c> operand compared via <c>==</c> to an ALREADY-optional <c>Decimal?</c> operand. The Int
+    /// side still widens bare (it isn't itself optional), but the widened result must become
+    /// <c>Some(...)</c>-wrapped to match its optional sibling — or the emitted crate does not compile.
+    /// </summary>
+    [Fact]
+    public void Non_optional_int_compared_to_optional_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    c: Decimal?\n" +
+            "    a: Int\n" +
+            "    isEq: Bool = c == a\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
