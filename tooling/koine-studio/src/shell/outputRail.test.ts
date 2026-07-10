@@ -43,11 +43,11 @@ describe('ensureOutputScaffold', () => {
     expect(s.rail.contains(s.railHead)).toBe(true);
   });
 
-  test('.out-rail carries no widget role/aria-label of its own — only the mounted tree\'s own <ul role="tree"> does (fixes the tablist-containing-a-tree nesting)', () => {
+  test('.out-rail carries a static role="region" + aria-label (never bare of an accessible role/name, even before the tree has any of its own — fixes the tablist-containing-a-tree nesting without reintroducing the original "no role at all" gap)', () => {
     const previewEl = host();
     const s = ensureOutputScaffold(previewEl);
-    expect(s.rail.getAttribute('role')).toBeNull();
-    expect(s.rail.getAttribute('aria-label')).toBeNull();
+    expect(s.rail.getAttribute('role')).toBe('region');
+    expect(s.rail.getAttribute('aria-label')).toBe('Generated files');
   });
 });
 
@@ -98,6 +98,11 @@ describe('applyOutputTreeEmphasis (ADR 0009) — replaces renderOutputRail\'s sc
     expect(byPath(root, 'Kitchen').classList.contains('on')).toBe(false);
     expect(byPath(root, 'runtime').classList.contains('dim')).toBe(true);
     expect(byPath(root, 'runtime').classList.contains('on')).toBe(false);
+
+    // WCAG AA non-color signal (ADR 0009): the active scope must not rely on color/hue alone.
+    expect(byPath(root, 'Ordering').getAttribute('aria-current')).toBe('true');
+    expect(byPath(root, 'Kitchen').getAttribute('aria-current')).toBeNull();
+    expect(byPath(root, 'runtime').getAttribute('aria-current')).toBeNull();
   });
 
   test('All contexts (activeContext null) leaves every top-level node plain', () => {
@@ -106,6 +111,7 @@ describe('applyOutputTreeEmphasis (ADR 0009) — replaces renderOutputRail\'s sc
     for (const el of topLevel(root)) {
       expect(el.classList.contains('on')).toBe(false);
       expect(el.classList.contains('dim')).toBe(false);
+      expect(el.getAttribute('aria-current')).toBeNull();
     }
   });
 
@@ -115,6 +121,7 @@ describe('applyOutputTreeEmphasis (ADR 0009) — replaces renderOutputRail\'s sc
     for (const el of topLevel(root)) {
       expect(el.classList.contains('on')).toBe(false);
       expect(el.classList.contains('dim')).toBe(false); // NOT the whole tree dimmed
+      expect(el.getAttribute('aria-current')).toBeNull();
     }
   });
 
@@ -126,6 +133,8 @@ describe('applyOutputTreeEmphasis (ADR 0009) — replaces renderOutputRail\'s sc
     expect(byPath(root, 'Ordering').classList.contains('dim')).toBe(true);
     expect(byPath(root, 'Kitchen').classList.contains('on')).toBe(true);
     expect(byPath(root, 'Kitchen').classList.contains('dim')).toBe(false);
+    expect(byPath(root, 'Ordering').getAttribute('aria-current')).toBeNull();
+    expect(byPath(root, 'Kitchen').getAttribute('aria-current')).toBe('true');
   });
 });
 

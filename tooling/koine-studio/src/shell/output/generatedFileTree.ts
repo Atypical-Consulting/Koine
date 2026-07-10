@@ -14,9 +14,16 @@
 //
 // A folder row toggles `aria-expanded` (and hides/reveals its `<ul role="group">`) on click or
 // Enter/Space; a file row sets `aria-selected="true"` (clearing any prior selection — single-select)
-// and fires `onSelect(path)`. `setFiles` always rebuilds from scratch (a fresh `buildFileTree` call),
-// so a prior selection/collapse state does not survive a rebuild — the caller re-asserts it via
-// `selectPath` if it wants a file to stay marked selected across a recompile.
+// and fires `onSelect(path)`. `setFiles` always rebuilds from scratch (a fresh `buildFileTree` call), so
+// a prior SELECTION never survives a rebuild — the caller re-asserts it via `selectPath` if it wants a
+// file to stay marked selected across a recompile. Collapsed-folder state, however, DOES survive a
+// rebuild for any folder path that still exists in the new tree (code-review fix): `setFiles` captures
+// the currently-collapsed paths before discarding the old render and re-applies them to the matching new
+// rows once built — mirroring exactly how the caller re-asserts selection via `selectPath`. This matters
+// because `setFiles` is called on every successful emit, INCLUDING a live-edit re-emit (surfaceLoaders.tsx's
+// `loadPreview`, ~350ms after any keystroke while this panel is visible) — without this, a user's manually
+// collapsed folders would snap back open on essentially every edit. A folder whose path no longer exists
+// in the new tree simply loses its (moot) collapsed state.
 import type { EmitFile } from '@/lsp/protocol';
 import { buildFileTree, type TreeNode } from '@/shell/output/fileTree';
 import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
@@ -58,19 +65,24 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   let byPath = new Map<string, HTMLElement>();
   let folderGroups = new Map<HTMLElement, HTMLUListElement>();
 
+  /** Every treeitem in the current render, in DOM/visual order — the one `querySelectorAll` both
+   *  {@link visibleTreeItems} and {@link setRovingItem} derive from, so a call that needs both the full
+   *  and the visible set (setRovingItem) only ever traverses the tree once. */
+  function allTreeItems(): HTMLElement[] {
+    return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+  }
+
   /** The visible (not collapsed-away) treeitems, in DOM/visual order — a row is excluded once any
    *  ancestor folder's `<ul role="group">` is `hidden`. */
   function visibleTreeItems(): HTMLElement[] {
-    return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]')).filter(
-      (el) => el.closest('[hidden]') === null,
-    );
+    return allTreeItems().filter((el) => el.closest('[hidden]') === null);
   }
 
   /** Seed/refresh the roving tabindex: exactly one visible treeitem (`active`, else the first) is the
    *  lone tab stop; every other treeitem — visible or not — leaves the tab order. */
   function setRovingItem(active: HTMLElement | null): void {
-    const all = Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
-    const visible = visibleTreeItems();
+    const all = allTreeItems();
+    const visible = all.filter((el) => el.closest('[hidden]') === null);
     const tabbable = active && visible.includes(active) ? active : (visible[0] ?? null);
     for (const item of all) item.tabIndex = item === tabbable ? 0 : -1;
   }
@@ -81,10 +93,16 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   }
 
   /** The treeitem a DOM event targets: the event target's nearest treeitem, else the currently-focused
-   *  element's (the listeners below are delegated on the root). */
+   *  element's (the listeners below are delegated on the root). Code-review fix: `ev.target` isn't always
+   *  an `Element` — a row's label is a bare Text node (`buildRow` sets `li.textContent` directly, no
+   *  wrapping `<span>`), and in Firefox a real mouse click landing on rendered text sets `event.target` to
+   *  that Text node, which has no `.closest`. Resolve to the nearest Element first (its `.parentElement`
+   *  when the target itself isn't one) before calling `.closest` on it. */
   function currentTreeItem(ev: Event): HTMLElement | null {
+    const target = ev.target;
+    const start = target instanceof Element ? target : ((target as Node | null)?.parentElement ?? null);
     return (
-      (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
+      start?.closest<HTMLElement>('[role="treeitem"]') ??
       (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
       null
     );
@@ -99,14 +117,28 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   function selectFile(li: HTMLElement, path: string, fireOnSelect: boolean): void {
     clearSelection();
     li.setAttribute('aria-selected', 'true');
+    // Code-review fix: a selection (a click, a keyboard activate, or a caller's selectPath) may land on a
+    // row that's off-screen in the scrollable `.out-rail` viewport (e.g. a recompile falling back to the
+    // first file when the previously-selected one was renamed/removed) — scroll it into view exactly like
+    // ExplorerPanel.tsx's own "SCROLL RETRY" fix does for the same scenario. Optional-chained since this
+    // widget builds its DOM synchronously (no Preact-async-render retry machinery needed) and jsdom/
+    // happy-dom may not implement it at all.
+    li.scrollIntoView?.({ block: 'nearest' });
     if (fireOnSelect) opts.onSelect(path);
+  }
+
+  /** Set a folder's expanded state directly (rather than toggling from its current state) — shared by
+   *  `toggleFolder` (click/Enter/Space) and `navFor`'s `expand`/`collapse` (ArrowRight/ArrowLeft), which
+   *  each already know which direction they want rather than needing a flip. */
+  function setFolderExpanded(li: HTMLElement, expanded: boolean): void {
+    li.setAttribute('aria-expanded', String(expanded));
+    const group = folderGroups.get(li);
+    if (group) group.hidden = !expanded;
   }
 
   function toggleFolder(li: HTMLElement): void {
     const expanded = li.getAttribute('aria-expanded') === 'true';
-    li.setAttribute('aria-expanded', String(!expanded));
-    const group = folderGroups.get(li);
-    if (group) group.hidden = expanded; // was expanded → now collapsing → hide
+    setFolderExpanded(li, !expanded);
   }
 
   /** Activate a row exactly like a click: toggle a folder, or select a file and fire `onSelect`. Also
@@ -136,6 +168,38 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       activate: (i) => {
         const item = items[i];
         if (item) activateItem(item);
+        return true;
+      },
+      // ArrowRight — mirrors ExplorerPanel.tsx's `expand()` convention exactly (this codebase's OTHER tree
+      // with real collapsible folders, per the WAI-ARIA APG): a closed folder expands IN PLACE (focus
+      // stays put); an already-open folder instead moves focus to its next visible row (its first child,
+      // since a folder's children are the rows immediately after it in visual order). A file row has
+      // nothing to expand — like ExplorerPanel, that's still a consumed (no-op) key, not left to the
+      // browser.
+      expand: (i) => {
+        const item = items[i];
+        if (item?.dataset.kind === 'folder') {
+          const expanded = item.getAttribute('aria-expanded') === 'true';
+          if (!expanded) {
+            setFolderExpanded(item, true);
+          } else if (i < items.length - 1) {
+            focusItem(items[i + 1]);
+          }
+        }
+        return true;
+      },
+      // ArrowLeft — the symmetric collapse, again mirroring ExplorerPanel.tsx's `collapse()`: an open
+      // folder collapses in place; anything else (a file row, or an already-collapsed folder) ascends to
+      // its parent folder treeitem instead.
+      collapse: (i) => {
+        const item = items[i];
+        const expanded = item?.dataset.kind === 'folder' && item.getAttribute('aria-expanded') === 'true';
+        if (expanded && item) {
+          setFolderExpanded(item, false);
+        } else {
+          const parent = item?.parentElement?.closest<HTMLElement>('[role="treeitem"]') ?? null;
+          if (parent) focusItem(parent);
+        }
         return true;
       },
     };
@@ -173,6 +237,16 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   element.addEventListener('keydown', (ev) => handleTreeKeydown(navFor(ev), ev));
 
   function setFiles(files: EmitFile[]): void {
+    // Code-review fix: capture which folder PATHS are currently collapsed in the OLD render, from the OLD
+    // byPath, BEFORE it's discarded below — so this rebuild can re-apply them to the matching new rows
+    // once built, rather than silently snapping every folder back open (see the module doc's header note).
+    const collapsedPaths = new Set<string>();
+    for (const [path, li] of byPath) {
+      if (li.dataset.kind === 'folder' && li.getAttribute('aria-expanded') === 'false') {
+        collapsedPaths.add(path);
+      }
+    }
+
     byPath = new Map();
     folderGroups = new Map();
     const nodes = buildFileTree(files);
@@ -189,7 +263,15 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     tree.setAttribute('role', 'tree');
     tree.setAttribute('aria-label', 'Generated files');
     tree.replaceChildren(...nodes.map((node) => buildRow(node, 1)));
-    setRovingItem(null); // seed the first treeitem as the lone tab stop
+
+    // Re-apply the captured collapsed state to whichever of those paths still resolve to a folder in the
+    // NEW tree — a path that no longer exists (renamed/removed folder) simply loses its now-moot state.
+    for (const path of collapsedPaths) {
+      const li = byPath.get(path);
+      if (li?.dataset.kind === 'folder') setFolderExpanded(li, false);
+    }
+
+    setRovingItem(null); // seed the first VISIBLE treeitem as the lone tab stop (honors the collapse above)
   }
 
   function selectPath(path: string): boolean {

@@ -51,8 +51,15 @@ export function ensureOutputScaffold(previewEl: HTMLElement): OutputScaffold {
   // `.out-rail` is a plain scroll container: the tree mounted into it (generatedFileTree.ts) carries its
   // OWN `role="tree"`/`aria-label` on its `<ul>`, so this element must not ALSO claim a widget role — it
   // used to be `role="tablist"` back when it held flat `role="tab"` buttons directly; that's now an
-  // invalid tablist-containing-a-tree nesting and has been removed.
+  // invalid tablist-containing-a-tree nesting and has been removed. Code-review fix: that removal left the
+  // rail with NO accessible role/name at all whenever the tree itself has none — `generatedFileTree.ts`'s
+  // `setFiles([])` (hit on every error/empty/loading state) strips role/aria-label from its own `<ul>` with
+  // no fallback. `role="region"` + a static `aria-label` here restores an always-present accessible name
+  // without reintroducing the old tablist-containing-a-tree problem — a region containing a tree (once
+  // files exist) is valid ARIA nesting.
   const rail = mk('out-rail koi-scroll', grid);
+  rail.setAttribute('role', 'region');
+  rail.setAttribute('aria-label', 'Generated files');
   const railHead = mk('out-railhead', rail);
   const view = mk('out-view', grid);
   const crumb = mk('out-crumb', view);
@@ -82,15 +89,28 @@ export function renderOutputRailHead(scaffold: OutputScaffold, count: number): v
  * without hiding anything (the whole-model overview stays browsable). Any previous emphasis is cleared
  * first. `activeContext` of `null` (the *All contexts* case), or a scope that matches no top-level path,
  * leaves every row neutral — a graceful no-op, the same behavior the old flat rail had.
+ *
+ * Code-review fix: the matched row also gets `aria-current="true"` (cleared from every other top-level
+ * row first) — the `.on`/`.dim` classes alone are a COLOR-only signal (border-color + opacity), which
+ * fails WCAG AA's "don't rely on color alone" for the active-scope indicator this same ADR-0009 concern
+ * is enforced for elsewhere in this exact codebase: `inspectorController.tsx` (a leading `✓`) and
+ * `contextMapPanel.tsx`'s `emphasiseContextMapScope` (`aria-current="true"`, the pattern mirrored here).
  */
 export function applyOutputTreeEmphasis(treeRoot: HTMLElement, activeContext: string | null): void {
   const topLevel = Array.from(treeRoot.querySelectorAll<HTMLElement>('[role="treeitem"][aria-level="1"]'));
-  for (const el of topLevel) el.classList.remove('on', 'dim');
+  for (const el of topLevel) {
+    el.classList.remove('on', 'dim');
+    el.removeAttribute('aria-current');
+  }
 
   const matches = activeContext !== null && topLevel.some((el) => el.dataset.path === activeContext);
   if (!matches) return;
 
-  for (const el of topLevel) el.classList.add(el.dataset.path === activeContext ? 'on' : 'dim');
+  for (const el of topLevel) {
+    const isActive = el.dataset.path === activeContext;
+    el.classList.add(isActive ? 'on' : 'dim');
+    if (isActive) el.setAttribute('aria-current', 'true');
+  }
 }
 
 /** Update the breadcrumb (path segments + a language chip). Pass `null` to clear it (error/empty states). */

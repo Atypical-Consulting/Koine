@@ -266,13 +266,12 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   outputScaffold.rail.appendChild(outputTree.element);
   let lastFiles: EmitFile[] = [];
   let selectedOutputPath: string | null = null;
-  let lastPreview = '';
 
   // The shared write-clipboard / flash-label / reset-after-1600ms sequence Copy file and Copy all both
-  // need — factored once so the two buttons don't duplicate the same three-branch promise chain.
-  // `getText` returning '' makes a click a no-op (mirrors each button's own `disabled` gate, which is the
-  // caller's job to keep in sync). Returns the button plus a `cancelReset` hook dispose() uses to drop any
-  // pending reset timer on teardown, exactly like the original single-button `copyResetTimer` did.
+  // need — factored once so the two buttons don't duplicate the same three-branch promise chain. The
+  // button's OWN `disabled` state gates a click — NOT a falsy-string check on `getText()` (code-review
+  // fix: the Python emitter always emits an empty `py.typed` file, so an empty `writeText('')` must
+  // proceed). Returns the button + a `cancelReset` hook dispose() uses to drop any pending reset timer.
   function makeCopyButton(cls: string, idleLabel: string, tip: string, getText: () => string): { el: HTMLButtonElement; cancelReset: () => void } {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -282,10 +281,9 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     btn.disabled = true;
     let resetTimer: ReturnType<typeof setTimeout> | undefined;
     btn.addEventListener('click', () => {
-      const text = getText();
-      if (!text) return;
+      if (btn.disabled) return;
       void navigator.clipboard
-        .writeText(text)
+        .writeText(getText())
         .then(() => (btn.textContent = 'Copied ✓'))
         .catch(() => (btn.textContent = 'Copy failed'))
         .finally(() => {
@@ -295,7 +293,11 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     });
     return { el: btn, cancelReset: () => clearTimeout(resetTimer) };
   }
-  const copyFile = makeCopyButton('out-copy out-copy-file', 'Copy file', 'Copy this file', () => lastPreview);
+  // Derived fresh from lastFiles at click time, like copyAll's getText below — replaces the redundant
+  // `lastPreview` mirror this used to read (code-review fix).
+  const copyFile = makeCopyButton('out-copy out-copy-file', 'Copy file', 'Copy this file', () =>
+    lastFiles.find((f) => f.path === selectedOutputPath)?.contents ?? '',
+  );
   const copyBtn = copyFile.el;
   // Copies every emitted file, `// ==== path ====`-delimited — the format the facet's pre-tree "copy
   // everything" flow used to produce (the issue's problem statement), still what a "copy all" click means.
@@ -320,7 +322,6 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     if (!f) return;
     selectedOutputPath = path;
     output.setContent(f.contents, store.getState().emitTarget);
-    lastPreview = f.contents;
     copyBtn.disabled = false;
     renderOutputCrumb(outputScaffold, path, targetLabel(store.getState().emitTarget));
     outputTree.selectPath(path);
@@ -330,7 +331,6 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   function clearOutput(message: string): void {
     lastFiles = [];
     selectedOutputPath = null;
-    lastPreview = '';
     copyBtn.disabled = true;
     copyAllBtn.disabled = true;
     outputTree.setFiles([]); // hides the tree entirely (Task 2's empty-input behavior)

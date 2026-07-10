@@ -464,6 +464,27 @@ describe('createSurfaceLoaders — Copy file / Copy all (#871 Task 4)', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(expect.stringContaining('invoice'));
   });
 
+  test('Copy file proceeds (writeText("")) for a genuinely empty-content file — code-review fix: the old ' +
+    'guard read getText() truthiness, so an empty file (e.g. the Python emitter\'s always-empty py.typed ' +
+    'marker) silently no-op\'d a click even though the button was enabled', async () => {
+    const { hosts, lsp, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'python',
+      files: [{ path: 'py.typed', contents: '' }],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+    const copyFileBtn = hosts.preview.querySelector<HTMLButtonElement>('.out-copy-file')!;
+    expect(copyFileBtn.disabled).toBe(false); // the file IS selected — the button's gate is disabled state
+
+    copyFileBtn.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('');
+    expect(copyFileBtn.textContent).toBe('Copied ✓');
+  });
+
   test('Copy all is disabled with no files, then writes every file\'s content joined as "// ==== path ===="', async () => {
     const { hosts, lsp, loaders } = build();
     const copyAllBtn = hosts.preview.querySelector<HTMLButtonElement>('.out-copy-all')!;
