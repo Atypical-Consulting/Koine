@@ -664,4 +664,73 @@ public class RustEmitterTests
         rust.ShouldContain("self.c == Some(Decimal::from(self.a))");
         rust.ShouldNotContain("Decimal::from(Some(");
     }
+
+    private const string OptionalIntMemberAccessComparedToDecimalModel = """
+        context Shop {
+          value Discount {
+            amount: Int?
+          }
+          value Money {
+            d: Discount
+            c: Decimal
+            isEq: Bool = d.amount == c
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1354: a <c>MemberAccessExpr</c> operand (<c>d.amount</c>, a nested value object's optional
+    /// <c>Int?</c> member read through its accessor) compared via <c>==</c> to a non-optional
+    /// <c>Decimal</c> reaches <c>WriteArithmeticOperand</c>'s <c>MemberAccessExpr</c>/<c>CallExpr</c>/
+    /// <c>UnaryExpr</c> wrap branch (added by #1316/#1321 for a non-optional tight-binding operand),
+    /// which — unlike the identifier and compound-operand branches #1343/#1347 already fixed — still
+    /// wrapped it in a bare <c>Decimal::from(...)</c> prefix, invalid Rust for an accessor returning
+    /// <c>&amp;Option&lt;i64&gt;</c> (E0277). The coerced operand must map inside its Option instead,
+    /// with the opposite (non-optional) <c>Decimal</c> operand becoming <c>Some(...)</c>-wrapped to
+    /// match.
+    /// </summary>
+    [Fact]
+    public void Optional_int_member_access_operand_compared_via_equality_to_decimal_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntMemberAccessComparedToDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.d.amount().map(Decimal::from) == Some(self.c)");
+        rust.ShouldNotContain("Decimal::from(self.d.amount())");
+    }
+
+    private const string OptionalIntCallOperandComparedToDecimalModel = """
+        context Shop {
+          value LineItem {
+            bonus: Int?
+          }
+          value Invoice {
+            items: List<LineItem>
+            taxRate: Decimal
+            isEq: Bool = items.max(i => i.bonus) == taxRate
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1354, second shape: a <c>CallExpr</c> operand (<c>items.max(i =&gt; i.bonus)</c>, an
+    /// aggregate over an optional <c>Int?</c> selector) compared via <c>==</c> to a non-optional
+    /// <c>Decimal</c> hits the SAME <c>WriteArithmeticOperand</c> branch as the <c>MemberAccessExpr</c>
+    /// case above — confirms the fix keys off the operand's own <c>type</c>, not its expression shape.
+    /// </summary>
+    [Fact]
+    public void Optional_int_call_operand_compared_via_equality_to_decimal_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntCallOperandComparedToDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain(
+            "crate::koine_runtime::koine_max(self.items.iter().map(|i| i.bonus().clone()))" +
+            ".map(Decimal::from) == Some(self.tax_rate)");
+        rust.ShouldNotContain("Decimal::from(crate::koine_runtime::koine_max(");
+    }
 }

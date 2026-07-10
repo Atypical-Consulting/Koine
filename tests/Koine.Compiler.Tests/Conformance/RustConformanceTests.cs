@@ -1969,6 +1969,63 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1354: a <c>MemberAccessExpr</c> operand whose type is an optional <c>Int?</c>, compared via
+    /// <c>==</c> to a non-optional <c>Decimal</c>, must map instead of bare-wrapping — or the emitted
+    /// crate does not compile (E0277: no <c>From&lt;Option&lt;i64&gt;&gt;</c>/<c>&amp;Option&lt;i64&gt;</c>
+    /// impl for <c>Decimal</c>).
+    /// </summary>
+    [Fact]
+    public void Optional_int_member_access_compared_to_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Discount {\n" +
+            "    amount: Int?\n" +
+            "  }\n" +
+            "  value Money {\n" +
+            "    d: Discount\n" +
+            "    c: Decimal\n" +
+            "    isEq: Bool = d.amount == c\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1354, second shape: the same fix for a <c>CallExpr</c> operand (an aggregate over an
+    /// optional <c>Int?</c> selector) compared to a non-optional <c>Decimal</c> — confirms the branch
+    /// keys off the operand's own type, not its expression shape.
+    /// </summary>
+    [Fact]
+    public void Optional_int_call_operand_compared_to_decimal_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value LineItem {\n" +
+            "    bonus: Int?\n" +
+            "  }\n" +
+            "  value Invoice {\n" +
+            "    items: List<LineItem>\n" +
+            "    taxRate: Decimal\n" +
+            "    isEq: Bool = items.max(i => i.bonus) == taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1349: the read-model dual of #1332's <c>WriteDerived</c> fix — <c>OwnDerived</c> must own an
     /// optional-declared <c>String?</c> projected field's <c>.trim()</c>-yielding borrowed <c>&amp;str</c>
     /// body via <c>.to_string()</c> and <c>Some(...)</c>-wrap it, or the emitted crate does not compile

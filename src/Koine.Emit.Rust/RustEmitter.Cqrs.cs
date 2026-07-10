@@ -166,16 +166,17 @@ public sealed partial class RustEmitter
     /// <c>WriteDerived</c> fix, generalized here to <c>OwnDerived</c>, its read-model dual, beyond just
     /// the <c>.trim()</c> shape since a read-model projection's body isn't restricted to it). Any other
     /// non-Copy body is <c>.clone()</c>d out of its accessor reference. Gated on <paramref name="bodyType"/>
-    /// (falling back to the field's underlying, non-optional declared type when inference can't determine
-    /// it) — not <paramref name="type"/> directly, which would misclassify an optional-declared field
-    /// whose body is a non-optional bare String. <c>Some(...)</c>-wraps the owned result when
-    /// <paramref name="type"/> is optional and <paramref name="bodyType"/> is non-optional — mirroring
-    /// <see cref="SomeWrapIfNeeded"/> (#1329) — so an always-present projected value still reaches the
-    /// declared <c>Option&lt;...&gt;</c> accessor shape.
+    /// (falling back to the field's underlying, non-optional declared type via the shared
+    /// <see cref="UnderlyingType"/> helper (#1350) when inference can't determine it) — not
+    /// <paramref name="type"/> directly, which would misclassify an optional-declared field whose body is
+    /// a non-optional bare String. <c>Some(...)</c>-wraps the owned result when <paramref name="type"/> is
+    /// optional and <paramref name="bodyType"/> is non-optional — mirroring <see cref="SomeWrapIfNeeded"/>
+    /// (#1329) — so an always-present projected value still reaches the declared
+    /// <c>Option&lt;...&gt;</c> accessor shape.
     /// </summary>
     private static string OwnDerived(string rendered, TypeRef type, TypeRef? bodyType, RustTypeMapper typeMapper)
     {
-        var underlyingType = type.IsOptional ? type with { IsOptional = false } : type;
+        var underlyingType = UnderlyingType(type);
 
         string owned;
         if (bodyType is { IsOptional: true })
