@@ -193,9 +193,9 @@ internal sealed class JavaExpressionTranslator
                 sb.Append('(');
                 WriteTopLevel(cond.Condition, sb);
                 sb.Append(" ? ");
-                Write(cond.Then, sb);
+                WriteReconciledBranch(cond.Then, cond.Else, sb);
                 sb.Append(" : ");
-                Write(cond.Else, sb);
+                WriteReconciledBranch(cond.Else, cond.Then, sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
@@ -224,6 +224,71 @@ internal sealed class JavaExpressionTranslator
             default:
                 sb.Append("/* unsupported expression */ false");
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Writes one ternary branch, reconciling it against its SIBLING branch's type so both arms of a Java
+    /// <c>?:</c> agree in type — Koine's semantic validator (and <see cref="TypeResolver"/>, #975)
+    /// legitimately lets a conditional's two branches differ in numeric type (<c>Int</c>/<c>Decimal</c>)
+    /// and/or optionality, widening the conditional's own joined type accordingly, but Java's ternary
+    /// operator (unlike Rust's <c>if</c>/<c>else</c>, which this method mirrors) requires both arms to
+    /// share a type: an unreconciled pair emits a bare <c>cond ? intBranch : decimalBranch</c> that
+    /// <c>javac</c> rejects with "incompatible types" (#1344). A branch is <c>BigDecimal.valueOf(...)</c>
+    /// widened when its own inferred type is a non-optional <c>Int</c> (<c>long</c>) while the SIBLING
+    /// branch is <c>Decimal</c>, map-widened (<c>.map(java.math.BigDecimal::valueOf)</c>) when its own
+    /// inferred type is an OPTIONAL <c>Int</c> while the SIBLING branch is <c>Decimal</c> (the branch's own
+    /// rendering is already <c>Optional&lt;Long&gt;</c>-shaped, so a bare <c>BigDecimal.valueOf(...)</c>
+    /// wrap around it does not compile; mapping inside the <c>Optional</c> is required instead), and/or
+    /// <c>Optional.of(...)</c>-wrapped when its own inferred type is non-optional while the SIBLING branch
+    /// is optional. Reconciling per-branch (rather than a single wrap around the whole conditional) is
+    /// required because the branches disagree with EACH OTHER, not with an externally supplied target
+    /// type — each branch still renders in its own native Java type/optionality unless reconciled here.
+    /// Fixed in the emitter (not the semantic validator): a widened or optional-joined conditional is a
+    /// legitimate, cross-target-sanctioned pattern (#975) — this is a Java-only rendering gap, not a
+    /// modeling error. The <c>needsWiden</c>/<c>needsOptionalWiden</c> cases are mutually exclusive (they
+    /// key off the same branch's own optionality: the former requires it non-optional, the latter requires
+    /// it optional). <c>needsWiden</c> composes with <c>needsSomeWrap</c> as
+    /// <c>Optional.of(BigDecimal.valueOf(...))</c> (widen inside, wrap outside) — the value must be a
+    /// <c>BigDecimal</c> before it becomes an <c>Optional&lt;BigDecimal&gt;</c>. <c>needsOptionalWiden</c>
+    /// never composes with <c>needsSomeWrap</c>: <c>needsSomeWrap</c> also requires the branch itself to be
+    /// non-optional, so a branch that is already <c>Optional</c>-shaped (<c>needsOptionalWiden</c>) never
+    /// needs the extra <c>Optional.of(...)</c> wrap.
+    /// </summary>
+    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    {
+        TypeScope scope = EffectiveScope();
+        TypeRef? branchType = _resolver.Infer(branch, scope);
+        TypeRef? siblingType = _resolver.Infer(sibling, scope);
+        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
+        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
+        var needsSomeWrap = branchType is { IsOptional: false } && siblingType is { IsOptional: true };
+
+        if (needsSomeWrap)
+        {
+            sb.Append("java.util.Optional.of(");
+        }
+
+        if (needsWiden)
+        {
+            sb.Append("java.math.BigDecimal.valueOf(");
+        }
+
+        Write(branch, sb);
+
+        if (needsWiden)
+        {
+            sb.Append(')');
+        }
+
+        if (needsOptionalWiden)
+        {
+            sb.Append(".map(java.math.BigDecimal::valueOf)");
+        }
+
+        if (needsSomeWrap)
+        {
+            sb.Append(')');
         }
     }
 
