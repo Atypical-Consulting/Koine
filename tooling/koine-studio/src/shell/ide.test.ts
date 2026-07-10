@@ -91,6 +91,27 @@ vi.mock('@/shell/commandWiring', async () => {
   };
 });
 
+// Capture the boot's single workspaceOpLock instance (#1275), so a test can contend for the REAL lock
+// directly — hold it open with its own deferred op, or drive a rejecting op through it — instead of
+// only ever holding it indirectly via a gated shared import. workspaceOpLock.ts is a dependency-free
+// leaf module, so this delegating mock cannot skew any other module's instance graph. (Mocking
+// lifecycleBoot itself to capture its deps bag is NOT safe here: its module-level appStore/bootIntent
+// imports then resolve to different instances than the test's, breaking the route-intent tests.)
+const lockSeam = vi.hoisted(() => ({
+  current: null as null | { run<T>(op: () => Promise<T>): Promise<T> },
+}));
+vi.mock('@/shell/workspaceOpLock', async () => {
+  const actual = await vi.importActual<typeof import('@/shell/workspaceOpLock')>('@/shell/workspaceOpLock');
+  return {
+    ...actual,
+    createWorkspaceOpLock: () => {
+      const lock = actual.createWorkspaceOpLock();
+      lockSeam.current = lock;
+      return lock;
+    },
+  };
+});
+
 // #731: capture the `onOpenPrefs` callback ide.ts wires into the (lazily-created) Assistant panel, so a
 // test can invoke it and assert it routes to the Settings overlay. A partial mock: every other aiPanel
 // export is preserved, and createAssistantChat returns a minimal stub (the panel is created lazily on
@@ -871,7 +892,39 @@ describe('ide init() — the workspace-open lock covers the toolbar entry points
     appStore.setState({ route: 'editor' });
     await settleBoot();
 
-    // runStartIntent → the raw deps.newModel() ran to completion inside the lock, resetting to BLANK.
+    // runStartIntent → the raw deps.newModelUnlocked() ran to completion inside the lock, resetting to BLANK.
+    expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
+  });
+
+  // #1275 hardening: the same invariant, contended through the REAL lock instance (the seam), not just
+  // the boot ladder's own shared import. A Home start-intent queued behind an arbitrary lock-holder
+  // must (a) DEFER — runStartIntent serializes on the one boot-wide lock the facade wraps — and then
+  // (b) COMPLETE once the holder releases, which is exactly what breaks if a refactor ever hands
+  // createLifecycleBoot the locked facade instead of the `…Unlocked` closures: runStartIntent would
+  // hold the lock while its newModel() waits behind it, and the release below would never unwedge it.
+  test('a Home start-intent queued behind a held lock defers, then completes on release (no double-lock)', async () => {
+    const { setStartIntent } = await import('@/shell/bootIntent');
+    const { appStore } = await import('@/store');
+
+    const { platform } = await boot();
+    expect(platform.defaultWorkspaceSeed).toContain('context Billing'); // the default boot's SEED
+
+    // Hold the boot's own lock with a deferred op — a stand-in for any slow workspace-opening op.
+    let release!: () => void;
+    void lockSeam.current!.run(() => new Promise<void>((resolve) => {
+      release = resolve;
+    }));
+    await settleBoot();
+
+    setStartIntent({ kind: 'new' });
+    appStore.setState({ route: 'editor' });
+    await settleBoot();
+    // The intent's reset queued behind the held lock instead of racing it.
+    expect(platform.defaultWorkspaceSeed).toContain('context Billing');
+
+    release();
+    await settleBoot();
+    // …and ran to completion once its turn came — the raw closure inside runStartIntent is unlocked.
     expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
   });
 });

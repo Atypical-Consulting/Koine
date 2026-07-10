@@ -56,8 +56,10 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
     refreshActiveSurfaces: vi.fn(),
     persistsWorkspace: true,
     showMemoryOnlyBanner: vi.fn(),
-    newModel: vi.fn(async () => undefined),
-    openFolder: vi.fn(async () => undefined),
+    // The UNLOCKED start-intent closures (#1275): runStartIntent already holds the lock when it calls
+    // these, so the deps carry them under names that say so (the locked facade lives in ide.tsx).
+    newModelUnlocked: vi.fn(async () => undefined),
+    openFolderUnlocked: vi.fn(async () => undefined),
     openRecentFolder: vi.fn(async () => undefined),
     openExample: vi.fn(async () => undefined),
     disposers: {
@@ -111,7 +113,7 @@ describe('lifecycleBoot', () => {
     const deps = makeDeps();
     createLifecycleBoot(deps);
     await flush();
-    expect(deps.newModel).toHaveBeenCalledOnce();
+    expect(deps.newModelUnlocked).toHaveBeenCalledOnce();
     expect(deps.openHostDefaultWorkspaceFlow).not.toHaveBeenCalled();
     // Cold boot: no unsaved work can exist yet, so the intent runs UNguarded (no confirm round-trip).
     expect(deps.confirmReplaceWork).not.toHaveBeenCalled();
@@ -221,7 +223,7 @@ describe('lifecycleBoot', () => {
 
       expect(deps.confirmReplaceWork).toHaveBeenCalled();
       // The user declined — no reset, no workspace swap.
-      expect(deps.newModel).not.toHaveBeenCalled();
+      expect(deps.newModelUnlocked).not.toHaveBeenCalled();
     });
 
     it('runs the return-visit intent once the user confirms (or nothing is dirty)', async () => {
@@ -362,7 +364,7 @@ describe('lifecycleBoot', () => {
       await flush();
 
       expect(deps.openExample).not.toHaveBeenCalled();
-      expect(deps.newModel).not.toHaveBeenCalled();
+      expect(deps.newModelUnlocked).not.toHaveBeenCalled();
       expect(deps.invalidateDocViews).toHaveBeenCalled();
       expect(deps.refreshActiveSurfaces).toHaveBeenCalled();
     });
@@ -427,12 +429,12 @@ describe('lifecycleBoot', () => {
       routeCallback()({ route: 'editor' }, { route: 'home' });
       await flush();
       // The import is still in flight: the Home "New model" pick must not run concurrently.
-      expect(deps.newModel).not.toHaveBeenCalled();
+      expect(deps.newModelUnlocked).not.toHaveBeenCalled();
 
       resolveImport(true);
       await flush();
       // Once the import settles, the queued Home action is free to run.
-      expect(deps.newModel).toHaveBeenCalledOnce();
+      expect(deps.newModelUnlocked).toHaveBeenCalledOnce();
     });
 
     it('defers a route-intent Home action until an in-flight fallback restore settles', async () => {
@@ -449,12 +451,12 @@ describe('lifecycleBoot', () => {
       routeCallback()({ route: 'editor' }, { route: 'home' });
       await flush();
       // The restore is still in flight: the Home "New model" pick must not run concurrently.
-      expect(deps.newModel).not.toHaveBeenCalled();
+      expect(deps.newModelUnlocked).not.toHaveBeenCalled();
 
       resolveRestore({ ok: true });
       await flush();
       // Once the restore settles, the queued Home action is free to run.
-      expect(deps.newModel).toHaveBeenCalledOnce();
+      expect(deps.newModelUnlocked).toHaveBeenCalledOnce();
     });
 
     it('serializes two rapid Home picks so the second does not run until the first settles', async () => {
@@ -463,7 +465,7 @@ describe('lifecycleBoot', () => {
       await flush(); // let the (intent-less) boot ladder settle first
 
       let resolveFirst!: () => void;
-      deps.newModel = vi.fn(
+      deps.newModelUnlocked = vi.fn(
         () =>
           new Promise<void>((resolve) => {
             resolveFirst = resolve;
@@ -472,7 +474,7 @@ describe('lifecycleBoot', () => {
 
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
       routeCallback()({ route: 'editor' }, { route: 'home' });
-      await flush(); // the first pick is in flight, awaiting deps.newModel()
+      await flush(); // the first pick is in flight, awaiting deps.newModelUnlocked()
 
       takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/proj' });
       routeCallback()({ route: 'editor' }, { route: 'home' });
@@ -512,7 +514,7 @@ describe('lifecycleBoot', () => {
           emitTargets: vi.fn(() => Promise.resolve([])) as never,
         },
         hasOpenWorkspace: vi.fn(() => workspaceOpen),
-        newModel: vi.fn(async () => {
+        newModelUnlocked: vi.fn(async () => {
           workspaceOpen = true;
         }),
         ...over,
@@ -531,7 +533,7 @@ describe('lifecycleBoot', () => {
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
       routeCallback()({ route: 'editor' }, { route: 'home' });
       await flush();
-      expect(deps.newModel).toHaveBeenCalledOnce();
+      expect(deps.newModelUnlocked).toHaveBeenCalledOnce();
 
       connect(); // the server is finally up — the shared-import branch now gets its turn
       await flush();
@@ -552,7 +554,7 @@ describe('lifecycleBoot', () => {
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
       routeCallback()({ route: 'editor' }, { route: 'home' });
       await flush();
-      expect(deps.newModel).toHaveBeenCalledOnce();
+      expect(deps.newModelUnlocked).toHaveBeenCalledOnce();
 
       connect();
       await flush();

@@ -758,10 +758,21 @@ export function init(hooks: IdeHooks = {}): () => void {
   // because the toolbar stays interactive across the multi-second lsp.start() connect window.
   const workspaceOpLock = createWorkspaceOpLock();
 
+  // The LOCKED workspace-open facade (#1275): the only path to the raw newModel()/openFolder() closures
+  // for every consumer — toolbar, chords, palette, overlays, onWorkspaceEmptied. Wrapping at the
+  // definition seam (instead of per call site, as #1088 did) makes a NEW workspace-opening affordance
+  // reach the locked name by default; the sole legitimate bypass is the pair handed to
+  // createLifecycleBoot below under the explicit `…Unlocked` names (runStartIntent already holds the
+  // lock when it calls them, so locking those would deadlock the boot).
+  const openWorkspace = {
+    newModel: (): Promise<void> => workspaceOpLock.run(() => newModel()),
+    openFolder: (): Promise<void> => workspaceOpLock.run(() => openFolder()),
+  };
+
   // --- open folder (directory-mode workspace) -------------------------------
 
   const openFolderBtn = domById<HTMLButtonElement>('btn-open-folder');
-  openFolderBtn.addEventListener('click', () => void workspaceOpLock.run(() => openFolder()));
+  openFolderBtn.addEventListener('click', () => void openWorkspace.openFolder());
   // Opening a folder relies on the File System Access API (Chromium-only). On browsers without it, the
   // button would look active but only ever raise an error toast — so disable it with an explanatory
   // tooltip rather than leaving a dead control. (Examples + share links + in-memory editing still work.)
@@ -873,7 +884,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     // Locked (#1088) — it fires reactively, so it can land mid shared-import. Safe to lock: newModel()
     // clears the default workspace through the platform API, never re-entering onWorkspaceEmptied.
-    onWorkspaceEmptied: () => void workspaceOpLock.run(() => newModel()),
+    onWorkspaceEmptied: () => void openWorkspace.newModel(),
     pushRecentFolder,
     // Remember the opened workspace so a reload restores it instead of the empty default (#535). Gated
     // (in the controller) on the same `recent` flag as pushRecentFolder, so transient opens don't set it.
@@ -1239,7 +1250,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     // Backs requestNewModel() — the New button, mod+N, the palette (#1088). Only the RESET is locked:
     // requestNewModel's confirm dialog runs before this, and locking it would hold the queue for as
     // long as the modal is on screen.
-    newModel: () => workspaceOpLock.run(() => newModel()),
+    newModel: () => openWorkspace.newModel(),
   });
 
   // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
@@ -1388,7 +1399,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     format: () => void formatActive(),
     goHome,
     // The palette's "Open folder…" entry and its mod+Shift+O chord (#1088).
-    openFolder: () => void workspaceOpLock.run(() => openFolder()),
+    openFolder: () => void openWorkspace.openFolder(),
     search,
     requestNewModel: () => void overlays.requestNewModel(),
     workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: () => workspace.buffers },
@@ -1460,9 +1471,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     showMemoryOnlyBanner: () => overlays.showMemoryOnlyBanner(),
     // RAW, deliberately unwrapped (#1088): runStartIntent already holds workspaceOpLock when it calls
     // these, and the FIFO queue has no re-entrancy detection — self-locking would enqueue behind the
-    // very op awaiting it and deadlock the boot. The wrapped variants are the closures above.
-    newModel: () => newModel(),
-    openFolder: () => openFolder(),
+    // very op awaiting it and deadlock the boot. Named for the exception they are (#1275); everything
+    // else goes through the locked `openWorkspace` facade above.
+    newModelUnlocked: () => newModel(),
+    openFolderUnlocked: () => openFolder(),
     openRecentFolder: (path) => openRecentFolder(path),
     openExample: (template) => openExample(template),
     disposers: {
