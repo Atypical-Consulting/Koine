@@ -436,28 +436,19 @@ internal sealed class RustExpressionTranslator
             if (!needsMapWrap)
             {
                 sb.Append("Decimal::from(");
-                WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
-                sb.Append(')');
-                return;
             }
 
-            // A UnaryExpr renders with a leading prefix operator (`-`/`!`), and Rust's `.` binds tighter
-            // than unary `-`/`!` — appending `.map(...)` directly after it would reassociate as
-            // `-(operand.map(...))` instead of the intended `(-operand).map(...)`, a real cargo check
-            // E0600 (`Option` has no `Neg`/`Not` impl). A MemberAccessExpr/CallExpr rendering has no such
-            // leading operator (it's already a tight postfix chain), so only UnaryExpr needs parenthesizing.
-            if (expr is UnaryExpr)
+            WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+
+            if (!needsMapWrap)
             {
-                sb.Append('(');
-                WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
                 sb.Append(')');
             }
             else
             {
-                WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
+                sb.Append(".map(Decimal::from)");
             }
 
-            sb.Append(".map(Decimal::from)");
             return;
         }
 
