@@ -54,14 +54,12 @@ use Koine\Runtime\Decimal;
 
 $failures = 0;
 
-function check(bool $condition, string $message): void
-{
-    global $failures;
+$check = function (bool $condition, string $message) use (&$failures): void {
     if (!$condition) {
         $failures++;
         fwrite(STDERR, "ASSERTION FAILED: {$message}\n");
     }
-}
+};
 
 // --- OrderLine: the derived `subtotal()` method must equal unitPrice * quantity. ---
 $widget = new ProductId('11111111-1111-4111-8111-111111111111');
@@ -70,11 +68,11 @@ $gadget = new ProductId('22222222-2222-4222-8222-222222222222');
 $line1 = new OrderLine($widget, 2, new Decimal('19.99'));
 $line2 = new OrderLine($gadget, 3, new Decimal('4.50'));
 
-check(
+$check(
     $line1->subtotal()->equals(new Decimal('39.98')),
     "line1.subtotal should be 39.98 (2 * 19.99), got {$line1->subtotal()->getValue()}",
 );
-check(
+$check(
     $line2->subtotal()->equals(new Decimal('13.50')),
     "line2.subtotal should be 13.50 (3 * 4.50), got {$line2->subtotal()->getValue()}",
 );
@@ -83,26 +81,26 @@ check(
 $orderId = OrderId::generate();
 $draftOrder = new Order($orderId, [$line1, $line2]);
 
-check(
+$check(
     $draftOrder->status === OrderStatus::DRAFT,
     "a freshly constructed order should default to Draft, got '{$draftOrder->status->name}'",
 );
-check(count($draftOrder->lines) === 2, 'order should carry both lines, got ' . count($draftOrder->lines));
-check($draftOrder->lines[0]->equals($line1), 'the first line should round-trip by value equality');
-check($draftOrder->lines[1]->equals($line2), 'the second line should round-trip by value equality');
+$check(count($draftOrder->lines) === 2, 'order should carry both lines, got ' . count($draftOrder->lines));
+$check($draftOrder->lines[0]->equals($line1), 'the first line should round-trip by value equality');
+$check($draftOrder->lines[1]->equals($line2), 'the second line should round-trip by value equality');
 
 // --- Order identity: equality is by id, not by structural contents (aggregate roots are
 // entities). NOTE: this reuses the same $orderId PHP object reference across both instances below
 // -- see KNOWN GAP 2 above for why that matters for the emitted `===` comparison. ---
 $sameIdDifferentLines = new Order($orderId, [$line1], OrderStatus::PLACED);
-check(
+$check(
     $draftOrder->equals($sameIdDifferentLines),
     'two Order instances with the same id must be equal regardless of their line/status contents '
         . '(entity identity)',
 );
 
 $differentOrder = new Order(OrderId::generate(), [$line1, $line2]);
-check(!$draftOrder->equals($differentOrder), 'two Order instances with different ids must not be equal');
+$check(!$draftOrder->equals($differentOrder), 'two Order instances with different ids must not be equal');
 
 // --- OrderStatus: the Draft -> Placed -> Shipped lifecycle values are all constructible and
 // distinguishable (see KNOWN GAP 1 above: this does not exercise a runtime transition guard,
@@ -110,20 +108,28 @@ check(!$draftOrder->equals($differentOrder), 'two Order instances with different
 $placedOrder = new Order($orderId, [$line1, $line2], OrderStatus::PLACED);
 $shippedOrder = new Order($orderId, [$line1, $line2], OrderStatus::SHIPPED);
 
-check($placedOrder->status === OrderStatus::PLACED, "expected Placed, got '{$placedOrder->status->name}'");
-check($shippedOrder->status === OrderStatus::SHIPPED, "expected Shipped, got '{$shippedOrder->status->name}'");
-check(
+$check($placedOrder->status === OrderStatus::PLACED, "expected Placed, got '{$placedOrder->status->name}'");
+$check($shippedOrder->status === OrderStatus::SHIPPED, "expected Shipped, got '{$shippedOrder->status->name}'");
+$check(
     $draftOrder->status !== $placedOrder->status,
     'Draft and Placed must be distinguishable status values',
 );
 
-$matched = $shippedOrder->status->match_(
+// match_() is emitted with a `mixed` return type (it dispatches to whichever closures the caller
+// passes), so narrow it back to the `string` these four arms return via an is_string() guard rather
+// than an unchecked cast -- if a future emitter change ever made match_ return something else, this
+// demo should fail loudly here instead of silently stringifying the wrong value.
+$matchedRaw = $shippedOrder->status->match_(
     draft: fn (): string => 'unexpected-draft',
     placed: fn (): string => 'unexpected-placed',
     shipped: fn (): string => 'shipped',
     cancelled: fn (): string => 'unexpected-cancelled',
 );
-check(
+if (!is_string($matchedRaw)) {
+    throw new \RuntimeException('OrderStatus::match_ was expected to return a string here.');
+}
+$matched = $matchedRaw;
+$check(
     $matched === 'shipped',
     "OrderStatus::match_ should route a Shipped order to its 'shipped' case, got '{$matched}'",
 );
