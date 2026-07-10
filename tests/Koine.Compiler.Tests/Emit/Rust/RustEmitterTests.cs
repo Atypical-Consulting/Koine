@@ -353,4 +353,315 @@ public class RustEmitterTests
         rust.ShouldNotContain("Decimal::from(Some(");
         rust.ShouldNotContain("{ Decimal::from(self.amount) } else");
     }
+
+    private const string CoalesceBothOperandsOptionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            fallback: Int?
+            total: Int? = bonus ?? fallback
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1333: a <c>CoalesceExpr</c> (<c>a ?? b</c>) whose right operand <c>b</c> is itself
+    /// optional must render <c>.or_else(...)</c> — an <c>Option&lt;T&gt;</c>-preserving fallback — not
+    /// <c>.unwrap_or_else(...)</c>, which force-unwraps to a bare <c>T</c> and fails a real
+    /// <c>cargo check</c> <c>E0308</c> (the closure returns <c>Option&lt;T&gt;</c>, not <c>T</c>).
+    /// </summary>
+    [Fact]
+    public void Value_object_coalesce_with_optional_right_operand_renders_or_else()
+    {
+        var result = new KoineCompiler().Compile(CoalesceBothOperandsOptionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
+        rust.ShouldContain("self.bonus.clone().or_else(|| self.fallback.clone())");
+        rust.ShouldNotContain(".unwrap_or_else(");
+    }
+
+    private const string CoalesceNonOptionalRightOperandModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            total: Int = bonus ?? 0
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Regression guard (issue #1333): a <c>CoalesceExpr</c> whose right operand is non-optional (the
+    /// pre-existing, already-correct case) must keep rendering <c>.unwrap_or_else(...)</c> unchanged.
+    /// Must pass both before and after the fix.
+    /// </summary>
+    [Fact]
+    public void Value_object_coalesce_with_non_optional_right_operand_keeps_unwrap_or_else()
+    {
+        var result = new KoineCompiler().Compile(CoalesceNonOptionalRightOperandModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> i64 {");
+        rust.ShouldContain("self.bonus.clone().unwrap_or_else(|| 0)");
+    }
+
+    private const string NestedCoalesceBothOptionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonus: Int?
+            fallback: Int?
+            backup: Int?
+            total: Int? = bonus ?? (fallback ?? backup)
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1333 edge case: a nested <c>CoalesceExpr</c> as the right operand of an outer coalesce
+    /// (<c>bonus ?? (fallback ?? backup)</c>) must pick <c>.or_else(...)</c> at BOTH levels — the outer
+    /// method-name choice depends on the inner coalesce's own inferred optionality, and
+    /// <c>WriteOperandValue</c>'s leaf-place clone logic must not append a spurious <c>.clone()</c> after
+    /// the inner coalesce's rendered call chain (a <c>CoalesceExpr</c> is not an <c>IdentifierExpr</c>/
+    /// <c>MemberAccessExpr</c> place).
+    /// </summary>
+    [Fact]
+    public void Value_object_coalesce_with_nested_optional_coalesce_right_operand_renders_or_else_at_both_levels()
+    {
+        var result = new KoineCompiler().Compile(NestedCoalesceBothOptionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
+        rust.ShouldContain("self.bonus.clone().or_else(|| self.fallback.clone().or_else(|| self.backup.clone()))");
+        rust.ShouldNotContain(".unwrap_or_else(");
+    }
+
+    private const string OptionalDerivedTrimOwnershipModel = """
+        context Shop {
+          value Person {
+            name: String
+            nickname: String? = name.trim
+            slug: String = name.trim
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1332: an optional-declared <c>String?</c> derived member whose bare body ends in
+    /// <c>.trim()</c> must own the result via <c>.to_string()</c> before <c>WriteDerived</c>'s
+    /// <c>Some(...)</c>-wrap (#1329) is applied — the <c>.trim()</c>-owning branch's gate previously
+    /// only recognized a non-optional-declared <c>String</c> member (<c>m.Type is { Name: "String",
+    /// IsOptional: false }</c>), so an optional-declared sibling fell through to the generic
+    /// <c>.clone()</c> fallback, which is a no-op on a borrowed <c>&amp;str</c> — a real <c>cargo
+    /// check</c> <c>E0308</c>. <c>slug</c> is the non-optional-declared sibling: the condition change
+    /// is a no-op for it (<c>underlyingType == m.Type</c> when not optional), so it isn't exercising the
+    /// fix itself — it pins the pre-existing, previously-uncovered baseline rendering so a future change
+    /// to this branch can't silently regress it too.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_trim_body_owns_the_result()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedTrimOwnershipModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn nickname(&self) -> Option<String> {");
+        rust.ShouldContain("Some(self.name.trim().to_string())");
+        rust.ShouldNotContain("Some(self.name.trim().clone())");
+
+        rust.ShouldContain("pub fn slug(&self) -> String {");
+        rust.ShouldContain("self.name.trim().to_string()");
+    }
+
+    private const string ConditionalOptionalIntWidenBranchModel = """
+        context Shop {
+          value Money {
+            decimalAmount: Decimal
+            intBonus: Int?
+            total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1335: a <c>ConditionalExpr</c> derived-member body whose numeric-widen-needing branch
+    /// (a bare <c>Int</c>-named type) is itself <b>optional</b> (<c>Int?</c>), while its sibling is a
+    /// non-optional <c>Decimal</c>, must render as <c>&lt;owned rendering&gt;.map(Decimal::from)</c> —
+    /// not the bare <c>Decimal::from(...)</c> prefix, which is invalid for an <c>Option&lt;i64&gt;</c>
+    /// operand and does not produce the <c>Option&lt;Decimal&gt;</c> the arm's type requires.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(ConditionalOptionalIntWidenBranchModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if self.decimal_amount > Decimal::from(0i64) { Some(self.decimal_amount) } else { self.int_bonus.clone().map(Decimal::from) }");
+        rust.ShouldNotContain("Decimal::from(self.int_bonus");
+    }
+
+    private const string ConditionalOptionalIntWidenBothOptionalModel = """
+        context Shop {
+          value Money {
+            amount: Int
+            bonusDecimal: Decimal?
+            bonusInt: Int?
+            total: Decimal? = if amount > 0 then bonusDecimal else bonusInt
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1335: the same optional-Int-widen-needing branch, but its sibling is ITSELF optional
+    /// (<c>Decimal?</c>, not a bare <c>Decimal</c>) — the branch still needs
+    /// <c>.map(Decimal::from)</c> to reach <c>Option&lt;Decimal&gt;</c>, matching the sibling's own
+    /// already-<c>Option</c>-shaped rendering (no <c>Some(...)</c> involved on either side).
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_maps_against_an_optional_decimal_sibling()
+    {
+        var result = new KoineCompiler().Compile(ConditionalOptionalIntWidenBothOptionalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if self.amount > 0 { self.bonus_decimal.clone() } else { self.bonus_int.clone().map(Decimal::from) }");
+        rust.ShouldNotContain("Decimal::from(self.bonus_int");
+    }
+
+    private const string OptionalIntIdentifierComparedToDecimalModel = """
+        context Shop {
+          value Money {
+            a: Int?
+            c: Decimal
+            isEq: Bool = a == c
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343: a bare optional <c>Int?</c> identifier compared via <c>==</c> to a non-optional
+    /// <c>Decimal</c> reaches <c>EmitCoerced</c> (via <c>WriteIdentifier</c>), which previously wrapped
+    /// it in a bare <c>Decimal::from(...)</c> prefix — invalid Rust for an <c>Option&lt;i64&gt;</c>
+    /// operand (E0277), the same defect class #1335 fixed for <c>WriteReconciledBranch</c>. The coerced
+    /// operand must map inside its Option instead, and — since the two sides of <c>==</c> must share the
+    /// same Rust type — the opposite (non-optional) <c>Decimal</c> operand must itself become
+    /// <c>Some(...)</c>-wrapped to match.
+    /// </summary>
+    [Fact]
+    public void Optional_int_identifier_compared_via_equality_to_decimal_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntIdentifierComparedToDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.a.map(Decimal::from) == Some(self.c)");
+        rust.ShouldNotContain("Decimal::from(self.a)");
+    }
+
+    private const string OptionalIntConditionalComparedToDecimalModel = """
+        context Shop {
+          value Money {
+            flag: Bool
+            x: Int
+            y: Int?
+            c: Decimal
+            isEq: Bool = (if flag then x else y) == c
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343: a compound (conditional) operand that itself yields an optional <c>Int?</c> (per
+    /// #975's branch-optionality join) compared via <c>==</c> to a non-optional <c>Decimal</c> reaches
+    /// <c>WriteArithmeticOperand</c>'s compound-operand wrap, which previously wrapped the whole
+    /// rendered <c>if</c>/<c>else</c> in a bare <c>Decimal::from(...)</c> prefix — invalid Rust once the
+    /// block itself evaluates to <c>Option&lt;i64&gt;</c>. Mirrors the bare-identifier case above, one
+    /// level up.
+    /// </summary>
+    [Fact]
+    public void Compound_optional_int_conditional_compared_via_equality_to_decimal_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntConditionalComparedToDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain(
+            "(if self.flag { Some(self.x) } else { self.y.clone() }).map(Decimal::from) == Some(self.c)");
+        rust.ShouldNotContain("Decimal::from(if ");
+    }
+
+    private const string OptionalIntComparedToOptionalDecimalModel = """
+        context Shop {
+          value Money {
+            a: Int?
+            d: Decimal?
+            isEq: Bool = a == d
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343 edge case: when the opposite operand is ITSELF optional (<c>Decimal?</c>, not a bare
+    /// <c>Decimal</c>), the coerced operand still needs <c>.map(Decimal::from)</c> to reach
+    /// <c>Option&lt;Decimal&gt;</c> — matching the sibling's own already-<c>Option</c>-shaped rendering,
+    /// with no <c>Some(...)</c> wrap needed on either side (mirrors #1335's identical "both optional"
+    /// edge case for <c>WriteReconciledBranch</c>).
+    /// </summary>
+    [Fact]
+    public void Optional_int_compared_to_optional_decimal_maps_with_no_some_wrap_on_either_side()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntComparedToOptionalDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.a.map(Decimal::from) == self.d");
+        rust.ShouldNotContain("Some(");
+    }
+
+    private const string NonOptionalIntComparedToOptionalDecimalModel = """
+        context Shop {
+          value Money {
+            c: Decimal?
+            a: Int
+            isEq: Bool = c == a
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343 code-review finding: the mirror of the bare-identifier case above — here the
+    /// Int-named operand (<c>a</c>) is NOT optional, but the opposite, already-<c>Decimal</c>-named
+    /// operand (<c>c</c>) IS optional (<c>Decimal?</c>). The Int side still widens bare (no
+    /// <c>.map(...)</c> needed, since it isn't itself optional), but the widened result must now become
+    /// <c>Some(...)</c>-wrapped to match its optional sibling — composing as <c>Some(Decimal::from(...))</c>
+    /// (wrap outside, widen inside), the same nesting order #1331 established for
+    /// <c>WriteReconciledBranch</c>. <c>someWrapLeft</c>/<c>someWrapRight</c> must key off EACH side's own
+    /// optionality, not off which side happens to be the Int-named one.
+    /// </summary>
+    [Fact]
+    public void Non_optional_int_compared_to_optional_decimal_some_wraps_the_widened_side()
+    {
+        var result = new KoineCompiler().Compile(NonOptionalIntComparedToOptionalDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.c == Some(Decimal::from(self.a))");
+        rust.ShouldNotContain("Decimal::from(Some(");
+    }
 }

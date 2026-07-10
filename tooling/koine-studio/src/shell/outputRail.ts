@@ -1,24 +1,23 @@
-// Output file-rail (concept-7 "Flush") — turns the Generated-preview surface from one concatenated blob
-// into a per-file rail beside a single-file viewer. The rail groups the emit result by bounded context
-// (the file's top-level folder), tints each file's dot by its DDD stereotype `kind`, and shows a line
-// count; clicking a file drives the existing read-only CodeMirror `OutputView` (no new editor).
+// The Generated-preview surface's supporting DOM pieces: the `[rail][crumb + code]` scaffold that hosts
+// a per-file browser beside a single-file viewer (concept-7 "Flush"), plus the ADR-0009 scope-emphasis
+// pass over that browser's top-level (bounded-context) rows. Clicking a file drives the existing
+// read-only CodeMirror `OutputView` (no new editor). The file browser itself — grouping files into a
+// nested folder tree, rendering, selection — is `shell/output/generatedFileTree.ts` (#871 Task 2); it
+// used to be a flat, context-grouped rail rendered here (`renderOutputRail`, #871 Task 3 replaced it with
+// the real tree), so this module now only builds the surrounding scaffold, paints the breadcrumb, and
+// applies scope emphasis to whatever tree fills `.out-rail`.
 //
 // The scaffold is built imperatively INSIDE the existing `#view-preview` host (rather than in index.html)
 // so it needs no markup change and degrades gracefully in the controller's DOM-fixture tests: it's
 // idempotent, so `ide.tsx` (which mounts the OutputView into `.out-code`) and `inspectorController.tsx`
-// (which renders the rail/crumb) can both call it, in either order.
-
-/** One emitted file as the rail needs it — a subset of the LSP `EmitFile` (path + optional DDD kind). */
-export interface OutputRailFile {
-  path: string;
-  /** The DDD stereotype slug (matches a `--koi-ddd-*` token), or null for infra/runtime files. */
-  kind?: string | null;
-  /** Line count, shown on the rail row. */
-  loc: number;
-}
+// (which mounts the file tree/crumb) can both call it, in either order.
 
 export interface OutputScaffold {
   rail: HTMLElement;
+  /** The small "N files" count header living above the tree inside `.out-rail` (the issue's UI-spec
+   *  requirement Task 3 dropped along with the old flat rail's `renderOutputRail` — restored here via
+   *  `renderOutputRailHead`, not by the flat rail's own per-file rendering). */
+  railHead: HTMLElement;
   crumbPath: HTMLElement;
   lang: HTMLElement;
   /** The single-file viewer mount (the CodeMirror OutputView lives here). */
@@ -33,6 +32,7 @@ export function ensureOutputScaffold(previewEl: HTMLElement): OutputScaffold {
   if (existing) {
     return {
       rail: existing.querySelector<HTMLElement>('.out-rail')!,
+      railHead: existing.querySelector<HTMLElement>('.out-railhead')!,
       crumb: existing.querySelector<HTMLElement>('.out-crumb')!,
       crumbPath: existing.querySelector<HTMLElement>('.out-crumb-path')!,
       lang: existing.querySelector<HTMLElement>('.out-lang')!,
@@ -48,9 +48,19 @@ export function ensureOutputScaffold(previewEl: HTMLElement): OutputScaffold {
   };
 
   const grid = mk('out2', previewEl);
+  // `.out-rail` is a plain scroll container: the tree mounted into it (generatedFileTree.ts) carries its
+  // OWN `role="tree"`/`aria-label` on its `<ul>`, so this element must not ALSO claim a widget role — it
+  // used to be `role="tablist"` back when it held flat `role="tab"` buttons directly; that's now an
+  // invalid tablist-containing-a-tree nesting and has been removed. Code-review fix: that removal left the
+  // rail with NO accessible role/name at all whenever the tree itself has none — `generatedFileTree.ts`'s
+  // `setFiles([])` (hit on every error/empty/loading state) strips role/aria-label from its own `<ul>` with
+  // no fallback. `role="region"` + a static `aria-label` here restores an always-present accessible name
+  // without reintroducing the old tablist-containing-a-tree problem — a region containing a tree (once
+  // files exist) is valid ARIA nesting.
   const rail = mk('out-rail koi-scroll', grid);
-  rail.setAttribute('role', 'tablist');
+  rail.setAttribute('role', 'region');
   rail.setAttribute('aria-label', 'Generated files');
+  const railHead = mk('out-railhead', rail);
   const view = mk('out-view', grid);
   const crumb = mk('out-crumb', view);
   const crumbPath = mk('out-crumb-path', crumb);
@@ -58,107 +68,48 @@ export function ensureOutputScaffold(previewEl: HTMLElement): OutputScaffold {
   lang.hidden = true;
   const code = mk('out-code', view);
 
-  return { rail, crumb, crumbPath, lang, code };
+  return { rail, railHead, crumb, crumbPath, lang, code };
 }
 
-/** The bounded context a file belongs to = its top-level folder (or "(root)" when it has none). */
-function contextOf(path: string): string {
-  const slash = path.indexOf('/');
-  return slash > 0 ? path.slice(0, slash) : '(root)';
-}
-
-function basename(path: string): string {
-  const slash = path.lastIndexOf('/');
-  return slash >= 0 ? path.slice(slash + 1) : path;
+/** Paint (or clear) the small file-count header above the tree — the issue's "a small count ('12 files')
+ *  sits in the header" requirement, dropped when Task 3 replaced the flat rail with the tree and not
+ *  replaced since (a real gap, not an intentional drop). `count === 0` clears it (the empty/error states). */
+export function renderOutputRailHead(scaffold: OutputScaffold, count: number): void {
+  scaffold.railHead.textContent = '';
+  if (count === 0) return;
+  const b = document.createElement('b');
+  b.textContent = `${count} file${count === 1 ? '' : 's'}`;
+  scaffold.railHead.appendChild(b);
 }
 
 /**
- * Render the file rail: a `N files · LANG` head, then files grouped by context (first-seen order), each a
- * button tinted by `kind`. The selected file's row is marked `.on`. Clicking a row calls `onSelect(path)`.
+ * Apply ADR-0009 scope emphasis to the Generated file tree's TOP-LEVEL rows (the bounded-context
+ * folders/files — `[role="treeitem"][aria-level="1"]`, matched by `data-path`): the row whose path
+ * matches `activeContext` is marked `.on` and every other top-level row `.dim`, so the active scope reads
+ * without hiding anything (the whole-model overview stays browsable). Any previous emphasis is cleared
+ * first. `activeContext` of `null` (the *All contexts* case), or a scope that matches no top-level path,
+ * leaves every row neutral — a graceful no-op, the same behavior the old flat rail had.
  *
- * `activeContext` is the bounded-context scope to EMPHASISE (ADR 0009 — the Output rail obeys the active
- * scope by emphasis, never hiding): the group whose context matches is marked active and the others are
- * de-emphasised, so the whole-model overview stays intact. Pass `null` (the *All contexts* case) for no
- * emphasis. Grouping is by the file's top-level folder, which equals the bounded-context name for the
- * context-organised targets; a scope that matches no group simply emphasises nothing (a graceful no-op).
+ * Code-review fix: the matched row also gets `aria-current="true"` (cleared from every other top-level
+ * row first) — the `.on`/`.dim` classes alone are a COLOR-only signal (border-color + opacity), which
+ * fails WCAG AA's "don't rely on color alone" for the active-scope indicator this same ADR-0009 concern
+ * is enforced for elsewhere in this exact codebase: `inspectorController.tsx` (a leading `✓`) and
+ * `contextMapPanel.tsx`'s `emphasiseContextMapScope` (`aria-current="true"`, the pattern mirrored here).
  */
-export function renderOutputRail(
-  scaffold: OutputScaffold,
-  files: OutputRailFile[],
-  selectedPath: string | null,
-  langLabel: string,
-  onSelect: (path: string) => void,
-  activeContext: string | null = null,
-): void {
-  const rail = scaffold.rail;
-  rail.textContent = '';
-
-  const head = document.createElement('div');
-  head.className = 'out-railhead';
-  const count = document.createElement('b');
-  count.textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
-  head.append(count, document.createTextNode(` · ${langLabel}`));
-  rail.appendChild(head);
-
-  // Group by context, preserving the order files first appear.
-  const groups: string[] = [];
-  const byGroup = new Map<string, OutputRailFile[]>();
-  for (const f of files) {
-    const ctx = contextOf(f.path);
-    if (!byGroup.has(ctx)) {
-      byGroup.set(ctx, []);
-      groups.push(ctx);
-    }
-    byGroup.get(ctx)!.push(f);
+export function applyOutputTreeEmphasis(treeRoot: HTMLElement, activeContext: string | null): void {
+  const topLevel = Array.from(treeRoot.querySelectorAll<HTMLElement>('[role="treeitem"][aria-level="1"]'));
+  for (const el of topLevel) {
+    el.classList.remove('on', 'dim');
+    el.removeAttribute('aria-current');
   }
 
-  // Scope emphasis (ADR 0009): emphasise the active context's group and de-emphasise the rest — never
-  // hide, so the whole-model overview survives. Applies only when the active scope actually has emitted
-  // files; a scope matching no group (or `null` = All contexts) emphasises nothing — a graceful no-op,
-  // rather than dimming the entire rail.
-  const emphasised = activeContext !== null && groups.includes(activeContext) ? activeContext : null;
+  const matches = activeContext !== null && topLevel.some((el) => el.dataset.path === activeContext);
+  if (!matches) return;
 
-  for (const ctx of groups) {
-    const isActive = emphasised !== null && ctx === emphasised;
-    const isDimmed = emphasised !== null && ctx !== emphasised;
-
-    const head = document.createElement('div');
-    head.className = 'out-ctx' + (isActive ? ' on' : '') + (isDimmed ? ' dim' : '');
-    const ctxName = document.createElement('span');
-    ctxName.className = 'out-ctx-name';
-    ctxName.textContent = ctx;
-    head.appendChild(ctxName);
-    if (isActive) {
-      // A non-colour active marker so the scope reads without relying on hue alone (WCAG AA, ADR 0009).
-      const mark = document.createElement('span');
-      mark.className = 'out-ctx-active';
-      mark.textContent = 'active';
-      head.appendChild(mark);
-    }
-    rail.appendChild(head);
-
-    for (const f of byGroup.get(ctx)!) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'out-file' + (f.path === selectedPath ? ' on' : '') + (isDimmed ? ' dim' : '');
-      btn.setAttribute('role', 'tab');
-      btn.setAttribute('aria-selected', f.path === selectedPath ? 'true' : 'false');
-      btn.dataset.tip = f.path; // the full path — the row shows only the basename
-      btn.dataset.key = `${f.loc} line${f.loc === 1 ? '' : 's'}`;
-      btn.style.setProperty('--fc', `var(--koi-ddd-${f.kind ?? 'x'}, var(--koi-muted))`);
-
-      const dot = document.createElement('span');
-      dot.className = 'fdot';
-      const name = document.createElement('span');
-      name.className = 'fname';
-      name.textContent = basename(f.path);
-      const loc = document.createElement('span');
-      loc.className = 'floc';
-      loc.textContent = String(f.loc);
-      btn.append(dot, name, loc);
-      btn.addEventListener('click', () => onSelect(f.path));
-      rail.appendChild(btn);
-    }
+  for (const el of topLevel) {
+    const isActive = el.dataset.path === activeContext;
+    el.classList.add(isActive ? 'on' : 'dim');
+    if (isActive) el.setAttribute('aria-current', 'true');
   }
 }
 

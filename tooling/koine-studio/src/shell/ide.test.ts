@@ -948,6 +948,39 @@ describe('ide init() — dirty tracking', () => {
   });
 });
 
+describe('ide init() — the injected store is the real singleton (#760)', () => {
+  test('a caret move through the live editor writes onto the real appStore, not merely an isolated instance', async () => {
+    // editorSession.test.ts proves editorSession's onCursor logic is correct against WHATEVER store
+    // it's handed (see its "caret mirrors into the store cursor slice" test, which always builds its
+    // own createAppStore()). That leaves one thing unproven anywhere: that ide.tsx's actual
+    // `createEditorSession({ ..., store: appStore, ... })` call site really does pass the real
+    // singleton through, as opposed to some other store instance a future refactor could disconnect.
+    // Boot the real IDE, drive a real caret move through the live CodeMirror EditorView, and assert the
+    // result lands on the REAL `appStore` singleton (imported the same way other tests in this file do,
+    // e.g. the return-visit start-intent test above).
+    const { appStore } = await import('@/store');
+
+    await boot();
+
+    const view = editorView();
+    // Move the caret to the end of the seeded doc. Derive the expected 1-based line/col the same way
+    // editorSession's onCursor does (ln.number, head - ln.from + 1) — re-deriving it here isn't about
+    // re-proving that arithmetic (editorSession.test.ts already does), it's about avoiding a brittle
+    // hardcoded position while still proving THIS write reaches the real singleton.
+    const pos = view.state.doc.length;
+    const ln = view.state.doc.lineAt(pos);
+    const expectedLine = ln.number;
+    const expectedCol = pos - ln.from + 1;
+
+    view.dispatch({ selection: { anchor: pos } });
+
+    // The write landed on the real appStore singleton — not a locally-created, disconnected instance.
+    expect(appStore.getState().cursor).toEqual({ line: expectedLine, column: expectedCol });
+    // The status-bar mirror (a separate sink in the same onCursor callback) confirms the same live path.
+    expect(document.getElementById('sb-cursor')!.textContent).toBe(`Ln ${expectedLine}, Col ${expectedCol}`);
+  });
+});
+
 describe('ide init() — close/unload guard', () => {
   test('beforeunload is a no-op on a clean workspace and blocks once a buffer is dirty', async () => {
     // Invoke the handler THIS boot registered (captured by boot()), not window.dispatchEvent — the
