@@ -14,6 +14,10 @@
 
 export interface OutputScaffold {
   rail: HTMLElement;
+  /** The small "N files" count header living above the tree inside `.out-rail` (the issue's UI-spec
+   *  requirement Task 3 dropped along with the old flat rail's `renderOutputRail` — restored here via
+   *  `renderOutputRailHead`, not by the flat rail's own per-file rendering). */
+  railHead: HTMLElement;
   crumbPath: HTMLElement;
   lang: HTMLElement;
   /** The single-file viewer mount (the CodeMirror OutputView lives here). */
@@ -28,6 +32,7 @@ export function ensureOutputScaffold(previewEl: HTMLElement): OutputScaffold {
   if (existing) {
     return {
       rail: existing.querySelector<HTMLElement>('.out-rail')!,
+      railHead: existing.querySelector<HTMLElement>('.out-railhead')!,
       crumb: existing.querySelector<HTMLElement>('.out-crumb')!,
       crumbPath: existing.querySelector<HTMLElement>('.out-crumb-path')!,
       lang: existing.querySelector<HTMLElement>('.out-lang')!,
@@ -43,9 +48,12 @@ export function ensureOutputScaffold(previewEl: HTMLElement): OutputScaffold {
   };
 
   const grid = mk('out2', previewEl);
+  // `.out-rail` is a plain scroll container: the tree mounted into it (generatedFileTree.ts) carries its
+  // OWN `role="tree"`/`aria-label` on its `<ul>`, so this element must not ALSO claim a widget role — it
+  // used to be `role="tablist"` back when it held flat `role="tab"` buttons directly; that's now an
+  // invalid tablist-containing-a-tree nesting and has been removed.
   const rail = mk('out-rail koi-scroll', grid);
-  rail.setAttribute('role', 'tablist');
-  rail.setAttribute('aria-label', 'Generated files');
+  const railHead = mk('out-railhead', rail);
   const view = mk('out-view', grid);
   const crumb = mk('out-crumb', view);
   const crumbPath = mk('out-crumb-path', crumb);
@@ -53,7 +61,18 @@ export function ensureOutputScaffold(previewEl: HTMLElement): OutputScaffold {
   lang.hidden = true;
   const code = mk('out-code', view);
 
-  return { rail, crumb, crumbPath, lang, code };
+  return { rail, railHead, crumb, crumbPath, lang, code };
+}
+
+/** Paint (or clear) the small file-count header above the tree — the issue's "a small count ('12 files')
+ *  sits in the header" requirement, dropped when Task 3 replaced the flat rail with the tree and not
+ *  replaced since (a real gap, not an intentional drop). `count === 0` clears it (the empty/error states). */
+export function renderOutputRailHead(scaffold: OutputScaffold, count: number): void {
+  scaffold.railHead.textContent = '';
+  if (count === 0) return;
+  const b = document.createElement('b');
+  b.textContent = `${count} file${count === 1 ? '' : 's'}`;
+  scaffold.railHead.appendChild(b);
 }
 
 /**

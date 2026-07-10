@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { applyOutputTreeEmphasis, ensureOutputScaffold, renderOutputCrumb } from '@/shell/outputRail';
+import { applyOutputTreeEmphasis, ensureOutputScaffold, renderOutputCrumb, renderOutputRailHead } from '@/shell/outputRail';
 import { createGeneratedFileTree } from '@/shell/output/generatedFileTree';
 import type { EmitFile } from '@/lsp/protocol';
 
@@ -34,6 +34,41 @@ describe('ensureOutputScaffold', () => {
     const b = ensureOutputScaffold(previewEl);
     expect(previewEl.querySelectorAll('.out2')).toHaveLength(1);
     expect(b.code).toBe(a.code);
+  });
+
+  test('builds a railHead ("N files" count header) above the tree inside .out-rail', () => {
+    const previewEl = host();
+    const s = ensureOutputScaffold(previewEl);
+    expect(s.railHead.classList.contains('out-railhead')).toBe(true);
+    expect(s.rail.contains(s.railHead)).toBe(true);
+  });
+
+  test('.out-rail carries no widget role/aria-label of its own — only the mounted tree\'s own <ul role="tree"> does (fixes the tablist-containing-a-tree nesting)', () => {
+    const previewEl = host();
+    const s = ensureOutputScaffold(previewEl);
+    expect(s.rail.getAttribute('role')).toBeNull();
+    expect(s.rail.getAttribute('aria-label')).toBeNull();
+  });
+});
+
+describe('renderOutputRailHead', () => {
+  test('shows the file count', () => {
+    const s = ensureOutputScaffold(host());
+    renderOutputRailHead(s, 12);
+    expect(s.railHead.textContent).toBe('12 files');
+  });
+
+  test('singular file count has no trailing "s"', () => {
+    const s = ensureOutputScaffold(host());
+    renderOutputRailHead(s, 1);
+    expect(s.railHead.textContent).toBe('1 file');
+  });
+
+  test('a zero count clears the header (the empty/error output states)', () => {
+    const s = ensureOutputScaffold(host());
+    renderOutputRailHead(s, 4);
+    renderOutputRailHead(s, 0);
+    expect(s.railHead.textContent).toBe('');
   });
 });
 

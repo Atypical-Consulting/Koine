@@ -52,7 +52,13 @@ import { renderAdrPanel, renderNotesPanel, type DocsPanelHandlers } from '@/docs
 import { DocsPanelHost } from '@/docs/DocsPanelHost';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
-import { applyOutputTreeEmphasis, ensureOutputScaffold, renderOutputCrumb, type OutputScaffold } from '@/shell/outputRail';
+import {
+  applyOutputTreeEmphasis,
+  ensureOutputScaffold,
+  renderOutputCrumb,
+  renderOutputRailHead,
+  type OutputScaffold,
+} from '@/shell/outputRail';
 import { createGeneratedFileTree } from '@/shell/output/generatedFileTree';
 import type { EmitFile } from '@/lsp/protocol';
 import type { BottomTab, CenterView } from '@/store/slices/uiChrome';
@@ -261,25 +267,43 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   let lastFiles: EmitFile[] = [];
   let selectedOutputPath: string | null = null;
   let lastPreview = '';
-  let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.className = 'out-copy';
-  copyBtn.textContent = 'Copy';
-  copyBtn.dataset.tip = 'Copy this file';
-  copyBtn.disabled = true;
-  copyBtn.addEventListener('click', () => {
-    if (!lastPreview) return;
-    void navigator.clipboard
-      .writeText(lastPreview)
-      .then(() => (copyBtn.textContent = 'Copied ✓'))
-      .catch(() => (copyBtn.textContent = 'Copy failed'))
-      .finally(() => {
-        clearTimeout(copyResetTimer);
-        copyResetTimer = setTimeout(() => (copyBtn.textContent = 'Copy'), 1600);
-      });
-  });
-  outputScaffold.crumb.appendChild(copyBtn);
+
+  // The shared write-clipboard / flash-label / reset-after-1600ms sequence Copy file and Copy all both
+  // need — factored once so the two buttons don't duplicate the same three-branch promise chain.
+  // `getText` returning '' makes a click a no-op (mirrors each button's own `disabled` gate, which is the
+  // caller's job to keep in sync). Returns the button plus a `cancelReset` hook dispose() uses to drop any
+  // pending reset timer on teardown, exactly like the original single-button `copyResetTimer` did.
+  function makeCopyButton(cls: string, idleLabel: string, tip: string, getText: () => string): { el: HTMLButtonElement; cancelReset: () => void } {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = cls;
+    btn.textContent = idleLabel;
+    btn.dataset.tip = tip;
+    btn.disabled = true;
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+    btn.addEventListener('click', () => {
+      const text = getText();
+      if (!text) return;
+      void navigator.clipboard
+        .writeText(text)
+        .then(() => (btn.textContent = 'Copied ✓'))
+        .catch(() => (btn.textContent = 'Copy failed'))
+        .finally(() => {
+          clearTimeout(resetTimer);
+          resetTimer = setTimeout(() => (btn.textContent = idleLabel), 1600);
+        });
+    });
+    return { el: btn, cancelReset: () => clearTimeout(resetTimer) };
+  }
+  const copyFile = makeCopyButton('out-copy out-copy-file', 'Copy file', 'Copy this file', () => lastPreview);
+  const copyBtn = copyFile.el;
+  // Copies every emitted file, `// ==== path ====`-delimited — the format the facet's pre-tree "copy
+  // everything" flow used to produce (the issue's problem statement), still what a "copy all" click means.
+  const copyAll = makeCopyButton('out-copy out-copy-all', 'Copy all', 'Copy every generated file', () =>
+    lastFiles.map((f) => `// ==== ${f.path} ====\n${f.contents}`).join('\n\n'),
+  );
+  const copyAllBtn = copyAll.el;
+  outputScaffold.crumb.append(copyBtn, copyAllBtn);
 
   // The effective emit target now lives ONLY in the shared store's `emitTarget` slice (#923's top-bar
   // mirror) — there is no more closure-local `currentTarget` shadowing it. `setTarget` writes through
@@ -308,7 +332,9 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     selectedOutputPath = null;
     lastPreview = '';
     copyBtn.disabled = true;
+    copyAllBtn.disabled = true;
     outputTree.setFiles([]); // hides the tree entirely (Task 2's empty-input behavior)
+    renderOutputRailHead(outputScaffold, 0);
     renderOutputCrumb(outputScaffold, null, '');
     output.setContent(message, 'plain');
   }
@@ -334,6 +360,8 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
         clearOutput('// no files emitted (fix diagnostics first)');
       } else {
         lastFiles = res.files;
+        copyAllBtn.disabled = false;
+        renderOutputRailHead(outputScaffold, lastFiles.length);
         outputTree.setFiles(lastFiles); // BEFORE showOutputFile, so selectPath has nodes to find
         const keep = selectedOutputPath && lastFiles.some((f) => f.path === selectedOutputPath);
         showOutputFile(keep ? selectedOutputPath! : lastFiles[0].path);
@@ -829,7 +857,8 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   // into a torn-down environment.
   function dispose(): void {
     disposed = true;
-    clearTimeout(copyResetTimer);
+    copyFile.cancelReset();
+    copyAll.cancelReset();
     clearTimeout(bottomPanelDebounce);
     unsubscribeDirtyCount();
   }

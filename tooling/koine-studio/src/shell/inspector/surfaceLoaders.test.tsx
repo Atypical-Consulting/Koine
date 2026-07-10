@@ -5,7 +5,7 @@
 // refresh-on-save (#470)" / "deck 2-up SECONDARY panes refresh on scope / theme / emit-target changes" /
 // "loading states clear on success" describe blocks (the facade's delegation to this module, unmodified
 // by this extraction).
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createSurfaceLoaders, type SurfaceLoadersDeps, type SurfaceLoadersHooks, type SurfaceLoadersHosts } from '@/shell/inspector/surfaceLoaders';
 import { createAppStore } from '@/store/index';
 import type { AppState } from '@/store/index';
@@ -429,6 +429,138 @@ describe('createSurfaceLoaders — the Generated file tree replaces the flat rai
     await loaders.loadPreview();
 
     expect(output.setContent).toHaveBeenLastCalledWith('// invoice v2', 'csharp');
+  });
+});
+
+// --- (f) Copy file / Copy all (#871 Task 4) --------------------------------
+describe('createSurfaceLoaders — Copy file / Copy all (#871 Task 4)', () => {
+  beforeEach(() => {
+    // The suite's existing clipboard-mocking convention (see exportShare.test.ts).
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => undefined) } });
+  });
+
+  test('Copy file is disabled until a file is selected, then writes only the SELECTED file\'s contents', async () => {
+    const { hosts, lsp, loaders } = build();
+    const copyFileBtn = hosts.preview.querySelector<HTMLButtonElement>('.out-copy-file')!;
+    expect(copyFileBtn.textContent).toBe('Copy file');
+    expect(copyFileBtn.disabled).toBe(true);
+
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [
+        { path: 'Billing/Money.cs', contents: '// money' },
+        { path: 'Billing/Invoice.cs', contents: '// invoice' },
+      ],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+    expect(copyFileBtn.disabled).toBe(false);
+
+    copyFileBtn.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('// money'); // the first/selected file only
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(expect.stringContaining('invoice'));
+  });
+
+  test('Copy all is disabled with no files, then writes every file\'s content joined as "// ==== path ===="', async () => {
+    const { hosts, lsp, loaders } = build();
+    const copyAllBtn = hosts.preview.querySelector<HTMLButtonElement>('.out-copy-all')!;
+    expect(copyAllBtn.textContent).toBe('Copy all');
+    expect(copyAllBtn.disabled).toBe(true);
+
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [
+        { path: 'Billing/Money.cs', contents: '// money' },
+        { path: 'Billing/Invoice.cs', contents: '// invoice' },
+      ],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+    expect(copyAllBtn.disabled).toBe(false);
+
+    copyAllBtn.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      '// ==== Billing/Money.cs ====\n// money\n\n// ==== Billing/Invoice.cs ====\n// invoice',
+    );
+  });
+
+  test('Copy all becomes disabled again once an emit error empties lastFiles', async () => {
+    const { hosts, lsp, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [{ path: 'Billing/Money.cs', contents: '// money' }],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+    const copyAllBtn = hosts.preview.querySelector<HTMLButtonElement>('.out-copy-all')!;
+    expect(copyAllBtn.disabled).toBe(false);
+
+    lsp.emitPreview.mockResolvedValueOnce({ target: 'csharp', files: [], diagnostics: [], error: 'emit exploded' });
+    await loaders.loadPreview();
+    expect(copyAllBtn.disabled).toBe(true);
+  });
+
+  test('Copy file flashes "Copied ✓" then resets to "Copy file" after 1600ms', async () => {
+    vi.useFakeTimers();
+    const { hosts, lsp, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [{ path: 'Billing/Money.cs', contents: '// money' }],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+    const copyFileBtn = hosts.preview.querySelector<HTMLButtonElement>('.out-copy-file')!;
+
+    copyFileBtn.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(copyFileBtn.textContent).toBe('Copied ✓');
+
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(copyFileBtn.textContent).toBe('Copy file');
+  });
+});
+
+// --- (g) the file-count header restores an issue requirement Task 3 dropped (#871 Task 4) ---
+describe('createSurfaceLoaders — file-count header restores a dropped issue requirement (#871 Task 4)', () => {
+  test('loadPreview paints "N files" above the tree', async () => {
+    const { hosts, lsp, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [
+        { path: 'Billing/Money.cs', contents: '// money' },
+        { path: 'Billing/Invoice.cs', contents: '// invoice' },
+      ],
+      diagnostics: [],
+      error: null,
+    });
+
+    await loaders.loadPreview();
+
+    expect(hosts.preview.querySelector('.out-railhead')!.textContent).toBe('2 files');
+  });
+
+  test('an emit error clears the file-count header', async () => {
+    const { hosts, lsp, loaders } = build();
+    lsp.emitPreview.mockResolvedValueOnce({
+      target: 'csharp',
+      files: [{ path: 'Billing/Money.cs', contents: '// money' }],
+      diagnostics: [],
+      error: null,
+    });
+    await loaders.loadPreview();
+    expect(hosts.preview.querySelector('.out-railhead')!.textContent).toBe('1 file');
+
+    lsp.emitPreview.mockResolvedValueOnce({ target: 'csharp', files: [], diagnostics: [], error: 'boom' });
+    await loaders.loadPreview();
+    expect(hosts.preview.querySelector('.out-railhead')!.textContent).toBe('');
   });
 });
 
