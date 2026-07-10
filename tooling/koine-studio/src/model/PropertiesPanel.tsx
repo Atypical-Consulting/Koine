@@ -158,11 +158,16 @@ function InspectorHeader(props: { element: InspectorElement; onGoto: (range: Ran
  * (stereotype), and an editable Description (persisted as a `///` doc comment). Editing is wired only
  * when the matching handler is supplied; without it the controls still render but no-op on commit.
  * Both the Name input and the Description textarea are UNCONTROLLED (`defaultValue`, not `value`) and
- * keyed by the element's current name/description — so typing never fights a re-render, and a genuine
- * prop change (e.g. the rename round-trip resolving with a new canonical name) remounts the field with
- * the fresh value rather than leaving a stale one behind. Escape/blur always read the CURRENT `element`
- * prop (captured fresh in this render's closures), never a value cached across renders — the class of
- * revert-to-stale-value bug the #992 Glossary task review caught cannot occur here.
+ * keyed by the element's `qualifiedName` — so typing never fights a re-render, and a genuine prop
+ * change (e.g. the rename round-trip resolving with a new canonical name, which changes the qualified
+ * name too) remounts the field with the fresh value rather than leaving a stale one behind. The key is
+ * deliberately the element's stable IDENTITY, not the field's own value (`element.name` /
+ * `element.description`): keying on the value let a focus-retaining selection change to a DIFFERENT
+ * element that happens to share the same name/description skip the remount, leaving the previous
+ * element's uncommitted text in the DOM — and the blur handler, now closed over the NEW element, would
+ * write that stale text to the wrong element (#992 task-4 review). Escape/blur always read the CURRENT
+ * `element` prop (captured fresh in this render's closures), never a value cached across renders — the
+ * class of revert-to-stale-value bug the #992 Glossary task review caught cannot occur here.
  */
 function GeneralSection(props: { element: InspectorElement; handlers: InspectorHandlers }) {
   const { element, handlers } = props;
@@ -173,7 +178,7 @@ function GeneralSection(props: { element: InspectorElement; handlers: InspectorH
       <label class="koi-inspector-field" htmlFor="koi-insp-name">
         <span class="koi-inspector-field-label">Name</span>
         <input
-          key={element.name}
+          key={element.qualifiedName}
           id="koi-insp-name"
           name="koi-insp-name"
           type="text"
@@ -207,7 +212,7 @@ function GeneralSection(props: { element: InspectorElement; handlers: InspectorH
       <label class="koi-inspector-field" htmlFor="koi-insp-description">
         <span class="koi-inspector-field-label">Description</span>
         <textarea
-          key={element.description ?? ''}
+          key={element.qualifiedName}
           id="koi-insp-description"
           name="koi-insp-description"
           class="koi-inspector-textarea koi-inspector-desc"

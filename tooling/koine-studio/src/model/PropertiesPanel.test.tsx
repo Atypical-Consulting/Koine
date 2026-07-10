@@ -93,6 +93,35 @@ function indexWithKind(kind: string) {
   return buildModelIndex(glossary, { files: [] });
 }
 
+/** Two distinct elements (different `qualifiedName`) that collide on Description — both undocumented,
+ *  so `element.description` is `''` for each — to reproduce the #992 task-4 review's cross-element
+ *  write-leak: a focus-retaining selection change between two elements sharing the same field VALUE
+ *  must still remount the field (it's keyed on identity, not value). */
+function makeDescriptionCollisionIndex() {
+  const glossary: GlossaryModel = {
+    entries: [
+      { id: 'Sales', name: 'Sales', kind: 'context', context: 'Sales', qualifiedName: 'Sales', doc: null, nameRange: range },
+      { id: 'Sales.Order', name: 'Order', kind: 'aggregate', context: 'Sales', qualifiedName: 'Sales.Order', doc: null, nameRange: range },
+      { id: 'Sales.Payment', name: 'Payment', kind: 'aggregate', context: 'Sales', qualifiedName: 'Sales.Payment', doc: null, nameRange: range },
+    ] satisfies GlossaryEntry[],
+  };
+  return buildModelIndex(glossary, { files: [] });
+}
+
+/** Two distinct elements (different `qualifiedName`, different bounded context) that collide on
+ *  Name — both called "Item" — to reproduce the same write-leak class for the Name/rename field. */
+function makeNameCollisionIndex() {
+  const glossary: GlossaryModel = {
+    entries: [
+      { id: 'Sales', name: 'Sales', kind: 'context', context: 'Sales', qualifiedName: 'Sales', doc: null, nameRange: range },
+      { id: 'Shipping', name: 'Shipping', kind: 'context', context: 'Shipping', qualifiedName: 'Shipping', doc: null, nameRange: range },
+      { id: 'Sales.Item', name: 'Item', kind: 'aggregate', context: 'Sales', qualifiedName: 'Sales.Item', doc: null, nameRange: range },
+      { id: 'Shipping.Item', name: 'Item', kind: 'aggregate', context: 'Shipping', qualifiedName: 'Shipping.Item', doc: null, nameRange: range },
+    ] satisfies GlossaryEntry[],
+  };
+  return buildModelIndex(glossary, { files: [] });
+}
+
 const handlers: InspectorHandlers = { onGoto: () => {} };
 
 /** Render the panel over `makeRichIndex()` with `h`, then select Sales.Order (flushed via act()). */
@@ -254,6 +283,45 @@ describe('PropertiesPanel', () => {
       expect(input.value).toBe('Order');
       expect(onRename).not.toHaveBeenCalled();
     });
+
+    // #992 task-4 review: the Name input used to be keyed on `element.name` (the field's own VALUE).
+    // Two distinct elements that happen to share a name (e.g. "Item" in two different bounded contexts)
+    // would then NOT remount the field on a focus-retaining selection change (no blur in between —
+    // keyboard nav or an outline click that doesn't blur the input) — so the stale, uncommitted DOM
+    // value from the first element survives, and a later blur would attribute it to the SECOND element.
+    // Keying on `element.qualifiedName` (a stable per-element identity) fixes this: this test fails
+    // (stays on 'RenamedSalesItem', or fires onRename) if the key regresses back to `element.name`.
+    test('remounts (resets) the Name field on a focus-retaining selection change to a different element sharing the same name (cross-element rename write-leak regression, #992 task-4 review)', () => {
+      const store = createAppStore();
+      const index = makeNameCollisionIndex();
+      const onRename = vi.fn();
+      const { container } = render(
+        <PropertiesPanel store={store} index={index} handlers={{ onGoto: () => {}, onRename }} />,
+      );
+      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Item', context: 'Sales' }));
+
+      const input = container.querySelector<HTMLInputElement>('#koi-insp-name')!;
+      expect(input.value).toBe('Item');
+
+      // Type into the field WITHOUT blurring.
+      act(() => input.focus());
+      input.value = 'RenamedSalesItem';
+      act(() => {
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      // Selection moves to a DIFFERENT element (different qualifiedName/context) that happens to share
+      // the same current name ("Item") — no blur fired in between, simulating a focus-retaining
+      // selection change (e.g. keyboard navigation in the outline).
+      act(() => store.getState().setSelection({ qualifiedName: 'Shipping.Item', context: 'Shipping' }));
+
+      const inputAfter = container.querySelector<HTMLInputElement>('#koi-insp-name')!;
+      expect(inputAfter.value).toBe('Item'); // reset to Shipping.Item's own name, not the stale typed text
+
+      // Blurring now must not attribute Sales.Item's uncommitted text to Shipping.Item.
+      act(() => inputAfter.blur());
+      expect(onRename).not.toHaveBeenCalled();
+    });
   });
 
   describe('General — Description', () => {
@@ -291,6 +359,46 @@ describe('PropertiesPanel', () => {
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.blur();
       });
+      expect(onSaveDescription).not.toHaveBeenCalled();
+    });
+
+    // #992 task-4 review: the Description textarea used to be keyed on `element.description ?? ''`
+    // (the field's own VALUE). Two distinct, undocumented elements (both `description === ''`) would
+    // then NOT remount the field on a focus-retaining selection change (no blur in between) — so a
+    // stale, uncommitted edit typed for the FIRST element survives in the DOM, and a later blur would
+    // attribute it to the SECOND element via `onSaveDescription`. Keying on `element.qualifiedName`
+    // fixes this: this test fails (stays on the stale text, or fires onSaveDescription) if the key
+    // regresses back to a value-derived key.
+    test('remounts (resets) the Description field on a focus-retaining selection change to a different element sharing the same description (cross-element write-leak regression, #992 task-4 review)', () => {
+      const store = createAppStore();
+      const index = makeDescriptionCollisionIndex();
+      const onSaveDescription = vi.fn();
+      const { container } = render(
+        <PropertiesPanel store={store} index={index} handlers={{ onGoto: () => {}, onSaveDescription }} />,
+      );
+      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+
+      const textarea = container.querySelector<HTMLTextAreaElement>('#koi-insp-description')!;
+      expect(textarea.value).toBe(''); // Order is undocumented
+
+      // Type into the field WITHOUT blurring — a focus-retaining selection change (e.g. keyboard
+      // navigation in the outline, or an outline click that doesn't blur the textarea) can move the
+      // selection while this text is still uncommitted.
+      act(() => textarea.focus());
+      textarea.value = 'Uncommitted note meant for Order';
+      act(() => {
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      // Selection moves to a DIFFERENT element that happens to share the same ('') description — still
+      // no blur fired.
+      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
+
+      const textareaAfter = container.querySelector<HTMLTextAreaElement>('#koi-insp-description')!;
+      expect(textareaAfter.value).toBe(''); // reset to Payment's own description, not the stale typed text
+
+      // Blurring now must not attribute Order's uncommitted text to Payment.
+      act(() => textareaAfter.blur());
       expect(onSaveDescription).not.toHaveBeenCalled();
     });
   });
