@@ -437,27 +437,36 @@ internal sealed class RustExpressionTranslator
 
     /// <summary>
     /// Writes one conditional branch, individually widened to <c>Decimal</c> when its own inferred type
-    /// is <c>Int</c> while the SIBLING branch is <c>Decimal</c>, and/or <c>Some(...)</c>-wrapped when its
-    /// own inferred type is non-optional while the SIBLING branch is optional. <see cref="TypeResolver"/>
+    /// is a non-optional <c>Int</c> while the SIBLING branch is <c>Decimal</c>, map-widened
+    /// (<c>.map(Decimal::from)</c>) when its own inferred type is an OPTIONAL <c>Int</c> while the
+    /// SIBLING branch is <c>Decimal</c> (#1335 — the branch's owned rendering is already
+    /// <c>Option&lt;i64&gt;</c>, so a bare <c>Decimal::from(...)</c> prefix does not compile; mapping
+    /// inside the <c>Option</c> is required instead), and/or <c>Some(...)</c>-wrapped when its own
+    /// inferred type is non-optional while the SIBLING branch is optional. <see cref="TypeResolver"/>
     /// already widens the conditional's own aggregate type to the wider/optional-joined type of the two
     /// branches (#975), so the outer <c>coerceTo</c> comparison in <see cref="WriteArithmeticOperand"/>
     /// (and <c>WriteDerived</c>'s own whole-body <c>Some(...)</c>-wrap decision, #1329) never sees a
     /// mismatch here — each branch still renders in its own native Rust type/optionality, so an
     /// unreconciled pair emits two different types in the same <c>if</c>/<c>else</c> (a real
-    /// <c>cargo check</c> E0308: numeric — #1311; optionality — #1331). Reconciling per-branch (rather
-    /// than a single wrap around the whole conditional) is required because the branches disagree with
-    /// EACH OTHER, not with an externally supplied <c>coerceTo</c>. Fixed here in the emitter (not the
-    /// semantic validator): a widened or optional-joined conditional is a legitimate,
-    /// cross-target-sanctioned pattern (#975) — this is a Rust-only rendering gap, not a modeling error.
-    /// The two reconciliations compose as <c>Some(Decimal::from(...))</c> (wrap outside, widen inside) —
-    /// the value must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>.
+    /// <c>cargo check</c> E0308: numeric — #1311; optionality — #1331; optional numeric — #1335).
+    /// Reconciling per-branch (rather than a single wrap around the whole conditional) is required
+    /// because the branches disagree with EACH OTHER, not with an externally supplied
+    /// <c>coerceTo</c>. Fixed here in the emitter (not the semantic validator): a widened or
+    /// optional-joined conditional is a legitimate, cross-target-sanctioned pattern (#975) — this is a
+    /// Rust-only rendering gap, not a modeling error. The <c>needsWiden</c>/<c>needsOptionalWiden</c>
+    /// widen cases are mutually exclusive (they key off the same branch's own optionality), and either
+    /// composes with <c>needsSomeWrap</c> as <c>Some(Decimal::from(...))</c> (wrap outside, widen
+    /// inside) — the value must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>.
+    /// <c>needsOptionalWiden</c> never composes with <c>needsSomeWrap</c>: the former requires the
+    /// branch itself to be optional, the latter requires it to be non-optional.
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
         TypeScope scope = EffectiveScope();
         TypeRef? branchType = _resolver.Infer(branch, scope);
         TypeRef? siblingType = _resolver.Infer(sibling, scope);
-        var needsWiden = branchType?.Name == "Int" && siblingType?.Name == "Decimal";
+        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
+        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
         var needsSomeWrap = branchType is { IsOptional: false } && siblingType is { IsOptional: true };
 
         if (needsSomeWrap)
@@ -474,6 +483,11 @@ internal sealed class RustExpressionTranslator
         if (needsWiden)
         {
             sb.Append(')');
+        }
+
+        if (needsOptionalWiden)
+        {
+            sb.Append(".map(Decimal::from)");
         }
 
         if (needsSomeWrap)
