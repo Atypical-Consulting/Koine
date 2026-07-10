@@ -187,9 +187,9 @@ export function centerDeckInitialChrome(
 export function createCenterDeckController(options: CenterDeckControllerOptions): CenterDeckController {
   const { store, editor, deps, hooks } = options;
 
-  // Mirrors the facade's own `disposed` gate (#1002): no async work of consequence lives in this module
-  // (every fetch is behind an injected hook a sibling module already guards), but the flag still gates the
-  // debounced notify-flash timer and the resize listener the same way the facade's own gate does.
+  // Mirrors the facade's own lifecycle guard (#1002): no async work of consequence lives in this module
+  // (every fetch is behind an injected hook a sibling module already guards), but the guard still gates the
+  // debounced notify-flash timer and the resize listener the same way the facade's own guard does.
   const lifecycle = createLifecycleGuard();
 
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via domById()) ---

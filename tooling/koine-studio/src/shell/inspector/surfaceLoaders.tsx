@@ -203,7 +203,7 @@ export interface SurfaceLoaders {
 export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoaders {
   const { store, lsp, output, platform, hosts, deps, hooks } = options;
 
-  // Mirrors the facade's own `disposed` gate (#1002): lifecycle.dispose() is called as dispose()'s first
+  // Mirrors the facade's own lifecycle guard (#1002): lifecycle.dispose() is called as dispose()'s first
   // statement, so a loader continuation racing teardown (or a debounced repaint) observes it before
   // touching a dead host.
   const lifecycle = createLifecycleGuard();
@@ -337,7 +337,8 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     if (!outputFiles.length) output.setContent('// generating preview…', 'plain');
     try {
       const res = await lsp.emitPreview(store.getState().emitTarget);
-      if (lifecycle.isDisposed()) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
+      // isCurrent() already folds in disposed — torn down mid-fetch (#1002) or superseded by a newer
+      // call, either way no repaint on behalf of a dead/stale controller.
       if (!previewGen.isCurrent(seq)) return;
       if (res.error) {
         clearOutput('// emit error\n' + res.error);
@@ -355,7 +356,6 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       }
       store.getState().markLoaded('preview', token);
     } catch (e) {
-      if (lifecycle.isDisposed()) return;
       if (!previewGen.isCurrent(seq)) return;
       clearOutput('// preview request failed\n' + String(e));
     }
@@ -384,7 +384,8 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     docMessage(hosts.diagrams, 'Rendering diagrams…');
     try {
       const res = await lsp.livingDocs();
-      if (lifecycle.isDisposed()) return; // torn down mid-fetch (#1002) — no repaint on behalf of a dead controller
+      // isCurrent() already folds in disposed — torn down mid-fetch (#1002) or superseded by a newer
+      // call, either way no repaint on behalf of a dead/stale controller.
       if (!diagramsGen.isCurrent(seq)) return;
       // Scope the diagrams to the active bounded context (#146): each diagram's graph is narrowed and
       // emptied diagrams/files drop out, so a context shows only its own diagrams. "All" is the identity.
@@ -398,10 +399,10 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       // mounts into diagramsView — its own `isCurrent` gate must also see the lifecycle guard's disposed
       // state, not just the local seq, or a resolving mount still lands in the torn-down host (#1002).
       await renderDiagrams(hosts.diagrams, files, currentTheme(), () => diagramsGen.isCurrent(seq));
-      if (lifecycle.isDisposed()) return; // the render above can itself suspend — re-check before markLoaded
+      // The render above can itself suspend — re-check before marking loaded (isCurrent() covers both
+      // disposed-mid-render and superseded-mid-render).
       if (diagramsGen.isCurrent(seq)) store.getState().markLoaded('diagrams', token);
     } catch (e) {
-      if (lifecycle.isDisposed()) return;
       if (diagramsGen.isCurrent(seq)) docMessage(hosts.diagrams, 'Diagrams request failed: ' + String(e), 'error');
     }
   }

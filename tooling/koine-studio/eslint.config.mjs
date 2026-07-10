@@ -9,10 +9,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 // Any `x.innerHTML = …` / `x.outerHTML = …` (and `+=`). The escape-before-innerHTML contract
 // (editor/markdown.ts) lives outside the type system, so these HTML-injection sinks are banned
 // by default: use textContent / el() / JSX, or renderMarkdown output behind a justified
-// same-line disable, or an allow-listed island below. Shared as a constant (not inlined per file
-// block) since several per-file overrides below need to re-declare `no-restricted-syntax` — ESLint
-// flat config REPLACES a rule's array per matching file rather than merging across blocks, so an
-// override that wants to keep SOME base selectors while dropping others must repeat them verbatim.
+// same-line disable, or an allow-listed island below.
 const INNER_HTML_ASSIGN_SELECTOR = {
   selector: "AssignmentExpression[left.property.name=/^(inner|outer)HTML$/]",
   message: 'Assigning innerHTML/outerHTML is an XSS sink. Use textContent/el()/JSX; renderMarkdown output only, behind a justified disable; imperative islands are allow-listed in eslint.config.mjs.',
@@ -42,6 +39,19 @@ const SEQ_COUNTER_SELECTOR = {
   message: 'Hand-rolled `let xSeq = 0` sequence counter is banned (#1352). Use createLifecycleGuard() from @/shared/lifecycleGuard instead.',
 };
 
+// Every syntax selector this gate can enforce, in one place. Several per-file overrides below need to
+// re-declare `no-restricted-syntax` for a file that's exempt from SOME but not all of these — ESLint flat
+// config REPLACES a rule's array per matching file rather than merging across blocks, so an override can't
+// just turn one selector off. `selectorsExcept(...)` expresses that override as "everything except the
+// named exceptions" — an opt-out list, matching this file's existing allow-list idiom below — instead of
+// each override hand-listing which selectors it wants included (an opt-in list silently drifts: a future
+// 5th selector added to ALL_SELECTORS applies everywhere by default here, with no override needing an edit
+// unless it specifically wants to exempt the new one).
+const ALL_SELECTORS = [INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR, DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR];
+function selectorsExcept(...excluded) {
+  return ALL_SELECTORS.filter((s) => !excluded.includes(s));
+}
+
 export default tseslint.config(
   {
     files: ['src/**/*.{ts,tsx}'],
@@ -63,35 +73,28 @@ export default tseslint.config(
         property: 'getElementById',
         message: 'Use domById (src/shared/domById.ts) so a missing #id throws loudly instead of a silent null.',
       }],
-      'no-restricted-syntax': [
-        'error',
-        INNER_HTML_ASSIGN_SELECTOR,
-        INSERT_ADJACENT_HTML_SELECTOR,
-        DISPOSED_FLAG_SELECTOR,
-        SEQ_COUNTER_SELECTOR,
-      ],
+      'no-restricted-syntax': ['error', ...ALL_SELECTORS],
     },
   },
   // src/shared/lifecycleGuard.ts is the primitive itself: it legitimately declares `let disposed = false`
-  // and its own sequence counter (`let current = 0`) inside the implementation. Re-declare
-  // no-restricted-syntax here as the innerHTML/insertAdjacentHTML pair only (unchanged from base) so this
-  // file is exempt from the two new disposed/Seq selectors without losing the XSS-sink bans.
+  // and its own sequence counter (`let current = 0`) inside the implementation. Exempt it from the two
+  // #1352 selectors only — the XSS-sink bans still apply.
   {
     files: ['src/shared/lifecycleGuard.ts'],
     rules: {
-      'no-restricted-syntax': ['error', INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR],
+      'no-restricted-syntax': ['error', ...selectorsExcept(DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR)],
     },
   },
   // src/shell/statusBar.tsx hand-rolls the exact same "am I still mounted" disposed flag as the six
   // controllers migrated onto createLifecycleGuard() — lifecycleGuard.ts's own header comment calls this
   // out by name as "the same disposed-only shape but out of this issue's scope — tracked as a follow-up
-  // rather than folded in here." So the new disposed-flag ban is scoped off for just this file's existing
+  // rather than folded in here." So the disposed-flag selector is scoped off for just this file's existing
   // declaration until that follow-up converts it; the Seq-counter selector stays active here (this file
   // has no `…Seq` pattern today, so nothing depends on it being off).
   {
     files: ['src/shell/statusBar.tsx'],
     rules: {
-      'no-restricted-syntax': ['error', INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR, SEQ_COUNTER_SELECTOR],
+      'no-restricted-syntax': ['error', ...selectorsExcept(DISPOSED_FLAG_SELECTOR)],
     },
   },
   // src/ai/ai.ts's `toolCallSeq` and src/shared/ids.ts's `idSeq` are plain monotonic id-minting counters
@@ -103,12 +106,16 @@ export default tseslint.config(
   {
     files: ['src/ai/ai.ts', 'src/shared/ids.ts'],
     rules: {
-      'no-restricted-syntax': ['error', INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR, DISPOSED_FLAG_SELECTOR],
+      'no-restricted-syntax': ['error', ...selectorsExcept(SEQ_COUNTER_SELECTOR)],
     },
   },
   // Permanent imperative islands (CONTRIBUTING non-goals): CodeMirror (editor), maxGraph
   // (diagrams-maxgraph), and the host seam build DOM imperatively by nature — innerHTML there is
   // inherent to the library boundary, not a migration debt, so the ban is permanently off for them.
+  // This blanket 'off' also happens to cover src/host/browser/wasm.ts's `let loaderSeq = 0` (a plain
+  // id-minting counter, same shape as ai.ts's/ids.ts's exempted ones above) — noted here so a future
+  // narrowing of this block doesn't unexpectedly trip the #1352 Seq selector on it with no exemption on
+  // record; add wasm.ts to a selectorsExcept(SEQ_COUNTER_SELECTOR) override at that point if needed.
   {
     files: ['src/editor/**', 'src/diagrams/diagrams-maxgraph.ts', 'src/host/**'],
     rules: { 'no-restricted-syntax': 'off' },
@@ -147,15 +154,12 @@ export default tseslint.config(
     // (the sub-modules it's being split into — src/shell/inspector/** — inherit the SAME exemption while
     // they still carry the moved-verbatim imperative DOM building; each shrinks/drops out as it converts).
     //
-    // ESLint flat config REPLACES a rule's value per matching file rather than merging arrays across
-    // blocks, so the innerHTML exemption above does NOT implicitly carry the base config's #1352
-    // disposed/Seq selectors here too — they're re-declared below as their own array (innerHTML/
-    // insertAdjacentHTML deliberately excluded; that ban stays off here until the innerHTML migration
-    // closes). These six inspector modules were already migrated onto createLifecycleGuard(), so the
-    // hand-rolled pattern must not be allowed to creep back in even while the innerHTML exemption stands.
+    // These six inspector modules were already migrated onto createLifecycleGuard() (#1352), so the
+    // disposed/Seq selectors must still apply here even while the (unrelated, still-open) innerHTML
+    // exemption stands — hence excluding only the innerHTML pair rather than turning the whole rule off.
     files: ['src/shell/inspectorController.tsx', 'src/shell/inspector/**'],
     rules: {
-      'no-restricted-syntax': ['error', DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR],
+      'no-restricted-syntax': ['error', ...selectorsExcept(INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR)],
     },
   },
   // Tests & stories: the deliberate fire-and-forget promises in vitest fixtures and Storybook play

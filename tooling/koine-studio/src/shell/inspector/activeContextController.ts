@@ -107,8 +107,8 @@ export function scopeLabel(scope: ContextScope): string {
 export function createActiveContextController(deps: ActiveContextControllerDeps): ActiveContextController {
   const { store, lsp, statusBarEl } = deps;
 
-  // lifecycle.dispose() is called as dispose()'s first statement, mirroring the facade's own `disposed`
-  // gate (#1002): suppresses a refreshContextList/followActiveFileContext continuation that resolves
+  // lifecycle.dispose() is called as dispose()'s first statement, mirroring the facade's own lifecycle
+  // guard (#1002): suppresses a refreshContextList/followActiveFileContext continuation that resolves
   // after teardown from writing into a dead store.
   const lifecycle = createLifecycleGuard();
 
