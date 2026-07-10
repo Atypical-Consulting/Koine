@@ -83,8 +83,8 @@ internal static class OperatorNeedsAnalyzer
 
         foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
         {
-            new ScalarOpWalker(BinaryOp.Mul, scope, index, multiply).Visit(expr);
-            new ScalarOpWalker(BinaryOp.Div, scope, index, divide).Visit(expr);
+            new ScalarOpWalker(BinaryOp.Mul, scope, resolver, index, multiply).Visit(expr);
+            new ScalarOpWalker(BinaryOp.Div, scope, resolver, index, divide).Visit(expr);
             new ValueObjectSumWalker(scope, resolver, summable).Visit(expr);
             new ValueObjectArithmeticWalker(scope, resolver, index, binary).Visit(expr);
         }
@@ -483,17 +483,20 @@ internal static class OperatorNeedsAnalyzer
     {
         private readonly BinaryOp _op;
         private readonly TypeScope _scope;
+        private readonly TypeResolver _resolver;
         private readonly ModelIndex _index;
         private readonly Dictionary<string, HashSet<string>> _needs;
 
         public ScalarOpWalker(
             BinaryOp op,
             TypeScope scope,
+            TypeResolver resolver,
             ModelIndex index,
             Dictionary<string, HashSet<string>> needs)
         {
             _op = op;
             _scope = scope;
+            _resolver = resolver;
             _index = index;
             _needs = needs;
         }
@@ -502,8 +505,8 @@ internal static class OperatorNeedsAnalyzer
         {
             if (n.Op == _op)
             {
-                var (lValue, lScalar) = InferOperand(n.Left, _scope, _index);
-                var (rValue, rScalar) = InferOperand(n.Right, _scope, _index);
+                var (lValue, lScalar) = InferOperand(n.Left);
+                var (rValue, rScalar) = InferOperand(n.Right);
 
                 // Canonical order `value-object op scalar` is recorded for both `*` and `/`.
                 if (lValue is not null && rScalar is not null)
@@ -521,44 +524,36 @@ internal static class OperatorNeedsAnalyzer
 
             base.VisitBinary(n);
         }
-    }
 
-    /// <summary>
-    /// Shallowly infers whether an operand is a value object or a numeric scalar. The operand's type is
-    /// read straight from the lexical <see cref="TypeScope"/> by name (identifiers) — deliberately
-    /// shallow, NOT the full <see cref="TypeResolver.TypeOf"/>: only a bare identifier or a numeric
-    /// literal is classified, matching the original member-type-map inference exactly. A collection or
-    /// otherwise un-named scope entry (whose <see cref="KoineType.Name"/> is <c>null</c>) is neither a
-    /// value object nor a scalar, so it falls through unrecorded — as before.
-    /// </summary>
-    private static (string? ValueObject, string? Scalar) InferOperand(
-        Expr expr, TypeScope scope, ModelIndex index)
-    {
-        switch (expr)
+        // Infers whether an operand is a value object or a numeric scalar via the operand's FULL
+        // inferred type (`TypeResolver.TypeOf`, mirroring `ValueObjectArithmeticWalker.RecordValueObjectOperand`)
+        // rather than a bare-identifier/literal-only classification, so a compound operand (a conditional,
+        // a `let`, a nested call) is recognized exactly as a bare place would be (#1289). A collection or
+        // otherwise un-named type (whose `KoineType.Name` is `null` — including the unresolvable-operand
+        // `ErrorType`) is neither a value object nor a scalar, so it falls through unrecorded — as before.
+        private (string? ValueObject, string? Scalar) InferOperand(Expr expr)
         {
-            case IdentifierExpr id when scope.TryGet(id.Name, out KoineType t) && t.Name is { } typeName:
-                if (index.Classify(typeName) == TypeKind.Value)
-                {
-                    return (typeName, null);
-                }
-
-                if (typeName == "Int")
-                {
-                    return (null, "int");
-                }
-
-                if (typeName == "Decimal")
-                {
-                    return (null, "decimal");
-                }
-
+            if (_resolver.TypeOf(expr, _scope).Name is not { } typeName)
+            {
                 return (null, null);
-            case LiteralExpr lit when lit.Kind == LiteralKind.Int:
+            }
+
+            if (_index.Classify(typeName) == TypeKind.Value)
+            {
+                return (typeName, null);
+            }
+
+            if (typeName == "Int")
+            {
                 return (null, "int");
-            case LiteralExpr lit when lit.Kind == LiteralKind.Decimal:
+            }
+
+            if (typeName == "Decimal")
+            {
                 return (null, "decimal");
-            default:
-                return (null, null);
+            }
+
+            return (null, null);
         }
     }
 

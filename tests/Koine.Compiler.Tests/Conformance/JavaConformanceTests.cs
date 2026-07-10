@@ -295,6 +295,44 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// Issue #1289 cross-target audit: <c>JavaExpressionTranslator.TryWriteValueObjectArithmetic</c> lowers
+    /// a value-object scalar <c>*</c>/<c>/</c> to <c>.times</c>/<c>.dividedBy</c> based on the operand's
+    /// FULL inferred type (<c>_resolver.Infer</c>), so it already recognized a compound (conditional)
+    /// operand as a value object — but the demand-generation walker (the shared
+    /// <c>OperatorNeedsAnalyzer.ScalarOpWalker</c>, fixed by #1289's Task 1) only recognized a bare
+    /// identifier/literal, so the <c>.times</c> method it called was never actually generated for a
+    /// conditional operand — a compile-time "cannot find symbol" analogous to Rust's <c>cargo check</c>
+    /// E0369. Fixed for free by the shared analyzer fix; this pins the regression on the Java side too.
+    /// </summary>
+    [Fact]
+    public void Plain_value_object_scalar_multiply_with_conditional_operand_emits_compiling_java()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    flag: Bool\n" +
+            "    scaledConditional: Money = (if flag then a else b) * 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): the demand-generated method the call site relies on.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("public Money times(long factor)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must
