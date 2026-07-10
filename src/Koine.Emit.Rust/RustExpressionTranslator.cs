@@ -319,12 +319,15 @@ internal sealed class RustExpressionTranslator
     /// binary operator, not just arithmetic ones (#1311, extending #1293).
     /// <para>
     /// A simple place is written bare-or-cloned exactly as before (clone only for a non-Copy arithmetic
-    /// operand — comparisons always borrow, per #1282). A compound expression (conditional/let/guard) OR
-    /// a bare non-leaf expression (a nested <c>BinaryExpr</c> used directly, not nested inside a
-    /// conditional — #1311, Task 3: <see cref="WriteOperand"/>'s own <c>BinaryExpr</c> case ignores
-    /// <paramref name="coerceTo"/> entirely) renders via <see cref="WriteOwnedOperand"/> (cloning
-    /// non-Copy leaf places only when <paramref name="isArithmetic"/>, since arithmetic consumes
-    /// ownership but a comparison borrows), then — mirroring
+    /// operand — comparisons always borrow, per #1282: the operator itself auto-refs a bare place, so no
+    /// move occurs). A compound expression (conditional/let/guard) OR a bare non-leaf expression (a
+    /// nested <c>BinaryExpr</c> used directly, not nested inside a conditional — #1311, Task 3:
+    /// <see cref="WriteOperand"/>'s own <c>BinaryExpr</c> case ignores <paramref name="coerceTo"/>
+    /// entirely) renders via <see cref="WriteOwnedOperand"/>, which ALWAYS clones a non-Copy leaf place
+    /// regardless of <paramref name="isArithmetic"/> — unlike the bare-place case, a conditional/let
+    /// block's tail position is a move-out-of-<c>&amp;self</c> position no matter what consumes the
+    /// block's result afterward, so skipping the clone for a comparison operand would leave the BLOCK
+    /// itself failing to borrow-check (E0507), not just the outer operator. Then — mirroring
     /// <c>RustEmitter.ValueObjects.WriteDerived</c>'s <c>NumericCoercionWrap</c> precedent — wraps the
     /// WHOLE rendered expression once in <c>Decimal::from(...)</c> when its own inferred
     /// <paramref name="type"/> differs from <paramref name="coerceTo"/>.
@@ -336,7 +339,7 @@ internal sealed class RustExpressionTranslator
         {
             var needsWrap = coerceTo is not null && type?.Name != coerceTo.Name;
             sb.Append(needsWrap ? "Decimal::from(" : "(");
-            WriteOwnedOperand(expr, sb, clone: isArithmetic);
+            WriteOwnedOperand(expr, sb);
             sb.Append(')');
             return;
         }
@@ -352,21 +355,21 @@ internal sealed class RustExpressionTranslator
     /// (#1268). Shared by the quantity <c>+</c>/<c>-</c> guard, the general arithmetic/comparison path
     /// (#1282, #1311), a bare conditional/let derived-member body
     /// (<see cref="RustExpressionTranslator.TranslateOwned"/>, #1282), and a <c>CoalesceExpr</c> arm
-    /// (<see cref="WriteOperandValue"/>, #1282). <paramref name="clone"/> (default <see langword="true"/>)
-    /// gates whether a non-Copy leaf place is cloned/normalized: every call site above needs an owned
-    /// value, but <see cref="WriteArithmeticOperand"/> passes <see langword="false"/> for a comparison
-    /// operand, which only ever borrows (#1282, #1311).
+    /// (<see cref="WriteOperandValue"/>, #1282). Always clones/normalizes a non-Copy leaf place — this is
+    /// unconditional (not gated by whether the caller is arithmetic or a comparison), because a
+    /// conditional/let block's own tail position requires an owned value to type/borrow-check regardless
+    /// of what the surrounding operator does with the block's result (#1311).
     /// </summary>
-    private void WriteOwnedOperand(Expr expr, StringBuilder sb, bool clone = true)
+    private void WriteOwnedOperand(Expr expr, StringBuilder sb)
     {
         if (expr is ConditionalExpr cond)
         {
             var condBuf = new StringBuilder();
             Write(cond.Condition, condBuf, null);
             sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
-            WriteReconciledBranch(cond.Then, cond.Else, sb, clone);
+            WriteReconciledBranch(cond.Then, cond.Else, sb);
             sb.Append(" } else { ");
-            WriteReconciledBranch(cond.Else, cond.Then, sb, clone);
+            WriteReconciledBranch(cond.Else, cond.Then, sb);
             sb.Append(" }");
             return;
         }
@@ -375,7 +378,7 @@ internal sealed class RustExpressionTranslator
         {
             List<string> pushed = WriteLetBindings(let.Bindings, sb, cloneNonCopyPlaces: true);
             var bodyBuf = new StringBuilder();
-            WriteOwnedOperand(let.Body, bodyBuf, clone);
+            WriteOwnedOperand(let.Body, bodyBuf);
             sb.Append(StripOuterParens(bodyBuf.ToString()));
             sb.Append(" }");
             PopLocals(pushed);
@@ -386,11 +389,11 @@ internal sealed class RustExpressionTranslator
         {
             // `when` is a semantic-only disambiguation with no runtime Rust representation (mirrors
             // Write's GuardExpr case) — the owned-value treatment belongs to the guarded body.
-            WriteOwnedOperand(g.Body, sb, clone);
+            WriteOwnedOperand(g.Body, sb);
             return;
         }
 
-        WriteOwnedLeaf(expr, sb, clone);
+        WriteOwnedLeaf(expr, sb);
     }
 
     /// <summary>
@@ -406,7 +409,7 @@ internal sealed class RustExpressionTranslator
     /// legitimate, cross-target-sanctioned pattern (#975) — this is a Rust-only rendering gap, not a
     /// modeling error.
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb, bool clone)
+    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
         TypeScope scope = EffectiveScope();
         TypeRef? branchType = _resolver.Infer(branch, scope);
@@ -417,7 +420,7 @@ internal sealed class RustExpressionTranslator
             sb.Append("Decimal::from(");
         }
 
-        WriteOwnedOperand(branch, sb, clone);
+        WriteOwnedOperand(branch, sb);
         if (needsWiden)
         {
             sb.Append(')');
@@ -433,10 +436,9 @@ internal sealed class RustExpressionTranslator
     /// place is cloned. A <b>non-place</b> String leaf (a concatenation) is left as-is: it already
     /// renders as an owned <c>String</c> via <see cref="WriteStringOwned"/>, and appending a suffix
     /// after <see cref="StripOuterParens"/> has removed its enclosing parens would bind to the
-    /// concatenation's last operand instead of the whole expression. Neither normalization applies when
-    /// <paramref name="clone"/> is <see langword="false"/> (a comparison operand, which borrows — #1311).
+    /// concatenation's last operand instead of the whole expression.
     /// </summary>
-    private void WriteOwnedLeaf(Expr expr, StringBuilder sb, bool clone)
+    private void WriteOwnedLeaf(Expr expr, StringBuilder sb)
     {
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
         var bodyBuf = new StringBuilder();
@@ -444,11 +446,11 @@ internal sealed class RustExpressionTranslator
         sb.Append(StripOuterParens(bodyBuf.ToString()));
 
         var isPlace = expr is IdentifierExpr or MemberAccessExpr;
-        if (clone && type is { Name: "String", IsOptional: false } && isPlace)
+        if (type is { Name: "String", IsOptional: false } && isPlace)
         {
             sb.Append(".to_string()");
         }
-        else if (clone && IsNonCopyPlace(expr, type))
+        else if (IsNonCopyPlace(expr, type))
         {
             sb.Append(".clone()");
         }

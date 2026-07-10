@@ -939,4 +939,75 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Code-review finding on #1311, Task 1 — a comparison operand's compound (conditional/let/guard)
+    /// branches must STILL be cloned/normalized when a leaf is a non-Copy place (<c>String</c>, or a
+    /// non-Copy value object), even though the comparison OPERATOR itself only ever borrows. The
+    /// normalization isn't there to satisfy the operator; it's there because the <c>if</c>/<c>else</c>
+    /// BLOCK's own tail position is a move-out-of-<c>&amp;self</c> position regardless of what consumes
+    /// the block's result afterward. Gating it off for every comparison (<c>isArithmetic</c>-keyed) broke
+    /// this for any non-Copy leaf — Int/Decimal never surfaced it since both are <c>Copy</c>.
+    /// </summary>
+    [Fact]
+    public void Comparison_operand_conditional_with_noncopy_string_branches_is_still_normalized()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Item {\n" +
+            "    primary: String\n" +
+            "    secondary: String\n" +
+            "    flag: Bool\n" +
+            "    isMatch: Bool = (if flag then primary else secondary) == \"x\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): each non-Copy String branch must still be
+        // normalized to an owned String so the if/else block itself type/borrow-checks.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("if self.flag { self.primary.to_string() } else { self.secondary.to_string() }");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Sibling of <see cref="Comparison_operand_conditional_with_noncopy_string_branches_is_still_normalized"/>
+    /// for a non-Copy VALUE OBJECT place (not a String) — confirms the fix isn't String-special-cased.
+    /// </summary>
+    [Fact]
+    public void Comparison_operand_conditional_with_noncopy_valueobject_branches_is_still_cloned()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  value Bag {\n" +
+            "    a: Money\n" +
+            "    b: Money\n" +
+            "    other: Money\n" +
+            "    flag: Bool\n" +
+            "    isMatch: Bool = (if flag then a else b) == other\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): each non-Copy Money branch must still be cloned
+        // so the if/else block itself type/borrow-checks; the bare `other` operand still borrows
+        // (no `.clone()`), per #1282, since it's used directly by the comparison, not as a block tail.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("(if self.flag { self.a.clone() } else { self.b.clone() }) == self.other");
+        rust.ShouldNotContain("self.other.clone()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
