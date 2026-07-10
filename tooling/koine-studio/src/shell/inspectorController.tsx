@@ -39,6 +39,7 @@ import type {
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { domById } from '@/shared/domById';
+import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 import { LEFT_RAIL_IDS, createFloatingMenu, type FloatingMenuItem } from '@atypical/koine-ui';
 import { NODE_NAVIGATE_EVENT } from '@/diagrams/diagramContract';
 import type {
@@ -306,11 +307,11 @@ export interface InspectorController {
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {
   const { lsp, editor, output, platform, store: appStore } = deps;
 
-  // Set as dispose()'s first statement, so a loader continuation racing teardown observes it. Unlike the
-  // stale-token guard (which only suppresses STALE content on a LIVE controller), this suppresses ALL
-  // post-await mount/subscribe/status-write work once the controller is dead — closing the in-flight-
-  // loader-after-dispose leak (#1002, the async sibling of #980's live-subscription leaks).
-  let disposed = false;
+  // lifecycle.dispose() is called as dispose()'s first statement, so a loader continuation racing teardown
+  // observes it. Unlike the stale-token guard (which only suppresses STALE content on a LIVE controller),
+  // this suppresses ALL post-await mount/subscribe/status-write work once the controller is dead — closing
+  // the in-flight-loader-after-dispose leak (#1002, the async sibling of #980's live-subscription leaks).
+  const lifecycle = createLifecycleGuard();
 
   // --- DOM hosts (looked up once; the same id surface init() builds, so a drift throws via domById()) ---
   // The Generated preview host (#view-preview): a per-file rail beside a single-file viewer (concept-7
@@ -654,7 +655,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     if (!syntaxTreeLoaded || s.right !== 'syntax-tree') return;
     clearTimeout(caretSyncTimer);
     caretSyncTimer = setTimeout(() => {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       if (!syntaxTreeLoaded || appStore.getState().right !== 'syntax-tree') return;
       renderSyntaxTree();
     }, 120);
@@ -1194,14 +1195,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // between boots stops a deferred refresh (onDocEdited's 350ms debounce) from firing into a torn-down
   // environment, where `render` would throw "document is not defined".
   function dispose(): void {
-    disposed = true;
+    lifecycle.dispose();
     clearTimeout(caretSyncTimer); // #890: clear the debounced Syntax Tree caret-sync so it can't re-render a torn-down host
     // Drop the Domain navigator's store subscription so a deferred store change can't repaint a torn-down
     // host (the same hazard the debounce clears, for the navigator's #453 subscription).
     domainNavigator?.unmount();
     // Drop surfaceLoaders' own timers (the Copy-affordance reset, the bottom-panel debounce) and its
     // Source Control dirty-count subscription (#470) — and cancel any pending onDocEdited scheduleRefresh
-    // callback (#985 Task 3: it self-guards on a `disposed` flag this call flips).
+    // callback (#985 Task 3: it self-guards on the lifecycle guard's disposed state this call flips).
     loaders.dispose();
     // Drop the Syntax Tree caret-sync subscription (#890) too — its callback re-renders the panel, which
     // must not fire into a torn-down host after dispose.
