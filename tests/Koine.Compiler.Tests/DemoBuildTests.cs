@@ -33,6 +33,10 @@ public class DemoBuildTests
     private const string NoPhpToolchainNotice =
         "No phpstan/php toolchain (set KOINE_PHPSTAN/KOINE_PHP) -- CI runs this for real.";
 
+    /// <summary>Notice shown when no Rust toolchain (cargo) is available locally.</summary>
+    private const string NoRustToolchainNotice =
+        "No cargo toolchain (set KOINE_CARGO) -- CI runs this for real.";
+
     /// <summary>
     /// R#1073 acceptance for the TypeScript target: <c>demo/typescript/run.sh</c> regenerates
     /// <c>templates/starters/ordering</c> to TypeScript, type-checks the emitted sources plus the
@@ -65,6 +69,19 @@ public class DemoBuildTests
     [Fact]
     public void Php_demo_builds_runs_and_asserts() =>
         RunDemo("php", PhpToolchainAvailable, NoPhpToolchainNotice);
+
+    /// <summary>
+    /// R#1073 acceptance for the Rust target: <c>demo/rust/run.sh</c> regenerates
+    /// <c>templates/starters/ordering</c> to Rust as a <c>koine-domain</c> crate, then builds and
+    /// runs the hand-written driver (<c>src/main.rs</c>) under <c>cargo run</c> — cargo's own
+    /// compile step IS the type-check for this target, so there is no separate lint pass the way
+    /// tsc/mypy/phpstan provide for the other three demos. The driver asserts the outcomes itself
+    /// and exits non-zero on any failed assertion. Skipped (not failed) only when no cargo
+    /// toolchain is present locally.
+    /// </summary>
+    [Fact]
+    public void Rust_demo_builds_runs_and_asserts() =>
+        RunDemo("rust", RustToolchainAvailable, NoRustToolchainNotice);
 
     /// <summary>
     /// Shells <c>demo/&lt;demoDir&gt;/run.sh</c> from the repo root, ALWAYS (regardless of toolchain
@@ -190,6 +207,18 @@ public class DemoBuildTests
         string repoRoot = TestSupport.RepoPath(".");
         return File.Exists(Path.Combine(repoRoot, "vendor", "bin", "phpstan"));
     }
+
+    /// <summary>
+    /// Whether a Rust toolchain (cargo) is available, probed the same way
+    /// <see cref="Conformance.RustConformanceTests"/> does through <see cref="TestSupport"/>'s
+    /// internal <c>ResolveCargo</c> resolver: an explicit <c>KOINE_CARGO</c> override always wins,
+    /// otherwise a same-named <c>cargo</c> binary on <c>PATH</c>. Unlike <see cref="TestSupport.CompileRust"/>,
+    /// this probe does not additionally require the dependency fetch to succeed offline — an absent
+    /// registry is a <c>run.sh</c>-level failure the demo's own <c>cargo run</c> surfaces directly,
+    /// not a silent Skip.
+    /// </summary>
+    private static bool RustToolchainAvailable() =>
+        ToolResolves("KOINE_CARGO", "cargo");
 
     /// <summary>
     /// The first existing path for <paramref name="command"/> on <c>PATH</c> (trying the Windows
