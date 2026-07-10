@@ -539,4 +539,129 @@ public class RustEmitterTests
         rust.ShouldContain("if self.amount > 0 { self.bonus_decimal.clone() } else { self.bonus_int.clone().map(Decimal::from) }");
         rust.ShouldNotContain("Decimal::from(self.bonus_int");
     }
+
+    private const string OptionalIntIdentifierComparedToDecimalModel = """
+        context Shop {
+          value Money {
+            a: Int?
+            c: Decimal
+            isEq: Bool = a == c
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343: a bare optional <c>Int?</c> identifier compared via <c>==</c> to a non-optional
+    /// <c>Decimal</c> reaches <c>EmitCoerced</c> (via <c>WriteIdentifier</c>), which previously wrapped
+    /// it in a bare <c>Decimal::from(...)</c> prefix — invalid Rust for an <c>Option&lt;i64&gt;</c>
+    /// operand (E0277), the same defect class #1335 fixed for <c>WriteReconciledBranch</c>. The coerced
+    /// operand must map inside its Option instead, and — since the two sides of <c>==</c> must share the
+    /// same Rust type — the opposite (non-optional) <c>Decimal</c> operand must itself become
+    /// <c>Some(...)</c>-wrapped to match.
+    /// </summary>
+    [Fact]
+    public void Optional_int_identifier_compared_via_equality_to_decimal_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntIdentifierComparedToDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.a.map(Decimal::from) == Some(self.c)");
+        rust.ShouldNotContain("Decimal::from(self.a)");
+    }
+
+    private const string OptionalIntConditionalComparedToDecimalModel = """
+        context Shop {
+          value Money {
+            flag: Bool
+            x: Int
+            y: Int?
+            c: Decimal
+            isEq: Bool = (if flag then x else y) == c
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343: a compound (conditional) operand that itself yields an optional <c>Int?</c> (per
+    /// #975's branch-optionality join) compared via <c>==</c> to a non-optional <c>Decimal</c> reaches
+    /// <c>WriteArithmeticOperand</c>'s compound-operand wrap, which previously wrapped the whole
+    /// rendered <c>if</c>/<c>else</c> in a bare <c>Decimal::from(...)</c> prefix — invalid Rust once the
+    /// block itself evaluates to <c>Option&lt;i64&gt;</c>. Mirrors the bare-identifier case above, one
+    /// level up.
+    /// </summary>
+    [Fact]
+    public void Compound_optional_int_conditional_compared_via_equality_to_decimal_maps_instead_of_wrapping()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntConditionalComparedToDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain(
+            "(if self.flag { Some(self.x) } else { self.y.clone() }).map(Decimal::from) == Some(self.c)");
+        rust.ShouldNotContain("Decimal::from(if ");
+    }
+
+    private const string OptionalIntComparedToOptionalDecimalModel = """
+        context Shop {
+          value Money {
+            a: Int?
+            d: Decimal?
+            isEq: Bool = a == d
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343 edge case: when the opposite operand is ITSELF optional (<c>Decimal?</c>, not a bare
+    /// <c>Decimal</c>), the coerced operand still needs <c>.map(Decimal::from)</c> to reach
+    /// <c>Option&lt;Decimal&gt;</c> — matching the sibling's own already-<c>Option</c>-shaped rendering,
+    /// with no <c>Some(...)</c> wrap needed on either side (mirrors #1335's identical "both optional"
+    /// edge case for <c>WriteReconciledBranch</c>).
+    /// </summary>
+    [Fact]
+    public void Optional_int_compared_to_optional_decimal_maps_with_no_some_wrap_on_either_side()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntComparedToOptionalDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.a.map(Decimal::from) == self.d");
+        rust.ShouldNotContain("Some(");
+    }
+
+    private const string NonOptionalIntComparedToOptionalDecimalModel = """
+        context Shop {
+          value Money {
+            c: Decimal?
+            a: Int
+            isEq: Bool = c == a
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1343 code-review finding: the mirror of the bare-identifier case above — here the
+    /// Int-named operand (<c>a</c>) is NOT optional, but the opposite, already-<c>Decimal</c>-named
+    /// operand (<c>c</c>) IS optional (<c>Decimal?</c>). The Int side still widens bare (no
+    /// <c>.map(...)</c> needed, since it isn't itself optional), but the widened result must now become
+    /// <c>Some(...)</c>-wrapped to match its optional sibling — composing as <c>Some(Decimal::from(...))</c>
+    /// (wrap outside, widen inside), the same nesting order #1331 established for
+    /// <c>WriteReconciledBranch</c>. <c>someWrapLeft</c>/<c>someWrapRight</c> must key off EACH side's own
+    /// optionality, not off which side happens to be the Int-named one.
+    /// </summary>
+    [Fact]
+    public void Non_optional_int_compared_to_optional_decimal_some_wraps_the_widened_side()
+    {
+        var result = new KoineCompiler().Compile(NonOptionalIntComparedToOptionalDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.c == Some(Decimal::from(self.a))");
+        rust.ShouldNotContain("Decimal::from(Some(");
+    }
 }
