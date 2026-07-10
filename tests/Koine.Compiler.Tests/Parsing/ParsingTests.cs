@@ -159,4 +159,43 @@ public class ParsingTests
         error.Line.ShouldBeGreaterThan(0);
         error.Column.ShouldBeGreaterThan(0);
     }
+
+    [Theory]
+    // Regression for #1298: an `aggregate` declaration missing its required `root <Entity>` clause
+    // used to crash the compiler with an unhandled NullReferenceException — BuildAggregate
+    // unconditionally dereferenced the (absent, on a recovered parse) second Identifier/typeName
+    // token. Auditing sibling `Build*` methods found the identical unguarded-second-required-token
+    // pattern in BuildEntity, BuildPolicy, BuildSpec, and BuildReadModel. The real syntax error is
+    // already reported by the parser; the builder visitor must not throw on top of it.
+    [InlineData(
+        // aggregate CartAgg { ... } missing `root Cart`
+        "context Shop {\n  value Money {\n    amount: Decimal\n  }\n  aggregate CartAgg {\n"
+        + "    entity Cart identified by CartId {\n      fee: Money\n    }\n  }\n}\n")]
+    [InlineData("context C {\n  entity Cart {\n    fee: Int\n  }\n}\n")]                  // entity missing `identified by <Id>`
+    [InlineData("context C {\n  policy NotifyOnPlaced then Notification.record()\n}\n")]  // policy missing `when <Event>`
+    [InlineData("context C {\n  spec IsLarge = total > 100\n}\n")]                        // spec missing `on <Type>`
+    [InlineData("context C {\n  readmodel OrderSummary {\n  }\n}\n")]                     // readmodel missing `from <Type>`
+    public void Missing_required_clause_yields_a_syntax_diagnostic_not_a_throw(string source)
+    {
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    // Positive-regression companion to the above: a well-formed aggregate with its `root` clause
+    // present must parse exactly as before — no diagnostic, no behavior change.
+    public void Aggregate_with_root_clause_parses_without_syntax_errors()
+    {
+        const string source =
+            "context Shop {\n  value Money {\n    amount: Decimal\n  }\n  aggregate CartAgg root Cart {\n"
+            + "    entity Cart identified by CartId {\n      fee: Money\n    }\n  }\n}\n";
+
+        var (model, diagnostics) = new KoineCompiler().Parse(source, "t.koi");
+
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+        model.Contexts.ShouldHaveSingleItem();
+    }
 }

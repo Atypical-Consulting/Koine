@@ -92,11 +92,19 @@ public sealed partial class PhpEmitter
         }
         else
         {
-            // Demand-driven scalar multiply (only when the model actually multiplies this VO by a scalar).
-            if (needs is { MultiplyFactors.Count: > 0 }
-                && fields.Any(m => m.Type.Name is "Int" or "Decimal"))
+            // Demand-driven scalar multiply/divide — each gated independently off its own factor set
+            // (issue #1301), mirroring every other emitter (Rust/Java/Kotlin/TypeScript/Python/C#): a
+            // multiply-only VO gets exactly `multipliedBy`, a divide-only VO gets exactly `dividedBy`,
+            // and a VO needing both gets both (unchanged, byte-identical to before).
+            bool numericField = fields.Any(m => m.Type.Name is "Int" or "Decimal");
+            if (needs is { MultiplyFactors.Count: > 0 } && numericField)
             {
-                WriteScalarOp(sb, fields);
+                WriteScalarOp(sb, fields, "multipliedBy", "mul");
+            }
+
+            if (needs is { DivideFactors.Count: > 0 } && numericField)
+            {
+                WriteScalarOp(sb, fields, "dividedBy", "div");
             }
 
             // Demand-driven `add`. The analyzer pre-computes the union of the two demands —
@@ -405,36 +413,36 @@ public sealed partial class PhpEmitter
 
     private static void WriteScalarOp(
         StringBuilder sb,
-        IReadOnlyList<Member> fields)
+        IReadOnlyList<Member> fields,
+        string methodName,
+        string decimalOp)
     {
         var numeric = new HashSet<string>(
             fields.Where(m => m.Type.Name is "Int" or "Decimal").Select(m => m.Name),
             StringComparer.Ordinal);
 
-        // multipliedBy() and dividedBy() — scalar scaling (mirrors the WriteQuantityOps pattern).
-        foreach (var (methodName, decimalOp) in new[] { ("multipliedBy", "mul"), ("dividedBy", "div") })
+        // multipliedBy() / dividedBy() — scalar scaling (mirrors the WriteQuantityOps pattern). Each
+        // call site gates on its own factor set (issue #1301), so this emits exactly one of the two.
+        sb.Append('\n');
+        sb.Append(Indent).Append("public function ").Append(methodName)
+          .Append(@"(\Koine\Runtime\Decimal $factor): self").Append('\n');
+        sb.Append(Indent).Append("{\n");
+
+        WriteFieldwiseSelf(sb, fields, m =>
         {
-            sb.Append('\n');
-            sb.Append(Indent).Append("public function ").Append(methodName)
-              .Append(@"(\Koine\Runtime\Decimal $factor): self").Append('\n');
-            sb.Append(Indent).Append("{\n");
-
-            WriteFieldwiseSelf(sb, fields, m =>
+            var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
+            if (!numeric.Contains(m.Name))
             {
-                var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-                if (!numeric.Contains(m.Name))
-                {
-                    return "$this->" + prop;
-                }
+                return "$this->" + prop;
+            }
 
-                // Decimal: use the runtime op directly; Int: cast to Decimal via runtime for consistency.
-                return m.Type.Name == "Decimal"
-                    ? "$this->" + prop + "->" + decimalOp + "($factor)"
-                    : "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->" + decimalOp + "($factor)";
-            });
+            // Decimal: use the runtime op directly; Int: cast to Decimal via runtime for consistency.
+            return m.Type.Name == "Decimal"
+                ? "$this->" + prop + "->" + decimalOp + "($factor)"
+                : "(new \\Koine\\Runtime\\Decimal($this->" + prop + "))->" + decimalOp + "($factor)";
+        });
 
-            sb.Append(Indent).Append("}\n");
-        }
+        sb.Append(Indent).Append("}\n");
     }
 
     // -------------------------------------------------------------------------
