@@ -20,3 +20,9 @@ Regenerate any of them from the repo root:
 
 The `.cs.txt` files use a `.txt` suffix on purpose so the demo project does
 **not** compile them as duplicate copies of the live `Generated/` types.
+
+> This folder covers only the **C#** (pizzeria) demo. Each polyglot demo — `demo/typescript`,
+> `demo/python`, `demo/php`, `demo/rust` (issue #1073) — has its own equivalent `reference/`
+> folder of committed emitted-source snapshots from `templates/starters/ordering`; see e.g.
+> [`../typescript/reference/README.md`](../typescript/reference/README.md) and the "Polyglot
+> demos" section of [`../README.md`](../README.md).

@@ -1,0 +1,9 @@
+# Regenerated on every run.sh — never commit the generated tree.
+/generated/
+
+# Cargo's build artifacts (compiled crate, dependency builds, incremental cache).
+/target/
+
+# A lockfile is reproducible from Cargo.toml + the regenerated Cargo.toml; don't commit it (the
+# generated crate's own Cargo.toml is regenerated fresh by every run.sh anyway).
+Cargo.lock

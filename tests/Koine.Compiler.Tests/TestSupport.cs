@@ -620,7 +620,7 @@ public static class TestSupport
     /// Locates a usable <c>node</c>: an explicit <c>KOINE_NODE</c> override (always wins), otherwise a
     /// direct <c>node</c> on PATH. Returns <c>null</c> when neither works so the caller can skip.
     /// </summary>
-    private static ToolInvocation? ResolveNode()
+    internal static ToolInvocation? ResolveNode()
     {
         if (Environment.GetEnvironmentVariable("KOINE_NODE") is { Length: > 0 } overrideNode)
         {
@@ -841,7 +841,7 @@ public static class TestSupport
     }
 
     /// <summary>How to invoke a tool: a program plus leading arguments (e.g. <c>python -m mypy</c>).</summary>
-    private readonly record struct ToolInvocation(string FileName, IReadOnlyList<string> Arguments);
+    internal readonly record struct ToolInvocation(string FileName, IReadOnlyList<string> Arguments);
 
     /// <summary>
     /// Locates a usable <c>mypy</c>: an explicit <c>KOINE_MYPY</c> override (always wins), a direct
@@ -850,7 +850,7 @@ public static class TestSupport
     /// try/catch: a candidate whose process refuses to start (e.g. a <c>mypy</c> on PATH with a
     /// shebang pointing at a removed interpreter) is skipped and the next candidate is tried.
     /// </summary>
-    private static ToolInvocation? ResolveMypy()
+    internal static ToolInvocation? ResolveMypy()
     {
         if (Environment.GetEnvironmentVariable("KOINE_MYPY") is { Length: > 0 } overrideMypy)
         {
@@ -877,7 +877,7 @@ public static class TestSupport
     /// <c>python3</c> → <c>python</c>. Returns <c>null</c> when none launches. Each candidate is
     /// probed via <see cref="CanRun"/> so a broken binary is skipped rather than crashing.
     /// </summary>
-    private static ToolInvocation? ResolvePython()
+    internal static ToolInvocation? ResolvePython()
     {
         if (Environment.GetEnvironmentVariable("KOINE_PYTHON") is { Length: > 0 } overridePython)
         {
@@ -1109,7 +1109,7 @@ public static class TestSupport
     /// a direct <c>phpstan</c> on PATH, or <c>vendor/bin/phpstan</c> resolved from the repo root.
     /// Returns <c>null</c> when none works so the caller can skip.
     /// </summary>
-    private static ToolInvocation? ResolvePhpStan()
+    internal static ToolInvocation? ResolvePhpStan()
     {
         if (Environment.GetEnvironmentVariable("KOINE_PHPSTAN") is { Length: > 0 } overridePhpStan)
         {
@@ -1146,7 +1146,7 @@ public static class TestSupport
     /// Locates a usable <c>php</c> interpreter. Order: <c>KOINE_PHP</c> override → <c>php</c> on
     /// PATH. Returns <c>null</c> when none launches.
     /// </summary>
-    private static ToolInvocation? ResolvePhp()
+    internal static ToolInvocation? ResolvePhp()
     {
         if (Environment.GetEnvironmentVariable("KOINE_PHP") is { Length: > 0 } overridePhp)
         {
@@ -1340,7 +1340,7 @@ public static class TestSupport
     /// Locates a usable <c>cargo</c>: an explicit <c>KOINE_CARGO</c> override (always wins) or a
     /// direct <c>cargo</c> on PATH. Returns <c>null</c> when none launches so the caller can skip.
     /// </summary>
-    private static ToolInvocation? ResolveCargo()
+    internal static ToolInvocation? ResolveCargo()
     {
         if (Environment.GetEnvironmentVariable("KOINE_CARGO") is { Length: > 0 } overrideCargo)
         {
@@ -1737,14 +1737,14 @@ public static class TestSupport
     }
 
     /// <summary>How to invoke <c>tsc</c>: a program plus leading arguments (e.g. <c>npx tsc</c>).</summary>
-    private readonly record struct TscInvocation(string FileName, IReadOnlyList<string> Arguments);
+    internal readonly record struct TscInvocation(string FileName, IReadOnlyList<string> Arguments);
 
     /// <summary>
     /// Locates a usable <c>tsc</c>: an explicit <c>KOINE_TSC</c> override, a direct <c>tsc</c> on
     /// PATH, or <c>npx --no-install tsc</c> when a local TypeScript install is present. Returns
     /// <c>null</c> when none is available so the caller can skip.
     /// </summary>
-    private static TscInvocation? ResolveTsc()
+    internal static TscInvocation? ResolveTsc()
     {
         if (Environment.GetEnvironmentVariable("KOINE_TSC") is { Length: > 0 } overrideTsc)
         {

@@ -1,0 +1,17 @@
+# Runnable, self-checking Rust demo (issue #1073).
+#
+# A small binary crate whose only dependency is the crate the Koine CLI regenerates into
+# `generated/` (a `koine-domain` path dependency) on every `run.sh` -- see ../README.md and this
+# folder's README.md.
+[package]
+name = "koine-rust-demo"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "koine-rust-demo"
+path = "src/main.rs"
+
+[dependencies]
+koine-domain = { path = "generated" }

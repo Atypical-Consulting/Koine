@@ -1,0 +1,10 @@
+{
+  "name": "koine-demo-typescript",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Runnable demo: templates/starters/ordering regenerated to TypeScript, driven and self-checked end-to-end.",
+  "scripts": {
+    "demo": "bash run.sh"
+  }
+}
