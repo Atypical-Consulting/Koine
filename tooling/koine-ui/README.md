@@ -106,13 +106,17 @@ without this package depending on that store):
 | `ReadableStore<T>` | A minimal `{ getState(): T; subscribe(listener): () => void }` interface — the seam a component depends on INSTEAD of a concrete store type. Any host (Koine Studio's Zustand `StoreApi<AppState>`, a future embedding) satisfies it via its own adapter. |
 | `useReadableStore(store)` | The Preact hook a component calls to subscribe to a `ReadableStore<T>`'s slice and re-render on change — the `koine-ui`-side counterpart to Zustand's `useStore(store, selector)`, without importing Zustand. |
 
-**Store-coupled components via `ReadableStore<T>`** (issue #944's prototype targets — each takes a
-`store: ReadableStore<SomeSlice>` prop instead of Koine Studio's `StoreApi<AppState>`):
+**Store-coupled components via `ReadableStore<T>`** (issue #944's prototype targets plus issue
+#1244's third tranche — each takes a `store: ReadableStore<SomeSlice>` prop instead of Koine
+Studio's `StoreApi<AppState>`):
 
 | Component | What it does |
 | --- | --- |
 | `HistoryControls` | The top-bar Undo/Redo button pair; disabled state driven by `ReadableStore<HistoryControlsSlice>` (`{ canUndo, canRedo }`). |
 | `WorkspaceProblemsBadge` | The status-bar workspace-wide problems rollup; driven by `ReadableStore<WorkspaceProblemsSlice>` (`{ kind, parts, fileCount }` — already classified AND formatted, so this package never needs Koine Studio's `LspDiagnostic` type or re-derives its pluralisation wording). |
+| `UnsavedIndicator` | The status-bar "N unsaved" pill + document-title bullet. Renders no tree of its own — it OWNS the host page's static button via effects, driven by `ReadableStore<UnsavedIndicatorSlice>` (`{ dirtyCount }` — the host's adapter counts the dirty buffers, so this package never sees the buffer collection). |
+| `DiagnosticsStripPanel` | The editor's diagnostics strip: a count summary + one clickable row per diagnostic, optionally mirrored into an external `countEl` pill (#1203). Driven by `ReadableStore<DiagnosticsStripSlice>` (`{ scoped, rows, count, kind }` — already scoped to the active bounded context, severity-classified AND count-formatted by the host's adapter). |
+| `DocsPanelHost` | The folder-derived Documentation page host (Decisions/Notes): captures its mount node for the controller on first mount, reloads ONLY on a workspace-folder change. Driven by `ReadableStore<DocsPanelHostSlice>` (`{ folderRootToken }` — an opaque folder identity). |
 
 ### The host-adapter pattern — when to reach for it, and how
 
@@ -178,11 +182,12 @@ are **permanent exclusions**: they have no meaningful behavior on a host without
 there's no generic contract worth designing for them.
 
 The remaining store/host-coupled panels not yet migrated (`PropertiesPanel`, `SourceControlPanel`,
-`DeckStage`, `StoreInspector`, `UnsavedIndicator`, `DiagnosticsStripPanel`, `CanvasPalette`,
-`DocsPanelHost`, `EventsPanel`, `GlossaryPanel`, `RelationshipsPanel`, `settingsPage`, and
-`AssistantView`'s sibling panels) are candidates for a **next-tranche follow-up** using the
-host-adapter pattern above — see issue #944's Task 1 audit comment for the full per-component
-coupling breakdown and which look like the next-best candidates.
+`DeckStage`, `StoreInspector`, `CanvasPalette`, `EventsPanel`, `GlossaryPanel`,
+`RelationshipsPanel`, `settingsPage`, and `AssistantView`'s sibling panels) are candidates for a
+**next-tranche follow-up** using the host-adapter pattern above — `EventsPanel` / `GlossaryPanel` /
+`RelationshipsPanel` look like the next-best batch now that issue #1244's third tranche
+(`UnsavedIndicator`, `DiagnosticsStripPanel`, `DocsPanelHost`) has landed; see issue #944's Task 1
+audit comment for the full per-component coupling breakdown.
 
 ## Development
 
