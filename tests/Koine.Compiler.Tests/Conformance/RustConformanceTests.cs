@@ -1235,6 +1235,75 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1318, sibling of #1270: a <c>quantity</c>'s inherent <c>add</c>/<c>sub</c>/<c>scale</c>
+    /// (<c>WriteQuantityOps</c>) built their result via a local <c>Construct(...)</c> helper that emitted
+    /// a raw <c>Weight { amount: …, unit: self.unit }</c> struct literal — bypassing <c>Weight::new</c>
+    /// and, with it, every declared <c>invariant</c>. Emitted-shape assertions alone would have passed
+    /// against the old raw-literal code just as happily, so this runs the emitted crate under
+    /// <c>cargo test</c>: a valid <c>sub</c>/<c>scale</c> still yields the expected value, while a
+    /// <c>sub</c> that goes negative now surfaces as <c>Err</c> (composing with the existing unit check)
+    /// and a <c>scale</c> by a negative factor now panics through <c>Weight::new</c>'s invariant guard
+    /// instead of silently producing a negative amount.
+    /// </summary>
+    [Fact]
+    public void Quantity_add_sub_scale_enforce_invariants_at_runtime()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum MassUnit { Grams, Kilograms }\n" +
+            "  quantity Weight {\n" +
+            "    amount: Decimal\n" +
+            "    unit: MassUnit\n" +
+            "    invariant amount >= 0 \"a weight cannot be negative\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{MassUnit, Weight};
+
+            /// A subtraction that stays non-negative still yields the difference.
+            #[test]
+            fn sub_preserves_a_valid_value() {
+                let big = Weight::new(Decimal::from(5), MassUnit::Kilograms).expect("5 is a valid Weight");
+                let small = Weight::new(Decimal::from(1), MassUnit::Kilograms).expect("1 is a valid Weight");
+                assert_eq!(big.sub(&small).unwrap(), Weight::new(Decimal::from(4), MassUnit::Kilograms).unwrap());
+            }
+
+            /// A subtraction that goes negative must surface as an Err, not a negative Weight.
+            #[test]
+            fn sub_enforces_the_invariant() {
+                let small = Weight::new(Decimal::from(1), MassUnit::Kilograms).expect("1 is a valid Weight");
+                let big = Weight::new(Decimal::from(5), MassUnit::Kilograms).expect("5 is a valid Weight");
+                assert!(small.sub(&big).is_err());
+            }
+
+            /// A scale that stays non-negative still yields the scaled value.
+            #[test]
+            fn scale_preserves_a_valid_value() {
+                let w = Weight::new(Decimal::from(2), MassUnit::Kilograms).expect("2 is a valid Weight");
+                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6), MassUnit::Kilograms).unwrap());
+            }
+
+            /// Scaling by a negative factor violates the invariant and must panic, not silently succeed.
+            #[test]
+            #[should_panic(expected = "a weight cannot be negative")]
+            fn scale_enforces_the_invariant() {
+                let w = Weight::new(Decimal::from(1), MassUnit::Kilograms).expect("1 is a valid Weight");
+                let _ = w.scale(Decimal::from(-5));
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1316, Task 1 — a bare <c>MemberAccessExpr</c> (a nested value object's member read through
     /// its accessor, e.g. <c>base.amount</c>) used DIRECTLY as one side of an arithmetic operator falls
     /// into <c>WriteOperand</c>'s <c>default: Write(expr, sb, coerceTo)</c> branch, which dispatches to
