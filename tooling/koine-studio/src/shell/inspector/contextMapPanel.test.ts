@@ -26,6 +26,9 @@ function makeOnNavigate() {
   return { setActiveContext: vi.fn(), gotoSourceSpan: vi.fn() };
 }
 
+/** A `renderContextMapGraph` call intercepted mid-flight, letting a test settle it after asserting on `isCurrent()`. */
+type CapturedRender = { isCurrent: () => boolean; resolve: (h: maxgraphRenderer.ContextMapGraphHandle | null) => void };
+
 /** Let queued microtask-chained loader promises settle (mirrors inspectorController.test.ts's flush). */
 async function flush(): Promise<void> {
   for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -112,7 +115,7 @@ describe('createContextMapPanel — superseded paint bails via the render seq', 
     const lsp = makeLsp();
     const host = makeHost();
 
-    const captured: Array<{ isCurrent: () => boolean; resolve: (h: maxgraphRenderer.ContextMapGraphHandle | null) => void }> = [];
+    const captured: CapturedRender[] = [];
     vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
     vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(
       async (_stage, _graph, isCurrent) =>
@@ -387,6 +390,84 @@ describe('createContextMapPanel — hover tooltip composition (#1211)', () => {
     // maxGraph renders the tooltip via `.innerHTML =`, so every fragment must be escaped — a name containing
     // markup must never reach the DOM unescaped (the tooltip is otherwise an HTML-injection point).
     expect(hooks!.tooltip!(edge)).toBe('Rel&lt;x&gt;: &lt;A&gt; → B&amp;C\nShared: &lt;Shared&gt;');
+
+    panel.dispose();
+  });
+});
+
+describe('createContextMapPanel — disposing mid-getMaxGraph skips the post-await tail (#1261)', () => {
+  test('success tail: emphasiseContextMapScope never marks the node once disposed before the render settles', async () => {
+    const store = createAppStore();
+    store.getState().setActiveContext('Billing');
+    const host = makeHost();
+    const lsp = makeLsp();
+
+    let captured: CapturedRender | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(
+      async (container, _graph, isCurrent) =>
+        new Promise((resolve) => {
+          // Mimic the real mount landing its nodes into the stage before the promise settles.
+          container.innerHTML = '<div class="koi-ctxmap-graph"><div class="koi-node koi-svg-node" data-qname="Billing">Billing</div></div>';
+          captured = { isCurrent, resolve };
+        }),
+    );
+
+    const panel = createContextMapPanel({ store, host, lsp, onNavigate: makeOnNavigate() });
+    void panel.load(); // fetch -> paintContextMap -> renderContextMapGraph call, left pending
+    await flush();
+    expect(captured).toBeDefined();
+    expect(captured!.isCurrent()).toBe(true); // sanity: current before disposal
+
+    panel.dispose(); // torn down while getMaxGraph() is still in flight — disposed=true, seq untouched
+    expect(captured!.isCurrent()).toBe(false); // the shared predicate now sees the disposal too
+
+    captured!.resolve({ dispose: vi.fn() }); // the stale mount lands anyway, mirroring the real race
+    await flush();
+
+    const node = host.querySelector<HTMLElement>('.koi-svg-node[data-qname="Billing"]');
+    expect(node?.getAttribute('aria-current')).not.toBe('true'); // the success tail must not have run
+  });
+
+  test('error tail: docMessage never writes into the torn-down stage once disposed before the rejection lands', async () => {
+    const host = makeHost();
+    const lsp = makeLsp();
+
+    let reject: ((e: unknown) => void) | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(
+      async () =>
+        new Promise((_resolve, rej) => {
+          reject = rej;
+        }),
+    );
+
+    const panel = createContextMapPanel({ store: createAppStore(), host, lsp, onNavigate: makeOnNavigate() });
+    void panel.load();
+    await flush();
+    expect(reject).toBeDefined();
+
+    panel.dispose(); // torn down while getMaxGraph() is still in flight — disposed=true, seq untouched
+
+    reject!(new Error('boom')); // the stale rejection lands anyway, mirroring the real race
+    await flush();
+
+    const stage = host.querySelector<HTMLElement>('.ctxmap-stage');
+    expect(stage?.querySelector('.doc-error')).toBeNull(); // the error tail must not have run
+  });
+
+  test('the live (non-disposed) error path still renders its message — the fix narrows the guard, it does not silence it', async () => {
+    const host = makeHost();
+    const lsp = makeLsp();
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockRejectedValue(new Error('boom'));
+
+    const panel = createContextMapPanel({ store: createAppStore(), host, lsp, onNavigate: makeOnNavigate() });
+    await panel.load();
+    await flush();
+
+    const stage = host.querySelector<HTMLElement>('.ctxmap-stage');
+    expect(stage?.querySelector('.doc-error')?.textContent).toBe('Could not render the context-map graph: Error: boom');
 
     panel.dispose();
   });
