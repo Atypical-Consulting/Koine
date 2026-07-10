@@ -287,8 +287,10 @@ public sealed partial class RustEmitter
                 body = $"{wrap}({body})";
             }
             // A String-typed derived member whose body yields a borrowed &str (e.g. `name.trim`) must be
-            // owned; a bare non-Copy field read must be cloned out of `&self`.
-            else if (m.Type is { Name: "String", IsOptional: false } && body.EndsWith(".trim()", StringComparison.Ordinal))
+            // owned; a bare non-Copy field read must be cloned out of `&self`. Gated on `underlyingType`
+            // (not `m.Type`) so an optional-declared `String?` member's `.trim()` body is owned too,
+            // before `SomeWrapIfNeeded` below wraps it (#1332, mirrors #1325's constant-default fix).
+            else if (underlyingType is { Name: "String" } && body.EndsWith(".trim()", StringComparison.Ordinal))
             {
                 body += ".to_string()";
             }

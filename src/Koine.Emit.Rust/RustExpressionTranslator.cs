@@ -146,10 +146,15 @@ internal sealed class RustExpressionTranslator
                 sb.Append(" }");
                 break;
             case CoalesceExpr co:
-                // `l ?? r` -> `l.clone().unwrap_or_else(|| r)` (l is an Option<T>; result is T).
+                // `l ?? r` -> `l.clone().unwrap_or_else(|| r)` (l is an Option<T>; result is T) when `r`
+                // is non-optional, or `l.clone().or_else(|| r)` (result stays Option<T>) when `r` is
+                // itself optional — force-unwrapping there would lose the "still absent" case and fail a
+                // real `cargo check` E0308 (#1333). Infer `r`'s type once and hand it to
+                // WriteOperandValue, which would otherwise re-infer the same node.
                 WriteOperandValue(co.Left, sb);
-                sb.Append(".unwrap_or_else(|| ");
-                WriteOperandValue(co.Right, sb);
+                TypeRef? rightType = _resolver.Infer(co.Right, EffectiveScope());
+                sb.Append(rightType?.IsOptional == true ? ".or_else(|| " : ".unwrap_or_else(|| ");
+                WriteOperandValue(co.Right, sb, rightType);
                 sb.Append(')');
                 break;
             case MemberAccessExpr ma:
@@ -575,9 +580,11 @@ internal sealed class RustExpressionTranslator
     /// Writes an expression as an owned value (used for coalesce arms): cloned when it is a place. A
     /// compound (conditional/let/guard) arm routes through <see cref="WriteOwnedOperand"/> instead, so a
     /// leaf place a branch would otherwise move out of <c>&amp;self</c> is cloned too (#1282) — the
-    /// non-compound case below is unchanged.
+    /// non-compound case below is unchanged. <paramref name="knownType"/> lets a caller that already
+    /// inferred <paramref name="expr"/>'s type (e.g. to pick a coalesce combinator, #1333) pass it
+    /// through instead of paying a second <see cref="TypeResolver.Infer"/> walk for the same node.
     /// </summary>
-    private void WriteOperandValue(Expr expr, StringBuilder sb)
+    private void WriteOperandValue(Expr expr, StringBuilder sb, TypeRef? knownType = null)
     {
         if (expr is ConditionalExpr or LetExpr or GuardExpr)
         {
@@ -585,7 +592,7 @@ internal sealed class RustExpressionTranslator
             return;
         }
 
-        TypeRef? type = _resolver.Infer(expr, EffectiveScope());
+        TypeRef? type = knownType ?? _resolver.Infer(expr, EffectiveScope());
         var clone = IsNonCopyPlace(expr, type);
         Write(expr, sb, null);
         if (clone)
