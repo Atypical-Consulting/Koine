@@ -20,6 +20,7 @@ import { isAllContexts, type ContextScope } from '@/model/activeContext';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { readRaw, writeRaw } from '@/shell/storage';
 import { escapeHtml, formatAclMapping, renderContextMapHtml } from '@/shell/ideUtils';
+import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 
 /** The narrow LSP surface this panel needs — just the strategic context-map fetch. A structural subset
  *  of `InspectorControllerLsp`, defined locally (not imported) so this module never depends on the
@@ -60,10 +61,10 @@ type ContextMapMode = 'graph' | 'table';
 export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPanel {
   const { store, host, lsp, onNavigate } = deps;
 
-  // Set as dispose()'s first statement, mirroring the facade's own `disposed` gate (#1002): suppresses
-  // all post-await mount/render work once the panel is torn down, so an in-flight fetch or a suspended
-  // maxGraph mount that resolves after dispose can't touch a dead host.
-  let disposed = false;
+  // lifecycle.dispose() is called as dispose()'s first statement, mirroring the facade's own lifecycle
+  // guard (#1002): suppresses all post-await mount/render work once the panel is torn down, so an
+  // in-flight fetch or a suspended maxGraph mount that resolves after dispose can't touch a dead host.
+  const lifecycle = createLifecycleGuard();
 
   // The active view is owned by the uiChrome slice (runtime, #983) and mirrored to
   // `koine.studio.contextMapView`. Seed it via the slice setter BEFORE wiring the subscription (so the
@@ -71,7 +72,7 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
   store.getState().setContextMapView(readRaw(CONTEXT_MAP_VIEW_KEY) === 'table' ? 'table' : 'graph');
   let lastContextMap: ContextMapResult | null = null;
   let contextMapGraphHandle: ContextMapGraphHandle | null = null;
-  let contextMapRenderSeq = 0;
+  const contextMapRenderGen = lifecycle.createSequence();
 
   function disposeContextMapGraph(): void {
     contextMapGraphHandle?.dispose();
@@ -200,10 +201,10 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
   // Paint the active view from the stored ContextMapResult. A monotonic seq makes a superseded async graph
   // render (a later toggle/refresh) bail before it touches the DOM; the prior graph handle is disposed first.
   async function paintContextMap(): Promise<void> {
-    const seq = ++contextMapRenderSeq;
+    const seq = contextMapRenderGen.next();
     // Shared by the async gate below AND both post-await tails, so the two halves of the guard
     // (disposal + supersession) can't drift apart again (#1261).
-    const isCurrent = () => !disposed && seq === contextMapRenderSeq;
+    const isCurrent = () => contextMapRenderGen.isCurrent(seq);
     disposeContextMapGraph();
     const { stage, details } = ensureContextMapSkeleton();
     for (const b of host.querySelectorAll<HTMLButtonElement>('.ctxmap-tab')) {
@@ -225,10 +226,10 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
     try {
       const graph = buildContextMapGraph(res);
       // renderContextMapGraph itself suspends again internally (a dynamic maxGraph import) before it mounts
-      // into stage and wires its click listener — its own `isCurrent` gate must also see `disposed`, not
-      // just the local seq, or a resolving mount still lands (and wires live handlers) in a torn-down host
-      // (#1002). paintContextMap is reached both from load()'s guardedLoad render callback and from a live
-      // setContextMapMode toggle, so this fix covers both call paths uniformly.
+      // into stage and wires its click listener — its own `isCurrent` gate must also see the lifecycle
+      // guard's disposed state, not just the local seq, or a resolving mount still lands (and wires live
+      // handlers) in a torn-down host (#1002). paintContextMap is reached both from load()'s guardedLoad
+      // render callback and from a live setContextMapMode toggle, so this fix covers both call paths uniformly.
       contextMapGraphHandle = await renderContextMapGraph(stage, graph, isCurrent, {
         // A context-node click both FILTERS the workspace to that bounded context (only when it's a
         // real, known context — a synthetic dangling endpoint isn't a valid scope) AND JUMPS to its
@@ -259,7 +260,7 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
     await guardedLoad({
       store,
       key: 'contextmap',
-      isDisposed: () => disposed,
+      isDisposed: lifecycle.isDisposed,
       loading: () => {
         disposeContextMapGraph();
         docMessage(host, 'Loading context map…');
@@ -277,7 +278,7 @@ export function createContextMapPanel(deps: ContextMapPanelDeps): ContextMapPane
   }
 
   function dispose(): void {
-    disposed = true;
+    lifecycle.dispose();
     disposeContextMapGraph();
     unsubscribeContextMapView();
     unsubscribeActiveContext();

@@ -28,6 +28,7 @@ import type { AppState } from '@/store/index';
 import type { DocumentSymbol, GlossaryModel } from '@/lsp/lsp';
 import { ALL_CONTEXTS, fileContextFollow, isAllContexts, listContexts, type ContextScope } from '@/model/activeContext';
 import { coverage } from '@/model/glossary';
+import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context` document
 // symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -106,10 +107,10 @@ export function scopeLabel(scope: ContextScope): string {
 export function createActiveContextController(deps: ActiveContextControllerDeps): ActiveContextController {
   const { store, lsp, statusBarEl } = deps;
 
-  // Set as dispose()'s first statement, mirroring the facade's own `disposed` gate (#1002): suppresses a
-  // refreshContextList/followActiveFileContext continuation that resolves after teardown from writing
-  // into a dead store.
-  let disposed = false;
+  // lifecycle.dispose() is called as dispose()'s first statement, mirroring the facade's own lifecycle
+  // guard (#1002): suppresses a refreshContextList/followActiveFileContext continuation that resolves
+  // after teardown from writing into a dead store.
+  const lifecycle = createLifecycleGuard();
 
   // A thin handle over the app store's `activeContext` slice — the store is the single source of truth,
   // so writers set it here and every scoped surface (the diagram, the glossary, and the bottom
@@ -174,7 +175,7 @@ export function createActiveContextController(deps: ActiveContextControllerDeps)
   async function refreshContextList(): Promise<void> {
     try {
       const model = await lsp.glossaryModel();
-      if (disposed) return; // torn down mid-fetch (#1002/#1037) — no write into the dead host
+      if (lifecycle.isDisposed()) return; // torn down mid-fetch (#1002/#1037) — no write into the dead host
       setContextOptions(listContexts(model));
       // Publish glossary documentation coverage for the status-bar docs ring (#923) — the model is
       // already in hand here, and this runs on folder open + every (debounced) edit, so the ring tracks
@@ -182,7 +183,7 @@ export function createActiveContextController(deps: ActiveContextControllerDeps)
       const cov = coverage(model.entries);
       store.getState().setDocsCoverage({ documented: cov.documented, total: cov.total });
     } catch (e) {
-      if (disposed) return;
+      if (lifecycle.isDisposed()) return;
       // Best-effort: empty the picker, but log so a failing glossary model isn't a silent dead end.
       console.warn('Context list refresh failed; clearing the context picker.', e);
       setContextOptions([]);
@@ -238,7 +239,7 @@ export function createActiveContextController(deps: ActiveContextControllerDeps)
   });
 
   function dispose(): void {
-    disposed = true;
+    lifecycle.dispose();
     unsubscribeActiveContext();
   }
 
