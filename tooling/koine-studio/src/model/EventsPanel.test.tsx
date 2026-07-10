@@ -129,6 +129,26 @@ describe('EventsPanel — table (moved from modelTables.test.ts)', () => {
     expect(firstRow).toEqual(['OrderPlaced', 'Domain', 'Order', 'Sales', '—']); // undocumented → em dash
   });
 
+  test('renders an integration event’s Type cell as "Integration", not "Domain"', () => {
+    // A context node publishing an integration-event node (mirrors extractEvents' classification rule:
+    // node.kind === 'integration-event' → type 'integration', publisher resolved from the `publishes` edge).
+    const integrationGraph: DiagramGraph = {
+      nodes: [
+        node('Sales', 'Sales', 'context', 'Sales', span(1)),
+        node('evt_OrderShipped', 'Sales.OrderShipped', 'integration-event', 'Sales.OrderShipped', span(20)),
+      ],
+      edges: [edge('Sales', 'evt_OrderShipped', 'publishes')],
+    };
+    const store = createAppStore();
+    const { container } = render(
+      <EventsPanel store={store} graph={integrationGraph} handlers={{ goto: () => {} }} />,
+    );
+    const firstRow = Array.from(container.querySelectorAll('tbody tr')[0].querySelectorAll('td')).map(
+      (td) => td.textContent,
+    );
+    expect(firstRow).toEqual(['OrderShipped', 'Integration', 'Sales', 'Sales', '—']);
+  });
+
   test('a row click invokes goto with the row’s span AND onSelect with the event’s qualifiedName + context (loads the inspector)', () => {
     const goto = vi.fn();
     const onSelect = vi.fn();
