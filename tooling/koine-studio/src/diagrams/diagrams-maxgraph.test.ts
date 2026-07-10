@@ -38,6 +38,7 @@ import { loadDiagramAnnotations, loadDiagramPositions, loadDiagramZoom, saveDiag
 import { createBrowserLayoutStore } from '@/diagrams/layoutStore';
 import type { Diagram, DiagramEdge, DiagramGraph, DiagramNode, DocsFile } from '@/lsp/lsp';
 import type { ContextMapEdge } from '@/diagrams/contextMapGraph';
+import { formatAclMapping } from '@/shell/ideUtils';
 
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
 // Shim it so the graph constructs with a sane size, and assert on the MODEL (never on pixels).
@@ -656,10 +657,15 @@ describe('renderContextMapGraph', () => {
       sharedTypes: ['Money'],
       acl: [{ upstreamContext: 'Gateway', upstreamType: 'GatewayResult', localContext: 'Payment', localType: 'PaymentReceipt' }],
     };
+    // Mirrors the real contextMapTooltip (contextMapPanel.tsx): a bidirectional arrow, a Shared line only
+    // when non-empty, and every ACL entry via the shared formatAclMapping helper (not just the first).
     const tooltip = (value: DiagramNode | DiagramEdge): string | null => {
       if (!('from' in value && 'to' in value)) return null;
       const e = value as ContextMapEdge;
-      const lines = [`${e.label}: ${e.from} → ${e.to}`, `Shared: ${e.sharedTypes.join(', ')}`, `ACL: ${e.acl[0].upstreamContext}.${e.acl[0].upstreamType} → ${e.acl[0].localContext}.${e.acl[0].localType}`];
+      const arrow = e.bidirectional ? '↔' : '→';
+      const lines = [`${e.label}: ${e.from} ${arrow} ${e.to}`];
+      if (e.sharedTypes.length) lines.push(`Shared: ${e.sharedTypes.join(', ')}`);
+      for (const a of e.acl) lines.push(`ACL: ${formatAclMapping(a)}`);
       return lines.join('\n');
     };
     const graph: DiagramGraph = { nodes: [ctx('Gateway'), ctx('Payment')], edges: [edge] };
@@ -667,12 +673,13 @@ describe('renderContextMapGraph', () => {
     const handle = await renderContextMapGraph(container, graph, () => true, { tooltip });
     try {
       const tooltipHandler = handle!.graph!.getPlugin<mx.TooltipHandler>('TooltipHandler')!;
-      const edgeCell = handle!.graph!.getDefaultParent().getChildEdges()[0];
+      const parent = handle!.graph!.getDefaultParent();
+      const edgeCell = parent.getChildEdges()[0];
       expect(tooltipHandler.getTooltipForCell(edgeCell)).toBe(tooltip(edge));
 
       // A context-node cell carries no `from`/`to` — contextMapTooltip (and this hook) return null for it,
       // so the plugin must render no tooltip rather than falling back to the bare node label.
-      const contextNodeCell = handle!.graph!.getDefaultParent().getChildVertices()[0];
+      const contextNodeCell = parent.getChildVertices()[0];
       expect(tooltipHandler.getTooltipForCell(contextNodeCell)).toBe('');
     } finally {
       handle?.dispose();

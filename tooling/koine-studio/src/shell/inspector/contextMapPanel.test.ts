@@ -345,4 +345,49 @@ describe('createContextMapPanel — hover tooltip composition (#1211)', () => {
 
     panel.dispose();
   });
+
+  test('omits the Shared/ACL lines entirely for a relation with neither (plain association)', async () => {
+    let hooks: maxgraphRenderer.ContextMapGraphHooks | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(async (_stage, _graph, _isCurrent, h) => {
+      hooks = h;
+      return { dispose: vi.fn() };
+    });
+
+    const panel = createContextMapPanel({ store: createAppStore(), host: makeHost(), lsp: makeLsp(), onNavigate: makeOnNavigate() });
+    await panel.load();
+    await flush();
+
+    const edge: ContextMapEdge = {
+      from: 'Kitchen', to: 'Delivery', label: 'Partnership', arrowKind: 'bidirectional',
+      bidirectional: true, sharedTypes: [], acl: [],
+    };
+    // Only the kind + direction line — no spurious "Shared: " / "ACL: " lines, and the bidirectional arrow.
+    expect(hooks!.tooltip!(edge)).toBe('Partnership: Kitchen ↔ Delivery');
+
+    panel.dispose();
+  });
+
+  test('HTML-escapes relation kind, endpoints, and shared-type names in the composed tooltip', async () => {
+    let hooks: maxgraphRenderer.ContextMapGraphHooks | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(async (_stage, _graph, _isCurrent, h) => {
+      hooks = h;
+      return { dispose: vi.fn() };
+    });
+
+    const panel = createContextMapPanel({ store: createAppStore(), host: makeHost(), lsp: makeLsp(), onNavigate: makeOnNavigate() });
+    await panel.load();
+    await flush();
+
+    const edge: ContextMapEdge = {
+      from: '<A>', to: 'B&C', label: 'Rel<x>', arrowKind: 'association',
+      bidirectional: false, sharedTypes: ['<Shared>'], acl: [],
+    };
+    // maxGraph renders the tooltip via `.innerHTML =`, so every fragment must be escaped — a name containing
+    // markup must never reach the DOM unescaped (the tooltip is otherwise an HTML-injection point).
+    expect(hooks!.tooltip!(edge)).toBe('Rel&lt;x&gt;: &lt;A&gt; → B&amp;C\nShared: &lt;Shared&gt;');
+
+    panel.dispose();
+  });
 });
