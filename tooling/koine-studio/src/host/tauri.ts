@@ -486,6 +486,11 @@ export class TauriPlatform implements Platform {
     return invoke('git_commit', { dir: folderToken, message }) as Promise<void>;
   }
 
+  /** Push the current branch to its upstream (`git push`); rejects with git's stderr when it refuses. */
+  gitPush(folderToken: string): Promise<void> {
+    return invoke('git_push', { dir: folderToken }) as Promise<void>;
+  }
+
   /** Revert the commit `sha`, recording a new commit that undoes it (`git revert --no-edit <sha>`). */
   gitRevert(folderToken: string, sha: string): Promise<void> {
     return invoke('git_revert', { dir: folderToken, sha }) as Promise<void>;

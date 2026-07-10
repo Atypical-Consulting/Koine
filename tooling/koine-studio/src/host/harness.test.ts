@@ -45,4 +45,9 @@ describe('BrowserPlatform git capability', () => {
     const platform: Platform = new BrowserPlatform();
     await expect(platform.gitNumstat('any-folder-token')).rejects.toBeInstanceOf(Error);
   });
+
+  it('degrades gitPush to an async rejection, same as every other git* stub', async () => {
+    const platform: Platform = new BrowserPlatform();
+    await expect(platform.gitPush('any-folder-token')).rejects.toBeInstanceOf(Error);
+  });
 });

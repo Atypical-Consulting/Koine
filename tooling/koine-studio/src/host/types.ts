@@ -122,12 +122,30 @@ export interface GitFile {
   status: 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflicted';
 }
 
+/**
+ * Upstream-tracking state for the current branch: the tracked ref plus how far local has diverged.
+ * Present only when the branch tracks an upstream; null/absent for a detached HEAD, a fresh local
+ * branch with no upstream, or a repo with no remote.
+ */
+export interface GitUpstream {
+  /** The upstream ref name, e.g. `origin/main` (git's `# branch.upstream` value). */
+  ref: string;
+  /** Commits the local branch is AHEAD of its upstream (unpushed). */
+  ahead: number;
+  /** Commits the local branch is BEHIND its upstream (unpulled). */
+  behind: number;
+}
+
 /** A snapshot of `git status` for a workspace folder: the current branch plus its changed paths. */
 export interface GitStatus {
   /** The current branch name, or a detached-HEAD marker (e.g. `(detached)` or a short SHA). */
   branch: string;
   /** Every changed path — staged entries, unstaged entries, and untracked files (see {@link GitFile}). */
   files: GitFile[];
+  /** Upstream-tracking counts for {@link branch}, or null/absent when the branch has no upstream.
+   *  Optional so existing gitStatus producers and panel test fakes stay valid (mirrors how the panel's
+   *  `dirtyCount`/`onSaveAll` props were added additively). */
+  upstream?: GitUpstream | null;
 }
 
 /** Per-(file, area) line churn from `git diff --numstat`, keyed like {@link GitFile} by (relPath, staged).
@@ -416,6 +434,14 @@ export interface Platform {
    * the browser stub rejects. Callers must check {@link canUseGit} first.
    */
   gitCommit(folderToken: string, message: string): Promise<void>;
+
+  /**
+   * Push the current branch of the workspace folder to its upstream (`git push`). Resolves once the
+   * push completes; rejects when the branch has no upstream or git refuses (non-fast-forward, auth,
+   * offline). Callers key the affordance off {@link GitStatus.upstream} being present. Desktop only;
+   * the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitPush(folderToken: string): Promise<void>;
 
   /**
    * Revert the commit `sha` of the workspace folder (`git revert --no-edit <sha>`), recording a new
