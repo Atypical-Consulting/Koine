@@ -1148,6 +1148,43 @@ fn git_unstage(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
     run_git(&dir, &args).map(|_| ())
 }
 
+/// Discard the working-tree changes of `rel_paths` — DESTRUCTIVE and unrecoverable, which is why the
+/// TS caller (the Source Control panel) always confirms with the user first. A tracked path is
+/// REVERTED to its index state (`git restore --worktree -- <paths…>` — so a partially-staged file
+/// keeps its staged copy) and an untracked one is DELETED from disk (`git clean -f -- <paths…>`).
+/// The two commands are deliberately conservative: each path goes to exactly one of them (`git
+/// ls-files` says which are tracked — `restore` errors on an untracked pathspec and `clean` skips
+/// tracked ones), both are always scoped by an explicit `--` pathspec, and an empty list is a no-op
+/// up front — so a discard can never touch a file the caller didn't name. `Err` (git's trimmed
+/// stderr) when any step fails.
+#[tauri::command]
+fn git_discard(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
+    if rel_paths.is_empty() {
+        return Ok(()); // never run an unscoped restore/clean
+    }
+
+    // The index knows which of the requested paths are tracked; everything else is untracked.
+    let mut ls_args: Vec<&str> = vec!["ls-files", "--"];
+    ls_args.extend(rel_paths.iter().map(String::as_str));
+    let ls_out = run_git(&dir, &ls_args)?;
+    let tracked: std::collections::HashSet<&str> = ls_out.lines().collect();
+
+    let (tracked_paths, untracked_paths): (Vec<&str>, Vec<&str>) =
+        rel_paths.iter().map(String::as_str).partition(|p| tracked.contains(p));
+
+    if !tracked_paths.is_empty() {
+        let mut args: Vec<&str> = vec!["restore", "--worktree", "--"];
+        args.extend(tracked_paths.iter().copied());
+        run_git(&dir, &args)?;
+    }
+    if !untracked_paths.is_empty() {
+        let mut args: Vec<&str> = vec!["clean", "-f", "--"];
+        args.extend(untracked_paths.iter().copied());
+        run_git(&dir, &args)?;
+    }
+    Ok(())
+}
+
 /// Commit the staged area with `message` (`git commit -m`). `Err` (with git's stderr) when there is
 /// nothing staged or the identity is unset.
 #[tauri::command]
@@ -2229,6 +2266,7 @@ pub fn run() {
             git_numstat,
             git_stage,
             git_unstage,
+            git_discard,
             git_commit,
             git_push,
             git_revert,
@@ -3486,6 +3524,70 @@ mod tests {
         let unstaged = git_status(repo.path()).unwrap();
         assert!(has_file(&unstaged.files, "e.txt", false, "modified"), "{:?}", unstaged.files);
         assert!(!has_file(&unstaged.files, "e.txt", true, "modified"));
+    }
+
+    #[test]
+    fn git_discard_reverts_a_tracked_file_and_removes_an_untracked_one() {
+        let repo = init_repo();
+        repo.write("t.txt", "base\n");
+        repo.write("keep.txt", "keep-base\n");
+        repo.git(&["add", "t.txt", "keep.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // A worktree edit on a tracked file, a brand-new untracked file, and an UNLISTED edit that
+        // the discard must leave alone (deleting too much is the worst failure mode here).
+        repo.write("t.txt", "edited\n");
+        repo.write("u.txt", "scratch\n");
+        repo.write("keep.txt", "keep-edited\n");
+        let before = git_status(repo.path()).unwrap();
+        assert!(has_file(&before.files, "t.txt", false, "modified"), "{:?}", before.files);
+        assert!(has_file(&before.files, "u.txt", false, "untracked"), "{:?}", before.files);
+
+        // One mixed call handles both kinds — exactly what a group Discard-all sends.
+        git_discard(repo.path(), vec!["t.txt".to_string(), "u.txt".to_string()]).unwrap();
+
+        // The tracked file is reverted to its committed content…
+        assert_eq!(std::fs::read_to_string(repo.dir.join("t.txt")).unwrap(), "base\n");
+        // …the untracked file is deleted from disk…
+        assert!(!repo.dir.join("u.txt").exists());
+        // …and the unlisted file keeps its edit (still modified on the next status).
+        assert_eq!(std::fs::read_to_string(repo.dir.join("keep.txt")).unwrap(), "keep-edited\n");
+        let after = git_status(repo.path()).unwrap();
+        assert!(has_file(&after.files, "keep.txt", false, "modified"), "{:?}", after.files);
+        assert!(!has_file(&after.files, "t.txt", false, "modified"));
+        assert!(!has_file(&after.files, "u.txt", false, "untracked"));
+    }
+
+    #[test]
+    fn git_discard_reverts_only_the_worktree_delta_of_a_partially_staged_file() {
+        let repo = init_repo();
+        repo.write("p.txt", "1\n");
+        repo.git(&["add", "p.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Stage one change, then edit again → modified in BOTH areas.
+        repo.write("p.txt", "2\n");
+        repo.git(&["add", "p.txt"]);
+        repo.write("p.txt", "3\n");
+
+        git_discard(repo.path(), vec!["p.txt".to_string()]).unwrap();
+
+        // The worktree reverts to the INDEX content (the staged "2"), never all the way to HEAD's "1"…
+        assert_eq!(std::fs::read_to_string(repo.dir.join("p.txt")).unwrap(), "2\n");
+        // …so the staged copy survives, and only the worktree row is gone.
+        let status = git_status(repo.path()).unwrap();
+        assert!(has_file(&status.files, "p.txt", true, "modified"), "{:?}", status.files);
+        assert!(!has_file(&status.files, "p.txt", false, "modified"), "{:?}", status.files);
+    }
+
+    #[test]
+    fn git_discard_with_no_paths_is_a_no_op_and_errors_on_a_non_git_dir() {
+        // An empty list is a defensive no-op — it must not shell out to a bare `git clean`/`restore`
+        // (unscoped, those would touch the whole tree), so it succeeds even outside a repo.
+        let plain = TempRepo::new();
+        assert!(git_discard(plain.path(), vec![]).is_ok());
+        // With paths, a non-repo dir surfaces git's error like every other git_* command.
+        assert!(git_discard(plain.path(), vec!["x.txt".to_string()]).is_err());
     }
 
     #[test]
