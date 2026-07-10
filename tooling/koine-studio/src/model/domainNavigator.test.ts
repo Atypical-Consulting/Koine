@@ -355,4 +355,31 @@ describe('mountDomainNavigator', () => {
     expect(host.querySelector('.koi-domain-empty')).toBeNull();
     expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
   });
+
+  // #760: the navigator takes its store as a parameter (never the `appStore` singleton) precisely so two
+  // instances can run side by side without leaking into one another. Pin that guarantee explicitly: two
+  // navigators, each built with its OWN createAppStore(), and a drill through the first must never be
+  // visible on the second's store or DOM.
+  it('two instances built with separate createAppStore()s do not see each other\'s writes (no shared global)', async () => {
+    const host1 = document.createElement('div');
+    const host2 = document.createElement('div');
+    document.body.append(host1, host2);
+    const store1 = makeTestStore();
+    const store2 = makeTestStore();
+    mountDomainNavigator(host1, store1, fakeLsp());
+    mountDomainNavigator(host2, store2, fakeLsp());
+    await flush(); // both instances' initial strategic fetches resolve and paint independently
+
+    // Drill into Ordering through the FIRST navigator only.
+    (host1.querySelector('[data-ctx="Ordering"]') as HTMLButtonElement).click();
+    expect(store1.getState().navAltitude).toBe('tactical');
+    expect(store1.getState().activeContext).toBe('Ordering');
+    await flush();
+
+    // The second instance's store — and its DOM — must be completely untouched by the first's write.
+    expect(store2.getState().navAltitude).toBe('strategic');
+    expect(store2.getState().activeContext).not.toBe('Ordering');
+    expect(host2.querySelector('.koi-breadcrumb-back')).toBeNull(); // still the strategic (non-drilled) view
+    expect(host2.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // strategic context list, unaffected
+  });
 });
