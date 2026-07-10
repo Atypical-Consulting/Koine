@@ -390,9 +390,16 @@ export interface CheckResult {
   changes: CheckChange[];
 }
 
-// Standard LSP WorkspaceEdit: text edits grouped by the file:// uri they apply to.
+// Standard LSP WorkspaceEdit: text edits grouped by the file:// uri they apply to. `idCoRename` and
+// `leftBehindIdName` ride along only on a `textDocument/rename` response — the authoritative outcome of
+// any convention-linked `<Root>Id` identity co-rename (#550), mirroring the server's
+// Koine.Compiler.Services.IdCoRenameOutcome — so `renameStatusMessage` (model/inspector.ts) doesn't have
+// to re-derive that decision from rendered text (#565 follow-up). Both are absent/undefined on every
+// other WorkspaceEdit-shaped payload (code actions, model edits).
 export interface WorkspaceEdit {
   changes: Record<string, TextEdit[]>;
+  idCoRename?: 'Applied' | 'LeftBehind' | null;
+  leftBehindIdName?: string | null;
 }
 
 // Standard LSP CodeAction: a titled quickfix/refactor carrying an inline WorkspaceEdit.

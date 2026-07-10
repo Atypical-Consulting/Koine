@@ -197,8 +197,15 @@ public sealed record WTextEdit(WRange Range, string NewText);
 /// <summary>LSP prepareRename answer: the editable identifier range + the current name placeholder.</summary>
 public sealed record WPrepareRename(WRange Range, string? Placeholder);
 
-/// <summary>LSP WorkspaceEdit: per-file text edits keyed by uri.</summary>
-public sealed record WWorkspaceEdit(Dictionary<string, WTextEdit[]> Changes);
+/// <summary>
+/// LSP WorkspaceEdit: per-file text edits keyed by uri. <see cref="IdCoRename"/>/<see cref="LeftBehindIdName"/>
+/// ride along only on a rename response — the authoritative outcome of any convention-linked
+/// <c>&lt;Root&gt;Id</c> identity co-rename (#550), serialized from
+/// <see cref="Koine.Compiler.Services.IdCoRenameOutcome"/> so Koine Studio can flag a left-behind id
+/// without re-deriving the decision from rendered text (#565 follow-up). Both are <c>null</c> for every
+/// other WorkspaceEdit-shaped payload (code actions, model edits).
+/// </summary>
+public sealed record WWorkspaceEdit(Dictionary<string, WTextEdit[]> Changes, string? IdCoRename = null, string? LeftBehindIdName = null);
 
 /// <summary>LSP CodeAction with an inline workspace edit (quickfix or refactor).</summary>
 public sealed record WCodeAction(string Title, string Kind, WWorkspaceEdit Edit);

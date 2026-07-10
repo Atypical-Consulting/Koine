@@ -35,6 +35,41 @@ public sealed record RenameFileChanges(string Uri, IReadOnlyList<Reference> Occu
 public sealed record RenameEdit(Reference Occurrence, string NewText);
 
 /// <summary>
+/// Whether a rename's convention-linked <c>&lt;Root&gt;Id</c> identity co-rename (#550) fired, as
+/// authoritative structured data alongside <see cref="RenameResult"/> — so a caller (Koine Studio) can
+/// flag a left-behind id without re-deriving the decision from rendered text (#565 follow-up: the prior
+/// approach string-matched the rendered <c>id: &lt;X&gt;Id</c> property row and the <c>aggregate root</c>
+/// stereotype label, which silently stopped firing if either rendered string ever changed shape).
+/// </summary>
+public enum IdCoRenameOutcome
+{
+    /// <summary>A convention-linked <c>&lt;Root&gt;Id</c> identity type existed and WAS co-renamed
+    /// alongside the root, in the same edit.</summary>
+    Applied,
+
+    /// <summary>A convention-linked <c>&lt;Root&gt;Id</c> identity type existed but could NOT be
+    /// co-renamed (the proposed <c>&lt;newName&gt;Id</c> collided with an existing declaration, or no
+    /// in-scope reference to it was found) — its unchanged name rides on
+    /// <see cref="RenameResult.LeftBehindIdName"/>.</summary>
+    LeftBehind,
+}
+
+/// <summary>
+/// The result of <c>KoineLanguageService.RenameEditsAt</c>: the per-occurrence rename
+/// <paramref name="Edits"/> plus the authoritative outcome of any convention-linked <c>&lt;Root&gt;Id</c>
+/// identity co-rename (#550). <paramref name="IdCoRename"/> is <c>null</c> when the renamed symbol
+/// carries no such convention-linked identity to begin with (not an aggregate root, or a
+/// non-conventional identity — e.g. <c>identified by Guid</c>); otherwise it reports whether that id
+/// was co-renamed (<see cref="IdCoRenameOutcome.Applied"/>) or left behind
+/// (<see cref="IdCoRenameOutcome.LeftBehind"/>, with <paramref name="LeftBehindIdName"/> set to its
+/// unchanged name).
+/// </summary>
+public sealed record RenameResult(
+    IReadOnlyList<RenameEdit> Edits,
+    IdCoRenameOutcome? IdCoRename,
+    string? LeftBehindIdName);
+
+/// <summary>
 /// A workspace-wide declaration index built from a <c>uri → source</c> map. Each
 /// document is parsed once; resolution is local-file-first, then a unique match
 /// across the other files (ambiguity yields no result). Editor-agnostic — no LSP.

@@ -2164,17 +2164,19 @@ public sealed class KoineLanguageService
     /// with every occurrence mapped to <paramref name="newName"/>. The extra power: when the renamed symbol
     /// is an <b>aggregate root entity</b> whose identity follows the <c>&lt;Root&gt;Id</c> convention, the
     /// edit ALSO co-renames that identity type to <c>&lt;newName&gt;Id</c> in the same pass (#550) — so a
-    /// <c>PurchaseOrder</c> no longer ends up with an <c>OrderId</c>. Returns null in exactly the cases
+    /// <c>PurchaseOrder</c> no longer ends up with an <c>OrderId</c>. The result's <c>IdCoRename</c>
+    /// reports that co-rename's outcome as authoritative structured data (#565 follow-up), so a caller
+    /// doesn't have to re-derive whether it happened from rendered text. Returns null in exactly the cases
     /// <see cref="RenameAt(KoineCompilation,string,int,int,string)"/> does.
     /// </summary>
-    public IReadOnlyList<RenameEdit>? RenameEditsAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character, string newName) =>
+    public RenameResult? RenameEditsAt(IReadOnlyDictionary<string, string> documents, string activeUri, int line, int character, string newName) =>
         RenameEditsAt(ToCompilation(documents), activeUri, line, character, newName);
 
     /// <summary>
     /// Overload of <see cref="RenameEditsAt(IReadOnlyDictionary{string,string},string,int,int,string)"/>
     /// that reuses a held <see cref="KoineCompilation"/> snapshot.
     /// </summary>
-    public IReadOnlyList<RenameEdit>? RenameEditsAt(KoineCompilation compilation, string activeUri, int line, int character, string newName)
+    public RenameResult? RenameEditsAt(KoineCompilation compilation, string activeUri, int line, int character, string newName)
     {
         var refs = RenameAt(compilation, activeUri, line, character, newName);
         if (refs is null)
@@ -2188,6 +2190,9 @@ public sealed class KoineLanguageService
             edits.Add(new RenameEdit(r, newName));
         }
 
+        IdCoRenameOutcome? idCoRename = null;
+        string? leftBehindIdName = null;
+
         // The old name under the cursor (RenameAt already validated it resolves and differs from newName).
         if (compilation.Documents.TryGetValue(activeUri, out var source))
         {
@@ -2200,37 +2205,90 @@ public sealed class KoineLanguageService
                 // same-named non-root symbol (enum member, value object, …) never triggers it (#621).
                 var offset = OffsetOf(source, line, character);
                 Symbol? target = compilation.WorkspaceIndex.ResolveSymbol(activeUri, oldName, offset, ctx.EnclosingTypeName);
-                if (IdentityCoRenameEdits(compilation, activeUri, oldName, newName, target) is { } idEdits)
+                var idResult = IdentityCoRenameEdits(compilation, activeUri, oldName, newName, target);
+                idCoRename = idResult.Outcome;
+                leftBehindIdName = idResult.LeftBehindIdName;
+                if (idResult.Edits is { } idEdits)
                 {
                     edits.AddRange(idEdits);
                 }
             }
         }
 
-        return edits;
+        return new RenameResult(edits, idCoRename, leftBehindIdName);
     }
 
     /// <summary>
-    /// The co-rename edits for an aggregate root's convention-linked identity type, or null when none apply.
-    /// Fires only when <paramref name="oldName"/> resolves, in the active file's model, to an aggregate
+    /// The co-rename outcome (edits + <see cref="IdCoRenameOutcome"/>) for an aggregate root's
+    /// convention-linked identity type. The <c>Outcome</c> is <c>null</c> — no edits, nothing to report —
+    /// unless <paramref name="oldName"/> resolves, in the active file's model, to an aggregate
     /// <b>root entity</b> whose identity type is literally <c>&lt;oldName&gt;Id</c> (the <c>&lt;Root&gt;Id</c>
-    /// convention) AND the proposed <c>&lt;newName&gt;Id</c> would not collide with an existing type. Each
-    /// occurrence of the identity type (its <c>identified by</c> declaration and every <c>: &lt;Root&gt;Id</c>
-    /// use across the workspace) is paired with <c>&lt;newName&gt;Id</c>. Returns null for a non-root entity,
-    /// a non-conventional identity (e.g. <c>identified by Guid</c>), or a name collision — the caller then
-    /// renames just the root and Studio surfaces the left-behind Id (#550, Approach 2 fallback).
-    /// <para><paramref name="resolvedTarget"/> is the symbol the cursor actually resolved to; the
-    /// co-rename gates on it being the aggregate root entity's OWN declaration, so a same-named non-root
-    /// symbol (an enum member, value object, command, … sharing the root's text) never fires it (#621).</para>
+    /// convention); when it does, the outcome is <see cref="IdCoRenameOutcome.Applied"/> (each occurrence of
+    /// the identity type — its <c>identified by</c> declaration and every <c>: &lt;Root&gt;Id</c> use across
+    /// the workspace — paired with <c>&lt;newName&gt;Id</c>) or <see cref="IdCoRenameOutcome.LeftBehind"/>
+    /// (with <c>LeftBehindIdName</c> set) when the proposed <c>&lt;newName&gt;Id</c> collides with an
+    /// existing type, or no in-scope reference was found. A non-root entity or a non-conventional identity
+    /// (e.g. <c>identified by Guid</c>) yields a <c>null</c> Outcome — the caller then renames just the
+    /// root and Studio surfaces the left-behind Id only when the outcome IS <c>LeftBehind</c> (#550,
+    /// Approach 2 fallback; #565 follow-up made this outcome authoritative structured data).
+    /// <para><paramref name="resolvedTarget"/> is the symbol the cursor actually resolved to; the root
+    /// entity itself is now resolved BY matching this symbol's own declaration position (not by a
+    /// separate name-keyed search — a second code-review pass on #565), so a same-named non-root symbol
+    /// (an enum member, value object, command, … sharing the root's text) never fires it (#621), AND two
+    /// DIFFERENT contexts' own same-named roots can never be confused for one another regardless of
+    /// declaration order.</para>
+    /// <para>The identity references are further scoped to the root's OWN bounded context (#565): two
+    /// UNRELATED contexts may each declare a type literally named <c>&lt;oldName&gt;Id</c>, and
+    /// <see cref="WorkspaceIndex.FindReferences"/> matches by bare token text, so without this scoping the
+    /// co-rename would also rewrite the other context's same-named, unrelated identity type. The scope
+    /// check is by each occurrence's ACTUAL enclosing <c>context { }</c> block — resolved by token
+    /// position via <see cref="TokenLocator.EnclosingContextName"/>, the same mechanism
+    /// <see cref="PrepareTypeHierarchy"/> uses to disambiguate a same-named declaration across contexts
+    /// (#389) — not by whether the occurrence's FILE happens to also register the id name: the grammar
+    /// allows more than one <c>context { }</c> per file, so a per-file namespace-presence check cannot
+    /// tell which of two same-file context blocks a specific occurrence belongs to (a code-review finding
+    /// on #565). A reference reached only via an <c>import</c> of another context's <c>&lt;Root&gt;Id</c>
+    /// is intentionally EXCLUDED even though the modeller wrote the import: the <c>*Id</c> convention is
+    /// always emitted locally, independently, by whichever context references it (see
+    /// <see cref="ModelIndex.ResolveReference"/>'s <c>*Id convention: emitted locally, no import</c> rule,
+    /// and <see cref="ResolveTargetContext"/>'s same-context-first resolution) — an importing context's
+    /// own <c>&lt;Root&gt;Id</c> reference names ITS OWN independently-generated identity type, never the
+    /// imported context's, so co-renaming it would rewrite an unrelated local declaration based on
+    /// coincidental same-text, exactly the bug this scoping fixes.</para>
     /// </summary>
-    private static IReadOnlyList<RenameEdit>? IdentityCoRenameEdits(
+    private static IdentityCoRenameResult IdentityCoRenameEdits(
         KoineCompilation compilation, string activeUri, string oldName, string newName, Symbol? resolvedTarget)
     {
-        // Resolve the aggregate's OWN root entity across the WHOLE workspace, not just the active file: a
-        // rename can be invoked from a reference in a different file than the one declaring the root
-        // (R13/R14 multi-file), and an aggregate's root entity lives in that aggregate's nested types —
-        // `AggregateDecl.RootEntity()` resolves it precisely (never a same-named non-root entity).
+        // #621 + root-selection consistency (a second code-review pass on #565): gate up front on the
+        // cursor having resolved to a TYPE declaration at all, then resolve the aggregate's OWN root
+        // entity — AND its owning context — by matching THAT resolved symbol's OWN declaration
+        // position — never via a separate name-keyed search. Two DIFFERENT bounded contexts may each
+        // legally declare their OWN aggregate root literally named <oldName> (only PER-CONTEXT
+        // root/type names must be unique — see SemanticValidator); a name-keyed search for "the"
+        // AggregateDecl with RootName == oldName (the previous approach:
+        // `.Where(a => a.RootName == oldName)...FirstOrDefault()`) is declaration-order-dependent and
+        // always resolves to the FIRST-declared same-named root across `compilation.Uris`, regardless
+        // of which root the cursor actually landed on — silently returning NotApplicable (no edit, no
+        // LeftBehind, nothing) for every OTHER same-named root even though `resolvedTarget` already
+        // uniquely and correctly identifies it (this is what let the #621 same-named-symbol gate below
+        // work correctly for the single-root case). The SAME name-keyed order-dependence also afflicted
+        // owning-context resolution: `ModelIndex.DeclaringContextsOf(oldName).FirstOrDefault()` returns
+        // every context declaring a same-named type, ordered by declaration — so it could pick the
+        // WRONG owner (e.g. Sales instead of Billing) even once root resolution itself was fixed. Both
+        // are fixed the same way, by the same single walk: iterate each context directly and match its
+        // OWN aggregate roots' entities by `resolvedTarget.DeclSpan` — the same DeclSpan-identity check
+        // `FindReferences` uses for enum members — so at most one context can ever match, and `root` and
+        // `ownerContext` can never disagree. Searched across the WHOLE workspace, not just the active
+        // file, because a rename can be invoked from a reference in a different file than the one
+        // declaring the root (R13/R14 multi-file).
+        if (resolvedTarget is not TypeSymbol)
+        {
+            return IdentityCoRenameResult.NotApplicable;
+        }
+
         EntityDecl? root = null;
+        SemanticModel? rootModel = null;
+        string? ownerContext = null;
         foreach (var uri in compilation.Uris)
         {
             if (compilation.SemanticModelFor(uri) is not { } model)
@@ -2238,30 +2296,30 @@ public sealed class KoineLanguageService
                 continue;
             }
 
-            root = model.Index.AllTypes()
-                .OfType<AggregateDecl>()
-                .Where(a => a.RootName == oldName)
-                .Select(a => a.RootEntity())
-                .FirstOrDefault(e => e is not null);
+            foreach (ContextNode ctx in model.Model.Contexts)
+            {
+                var candidate = ctx.AllTypeDecls()
+                    .OfType<AggregateDecl>()
+                    .Select(a => a.RootEntity())
+                    .FirstOrDefault(e => e is not null && e.NameSpan == resolvedTarget.DeclSpan);
+                if (candidate is not null)
+                {
+                    root = candidate;
+                    rootModel = model;
+                    ownerContext = ctx.Name;
+                    break;
+                }
+            }
+
             if (root is not null)
             {
                 break;
             }
         }
 
-        if (root is null)
+        if (root is null || rootModel is null || ownerContext is null)
         {
-            return null;
-        }
-
-        // #621: gate on the RESOLVED symbol, not the bare token text. Fire only when the cursor resolved
-        // to the root entity's OWN type declaration — comparing the resolved symbol's declaration span to
-        // the root entity's name span (the same DeclSpan-identity check FindReferences uses for enum
-        // members). A same-named non-root symbol (enum member, value object, …) resolves elsewhere and is
-        // rejected here, so renaming it no longer rewrites the unrelated root's <Root>Id.
-        if (resolvedTarget is not TypeSymbol || resolvedTarget.DeclSpan != root.NameSpan)
-        {
-            return null;
+            return IdentityCoRenameResult.NotApplicable;
         }
 
         // The <Root>Id convention: only co-rename when the identity type is literally <oldName>Id. A
@@ -2269,20 +2327,97 @@ public sealed class KoineLanguageService
         var oldIdName = oldName + "Id";
         if (root.IdentityName != oldIdName)
         {
-            return null;
+            return IdentityCoRenameResult.NotApplicable;
         }
 
-        // Collision guard: if <newName>Id already names a type/spec/Id, do not co-rename (Approach 2 fallback).
+        // Collision guard: if <newName>Id already names a type/spec/Id, do not co-rename (Approach 2
+        // fallback) — the id existed by convention but is left behind under its unchanged name.
         var newIdName = newName + "Id";
         if (compilation.WorkspaceIndex.DeclaresTypeLike(newIdName))
         {
-            return null;
+            return IdentityCoRenameResult.LeftBehind(oldIdName);
         }
 
         // Resolve the identity type workspace-wide (offset: null) so the co-rename is independent of which
         // file the rename was invoked from — its declaration and every cross-file `: <Root>Id` use rename.
         IReadOnlyList<Reference> idRefs = compilation.WorkspaceIndex.FindReferences(activeUri, oldIdName, offset: null, enclosingType: null);
-        return idRefs.Count == 0 ? null : idRefs.Select(r => new RenameEdit(r, newIdName)).ToList();
+
+        // #565: scope those references to the root's OWN owning context — by the ACTUAL context block
+        // each occurrence's token lexically sits within (resolved by position, below), not by whether the
+        // occurrence's FILE happens to also register the id name. `FindReferences` is a workspace-wide
+        // TEXT match, so an unrelated context's coincidentally same-named `<oldName>Id` — even one
+        // declared in the SAME file as the root's own context — would otherwise be swept in too.
+        // `ownerContext` is already known precisely (resolved above alongside `root` itself, from the
+        // same position-based walk), so there is no separate name-keyed lookup left to disagree with it.
+        idRefs = FilterToOwnerContext(compilation, idRefs, ownerContext);
+
+        // No in-scope reference to the convention-linked id (defensive — the declaration itself should
+        // normally be found): the id is left behind under its unchanged name, same as the collision case.
+        if (idRefs.Count == 0)
+        {
+            return IdentityCoRenameResult.LeftBehind(oldIdName);
+        }
+
+        return IdentityCoRenameResult.Applied(idRefs.Select(r => new RenameEdit(r, newIdName)).ToList());
+    }
+
+    /// <summary>
+    /// The private return shape of <see cref="IdentityCoRenameEdits"/>: the co-rename
+    /// <see cref="Edits"/> (only non-null for <see cref="IdCoRenameOutcome.Applied"/>) paired with the
+    /// authoritative <see cref="Outcome"/> that <see cref="RenameEditsAt(KoineCompilation,string,int,int,string)"/>
+    /// surfaces on <see cref="RenameResult.IdCoRename"/>/<see cref="RenameResult.LeftBehindIdName"/>.
+    /// </summary>
+    private readonly record struct IdentityCoRenameResult(IReadOnlyList<RenameEdit>? Edits, IdCoRenameOutcome? Outcome, string? LeftBehindIdName)
+    {
+        /// <summary>No convention-linked identity to co-rename — not an aggregate root, or a
+        /// non-conventional identity.</summary>
+        public static readonly IdentityCoRenameResult NotApplicable = new(null, null, null);
+
+        /// <summary>The convention-linked identity WAS co-renamed; <paramref name="edits"/> carries its edits.</summary>
+        public static IdentityCoRenameResult Applied(IReadOnlyList<RenameEdit> edits) =>
+            new(edits, IdCoRenameOutcome.Applied, null);
+
+        /// <summary>The convention-linked identity existed but could NOT be co-renamed; <paramref name="idName"/>
+        /// is its unchanged name.</summary>
+        public static IdentityCoRenameResult LeftBehind(string idName) =>
+            new(null, IdCoRenameOutcome.LeftBehind, idName);
+    }
+
+    /// <summary>
+    /// Filters <paramref name="refs"/> down to the occurrences whose token lexically sits within the
+    /// <paramref name="ownerContext"/> <c>context { }</c> block — a pure, position-based lexical scan
+    /// (never depends on a successful parse), reusing the exact <see cref="TokenLocator.EnclosingContextName"/>
+    /// resolution <see cref="PrepareTypeHierarchy"/> already established for disambiguating a same-named
+    /// declaration across bounded contexts (#389). Distinguishes two <c>context { }</c> blocks in the
+    /// SAME file by each occurrence's actual position, unlike a per-file namespace-presence check (which
+    /// cannot tell them apart).
+    /// <para>Groups <paramref name="refs"/> by <see cref="Reference.Uri"/> and lexes each DISTINCT file
+    /// exactly ONCE via <see cref="TokenLocator.Lex"/> — a per-reference call to the (position-aware but
+    /// otherwise redundant) full-document <see cref="TokenLocator.Locate"/> would re-lex the whole file
+    /// on every occurrence, wasted work when several occurrences of the identity type live in the same
+    /// file (a code-review finding on #565).</para>
+    /// </summary>
+    private static List<Reference> FilterToOwnerContext(KoineCompilation compilation, IReadOnlyList<Reference> refs, string ownerContext)
+    {
+        var result = new List<Reference>(refs.Count);
+        foreach (var group in refs.GroupBy(r => r.Uri))
+        {
+            if (!compilation.Documents.TryGetValue(group.Key, out var source))
+            {
+                continue;
+            }
+
+            var tokens = TokenLocator.Lex(source);
+            foreach (var r in group)
+            {
+                if (string.Equals(TokenLocator.EnclosingContextName(tokens, r.Line - 1, r.StartColumn), ownerContext, StringComparison.Ordinal))
+                {
+                    result.Add(r);
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

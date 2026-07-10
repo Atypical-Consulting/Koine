@@ -740,13 +740,18 @@ public class KoineLanguageServiceTests
         var entityLine = src.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         // The root itself renames to the new name …
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // … and its convention-linked identity type OrderId co-renames to PurchaseOrderId.
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
+        // #565 follow-up: the co-rename outcome is authoritative structured data on the result itself —
+        // Applied, with no left-behind id name — not something a caller has to re-derive from rendered text.
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+        result.LeftBehindIdName.ShouldBeNull();
 
         // The Id co-rename is the additive part of RenameEditsAt: the lower-level RenameAt (which renames
         // a single symbol uniformly) only touches the root, never the OrderId identity type.
@@ -778,12 +783,232 @@ public class KoineLanguageServiceTests
         var refLine = shipping.Split('\n')[1];
         var col = refLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(docs, "file:///shipping.koi", line: 1, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(docs, "file:///shipping.koi", line: 1, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // The OrderId co-rename fires even though shipping.koi doesn't declare the root.
         edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+    }
+
+    [Fact]
+    public void RenameEdits_corenames_the_id_across_other_files_of_the_SAME_context()
+    {
+        // #565 regression guard: context Ordering is split across two files (R13/R14 multi-file). The
+        // root + its identity declaration live in ordering.koi; ordering2.koi merely REFERENCES OrderId
+        // from the SAME context. Renaming the root must still co-rename that cross-file reference too —
+        // this is the existing #550 multi-file behavior and must not regress when the co-rename is
+        // scoped to the root's own context.
+        var ordering =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var ordering2 = "context Ordering {\n  value Receipt { order: OrderId }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///ordering2.koi"] = ordering2,
+        };
+        var entityLine = ordering.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var result = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Both the declaration (ordering.koi) AND the cross-file reference (ordering2.koi) co-rename.
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering2.koi");
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+    }
+
+    [Fact]
+    public void RenameEdits_does_not_corename_an_unrelated_contexts_same_named_id_type()
+    {
+        // #565: context Ordering's root Order is `identified by OrderId`; a wholly UNRELATED context
+        // Billing happens to declare its OWN type literally named OrderId too. Renaming Ordering's root
+        // must co-rename ONLY Ordering's own OrderId — Billing's same-named OrderId must be untouched,
+        // even though WorkspaceIndex.FindReferences matches by bare token text across the workspace.
+        var ordering =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var billing = "context Billing {\n  value OrderId { code: String }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///billing.koi"] = billing,
+        };
+        var entityLine = ordering.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var result = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Ordering's own OrderId co-renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        // … but Billing's unrelated, same-named OrderId is left completely untouched.
+        edits.ShouldNotContain(e => e.Occurrence.Uri == "file:///billing.koi");
+        // Ordering's own co-rename applied cleanly — Billing's unrelated name never enters the outcome.
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+    }
+
+    [Fact]
+    public void RenameEdits_does_not_corename_a_DIFFERENT_same_file_contexts_same_named_id_type()
+    {
+        // Code-review finding #1 on #565: the grammar allows more than one `context { }` block per
+        // FILE (`program: programMember*`). If context Ordering's root Order (`identified by OrderId`)
+        // and an UNRELATED context Billing (which separately declares its OWN `value OrderId { ... }`)
+        // are declared in the very SAME file, a per-file "does this file's own context set register the
+        // name" check cannot tell which of the two context blocks a specific OrderId occurrence belongs
+        // to — it would see the file recognizes "OrderId" under context Ordering and sweep in EVERY
+        // occurrence in the file, including Billing's. The co-rename must be scoped by the ACTUAL
+        // context block each occurrence's token lexically sits within, not by file-level presence.
+        var src =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n" +
+            "context Billing {\n" +
+            "  value OrderId { code: String }\n" +
+            "}\n";
+        var entityLine = src.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Ordering's own OrderId (inside the Ordering block) co-renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
+        // … but Billing's unrelated, same-named OrderId — declared in the SAME file, a DIFFERENT
+        // context block — must NOT be touched: no edit should target Billing's `value OrderId` line.
+        var billingLine = src.Split('\n').ToList().FindIndex(l => l.Contains("value OrderId"));
+        edits.ShouldNotContain(e => e.Occurrence.Line - 1 == billingLine);
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+    }
+
+    [Fact]
+    public void RenameEdits_corenames_the_SECOND_declared_of_two_same_file_same_named_roots()
+    {
+        // Whole-branch code-review finding #1 on #565 (a second review pass): two DIFFERENT bounded
+        // contexts, in the SAME file, each legally declare their OWN aggregate root literally named
+        // `Order` — only PER-CONTEXT root/type names must be unique (SemanticValidator), so this is
+        // legal input. Renaming the SECOND-declared root (Billing's Order) must co-rename Billing's
+        // OWN OrderId. Before the fix, `IdentityCoRenameEdits` re-derived "the" root via a NAME-keyed
+        // search (`AllTypes().OfType<AggregateDecl>().Where(a => a.RootName == oldName)...FirstOrDefault()`)
+        // that always resolves to the FIRST-declared same-named root (Sales's Order) regardless of
+        // which root the cursor actually landed on, while `resolvedTarget` (passed in) correctly
+        // pointed at Billing's Order — the resulting `resolvedTarget.DeclSpan != root.NameSpan`
+        // mismatch made the method return NotApplicable (null outcome, zero edits) even though a
+        // genuine conventional id existed to co-rename: a silent failure, order-dependent on which
+        // same-named root happens to be declared first in the file.
+        var src =
+            "context Sales {\n" +
+            "  aggregate S root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n" +
+            "context Billing {\n" +
+            "  aggregate B root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      code: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var lines = src.Split('\n').ToList();
+        var salesEntityLineIndex = lines.FindIndex(l => l.Contains("entity Order"));
+        var billingEntityLineIndex = lines.FindLastIndex(l => l.Contains("entity Order"));
+        billingEntityLineIndex.ShouldNotBe(salesEntityLineIndex); // sanity: two distinct declarations
+        var col = lines[billingEntityLineIndex].IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var result = Svc.RenameEditsAt(Doc(src), U, line: billingEntityLineIndex, character: col, newName: "PurchaseOrder");
+
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
+        // Billing's root renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // … and Billing's OWN convention-linked OrderId co-renames too — the fix (not a symptom patch)
+        // makes root resolution position-consistent with `resolvedTarget`.
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
+        // Exactly ONE identity co-rename fires, and it is Billing's OWN OrderId — Sales's unrelated,
+        // same-named OrderId (declared EARLIER in the same file, a DIFFERENT context) is untouched.
+        // (This test is scoped to the Id CO-RENAME's root/context resolution specifically — the base
+        // single-symbol rename's own cross-context scoping for the ROOT's plain name is a separate,
+        // pre-existing concern in WorkspaceIndex.FindReferences, out of scope here.)
+        edits.Count(e => e.NewText == "PurchaseOrderId").ShouldBe(1);
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Line - 1 == billingEntityLineIndex);
+        edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Line - 1 == salesEntityLineIndex);
+        // Authoritatively APPLIED — never a silent null/NotApplicable when a genuine id exists.
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+        result.LeftBehindIdName.ShouldBeNull();
+    }
+
+    [Fact]
+    public void RenameEdits_does_not_corename_a_different_contexts_id_reached_only_via_import()
+    {
+        // Code-review finding #2 on #565: does an EXPLICIT `import Ordering.{ OrderId }` in an unrelated
+        // context make that context's own `OrderId` reference "the same identity" as Ordering's root's,
+        // so it should co-rename too? No: Koine's `<Root>Id` convention is emitted LOCALLY, independently,
+        // by whichever context references it — verified by the generated C# (each context gets its own
+        // `<Context>/ValueObjects/OrderId.cs`, regardless of any import) and by ModelIndex.ResolveReference's
+        // own "*Id convention: emitted locally, no import" rule, plus the #389 type-hierarchy precedent
+        // (ResolveTargetContext resolves an id-convention name to the REFERENCING context first, before
+        // ever consulting imports). So Shipping's `order: OrderId` field, even with the import, names
+        // Shipping's OWN independently-generated OrderId — co-renaming it would rewrite an unrelated
+        // context's own local identity type based on coincidental same-text, exactly the #565 bug in a
+        // different guise. This test locks in the CORRECT (exclusion) behavior.
+        var ordering =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var shipping =
+            "context Shipping {\n" +
+            "  import Ordering.{ OrderId }\n" +
+            "  value Parcel { order: OrderId }\n" +
+            "}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///ordering.koi"] = ordering,
+            ["file:///shipping.koi"] = shipping,
+        };
+        var entityLine = ordering.Split('\n')[2];
+        var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var result = Svc.RenameEditsAt(docs, "file:///ordering.koi", line: 2, character: col, newName: "PurchaseOrder");
+
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // Ordering's own OrderId co-renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Uri == "file:///ordering.koi");
+        // … but Shipping's own (independently-emitted) OrderId reference is left completely untouched,
+        // even though it's reached via an explicit import.
+        edits.ShouldNotContain(e => e.Occurrence.Uri == "file:///shipping.koi");
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
     }
 
     [Fact]
@@ -802,13 +1027,17 @@ public class KoineLanguageServiceTests
         var entityLine = src.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         // No fabricated <New>Id edit, and the Guid primitive is left alone.
         edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId");
         edits.ShouldNotContain(e => e.NewText == "Guid");
+        // No convention-linked id to begin with — the outcome is null (not "left behind").
+        result.IdCoRename.ShouldBeNull();
+        result.LeftBehindIdName.ShouldBeNull();
     }
 
     [Fact]
@@ -828,11 +1057,17 @@ public class KoineLanguageServiceTests
         var entityLine = src.Split('\n')[2];
         var col = entityLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 2, character: col, newName: "PurchaseOrder");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         edits.ShouldContain(e => e.NewText == "PurchaseOrder");
         edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId"); // collision → Id left unchanged
+        // #565 follow-up: the collision is reported as authoritative structured data — LeftBehind, with
+        // the left-behind id's (unchanged) name — instead of Studio having to re-derive it from rendered
+        // text (a rendered "id: OrderId" row + an "aggregate root" stereotype match).
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.LeftBehind);
+        result.LeftBehindIdName.ShouldBe("OrderId");
     }
 
     [Fact]
@@ -848,11 +1083,14 @@ public class KoineLanguageServiceTests
         var voLine = src.Split('\n')[1];
         var col = voLine.IndexOf("OrderId", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "RefId");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "RefId");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         // Every edit is the ordinary rename to RefId — no spurious suffixed co-rename text.
         edits.ShouldAllBe(e => e.NewText == "RefId");
+        // Not an aggregate root at all — the outcome is null, never "left behind".
+        result.IdCoRename.ShouldBeNull();
     }
 
     [Fact]
@@ -874,13 +1112,16 @@ public class KoineLanguageServiceTests
         var enumLine = src.Split('\n')[1];
         var col = enumLine.IndexOf("Order", StringComparison.Ordinal) + 2;
 
-        var edits = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "Foo");
+        var result = Svc.RenameEditsAt(Doc(src), U, line: 1, character: col, newName: "Foo");
 
-        edits.ShouldNotBeNull();
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
         // The enum member renames …
         edits.ShouldContain(e => e.NewText == "Foo");
         // … but the unrelated aggregate-root identity OrderId is left untouched (no spurious FooId).
         edits.ShouldNotContain(e => e.NewText == "FooId");
+        // The cursor resolved to the enum member, not the root — the outcome is null, never "left behind".
+        result.IdCoRename.ShouldBeNull();
     }
 
     // ---- Linked editing ---------------------------------------------------
