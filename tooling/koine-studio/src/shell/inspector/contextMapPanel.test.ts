@@ -425,4 +425,47 @@ describe('createContextMapPanel — disposing mid-getMaxGraph skips the post-awa
     const node = host.querySelector<HTMLElement>('.koi-svg-node[data-qname="Billing"]');
     expect(node?.getAttribute('aria-current')).not.toBe('true'); // the success tail must not have run
   });
+
+  test('error tail: docMessage never writes into the torn-down stage once disposed before the rejection lands', async () => {
+    const host = makeHost();
+    const lsp = makeLsp();
+
+    let reject: ((e: unknown) => void) | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(
+      async () =>
+        new Promise((_resolve, rej) => {
+          reject = rej;
+        }),
+    );
+
+    const panel = createContextMapPanel({ store: createAppStore(), host, lsp, onNavigate: makeOnNavigate() });
+    void panel.load();
+    await flush();
+    expect(reject).toBeDefined();
+
+    panel.dispose(); // torn down while getMaxGraph() is still in flight — disposed=true, seq untouched
+
+    reject!(new Error('boom')); // the stale rejection lands anyway, mirroring the real race
+    await flush();
+
+    const stage = host.querySelector<HTMLElement>('.ctxmap-stage');
+    expect(stage?.querySelector('.doc-error')).toBeNull(); // the error tail must not have run
+  });
+
+  test('the live (non-disposed) error path still renders its message — the fix narrows the guard, it does not silence it', async () => {
+    const host = makeHost();
+    const lsp = makeLsp();
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockRejectedValue(new Error('boom'));
+
+    const panel = createContextMapPanel({ store: createAppStore(), host, lsp, onNavigate: makeOnNavigate() });
+    await panel.load();
+    await flush();
+
+    const stage = host.querySelector<HTMLElement>('.ctxmap-stage');
+    expect(stage?.querySelector('.doc-error')?.textContent).toBe('Could not render the context-map graph: Error: boom');
+
+    panel.dispose();
+  });
 });
