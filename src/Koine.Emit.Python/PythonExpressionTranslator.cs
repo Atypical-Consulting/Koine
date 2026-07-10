@@ -225,11 +225,11 @@ internal sealed class PythonExpressionTranslator
             case ConditionalExpr cond:
                 // Python conditional expression: `(<then> if <cond> else <else>)`.
                 sb.Append('(');
-                Write(cond.Then, sb);
+                WriteReconciledBranch(cond.Then, cond.Else, sb);
                 sb.Append(" if ");
                 Write(cond.Condition, sb);
                 sb.Append(" else ");
-                Write(cond.Else, sb);
+                WriteReconciledBranch(cond.Else, cond.Then, sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
@@ -282,6 +282,63 @@ internal sealed class PythonExpressionTranslator
                 sb.Append("None  # unsupported expression");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Writes one <c>ConditionalExpr</c> branch, individually widened to <c>Decimal</c> when its own
+    /// inferred type is a non-optional <c>Int</c> while the SIBLING branch is <c>Decimal</c>
+    /// (<c>Decimal(...)</c>), or null-check-widened when its own inferred type is an OPTIONAL <c>Int</c>
+    /// while the SIBLING branch is <c>Decimal</c> (<c>(Decimal(x) if x is not None else None)</c> — Python
+    /// has no <c>Option.map</c>, so the widen is an inline conditional expression that passes <c>None</c>
+    /// through and widens the present value). <see cref="TypeResolver"/> already widens the conditional's
+    /// own aggregate type to the wider/optional-joined type of the two branches (#975), so an unreconciled
+    /// pair emits two disagreeing types in the same ternary — a real <c>mypy --strict</c> "Incompatible
+    /// return value type" (issue #1344; the numeric-only case, the optional-numeric case, and both at
+    /// once). Reconciling per-branch (rather than a single wrap around the whole conditional) is required
+    /// because the branches disagree with EACH OTHER, not with an externally supplied target type. Fixed
+    /// here in the emitter (not the semantic validator): a widened or optional-joined conditional is a
+    /// legitimate, cross-target-sanctioned pattern (#975) — this is a Python-only rendering gap, not a
+    /// modeling error.
+    /// <para>
+    /// Unlike the Rust/Java siblings, Python has NO analogue of <c>Some(...)</c>/<c>Optional.of(...)</c>
+    /// wrapping: a Koine optional type maps to a plain PEP&#160;604 union with <c>None</c>
+    /// (<c>T | None</c>), and a bare, non-optional <c>T</c> value is already structurally assignable
+    /// wherever <c>T | None</c> is expected — verified under <c>mypy --strict</c> — so a non-optional
+    /// branch against an optional sibling needs no rendering change at all (mirrors the TypeScript/Kotlin
+    /// conclusion for their own structural-union optional shapes).
+    /// </para>
+    /// <c>needsWiden</c> and <c>needsOptionalWiden</c> are mutually exclusive (they key off the same
+    /// branch's own optionality). The branch expression is written twice for <c>needsOptionalWiden</c>
+    /// (the <c>None</c> guard and the widened value) — safe because this sublanguage's expressions are
+    /// pure, the same duplication the <c>CoalesceExpr</c> lowering above already relies on.
+    /// </summary>
+    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    {
+        TypeScope scope = EffectiveScope();
+        TypeRef? branchType = _resolver.Infer(branch, scope);
+        TypeRef? siblingType = _resolver.Infer(sibling, scope);
+        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
+        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
+
+        if (needsWiden)
+        {
+            sb.Append("Decimal(");
+            Write(branch, sb);
+            sb.Append(')');
+            return;
+        }
+
+        if (needsOptionalWiden)
+        {
+            sb.Append("(Decimal(");
+            Write(branch, sb);
+            sb.Append(") if ");
+            Write(branch, sb);
+            sb.Append(" is not None else None)");
+            return;
+        }
+
+        Write(branch, sb);
     }
 
     private void WriteUnary(UnaryExpr un, StringBuilder sb)

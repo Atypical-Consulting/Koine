@@ -731,6 +731,155 @@ public class PythonConformanceTests
             "Int-field divide should truncate toward zero (7/2==3, -7/2==-3):\n" + string.Join("\n", run.Errors));
     }
 
+    /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in numeric
+    /// type (a non-optional <c>Int</c> branch against a <c>Decimal</c> sibling) must widen the <c>Int</c>
+    /// branch to <c>Decimal(...)</c> so both ternary arms share a type — <c>mypy --strict</c> rejects an
+    /// unreconciled <c>int | Decimal</c> return where a bare <c>Decimal</c> is declared. Before the fix
+    /// this emitted an unreconciled <c>(self.a if (self.a > 0) else self.b)</c> that fails
+    /// <c>mypy --strict</c> with "Incompatible return value type (got \"int | Decimal\", expected
+    /// \"Decimal\")".
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_typechecks_under_strict()
+    {
+        const string src = """
+            context Shop {
+              value Line {
+                a: Int
+                b: Decimal
+                total: Decimal = if a > 0 then a else b
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal(self.a)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in
+    /// optionality (a non-optional branch against an optional sibling of the SAME underlying type) is
+    /// already <c>mypy --strict</c>-clean in Python with no emitter change: an optional Koine type maps
+    /// to a plain PEP&#160;604 union with <c>None</c> (<c>T | None</c>), and a bare <c>T</c> value is
+    /// structurally assignable wherever <c>T | None</c> is expected — unlike Rust's <c>Option&lt;T&gt;</c>
+    /// or Java's <c>Optional&lt;T&gt;</c>, which are distinct nominal types that need an explicit wrap
+    /// (mirrors the TypeScript/Kotlin conclusion for their own structural-union optional shapes, verified
+    /// here against real <c>mypy --strict</c>). This guards that Python keeps taking the no-op path (no
+    /// wrap emitted) for this shape.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_optionality_only_mismatch_typechecks_under_strict()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Int
+                bonus: Int?
+                total: Int? = if amount > 0 then amount else bonus
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1344 (the issue's exact repro): a <c>ConditionalExpr</c> derived-member body whose branches
+    /// disagree in BOTH numeric type and optionality at once — a non-optional <c>Decimal</c> branch
+    /// against an optional <c>Int</c> sibling — must null-check-and-widen the optional <c>Int</c> branch
+    /// so both ternary arms are <c>Decimal | None</c>-compatible. Before the fix Python rendered a bare
+    /// <c>(self.decimal_amount if (self.decimal_amount > 0) else self.int_bonus)</c> — a <c>Decimal</c>
+    /// against a bare <c>int | None</c> — which <c>mypy --strict</c> rejects with exactly "Incompatible
+    /// return value type (got \"Decimal | int | None\", expected \"Decimal | None\")".
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_optional_int_widen_typechecks_under_strict()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                decimalAmount: Decimal
+                intBonus: Int?
+                total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal(self.int_bonus) if self.int_bonus is not None else None");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1344: the <c>needsWiden</c> widen must apply against an OPTIONAL <c>Decimal?</c> sibling
+    /// too (not just a non-optional one) — a non-optional <c>Int</c> branch against a <c>Decimal?</c>
+    /// sibling must still widen to <c>Decimal(...)</c>; no further wrap is needed since a bare
+    /// <c>Decimal</c> is already assignable where <c>Decimal | None</c> is expected. Mirrors the
+    /// Rust/Java/TypeScript <c>Cash</c> fixture's widen(+wrap) composition case (Python, like TypeScript,
+    /// never needs the wrap half — see
+    /// <see cref="Conditional_branch_optionality_only_mismatch_typechecks_under_strict"/>).
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_numeric_widen_against_optional_sibling_typechecks_under_strict()
+    {
+        const string src = """
+            context Shop {
+              value Cash {
+                amount: Int
+                bonusAmount: Decimal?
+                total: Decimal? = if amount > 0 then amount else bonusAmount
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal(self.amount)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1344: a nested <c>ConditionalExpr</c> used as one branch of an outer conditional must itself
+    /// reconcile its own two arms BEFORE the outer branch is emitted, so the inner ternary's inferred
+    /// (joined, #975) type lines up with the outer sibling's type. Here the inner <c>if</c> widens
+    /// <c>amount</c> (<c>Int</c>) against <c>bonus</c> (<c>Decimal</c>) to <c>Decimal</c>, which then
+    /// already matches the outer <c>else</c> branch <c>fallback: Decimal</c> with no further outer-level
+    /// reconciliation needed.
+    /// </summary>
+    [Fact]
+    public void Conditional_branch_with_nested_conditional_typechecks_under_strict()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Int
+                bonus: Decimal
+                fallback: Decimal
+                total: Decimal = if amount > 0 then (if amount > 10 then amount else bonus) else fallback
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("Decimal(self.amount)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
