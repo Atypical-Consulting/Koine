@@ -94,7 +94,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1488 → 1489: #1274 wraps the fifth bypass #1088 missed — `saveProjectToDisk`'s own
   // reopen-from-disk — in the same shared `workspaceOpLock.run(...)`, +1 LOC (the wrap plus its
   // one-line justification comment). Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1489 },
+  // Raised 1489 → 1490: #760 injects the app store into createEditorSession instead of editorSession.tsx
+  // reaching for the `appStore` singleton itself — the composition root now passes `store: appStore` into
+  // the createEditorSession(...) call, +1 LOC. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1490 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.
