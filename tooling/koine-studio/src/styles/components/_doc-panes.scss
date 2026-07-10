@@ -212,8 +212,10 @@
   color: var(--koi-fg);
 }
 
-/* maxGraph's hover tooltip (enabled only on the context-map graph) — themed to match the studio. */
-.mxTooltip {
+/* maxGraph's hover tooltip (enabled only on the context-map graph) — themed to match the studio.
+   Specificity must match @maxgraph/core/css/common.css's `div.mxTooltip` (0,1,1) — a bare `.mxTooltip`
+   (0,1,0) loses regardless of import order, leaving maxGraph's unthemed pale-yellow default in place. */
+div.mxTooltip {
   position: absolute;
   z-index: var(--koi-z-popover, 120);
   background: var(--koi-paper-2);
