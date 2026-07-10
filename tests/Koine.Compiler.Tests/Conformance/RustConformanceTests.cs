@@ -1471,6 +1471,72 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1321 — a bare <c>UnaryExpr</c> (a negation, e.g. <c>-baseAmount</c>) used DIRECTLY as one
+    /// side of an arithmetic operator falls into <c>Write()</c>'s <c>case UnaryExpr un: WriteUnary(un,
+    /// sb)</c> dispatch — a method that never consults <c>coerceTo</c> at all, the same defect
+    /// <c>MemberAccessExpr</c>/<c>CallExpr</c> had before #1316. The generated `total` getter silently
+    /// dropped the Int-&gt;Decimal coercion (`-self.base_amount + self.tax_rate`), a real
+    /// <c>cargo check</c> E0277 (no `Add&lt;Decimal&gt;` impl for `i64`).
+    /// </summary>
+    [Fact]
+    public void Bare_unary_operand_needing_coercion_is_wrapped_once_as_a_whole()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    taxRate: Decimal\n" +
+            "    total: Decimal = -baseAmount + taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the negated Int field is coerced ONCE, as a
+        // whole — not silently dropped.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Decimal::from(-self.base_amount) + self.tax_rate");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Sibling guard for the currently-passing (no-coercion-needed) shape: a bare <c>UnaryExpr</c>
+    /// arithmetic operand whose type already matches its sibling must render byte-identical to before
+    /// this fix — no gratuitous outer parens. This is the primary regression risk the issue calls out:
+    /// naively widening the compound-shape wrap (used for <c>ConditionalExpr</c>/<c>LetExpr</c>/
+    /// <c>GuardExpr</c>/<c>BinaryExpr</c>, which all need delimiting) to a <c>UnaryExpr</c> would wrap
+    /// even the no-coercion case in bare <c>(...)</c>, since a negation has no self-enclosing parens for
+    /// <c>StripOuterParens</c> to remove.
+    /// </summary>
+    [Fact]
+    public void Bare_unary_operand_needing_no_coercion_renders_unwrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Int = -baseAmount + surcharge\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("-self.base_amount + self.surcharge");
+        rust.ShouldNotContain("(-self.base_amount)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1319: a value object's constant-default field must be coerced to its declared Rust type in
     /// the smart constructor, or the emitted crate does not compile at all. Before the fix, a
     /// <c>Decimal</c> field defaulted to an <c>Int</c> literal emitted the raw literal (<c>tax_rate:

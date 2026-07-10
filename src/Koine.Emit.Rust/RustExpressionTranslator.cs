@@ -353,9 +353,9 @@ internal sealed class RustExpressionTranslator
     /// <see cref="WriteOwnedOperand"/>'s "compound" treatment unconditionally would wrap even the
     /// no-coercion case in bare <c>(...)</c> (a plain accessor call has no self-enclosing parens for
     /// <see cref="StripOuterParens"/> to remove), regressing every currently-passing shape. A bare
-    /// <c>UnaryExpr</c> operand (e.g. <c>-baseAmount</c>) has the identical defect — <c>WriteUnary</c>
-    /// also never consults <paramref name="coerceTo"/> — but is a separate, not-yet-fixed instance of the
-    /// same family, tracked as #1321.
+    /// <c>UnaryExpr</c> operand (e.g. <c>-baseAmount</c>) had the identical defect — <c>WriteUnary</c>
+    /// never consults <paramref name="coerceTo"/> — closed by #1321 the same way, since a negation is
+    /// likewise a tight-binding primary with no self-enclosing parens.
     /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
@@ -376,7 +376,7 @@ internal sealed class RustExpressionTranslator
 
         var clone = isArithmetic && IsNonCopyPlace(expr, type);
 
-        if (expr is MemberAccessExpr or CallExpr && needsWrap)
+        if (expr is MemberAccessExpr or CallExpr or UnaryExpr && needsWrap)
         {
             sb.Append("Decimal::from(");
             WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
