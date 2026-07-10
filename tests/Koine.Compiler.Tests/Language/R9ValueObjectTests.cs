@@ -973,6 +973,208 @@ public class R9ValueObjectTests
     }
 
     // ======================================================================
+    // #1300 — the */÷ sibling gap #1290's own code-review pass found but left out of its own
+    // +/- -only scope: entities and aggregates never have ANY generated arithmetic operator, so
+    // */÷ with an entity-typed operand is just as unreachable in any target as +/- was.
+    // CheckEntityOperandArithmetic's guard now covers all four operators.
+    // ======================================================================
+
+    [Fact]
+    public void Same_type_entity_multiplication_is_also_rejected()
+    {
+        // This issue's own repro: `item1 * item2`, both Item (entity), same declared type.
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item1: Item
+                  item2: Item
+                  bad:   Item = item1 * item2
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeFalse();
+
+        var diag = result.Diagnostics.Single(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+        diag.Message.ShouldContain("Item");
+    }
+
+    [Fact]
+    public void Entity_multiplied_by_scalar_is_rejected()
+    {
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item: Item
+                  bad:  Item = item * 2
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Scalar_divided_by_entity_is_rejected()
+    {
+        // `2 / item` — reversed operand order, scalar on the LEFT.
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item: Item
+                  bad:  Item = 2 / item
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Entity_divided_by_entity_of_the_same_type_is_rejected()
+    {
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item1: Item
+                  item2: Item
+                  bad:   Item = item1 / item2
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_typed_operand_is_also_rejected_via_mul()
+    {
+        // Mirrors Aggregate_typed_operand_is_also_rejected (the +/- coverage for the `or
+        // AggregateDecl` disjunct) but via `*` — an aggregate has no generated arithmetic
+        // operator either, for any binary operator.
+        const string src = """
+            context Sales {
+              value Money {
+                amount: Decimal
+              }
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  related: Customers
+                  fee:     Money
+                  bad:     Money = related * fee
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_typed_operand_is_also_rejected_via_div()
+    {
+        const string src = """
+            context Sales {
+              value Money {
+                amount: Decimal
+              }
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  related: Customers
+                  fee:     Money
+                  bad:     Money = related / fee
+                }
+              }
+              aggregate Customers root Customer {
+                entity Customer identified by CustomerId {
+                  name: String
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Value_object_scalar_scaling_remains_unaffected_by_the_widened_entity_check()
+    {
+        // KOI0215/KOI0216 (CheckValueObjectScalarArithmetic) still exclusively owns
+        // value-object-vs-scalar */÷ scaling; widening CheckEntityOperandArithmetic to Mul/Div
+        // must NOT also trip KOI0220 for a model with no entity/aggregate operand at all.
+        const string src = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                invariant amount >= 0
+              }
+              entity Order identified by OrderId {
+                fee: Money
+              }
+              readmodel FeeSplit from Order {
+                doubled: Money = fee * 2
+                halved:  Money = fee / 2
+              }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Entity_mul_div_operand_arithmetic_is_rejected_before_reaching_any_code_emitter()
+    {
+        const string src = """
+            context Shop {
+              aggregate CartAgg root Cart {
+                entity Cart identified by CartId {
+                  item1: Item
+                  item2: Item
+                  bad:   Item = item1 * item2
+                }
+                entity Item identified by ItemId {
+                  name: String
+                }
+              }
+            }
+            """;
+        var compiler = new KoineCompiler();
+        AssertRejected(compiler.Compile(src, new CSharpEmitter()));
+        AssertRejected(compiler.Compile(src, new TypeScriptEmitter()));
+        AssertRejected(compiler.Compile(src, new PythonEmitter()));
+        AssertRejected(compiler.Compile(src, new PhpEmitter()));
+        AssertRejected(compiler.Compile(src, new RustEmitter()));
+        AssertRejected(compiler.Compile(src, new JavaEmitter()));
+        AssertRejected(compiler.Compile(src, new KotlinEmitter()));
+
+        static void AssertRejected(CompileResult result)
+        {
+            result.Success.ShouldBeFalse();
+            result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+            result.Files.ShouldBeEmpty();
+        }
+    }
+
+    // ======================================================================
     // Regressions found by the R9 review
     // ======================================================================
 
