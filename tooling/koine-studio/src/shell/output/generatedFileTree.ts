@@ -89,17 +89,27 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
   }
 
+  /** Whether a row is reachable (not collapsed away): true unless some ANCESTOR folder row is collapsed.
+   *  Deliberately ancestor-only (#1366): `closest` tests the element ITSELF before its ancestors, and a
+   *  collapsed folder's own `<li>` also carries `aria-expanded="false"` — an `el.closest(...)` check
+   *  would wrongly exclude the collapsed folder's own (still visible, still tabbable) header row.
+   *  Starting the walk at `parentElement` skips the row itself, so only its DESCENDANTS disappear. A
+   *  top-level row has no collapsed ancestor to find, so it is always reachable. */
+  function isReachable(el: HTMLElement): boolean {
+    return !el.parentElement?.closest('[role="treeitem"][aria-expanded="false"]');
+  }
+
   /** The visible (not collapsed-away) treeitems, in DOM/visual order — a row is excluded once any
-   *  ancestor folder's `<ul role="group">` is `hidden`. */
+   *  ancestor folder is collapsed (see {@link isReachable}). */
   function visibleTreeItems(): HTMLElement[] {
-    return allTreeItems().filter((el) => el.closest('[hidden]') === null);
+    return allTreeItems().filter(isReachable);
   }
 
   /** Seed/refresh the roving tabindex: exactly one visible treeitem (`active`, else the first) is the
    *  lone tab stop; every other treeitem — visible or not — leaves the tab order. */
   function setRovingItem(active: HTMLElement | null): void {
     const all = allTreeItems();
-    const visible = all.filter((el) => el.closest('[hidden]') === null);
+    const visible = all.filter(isReachable);
     const tabbable = active && visible.includes(active) ? active : (visible[0] ?? null);
     for (const item of all) item.tabIndex = item === tabbable ? 0 : -1;
   }

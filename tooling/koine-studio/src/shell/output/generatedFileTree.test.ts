@@ -245,6 +245,34 @@ describe('createGeneratedFileTree', () => {
       expect(document.activeElement).toBe(folder);
     });
 
+    // #1366 regression lock: a collapsed folder's OWN row must stay keyboard-reachable — only its
+    // DESCENDANTS leave the visible set. The reachability predicate must therefore test ANCESTORS only:
+    // the naive `el.closest('[aria-expanded="false"]')` would match the collapsed folder's own row
+    // (`closest` tests the element itself before its ancestors) and wrongly drop it from the
+    // roving-tabindex/arrow-nav set.
+    it("a collapsed folder's own row stays keyboard-reachable while its children are skipped", () => {
+      const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(sampleFiles());
+      document.body.appendChild(element);
+
+      const folder = element.querySelector<HTMLElement>('[data-path="Billing"]')!;
+      folder.click(); // collapse Billing/
+      expect(folder.getAttribute('aria-expanded')).toBe('false');
+
+      // The collapsed folder itself keeps the roving tab stop — its own row is still visible/reachable.
+      expect(folder.tabIndex).toBe(0);
+
+      // ArrowDown from it skips its collapsed-away children, landing on the next VISIBLE row …
+      folder.focus();
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      const program = element.querySelector<HTMLElement>('[data-path="Program.cs"]')!;
+      expect(document.activeElement).toBe(program);
+
+      // … and ArrowUp from that row comes straight back to the collapsed folder's own row.
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      expect(document.activeElement).toBe(folder);
+    });
+
     it('ArrowLeft on a file row ascends focus to its parent folder', () => {
       const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
       setFiles(sampleFiles());
