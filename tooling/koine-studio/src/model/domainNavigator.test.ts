@@ -289,4 +289,70 @@ describe('mountDomainNavigator', () => {
     store.getState().setNavAltitude('tactical');
     expect(host.querySelector('.koi-breadcrumb-back')).toBeNull();
   });
+
+  // Same disposal-race shape #1261 fixed in contextMapPanel.tsx's paintContextMap: doFetch()'s seq
+  // guard alone only drops a SUPERSEDED fetch, not one whose owning navigator was unmounted outright.
+  it('unmounting mid-fetch skips the cache write and the trailing render() once the in-flight fetch resolves (#1308)', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+
+    let resolveGlossary!: (m: GlossaryModel) => void;
+    const pendingGlossary = new Promise<GlossaryModel>((resolve) => {
+      resolveGlossary = resolve;
+    });
+    const lsp = {
+      glossaryModel: vi.fn(() => pendingGlossary),
+      contextMap: vi.fn(async (): Promise<ContextMapResult> => ({ contexts: ['Ordering', 'Billing'], relations: [] })),
+      model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+    };
+
+    const handle = mountDomainNavigator(host, store, lsp);
+    await flush(); // the mount-time render painted the loading placeholder; doFetch()'s Promise.all is left pending on glossaryModel
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy(); // sanity: nothing painted yet
+
+    handle.unmount(); // torn down while doFetch() is still in flight — the seq check alone won't catch this
+
+    resolveGlossary(fakeGlossary(['Ordering', 'Billing'])); // the stale fetch resolves anyway, mirroring the real race
+    await flush();
+
+    // The disposed guard must have skipped both the cache write and the trailing render() call — the
+    // host stays on the loading placeholder rather than painting the now-stale strategic context rows.
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeNull();
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
+  });
+
+  // The catch tail's own best-effort empty-state write needs the same coverage as the success tail
+  // above — both were converted from `seq !== fetchSeq` to `isCurrent()`, mirroring contextMapPanel.tsx's
+  // paired success/error-tail tests (#1261).
+  it('unmounting mid-fetch skips the catch tail\'s empty-state cache write and the trailing render() once the in-flight fetch rejects (#1308)', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+
+    let rejectGlossary!: (e: unknown) => void;
+    const pendingGlossary = new Promise<GlossaryModel>((_resolve, reject) => {
+      rejectGlossary = reject;
+    });
+    const lsp = {
+      glossaryModel: vi.fn(() => pendingGlossary),
+      contextMap: vi.fn(async (): Promise<ContextMapResult> => ({ contexts: ['Ordering', 'Billing'], relations: [] })),
+      model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+    };
+
+    const handle = mountDomainNavigator(host, store, lsp);
+    await flush(); // the mount-time render painted the loading placeholder; doFetch()'s Promise.all is left pending on glossaryModel
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy(); // sanity: nothing painted yet
+
+    handle.unmount(); // torn down while doFetch() is still in flight
+
+    rejectGlossary(new Error('boom')); // the stale fetch rejects anyway, mirroring the real race
+    await flush();
+
+    // The disposed guard must have skipped the catch tail's best-effort empty-state cache write and the
+    // trailing render() call — the host stays on the loading placeholder rather than painting the
+    // now-stale "no elements yet" empty state.
+    expect(host.querySelector('.koi-domain-empty')).toBeNull();
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
+  });
 });
