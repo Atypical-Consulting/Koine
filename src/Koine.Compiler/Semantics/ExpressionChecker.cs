@@ -97,6 +97,7 @@ internal sealed class ExpressionChecker
                 CheckArithmeticNullSafety(b, scope);
                 CheckValueObjectScalarArithmetic(b, scope);
                 CheckValueObjectTypeMismatch(b, scope);
+                CheckValueObjectMulDivMismatch(b, scope);
                 CheckEntityOperandArithmetic(b, scope);
                 break;
 
@@ -362,25 +363,7 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        TypeRef? left = _resolver.Infer(b.Left, scope);
-        TypeRef? right = _resolver.Infer(b.Right, scope);
-        if (left is null || right is null)
-        {
-            return;
-        }
-
-        ValueObjectDecl? leftDecl = ResolveValueObject(left);
-        ValueObjectDecl? rightDecl = ResolveValueObject(right);
-
-        // A resolved declaration is authoritative for its side; a side that resolves to no declared
-        // type at all (e.g. an Id-convention synthetic type, which has no TypeDecl to resolve) falls
-        // back to the flat IsValueLike classification so ID-typed operands stay covered.
-        if (leftDecl is null && !_resolver.IsValueLike(left))
-        {
-            return;
-        }
-
-        if (rightDecl is null && !_resolver.IsValueLike(right))
+        if (!TryResolveValueLikeOperands(b, scope, out TypeRef? left, out TypeRef? right, out ValueObjectDecl? leftDecl, out ValueObjectDecl? rightDecl))
         {
             return;
         }
@@ -430,6 +413,90 @@ internal sealed class ExpressionChecker
         }
 
         return _index.TryGetDecl(t.Name, out decl) ? decl : null;
+    }
+
+    /// <summary>
+    /// Shared resolve-and-classify prefix for <see cref="CheckValueObjectTypeMismatch"/> and
+    /// <see cref="CheckValueObjectMulDivMismatch"/>: infers both operands, resolves each to its declared
+    /// <see cref="ValueObjectDecl"/> via <see cref="ResolveValueObject"/> (the context-aware R13.2
+    /// resolution #1266/#1284/#1285 established), and — for a side with no declared type at all (e.g. an
+    /// Id-convention synthetic type) — falls back to the flat <see cref="TypeResolver.IsValueLike"/>
+    /// classification so ID-typed operands stay covered. Returns <c>false</c> (bailing the caller out)
+    /// when either operand can't be inferred, or when a side resolves to no declared type AND isn't
+    /// value-like by the flat classification either — i.e. it isn't value-like at all.
+    /// </summary>
+    private bool TryResolveValueLikeOperands(
+        BinaryExpr b, TypeScope scope,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TypeRef? left,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TypeRef? right,
+        out ValueObjectDecl? leftDecl, out ValueObjectDecl? rightDecl)
+    {
+        left = _resolver.Infer(b.Left, scope);
+        right = _resolver.Infer(b.Right, scope);
+        if (left is null || right is null)
+        {
+            leftDecl = null;
+            rightDecl = null;
+            return false;
+        }
+
+        leftDecl = ResolveValueObject(left);
+        rightDecl = ResolveValueObject(right);
+
+        // A resolved declaration is authoritative for its side; a side that resolves to no declared
+        // type at all (e.g. an Id-convention synthetic type, which has no TypeDecl to resolve) falls
+        // back to the flat IsValueLike classification so ID-typed operands stay covered.
+        if (leftDecl is null && !_resolver.IsValueLike(left))
+        {
+            return false;
+        }
+
+        if (rightDecl is null && !_resolver.IsValueLike(right))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// #1291: the <c>*</c>/<c>/</c> sibling gap #1284's own code-review pass found but explicitly left
+    /// out of its own scope (a <c>+</c>/<c>-</c>-only fix) — a binary <c>*</c>/<c>/</c> where BOTH
+    /// operands are value-like (two quantities, a quantity and a plain value object, or two plain value
+    /// objects) also compiles with zero diagnostics today and fails downstream with a real C# CS0019
+    /// (this issue's own repro: <c>value Mix { m: Money; w: Weight; bad: Money = m * w }</c>).
+    /// <see cref="CheckValueObjectScalarArithmetic"/> only fires when EXACTLY one side is value-like and
+    /// the OTHER is a bare numeric scalar (Int/Decimal) — its <c>voOnLeft</c>/<c>voOnRight</c> both stay
+    /// <c>false</c> when BOTH sides are value-like, so it silently no-ops for this case.
+    /// <see cref="CheckValueObjectTypeMismatch"/> only guards <see cref="BinaryOp.Add"/>/
+    /// <see cref="BinaryOp.Sub"/>. No existing check covers two value-like operands combined via
+    /// <c>*</c>/<c>/</c>.
+    ///
+    /// UNLIKE <see cref="CheckValueObjectTypeMismatch"/>, this check has NO same-declared-type
+    /// exception: no emitter ever generates a value-object-vs-value-object <c>*</c>/<c>/</c> operator,
+    /// even for the SAME type (<c>Money * Money</c> is as meaningless dimensionally as
+    /// <c>Money * Weight</c> and has no generated operator either — unlike same-type <c>+</c>/<c>-</c>,
+    /// which some value objects/quantities DO support).
+    ///
+    /// Both operands are resolved via the shared <see cref="TryResolveValueLikeOperands"/> prefix — the
+    /// same context-aware resolution <see cref="CheckValueObjectTypeMismatch"/> uses.
+    /// </summary>
+    private void CheckValueObjectMulDivMismatch(BinaryExpr b, TypeScope scope)
+    {
+        if (b.Op is not (BinaryOp.Mul or BinaryOp.Div))
+        {
+            return;
+        }
+
+        if (!TryResolveValueLikeOperands(b, scope, out TypeRef? left, out TypeRef? right, out _, out _))
+        {
+            return;
+        }
+
+        var verb = b.Op == BinaryOp.Mul ? "multiply" : "divide";
+        Report(DiagnosticCodes.ValueObjectMulDivMismatch,
+            $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; no target ever generates a "
+            + "'*'/'/' operator between two value-like operands, even of the SAME declared type", b);
     }
 
     /// <summary>
