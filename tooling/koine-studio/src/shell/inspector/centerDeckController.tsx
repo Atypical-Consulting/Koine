@@ -623,10 +623,10 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
     terminalPanel.hidden = tab !== 'terminal';
     reviewPanel.hidden = tab !== 'review';
     diagCountEl.hidden = tab !== 'problems';
-    // A tab click always reveals its panel: a TRANSIENT runtime expand that moves only the slice's runtime
+    // A tab click always reveals its panel: the slice's TRANSIENT reveal (#1095) moves only the runtime
     // flag (the subscription paints), never the preference — so it doesn't persist and a reload restores
     // the saved choice.
-    if (store.getState().diagCollapsed) store.setState({ diagCollapsed: false });
+    store.getState().revealDiagTransient();
     hooks.ensureBottomLoaded(tab);
   }
   for (const t of bottomTabs) {
