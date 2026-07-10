@@ -291,6 +291,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.DivisionByZeroInConstantDefault
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI1007" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityOperandArithmetic = "KOI0220" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.NumericNarrowingConversion = "KOI0217" -> string!
