@@ -132,7 +132,23 @@ public sealed partial class RustEmitter
             sb.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(m.Name));
             if (HasConstantDefault(m))
             {
-                sb.Append(": ").Append(translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index)));
+                var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
+
+                // Reconcile the default's inferred type with the field's declared type — the constant-
+                // default dual of WriteDerived's coercion (#961). Rust has no implicit numeric widening
+                // or &str->String coercion, so a Decimal field defaulted to an Int literal, or a String
+                // field defaulted to a string literal, must be owned/widened here or cargo rejects the
+                // struct literal as E0308 (#1319).
+                if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
+                {
+                    defaultValue = $"{wrap}({defaultValue})";
+                }
+                else if (m.Type is { Name: "String", IsOptional: false } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
+                {
+                    defaultValue += ".to_string()";
+                }
+
+                sb.Append(": ").Append(defaultValue);
             }
             sb.Append(",\n");
         }
