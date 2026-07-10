@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
 import type { GlossaryEntry, GlossaryModel } from '@/lsp/lsp';
 import { coverage, groupByContext, type GlossaryHandlers } from '@/model/glossary';
 import { scopeGlossaryModel } from '@/model/activeContext';
+import { useCommittableField } from '@/shared/useCommittableField';
 
 // The ubiquitous-language glossary editor as a Preact panel (#193, #67, #146, #992). It subscribes to
 // the `activeContext` slice and narrows the glossary model to that bounded context, so switching scope
@@ -76,22 +77,20 @@ export function GlossaryPanel(props: {
 }
 
 /**
- * One glossary row: name (jumps to source) + kind badge + description with an inline editor. `draft`
- * holds both the read view's current text AND the textarea's live value while editing — seeded from
- * `entry.doc` on mount, updated locally on Save (so the row reflects the new text immediately, without
- * waiting for the controller's async model reload), and reset back to the last COMMITTED value (not the
- * `entry.doc` prop) on Cancel/Escape. The prop only refreshes on a debounced (350ms) reload, so reverting
- * to it can undo a just-completed Save that the prop hasn't caught up to yet — `originalRef` tracks what
- * this row itself last committed instead (mirrors the old imperative renderDescription/
- * openDescriptionEditor code, where each editor closure captured the current rendered value, not a
- * static prop).
+ * One glossary row: name (jumps to source) + kind badge + description with an inline editor. The
+ * edit-mode/draft/revert state is a `useCommittableField` (see `@/shared/useCommittableField` for the
+ * contract): `draft` holds both the read view's current text AND the textarea's live value while
+ * editing, and Cancel/Escape revert to the hook's own last-committed value — never the `entry.doc`
+ * prop, which only refreshes on a debounced (350ms) reload and so can still hold the pre-save text
+ * right after a Save (the #992-review bug class the hook exists to close).
  */
 function GlossaryEntryRow(props: { entry: GlossaryEntry; handlers: GlossaryHandlers }) {
   const { entry, handlers } = props;
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(entry.doc?.trim() ?? '');
+  const { editing, draft, setDraft, openEditor, commit, cancel } = useCommittableField({
+    committedValue: entry.doc?.trim() ?? '',
+    onCommit: (next) => handlers.onSave(entry, next),
+  });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const originalRef = useRef(draft);
 
   // Focus the textarea once, right when editing STARTS — not on every keystroke (mirrors ExplorerItem's
   // rename-input focus effect).
@@ -101,21 +100,6 @@ function GlossaryEntryRow(props: { entry: GlossaryEntry; handlers: GlossaryHandl
   }, [editing]);
 
   const hasDoc = draft.trim().length > 0;
-
-  const openEditor = (): void => {
-    originalRef.current = draft; // capture the current (possibly just-saved) value as the revert target
-    setEditing(true);
-  };
-  const commit = (): void => {
-    handlers.onSave(entry, draft);
-    const trimmed = draft.trim();
-    setDraft(trimmed); // match the old renderDescription's `input.value.trim() || null` display semantics
-    setEditing(false);
-  };
-  const cancel = (): void => {
-    setDraft(originalRef.current); // discard the in-progress edit, reverting to the last committed value
-    setEditing(false);
-  };
 
   return (
     <div class="koi-gloss-entry" data-qn={entry.qualifiedName}>
