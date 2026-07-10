@@ -713,6 +713,103 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #1301 acceptance: a <b>divide-only</b> non-quantity value object — divided by a scalar
+    /// somewhere in the model, but never multiplied by one anywhere — must still get a
+    /// <c>dividedBy(\Koine\Runtime\Decimal $factor): self</c> method. Before the fix, PHP's demand-driven
+    /// scalar-scaling gate (<c>PhpEmitter.ValueObjects.cs</c>, <c>WriteScalarOp</c>'s call site) checked
+    /// only <c>needs.MultiplyFactors.Count &gt; 0</c> — <c>needs.DivideFactors</c> was never independently
+    /// consulted — so <c>WriteScalarOp</c> never fired at all for a divide-only VO and neither
+    /// <c>multipliedBy</c> nor <c>dividedBy</c> was emitted, even though the translator still
+    /// unconditionally lowers <c>vo / scalar</c> to <c>$this-&gt;dividedBy(...)</c>. Always-on guard (no
+    /// phpstan toolchain needed): asserts the emitted <c>Money</c> class declares <c>dividedBy</c>.
+    /// </summary>
+    [Fact]
+    public void Divide_only_value_object_emits_dividedBy_method()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    perUnit: Money = base / 4\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var moneyPhp = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        moneyPhp.ShouldContain("public function dividedBy(\\Koine\\Runtime\\Decimal $factor): self");
+    }
+
+    /// <summary>
+    /// Issue #1301, other half of the fix: a <b>multiply-only</b> non-quantity value object — multiplied
+    /// by a scalar somewhere in the model, but never divided by one anywhere — must get exactly
+    /// <c>multipliedBy</c>, NOT a dead, unreachable <c>dividedBy</c> alongside it. Before the fix,
+    /// <c>WriteScalarOp</c> unconditionally emitted BOTH methods together once its combined gate fired on
+    /// <c>MultiplyFactors</c> alone, so a multiply-only VO wastefully declared a <c>dividedBy</c> no call
+    /// site ever reaches. Always-on guard (no phpstan toolchain needed).
+    /// </summary>
+    [Fact]
+    public void Multiply_only_value_object_does_not_emit_dividedBy_method()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    scaled: Money = base * 2\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var moneyPhp = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        moneyPhp.ShouldContain("public function multipliedBy(\\Koine\\Runtime\\Decimal $factor): self");
+        moneyPhp.ShouldNotContain("dividedBy");
+    }
+
+    /// <summary>
+    /// Issue #1301 real-toolchain regression: the issue's own minimal repro — a divide-only <c>Money</c>
+    /// (<c>perUnit: Money = base / 4</c>, no <c>*</c> anywhere in the model) — must type-check under
+    /// <c>phpstan analyse --level max</c>, not just pass the always-on static guard above. Before the
+    /// fix, <c>phpstan</c> reported <c>Call to an undefined method …Money::dividedBy()</c> because the
+    /// gate never fired at all for a divide-only value object. Skipped (not failed) only when no
+    /// <c>phpstan</c> is present locally; CI installs the toolchain and runs it for real.
+    /// </summary>
+    [Fact]
+    public void Divide_only_value_object_typechecks_at_phpstan_level_max()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    perUnit: Money = base / 4\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (runs without a phpstan toolchain): dividedBy must be declared on Money.
+        var moneyPhp = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        moneyPhp.ShouldContain("public function dividedBy(\\Koine\\Runtime\\Decimal $factor): self");
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// The always-on syntax gate: a valid PHP snippet must pass <c>php -l</c>.
     /// Skipped (not failed) only when no interpreter is present; with one it MUST parse cleanly.
     /// </summary>
