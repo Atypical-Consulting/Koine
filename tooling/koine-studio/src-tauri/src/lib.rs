@@ -877,6 +877,19 @@ struct GitFile {
     status: String,
 }
 
+/// Upstream-tracking state for the current branch: the tracked ref plus how far local has diverged —
+/// the TS `GitUpstream`. `ref` is a Rust keyword, so the field is `r#ref` renamed on serialization.
+#[derive(serde::Serialize, Debug)]
+struct GitUpstream {
+    /// The upstream ref name, e.g. `origin/main` (git's `# branch.upstream` header value).
+    #[serde(rename = "ref")]
+    r#ref: String,
+    /// Commits the local branch is AHEAD of its upstream (unpushed).
+    ahead: i64,
+    /// Commits the local branch is BEHIND its upstream (unpulled).
+    behind: i64,
+}
+
 /// A snapshot of `git status` for a workspace folder: the current branch plus its changed paths.
 /// `branch` and `files` are already camelCase, so no field rename is needed.
 #[derive(serde::Serialize)]
@@ -885,6 +898,9 @@ struct GitStatus {
     branch: String,
     /// Every changed path — staged, unstaged, and untracked entries (see [`GitFile`]).
     files: Vec<GitFile>,
+    /// Upstream-tracking counts for `branch`, or `None` (TS `null`) when it has no upstream —
+    /// a detached HEAD, a fresh local branch, or a repo with no remote.
+    upstream: Option<GitUpstream>,
 }
 
 /// One commit in `git log`, newest first. Fields are single words, already the camelCase the TS
@@ -969,20 +985,38 @@ fn push_xy_files(files: &mut Vec<GitFile>, xy: &str, path: &str) {
     }
 }
 
+/// Parse the porcelain-v2 `# branch.ab` payload (`+<ahead> -<behind>`) into `(ahead, behind)` counts.
+/// `None` on any unexpected shape so a malformed header degrades to "no upstream data" rather than a
+/// bogus 0/0 readout.
+fn parse_branch_ab(rest: &str) -> Option<(i64, i64)> {
+    let mut parts = rest.split_whitespace();
+    let ahead = parts.next()?.strip_prefix('+')?.parse().ok()?;
+    let behind = parts.next()?.strip_prefix('-')?.parse().ok()?;
+    Some((ahead, behind))
+}
+
 /// `git status` for the open folder: the current branch plus every changed path. Parses
-/// `--porcelain=v2 -b` — the branch from the `# branch.head` header; `1 <XY> …` ordinary entries
-/// (staged when X≠`.`, unstaged when Y≠`.`, so a both-areas file appears twice); `2 …` renames/
-/// copies (new path before the tab); `? …` untracked; `u …` unmerged → `conflicted`. `Err` when
-/// `dir` is not a work tree.
+/// `--porcelain=v2 -b` — the branch from the `# branch.head` header; the upstream ref + ahead/behind
+/// counts from `# branch.upstream` / `# branch.ab` (both emitted only when the branch tracks an
+/// upstream — `upstream` needs BOTH, so a gone upstream ref with no computable counts stays `None`);
+/// `1 <XY> …` ordinary entries (staged when X≠`.`, unstaged when Y≠`.`, so a both-areas file appears
+/// twice); `2 …` renames/copies (new path before the tab); `? …` untracked; `u …` unmerged →
+/// `conflicted`. `Err` when `dir` is not a work tree.
 #[tauri::command]
 fn git_status(dir: String) -> Result<GitStatus, String> {
     let out = run_git(&dir, &["status", "--porcelain=v2", "-b"])?;
     let mut branch = String::new();
+    let mut upstream_ref: Option<String> = None;
+    let mut ahead_behind: Option<(i64, i64)> = None;
     let mut files: Vec<GitFile> = Vec::new();
 
     for line in out.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
             branch = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+            upstream_ref = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+            ahead_behind = parse_branch_ab(rest);
         } else if let Some(rest) = line.strip_prefix("? ") {
             files.push(GitFile {
                 rel_path: rest.to_string(),
@@ -1018,7 +1052,15 @@ fn git_status(dir: String) -> Result<GitStatus, String> {
         }
     }
 
-    Ok(GitStatus { branch, files })
+    // Surface upstream data only when git reported BOTH the ref and computable counts, so a gone
+    // upstream (ref present, no `# branch.ab`) reads as "no upstream" rather than a fake 0/0.
+    let upstream = upstream_ref.zip(ahead_behind).map(|(r, (ahead, behind))| GitUpstream {
+        r#ref: r,
+        ahead,
+        behind,
+    });
+
+    Ok(GitStatus { branch, files, upstream })
 }
 
 /// The unified diff for one path: the worktree diff, or the staged (`--cached`) diff when `staged`.
@@ -3246,6 +3288,42 @@ mod tests {
             "{:?}",
             status.files
         );
+        // No upstream is configured, so the porcelain emits no `# branch.upstream`/`# branch.ab`
+        // headers and the snapshot carries no upstream — the panel shows no counts, never a fake 0/0.
+        assert!(status.upstream.is_none(), "no upstream configured");
+    }
+
+    #[test]
+    fn git_status_reports_upstream_ref_and_ahead_behind_counts_when_tracking() {
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+
+        // A local branch `up` diverges by one commit (main will be BEHIND it by 1)…
+        repo.git(&["checkout", "-b", "up"]);
+        repo.write("up.txt", "u\n");
+        repo.git(&["add", "up.txt"]);
+        repo.git(&["commit", "-m", "up-only"]);
+
+        // …while main gains two of its own commits (AHEAD of `up` by 2).
+        repo.git(&["checkout", "main"]);
+        repo.write("f.txt", "2\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c2"]);
+        repo.write("f.txt", "3\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c3"]);
+
+        // Track `up` — porcelain now emits `# branch.upstream up` and `# branch.ab +2 -1`, which
+        // git_status surfaces as the upstream field (a local branch works exactly like a remote ref).
+        repo.git(&["branch", "--set-upstream-to=up", "main"]);
+
+        let status = git_status(repo.path()).unwrap();
+        let up = status.upstream.expect("branch tracks an upstream");
+        assert_eq!(up.r#ref, "up");
+        assert_eq!(up.ahead, 2);
+        assert_eq!(up.behind, 1);
     }
 
     #[test]
