@@ -153,6 +153,45 @@ internal static class TokenLocator
             enclosingKeyword, enclosingType, insideStringOrRegex, enclosingContext);
     }
 
+    /// <summary>
+    /// Lexes <paramref name="source"/> into its default-channel token list only (comments/whitespace/EOF
+    /// dropped) — the position-INDEPENDENT half of <see cref="Locate"/>'s work. A caller that needs the
+    /// enclosing scope at MANY positions in the SAME file (e.g. the aggregate-root <c>&lt;Root&gt;Id</c>
+    /// co-rename's per-reference context-scoping filter, #565) should call this ONCE per file and pass
+    /// the result to <see cref="EnclosingContextName"/> for each position, instead of calling
+    /// <see cref="Locate"/> once per position — each <see cref="Locate"/> call re-lexes the whole file
+    /// from scratch, which is wasted work when several positions share one file.
+    /// </summary>
+    internal static List<IToken> Lex(string source)
+    {
+        var lexer = new KoineLexer(new AntlrInputStream(source));
+        lexer.RemoveErrorListeners();
+        var stream = new CommonTokenStream(lexer);
+        stream.Fill();
+
+        var def = new List<IToken>();
+        foreach (IToken t in stream.GetTokens())
+        {
+            if (t.Type == TokenConstants.EOF || t.Channel != TokenConstants.DefaultChannel)
+            {
+                continue;
+            }
+
+            def.Add(t);
+        }
+
+        return def;
+    }
+
+    /// <summary>
+    /// The enclosing bounded <c>context</c> name for an LSP 0-based <paramref name="line"/>/<paramref name="character"/>
+    /// position, given a token list already produced by <see cref="Lex"/> — the position-only half of
+    /// <see cref="EnclosingScope"/>, for a caller that has pre-lexed once (<see cref="Lex"/>) and needs to
+    /// query many positions in that same file without paying <see cref="Locate"/>'s per-call lex cost again.
+    /// </summary>
+    internal static string? EnclosingContextName(List<IToken> tokens, int line, int character) =>
+        EnclosingScope(tokens, line + 1, character).Context;
+
     private static bool IsWord(IToken t)
     {
         if (t.Type == KoineLexer.Identifier)

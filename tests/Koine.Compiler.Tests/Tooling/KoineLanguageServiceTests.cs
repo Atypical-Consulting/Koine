@@ -906,6 +906,64 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void RenameEdits_corenames_the_SECOND_declared_of_two_same_file_same_named_roots()
+    {
+        // Whole-branch code-review finding #1 on #565 (a second review pass): two DIFFERENT bounded
+        // contexts, in the SAME file, each legally declare their OWN aggregate root literally named
+        // `Order` — only PER-CONTEXT root/type names must be unique (SemanticValidator), so this is
+        // legal input. Renaming the SECOND-declared root (Billing's Order) must co-rename Billing's
+        // OWN OrderId. Before the fix, `IdentityCoRenameEdits` re-derived "the" root via a NAME-keyed
+        // search (`AllTypes().OfType<AggregateDecl>().Where(a => a.RootName == oldName)...FirstOrDefault()`)
+        // that always resolves to the FIRST-declared same-named root (Sales's Order) regardless of
+        // which root the cursor actually landed on, while `resolvedTarget` (passed in) correctly
+        // pointed at Billing's Order — the resulting `resolvedTarget.DeclSpan != root.NameSpan`
+        // mismatch made the method return NotApplicable (null outcome, zero edits) even though a
+        // genuine conventional id existed to co-rename: a silent failure, order-dependent on which
+        // same-named root happens to be declared first in the file.
+        var src =
+            "context Sales {\n" +
+            "  aggregate S root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      total: Decimal\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n" +
+            "context Billing {\n" +
+            "  aggregate B root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      code: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var lines = src.Split('\n').ToList();
+        var salesEntityLineIndex = lines.FindIndex(l => l.Contains("entity Order"));
+        var billingEntityLineIndex = lines.FindLastIndex(l => l.Contains("entity Order"));
+        billingEntityLineIndex.ShouldNotBe(salesEntityLineIndex); // sanity: two distinct declarations
+        var col = lines[billingEntityLineIndex].IndexOf("Order", StringComparison.Ordinal) + 2;
+
+        var result = Svc.RenameEditsAt(Doc(src), U, line: billingEntityLineIndex, character: col, newName: "PurchaseOrder");
+
+        result.ShouldNotBeNull();
+        var edits = result.Edits;
+        // Billing's root renames …
+        edits.ShouldContain(e => e.NewText == "PurchaseOrder");
+        // … and Billing's OWN convention-linked OrderId co-renames too — the fix (not a symptom patch)
+        // makes root resolution position-consistent with `resolvedTarget`.
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId");
+        // Exactly ONE identity co-rename fires, and it is Billing's OWN OrderId — Sales's unrelated,
+        // same-named OrderId (declared EARLIER in the same file, a DIFFERENT context) is untouched.
+        // (This test is scoped to the Id CO-RENAME's root/context resolution specifically — the base
+        // single-symbol rename's own cross-context scoping for the ROOT's plain name is a separate,
+        // pre-existing concern in WorkspaceIndex.FindReferences, out of scope here.)
+        edits.Count(e => e.NewText == "PurchaseOrderId").ShouldBe(1);
+        edits.ShouldContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Line - 1 == billingEntityLineIndex);
+        edits.ShouldNotContain(e => e.NewText == "PurchaseOrderId" && e.Occurrence.Line - 1 == salesEntityLineIndex);
+        // Authoritatively APPLIED — never a silent null/NotApplicable when a genuine id exists.
+        result.IdCoRename.ShouldBe(IdCoRenameOutcome.Applied);
+        result.LeftBehindIdName.ShouldBeNull();
+    }
+
+    [Fact]
     public void RenameEdits_does_not_corename_a_different_contexts_id_reached_only_via_import()
     {
         // Code-review finding #2 on #565: does an EXPLICIT `import Ordering.{ OrderId }` in an unrelated
