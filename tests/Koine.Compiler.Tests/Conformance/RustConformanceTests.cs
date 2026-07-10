@@ -1683,4 +1683,35 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1329: the entity dual of the value-object case above — <c>WriteDerived</c> is shared
+    /// verbatim between <c>EmitValueObject</c> and <c>EmitEntity</c>, so an entity's optional-declared
+    /// derived member needs the identical coerce/<c>Some(...)</c>-wrap treatment, or the emitted crate
+    /// does not compile.
+    /// </summary>
+    [Fact]
+    public void Entity_optional_derived_member_numeric_coercion_cases_emit_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    bonus: Int?\n" +
+            "    fallback: Int?\n" +
+            "    totalNarrower: Decimal? = amount + surcharge\n" +
+            "    totalSameType: Int? = amount + surcharge\n" +
+            "    totalOptCond: Int? = if amount > 0 then bonus else fallback\n" +
+            "    totalNumCond: Decimal? = if amount > 0 then amount else 0\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

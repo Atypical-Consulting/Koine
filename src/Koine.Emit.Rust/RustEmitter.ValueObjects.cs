@@ -267,10 +267,7 @@ public sealed partial class RustEmitter
             {
                 body = $"{ownedWrap}({body})";
             }
-            if (m.Type.IsOptional && ownedBodyType is { IsOptional: false })
-            {
-                body = $"Some({body})";
-            }
+            body = SomeWrapIfNeeded(body, m.Type, ownedBodyType);
         }
         else
         {
@@ -300,13 +297,7 @@ public sealed partial class RustEmitter
                 body += ".clone()";
             }
 
-            // An optional-declared member's bare body that isn't itself optional (i.e. always present)
-            // must be Some(...)-wrapped to match the declared Option<...> return type — even when no
-            // numeric coercion was needed above (e.g. a same-type `Int?` body over an `Int` sum) (#1329).
-            if (m.Type.IsOptional && bodyType is { IsOptional: false })
-            {
-                body = $"Some({body})";
-            }
+            body = SomeWrapIfNeeded(body, m.Type, bodyType);
         }
 
         WriteDoc(sb, m.Doc, Indent);
@@ -315,6 +306,18 @@ public sealed partial class RustEmitter
         sb.Append(Indent).Append(Indent).Append(body).Append('\n');
         sb.Append(Indent).Append("}\n");
     }
+
+    /// <summary>
+    /// Wraps <paramref name="body"/> in <c>Some(...)</c> when <paramref name="declared"/> is optional and
+    /// <paramref name="bodyType"/> is itself definitely non-optional — an always-present value rendered
+    /// against an <c>Option&lt;...&gt;</c>-returning accessor. Left unchanged when <paramref name="bodyType"/>
+    /// is optional (or unknown), since such a body may already render as <c>Option</c>-shaped and a second
+    /// wrap here would double-wrap it (#1329). Shared by <see cref="WriteDerived"/>'s two coercion call
+    /// sites (the bare-body branch and the <c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>
+    /// owned-value branch).
+    /// </summary>
+    private static string SomeWrapIfNeeded(string body, TypeRef declared, TypeRef? bodyType) =>
+        declared.IsOptional && bodyType is { IsOptional: false } ? $"Some({body})" : body;
 
     /// <summary>
     /// The Rust conversion function to wrap a derived member's body in when its inferred numeric type
