@@ -1745,4 +1745,32 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1333: a <c>CoalesceExpr</c> (<c>a ?? b</c>) whose right operand is itself optional must
+    /// render <c>.or_else(...)</c>, not <c>.unwrap_or_else(...)</c> — the latter force-unwraps to a bare
+    /// <c>T</c> while the closure actually returns <c>Option&lt;T&gt;</c>, a real <c>cargo check</c>
+    /// <c>E0308</c>. Exercises all four presence combinations (present/absent on each side) at runtime,
+    /// not just that it compiles.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_both_operands_optional_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    bonus: Int?\n" +
+            "    fallback: Int?\n" +
+            "    total: Int? = bonus ?? fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
