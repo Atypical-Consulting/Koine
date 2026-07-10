@@ -14,6 +14,17 @@ export interface WorkspaceOpLock {
    * have been changed by the op ahead of it (#1088).
    */
   run<T>(op: () => Promise<T>): Promise<T>;
+  /**
+   * True from the moment an op is enqueued until the queue drains (#1275). Synchronous at enqueue —
+   * a handler that just called run() already reads busy — and derived from the queue itself, so it
+   * cannot drift; a REJECTED op clears it exactly as it releases the lock.
+   */
+  busy(): boolean;
+  /**
+   * Subscribe to busy TRANSITIONS (#1275): fired with `true` when an idle lock takes its first op and
+   * with `false` when the queue drains — never once per enqueued op. Returns an unsubscribe.
+   */
+  onBusyChanged(cb: (busy: boolean) => void): () => void;
 }
 
 /**
@@ -26,11 +37,34 @@ export interface WorkspaceOpLock {
  */
 export function createWorkspaceOpLock(): WorkspaceOpLock {
   let queue: Promise<unknown> = Promise.resolve();
+  // The number of ops enqueued but not yet settled — busy() derives from it, so the flag can never
+  // outlive (or lag) the queue it describes. Snapshot the listener set per notify so an unsubscribe
+  // during delivery can't skip a sibling.
+  let pending = 0;
+  const listeners = new Set<(busy: boolean) => void>();
+  const notify = (busy: boolean): void => {
+    for (const cb of [...listeners]) cb(busy);
+  };
   return {
     run<T>(op: () => Promise<T>): Promise<T> {
+      pending += 1;
+      if (pending === 1) notify(true); // idle → busy: the first op of a burst flips the flag
       const run = queue.catch(() => {}).then(op);
-      queue = run.catch(() => {});
+      // Settle accounting rides the same swallowed-rejection link the queue already chains on, so a
+      // rejected op both releases the lock AND clears busy; the caller still sees the error via `run`.
+      const settled = (): void => {
+        pending -= 1;
+        if (pending === 0) notify(false); // the whole queue drained, not just this op
+      };
+      queue = run.then(settled, settled);
       return run;
+    },
+    busy: () => pending > 0,
+    onBusyChanged(cb: (busy: boolean) => void): () => void {
+      listeners.add(cb);
+      return () => {
+        listeners.delete(cb);
+      };
     },
   };
 }
