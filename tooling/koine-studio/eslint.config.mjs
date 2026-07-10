@@ -78,7 +78,9 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
-    files: ['src/docs/docsPanel.ts', 'src/model/glossary.ts'], // retired by #992 (pure-DOM model/docs builders → JSX)
+    // src/model/glossary.ts dropped out when GlossaryPanel converted to real JSX (#992 task 1, the
+    // renderGlossary DOM builder retired); docsPanel.ts stays exempted until its own #992 task converts it.
+    files: ['src/docs/docsPanel.ts'],
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
