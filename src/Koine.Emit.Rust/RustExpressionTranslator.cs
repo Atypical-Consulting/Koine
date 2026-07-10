@@ -437,16 +437,20 @@ internal sealed class RustExpressionTranslator
 
     /// <summary>
     /// Writes one conditional branch, individually widened to <c>Decimal</c> when its own inferred type
-    /// is <c>Int</c> while the SIBLING branch is <c>Decimal</c>. <see cref="TypeResolver"/> already
-    /// widens the conditional's own aggregate type to the wider of the two branches (#975), so the outer
-    /// <c>coerceTo</c> comparison in <see cref="WriteArithmeticOperand"/> never sees a mismatch here —
-    /// each branch still renders in its own native Rust type, so an unreconciled Int/Decimal pair emits
-    /// two different types in the same <c>if</c>/<c>else</c> (a real <c>cargo check</c> E0308, #1311).
-    /// Reconciling per-branch (rather than a single wrap around the whole conditional) is required
-    /// because the branches disagree with EACH OTHER, not with an externally supplied <c>coerceTo</c>.
-    /// Fixed here in the emitter (not the semantic validator): the widened Int/Decimal conditional is a
-    /// legitimate, cross-target-sanctioned pattern (#975) — this is a Rust-only rendering gap, not a
-    /// modeling error.
+    /// is <c>Int</c> while the SIBLING branch is <c>Decimal</c>, and/or <c>Some(...)</c>-wrapped when its
+    /// own inferred type is non-optional while the SIBLING branch is optional. <see cref="TypeResolver"/>
+    /// already widens the conditional's own aggregate type to the wider/optional-joined type of the two
+    /// branches (#975), so the outer <c>coerceTo</c> comparison in <see cref="WriteArithmeticOperand"/>
+    /// (and <c>WriteDerived</c>'s own whole-body <c>Some(...)</c>-wrap decision, #1329) never sees a
+    /// mismatch here — each branch still renders in its own native Rust type/optionality, so an
+    /// unreconciled pair emits two different types in the same <c>if</c>/<c>else</c> (a real
+    /// <c>cargo check</c> E0308: numeric — #1311; optionality — #1331). Reconciling per-branch (rather
+    /// than a single wrap around the whole conditional) is required because the branches disagree with
+    /// EACH OTHER, not with an externally supplied <c>coerceTo</c>. Fixed here in the emitter (not the
+    /// semantic validator): a widened or optional-joined conditional is a legitimate,
+    /// cross-target-sanctioned pattern (#975) — this is a Rust-only rendering gap, not a modeling error.
+    /// The two reconciliations compose as <c>Some(Decimal::from(...))</c> (wrap outside, widen inside) —
+    /// the value must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>.
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
@@ -454,6 +458,13 @@ internal sealed class RustExpressionTranslator
         TypeRef? branchType = _resolver.Infer(branch, scope);
         TypeRef? siblingType = _resolver.Infer(sibling, scope);
         var needsWiden = branchType?.Name == "Int" && siblingType?.Name == "Decimal";
+        var needsSomeWrap = branchType is { IsOptional: false } && siblingType is { IsOptional: true };
+
+        if (needsSomeWrap)
+        {
+            sb.Append("Some(");
+        }
+
         if (needsWiden)
         {
             sb.Append("Decimal::from(");
@@ -461,6 +472,11 @@ internal sealed class RustExpressionTranslator
 
         WriteOwnedOperand(branch, sb);
         if (needsWiden)
+        {
+            sb.Append(')');
+        }
+
+        if (needsSomeWrap)
         {
             sb.Append(')');
         }
