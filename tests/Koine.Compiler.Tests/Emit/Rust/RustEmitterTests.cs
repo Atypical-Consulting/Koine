@@ -353,4 +353,40 @@ public class RustEmitterTests
         rust.ShouldNotContain("Decimal::from(Some(");
         rust.ShouldNotContain("{ Decimal::from(self.amount) } else");
     }
+
+    private const string OptionalDerivedTrimOwnershipModel = """
+        context Shop {
+          value Person {
+            name: String
+            nickname: String? = name.trim
+            slug: String = name.trim
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1332: an optional-declared <c>String?</c> derived member whose bare body ends in
+    /// <c>.trim()</c> must own the result via <c>.to_string()</c> before <c>WriteDerived</c>'s
+    /// <c>Some(...)</c>-wrap (#1329) is applied — the <c>.trim()</c>-owning branch's gate previously
+    /// only recognized a non-optional-declared <c>String</c> member (<c>m.Type is { Name: "String",
+    /// IsOptional: false }</c>), so an optional-declared sibling fell through to the generic
+    /// <c>.clone()</c> fallback, which is a no-op on a borrowed <c>&amp;str</c> — a real <c>cargo
+    /// check</c> <c>E0308</c>. The non-optional-declared case (<c>slug</c>) must keep rendering exactly
+    /// as before.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_derived_member_with_trim_body_owns_the_result()
+    {
+        var result = new KoineCompiler().Compile(OptionalDerivedTrimOwnershipModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn nickname(&self) -> Option<String> {");
+        rust.ShouldContain("Some(self.name.trim().to_string())");
+        rust.ShouldNotContain("Some(self.name.trim().clone())");
+
+        rust.ShouldContain("pub fn slug(&self) -> String {");
+        rust.ShouldContain("self.name.trim().to_string()");
+    }
 }
