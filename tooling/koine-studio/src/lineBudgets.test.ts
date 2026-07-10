@@ -167,7 +167,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // surface loaders (Generated preview, diagrams, glossary, left-rail model, ADR/Notes docs, Source
   // Control, Events/Relationships, Compatibility check) consolidated onto the docViews slice and
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.
-  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 894 },
+  // Raised 894 → 918: #871 (browse generated output file-by-file via a file tree) and #992 (Docs pages
+  // JSX conversion — rewires loadAdr/loadNotes to mount <AdrPanel>/<NotesPanel> via the existing
+  // renderPanel pattern) both touch this file and landed together in this merge. Measured end-state
+  // (900), ceil(900 × 1.02) = 918.
+  { file: 'src/shell/inspector/surfaceLoaders.tsx', maxLines: 918 },
   // Lowered 736 → 731: the #985 whole-branch code-review's dead-code finding — `ensureTerminal`/
   // `ensureReview` were declared on `CenterDeckControllerDeps` and passed in by the facade, but never
   // actually called (the real Terminal/Review dispatch lives entirely in the injected
