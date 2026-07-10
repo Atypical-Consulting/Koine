@@ -49,7 +49,8 @@ import { SourceControlPanel, type SourceControlFocus } from '@/model/SourceContr
 import type { ModelIndex } from '@/model/modelIndex';
 import { createDocsStore } from '@/docs/docsStore';
 import { AdrPanel, NotesPanel, type DocsPanelHandlers } from '@/docs/DocsPanels';
-import { DocsPanelHost } from '@/docs/DocsPanelHost';
+import { DocsPanelHost } from '@atypical/koine-ui';
+import { createDocsPanelHostStore } from '@/store/readableStores';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
@@ -549,10 +550,12 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
 
   // Mount each folder-derived page into its host. On mount the host hands us the node (captured for the
   // lazy first-load + in-panel reloads) WITHOUT fetching — the lazy tab-open path owns that first paint. A
-  // real folder-token change re-runs the fetch in place.
+  // real folder-token change re-runs the fetch in place. The host panel lives in @atypical/koine-ui since
+  // #1244, so it reads the folder token through the generic ReadableStore adapter (one shared instance).
+  const docsHostStore = createDocsPanelHostStore(store);
   render(
     <DocsPanelHost
-      store={store}
+      store={docsHostStore}
       onMount={(host) => { adrMount = host; }}
       load={(host) => { adrMount = host; adrLoaded = false; void loadAdr(host); }}
     />,
@@ -560,7 +563,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   );
   render(
     <DocsPanelHost
-      store={store}
+      store={docsHostStore}
       onMount={(host) => { notesMount = host; }}
       load={(host) => { notesMount = host; notesLoaded = false; void loadNotes(host); }}
     />,

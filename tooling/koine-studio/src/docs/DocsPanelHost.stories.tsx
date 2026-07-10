@@ -1,9 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { render } from 'preact';
-import { DocsPanelHost } from '@/docs/DocsPanelHost';
+import { DocsPanelHost } from '@atypical/koine-ui';
 import { AdrPanel, NotesPanel, type DocsPanelData, type DocsPanelHandlers } from '@/docs/DocsPanels';
 import type { AdrFile, NoteFile } from '@/docs/docsStore';
 import { renderMarkdown } from '@/editor/markdown';
+import { createDocsPanelHostStore } from '@/store/readableStores';
 import { createAppStore } from '@/store/index';
 
 // A folder-derived Documentation page host — reused for both the Decisions (ADR) and Notes pages. In the
@@ -13,6 +14,12 @@ import { createAppStore } from '@/store/index';
 // components against a representative fixture so the host's framing is visible. The story never changes
 // folderRootToken, so the `load` reload path doesn't fire; it's wired to the same painter to document the
 // folder-change contract.
+//
+// The host panel itself lives in @atypical/koine-ui since #1244 (behind its ReadableStore contract; the
+// real app store is adapted via createDocsPanelHostStore). This story stays on the koine-studio side —
+// unlike the other migrated panels' stories — because its real subject is the studio-only <AdrPanel> /
+// <NotesPanel> pages painted INTO the host (their only story coverage); koine-ui's own DocsPanelHost
+// story covers the bare host with a neutral fixture.
 
 const handlers: DocsPanelHandlers = {
   onCreateAdr: () => {},
@@ -75,7 +82,7 @@ const meta = {
   component: DocsPanelHost,
   parameters: { layout: 'padded' },
   args: {
-    store: createAppStore(),
+    store: createDocsPanelHostStore(createAppStore()),
     onMount: (_host: HTMLElement) => {},
     load: (_host: HTMLElement) => {},
   },

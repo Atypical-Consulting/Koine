@@ -88,6 +88,17 @@ function problemsSliceEqual(a: ProblemsSlice, b: ProblemsSlice): boolean {
   );
 }
 
+/**
+ * Adapts the workspace slice's `folderRootToken` (the primary root, set atomically with `roots` so
+ * folder-derived consumers keep firing on a change — see slices/workspace.ts) to `DocsPanelHost`'s
+ * generic `ReadableStore<DocsPanelHostSlice>`. The token is one immutable string, but the selector
+ * wraps it in a fresh object each call, so `shallowEqual` supplies the "only notify on a REAL folder
+ * change" gate that keeps the folder-derived docs pages from reloading on unrelated writes.
+ */
+export function createDocsPanelHostStore(store: StoreApi<AppState>) {
+  return zustandToReadableStore(store, (s) => ({ folderRootToken: s.folderRootToken }), shallowEqual);
+}
+
 /** The bounded context a source file denotes — its `.koi` stem, lowercased — or null for a non-`.koi`
  *  uri. One `.koi` file is one bounded context (the stem convention the Files-tree scope emphasis uses).
  *  Moved here from DiagnosticsStripPanel.tsx with the #1244 extraction: which files belong to a context

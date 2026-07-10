@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { createAppStore } from '@/store/index';
 import {
   createDiagnosticsStripStore,
+  createDocsPanelHostStore,
   createHistoryControlsStore,
   createUnsavedIndicatorStore,
   createWorkspaceProblemsStore,
@@ -247,6 +248,41 @@ describe('createDiagnosticsStripStore', () => {
 
     // A push for a DIFFERENT file leaves the unscoped active-file slice untouched — no notification.
     store.getState().setDiagnostics('file:///b.koi', [err('elsewhere')]);
+    expect(calls).toBe(1);
+  });
+});
+
+describe('createDocsPanelHostStore', () => {
+  test('getState() forwards the workspace slice’s folderRootToken', () => {
+    const store = createAppStore();
+    const readable = createDocsPanelHostStore(store);
+    expect(readable.getState()).toEqual({ folderRootToken: '' });
+
+    store.getState().setRoots(['WS-A', 'WS-B']);
+    expect(readable.getState()).toEqual({ folderRootToken: 'WS-A' }); // the PRIMARY root
+  });
+
+  test('notifies on a folder change and not on an unrelated store write', () => {
+    const store = createAppStore();
+    store.getState().setRoots(['WS-A']);
+    const readable = createDocsPanelHostStore(store);
+    let seen: unknown;
+    let calls = 0;
+    readable.subscribe((s) => {
+      seen = s;
+      calls++;
+    });
+
+    store.getState().setNavAltitude('tactical'); // unrelated slice
+    expect(calls).toBe(0);
+
+    store.getState().setRoots(['WS-B']);
+    expect(calls).toBe(1);
+    expect(seen).toEqual({ folderRootToken: 'WS-B' });
+
+    // Re-setting the SAME primary root leaves the token unchanged — no notification, so the
+    // folder-derived docs pages never reload on a no-op roots write.
+    store.getState().setRoots(['WS-B', 'WS-C']);
     expect(calls).toBe(1);
   });
 });

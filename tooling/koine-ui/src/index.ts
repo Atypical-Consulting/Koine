@@ -75,3 +75,4 @@ export {
   type DiagnosticsStripRow,
   type DiagnosticsStripRange,
 } from './components/DiagnosticsStripPanel';
+export { DocsPanelHost, type DocsPanelHostSlice } from './components/DocsPanelHost';
