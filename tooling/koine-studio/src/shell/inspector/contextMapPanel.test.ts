@@ -391,3 +391,38 @@ describe('createContextMapPanel — hover tooltip composition (#1211)', () => {
     panel.dispose();
   });
 });
+
+describe('createContextMapPanel — disposing mid-getMaxGraph skips the post-await tail (#1261)', () => {
+  test('success tail: emphasiseContextMapScope never marks the node once disposed before the render settles', async () => {
+    const store = createAppStore();
+    store.getState().setActiveContext('Billing');
+    const host = makeHost();
+    const lsp = makeLsp();
+
+    let captured: { isCurrent: () => boolean; resolve: (h: maxgraphRenderer.ContextMapGraphHandle | null) => void } | undefined;
+    vi.mocked(maxgraphRenderer.renderContextMapGraph).mockRestore();
+    vi.spyOn(maxgraphRenderer, 'renderContextMapGraph').mockImplementation(
+      async (container, _graph, isCurrent) =>
+        new Promise((resolve) => {
+          // Mimic the real mount landing its nodes into the stage before the promise settles.
+          container.innerHTML = '<div class="koi-ctxmap-graph"><div class="koi-node koi-svg-node" data-qname="Billing">Billing</div></div>';
+          captured = { isCurrent, resolve };
+        }),
+    );
+
+    const panel = createContextMapPanel({ store, host, lsp, onNavigate: makeOnNavigate() });
+    void panel.load(); // fetch -> paintContextMap -> renderContextMapGraph call, left pending
+    await flush();
+    expect(captured).toBeDefined();
+    expect(captured!.isCurrent()).toBe(true); // sanity: current before disposal
+
+    panel.dispose(); // torn down while getMaxGraph() is still in flight — disposed=true, seq untouched
+    expect(captured!.isCurrent()).toBe(false); // the shared predicate now sees the disposal too
+
+    captured!.resolve({ dispose: vi.fn() }); // the stale mount lands anyway, mirroring the real race
+    await flush();
+
+    const node = host.querySelector<HTMLElement>('.koi-svg-node[data-qname="Billing"]');
+    expect(node?.getAttribute('aria-current')).not.toBe('true'); // the success tail must not have run
+  });
+});
