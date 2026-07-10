@@ -91,6 +91,23 @@ wrong abstraction:
   mechanisms are different enough that collapsing them would hide meaningful platform divergence
   rather than abstract it.
 
+## Store injection (the `AppStore` convention)
+
+Studio's state is a single vanilla Zustand store composed of typed slices (`src/store/index.ts`,
+`createAppStore(): AppStore` where `AppStore = StoreApi<AppState>`), with one app-wide singleton,
+`export const appStore = createAppStore()`. Controllers and panels take that store as an **injected
+dependency** — `store: AppStore` (a parameter or a `deps` field) — never the `appStore` singleton
+directly (see `src/shell/inspectorController.tsx`, `src/model/domainNavigator.ts`,
+`src/shell/guardedLoad.ts`, …). This lets tests and Storybook stories build their own isolated
+`createAppStore()` instead of sharing global, cross-test mutable state.
+
+Only the composition root (`src/main.ts`, `src/shell/ide.tsx`), the `useAppStore` React binding
+(`src/store/hooks.ts`), and a small, explicitly reviewed set of other entry points construct or import
+the singleton directly. That set is pinned exactly by `src/store/storeInjection.convention.test.ts`,
+a vitest guard that fails if a new `import { appStore } from '@/store'` appears anywhere else — same
+pattern as the `Platform`-port seam guard above. Growing or shrinking that allowlist is a deliberate,
+reviewed edit to the test, not an incidental one.
+
 ## How it works
 
 - The Rust host (`src-tauri/src/lib.rs`) spawns the Koine LSP lazily on the `lsp_start`
