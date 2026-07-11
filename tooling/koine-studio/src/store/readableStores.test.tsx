@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'vitest';
+import { render } from '@testing-library/preact';
+import { GlossaryPanel } from '@atypical/koine-ui';
 import { createAppStore } from '@/store/index';
 import {
   createDiagnosticsStripStore,
@@ -498,6 +500,23 @@ describe('createGlossaryPanelStore', () => {
     const scoped = readable.getState();
     expect(scoped).not.toBe(first);
     expect(readable.getState()).toBe(scoped); // and the new slice is itself served from the memo
+  });
+
+  // Pins #1470: renders `GlossaryPanel` (imported from `@atypical/koine-ui`, exactly as
+  // surfaceLoaders.tsx's renderGlossaryPanel() does) fed by the store this describe block otherwise only
+  // asserts the SHAPE of — so a regression that resolves the cross-package import to `undefined` (Preact
+  // then renders the vnode's props object as the literal text "[object Object]", with no thrown error) is
+  // caught here, not just a getState() shape check.
+  test('rendered through the real GlossaryPanel import, concept names paint as plain text — never "[object Object]"', () => {
+    const store = createAppStore();
+    const readable = createGlossaryPanelStore(store, model);
+    const { container } = render(
+      <GlossaryPanel store={readable} handlers={{ onGoto: () => {}, onSave: () => {} }} />,
+    );
+
+    expect(container.textContent).toContain('Order');
+    expect(container.textContent).toContain('A customer order.');
+    expect(container.textContent).not.toContain('[object Object]');
   });
 });
 
