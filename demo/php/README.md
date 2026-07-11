@@ -19,9 +19,8 @@ part of its own `dotnet build`), [`demo/typescript`](../typescript), and [`demo/
      two different lines;
    - a freshly constructed `Order` defaults to `Draft` and carries both lines;
    - `Order` equality is by **id** (entity identity), not by structural contents — two orders built
-     from the very same `OrderId` object but different lines/status are equal, and two orders built
-     from different `OrderId` objects are not (see the "known emitter gap" note below — this demo
-     deliberately stays on the side of that gap that is correct);
+     from distinct `OrderId` objects wrapping the *same* underlying value are equal regardless of
+     differing lines/status, and two orders built from `OrderId`s wrapping different values are not;
    - the `Draft`, `Placed`, and `Shipped` `OrderStatus` enum cases are all constructible, mutually
      distinguishable, and route correctly through the generated `OrderStatus::match_()` exhaustive
      dispatch.
@@ -89,33 +88,6 @@ A human may want to file a follow-up issue to enrich `templates/starters/orderin
 `place`/`ship`/`cancel` commands (making its `template.json` "state transitions" teaching claim
 literally exercised by a generated guard), which would let this demo — and its TypeScript/Python/Rust
 siblings — assert a genuine illegal-transition rejection.
-
-### 2. `Order::equals()` compares its id by PHP object identity, not by value (PHP-emitter-specific)
-
-The emitted `Order::equals()` is:
-
-```php
-public function equals(self $other): bool
-{
-    return $this->id === $other->id;
-}
-```
-
-PHP's `===` on two objects is identity comparison (same object instance), not value comparison —
-unlike the TypeScript emitter (`this.id.equals(other.id)`, an explicit structural call) or the
-Python emitter (`self.id == other.id`, value-based via the dataclass's generated `__eq__`). So two
-`Order` instances holding *value-equal but distinct* `OrderId` object instances — exactly what a
-repository reconstructing the same entity from a persisted UUID string on two separate loads would
-produce — would incorrectly compare as unequal under the emitted `Order::equals()`.
-
-`main.php`'s identity assertions reuse the very same `OrderId` PHP object reference across both
-`Order` instances in the "same identity" case (mirroring how the TypeScript/Python demos are
-written), so this demo never actually exercises the broken cross-instance path and stays green. See
-[`reference/README.md`](reference/README.md) for a standalone repro. **This is a real PHP-emitter
-gap worth a follow-up issue** (`Order::equals()` — and any other entity's generated `equals()` —
-should compare an object-typed id via `$this->id->equals($other->id)` or `==`, not `===`), not
-something this demo's driver silently papers over: it is called out here, in
-`reference/README.md`, and in the `KNOWN GAPS` doc comment atop `main.php`.
 
 ## Layout
 

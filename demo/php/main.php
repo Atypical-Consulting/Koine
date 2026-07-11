@@ -14,7 +14,7 @@ declare(strict_types=1);
  * the same way the Conformance/PhpConformanceTests harness exercises them (it writes files to a
  * temp directory and analyses them as-is, with no autoloader).
  *
- * KNOWN GAPS (see reference/README.md and ../README.md "What this demo does NOT prove"):
+ * KNOWN GAP (see ../README.md "What this demo does NOT prove"):
  *
  * 1. templates/starters/ordering's `states status { ... }` block has no paired `command`
  *    declarations, so -- per the documented Koine semantics ("the block by itself emits nothing;
@@ -24,18 +24,6 @@ declare(strict_types=1);
  *    illegal transition (e.g. Draft -> Shipped) is rejected, because nothing in the emitted code
  *    rejects it. This is a property of the *template*, not a PHP-emitter bug -- identical to the
  *    TypeScript, Python, and Rust demos of this same template.
- *
- * 2. The emitted `Order::equals()` compares its `id` member with PHP's `===` operator
- *    (object-identity equality), not with the `OrderId` value object's own `equals()` method (a
- *    value comparison). The TypeScript emitter calls `this.id.equals(other.id)` and the Python
- *    emitted dataclass uses value-based `==`, so this is a PHP-emitter-specific divergence: two
- *    `OrderId` instances holding the *same* underlying UUID string, but constructed as separate PHP
- *    objects (e.g. one built fresh from a persisted string, as a repository load would do), would
- *    incorrectly compare as NOT equal. This demo works around the gap by reusing the very same
- *    `OrderId` PHP object reference across the "same identity" assertion below (which is also
- *    exactly how the TypeScript/Python demos are written), so it never actually exercises the
- *    broken cross-instance case -- see reference/README.md for the concrete repro and the follow-up
- *    this warrants.
  */
 
 require_once __DIR__ . '/generated/KoineRuntime.php';
@@ -90,9 +78,12 @@ $check($draftOrder->lines[0]->equals($line1), 'the first line should round-trip 
 $check($draftOrder->lines[1]->equals($line2), 'the second line should round-trip by value equality');
 
 // --- Order identity: equality is by id, not by structural contents (aggregate roots are
-// entities). NOTE: this reuses the same $orderId PHP object reference across both instances below
-// -- see KNOWN GAP 2 above for why that matters for the emitted `===` comparison. ---
-$sameIdDifferentLines = new Order($orderId, [$line1], OrderStatus::PLACED);
+// entities). This constructs a SECOND, distinct OrderId object from the same underlying UUID
+// string -- the realistic shape a repository rehydrating an entity from a persisted id on two
+// separate loads would produce -- to prove identity is compared by value, not by PHP object
+// reference. ---
+$sameIdDifferentObject = new OrderId($orderId->value);
+$sameIdDifferentLines = new Order($sameIdDifferentObject, [$line1], OrderStatus::PLACED);
 $check(
     $draftOrder->equals($sameIdDifferentLines),
     'two Order instances with the same id must be equal regardless of their line/status contents '

@@ -244,8 +244,8 @@ impl std::hash::Hash for Order {
 
 impl Order {
     /// Creates a validated `Order`, running its invariants.
-    pub fn new(id: OrderId, lines: i64) -> Result<Self, DomainError> {
-        let status = OrderStatus::Draft;
+    pub fn new(id: OrderId, lines: i64, status: Option<OrderStatus>) -> Result<Self, DomainError> {
+        let status = status.unwrap_or_else(|| OrderStatus::Draft);
         Ok(Self {
             id,
             lines,
@@ -274,7 +274,7 @@ impl Order {
         let events: Vec<DomainEvent> = vec![
             DomainEvent::OrderOpened(OrderOpened::new(id.clone(), lines)),
         ];
-        let mut instance = Self::new(id, lines)?;
+        let mut instance = Self::new(id, lines, None)?;
         instance.events = events;
         Ok(instance)
     }

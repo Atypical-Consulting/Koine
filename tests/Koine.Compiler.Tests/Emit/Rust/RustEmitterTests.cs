@@ -97,7 +97,8 @@ public class RustEmitterTests
     /// in the smart constructor's <c>let</c>-binding loop — the entity dual of #1319's value-object fix.
     /// A <c>Decimal</c> field defaulted to a bare <c>Int</c> literal, or a <c>String</c> field defaulted
     /// to a string literal, otherwise binds a raw uncoerced local that is a real <c>cargo check</c>
-    /// <c>E0308</c> at the struct-literal field-init site.
+    /// <c>E0308</c> at the struct-literal field-init site. Since #1380, a non-optional defaulted member
+    /// is a trailing <c>Option&lt;T&gt;</c> constructor parameter unwrapped to the (still-coerced) default.
     /// </summary>
     [Fact]
     public void Entity_constant_default_fields_coerce_to_their_declared_rust_type()
@@ -107,10 +108,10 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("let tax_rate = Decimal::from(2);");
+        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
         rust.ShouldNotContain("let tax_rate = 2;");
 
-        rust.ShouldContain("let label = \"std\".to_string();");
+        rust.ShouldContain("let label = label.unwrap_or_else(|| \"std\".to_string());");
         rust.ShouldNotContain("let label = \"std\";");
     }
 

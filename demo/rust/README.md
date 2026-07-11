@@ -19,6 +19,7 @@ part of its own `dotnet build`), [`demo/typescript`](../typescript), [`demo/pyth
    - `OrderLine::subtotal()` (a derived method) is correctly computed (`unit_price *
      Decimal::from(quantity)`) for two different lines;
    - a freshly constructed `Order` defaults to `Draft` and carries both lines;
+   - overriding the trailing `status` parameter constructs a `Placed` `Order` directly;
    - `Order` equality is by **id** (entity identity), not by structural contents — two orders with
      the same id but different `lines` are equal, and two orders with different ids are not;
    - the `Draft`/`Placed`/`Shipped`/`Cancelled` `OrderStatus` enum variants are all constructible,
@@ -77,29 +78,12 @@ this same template. A human may want to file a follow-up issue to enrich
 would let this demo — and its TypeScript/Python/PHP siblings — assert a genuine illegal-transition
 rejection.
 
-### 2. `Order::new` has no `status` parameter at all (Rust-specific parity gap)
-
-Unlike the C#, TypeScript, Python, and PHP emitters — which all render `Order`'s default-valued
-`status` member as an **optional trailing constructor parameter** defaulting to `Draft` (e.g.
-TypeScript's `constructor(id, lines, status = OrderStatus.Draft)`) — the Rust emitter's
-`Order::new(id: OrderId, lines: Vec<OrderLine>) -> Result<Self, DomainError>` takes **no `status`
-parameter whatsoever**; it unconditionally sets `status = OrderStatus::Draft` inline. Since
-`Order`'s fields are private and no setter is generated, there is no way from outside the crate to
-construct an `Order` whose `status` is anything but `Draft`.
-
-This means the driver cannot mirror the TypeScript/Python/PHP siblings' "construct a `Placed`
-order directly" assertions. It works around the gap by exercising the `OrderStatus` enum's
-`Draft`/`Placed`/`Shipped`/`Cancelled` variants as freestanding values (they are public and need no
-`Order` to construct), and its entity-identity assertion only varies `lines` between the two
-same-id instances, not `status` (which the constructor cannot express) — see
-[`reference/README.md`](reference/README.md) for the exact emitted-code comparison across targets.
-
-**This is a real Rust-emitter parity gap worth a follow-up issue** against
-`src/Koine.Emit.Rust/RustEmitter.Aggregates.cs` (render the same optional trailing parameter the
-other four emitters already do) — not something this demo's driver silently papers over: it is
-called out here, in `reference/README.md`, and in the `KNOWN GAPS` doc comment atop `src/main.rs`.
-This demo does not touch `src/Koine.Emit.Rust/` itself, per issue #1073's scope (demo + test-harness
-only).
+> This section previously also listed a Rust-specific parity gap: `Order::new` rendered no trailing
+> `status` parameter at all, unlike the C#/TypeScript/Python/PHP emitters. That gap is fixed (#1380)
+> — `Order::new`'s generated signature now takes a trailing `status: Option<OrderStatus>` that
+> defaults to `Draft` when omitted, matching the other four emitters' shape, and this driver now
+> constructs a `Placed` `Order` directly (see `src/main.rs`) the same way its TypeScript/Python/PHP
+> siblings do.
 
 ## Layout
 
