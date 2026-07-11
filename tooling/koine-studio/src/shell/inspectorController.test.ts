@@ -1114,6 +1114,45 @@ describe('createInspectorController — bounded-context scope', () => {
     expect(lsp.contextMap.mock.calls.length).toBeGreaterThan(callsAfterBuild);
   });
 
+  // Regression (#1447): getCachedDomainIndex()'s post-await write used to be unconditional, so a build
+  // started BEFORE a later invalidateDocViews() — still in flight when that invalidation lands — could
+  // resolve afterwards and clobber the fresher (already-rebuilt) cache with its own now-stale data. A
+  // generation guard (bumped by invalidateModelDerivedCaches) must drop that late write instead.
+  test('a stale getCachedDomainIndex() build settling after a later invalidation does not clobber the fresh value', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    // Build A's contextMap call never resolves in this test — stands in for "still in flight" when the
+    // next edit's invalidation lands.
+    let resolveStaleContextMap!: (result: ContextMapResult) => void;
+    lsp.contextMap.mockImplementationOnce(
+      () =>
+        new Promise<ContextMapResult>((resolve) => {
+          resolveStaleContextMap = resolve;
+        }),
+    );
+
+    const stalePromise = ctl.getCachedDomainIndex(); // build A: kicks off, pends on contextMap
+
+    ctl.invalidateDocViews(); // edit N+1 lands while A is still in flight
+
+    // Build B: cachedDomainIndex is still null (A hasn't written yet) so this starts its own build,
+    // against the default (fast-resolving) fixtures.
+    const freshIdx = await ctl.getCachedDomainIndex();
+    expect(freshIdx?.contexts).toEqual(['Billing']);
+
+    // Let A settle now, AFTER B has already written the fresh value — with a distinguishable payload so
+    // a clobber is observable.
+    resolveStaleContextMap({ contexts: ['StaleWorld'], relations: [] });
+    await stalePromise;
+    await flush();
+
+    // A later reader must still see B's fresh value — A's late write was dropped, not applied.
+    const finalIdx = await ctl.getCachedDomainIndex();
+    expect(finalIdx?.contexts).toEqual(['Billing']);
+  });
+
   test('a scope change fans out to the Files tree via scopeFiles (context, then null for All) — ADR 0009', async () => {
     const lsp = makeLsp();
     const deps = makeDeps(lsp);
