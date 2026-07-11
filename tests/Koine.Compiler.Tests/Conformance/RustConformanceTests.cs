@@ -304,6 +304,56 @@ public class RustConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    private const string ValueObjectOptionalDefaultedMemberSurvivesAdditiveOperatorModel = """
+        context Shop {
+          value Money {
+            amount: Decimal
+            taxRate: Decimal? = 2
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+          value Line {
+            base: Money
+            combined: Money = base + base
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1463 Task 2: the additive operator's generated <c>Money::new(...)</c> call must carry an
+    /// optional-declared defaulted member's ACTUAL runtime value forward, not silently reset it to the
+    /// declared default — the value-object dual of the non-optional-declared carry-forward fix
+    /// (<see cref="Value_object_defaulted_member_survives_additive_operator"/>). Since Task 1 merged
+    /// optional-declared members into <c>defaultedParams</c>, the unconditional <c>Some(self.field)</c>
+    /// wrap those operator builders already apply would double-wrap an already-<c>Option</c>-typed field
+    /// (<c>self.tax_rate</c> is <c>Option&lt;Decimal&gt;</c>, so <c>Some(self.tax_rate)</c> is
+    /// <c>Option&lt;Option&lt;Decimal&gt;&gt;</c>) — a real <c>cargo check</c> <c>E0308</c> against the
+    /// <c>Option&lt;Decimal&gt;</c> constructor parameter.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_declared_defaulted_member_survives_additive_operator()
+    {
+        var result = new KoineCompiler().Compile(ValueObjectOptionalDefaultedMemberSurvivesAdditiveOperatorModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Money;
+
+            #[test]
+            fn overridden_tax_rate_survives_addition() {
+                let overridden = Money::new(Decimal::from(10), Some(Decimal::from(9))).expect("valid Money");
+                let combined = overridden.clone() + overridden;
+                assert_eq!(combined.tax_rate(), &Some(Decimal::from(9)));
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>
     /// Issue #1068: a <c>quantity</c> value object used directly in plain binary arithmetic —
     /// <c>combined: Weight = base + base</c> — must lower through its existing unit-checked

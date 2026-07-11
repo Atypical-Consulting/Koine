@@ -163,11 +163,11 @@ public class RustEmitterTests
         """;
 
     /// <summary>
-    /// Issue #1325: an <b>optional</b> value-object constant-default field must be coerced to its
-    /// declared underlying Rust type <i>and</i> <c>Some(...)</c>-wrapped in the smart constructor's
-    /// <c>Ok(Self { ... })</c> literal — #1319 only handles the non-optional case, so an
-    /// <c>Option&lt;Decimal&gt;</c>/<c>Option&lt;String&gt;</c> field defaulted to a bare literal is
-    /// otherwise left completely uncoerced, a real <c>cargo check</c> <c>E0308</c>.
+    /// Issue #1325 (superseded by #1463): an <b>optional</b> value-object constant-default field must be
+    /// coerced to its declared underlying Rust type <i>and</i> <c>Some(...)</c>-wrapped. Since #1463, this
+    /// member class is a trailing, overridable <c>Option&lt;T&gt;</c> constructor parameter (the
+    /// value-object dual of #1437's entity fix) rather than a hardcoded local — the coercion itself is
+    /// unchanged, only unwrapped from the parameter instead of the bare literal.
     /// </summary>
     [Fact]
     public void Value_object_optional_constant_default_fields_coerce_and_some_wrap()
@@ -177,11 +177,17 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("tax_rate: Some(Decimal::from(2)),");
-        rust.ShouldNotContain("tax_rate: 2,");
+        rust.ShouldContain("pub fn new(amount: Decimal, tax_rate: Option<Decimal>, label: Option<String>) -> Result<Self, DomainError>");
 
-        rust.ShouldContain("label: Some(\"std\".to_string()),");
-        rust.ShouldNotContain("label: \"std\",");
+        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
+        rust.ShouldContain("let tax_rate = Some(tax_rate);");
+        rust.ShouldNotContain("let tax_rate = Some(Decimal::from(2));");
+        rust.ShouldNotContain("let tax_rate = 2;");
+
+        rust.ShouldContain("let label = label.unwrap_or_else(|| \"std\".to_string());");
+        rust.ShouldContain("let label = Some(label);");
+        rust.ShouldNotContain("let label = Some(\"std\".to_string());");
+        rust.ShouldNotContain("let label = \"std\";");
     }
 
     private const string OptionalEntityConstantDefaultCoercionModel = """
@@ -249,6 +255,36 @@ public class RustEmitterTests
         rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
         rust.ShouldContain("let tax_rate = Some(tax_rate);");
         rust.ShouldNotContain("let tax_rate = Some(Decimal::from(2));");
+    }
+
+    private const string ValueObjectOptionalDefaultedMemberBecomesTrailingParamModel = """
+        context Shop {
+          value Money {
+            amount: Decimal
+            taxRate: Decimal? = 2
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1463 (value-object dual of #1437): a value object's optional-declared (<c>T?</c>) *and*
+    /// constant-defaulted member must become a trailing, overridable <c>Option&lt;T&gt;</c> constructor
+    /// parameter — #1436 only merged the non-optional-declared bucket into this shape, leaving the
+    /// already-optional bucket hardcoded and un-overridable via <c>Money::new(...)</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_optional_declared_defaulted_member_becomes_trailing_option_ctor_parameter()
+    {
+        var result = new KoineCompiler().Compile(ValueObjectOptionalDefaultedMemberBecomesTrailingParamModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn new(amount: Decimal, tax_rate: Option<Decimal>) -> Result<Self, DomainError>");
+        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
+        rust.ShouldContain("let tax_rate = Some(tax_rate);");
+        rust.ShouldNotContain("tax_rate: Some(Decimal::from(2)),");
     }
 
     private const string OptionalDerivedNarrowerNumericModel = """

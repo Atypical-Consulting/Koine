@@ -26,12 +26,11 @@ public sealed partial class RustEmitter
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var required = stored.Where(m => !HasConstantDefault(m)).ToList();
 
-        // A defaulted member with a plain (non-optional-declared) type becomes a trailing `Option<T>`
-        // constructor parameter, unwrapped to its default — matching the entity emitter's "optional
-        // trailing parameter" shape for the same construct (#1380). A member that is already
-        // `T?`-declared *and* defaulted keeps its existing inline `Ok(Self { ... })` coercion/Some-wrap
-        // (#1319/#1325) — that combination is untouched.
-        var defaultedParams = stored.Where(m => HasConstantDefault(m) && !m.Type.IsOptional).ToList();
+        // Every constant-defaulted member becomes a trailing `Option<T>` constructor parameter, unwrapped
+        // to its default — matching the entity emitter's "optional trailing parameter" shape for the same
+        // construct (#1380 for non-optional-declared members, #1463 for already-`T?`-declared ones). An
+        // already-optional-declared member is additionally re-wrapped in `Some(...)` after unwrapping.
+        var defaultedParams = stored.Where(HasConstantDefault).ToList();
 
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
         var translator = new RustExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, emit.EnumVariants, typeMapper, context);
@@ -128,17 +127,25 @@ public sealed partial class RustEmitter
         sb.Append(Indent).Append("/// Creates a validated `").Append(name).Append("`, running its invariants.\n");
         sb.Append(Indent).Append("pub fn new(").Append(string.Join(", ", ctorParams)).Append(") -> Result<Self, DomainError> {\n");
 
-        // A non-optional defaulted member unwraps its `Option<T>` parameter to the declared default
-        // (so invariants can see the resolved value before the checks) — the value-object dual of
-        // EmitEntity's identical handling (#1380/#1436). `unwrap_or_else` (not `unwrap_or`): the latter
-        // always evaluates its argument eagerly, so an overriding caller would still pay for
-        // constructing the discarded default.
+        // A defaulted member unwraps its `Option<T>` parameter to the declared default (so invariants can
+        // see the resolved value before the checks). The default's inferred type is reconciled against
+        // the field's declared (underlying, if optional) type — the value-object dual of EmitEntity's
+        // identical handling (#1380/#1436/#1437). `unwrap_or_else` (not `unwrap_or`): the latter always
+        // evaluates its argument eagerly, so an overriding caller would still pay for constructing the
+        // discarded default. An already-optional-declared member is then re-wrapped in `Some(...)`,
+        // mirroring its original hardcoded shape (#1463).
         foreach (Member m in defaultedParams)
         {
-            var defaultValue = CoercedDefaultValue(m, m.Type, translator, emit.Index);
+            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index);
             var field = RustNaming.Field(m.Name);
             sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = ")
               .Append(field).Append(".unwrap_or_else(|| ").Append(defaultValue).Append(");\n");
+
+            if (m.Type.IsOptional)
+            {
+                sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = Some(")
+                  .Append(field).Append(");\n");
+            }
         }
 
         foreach (Invariant inv in vo.Invariants)
@@ -146,22 +153,12 @@ public sealed partial class RustEmitter
             WriteInvariantGuard(sb, name, inv, translator, Indent + Indent);
         }
 
-        // Construct: required (and now-unwrapped defaulted-param) fields bind their same-named locals;
-        // an optional-declared constant-default field takes its inline default expr.
+        // Construct: every stored field (required and now-unwrapped defaulted-param alike) binds its
+        // same-named local.
         sb.Append(Indent).Append(Indent).Append("Ok(Self {\n");
         foreach (Member m in stored)
         {
-            sb.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(m.Name));
-            if (HasConstantDefault(m) && m.Type.IsOptional)
-            {
-                // An optional field's literal default is always a bare underlying-type literal (Koine
-                // has no Option-literal syntax), so it's coerced against the underlying type — reusing
-                // the same shared helper the trailing-param unwrap above calls — then Some(...)-wrapped
-                // (#1325).
-                var defaultValue = $"Some({CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index)})";
-                sb.Append(": ").Append(defaultValue);
-            }
-            sb.Append(",\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(m.Name)).Append(",\n");
         }
         sb.Append(Indent).Append(Indent).Append("})\n");
         sb.Append(Indent).Append("}\n");
@@ -358,12 +355,27 @@ public sealed partial class RustEmitter
     // Demand-driven operators
     // ----------------------------------------------------------------------
 
+    /// <summary>
+    /// The trailing-parameter carry-forward expression for a <c>defaultedParams</c> member (#1436): a
+    /// plain-typed field's owned expression is <c>Some(...)</c>-wrapped to match its <c>Option&lt;T&gt;</c>
+    /// constructor parameter. An already-optional-declared field (#1463) is already <c>Option</c>-shaped —
+    /// wrapping it again would double-wrap into <c>Option&lt;Option&lt;T&gt;&gt;</c>, a real <c>cargo
+    /// check</c> <c>E0308</c> against the constructor parameter — so it's passed through unwrapped.
+    /// Reuses <see cref="SomeWrapIfNeeded"/> (the same "wrap unless already Option-shaped" rule
+    /// <see cref="WriteDerived"/> applies): the target is always the ctor's <c>Option&lt;T&gt;</c>
+    /// parameter shape, and the expression's current type is always <paramref name="m"/>'s own declared
+    /// type, since <paramref name="ownedFieldExpr"/> reads straight off the struct field.
+    /// </summary>
+    private static string CarriedDefaultedArg(Member m, string ownedFieldExpr) =>
+        SomeWrapIfNeeded(ownedFieldExpr, m.Type with { IsOptional = true }, m.Type);
+
     /// <summary>A scalar <c>Mul</c>/<c>Div</c> (e.g. <c>Money * quantity</c> or <c>fee / 2</c>): applies
     /// <paramref name="op"/> to each numeric field, carries the rest, and rebuilds through the validating
     /// constructor (#1270). <paramref name="op"/> is <c>"*"</c> or <c>"/"</c>. Each trailing
-    /// <paramref name="defaultedParams"/> member (#1436) is carried from <c>self</c> (<c>Some(self.field)</c>),
-    /// not reset to its default — the operator's <c>self</c> is owned, so no clone is needed, mirroring how
-    /// a non-numeric <paramref name="required"/> field is already carried below.</summary>
+    /// <paramref name="defaultedParams"/> member (#1436/#1463) is carried from <c>self</c> via
+    /// <see cref="CarriedDefaultedArg"/>, not reset to its default — the operator's <c>self</c> is owned,
+    /// so no clone is needed, mirroring how a non-numeric <paramref name="required"/> field is already
+    /// carried below.</summary>
     private void WriteScalarOp(
         StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> defaultedParams,
         IReadOnlySet<string> scalars, string op)
@@ -376,7 +388,7 @@ public sealed partial class RustEmitter
         foreach (var (rustFactor, isDecimal) in ScalarFactors(scalars))
         {
             var args = required.Select(m => ScaleField(m, "self." + RustNaming.Field(m.Name), param, isDecimal, op))
-                .Concat(defaultedParams.Select(m => $"Some(self.{RustNaming.Field(m.Name)})"));
+                .Concat(defaultedParams.Select(m => CarriedDefaultedArg(m, "self." + RustNaming.Field(m.Name))));
 
             sb.Append('\n');
             sb.Append("impl std::ops::").Append(trait).Append('<').Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
@@ -391,11 +403,11 @@ public sealed partial class RustEmitter
     /// <summary>An additive <c>Add</c>/<c>Sub</c> (for <c>sum</c> folds and plain value-object arithmetic,
     /// #887): applies <paramref name="op"/> to each numeric field pairwise, carries the rest from self, and
     /// rebuilds through the validating constructor (#1270). <paramref name="op"/> is <c>"+"</c> or <c>"-"</c>.
-    /// Each trailing <paramref name="defaultedParams"/> member (#1436) is likewise carried from <c>self</c>
-    /// (<c>Some(self.field)</c>), not reset to its default — e.g. combining two <c>Money</c> whose
-    /// overridden <c>currency</c> is <c>Usd</c> must not silently coerce the result back to the declared
-    /// default (the <c>EUR + USD -&gt; EUR</c> failure mode the C# emitter's own carried-member handling
-    /// guards against). <c>self</c> is owned here, so no clone is needed.</summary>
+    /// Each trailing <paramref name="defaultedParams"/> member (#1436/#1463) is likewise carried from
+    /// <c>self</c> via <see cref="CarriedDefaultedArg"/>, not reset to its default — e.g. combining two
+    /// <c>Money</c> whose overridden <c>currency</c> is <c>Usd</c> must not silently coerce the result back
+    /// to the declared default (the <c>EUR + USD -&gt; EUR</c> failure mode the C# emitter's own
+    /// carried-member handling guards against). <c>self</c> is owned here, so no clone is needed.</summary>
     private void WriteAdditiveOp(
         StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> defaultedParams, string op)
     {
@@ -412,7 +424,7 @@ public sealed partial class RustEmitter
                     ? $"self.{f}.zip({other}.{f}).map(|(a, b)| a {op} b)"
                     : $"self.{f} {op} {other}.{f}"
                 : "self." + f;
-        }).Concat(defaultedParams.Select(m => $"Some(self.{RustNaming.Field(m.Name)})"));
+        }).Concat(defaultedParams.Select(m => CarriedDefaultedArg(m, "self." + RustNaming.Field(m.Name))));
 
         sb.Append('\n');
         sb.Append("impl std::ops::").Append(trait).Append(" for ").Append(name).Append(" {\n");
@@ -508,11 +520,11 @@ public sealed partial class RustEmitter
             })) + Indent + Indent + "}";
 
         // Builds the `Name::new(...)` argument list over `required`, in declared order, substituting
-        // `amtExpr` for the amount field, then a trailing `Some(self.field)` per `defaultedParams` member
-        // (#1436) — carried from `self`, not reset to its default, for the same reason `WriteAdditiveOp`/
-        // `WriteScalarOp` carry theirs. The `&self` receiver means any non-`Copy` carried field (required
-        // or defaulted) must be cloned out of `self` (units are `Copy` enums, so the common case clones
-        // nothing).
+        // `amtExpr` for the amount field, then a trailing carried-forward arg per `defaultedParams` member
+        // (#1436/#1463, via `CarriedDefaultedArg`) — carried from `self`, not reset to its default, for the
+        // same reason `WriteAdditiveOp`/`WriteScalarOp` carry theirs. The `&self` receiver means any
+        // non-`Copy` carried field (required or defaulted) must be cloned out of `self` (units are `Copy`
+        // enums, so the common case clones nothing).
         IEnumerable<string> NewArgs(string amtExpr) =>
             required.Select(m =>
             {
@@ -525,7 +537,8 @@ public sealed partial class RustEmitter
             }).Concat(defaultedParams.Select(m =>
             {
                 var f = "self." + RustNaming.Field(m.Name);
-                return typeMapper.IsCopy(m.Type) ? $"Some({f})" : $"Some({f}.clone())";
+                var owned = typeMapper.IsCopy(m.Type) ? f : f + ".clone()";
+                return CarriedDefaultedArg(m, owned);
             }));
 
         sb.Append('\n');
