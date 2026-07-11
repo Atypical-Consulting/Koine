@@ -511,9 +511,14 @@ public sealed partial class RustEmitter
                 // (the same shape #1437's follow-up fixed for the sibling defaultedParams loop).
                 args.Add(m.Type.IsOptional && !translator.IsOptional(value) ? $"Some({owned})" : owned);
             }
-            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+            else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
-                args.Add(RustNaming.Field(m.Name)); // auto-bound same-named parameter
+                // AutoBinds never permits an optional param to bind to a non-optional member, so this
+                // only ever needs a wrap in one direction — an optional-declared member bound to a
+                // non-optional param — the same "wrap unless already Option-shaped" rule SomeWrapIfNeeded
+                // already applies elsewhere (WriteDerived, CarriedDefaultedArg).
+                var field = RustNaming.Field(m.Name); // auto-bound same-named parameter
+                args.Add(SomeWrapIfNeeded(field, m.Type, boundParam.Type));
             }
             else if (m.Type.IsOptional)
             {

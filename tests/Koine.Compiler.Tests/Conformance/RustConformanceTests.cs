@@ -2653,4 +2653,72 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1467 — the <c>required</c> loop's auto-bound branch never <c>Some(...)</c>-wraps the bound
+    /// field for a member whose declared type is optional but has no member-level default (e.g.
+    /// <c>total: Decimal?</c>), when the auto-bound factory parameter itself is declared non-optional
+    /// (e.g. <c>total: Decimal</c>). The sibling <c>defaultedParams</c> loop's own auto-bound branch
+    /// already carries this guard; only this loop's auto-bound branch was missing it — the second branch
+    /// of this loop to need the wrap, after the explicit-init branch (#1452/PR #1464); the unset branch
+    /// already handles it correctly and never needed a fix.
+    /// </summary>
+    [Fact]
+    public void Factory_auto_bound_non_optional_parameter_binding_to_an_optional_declared_required_member_is_some_wrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(total: Decimal) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the auto-bound non-optional parameter must be
+        // Some(...)-wrapped to match the constructor's Option<Decimal> parameter, not passed through as
+        // the bare, un-wrapped field.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, Some(total))");
+        rust.ShouldNotContain("Self::new(id, total)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Same member shape (#1467), regression guard: an auto-bound <b>optional</b> (<c>T?</c>) parameter
+    /// binding to the same optional-declared required member must be unaffected — the field is already
+    /// <c>Option&lt;T&gt;</c>-typed (mirroring the sibling <c>defaultedParams</c> loop's own
+    /// already-correct same-shape case), so no additional wrap is applied (no double-wrap).
+    /// </summary>
+    [Fact]
+    public void Factory_auto_bound_optional_parameter_binding_to_an_optional_declared_required_member_is_not_double_wrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(total: Decimal?) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, total)");
+        rust.ShouldNotContain("Some(total)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
