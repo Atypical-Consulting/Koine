@@ -2347,6 +2347,78 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1452 — the <c>required</c> loop's explicit-init branch never <c>Some(...)</c>-wraps a
+    /// value for a member whose declared type is optional but has no member-level default (e.g.
+    /// <c>total: Decimal?</c>), even though that identical member shape is already handled correctly by
+    /// this same loop's <c>unset</c> branch three lines below (<c>m.Type.IsOptional</c> → <c>"None"</c>).
+    /// The constructor signature correctly declares the parameter <c>Option&lt;Decimal&gt;</c> (an
+    /// optional-declared, default-less member still needs <c>Option&lt;T&gt;</c> since it can be
+    /// legitimately unset), but the explicit-init branch passed the bare, un-wrapped value — a real
+    /// <c>cargo check</c> E0308.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_is_some_wrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "    label: String\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5\n" +
+            "      label -> \"std\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the optional-declared required member's
+        // explicit init must be numerically coerced AND Some(...)-wrapped to match the constructor's
+        // Option<Decimal> parameter, not passed through as the bare, un-wrapped value.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, Some(Decimal::from(5)), \"std\".to_string())");
+        rust.ShouldNotContain("Self::new(id, 5,");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Same defect (#1452), non-numeric member: the <c>Some(...)</c> wrap must apply independently of
+    /// <c>NumericCoercionWrap</c> firing — an optional-declared required <c>String</c> member explicitly
+    /// initialized with a string literal must also be wrapped, not just numeric ones.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_string_member_is_some_wrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    label: String?\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      label -> \"std\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, Some(\"std\".to_string()))");
+        rust.ShouldNotContain("Self::new(id, \"std\".to_string())");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1437: an entity member that is both optional-declared and constant-defaulted
     /// (<c>taxRate: Decimal? = 2</c>) must have a factory's explicit <c>taxRate -&gt; 5</c> initialization
     /// actually reach the constructed value — before this fix, this member class had no constructor
