@@ -14,6 +14,7 @@ import {
   fileUriToPath,
   pathToFileUri,
 } from '@/shell/ideUtils';
+import { createStoreInspectorToggle } from '@/shell/storeInspectorToggle';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
 import { HistoryControls, initInstantTooltip, LEFT_RAIL_IDS, LeftRail, RightStrip, UnsavedIndicator, WorkspaceProblemsBadge } from '@atypical/koine-ui';
@@ -289,32 +290,12 @@ export function init(hooks: IdeHooks = {}): () => void {
   // right now, toggled from the command palette. Registered only in dev builds (see devCommands), and
   // the panel is dynamic-import()ed here so its chunk never ships in production — the dev-only command
   // is its sole caller, so in a vite build the import is unreachable and drops out of the bundle.
-  // The host is created lazily on first toggle and the panel rendered once (it tracks the store
-  // thereafter); toggling just flips the host's hidden flag.
-  let storeInspectorHost: HTMLElement | null = null;
-  let storeInspectorMounting = false;
-  async function toggleStoreInspector(): Promise<void> {
-    if (!storeInspectorHost) {
-      // First invocation: load the panel chunk, create the host (visible by default) and render once.
-      // Guard against a double-click racing two mounts while the dynamic import is in flight. Return
-      // here so we don't immediately flip it back to hidden — the first toggle SHOWS it.
-      if (storeInspectorMounting) return;
-      storeInspectorMounting = true;
-      try {
-        const { StoreInspector } = await import('@/shell/StoreInspector');
-        storeInspectorHost = document.createElement('div');
-        storeInspectorHost.className = 'koi-store-inspector-overlay';
-        document.body.appendChild(storeInspectorHost);
-        render(<StoreInspector store={appStore} />, storeInspectorHost);
-      } finally {
-        // Always clear the flag — even if the dynamic import rejects — so a failed first attempt
-        // doesn't wedge the toggle permanently.
-        storeInspectorMounting = false;
-      }
-      return;
-    }
-    storeInspectorHost.hidden = !storeInspectorHost.hidden;
-  }
+  // The overlay unmounts when hidden (zero subscriptions, zero serialization) and remounts when shown
+  // again, resetting its <details> to collapsed (see storeInspectorToggle.tsx for lifecycle details).
+  const toggleStoreInspector = createStoreInspectorToggle(
+    appStore,
+    () => import('@/shell/StoreInspector'),
+  );
 
   // Seed the LSP trace verbosity from the user-level setting (no workspace is open yet at construction,
   // so the effective value equals the user value — mirroring `lineWrap: settings.wordWrap` below). Any

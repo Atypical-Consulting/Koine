@@ -506,7 +506,13 @@ public sealed partial class RustEmitter
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-                args.Add(translator.TranslateOwned(value, expectedEnum));
+                var owned = translator.TranslateOwned(value, expectedEnum);
+                if (NumericCoercionWrap(m.Type, translator.InferType(value)) is { } wrap)
+                {
+                    owned = $"{wrap}({owned})";
+                }
+
+                args.Add(owned);
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {

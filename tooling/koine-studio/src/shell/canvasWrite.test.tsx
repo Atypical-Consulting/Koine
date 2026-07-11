@@ -12,7 +12,8 @@ vi.mock('@/review/CommentComposer', () => ({
 }));
 
 import { createCanvasWrite, type CanvasWriteDeps } from '@/shell/canvasWrite';
-import { DIAGRAM_ANNOTATION_CREATE_EVENT, EMPTY_STATE_PICK_EVENT } from '@/diagrams/diagramContract';
+import { DIAGRAM_ANNOTATION_CREATE_EVENT, EMPTY_STATE_PICK_EVENT, isDiagramTouchMode } from '@/diagrams/diagramContract';
+import { BP_NARROW } from '@/shared/breakpoint';
 
 function mountDom(): void {
   document.body.innerHTML = `
@@ -117,5 +118,30 @@ describe('canvasWrite', () => {
     expect(deps.refreshReviewDecorations).toHaveBeenCalledOnce();
     // The composer host is torn down on submit.
     expect(document.querySelector('.koi-comment-composer-host')).toBeNull();
+  });
+
+  describe('onDiagramViewportResize (#1403 — createNarrowCrossHandler conversion)', () => {
+    const origWidth = window.innerWidth;
+    const setWidth = (value: number) =>
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value });
+
+    afterEach(() => setWidth(origWidth));
+
+    it('a breakpoint cross toggles touch mode exactly once and reloads diagrams; same-side ticks are no-ops', () => {
+      setWidth(1280);
+      const { deps } = build();
+      expect(isDiagramTouchMode()).toBe(false);
+
+      setWidth(500);
+      window.dispatchEvent(new Event('resize'));
+      expect(isDiagramTouchMode()).toBe(true);
+      expect(deps.controller.loadDiagrams).toHaveBeenCalledOnce();
+
+      // keyboard/address-bar churn on the same (narrow) side — no re-fire
+      setWidth(BP_NARROW - 50);
+      window.dispatchEvent(new Event('resize'));
+      expect(isDiagramTouchMode()).toBe(true);
+      expect(deps.controller.loadDiagrams).toHaveBeenCalledOnce();
+    });
   });
 });

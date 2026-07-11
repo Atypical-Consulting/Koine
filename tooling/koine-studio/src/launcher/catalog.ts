@@ -160,3 +160,12 @@ export function parseMode(input: string): { mode: LauncherMode; query: string } 
   }
   return { mode: MODES.all, query: input };
 }
+
+/**
+ * The workspace-relative path for a file entry: prefers the first-class `relPath` (#1204), falling
+ * back to the `sub`/`title` join only for fixtures without `relPath` (#1204's comment warns against
+ * deriving from display fields). This is the single sanctioned way to get a file entry's identity path.
+ */
+export function relPathOf(entry: CatalogEntry): string {
+  return entry.relPath ?? (entry.sub ? `${entry.sub}/${entry.title}` : entry.title);
+}

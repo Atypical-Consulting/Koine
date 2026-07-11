@@ -606,6 +606,80 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     resolveStaleGlossary(glossaryFixture()); // let edit N's stale fetch settle too, harmlessly, after
     await flush();
   });
+
+  // A glossary with one context + one aggregate (root entity nested under it), so the built DomainIndex
+  // carries a non-empty `aggregates` array — proving the data returned actually came from the SHARED
+  // fetch, not a second, independently-resolved one.
+  function aggregateGlossaryFixture(): GlossaryModel {
+    return {
+      entries: [
+        glossaryFixture().entries[0], // the Billing context header
+        {
+          id: 'Billing.Invoice',
+          name: 'Invoice',
+          kind: 'aggregate',
+          context: 'Billing',
+          qualifiedName: 'Billing.Invoice',
+          doc: null,
+          nameRange: { start: { line: 2, character: 10 }, end: { line: 2, character: 17 } },
+        },
+        {
+          id: 'Billing.Invoice.Invoice',
+          name: 'Invoice',
+          kind: 'entity',
+          context: 'Billing',
+          qualifiedName: 'Billing.Invoice.Invoice',
+          doc: null,
+          nameRange: { start: { line: 3, character: 10 }, end: { line: 3, character: 17 } },
+        },
+      ],
+    };
+  }
+
+  // Regression (#1405): buildDomainIndex() — the assistant's domain-index builder — used to call
+  // lsp.glossaryModel() directly instead of the facade's shared fetchGlossaryModel() memoizer, so an
+  // assistant turn that raced the debounced post-edit refresh paid for a SECOND glossaryModel round-trip
+  // instead of sharing the one already in flight.
+  test('getCachedDomainIndex() shares the debounced refresh\'s in-flight glossary fetch, not a second one', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+    ctl.selectCenter('technical');
+    // Settle a first load + a first domain-index build so the assertions below measure the steady-state
+    // post-edit path, not the one-off unseeded mount/build.
+    ctl.refreshActiveSurfaces();
+    await ctl.getCachedDomainIndex();
+    await flush();
+    vi.useFakeTimers();
+    lsp.glossaryModel.mockClear();
+
+    // The next glossaryModel fetch stays unresolved — stands in for "still in flight" when the assistant
+    // asks for the domain index right after the user's edit.
+    let resolveGlossary!: (model: GlossaryModel) => void;
+    lsp.glossaryModel.mockImplementationOnce(
+      () =>
+        new Promise<GlossaryModel>((resolve) => {
+          resolveGlossary = resolve;
+        }),
+    );
+
+    ctl.invalidateDocViews(); // an edit: clears the model index AND cachedDomainIndex
+    ctl.onDocEdited(); // schedules the 350ms debounced refresh (refreshContextList + refreshActiveSurfaces)
+    await vi.advanceTimersByTimeAsync(350); // the debounce fires, kicking off the ONE shared glossaryModel() fetch
+
+    // The assistant asks for a fresh domain index while that fetch is still in flight.
+    const domainIndexPromise = ctl.getCachedDomainIndex();
+
+    resolveGlossary(aggregateGlossaryFixture());
+    await flush();
+    const idx = await domainIndexPromise;
+
+    // One lsp.glossaryModel call total: buildDomainIndex() reused the debounced refresh's in-flight
+    // fetchGlossaryModel() promise instead of issuing its own.
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
+    expect(idx?.contexts).toEqual(['Billing']);
+    expect(idx?.aggregates).toEqual([{ name: 'Invoice', root: 'Invoice' }]);
+  });
 });
 
 describe('createInspectorController — bottom strip lazy loading', () => {
@@ -869,6 +943,25 @@ describe('createInspectorController — loading states clear on success', () => 
     expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
     expect(lsp.model).toHaveBeenCalledTimes(1);
     // The reload still painted correctly from the seeded data (behaviour unchanged).
+    const domainPane = domById('rail-domain-pane');
+    expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
+  });
+
+  // Regression (#1397 follow-up on #484/#1258): the FIRST model load used to fetch glossaryModel()/
+  // model() TWICE — once from the Domain navigator's own unseeded first-mount doFetch, once from
+  // loadModel's ensureModelIndex — because the mount branch (unlike the reload branch) issued its own
+  // requests. ensureDomainNavigator() now seeds the mount too, so the very first load costs one of each,
+  // just like every subsequent edit.
+  test('the FIRST model load fetches glossaryModel()/model() once each — mount and reload both seeded', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.refreshActiveSurfaces(); // the FIRST load: mounts the navigator AND builds the index in one tick
+    await flush();
+
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
+    expect(lsp.model).toHaveBeenCalledTimes(1);
     const domainPane = domById('rail-domain-pane');
     expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
   });

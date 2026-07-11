@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import type { Platform } from '@/host';
-import { koineMark } from '@/shared/logo';
+import { BrandMark } from '@/shared/BrandMark';
 import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, TAGLINE, wireExternalLink } from '@/shared/colophon';
 
 export interface AboutProps {
@@ -56,12 +56,9 @@ export function About({ platform, refreshToken }: AboutProps) {
     <>
       {/* The shared, single-ink brand mark (logo.ts): id-free, so this copy and the Home footer's copy
           (welcome.ts) never collide, and it tracks the theme via stroke=var(--koi-accent). */}
-      <div
-        class="koi-welcome-logo koi-about-logo"
-        aria-hidden="true"
-        // eslint-disable-next-line no-restricted-syntax -- static, trusted brand mark from logo.ts (koineMark returns a fixed SVG); ide.tsx:199 carries the identical disable for the same call
-        dangerouslySetInnerHTML={{ __html: koineMark() }}
-      />
+      <div class="koi-welcome-logo koi-about-logo">
+        <BrandMark />
+      </div>
 
       <p class="koi-about-wordmark">
         Koine <span>Studio</span>

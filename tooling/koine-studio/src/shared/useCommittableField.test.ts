@@ -93,7 +93,7 @@ describe('useCommittableField', () => {
     expect(result.current.draft).toBe('A freshly saved amount.');
   });
 
-  test('an external committedValue change while EDITING clobbers neither the draft nor the revert target', () => {
+  test('an external committedValue change while EDITING clobbers neither the draft nor the revert target, and cancel adopts it', () => {
     const { result, rerender, onCommit } = setup('open-time value');
 
     act(() => result.current.openEditor());
@@ -102,8 +102,50 @@ describe('useCommittableField', () => {
 
     expect(result.current.draft).toBe('mid-edit typing'); // the in-progress edit survives
     act(() => result.current.cancel());
-    expect(result.current.draft).toBe('open-time value'); // reverts to the open-time capture, not the prop
+    expect(result.current.draft).toBe('externally changed'); // cancel-adopts: shows the latest external truth
     expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  test('commit wins over a mid-edit external change: the pending external value is discarded', () => {
+    const { result, rerender, onCommit } = setup('open-time value');
+
+    act(() => result.current.openEditor());
+    act(() => result.current.setDraft('my edit'));
+    rerender({ committedValue: 'externally changed' }); // arrives mid-edit
+    act(() => result.current.commit());
+
+    expect(onCommit).toHaveBeenCalledWith('my edit');
+    expect(result.current.draft).toBe('my edit'); // the user's save wins, not the discarded external value
+
+    // Re-open and cancel: reverts to what was just committed, never the discarded external value.
+    act(() => result.current.openEditor());
+    act(() => result.current.setDraft('a discarded second draft'));
+    act(() => result.current.cancel());
+    expect(result.current.draft).toBe('my edit');
+  });
+
+  test('a cancel-adopted external value does not resurrect a stale pending value in a later edit session', () => {
+    const { result, rerender } = setup('open-time value');
+
+    act(() => result.current.openEditor());
+    rerender({ committedValue: 'externally changed' }); // arrives mid-edit
+    act(() => result.current.cancel());
+    expect(result.current.draft).toBe('externally changed');
+
+    // A second session with no new external change: cancel reverts to the adopted value, not stale state.
+    act(() => result.current.openEditor());
+    act(() => result.current.setDraft('typing again'));
+    act(() => result.current.cancel());
+    expect(result.current.draft).toBe('externally changed');
+  });
+
+  test('an empty-string external change mid-edit is adopted on cancel (null-vs-empty distinction)', () => {
+    const { result, rerender } = setup('open-time value');
+
+    act(() => result.current.openEditor());
+    rerender({ committedValue: '' }); // arrives mid-edit
+    act(() => result.current.cancel());
+    expect(result.current.draft).toBe('');
   });
 
   test('an external committedValue change while idle refreshes the draft (fresh content, not a clobber)', () => {

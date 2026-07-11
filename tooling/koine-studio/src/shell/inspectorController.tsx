@@ -61,7 +61,7 @@ import { CanvasPalette } from '@/diagrams/CanvasPalette';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
-import { isNarrowViewport } from '@/shared/breakpoint';
+import { createNarrowCrossHandler, isNarrowViewport } from '@/shared/breakpoint';
 import { DEFAULT_CENTER, DEFAULT_DECK_STATE, isValidCenter, type DeckState, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { fileUriToPath } from '@/shell/ideUtils';
@@ -74,7 +74,6 @@ import {
 } from '@/shell/inspector/activeContextController';
 import { createSurfaceLoaders } from '@/shell/inspector/surfaceLoaders';
 import { centerDeckInitialChrome, createCenterDeckController } from '@/shell/inspector/centerDeckController';
-import { createNarrowCrossHandler } from '@/shell/inspector/shared';
 
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
@@ -548,9 +547,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // throws. Returns undefined for a scratch/empty model so the system prompt stays clean.
   async function buildDomainIndex(): Promise<DomainIndex | undefined> {
     try {
+      // glossaryModel rides the shared fetchGlossaryModel() memoizer (#1405, the fourth consumer): a
+      // debounced post-edit refresh often has its own glossaryModel fetch already in flight when the
+      // assistant asks for a fresh domain index, so this reuses that one instead of paying for a second.
+      // contextMap has no memoizer — it's this builder's only per-edit consumer, so nothing to share.
       const [contextMap, glossaryModel] = await Promise.all([
         lsp.contextMap().catch(() => null),
-        lsp.glossaryModel().catch(() => null),
+        fetchGlossaryModel().catch(() => null),
       ]);
       const contexts = contextMap?.contexts ?? [];
       if (!contexts.length) return undefined;
@@ -763,7 +766,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // issue its OWN request for these same two endpoints — doubling them on every edit. Memoizing the
   // in-flight promise here means whichever caller asks first kicks off the one lsp call and the other
   // awaits that same promise, so the request count halves WITHOUT delaying either caller — both still
-  // kick off their fetch immediately, in parallel with everything else loadModel does.
+  // kick off their fetch immediately, in parallel with everything else loadModel does. `fetchGlossaryModel`
+  // now has four consumers sharing this one in-flight fetch: the navigator reload + ensureModelIndex above,
+  // activeContextController's refreshContextList (#1258, the third), and buildDomainIndex — the assistant's
+  // domain-index builder (#1405, the fourth) — below.
   let glossaryFetch: Promise<GlossaryModel> | null = null;
   function fetchGlossaryModel(): Promise<GlossaryModel> {
     glossaryFetch ??= lsp.glossaryModel().finally(() => {
@@ -860,12 +866,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // promptly. Its Context Map / Glossary doorways route to the same focuses the docs footer used.
   function ensureDomainNavigator(): void {
     const hadIndex = modelIndex != null;
-    // The reload below is SEEDED with the same shared fetchGlossaryModel()/fetchStructuredModel() promises
-    // ensureModelIndex() is about to start (#484) — both calls land on the same in-flight fetch, so the
-    // navigator's own doFetch reuses it instead of re-issuing glossaryModel()/model(), halving the
-    // per-edit request count with no change to when the rail paints.
+    // Both branches below are SEEDED with the same shared fetchGlossaryModel()/fetchStructuredModel()
+    // promises ensureModelIndex() is about to start (#484, mount branch seeded #1397) — every call lands
+    // on the same in-flight fetch, so the navigator's own doFetch reuses it instead of re-issuing
+    // glossaryModel()/model(), halving the request count on both the first load and every edit after it.
     if (!domainNavigator) {
-      domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
+      domainNavigator = mountDomainNavigator(
+        domainPane,
+        appStore,
+        lsp,
+        modelOutlineHandlers,
+        tacticalHandlers,
+        { glossaryModel: fetchGlossaryModel(), model: fetchStructuredModel() },
+      );
     } else if (!hadIndex) {
       domainNavigator.reload({ glossaryModel: fetchGlossaryModel(), model: fetchStructuredModel() });
     }

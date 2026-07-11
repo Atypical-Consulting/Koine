@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { GROUPS, KIND, MODES, PREFIX_CHARS, parseMode } from '@/launcher/catalog';
+import { GROUPS, KIND, MODES, PREFIX_CHARS, parseMode, relPathOf } from '@/launcher/catalog';
 
 // Ported verbatim from design/design_handoff_git_spotlight_logos/koine-launcher.js's `MODES` /
 // `PREFIX_CHARS` / `GROUPS` / `KIND`, with one deliberate adaptation (scratchpad/SEAMS.md): the
@@ -103,5 +103,33 @@ describe('parseMode', () => {
     const { mode, query } = parseMode('');
     expect(mode).toBe(MODES.all);
     expect(query).toBe('');
+  });
+});
+
+describe('relPathOf', () => {
+  test('returns entry.relPath when present, even if sub/title diverge', () => {
+    const entry = {
+      cat: 'file' as const,
+      id: 'test',
+      title: 'other.koi',
+      sub: 'display/dir',
+      relPath: 'src/deep/ordering.koi',
+    };
+    expect(relPathOf(entry)).toBe('src/deep/ordering.koi');
+  });
+
+  test('joins sub + title when relPath is absent (fixture fallback)', () => {
+    const entry = { cat: 'file' as const, id: 'test', title: 'a.koi', sub: 'src' };
+    expect(relPathOf(entry)).toBe('src/a.koi');
+  });
+
+  test('returns bare title when relPath absent and sub undefined', () => {
+    const entry = { cat: 'file' as const, id: 'test', title: 'koine.config.json' };
+    expect(relPathOf(entry)).toBe('koine.config.json');
+  });
+
+  test('returns bare title when relPath absent and sub empty string', () => {
+    const entry = { cat: 'file' as const, id: 'test', title: 'README.md', sub: '' };
+    expect(relPathOf(entry)).toBe('README.md');
   });
 });

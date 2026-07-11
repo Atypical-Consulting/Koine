@@ -8,7 +8,7 @@
 import { render } from 'preact';
 import { appStore } from '@/store/index';
 import { openInspectorSheet } from '@/shell/inspectorSheet';
-import { isNarrowViewport } from '@/shared/breakpoint';
+import { createNarrowCrossHandler, isNarrowViewport } from '@/shared/breakpoint';
 import { domById } from '@/shared/domById';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 import { type MobileZone } from '@/store/slices/uiChrome';
@@ -408,16 +408,12 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
   setDiagramTouchMode(isNarrowViewport());
   // The default zoom a freshly-opened domain canvas uses when nothing per-diagram is saved (#762).
   setDefaultCanvasZoom(deps.defaultCanvasZoom);
-  let diagramWasNarrow = isNarrowViewport();
   // Named so dispose() can removeEventListener it — otherwise this listener (and its closed-over
   // controller) outlives the IDE and a breakpoint cross would call loadDiagrams() on a torn-down controller.
-  const onDiagramViewportResize = (): void => {
-    const narrow = isNarrowViewport();
-    if (narrow === diagramWasNarrow) return; // act on a CROSS only — not on every resize tick
-    diagramWasNarrow = narrow;
+  const onDiagramViewportResize = createNarrowCrossHandler((narrow) => {
     setDiagramTouchMode(narrow);
     void controller.loadDiagrams(); // rebuild the canvas with the now-correct gesture wiring
-  };
+  });
   window.addEventListener('resize', onDiagramViewportResize);
   diagramsView.addEventListener(NODE_EDIT_EVENT, (e) => {
     const detail = (e as CustomEvent<DiagramNodeEditDetail>).detail;

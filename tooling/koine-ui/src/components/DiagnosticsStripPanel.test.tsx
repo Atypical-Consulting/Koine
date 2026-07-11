@@ -92,27 +92,22 @@ describe('DiagnosticsStripPanel', () => {
     expect(onOpen).toHaveBeenCalledWith('file:///Billing.koi', row.range);
   });
 
-  test('mirrors its count into an injected countEl (the Problems tab pill, #1203)', () => {
+  test('renders only within its subtree — no imperative host-DOM writes', () => {
+    // The component is pure: it reads the store and renders within its own container via Preact
+    // (#1406 — removed the old countEl host-element mirror). The host adapter mirrors the pill
+    // host-side by subscribing to the same store.
     const store = createTestReadableStore<DiagnosticsStripSlice>(CLEAN);
-    const countEl = document.createElement('span');
-    const { container } = render(
-      <DiagnosticsStripPanel store={store} onGoto={() => {}} countEl={countEl} />,
-    );
+    const { container } = render(<DiagnosticsStripPanel store={store} onGoto={() => {}} />);
 
-    // Mounted clean: the pill mirrors the strip's empty state (same 'clean' sentinel + data-kind).
-    expect(countEl.textContent).toBe('clean');
-    expect(countEl.dataset.kind).toBe('clean');
+    // The component's count and kind are rendered in its own element, not written to external DOM.
+    expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('clean');
+    expect(container.querySelector('[data-role="diag-count"]')!.getAttribute('data-kind')).toBe('clean');
 
-    act(() => store.set({ scoped: true, rows: [errRow('boom')], count: '1 error', kind: 'error' }));
+    act(() => store.set({ scoped: false, rows: [errRow('boom')], count: '1 error', kind: 'error' }));
 
-    // The pill stays byte-identical to the strip's own count element: one source, two mirrors —
-    // scoped exactly when the strip is scoped, since both read the SAME slice.
-    expect(countEl.textContent).toBe('1 error');
-    expect(countEl.dataset.kind).toBe('error');
-    expect(countEl.textContent).toBe(container.querySelector('[data-role="diag-count"]')!.textContent);
-    expect(countEl.dataset.kind).toBe(
-      container.querySelector('[data-role="diag-count"]')!.getAttribute('data-kind'),
-    );
+    // After a store update, the strip's own elements update in its subtree.
+    expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('1 error');
+    // The component only mutates its own DOM, never external host elements (no countEl imperative writes).
   });
 
   test('a top-level re-render reflects getState() fresh, without a store notification', () => {

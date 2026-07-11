@@ -1198,15 +1198,17 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        return compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        return compilation.WorkspaceIndex.FindReferencesInOwnContext(activeUri, name, offset, ctx.EnclosingTypeName);
     }
 
     /// <summary>
     /// The code lenses of the active document — one per top-level declaration (type / service /
     /// spec) in its outline, annotated with a reference-count label. The count is
-    /// references-from-elsewhere: <see cref="WorkspaceIndex.FindReferences"/> includes the
-    /// declaration's own name occurrence, so the label is <c>total - 1</c> (clamped at 0). Each
-    /// lens sits on the declaration's identifier <c>NameSpan</c> (its <c>SelectionRange</c>).
+    /// references-from-elsewhere: <see cref="WorkspaceIndex.FindReferencesInOwnContext"/> includes the
+    /// declaration's own name occurrence, so the label is <c>total - 1</c> (clamped at 0) — and, for a
+    /// declared type/spec, excludes an unrelated context's own coincidentally-same-named declaration
+    /// (#1376), matching what Rename/Find References would actually touch from this same declaration.
+    /// Each lens sits on the declaration's identifier <c>NameSpan</c> (its <c>SelectionRange</c>).
     /// Returns an empty list when the active document is absent or does not parse.
     /// </summary>
     public IReadOnlyList<CodeLens> CodeLenses(IReadOnlyDictionary<string, string> documents, string activeUri) =>
@@ -1241,10 +1243,10 @@ public sealed class KoineLanguageService
                     continue;
                 }
 
-                // Offset of the declaration's name so FindReferences scopes to the right symbol.
-                // SelectionRange is 1-based; OffsetOf takes 0-based LSP line/character.
+                // Offset of the declaration's name so FindReferencesInOwnContext scopes to the right
+                // symbol. SelectionRange is 1-based; OffsetOf takes 0-based LSP line/character.
                 var nameOffset = OffsetOf(source, nameSpan.Line - 1, nameSpan.Column - 1);
-                var total = compilation.WorkspaceIndex.FindReferences(activeUri, decl.Name, nameOffset).Count;
+                var total = compilation.WorkspaceIndex.FindReferencesInOwnContext(activeUri, decl.Name, nameOffset, enclosingType: null).Count;
                 var n = Math.Max(0, total - 1); // subtract the declaration's own occurrence
                 var title = $"{n} reference{(n == 1 ? "" : "s")}";
                 lenses.Add(new CodeLens(decl.Name, activeUri, nameSpan, title));
@@ -2154,7 +2156,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = compilation.WorkspaceIndex.FindReferencesInOwnContext(activeUri, name, offset, ctx.EnclosingTypeName);
         return refs.Count == 0 ? null : refs;
     }
 
@@ -2515,7 +2517,7 @@ public sealed class KoineLanguageService
         // Only offer a rename range where a rename would actually produce edits: resolve the
         // symbol under the cursor exactly as RenameAt does (offset + enclosing-type scope).
         var offset = OffsetOf(source, line, character);
-        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = compilation.WorkspaceIndex.FindReferencesInOwnContext(activeUri, name, offset, ctx.EnclosingTypeName);
         if (refs.Count == 0)
         {
             return null;
