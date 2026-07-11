@@ -1190,6 +1190,45 @@ describe('createInspectorController — bounded-context scope', () => {
     expect(finalIdx?.contexts).toEqual(['Billing']);
   });
 
+  // Baseline for #1457's LifecycleSequence swap: two builds racing WITHOUT an intervening
+  // invalidateDocViews() call — `cacheGeneration` is never bumped between them, so both builds share
+  // generation 0 and both pass the `gen === cacheGeneration` write guard. Whichever build COMPLETES
+  // last therefore wins, regardless of which one started first. This pins that as today's (pre-refactor)
+  // behavior; the swap to `modelDerivedSeq` changes the winner to whichever build STARTED last instead
+  // (see the sibling test after the refactor lands).
+  test('two getCachedDomainIndex() builds racing without an intervening invalidation: the one that completes last wins (pre-refactor baseline)', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    // Build A's contextMap call stalls — it started first but will settle last.
+    let resolveStaleContextMap!: (result: ContextMapResult) => void;
+    lsp.contextMap.mockImplementationOnce(
+      () =>
+        new Promise<ContextMapResult>((resolve) => {
+          resolveStaleContextMap = resolve;
+        }),
+    );
+
+    const buildA = ctl.getCachedDomainIndex(); // build A: kicks off, pends on contextMap
+
+    // No invalidateDocViews() call here — cachedDomainIndex is still null (A hasn't written yet), so
+    // this starts a second, independent build against the default (fast-resolving) fixtures.
+    const freshIdx = await ctl.getCachedDomainIndex(); // build B: starts second, completes first
+    expect(freshIdx?.contexts).toEqual(['Billing']);
+
+    // Let A settle now, AFTER B has already written — with a distinguishable payload so the winner is
+    // observable.
+    resolveStaleContextMap({ contexts: ['StaleWorld'], relations: [] });
+    await buildA;
+    await flush();
+
+    // Today: A's late write is NOT guarded against B's (same generation), so A — the one that completed
+    // LAST — clobbers B's fresher value.
+    const finalIdx = await ctl.getCachedDomainIndex();
+    expect(finalIdx?.contexts).toEqual(['StaleWorld']);
+  });
+
   test('a scope change fans out to the Files tree via scopeFiles (context, then null for All) — ADR 0009', async () => {
     const lsp = makeLsp();
     const deps = makeDeps(lsp);
