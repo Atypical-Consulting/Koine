@@ -27,13 +27,11 @@ public sealed partial class RustEmitter
         var derived = entity.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var required = stored.Where(m => m.Initializer is null).ToList();
 
-        // A defaulted member with a plain (non-optional-declared) type becomes a trailing `Option<T>`
-        // constructor parameter, unwrapped to its default — matching the C#/TypeScript/PHP emitters'
-        // "optional trailing parameter" shape for the same construct (#1380). A member that is already
-        // `T?`-declared *and* defaulted keeps its existing local-`let`/`Some(...)`-wrapped handling
-        // (#1319/#1324/#1325) — that combination is untouched.
-        var defaultedParams = stored.Where(m => m.Initializer is not null && !m.Type.IsOptional).ToList();
-        var defaulted = stored.Where(m => m.Initializer is not null && m.Type.IsOptional).ToList();
+        // Every defaulted member becomes a trailing `Option<T>` constructor parameter, unwrapped to its
+        // default — matching the C#/TypeScript/PHP emitters' "optional trailing parameter" shape for the
+        // same construct (#1380 for non-optional-declared members, #1437 for already-`T?`-declared ones).
+        // An already-optional-declared member is additionally re-wrapped in `Some(...)` after unwrapping.
+        var defaultedParams = stored.Where(m => m.Initializer is not null).ToList();
         var hasEmits = EmitsEvents(entity);
 
         // The synthetic domain-event collector's field name, chosen to dodge a user member literally
@@ -88,38 +86,27 @@ public sealed partial class RustEmitter
         body.Append(Indent).Append("/// Creates a validated `").Append(name).Append("`, running its invariants.\n");
         body.Append(Indent).Append("pub fn new(").Append(string.Join(", ", ctorParams)).Append(") -> Result<Self, DomainError> {\n");
 
-        // A non-optional defaulted member unwraps its `Option<T>` parameter to the declared default
-        // (so invariants can see the resolved value before the checks).
+        // A defaulted member unwraps its `Option<T>` parameter to the declared default (so invariants
+        // can see the resolved value before the checks). The default's inferred type is reconciled
+        // against the field's declared (underlying, if optional) type — the entity dual of the
+        // value-object smart constructor's coercion (#1319/#1325). An already-optional-declared member
+        // is then re-wrapped in `Some(...)`, mirroring its original hardcoded shape (#1437).
         foreach (Member m in defaultedParams)
         {
-            var defaultValue = CoercedDefaultValue(m, m.Type, translator, emit.Index);
+            var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
+            var defaultValue = CoercedDefaultValue(m, underlyingType, translator, emit.Index);
 
             // `unwrap_or_else` (not `unwrap_or`): the latter always evaluates its argument eagerly,
             // so an overriding caller would still pay for constructing the discarded default.
             var field = RustNaming.Field(m.Name);
             body.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = ")
                 .Append(field).Append(".unwrap_or_else(|| ").Append(defaultValue).Append(");\n");
-        }
-
-        // Defaulted members are bound as locals (so invariants can see them) before the checks.
-        foreach (Member m in defaulted)
-        {
-            // Reconciles the default's inferred type against the field's declared (underlying, if
-            // optional) type — the entity dual of the value-object smart constructor's coercion (#1319).
-            // An optional field's literal default is always a bare underlying-type literal (Koine has no
-            // Option-literal syntax), so it's coerced against the underlying type and then Some(...)-
-            // wrapped (#1325).
-            var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
-            var defaultValue = CoercedDefaultValue(m, underlyingType, translator, emit.Index);
 
             if (m.Type.IsOptional)
             {
-                defaultValue = $"Some({defaultValue})";
+                body.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = Some(")
+                    .Append(field).Append(");\n");
             }
-
-            body.Append(Indent).Append(Indent).Append("let ").Append(RustNaming.Field(m.Name)).Append(" = ")
-                .Append(defaultValue)
-                .Append(";\n");
         }
 
         foreach (Invariant inv in entity.Invariants)
