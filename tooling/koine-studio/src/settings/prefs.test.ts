@@ -893,6 +893,22 @@ describe("keyboard settings", () => {
         expect(onKeybindingsChanged).toHaveBeenCalled();
     });
 
+    it("warns before shadowing a loaded built-in the old hand table missed (Mod-/ = toggleComment)", () => {
+        // Mod-/ (toggleComment) is in defaultKeymap but was NOT in the old four-entry RESERVED_CHORDS —
+        // this is the exact drift the exhaustive live-keymap derivation fixes.
+        const onKeybindingsChanged = vi.fn();
+        openPrefs({ onKeybindingsChanged });
+        record("format", { key: "/", ctrlKey: true }); // Mod-/
+        const conflict = conflictOf("format");
+        expect(conflict.hidden).toBe(false);
+        expect(conflict.textContent).toContain("Toggle comment");
+        expect(loadKeybindingOverrides().format).toBeUndefined(); // deferred until confirmed
+
+        reassignBtn("format").click();
+        expect(loadKeybindingOverrides().format).toBe("Mod-/");
+        expect(onKeybindingsChanged).toHaveBeenCalled();
+    });
+
     it("recording a command’s own default drops the override instead of persisting a redundant one", () => {
         openPrefs();
         record("format", { key: "j", ctrlKey: true }); // override away from the default
