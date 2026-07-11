@@ -265,7 +265,7 @@ internal sealed class RustExpressionTranslator
         // of coercion. Either way, whichever side ends up non-optional after coercion must itself become
         // `Some(...)`-wrapped when its sibling is optional, or the two sides of the operator render as
         // mismatched `Option<Decimal>` / `Decimal` types (#1343 — mirrors WriteReconciledBranch's
-        // needsSomeWrap, #1335, applied here to binary operands rather than conditional branches). Keyed
+        // NeedsSomeWrap, #1335, applied here to binary operands rather than conditional branches). Keyed
         // on each side's OWN optionality (not on which side happens to be the Int-named one), so it
         // fires both when the Int side is optional and when the already-Decimal side is optional.
         // Gated on `coerceLeft`/`coerceRight` involvement so this never touches an unrelated type
@@ -407,7 +407,7 @@ internal sealed class RustExpressionTranslator
         {
             // An optional operand's owned rendering is already `Option<...>` — a bare `Decimal::from(...)`
             // prefix around it doesn't compile (E0277), so map inside the Option instead (#1343, mirrors
-            // WriteReconciledBranch's needsOptionalWiden, #1335).
+            // WriteReconciledBranch's NeedsOptionalWiden, #1335).
             var needsMapWrap = needsWrap && type is { IsOptional: true };
 
             // The prefix is picked before rendering and `WriteOwnedOperand` writes straight into `sb` —
@@ -520,46 +520,45 @@ internal sealed class RustExpressionTranslator
     /// because the branches disagree with EACH OTHER, not with an externally supplied
     /// <c>coerceTo</c>. Fixed here in the emitter (not the semantic validator): a widened or
     /// optional-joined conditional is a legitimate, cross-target-sanctioned pattern (#975) — this is a
-    /// Rust-only rendering gap, not a modeling error. The <c>needsWiden</c>/<c>needsOptionalWiden</c>
+    /// Rust-only rendering gap, not a modeling error. The <c>NeedsWiden</c>/<c>NeedsOptionalWiden</c>
     /// widen cases are mutually exclusive (they key off the same branch's own optionality: the former
-    /// requires it non-optional, the latter requires it optional). <c>needsWiden</c> composes with
-    /// <c>needsSomeWrap</c> as <c>Some(Decimal::from(...))</c> (wrap outside, widen inside) — the value
-    /// must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>. <c>needsOptionalWiden</c>
-    /// never composes with <c>needsSomeWrap</c>: <c>needsSomeWrap</c> also requires the branch itself to
-    /// be non-optional, so a branch that is already <c>Option</c>-shaped (<c>needsOptionalWiden</c>)
+    /// requires it non-optional, the latter requires it optional). <c>NeedsWiden</c> composes with
+    /// <c>NeedsSomeWrap</c> as <c>Some(Decimal::from(...))</c> (wrap outside, widen inside) — the value
+    /// must be a <c>Decimal</c> before it becomes an <c>Option&lt;Decimal&gt;</c>. <c>NeedsOptionalWiden</c>
+    /// never composes with <c>NeedsSomeWrap</c>: <c>NeedsSomeWrap</c> also requires the branch itself to
+    /// be non-optional, so a branch that is already <c>Option</c>-shaped (<c>NeedsOptionalWiden</c>)
     /// never needs the extra <c>Some(...)</c> wrap. <paramref name="branchType"/>/<paramref name="siblingType"/>
     /// are inferred once by the caller (<see cref="WriteOwnedOperand"/>) and passed in rather than
     /// re-inferred here — <c>Then</c>/<c>Else</c> would otherwise each be walked twice per conditional
-    /// (#1345).
+    /// (#1345). The DECISION — which of the three dimensions apply — is the shared, cross-target
+    /// <see cref="BranchReconciliation.Classify"/> (#1368); only the Rust RENDERING below is local.
     /// </summary>
     private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
     {
-        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
-        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
-        var needsSomeWrap = branchType is { IsOptional: false } && siblingType is { IsOptional: true };
+        BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
-        if (needsSomeWrap)
+        if (needs.NeedsSomeWrap)
         {
             sb.Append("Some(");
         }
 
-        if (needsWiden)
+        if (needs.NeedsWiden)
         {
             sb.Append("Decimal::from(");
         }
 
         WriteOwnedOperand(branch, sb);
-        if (needsWiden)
+        if (needs.NeedsWiden)
         {
             sb.Append(')');
         }
 
-        if (needsOptionalWiden)
+        if (needs.NeedsOptionalWiden)
         {
             sb.Append(".map(Decimal::from)");
         }
 
-        if (needsSomeWrap)
+        if (needs.NeedsSomeWrap)
         {
             sb.Append(')');
         }
@@ -769,7 +768,7 @@ internal sealed class RustExpressionTranslator
     /// Wraps an emitted Int identifier in <c>Decimal::from(…)</c> when a Decimal is expected — or, when
     /// the identifier's own <paramref name="ownType"/> is itself optional, maps inside the Option instead
     /// (<c>.map(Decimal::from)</c>): a bare <c>Decimal::from(...)</c> around an <c>Option&lt;i64&gt;</c>
-    /// operand does not compile (#1343, mirrors WriteReconciledBranch's needsOptionalWiden, #1335).
+    /// operand does not compile (#1343, mirrors WriteReconciledBranch's NeedsOptionalWiden, #1335).
     /// </summary>
     private static void EmitCoerced(StringBuilder sb, TypeRef? coerceTo, TypeRef? ownType, Action emit)
     {

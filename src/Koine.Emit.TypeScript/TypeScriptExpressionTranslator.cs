@@ -293,18 +293,21 @@ internal sealed class TypeScriptExpressionTranslator
     /// wrapping: a Koine optional type maps to a plain union with <c>undefined</c> (<c>T | undefined</c>),
     /// and a bare, non-optional <c>T</c> value is already structurally assignable wherever
     /// <c>T | undefined</c> is expected — verified under <c>tsc --strict</c> — so a non-optional branch
-    /// against an optional sibling needs no rendering change at all. <c>needsWiden</c> and
-    /// <c>needsOptionalWiden</c> are mutually exclusive (they key off the same branch's own optionality).
+    /// against an optional sibling needs no rendering change at all. <c>NeedsWiden</c> and
+    /// <c>NeedsOptionalWiden</c> are mutually exclusive (they key off the same branch's own optionality).
+    /// The DECISION — which dimensions apply — is the shared, cross-target
+    /// <see cref="BranchReconciliation.Classify"/> (#1368); only the TypeScript RENDERING below is local
+    /// (TS ignores the classifier's <see cref="BranchReconciliation.NeedsSomeWrap"/>, its optional being a
+    /// plain <c>| undefined</c> union that needs no lift).
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
         TypeScope scope = EffectiveScope();
         TypeRef? branchType = _resolver.Infer(branch, scope);
         TypeRef? siblingType = _resolver.Infer(sibling, scope);
-        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
-        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
+        BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
-        if (needsWiden)
+        if (needs.NeedsWiden)
         {
             sb.Append("Decimal.fromInt(");
             Write(branch, sb);
@@ -312,7 +315,7 @@ internal sealed class TypeScriptExpressionTranslator
             return;
         }
 
-        if (needsOptionalWiden)
+        if (needs.NeedsOptionalWiden)
         {
             sb.Append("((__v: ").Append(_typeMapper.Map(branchType!))
               .Append(") => (__v === undefined ? undefined : Decimal.fromInt(__v)))(");

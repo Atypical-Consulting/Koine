@@ -246,30 +246,30 @@ internal sealed class JavaExpressionTranslator
     /// type — each branch still renders in its own native Java type/optionality unless reconciled here.
     /// Fixed in the emitter (not the semantic validator): a widened or optional-joined conditional is a
     /// legitimate, cross-target-sanctioned pattern (#975) — this is a Java-only rendering gap, not a
-    /// modeling error. The <c>needsWiden</c>/<c>needsOptionalWiden</c> cases are mutually exclusive (they
+    /// modeling error. The <c>NeedsWiden</c>/<c>NeedsOptionalWiden</c> cases are mutually exclusive (they
     /// key off the same branch's own optionality: the former requires it non-optional, the latter requires
-    /// it optional). <c>needsWiden</c> composes with <c>needsSomeWrap</c> as
+    /// it optional). <c>NeedsWiden</c> composes with <c>NeedsSomeWrap</c> as
     /// <c>Optional.of(BigDecimal.valueOf(...))</c> (widen inside, wrap outside) — the value must be a
-    /// <c>BigDecimal</c> before it becomes an <c>Optional&lt;BigDecimal&gt;</c>. <c>needsOptionalWiden</c>
-    /// never composes with <c>needsSomeWrap</c>: <c>needsSomeWrap</c> also requires the branch itself to be
-    /// non-optional, so a branch that is already <c>Optional</c>-shaped (<c>needsOptionalWiden</c>) never
-    /// needs the extra <c>Optional.of(...)</c> wrap.
+    /// <c>BigDecimal</c> before it becomes an <c>Optional&lt;BigDecimal&gt;</c>. <c>NeedsOptionalWiden</c>
+    /// never composes with <c>NeedsSomeWrap</c>: <c>NeedsSomeWrap</c> also requires the branch itself to be
+    /// non-optional, so a branch that is already <c>Optional</c>-shaped (<c>NeedsOptionalWiden</c>) never
+    /// needs the extra <c>Optional.of(...)</c> wrap. The DECISION — which of the three dimensions apply —
+    /// is the shared, cross-target <see cref="BranchReconciliation.Classify"/> (#1368); only the Java
+    /// RENDERING below is local.
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
         TypeScope scope = EffectiveScope();
         TypeRef? branchType = _resolver.Infer(branch, scope);
         TypeRef? siblingType = _resolver.Infer(sibling, scope);
-        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
-        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
-        var needsSomeWrap = branchType is { IsOptional: false } && siblingType is { IsOptional: true };
+        BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
-        if (needsSomeWrap)
+        if (needs.NeedsSomeWrap)
         {
             sb.Append("java.util.Optional.of(");
         }
 
-        if (needsWiden)
+        if (needs.NeedsWiden)
         {
             // Reuses the same BigDecimal-position widening WriteBinary already applies to a plain
             // arithmetic/comparison operand, so a literal `0` branch gets its BigDecimal.ZERO shortcut here
@@ -281,12 +281,12 @@ internal sealed class JavaExpressionTranslator
             Write(branch, sb);
         }
 
-        if (needsOptionalWiden)
+        if (needs.NeedsOptionalWiden)
         {
             sb.Append(".map(java.math.BigDecimal::valueOf)");
         }
 
-        if (needsSomeWrap)
+        if (needs.NeedsSomeWrap)
         {
             sb.Append(')');
         }
