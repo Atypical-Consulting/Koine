@@ -1,17 +1,18 @@
 import { render } from 'preact';
+import type { ComponentType } from 'preact';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 
-export type StoreInspectorComponent = (props: { store: StoreApi<AppState> }) => JSX.Element;
+type StoreInspectorComponent = ComponentType<{ store: StoreApi<AppState> }>;
 
 export function createStoreInspectorToggle(
   store: StoreApi<AppState>,
   // injected so tests can stub the chunk load; ide.tsx passes () => import('@/shell/StoreInspector')
-  load: () => Promise<{ StoreInspector: typeof StoreInspectorComponent }>,
+  load: () => Promise<{ StoreInspector: StoreInspectorComponent }>,
 ): () => Promise<void> {
   let storeInspectorHost: HTMLElement | null = null;
   let storeInspectorMounting = false;
-  let storeInspectorComponent: typeof StoreInspectorComponent | null = null;
+  let storeInspectorComponent: StoreInspectorComponent | null = null;
 
   return async function toggleStoreInspector(): Promise<void> {
     if (!storeInspectorHost) {
