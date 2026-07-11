@@ -65,6 +65,7 @@ describe('persistence.ts export surface (#988 barrel guard)', () => {
       'saveWorkspaceOverride',
       'setLastSession',
       'setLastWorkspace',
+      'updateRecentFolderMeta',
       'whenSecretsReady',
       'workspaceKeyOf',
     ]);

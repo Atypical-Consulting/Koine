@@ -284,7 +284,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // — the rememberLastSession snapshot helper (reading the store slice), the folder-open branch/language
   // capture, and the save/dirty facade wraps — 832 LOC, ceil(832 × 1.02) = 849. The three modules stay
   // frozen at their post-split sizes so no single one regrows toward a god-file.
-  { file: 'src/shell/workspaceController.ts', maxLines: 849 },
+  // Raised 849 → 880: #1012 adds the bulk setBuffers action (O(N) open/teardown, one notification) +
+  // #1016 guards the async recents branch capture (openedAt-preserving updateRecentFolderMeta + a
+  // roots[0]-still-active guard) + #1018 makes the resume-card file semantics deliberate (clarifying
+  // comment + a pinning test) — 863 LOC, ceil(863 × 1.02) = 880.
+  { file: 'src/shell/workspaceController.ts', maxLines: 880 },
   // Raised 158 → 165: #1081 guards applyFileEdit's post-write lsp.didSave() against a write that went
   // stale before the freshness check (the same stillFresh gate its markSaved call already used) —
   // 161 LOC, ceil(161 × 1.02) = 165.
@@ -355,7 +359,14 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1513 → 1522: #1017 cloned-empty recovery — the notifyClonedEmpty seam (mirrors dead-recent
   // recover()) plus its HomeHandle/WelcomeCallbacks doc comments; measured end-state, no headroom needed
   // (the next feature here should ratchet again rather than inherit slack).
-  { file: 'src/welcome/welcome.ts', maxLines: 1522 },
+  // Lowered 1522 → 90: #991 migrated welcome.ts's imperative Home view to the Preact component Home.tsx
+  // (see its row below). welcome.ts is now a thin facade (mountHome + render(<Home/>) + the re-exported
+  // filterTemplates/DIFFICULTY_ORDER helpers) at 75 LOC; facade ceiling with headroom for doc tweaks.
+  { file: 'src/welcome/welcome.ts', maxLines: 90 },
+  // #991 Preact migration: welcome.ts's 1483-LOC imperative Home view became the Home.tsx component
+  // (controlled recents/gallery inputs, state-driven roving tabindex, an effect-scoped registerOverlay
+  // Esc-stack). Measured 1042 LOC, ceil(1042 × 1.02) = 1063.
+  { file: 'src/welcome/Home.tsx', maxLines: 1063 },
 ];
 
 describe('line-budget guard', () => {

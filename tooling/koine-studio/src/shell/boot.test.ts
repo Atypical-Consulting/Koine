@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveSettings, DEFAULT_SETTINGS, getRecentFolders } from '@/settings/persistence';
+import { installExplorerSyncRendering } from '../test-setup';
 
 // Stub the IDE shell so booting doesn't pull the whole editor module graph, and so we can assert
 // whether init() runs per route. The real init() is exercised exhaustively in ide.test.ts. BLANK is
@@ -45,6 +46,13 @@ import { appStore } from '@/store';
 import { takeStartIntent } from '@/shell/bootIntent';
 import { INSTALL_ANNOUNCEMENT, type BeforeInstallPromptEvent } from '@/shell/pwaInstall';
 import { buildShareUrl } from '@/export/share';
+
+// `bootStudio` mounts the Preact `Home` component (#991 task 3) behind the `mountHome` facade. These
+// tests drive that DOM the way they always did — a raw `.click()`/`dispatchEvent(...)` immediately
+// followed by a DOM/route assertion, with fixed microtask counts calibrated for synchronous rendering —
+// so this file opts into the same synchronous-render mode welcome.test.ts/generateProjectWizard.test.ts
+// use. Idempotent + process-global; vitest's per-file module isolation means each file installs its own.
+installExplorerSyncRendering();
 
 let dispose: (() => void) | null = null;
 
