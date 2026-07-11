@@ -148,23 +148,6 @@ internal sealed class Lowerer : KoineSyntaxVisitor<BoundNode>
     /// <summary>Synthesizes a readable rule message from an unmessaged invariant (the C# message default).</summary>
     internal static string SourceText(Expr expr) => SourceTextVisitor.Instance.Visit(expr);
 
-    private static string SourceOp(BinaryOp op) => op switch
-    {
-        BinaryOp.Or => "or",
-        BinaryOp.And => "and",
-        BinaryOp.Eq => "==",
-        BinaryOp.Neq => "!=",
-        BinaryOp.Lt => "<",
-        BinaryOp.Le => "<=",
-        BinaryOp.Gt => ">",
-        BinaryOp.Ge => ">=",
-        BinaryOp.Add => "+",
-        BinaryOp.Sub => "-",
-        BinaryOp.Mul => "*",
-        BinaryOp.Div => "/",
-        _ => "?"
-    };
-
     /// <summary>
     /// Renders an expression back to Koine source syntax, for synthesizing a readable rule message
     /// from an unmessaged invariant. Exhaustive (<see cref="ExprVisitor{T}"/>) so every node — including
@@ -195,7 +178,7 @@ internal sealed class Lowerer : KoineSyntaxVisitor<BoundNode>
 
         protected override string VisitUnary(UnaryExpr n) => (n.Op == UnaryOp.Not ? "not " : "-") + Visit(n.Operand);
 
-        protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {SourceOp(n.Op)} {Visit(n.Right)}";
+        protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {n.Op.Symbol()} {Visit(n.Right)}";
 
         protected override string VisitMatch(MatchExpr n) => $"{Visit(n.Target)} matches /{n.Pattern}/";
 
