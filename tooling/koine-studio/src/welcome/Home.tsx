@@ -29,7 +29,7 @@ import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, wireExternalLi
 import { type Template } from '@/welcome/templates';
 import { wrapIndex } from '@/shared/wrapIndex';
 import { basename } from '@/shared/path';
-import { koineMark } from '@/shared/logo';
+import { BrandMark } from '@/shared/BrandMark';
 import { toggleTheme, currentTheme } from '@/settings/theme';
 import { MOD } from '@/shared/platform';
 
@@ -757,7 +757,7 @@ export function Home(props: HomeProps): JSX.Element {
           {/* Brand lockup: reuse the editor toolbar's global `.brand` markup. The `koi-home-brand` class
               strips the button hover (this copy is a decorative div). The mark comes from logo.ts. */}
           <div class="brand koi-home-brand" role="img" aria-label="Koine Studio">
-            <Icon markup={koineMark()} class="brand-logo" />
+            <BrandMark class="brand-logo" />
             <span class="brand-text" aria-hidden="true">
               <span class="brand-name">Koine</span>
               <span class="brand-eyebrow">Studio</span>
