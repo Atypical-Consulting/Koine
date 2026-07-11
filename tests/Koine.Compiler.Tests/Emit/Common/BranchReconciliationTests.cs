@@ -75,6 +75,19 @@ public class BranchReconciliationTests
     }
 
     [Fact]
+    public void NonOptionalDecimalBranchAgainstOptionalIntSibling_NeedsSomeWrapOnly()
+    {
+        // The mirror of the compose case, and the only combination where NeedsSomeWrap fires on a
+        // NUMERIC branch: this branch is already Decimal (so no widen), but its sibling is an optional
+        // Int — the sibling takes the map-widen path, and this branch only needs the optional lift.
+        BranchReconciliation r = BranchReconciliation.Classify(Type("Decimal"), Type("Int", optional: true));
+
+        r.NeedsWiden.ShouldBeFalse();
+        r.NeedsOptionalWiden.ShouldBeFalse();
+        r.NeedsSomeWrap.ShouldBeTrue();
+    }
+
+    [Fact]
     public void MatchingTypes_NeedNoReconciliation()
     {
         BranchReconciliation r = BranchReconciliation.Classify(Type("Decimal"), Type("Decimal"));
