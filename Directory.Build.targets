@@ -32,4 +32,15 @@
     <None Include="$(MSBuildThisFileDirectory)nuget-readme.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 
+  <!-- Shared NuGet package icon (issue #1432). Same pattern as the README above, wired once so every
+       publishable package ships the Koine hexagon-k mark instead of the default placeholder on
+       nuget.org. The packed PackagePath ("koine-icon.png") and <PackageIcon> value must agree — that's
+       the name NuGet resolves the icon by inside the .nupkg. -->
+  <PropertyGroup Condition="'$(IsPackable)' == 'true' or '$(PackAsTool)' == 'true'">
+    <PackageIcon>koine-icon.png</PackageIcon>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(IsPackable)' == 'true' or '$(PackAsTool)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)assets/koine-icon.png" Pack="true" PackagePath="koine-icon.png" />
+  </ItemGroup>
+
 </Project>
