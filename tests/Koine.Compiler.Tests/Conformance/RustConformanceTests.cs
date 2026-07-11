@@ -1789,6 +1789,58 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1472: an entity <c>invariant</c> comparing a constant-defaulted, optional-declared
+    /// member against a same-typed non-optional operand (guarded by <c>isPresent</c>) must compile —
+    /// before the fix, the member's ctor-local was re-wrapped in <c>Some(...)</c> before the invariant
+    /// guards ran, so the comparison mismatched <c>Option&lt;Decimal&gt;</c> against <c>Decimal</c>
+    /// (<c>E0308</c>).
+    /// </summary>
+    [Fact]
+    public void Entity_invariant_referencing_constant_defaulted_optional_member_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1472: the value-object dual of the entity case above — <c>WriteSmartConstructor</c>
+    /// re-wraps a constant-defaulted optional member the same way, so it hits the identical
+    /// <c>E0308</c> once an invariant references it.
+    /// </summary>
+    [Fact]
+    public void Value_object_invariant_referencing_constant_defaulted_optional_member_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1329: an optional-declared derived (computed) member whose bare or conditional body is a
     /// non-optional numeric value must be coerced to the declared underlying type and <c>Some(...)</c>-
     /// wrapped — <c>WriteDerived</c>'s coercion sites otherwise left it entirely uncoerced/unwrapped
