@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { axe } from 'vitest-axe';
 import { createCommandPalette, type Command } from './palette';
 import { createCommandRegistry } from './commandRegistry';
 
@@ -402,6 +403,109 @@ describe('running commands', () => {
     reopening.open();
     keydown('Enter');
     expect(order).toEqual(['run']);
+  });
+});
+
+describe('visible-but-disabled rows (#1407)', () => {
+  // A command with enabled: () => false stays in the filtered/visible list (when() is unaffected
+  // by this axis) but renders as a greyed-out, inert row: aria-disabled + a disabled class, and
+  // its run() must never fire from a click or a keyboard Enter.
+  function disabledCmd(id: string, title: string): Command {
+    return cmd(id, title, { enabled: () => false });
+  }
+
+  test('a disabled-command row is present, carries aria-disabled and the disabled class', () => {
+    const commands = [cmd('always', 'Always Enabled'), disabledCmd('gated', 'Gated Command')];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    expect(titles()).toEqual(['Always Enabled', 'Gated Command']);
+    const r = rows();
+    expect(r[0].hasAttribute('aria-disabled')).toBe(false);
+    expect(r[0].classList.contains('koi-palette-item--disabled')).toBe(false);
+    expect(r[1].getAttribute('aria-disabled')).toBe('true');
+    expect(r[1].classList.contains('koi-palette-item--disabled')).toBe(true);
+  });
+
+  test('clicking a disabled row does not run it and does not close the palette', () => {
+    const commands = [cmd('always', 'Always Enabled'), disabledCmd('gated', 'Gated Command')];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    rows()[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(commands[1].run).not.toHaveBeenCalled();
+    expect(palette.isOpen).toBe(true);
+  });
+
+  test('selecting a disabled row via ArrowDown then pressing Enter does not run it and does not close', () => {
+    const commands = [cmd('always', 'Always Enabled'), disabledCmd('gated', 'Gated Command')];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    keydown('ArrowDown'); // moves selection onto the disabled row (index 1)
+    expect(selectedIndex()).toBe(1);
+
+    keydown('Enter');
+    expect(commands[1].run).not.toHaveBeenCalled();
+    expect(palette.isOpen).toBe(true);
+  });
+
+  test('a normal row (no enabled field) still runs and closes as before', () => {
+    const commands = [cmd('always', 'Always Enabled'), disabledCmd('gated', 'Gated Command')];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    keydown('Enter'); // row 0, no `enabled` field
+    expect(commands[0].run).toHaveBeenCalledTimes(1);
+    expect(palette.isOpen).toBe(false);
+  });
+
+  test('an explicitly-enabled row (enabled: () => true) still runs and closes', () => {
+    const commands = [cmd('yes', 'Explicitly Enabled', { enabled: () => true })];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    keydown('Enter');
+    expect(commands[0].run).toHaveBeenCalledTimes(1);
+    expect(palette.isOpen).toBe(false);
+  });
+
+  test('re-evaluates enabled() at activation time rather than a stale open-time snapshot', () => {
+    // A workspace op can start/finish while the palette is open — enabled() must be checked fresh
+    // at the moment of activation, not memoized from when the palette opened.
+    let busy = false;
+    const commands = [cmd('save', 'Save File', { enabled: () => !busy })];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    busy = true; // op starts after open() already snapshotted the command list
+    keydown('Enter');
+    expect(commands[0].run).not.toHaveBeenCalled();
+    expect(palette.isOpen).toBe(true);
+
+    busy = false; // op finishes while still open
+    keydown('Enter');
+    expect(commands[0].run).toHaveBeenCalledTimes(1);
+    expect(palette.isOpen).toBe(false);
+  });
+
+  test('hovering a disabled row still moves the visual selection (selection ≠ activation)', () => {
+    const commands = [cmd('always', 'Always Enabled'), disabledCmd('gated', 'Gated Command')];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    rows()[1].dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    expect(selectedIndex()).toBe(1);
+    expect(commands[1].run).not.toHaveBeenCalled();
+  });
+
+  test('has no axe violations with a disabled row present', async () => {
+    const commands = [cmd('always', 'Always Enabled'), disabledCmd('gated', 'Gated Command')];
+    const palette = createCommandPalette(() => commands);
+    palette.open();
+
+    expect(await axe(backdrop())).toHaveNoViolations();
   });
 });
 

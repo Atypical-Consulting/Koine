@@ -50,6 +50,7 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
   panel.className = 'koi-palette';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-label', 'Command palette');
 
   const input = document.createElement('input');
   input.className = 'koi-palette-input';
@@ -62,6 +63,7 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
   const list = document.createElement('div');
   list.className = 'koi-palette-list';
   list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-label', 'Commands');
 
   panel.append(input, list);
   backdrop.appendChild(panel);
@@ -100,6 +102,16 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
       row.className = 'koi-palette-item';
       row.setAttribute('role', 'option');
       row.setAttribute('aria-selected', i === selected ? 'true' : 'false');
+
+      // Visible-but-disabled affordance (#1407): a command gated by enabled() stays in the
+      // filtered list (when() alone governs visibility) but renders greyed-out and inert —
+      // still focusable/selectable (screen readers still announce it, arrow keys still land on
+      // it), just not activatable. The authoritative check happens again in runAt() at the
+      // moment of activation, since a workspace op can start/finish while the palette is open.
+      if (cmd.enabled?.() === false) {
+        row.classList.add('koi-palette-item--disabled');
+        row.setAttribute('aria-disabled', 'true');
+      }
 
       const title = document.createElement('span');
       title.className = 'koi-palette-item-title';
@@ -142,6 +154,11 @@ export function createCommandPalette(getCommands: () => Command[]): PaletteHandl
   function runAt(i: number): void {
     const cmd = filtered[i];
     if (!cmd) return;
+    // Re-check enabled() fresh at the moment of activation rather than trusting the row's
+    // render-time class/aria-disabled snapshot (#1407) — a workspace op can start or finish
+    // while the palette is still open, so a row rendered enabled may no longer be, or vice versa.
+    // Inert: no run(), and the palette stays open (not just "doesn't run" — doesn't dismiss either).
+    if (cmd.enabled?.() === false) return;
     close();
     cmd.run();
   }
