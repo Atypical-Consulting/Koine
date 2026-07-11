@@ -12,6 +12,7 @@ export function BrandMark(props: { class?: string }): JSX.Element {
     <span
       class={props.class}
       aria-hidden="true"
+      // eslint-disable-next-line no-restricted-syntax -- static, trusted brand mark from logo.ts (koineMark returns a fixed SVG), never user input
       dangerouslySetInnerHTML={{ __html: koineMark() }}
     />
   );
