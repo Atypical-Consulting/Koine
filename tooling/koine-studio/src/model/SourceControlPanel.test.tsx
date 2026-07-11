@@ -636,6 +636,10 @@ describe('SourceControlPanel — Discard controls (#1151)', () => {
 });
 
 describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
+  beforeEach(() => {
+    vi.mocked(koiConfirm).mockReset();
+  });
+
   // Open the ⋮ menu (a REAL createFloatingMenu, mounted on document.body) and return its role="menu".
   async function openOverflow(view: ReturnType<typeof render>) {
     const trigger = await view.findByRole('button', { name: 'Views and more actions' });
@@ -686,12 +690,116 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     expect(item('Unstage all changes').disabled).toBe(false);
     expect(item('Collapse all groups').disabled).toBe(false);
     expect(item('View all commits').disabled).toBe(false);
+    // Discard-all and Push (#1401) are now wired to the same gitDiscard/gitPush ops the panel's other
+    // controls already use — live with a non-staged discard candidate + a tracked upstream present.
+    expect(item('Discard all changes').disabled).toBe(false);
+    expect(item('Push').disabled).toBe(false);
 
     // Deferred items — no backing Platform git op yet (sibling follow-ups): rendered disabled, never inert-live.
-    expect(item('Discard all changes').disabled).toBe(true);
     expect(item('Pull').disabled).toBe(true);
-    expect(item('Push').disabled).toBe(true);
     expect(item('Fetch').disabled).toBe(true);
+  });
+
+  test('the ⋮ menu "Discard all changes" confirms then calls gitDiscard with the full tracked/untracked split', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' }, // staged — Discard all never touches it
+      { relPath: 'b.koi', staged: false, status: 'modified' }, // tracked, unstaged
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Discard all changes' }));
+
+    // Destructive, so it asks first — through the same danger confirm every other Discard control uses.
+    await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.danger).toBe(true);
+
+    // The tracked/untracked split lands exactly like the per-row/group Discard controls: b.koi (tracked)
+    // in the first bucket, c.koi (untracked) in the second.
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi'], ['c.koi']));
+    // The staged file is untouched — Discard all never reaches into the Staged Changes group.
+    await waitFor(() => expect(group(view.container, 'Staged Changes')?.textContent).toContain('a.koi'));
+  });
+
+  test('declining the "Discard all changes" confirm makes NO gitDiscard call', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(false);
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Discard all changes' }));
+
+    await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) discard microtask flush
+    expect(git.gitDiscard).not.toHaveBeenCalled();
+  });
+
+  test('the ⋮ menu "Discard all changes" is disabled when there is nothing to discard', async () => {
+    // Only a staged file — Discard all never covers staged rows, so there is no discardable candidate.
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    expect(
+      (within(menu).getByRole('menuitem', { name: 'Discard all changes' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  test('the ⋮ menu "Push" calls gitPush and re-fetches status', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 2, behind: 0 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Push' }));
+
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
+    // The mutate() follow-up reload re-reads status, so the ahead count tracks the pushed repository.
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+  });
+
+  test('the ⋮ menu "Push" is disabled when the branch has no upstream', async () => {
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    expect((within(menu).getByRole('menuitem', { name: 'Push' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('the ⋮ menu "Discard all changes" and "Push" are both disabled while busy', async () => {
+    const git = makeGit(
+      [
+        { relPath: 'b.koi', staged: false, status: 'modified' },
+        { relPath: 'c.koi', staged: false, status: 'untracked' },
+      ],
+      { ref: 'origin/main', ahead: 1, behind: 0 },
+    );
+    // Never resolves — latches `busy` true across the rest of the test, mirroring an in-flight mutation.
+    git.gitStage.mockImplementation(() => new Promise<void>(() => {}));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+
+    fireEvent.click(await view.findByRole('button', { name: 'Stage b.koi' }));
+    const menu = await openOverflow(view);
+
+    expect(
+      (within(menu).getByRole('menuitem', { name: 'Discard all changes' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect((within(menu).getByRole('menuitem', { name: 'Push' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   test('the ⋮ menu "Stage all changes" stages every unstaged + untracked path', async () => {

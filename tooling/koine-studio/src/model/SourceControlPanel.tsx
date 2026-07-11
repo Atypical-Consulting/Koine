@@ -482,14 +482,17 @@ export function SourceControlPanel(props: {
   };
 
   // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
-  // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits);
-  // the DEFERRED items render disabled — each a tracked sibling follow-up of #1146/#1142: the pull/fetch
-  // ops have no Platform git op yet, and wiring this menu's Discard-all / Push items to the gitDiscard
-  // (#1151) / gitPush (#1150) ops the panel controls now invoke rides along with that menu-wiring
-  // follow-up. Disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
+  // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits,
+  // and — as of #1401 — Discard all changes / Push, wired to the same onDiscard/onPush the per-row and
+  // group controls already use). The DEFERRED items (Pull, Fetch) render disabled since neither has a
+  // Platform git op yet; disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
   const openOverflowMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
-    const unstagedPaths = [...unstaged, ...untracked].map((f) => f.relPath);
+    // Every unstaged (tracked) + untracked file — the same candidate set the per-group Discard-all
+    // controls draw from; staged rows are never included (mirrors the fileGroup/fileRow invariant: a
+    // staged row's discard would silently revert only the worktree delta, not the staged change itself).
+    const discardCandidates = [...unstaged, ...untracked];
+    const unstagedPaths = discardCandidates.map((f) => f.relPath);
     const stagedPaths = staged.map((f) => f.relPath);
     // Every present, collapsible section label — the non-empty file groups plus the Recent-commits log.
     const groupLabels = [
@@ -522,9 +525,19 @@ export function SourceControlPanel(props: {
       // Enabled only when the 10-row cap actually hides commits (matches the "View all" button's gate), so
       // the item is never a live-but-inert no-op when everything already shows.
       { id: 'view-all-commits', label: 'View all commits', disabled: !hasMoreCommits, run: revealAllCommits },
-      { id: 'discard-all', label: 'Discard all changes', disabled: true, run: () => {} },
+      // Discard all changes (#1401): the same confirm-gated onDiscard the per-row/group controls use,
+      // over every non-staged candidate — disabled when busy or when there's nothing to discard (matches
+      // the "never a live-but-inert no-op" rule the empty-group Discard-all controls already follow).
+      {
+        id: 'discard-all',
+        label: 'Discard all changes',
+        disabled: busy || discardCandidates.length === 0,
+        run: () => onDiscard(discardCandidates, { untracked: false, group: 'the working tree' }),
+      },
       { id: 'pull', label: 'Pull', disabled: true, run: () => {} },
-      { id: 'push', label: 'Push', disabled: true, run: () => {} },
+      // Push (#1401): the same onPush the branch-bar push button uses — disabled while busy or when the
+      // branch has no upstream to push to (mirrors that button's own gate, since there's nothing to push).
+      { id: 'push', label: 'Push', disabled: busy || !upstream, run: onPush },
       { id: 'fetch', label: 'Fetch', disabled: true, run: () => {} },
     ];
     overflowMenuRef.current!.toggle({ trigger, items, align: 'right' });
