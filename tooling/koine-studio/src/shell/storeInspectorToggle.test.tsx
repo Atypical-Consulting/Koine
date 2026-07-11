@@ -131,4 +131,70 @@ describe('storeInspectorToggle', () => {
     await toggle();
     expect(mockLoad).toHaveBeenCalledOnce();
   });
+
+  it('hide unmounts the tree (childElementCount becomes 0)', async () => {
+    const mockLoad = vi.fn(async () => ({
+      StoreInspector: ({ store }) => <div data-testid="store-inspector">Mocked</div>,
+    }));
+
+    const toggle = createStoreInspectorToggle(store, mockLoad);
+
+    // Show
+    await toggle();
+    const host = document.querySelector('.koi-store-inspector-overlay');
+    expect(host).not.toBeNull();
+    expect(host!.childElementCount).toBeGreaterThan(0);
+
+    // Hide
+    await toggle();
+    expect(host!.childElementCount).toBe(0);
+    expect(host!.hidden).toBe(true);
+  });
+
+  it('show after hide remounts the tree', async () => {
+    const mockLoad = vi.fn(async () => ({
+      StoreInspector: ({ store }) => <div data-testid="store-inspector">Mocked</div>,
+    }));
+
+    const toggle = createStoreInspectorToggle(store, mockLoad);
+
+    // Show
+    await toggle();
+    const host = document.querySelector('.koi-store-inspector-overlay');
+    const childCountBefore = host!.childElementCount;
+    expect(childCountBefore).toBeGreaterThan(0);
+
+    // Hide
+    await toggle();
+    expect(host!.childElementCount).toBe(0);
+
+    // Show again
+    await toggle();
+    expect(host!.childElementCount).toBe(childCountBefore);
+    expect(host!.hidden).toBe(false);
+  });
+
+  it('remount creates a fresh component after hide', async () => {
+    // After unmounting and remounting, the component's internal state (like <details> open)
+    // is discarded, so it comes back in its default state (collapsed)
+    const mockLoad = vi.fn(async () => ({
+      StoreInspector: ({ store }) => <div>Mocked Inspector</div>,
+    }));
+
+    const toggle = createStoreInspectorToggle(store, mockLoad);
+
+    // Show
+    await toggle();
+    const host = document.querySelector('.koi-store-inspector-overlay');
+    expect(host).not.toBeNull();
+    expect(host!.childElementCount).toBeGreaterThan(0);
+
+    // Hide — unmounts the tree
+    await toggle();
+    expect(host!.childElementCount).toBe(0);
+
+    // Show — remounts with fresh state
+    await toggle();
+    expect(host!.childElementCount).toBeGreaterThan(0);
+  });
 });
