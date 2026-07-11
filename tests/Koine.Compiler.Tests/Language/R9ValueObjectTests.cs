@@ -1020,7 +1020,7 @@ public class R9ValueObjectTests
     public void Same_type_entity_multiplication_is_also_rejected()
     {
         // This issue's own repro: `item1 * item2`, both Item (entity), same declared type. Message
-        // assertions lock the verb/symbol pairing so a Mul/Div transposition in DescribeBinaryOp
+        // assertions lock the verb/symbol pairing so a Mul/Div transposition in BinaryOpExtensions
         // would fail this test.
         var result = new KoineCompiler().Compile(SameTypeEntitySrc("*"), new CSharpEmitter());
         result.Success.ShouldBeFalse();
