@@ -39,6 +39,8 @@ function makeGit(
     gitDiscard: async () => {},
     gitCommit: async () => {},
     gitPush: async () => {},
+    gitPull: async () => {},
+    gitFetch: async () => {},
     gitBranches: async () => ['main', 'feature/scm'],
     gitCheckout: async () => {},
     gitLog: async () => log,
