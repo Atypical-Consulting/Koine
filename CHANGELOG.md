@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Koine is pre-1.0, so minor versions
 may include breaking changes.
 
+## [0.250.0](https://github.com/Atypical-Consulting/Koine/compare/v0.249.0...v0.250.0) (2026-07-11)
+
+
+### Features
+
+* **studio:** add a Source Control ahead/behind sync readout and push action ([#1150](https://github.com/Atypical-Consulting/Koine/issues/1150)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** add Source Control Discard all and per-row Discard behind a confirm gate ([#1151](https://github.com/Atypical-Consulting/Koine/issues/1151)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** clear the studio-shell backlog — 16 grouped shell fixes ([#1387](https://github.com/Atypical-Consulting/Koine/issues/1387)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** migrate UnsavedIndicator, DiagnosticsStripPanel, and DocsPanelHost to koine-ui ([#1244](https://github.com/Atypical-Consulting/Koine/issues/1244)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+
+
+### Bug Fixes
+
+* **deps:** update dependency @anthropic-ai/sdk to ^0.111.0 ([#1393](https://github.com/Atypical-Consulting/Koine/issues/1393)) ([5f753f1](https://github.com/Atypical-Consulting/Koine/commit/5f753f1d589ec0172488318440720180aedf031f))
+* **deps:** update dependency starlight-blog to ^0.28.0 ([#1391](https://github.com/Atypical-Consulting/Koine/issues/1391)) ([b703349](https://github.com/Atypical-Consulting/Koine/commit/b7033494f34a6a9058c7f6a2fe91bf97656cb2e5))
+* **studio:** address branch-wide code-review findings, incl. per-row Discard destroying staged-row edits and git_discard no-op on C-quoted filenames ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** key SortableTable rows on rowLabel to avoid remount-on-sort churn ([#1382](https://github.com/Atypical-Consulting/Koine/issues/1382)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** make the workspace-open lock impossible to bypass and disable controls in flight ([#1275](https://github.com/Atypical-Consulting/Koine/issues/1275)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** move Source Control header actions into the shared right-rail header and align panel insets ([#1410](https://github.com/Atypical-Consulting/Koine/issues/1410)) ([bafbdb2](https://github.com/Atypical-Consulting/Koine/commit/bafbdb2ec4b3e6fa1ac0b6277b32c533e6216049))
+* **studio:** revert-and-close the ADR/Note edit textareas on Escape ([#1383](https://github.com/Atypical-Consulting/Koine/issues/1383)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** scope the Problems tab count pill to the active context ([#1203](https://github.com/Atypical-Consulting/Koine/issues/1203)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** shrink .koi-resizer/.koi-resizer-y handles to 1px ([#1388](https://github.com/Atypical-Consulting/Koine/issues/1388)) ([aa7c64c](https://github.com/Atypical-Consulting/Koine/commit/aa7c64c1d8135e45275beabd3bfac3fa1bf7f39d))
+
+
+### Performance Improvements
+
+* **studio:** make the StoreInspector raw dump lazy and throttled ([#1134](https://github.com/Atypical-Consulting/Koine/issues/1134)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+* **studio:** route refreshContextList() through the shared glossary memoizer ([#1258](https://github.com/Atypical-Consulting/Koine/issues/1258)) ([92fbf20](https://github.com/Atypical-Consulting/Koine/commit/92fbf203e68d1a4149c2fc2f4d4b885ff79421c7))
+
 ## [0.249.0](https://github.com/Atypical-Consulting/Koine/compare/v0.248.0...v0.249.0) (2026-07-10)
 
 
