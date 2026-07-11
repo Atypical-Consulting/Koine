@@ -200,35 +200,48 @@ export { renderMarkdown };
 
 // --- loaded-keymap accessor (for the Settings conflict check) ---------------
 
-// Small display-label table for the CodeMirror commands the editor's loaded keymaps bind. Keyed by
-// the run function's name; any unlabelled entry falls back to the function name (or "Editor command"
-// for anonymous/minified functions).
-const BUILT_IN_CHORD_LABELS: Readonly<Record<string, string>> = {
-  openSearchPanel: 'Find',
-  closeSearchPanel: 'Close find panel',
-  findNext: 'Find next',
-  findPrevious: 'Find previous',
-  selectNextOccurrence: 'Select next occurrence',
-  gotoLine: 'Go to line',
-  selectSelectionMatches: 'Select all occurrences',
-  selectAll: 'Select all',
-  moveLineUp: 'Move line up',
-  moveLineDown: 'Move line down',
-  copyLineUp: 'Copy line up',
-  copyLineDown: 'Copy line down',
-  addCursorAbove: 'Add cursor above',
-  addCursorBelow: 'Add cursor below',
-  simplifySelection: 'Collapse selection',
-  toggleComment: 'Toggle comment',
-  toggleBlockComment: 'Toggle block comment',
-  indentLess: 'Outdent',
-  indentMore: 'Indent',
-  indentSelection: 'Indent selection',
-  deleteLine: 'Delete line',
-  cursorMatchingBracket: 'Jump to matching bracket',
-  selectParentSyntax: 'Expand selection',
-  insertNewlineAndIndent: 'Insert newline',
+// Friendly display labels for the reserved chords worth naming, keyed by the NORMALIZED chord (the
+// same canonical form `chordFromEvent` emits) — NOT by the run function's name, which esbuild mangles
+// in a minified production build. Any loaded chord without an entry here degrades to "Editor command".
+const RESERVED_CHORD_LABELS: Readonly<Record<string, string>> = {
+  'Mod-f': 'Find',
+  'Mod-d': 'Select next occurrence',
+  'Mod-a': 'Select all',
+  'Mod-i': 'Expand selection',
+  'Mod-/': 'Toggle comment',
+  'Shift-Alt-a': 'Toggle block comment',
+  'Mod-[': 'Outdent',
+  'Mod-]': 'Indent',
+  'Mod-Alt-\\': 'Indent selection',
+  'Alt-ArrowUp': 'Move line up',
+  'Alt-ArrowDown': 'Move line down',
+  'Shift-Alt-ArrowUp': 'Copy line up',
+  'Shift-Alt-ArrowDown': 'Copy line down',
+  'Mod-Alt-ArrowUp': 'Add cursor above',
+  'Mod-Alt-ArrowDown': 'Add cursor below',
+  'Mod-Shift-k': 'Delete line',
+  'Mod-Shift-\\': 'Jump to matching bracket',
+  'Mod-Alt-h': 'Call hierarchy',
 };
+
+// Rewrite a CodeMirror keymap `key` string into the canonical chord form `chordFromEvent` emits, so a
+// recorded chord matches a loaded built-in by string equality regardless of how CodeMirror spelled it.
+// CodeMirror is inconsistent about modifier ORDER (`Shift-Mod-k`) and CASE (`Alt-A`); `chordFromEvent`
+// always emits `Mod-` then `Shift-` then `Alt-` then a lowercased single-char base. We also fold the
+// concrete `Ctrl`/`Cmd`/`Meta` prefixes onto the portable `Mod-`, and treat a single uppercase letter
+// as an implied Shift (CodeMirror's `Alt-A` ≡ `Shift-Alt-a`, per its own docs).
+function normalizeChord(cmKey: string): string {
+  const parts = cmKey.split('-');
+  let base = parts.pop() ?? '';
+  const mods = new Set(parts);
+  if (/^[A-Z]$/.test(base)) mods.add('Shift'); // uppercase letter implies the shifted key
+  if (base.length === 1) base = base.toLowerCase();
+  let prefix = '';
+  if (mods.has('Mod') || mods.has('Ctrl') || mods.has('Cmd') || mods.has('Meta')) prefix += 'Mod-';
+  if (mods.has('Shift')) prefix += 'Shift-';
+  if (mods.has('Alt')) prefix += 'Alt-';
+  return prefix + base;
+}
 
 /**
  * Returns the editor's reserved chord → display-label map, derived from the keymaps the editor
@@ -236,9 +249,10 @@ const BUILT_IN_CHORD_LABELS: Readonly<Record<string, string>> = {
  * literal. This is what the Settings conflict-check consults so it stays exhaustive by construction
  * and can never drift from the editor — because it *is* the editor's own keymap.
  *
- * DOM-free (no `EditorView` required), matching the `keybindings.ts` testable-seam style. Only the
- * portable `key` property of each {@link KeyBinding} is surfaced — `mac`/`win`/`linux` platform
- * variants are skipped, since chord recording via `chordFromEvent` always emits the portable `Mod-`
+ * DOM-free (no `EditorView` required), matching the `keybindings.ts` testable-seam style. Each keymap
+ * entry's portable `key` is run through {@link normalizeChord} so a recorded chord matches it by
+ * equality despite CodeMirror's modifier-order/case quirks. `mac`/`win`/`linux` platform variants
+ * (which carry no portable `key`) are skipped, since `chordFromEvent` always emits the portable `Mod-`
  * form. `historyKeymap` is NOT loaded by the editor (see `createKoineEditor`), so `Mod-z`/`Mod-y`
  * are deliberately absent.
  *
@@ -254,11 +268,10 @@ export function loadedReservedChords(resolved: Record<BindingId, string>): Recor
 
   const addKeymap = (bindings: readonly KeyBinding[]): void => {
     for (const b of bindings) {
-      const key = b.key;
-      if (!key) continue; // mac/win/linux-only variant — not cross-platform portable
-      if (registryChords.has(key)) continue; // rebindable row — inter-row conflict logic owns this
-      const runName = b.run?.name ?? '';
-      result[key] = BUILT_IN_CHORD_LABELS[runName] ?? (runName || 'Editor command');
+      if (!b.key) continue; // mac/win/linux-only variant — no cross-platform portable chord
+      const chord = normalizeChord(b.key);
+      if (registryChords.has(chord)) continue; // rebindable row — inter-row conflict logic owns this
+      result[chord] = RESERVED_CHORD_LABELS[chord] ?? 'Editor command';
     }
   };
 

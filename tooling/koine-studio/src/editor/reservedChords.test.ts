@@ -28,6 +28,28 @@ describe("loadedReservedChords", () => {
         expect(reserved["Mod-/"]).toBe("Toggle comment");
     });
 
+    test("normalizes CodeMirror's modifier ORDER so reorder-spelled built-ins are still caught", () => {
+        const reserved = loadedReservedChords(DEFAULT_BINDINGS);
+        // defaultKeymap spells deleteLine as "Shift-Mod-k" and cursorMatchingBracket as "Shift-Mod-\\",
+        // but chordFromEvent always emits Mod- before Shift-. Without normalization these would be stored
+        // under keys a recorded chord can never equal, silently shadowing the built-in.
+        expect(reserved).toHaveProperty("Mod-Shift-k");
+        expect(reserved["Mod-Shift-k"]).toBe("Delete line");
+        expect(reserved).toHaveProperty("Mod-Shift-\\");
+        // The raw CodeMirror spellings must NOT leak through.
+        expect(reserved).not.toHaveProperty("Shift-Mod-k");
+        expect(reserved).not.toHaveProperty("Shift-Mod-\\");
+    });
+
+    test("normalizes an uppercase-letter key (Alt-A ≡ Shift-Alt-a) so it is reachable", () => {
+        const reserved = loadedReservedChords(DEFAULT_BINDINGS);
+        // CodeMirror binds toggleBlockComment to "Alt-A"; a single uppercase letter implies Shift, and
+        // chordFromEvent lowercases the base — so the recorded chord is "Shift-Alt-a".
+        expect(reserved).toHaveProperty("Shift-Alt-a");
+        expect(reserved["Shift-Alt-a"]).toBe("Toggle block comment");
+        expect(reserved).not.toHaveProperty("Alt-A");
+    });
+
     test("returns non-empty string labels for every entry", () => {
         const reserved = loadedReservedChords(DEFAULT_BINDINGS);
         for (const [chord, label] of Object.entries(reserved)) {
@@ -37,16 +59,14 @@ describe("loadedReservedChords", () => {
         }
     });
 
-    test("excludes registry chords so inter-row logic handles them, not the built-in check", () => {
-        // When a registry chord matches a built-in, the inter-row conflict (otherId != null path) runs,
-        // not the built-in reserved path. The accessor must leave registry chords out.
-        const resolved = { ...DEFAULT_BINDINGS };
-        const reserved = loadedReservedChords(resolved);
-        for (const chord of Object.values(resolved)) {
-            if (chord !== "") {
-                expect(reserved).not.toHaveProperty(chord);
-            }
-        }
+    test("excludes a chord that a registry override now owns, so inter-row logic handles it", () => {
+        // Point a rebindable command AT a real loaded built-in chord. The accessor must then drop that
+        // chord from the reserved set (the otherId != null inter-row path owns it), NOT double-count it.
+        // This genuinely exercises the registryChords guard — the untouched DEFAULT_BINDINGS never
+        // overlaps a built-in, so with defaults the same chord is present (the contrast below proves it).
+        expect(loadedReservedChords(DEFAULT_BINDINGS)).toHaveProperty("Mod-/");
+        const overridden = { ...DEFAULT_BINDINGS, format: "Mod-/" };
+        expect(loadedReservedChords(overridden)).not.toHaveProperty("Mod-/");
     });
 
     test("labels the named built-ins", () => {
@@ -54,6 +74,15 @@ describe("loadedReservedChords", () => {
         expect(reserved["Mod-f"]).toBe("Find");
         expect(reserved["Mod-a"]).toBe("Select all");
         expect(reserved["Mod-Alt-h"]).toBe("Call hierarchy");
+    });
+
+    test("labels are chord-keyed (minification-proof), not derived from the run function's name", () => {
+        // Regression guard for the esbuild name-mangling trap: every friendly label must come from the
+        // chord string, so a production build (which renames run functions) still shows "Find", not a
+        // mangled identifier. A named built-in therefore never degrades to the "Editor command" fallback.
+        const reserved = loadedReservedChords(DEFAULT_BINDINGS);
+        expect(reserved["Mod-f"]).not.toBe("Editor command");
+        expect(reserved["Mod-d"]).not.toBe("Editor command");
     });
 
     test("covers more chords than the old four-entry table", () => {
