@@ -152,8 +152,11 @@ class FakeLspTransport implements LspTransport {
     this.sent.push(message);
     const msg = JSON.parse(message) as { id?: number; method?: string };
     // Reply to the `initialize` request so the handshake completes, and to the launcher's model-index
-    // requests with empty results (#1143). Any other request is left unanswered (boot does not depend on
-    // it); notifications carry no id.
+    // requests with empty results (#1143). `koine/emitTargets` is answered with an empty list so the
+    // fire-and-forget boot query (lifecycleBoot) resolves at once and falls back to the built-in
+    // targets (setEmitTargets treats [] as "use built-ins") — the same outcome as before, but without
+    // the request sitting unanswered until the 15s LSP timeout logs `fetching emit targets failed`.
+    // Any other request is left unanswered (boot does not depend on it); notifications carry no id.
     if (typeof msg.id === 'number') {
       if (msg.method === 'initialize') {
         this.reply({ jsonrpc: '2.0', id: msg.id, result: { capabilities: {} } });
@@ -163,6 +166,8 @@ class FakeLspTransport implements LspTransport {
         this.reply({ jsonrpc: '2.0', id: msg.id, result: { files: [] } });
       } else if (msg.method === 'koine/model') {
         this.reply({ jsonrpc: '2.0', id: msg.id, result: null });
+      } else if (msg.method === 'koine/emitTargets') {
+        this.reply({ jsonrpc: '2.0', id: msg.id, result: { targets: [] } });
       }
     }
     return Promise.resolve();
@@ -1071,6 +1076,8 @@ describe('ide init() — boot ladder clears the model hash via try/finally', () 
     platform.materializeWorkspace = () => Promise.reject(new Error('disk full'));
 
     // Boot must not crash the page despite the rejected import…
+    // The workspace branch logs the injected import failure; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await boot({ platform });
 
     // …and the finally still cleared the #model= fragment, so a reload won't re-trigger the failing
@@ -1084,6 +1091,8 @@ describe('ide init() — boot ladder clears the model hash via try/finally', () 
     // Make the 1-file share open fail inside the try block.
     platform.materializeWorkspace = () => Promise.reject(new Error('disk full'));
 
+    // The single branch logs the injected open failure; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await boot({ platform });
 
     // The single branch's finally cleared the hash too, despite the throw.
@@ -1298,6 +1307,8 @@ describe('ide init() — Recent open recovery routes to the Home route (#391)', 
     setStartIntent({ kind: 'open-recent', path: 'ghost' });
 
     const onOpenRecentFailed = vi.fn();
+    // The dead-recent path logs the injected listKoiFiles failure; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await boot({ platform: p, hooks: { onOpenRecentFailed } });
     await settleBoot();
 
