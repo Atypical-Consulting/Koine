@@ -493,12 +493,23 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var owned = translator.TranslateOwned(value, expectedEnum);
-                if (NumericCoercionWrap(m.Type, translator.InferType(value)) is { } wrap)
+
+                // Coerce against the underlying (non-optional) type, never m.Type directly — for an
+                // optional-declared member, NumericCoercionWrap short-circuits on declared.IsOptional
+                // and would otherwise silently skip a real Int-into-Decimal mismatch, emitting
+                // Some(5) against an Option<Decimal> parameter (the same gap #1437 fixed for the
+                // sibling defaultedParams loop below).
+                if (NumericCoercionWrap(UnderlyingType(m.Type), translator.InferType(value)) is { } wrap)
                 {
                     owned = $"{wrap}({owned})";
                 }
 
-                args.Add(owned);
+                // Wrap in Some(...) only when the initializing expression isn't already Option-typed —
+                // the validator legally allows an Option-typed expression (e.g. a `T?` factory
+                // parameter) to initialize an optional-declared required member, and unconditionally
+                // wrapping it would double-wrap into Option<Option<T>>, a real cargo check E0308
+                // (the same shape #1437's follow-up fixed for the sibling defaultedParams loop).
+                args.Add(m.Type.IsOptional && !translator.IsOptional(value) ? $"Some({owned})" : owned);
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {
