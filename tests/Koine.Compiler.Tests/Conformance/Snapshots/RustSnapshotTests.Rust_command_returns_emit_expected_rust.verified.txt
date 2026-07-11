@@ -225,9 +225,9 @@ impl std::hash::Hash for Order {
 
 impl Order {
     /// Creates a validated `Order`, running its invariants.
-    pub fn new(id: OrderId) -> Result<Self, DomainError> {
-        let status = OrderStatus::Draft;
-        let total = 0;
+    pub fn new(id: OrderId, status: Option<OrderStatus>, total: Option<i64>) -> Result<Self, DomainError> {
+        let status = status.unwrap_or(OrderStatus::Draft);
+        let total = total.unwrap_or(0);
         Ok(Self {
             id,
             status,

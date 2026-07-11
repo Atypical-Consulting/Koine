@@ -153,6 +153,11 @@ public class RustSnapshotTests
         shop.ShouldContain("pub fn deposit(&mut self, amount: i64) -> Result<(), DomainError>");
         shop.ShouldContain("impl PartialEq for Account");   // identity equality
 
+        // A non-optional defaulted member (`status: Status = Active`) trails the constructor as an
+        // `Option<T>` parameter, unwrapped to its declared default (#1380) — not hardcoded/unreachable.
+        shop.ShouldContain("pub fn new(id: AccountId, balance: i64, status: Option<Status>) -> Result<Self, DomainError>");
+        shop.ShouldContain("let status = status.unwrap_or(Status::Active);");
+
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
 
@@ -982,7 +987,11 @@ public class RustSnapshotTests
         sales.ShouldContain("pub fn open(lines: i64) -> Result<Self, DomainError>");
         sales.ShouldContain("let id = OrderId::generate();");
         sales.ShouldContain("DomainEvent::OrderOpened(OrderOpened::new(id.clone(), lines))");
-        sales.ShouldContain("let mut instance = Self::new(id, lines)?;");
+
+        // `status: OrderStatus = Draft` trails the ctor as `Option<OrderStatus>` (#1380); the factory
+        // doesn't reference it, so it passes `None` and the ctor applies the declared default.
+        sales.ShouldContain("pub fn new(id: OrderId, lines: i64, status: Option<OrderStatus>) -> Result<Self, DomainError>");
+        sales.ShouldContain("let mut instance = Self::new(id, lines, None)?;");
 
         // The uuid crate is pulled in only because the model uses a factory.
         var cargo = result.Files.Single(f => f.RelativePath == "Cargo.toml").Contents;

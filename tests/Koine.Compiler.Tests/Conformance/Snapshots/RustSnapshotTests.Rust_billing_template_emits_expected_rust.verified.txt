@@ -308,8 +308,8 @@ impl std::hash::Hash for Order {
 
 impl Order {
     /// Creates a validated `Order`, running its invariants.
-    pub fn new(id: OrderId, customer: CustomerId, lines: Vec<OrderLine>) -> Result<Self, DomainError> {
-        let status = OrderStatus::Draft;
+    pub fn new(id: OrderId, customer: CustomerId, lines: Vec<OrderLine>, status: Option<OrderStatus>) -> Result<Self, DomainError> {
+        let status = status.unwrap_or(OrderStatus::Draft);
         if lines.is_empty() && !(status == OrderStatus::Draft) {
             return Err(DomainError::InvariantViolation { type_name: "Order", rule: "invariant failed" });
         }

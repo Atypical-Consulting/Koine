@@ -218,8 +218,8 @@ impl std::hash::Hash for Account {
 
 impl Account {
     /// Creates a validated `Account`, running its invariants.
-    pub fn new(id: AccountId, balance: i64) -> Result<Self, DomainError> {
-        let status = Status::Active;
+    pub fn new(id: AccountId, balance: i64, status: Option<Status>) -> Result<Self, DomainError> {
+        let status = status.unwrap_or(Status::Active);
         if !(balance >= 0) {
             return Err(DomainError::InvariantViolation { type_name: "Account", rule: "balance cannot go negative" });
         }

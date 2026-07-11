@@ -2130,4 +2130,50 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1380 — the compiling-code proof for the trailing <c>Option&lt;T&gt;</c> constructor
+    /// parameter: a caller can both override a non-optional defaulted member (<c>Order::new(id, lines,
+    /// Some(OrderStatus::Placed))</c>) and omit it (<c>Order::new(id, lines, None)</c>) to fall back to
+    /// the declared default — proving the parameter is genuinely usable, not just present in the
+    /// signature.
+    /// </summary>
+    [Fact]
+    public void Entity_with_defaulted_member_constructs_via_override_and_via_default()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  enum OrderStatus { Draft, Placed, Shipped, Cancelled }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    lines:  Int\n" +
+            "    status: OrderStatus = Draft\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::sales::{Order, OrderId, OrderStatus};
+
+            /// Passing `None` falls back to the declared default (`Draft`).
+            #[test]
+            fn omitting_the_parameter_applies_the_declared_default() {
+                let order = Order::new(OrderId::new("order-1"), 3, None).expect("valid order");
+                assert_eq!(order.status(), OrderStatus::Draft);
+            }
+
+            /// Passing `Some(...)` overrides the default — the whole point of the parameter existing.
+            #[test]
+            fn overriding_the_parameter_constructs_a_non_default_status() {
+                let order = Order::new(OrderId::new("order-1"), 3, Some(OrderStatus::Placed)).expect("valid order");
+                assert_eq!(order.status(), OrderStatus::Placed);
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
