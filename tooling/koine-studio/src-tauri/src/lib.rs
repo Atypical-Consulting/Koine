@@ -999,50 +999,57 @@ fn parse_branch_ab(rest: &str) -> Option<(i64, i64)> {
 }
 
 /// `git status` for the open folder: the current branch plus every changed path. Parses
-/// `--porcelain=v2 -b` — the branch from the `# branch.head` header; the upstream ref + ahead/behind
-/// counts from `# branch.upstream` / `# branch.ab` (both emitted only when the branch tracks an
-/// upstream — `upstream` needs BOTH, so a gone upstream ref with no computable counts stays `None`);
-/// `1 <XY> …` ordinary entries (staged when X≠`.`, unstaged when Y≠`.`, so a both-areas file appears
-/// twice); `2 …` renames/copies (new path before the tab); `? …` untracked; `u …` unmerged →
-/// `conflicted`. `Err` when `dir` is not a work tree.
+/// `--porcelain=v2 -b -z` — NUL-terminated records, so every path is printed **verbatim** (never
+/// C-quoted, regardless of `core.quotePath` or non-ASCII/quote/backslash bytes in the name) and the
+/// output tokenizes with a plain `split('\0')`. The branch comes from the `# branch.head` header; the
+/// upstream ref + ahead/behind counts from `# branch.upstream` / `# branch.ab` (both emitted only when
+/// the branch tracks an upstream — `upstream` needs BOTH, so a gone upstream ref with no computable
+/// counts stays `None`); `1 <XY> …` ordinary entries (staged when X≠`.`, unstaged when Y≠`.`, so a
+/// both-areas file appears twice); `2 …` renames/copies (the entry token's last field is the new path,
+/// verbatim; with `-z` there is no tab — the original path has its own following NUL token, which is
+/// consumed and discarded here); `? …` untracked; `u …` unmerged → `conflicted`. `Err` when `dir` is not
+/// a work tree.
 #[tauri::command]
 fn git_status(dir: String) -> Result<GitStatus, String> {
-    let out = run_git(&dir, &["status", "--porcelain=v2", "-b"])?;
+    let out = run_git(&dir, &["status", "--porcelain=v2", "-b", "-z"])?;
     let mut branch = String::new();
     let mut upstream_ref: Option<String> = None;
     let mut ahead_behind: Option<(i64, i64)> = None;
     let mut files: Vec<GitFile> = Vec::new();
 
-    for line in out.lines() {
-        if let Some(rest) = line.strip_prefix("# branch.head ") {
+    let mut tokens = out.split('\0').filter(|t| !t.is_empty());
+    while let Some(token) = tokens.next() {
+        if let Some(rest) = token.strip_prefix("# branch.head ") {
             branch = rest.trim().to_string();
-        } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+        } else if let Some(rest) = token.strip_prefix("# branch.upstream ") {
             upstream_ref = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+        } else if let Some(rest) = token.strip_prefix("# branch.ab ") {
             ahead_behind = parse_branch_ab(rest);
-        } else if let Some(rest) = line.strip_prefix("? ") {
+        } else if let Some(rest) = token.strip_prefix("? ") {
             files.push(GitFile {
                 rel_path: rest.to_string(),
                 staged: false,
                 status: "untracked".to_string(),
             });
-        } else if let Some(rest) = line.strip_prefix("1 ") {
-            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>  (8 fields; path may contain spaces).
+        } else if let Some(rest) = token.strip_prefix("1 ") {
+            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>  (8 fields; -z prints the path verbatim,
+            // spaces included, with no trailing separator to strip).
             let mut fields = rest.splitn(8, ' ');
             let xy = fields.next().unwrap_or("..");
             if let Some(path) = fields.nth(6) {
                 push_xy_files(&mut files, xy, path);
             }
-        } else if let Some(rest) = line.strip_prefix("2 ") {
-            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>\t<origPath>  (9 fields).
+        } else if let Some(rest) = token.strip_prefix("2 ") {
+            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>  (9 fields). The original path is
+            // NOT part of this token under -z — it is the next NUL-separated token, consumed below so
+            // it isn't misparsed as its own record.
             let mut fields = rest.splitn(9, ' ');
             let xy = fields.next().unwrap_or("..");
-            if let Some(path_and_orig) = fields.nth(7) {
-                // The new path precedes the tab; the original path follows it.
-                let path = path_and_orig.split('\t').next().unwrap_or(path_and_orig);
+            if let Some(path) = fields.nth(7) {
                 push_xy_files(&mut files, xy, path);
             }
-        } else if let Some(rest) = line.strip_prefix("u ") {
+            tokens.next(); // discard the orig-path token
+        } else if let Some(rest) = token.strip_prefix("u ") {
             // Unmerged: <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>  (10 fields).
             let mut fields = rest.splitn(10, ' ');
             if let Some(path) = fields.nth(9) {
