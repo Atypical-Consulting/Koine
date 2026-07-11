@@ -17,6 +17,18 @@ import type { JSX, RefObject } from 'preact';
 //    so even a caller that forgets (or mis-derives) the key gets a correct reset instead of a silent
 //    wrong-element write. That converts the historical bug class from "possible if a caller mis-keys"
 //    to "structurally prevented by the hook".
+//
+// TWO MODES (#1396). By default the hook edits a PERSISTENT field (everything above): a mistaken/blank/
+// unchanged edit resets the DOM value in place and the field stays. Passing `onCancel` opts into
+// TRANSIENT-SESSION mode — the field is a temporary row (ExplorerPanel's inline create/rename editor)
+// that must DISAPPEAR on cancel rather than reset. In session mode:
+//   - `validate(trimmed)` gates the commit. On Enter an invalid value calls `onInvalid()` and KEEPS the
+//     edit open (no blur); on blur an invalid (or blank, or unchanged) value calls `onCancel()`.
+//   - Escape calls `onCancel()` (not a DOM-value reset — there's no persistent field to reset to).
+//   - Blur on a valid, CHANGED value commits exactly once; every other blur outcome — blank, invalid,
+//     unchanged, or a `!isConnected` element (the edited entry was removed upstream mid-edit) — cancels.
+// The `isConnected` guard lives here (hoisted into `onBlur`) so every session caller is structurally
+// protected from committing into an element Preact already unmounted.
 
 export interface EditableFieldParams {
   /** The stable identity this field edits (e.g. `qualifiedName` or `qualifiedName:propertyName`) —
@@ -29,6 +41,15 @@ export interface EditableFieldParams {
   /** Opt-in: let a cleared (blank) field commit `''` — e.g. deleting a Description is a real commit.
    *  Off by default: for names/types a blank value is invalid and resets instead. */
   commitBlank?: boolean;
+  /** Session mode only (ignored without `onCancel`): return `false` to reject `trimmed`. On Enter this
+   *  keeps the edit open and fires `onInvalid`; on blur it cancels the session instead of committing. */
+  validate?: (trimmed: string) => boolean;
+  /** Session mode only: an invalid commit ATTEMPT happened (a rejected Enter) — the caller shows its
+   *  invalid mark and keeps the edit open. */
+  onInvalid?: () => void;
+  /** Transient-session mode switch: when provided, the field is a temporary session that ENDED without
+   *  a commit — Escape, or a blur on a blank/invalid/unchanged value or a `!isConnected` element. */
+  onCancel?: () => void;
 }
 
 export interface EditableFieldProps<T extends HTMLInputElement | HTMLTextAreaElement> {
@@ -45,8 +66,11 @@ export interface EditableFieldProps<T extends HTMLInputElement | HTMLTextAreaEle
 export function useEditableField<T extends HTMLInputElement | HTMLTextAreaElement>(
   params: EditableFieldParams,
 ): EditableFieldProps<T> {
-  const { identity, value, onCommit, commitBlank = false } = params;
+  const { identity, value, onCommit, commitBlank = false, validate, onInvalid, onCancel } = params;
   const ref = useRef<T>(null);
+  // Session mode iff a caller opted in via `onCancel` (see the header note). In persistent mode every
+  // branch below is byte-identical to the pre-#1396 hook — `validate`/`onInvalid` are inert.
+  const session = onCancel !== undefined;
 
   // The identity-change safety net (see the header note). Runs after every render but only ACTS when
   // `identity` changed since the previous render — never on the field's own typing (uncontrolled typing
@@ -68,14 +92,42 @@ export function useEditableField<T extends HTMLInputElement | HTMLTextAreaElemen
       const el = e.currentTarget;
       if (e.key === 'Enter') {
         e.preventDefault();
+        // Session mode: an invalid name keeps the edit open (report it, don't blur) so the user can fix
+        // it in place; a valid one blurs and the commit rides the blur, exactly like persistent mode.
+        if (session && validate && !validate(el.value.trim())) {
+          onInvalid?.();
+          return;
+        }
         el.blur();
       } else if (e.key === 'Escape') {
-        el.value = value;
-        el.blur();
+        if (session) {
+          // No persistent field to reset to — the whole session ends.
+          e.preventDefault();
+          onCancel!();
+        } else {
+          el.value = value;
+          el.blur();
+        }
       }
     },
     onBlur: (e) => {
       const el = e.currentTarget;
+      if (session) {
+        // A transient session commits ONLY a valid, changed value; every other outcome cancels the
+        // session (the row disappears) rather than resetting a DOM value in place.
+        if (!el.isConnected) {
+          // The edited entry was removed upstream mid-edit — Preact already unmounted this element.
+          onCancel!();
+          return;
+        }
+        const next = el.value.trim();
+        if ((!next && !commitBlank) || (validate && !validate(next)) || next === value) {
+          onCancel!();
+          return;
+        }
+        onCommit(next);
+        return;
+      }
       const next = el.value.trim();
       if (next !== value && (next || commitBlank)) onCommit(next);
       else el.value = value;

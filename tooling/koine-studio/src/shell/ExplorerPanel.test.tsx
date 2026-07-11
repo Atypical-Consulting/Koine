@@ -1180,6 +1180,81 @@ describe('ExplorerPanel', () => {
       act(() => { input.dispatchEvent(new Event('blur')); });
       expect(cb.onRename).not.toHaveBeenCalled();
     });
+
+    // --- #1396 edge cases (pinned before the useEditableField migration so the behavior is proven
+    // identical across it): empty-name cancel, typing-clears-the-mark, blur-commits-a-valid-name, and
+    // arrow-keys-inside-the-input-don't-navigate-the-tree (the unconditional stopPropagation).
+    it('an empty name cancels an inline create on Enter without calling onNewFile', () => {
+      const cb = makeCallbacks();
+      const store = createAppStore();
+      const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      // Press Enter on the still-empty field.
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+      expect(cb.onNewFile).not.toHaveBeenCalled();
+      expect(container.querySelector('.explorer-create')).toBeNull(); // session closed
+    });
+
+    it('typing clears the invalid mark on an inline create', () => {
+      const cb = makeCallbacks();
+      const store = createAppStore();
+      const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      act(() => {
+        input.value = 'bad/name';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      expect(input.classList.contains('is-invalid')).toBe(true); // flagged, still open
+
+      act(() => {
+        input.value = 'good.koi';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(input.classList.contains('is-invalid')).toBe(false); // typing cleared the mark
+      expect(container.querySelector('.explorer-create')).not.toBeNull(); // still open
+    });
+
+    it('blur commits a valid inline create name (onNewFile) and closes the session', () => {
+      const cb = makeCallbacks();
+      const store = createAppStore();
+      const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      act(() => {
+        input.value = 'catalog.koi';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      // Real `.blur()` (not a synthetic Event) — this file transitively loads `preact/compat`, which
+      // listens for 'focusout'; see the sibling invalid-blur test's comment above for the full rationale.
+      act(() => { input.blur(); });
+
+      expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'catalog.koi');
+      expect(container.querySelector('.explorer-create')).toBeNull();
+    });
+
+    it('arrow keys inside the create input do not bubble to the tree (no tree navigation mid-edit)', () => {
+      const cb = makeCallbacks();
+      const store = createAppStore();
+      const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
+      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+
+      const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
+      expect(document.activeElement).toBe(input); // focused when the create row appears
+
+      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+
+      // If the keydown had bubbled to the tree's delegated handler, the roving tab stop would have moved
+      // to a real tree row; the unconditional stopPropagation keeps focus in the input.
+      expect(document.activeElement).toBe(input);
+      expect(cb.onOpenFile).not.toHaveBeenCalled();
+    });
   });
 
   // --- drag-and-drop move (#989 task 6): HTML5 DnD wired per-row (draggable + dragstart/dragover/

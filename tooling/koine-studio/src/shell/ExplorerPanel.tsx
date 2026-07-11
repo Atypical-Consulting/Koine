@@ -18,6 +18,7 @@ import { ExplorerItem, INVALID_NAME_TITLE, ItemIcon } from '@/shell/ExplorerItem
 import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 import { appStore, type AppState } from '@/store/index';
 import { useAppStore } from '@/store/hooks';
+import { useEditableField } from '@/shared/useEditableField';
 import {
   createFloatingMenu,
   createModal,
@@ -106,10 +107,11 @@ import {
 // see ExplorerPanel.test.tsx's "survives a changed re-render mid-edit" test. explorer.ts needed a whole
 // `renaming`/`creating` flag pair plus `flushPendingRender()` to defend against exactly this; here there
 // is nothing to defend, because keyed reconciliation makes the tear-down structurally impossible. The
-// commit/cancel/invalid-mark lifecycle (`commitEdit`/`cancelEdit`/`onEditBlur` below) still ports
-// explorer.ts's `wireInlineEdit` semantics 1:1 (Enter commits a valid name, Escape cancels, blur commits-
-// or-cancels, an invalid name stays open to fix) — see their doc comments for the one behavioral addition
-// (the `input.isConnected` blur guard) that keyed reconciliation itself doesn't remove the need for.
+// commit/cancel/invalid-mark lifecycle is owned by the shared `useEditableField` primitive in transient-
+// session mode (#1385/#1396 — see the call below): it ports explorer.ts's `wireInlineEdit` semantics 1:1
+// (Enter commits a valid name, Escape cancels, blur commits-or-cancels, an invalid name stays open) plus
+// the `input.isConnected` blur guard. The create input runs UNCONTROLLED off the hook's `ref`/
+// `defaultValue`; the rename input (rendered by `ExplorerItem`) stays CONTROLLED, keeping its `editValue`.
 //
 // DRAG-AND-DROP MOVE (#989 task 6): every row is draggable AND a drop target - a directory accepts a drop
 // INTO itself, a file routes to its own containing directory (so a drop onto a file row is never a dead
@@ -266,20 +268,15 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
   const treeRef = useRef<HTMLUListElement>(null);
 
   // The one open inline create/rename session (#989 task 5) — see {@link EditingState}. `editValue`/
-  // `editInvalid` are kept as SEPARATE state (not nested in `editing`) so typing a keystroke
-  // (`onEditInput`) never touches the `editing` object's own reference — that reference only changes
-  // twice per edit (start, end), which is what lets a mid-edit re-render (a `groups`/`cb` prop change
-  // from elsewhere) leave the same `<input>` DOM node mounted (see the file-header note above).
+  // `editInvalid` are SEPARATE state (not nested in `editing`) so a keystroke never touches the `editing`
+  // reference — it changes only twice per edit (start, end), letting a mid-edit re-render leave the same
+  // `<input>` DOM node mounted (see the file-header note above). `editValue` backs ONLY the CONTROLLED
+  // rename input (`ExplorerItem` binds `value=`); the create input runs UNCONTROLLED off the shared hook's
+  // `ref`/`defaultValue` (see the `useEditableField` call below) and reads no value state. `editInvalid`
+  // (the invalid-name mark) is shared by both inputs and clears on the next keystroke.
   const [editing, setEditing] = useState<EditingState>(null);
   const [editValue, setEditValue] = useState('');
   const [editInvalid, setEditInvalid] = useState(false);
-  // Autofocus target for the create-row's input — the rename input's own focus is handled inside
-  // `ExplorerItem` (it already owns the row's DOM), but the create row is built inline below, so its
-  // input needs the same "focus once, right when the row appears" treatment here instead.
-  const createInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (editing?.kind === 'create') createInputRef.current?.focus();
-  }, [editing]);
 
   // Debounce the filter — 110ms, mirroring explorer.ts's `setTimeout(applyFilter, 110)` — so each
   // keystroke doesn't re-derive visibility/highlighting for the whole tree. Keyed off the store's
@@ -581,7 +578,8 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
       expandExplorerTokens([parentDirToken]);
     }
     setEditing({ kind: 'create', parent: parentDirToken, entryKind: kind });
-    setEditValue('');
+    // No `editValue` seed — the create input is uncontrolled (see the hook call below); only the shared
+    // invalid mark needs resetting for the fresh session.
     setEditInvalid(false);
   };
   const startRename = (token: string): void => {
@@ -593,67 +591,71 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     setEditInvalid(false);
   };
 
-  // Shared commit — ported from explorer.ts's `wireInlineEdit`'s `tryCommit()`: an empty (trimmed) name
-  // cancels outright; an invalid one (see `invalidSegment`) is flagged and the edit STAYS OPEN so the
-  // user can fix it; otherwise the matching callback fires and the edit closes. A no-op rename (typed
-  // name unchanged) still closes the edit but skips `cb.onRename` — same as explorer.ts.
-  const commitEdit = (raw: string): void => {
-    if (!editing) return;
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      cancelEdit();
-      return;
-    }
-    if (invalidSegment(trimmed)) {
-      setEditInvalid(true);
-      return;
-    }
-    if (editing.kind === 'create') {
-      const { parent, entryKind } = editing;
-      setEditing(null);
-      if (entryKind === 'dir') cb.onNewFolder(parent, trimmed);
-      else cb.onNewFile(parent, trimmed);
-    } else {
-      const entry = entryIndex.entries.get(editing.token);
-      setEditing(null);
-      if (entry && trimmed !== entry.name) cb.onRename(entry, trimmed);
-    }
-  };
-  const cancelEdit = (): void => setEditing(null);
+  // The inline create/rename editor is the TRANSIENT-SESSION form of the shared editable-field primitive
+  // (#1385/#1396): one `useEditableField` call now owns the whole Enter/Escape/blur/validity/`isConnected`
+  // lifecycle the hand-rolled `commitEdit`/`cancelEdit`/`onEditBlur` cluster used to re-implement (the bug
+  // class #1385 exists to kill — see the hook's own header for the full session-mode matrix). `identity`/
+  // `value` derive from the open `editing` session; when none is open the field is inert (no input renders).
+  // Only a valid, CHANGED value commits (dispatching the matching `cb` once); Escape / a blank, invalid, or
+  // unchanged blur / a blur on an already-unmounted element all cancel.
+  const {
+    ref: editInputRef,
+    defaultValue: editSeedValue,
+    onKeyDown: editKeyDown,
+    onBlur: onEditBlur,
+  } = useEditableField<HTMLInputElement>({
+    identity:
+      editing == null
+        ? 'none'
+        : editing.kind === 'create'
+          ? `create:${editing.parent}:${editing.entryKind}`
+          : `rename:${editing.token}`,
+    // Create seeds blank; rename seeds the entry's current name — the committed value the hook's no-op
+    // (unchanged) check and its imperative identity-reset both compare against.
+    value: editing?.kind === 'rename' ? (entryIndex.entries.get(editing.token)?.name ?? '') : '',
+    validate: (s) => !invalidSegment(s),
+    onInvalid: () => setEditInvalid(true),
+    onCancel: () => setEditing(null),
+    onCommit: (next) => {
+      if (editing == null) return;
+      if (editing.kind === 'create') {
+        const { parent, entryKind } = editing;
+        setEditing(null);
+        if (entryKind === 'dir') cb.onNewFolder(parent, next);
+        else cb.onNewFile(parent, next);
+      } else {
+        // The hook only reaches `onCommit` for a valid, CHANGED value, so no `next !== entry.name` guard
+        // is needed here — a no-op rename already cancelled (closing the edit) without ever arriving.
+        const entry = entryIndex.entries.get(editing.token);
+        setEditing(null);
+        if (entry) cb.onRename(entry, next);
+      }
+    },
+  });
 
-  const onEditInput = (ev: JSX.TargetedEvent<HTMLInputElement>): void => {
-    setEditValue(ev.currentTarget.value);
-    setEditInvalid(false); // typing clears the invalid mark, mirrors explorer.ts's `input` listener
-  };
+  // The tree's ArrowUp/Down/Left/Right/Delete/Enter routing is ONE delegated handler on `ul[role="tree"]`;
+  // a keypress inside the edit input (arrow keys moving the text cursor, or a literal "Delete") must never
+  // reach it. Stop propagation unconditionally, THEN delegate Enter/Escape to the hook — ported from
+  // explorer.ts's `wireInlineEdit`'s own unconditional `ev.stopPropagation()`.
   const onEditKeyDown = (ev: JSX.TargetedKeyboardEvent<HTMLInputElement>): void => {
-    // Stop here so a keypress inside the edit input — notably Arrow keys used to move the text cursor,
-    // or a literal "Delete" character-delete — never bubbles to the tree's delegated `onTreeKeyDown` and
-    // gets misrouted as tree navigation or a delete-confirm. Ported from explorer.ts's `wireInlineEdit`'s
-    // unconditional `ev.stopPropagation()`.
     ev.stopPropagation();
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      commitEdit(ev.currentTarget.value);
-    } else if (ev.key === 'Escape') {
-      ev.preventDefault();
-      cancelEdit();
-    }
+    editKeyDown(ev);
   };
-  // Blur commits a valid name, else cancels — never traps the user in a bad-name row (explorer.ts's
-  // `wireInlineEdit`'s blur listener). Guarded by `isConnected` per the issue's design decision #3: if an
-  // upstream data change removed the edited entry (or its parent directory) out from under the user mid-
-  // edit, Preact will have already unmounted this `<input>` by the time any blur fires for it — treat
-  // that as a cancel, not a commit, since there is nothing left to rename/create into.
-  const onEditBlur = (ev: JSX.TargetedFocusEvent<HTMLInputElement>): void => {
-    const input = ev.currentTarget;
-    if (!input.isConnected) {
-      setEditing(null);
-      return;
-    }
-    const raw = input.value.trim();
-    if (raw && !invalidSegment(raw)) commitEdit(raw);
-    else cancelEdit();
+  // Typing clears the invalid mark (mirrors explorer.ts's `input` listener). The create input runs
+  // uncontrolled (clearing the mark is all it needs); the rename input is CONTROLLED by `ExplorerItem`, so
+  // it additionally tracks `editValue` here (see `renaming` in `renderEntry`).
+  const onCreateInput = (): void => setEditInvalid(false);
+  const onRenameInput = (ev: JSX.TargetedEvent<HTMLInputElement>): void => {
+    setEditValue(ev.currentTarget.value);
+    setEditInvalid(false);
   };
+
+  // Autofocus the create-row input the moment its row appears — the rename input's focus + stem-preselect
+  // are owned by `ExplorerItem` (it renders that input), but the create row is built inline below, so it
+  // focuses here via the hook's exposed `ref`.
+  useEffect(() => {
+    if (editing?.kind === 'create') editInputRef.current?.focus();
+  }, [editing, editInputRef]);
 
   // The shared confirm dialog (#989 task 4), ported from explorer.ts's openConfirm()/confirmDelete():
   // resolves true on the danger OK button, false on Cancel/Escape/backdrop-click (createModal's own
@@ -846,7 +848,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
             beginCreate, which never re-classifies the icon off the in-progress name. */}
         <ItemIcon kind={kind} name={kind === 'dir' ? 'new folder' : 'new.koi'} expanded={false} />
         <input
-          ref={createInputRef}
+          ref={editInputRef}
           type="text"
           class={editInvalid ? 'explorer-rename is-invalid' : 'explorer-rename'}
           id="koi-explorer-new"
@@ -855,8 +857,8 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
           aria-label={kind === 'dir' ? 'New folder name' : 'New file name'}
           title={editInvalid ? INVALID_NAME_TITLE : undefined}
           spellcheck={false}
-          value={editValue}
-          onInput={onEditInput}
+          defaultValue={editSeedValue}
+          onInput={onCreateInput}
           onKeyDown={onEditKeyDown}
           onBlur={onEditBlur}
           onClick={(e: JSX.TargetedMouseEvent<HTMLInputElement>) => e.stopPropagation()}
@@ -909,7 +911,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
     }
 
     const renaming = editing?.kind === 'rename' && editing.token === entry.token
-      ? { value: editValue, invalid: editInvalid, onInput: onEditInput, onKeyDown: onEditKeyDown, onBlur: onEditBlur }
+      ? { value: editValue, invalid: editInvalid, onInput: onRenameInput, onKeyDown: onEditKeyDown, onBlur: onEditBlur }
       : undefined;
 
     // --- drag-and-drop move (#989 task 6): per-row handlers -----------------------------------------------
