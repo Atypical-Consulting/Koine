@@ -860,11 +860,16 @@
   display: none;
   flex-direction: column;
   align-items: center;
-  gap: var(--koi-space-1);
-  padding: var(--koi-space-2) var(--koi-space-1);
+  /* Seat the spine on the same 36px grid as the right-edge tool-window stripe (#right-strip, #1426): a
+     28px .lstrip-btn in a 36px box means 4px of block padding and an 8px gap (28 + 8 = 36px pitch), so the
+     FIRST icon centres at 4 + 14 = 18px — level with the Overview icon, #right-header, and the right
+     stripe's first icon — so the two rail edges share the shell's top-row rhythm. */
+  gap: var(--koi-space-2);
+  padding: var(--koi-space-1);
 }
 
 .lstrip-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -886,10 +891,24 @@
   outline: 2px solid var(--koi-accent);
   outline-offset: 1px;
 }
+/* Pressed state mirrors the right stripe's .rstrip-btn (#500): the icon inks to full foreground over a
+   faint accent tint, and a short accent bar marks the active toggle. The bar sits on the RIGHT (the mirror
+   of the right stripe's LEFT bar) — the navigator this toggle re-opens is to the spine's right. */
 .lstrip-btn[aria-pressed='true'] {
+  color: var(--koi-fg);
   background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
-  border-color: var(--koi-accent);
-  color: var(--koi-accent);
+  border-color: transparent;
+}
+.lstrip-btn[aria-pressed='true']::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 1.1rem;
+  border-radius: var(--koi-radius-2xs);
+  background: var(--koi-accent-grad);
 }
 
 .lstrip-expand {
