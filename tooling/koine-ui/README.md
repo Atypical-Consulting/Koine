@@ -93,6 +93,8 @@ host coupling):
 | `ExportMenu` | The diagram "Export ▾" floating menu — a native `<details>` disclosure offering SVG / PNG / PlantUML export plus "copy Mermaid source". |
 | `AssistantView` (+ `ASSISTANT_MOUNT_CLASS`) | A thin Preact host that renders a single mount node once and never re-renders it, so a host can attach an imperative AI-chat panel into it without Preact and the panel fighting over reconciliation. |
 | `LeftRail` | A left sidebar's markup as a Preact component: a labelled Domain·Files axis switch over one navigator host, rendered once so imperative children mounted into it are never reconciled away. |
+| `SortableTable` (`SortableTableColumn`, `SourceSpan`, `TableHandlers`) | A generic, store-free sortable model table (numeric-aware, case-insensitive sort with `aria-sort`; jump-to-source rows). Rows are keyed on a caller-supplied `rowKey` (#1382), and the current sort survives a re-render with a fresh `rows` array (#992). Shared by the migrated `EventsPanel`/`RelationshipsPanel` (issue #1408). |
+| `useCommittableField` (`CommittableField`) *(hook)* | The controlled explicit edit-mode primitive behind an inline description editor: open-time capture + cancel-adopts / commit-wins semantics (#1385/#1398) so a Cancel/Escape after a Save reverts to the just-saved value, never a stale prop. Used by the migrated `GlossaryPanel` (issue #1408). |
 
 Each component's own doc comment (at the top of its `.tsx` file) has the full design rationale,
 including what was deliberately generalized when it was extracted from Koine Studio (e.g.
@@ -106,9 +108,9 @@ without this package depending on that store):
 | `ReadableStore<T>` | A minimal `{ getState(): T; subscribe(listener): () => void }` interface — the seam a component depends on INSTEAD of a concrete store type. Any host (Koine Studio's Zustand `StoreApi<AppState>`, a future embedding) satisfies it via its own adapter. |
 | `useReadableStore(store)` | The Preact hook a component calls to subscribe to a `ReadableStore<T>`'s slice and re-render on change — the `koine-ui`-side counterpart to Zustand's `useStore(store, selector)`, without importing Zustand. |
 
-**Store-coupled components via `ReadableStore<T>`** (issue #944's prototype targets plus issue
-#1244's third tranche — each takes a `store: ReadableStore<SomeSlice>` prop instead of Koine
-Studio's `StoreApi<AppState>`):
+**Store-coupled components via `ReadableStore<T>`** (issue #944's prototype targets, issue #1244's
+third tranche, and issue #1408's fourth tranche of bottom-dock model panels — each takes a
+`store: ReadableStore<SomeSlice>` prop instead of Koine Studio's `StoreApi<AppState>`):
 
 | Component | What it does |
 | --- | --- |
@@ -117,6 +119,9 @@ Studio's `StoreApi<AppState>`):
 | `UnsavedIndicator` | The status-bar "N unsaved" pill + document-title bullet. Renders no tree of its own — it OWNS the host page's static button via effects, driven by `ReadableStore<UnsavedIndicatorSlice>` (`{ dirtyCount }` — the host's adapter counts the dirty buffers, so this package never sees the buffer collection). |
 | `DiagnosticsStripPanel` | The editor's diagnostics strip: a count summary + one clickable row per diagnostic. Driven by `ReadableStore<DiagnosticsStripSlice>` (`{ scoped, rows, count, kind }` — already scoped to the active bounded context, severity-classified AND count-formatted by the host's adapter). |
 | `DocsPanelHost` | The folder-derived Documentation page host (Decisions/Notes): captures its mount node for the controller on first mount, reloads ONLY on a workspace-folder change. Driven by `ReadableStore<DocsPanelHostSlice>` (`{ folderRootToken }` — an opaque folder identity). |
+| `RelationshipsPanel` | The bottom-dock structural-relations table (Source · Relation · Target · Contexts). Driven by `ReadableStore<RelationshipsPanelSlice>` (`{ rows }` — the host adapter pre-scopes the merged diagram graph to the active bounded context and pre-extracts plain `RelationRowView` rows, so this package never sees `DiagramGraph`). |
+| `GlossaryPanel` | The ubiquitous-language editor: a documentation-coverage gauge + per-context concept rows with inline description editors. Driven by `ReadableStore<GlossaryPanelSlice>` (`{ groups, coverage }` — pre-scoped, grouped, and coverage-computed host-side); edit handlers arrive as `GlossaryHandlers` callback props and rows edit via the same-package `useCommittableField`. |
+| `EventsPanel` | The bottom-dock events view with a Table \| Flow toggle. Driven by `ReadableStore<EventsPanelSlice>` (`{ rows, scopeKey, flowNodes }` — pre-scoped table rows + flow legend nodes). The maxGraph flow CANVAS stays host-side via an injected `FlowRenderer` callback (`(host, scopeKey) => { dispose() }`); maxGraph never enters this package. |
 
 ### The host-adapter pattern — when to reach for it, and how
 
@@ -205,12 +210,13 @@ are **permanent exclusions**: they have no meaningful behavior on a host without
 there's no generic contract worth designing for them.
 
 The remaining store/host-coupled panels not yet migrated (`PropertiesPanel`, `SourceControlPanel`,
-`DeckStage`, `StoreInspector`, `CanvasPalette`, `EventsPanel`, `GlossaryPanel`,
-`RelationshipsPanel`, `settingsPage`, and `AssistantView`'s sibling panels) are candidates for a
-**next-tranche follow-up** using the host-adapter pattern above — `EventsPanel` / `GlossaryPanel` /
-`RelationshipsPanel` look like the next-best batch now that issue #1244's third tranche
-(`UnsavedIndicator`, `DiagnosticsStripPanel`, `DocsPanelHost`) has landed; see issue #944's Task 1
-audit comment for the full per-component coupling breakdown.
+`DeckStage`, `StoreInspector`, `CanvasPalette`, `settingsPage`, and `AssistantView`'s sibling panels)
+are candidates for a **fifth-tranche follow-up** using the host-adapter pattern above, now that issue
+#1408's fourth tranche of bottom-dock model panels (`RelationshipsPanel`, `GlossaryPanel`,
+`EventsPanel` — plus the shared `SortableTable` / `useCommittableField` they lean on) has landed on
+top of issue #1244's third tranche (`UnsavedIndicator`, `DiagnosticsStripPanel`, `DocsPanelHost`).
+`PropertiesPanel` / `SourceControlPanel` look like the next-best batch; see issue #944's Task 1 audit
+comment for the full per-component coupling breakdown.
 
 ## Development
 
