@@ -104,7 +104,9 @@
   --koi-diagram-edge: #5d6b8e;
   /* text */
   --koi-fg: #d6dde8;
-  --koi-muted: #7d8694;
+  /* #858e9c, not #7d8694 — the latter measures ~4.31:1 on --koi-surface, under WCAG AA 4.5:1
+     (issue #991 / PR #1416). */
+  --koi-muted: #858e9c;
   --koi-ink-soft: #aeb8c6;
   /* accents */
   --koi-accent: #5aa9ff;
