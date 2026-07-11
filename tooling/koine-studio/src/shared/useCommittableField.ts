@@ -14,7 +14,12 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 //    canonical re-render of just-saved content) refreshes both the idle draft and the revert target —
 //    so `openEditor()` always works from the value current at CALL time, never one frozen at mount.
 //  - While EDITING, a prop change is absorbed without touching the draft or the open-time revert
-//    target — an external refresh can never clobber an in-progress edit.
+//    target — an external refresh can never clobber an in-progress edit — but it IS remembered as a
+//    `pendingExternal` value: `cancel()` (and Escape) adopts it, showing the latest committed truth
+//    instead of the open-time snapshot; `commit()` discards it, since the user's explicit save is the
+//    newer truth and must not be silently overridden by a background refresh (cancel-adopts /
+//    commit-wins — issue #1398). `openEditor()` clears any stale pending value so a previous edit
+//    session can't leak into a new one.
 //
 // No `identity`/`key` concept here (unlike `useEditableField`): each row of this family is its own
 // component instance, isolated by its parent list's `key`, so cross-element leakage isn't this
@@ -53,6 +58,10 @@ export function useCommittableField(params: {
   // The revert target: what this hook last saw committed — seeded from the prop, then owned by
   // commit() (and refreshed from a genuine idle-time prop change below). cancel() reads ONLY this.
   const committedRef = useRef(committedValue);
+  // A mid-edit external change, remembered but not yet acted on — cancel() adopts it, commit() and
+  // openEditor() discard it. `string | null` (not falsiness) so an empty-string external value is a
+  // valid pending value, distinct from "none pending".
+  const pendingExternal = useRef<string | null>(null);
 
   // Absorb committedValue prop changes. `lastSeen` tracks the prop across renders so the sync fires
   // only on a GENUINE prop change — never on a re-render caused by the hook's own setDraft/commit
@@ -61,13 +70,22 @@ export function useCommittableField(params: {
   useEffect(() => {
     if (lastSeen.current === committedValue) return;
     lastSeen.current = committedValue;
-    if (editing) return; // never clobber an in-progress edit or its open-time revert target
+    if (editing) {
+      pendingExternal.current = committedValue; // remembered for cancel() to adopt; draft/revert untouched
+      return;
+    }
     committedRef.current = committedValue;
     setDraft(committedValue);
   }, [committedValue, editing]);
 
   const cancel = (): void => {
-    setDraft(committedRef.current); // the internal ref — never a (possibly stale) prop
+    if (pendingExternal.current !== null) {
+      committedRef.current = pendingExternal.current;
+      setDraft(pendingExternal.current); // cancel-adopts: show the latest external truth
+      pendingExternal.current = null;
+    } else {
+      setDraft(committedRef.current); // the internal ref — never a (possibly stale) prop
+    }
     setEditing(false);
   };
 
@@ -79,9 +97,11 @@ export function useCommittableField(params: {
       // Capture the currently shown value (possibly just-saved, ahead of a stale prop) as the revert
       // target — mirrors GlossaryEntryRow's original `originalRef.current = draft` capture-on-open.
       committedRef.current = draft;
+      pendingExternal.current = null; // a previous session's pending value must not leak into this one
       setEditing(true);
     },
     commit: (): void => {
+      pendingExternal.current = null; // commit-wins: the user's explicit save overrides any pending refresh
       onCommit(draft);
       const trimmed = draft.trim();
       committedRef.current = trimmed;
