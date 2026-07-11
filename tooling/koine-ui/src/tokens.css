@@ -66,7 +66,11 @@
 
   /* text */
   --koi-fg: #d6dde8;
-  --koi-muted: #7d8694;
+  /* Lightened #7d8694 → #858e9c so small muted text clears WCAG AA 4.5:1 on the dark card surfaces
+     (--koi-surface #1c2230 and the selected-card #172333, where #7d8694 sat at 4.31–4.32:1). #858e9c
+     gives 4.79:1 there and more on every darker surface; the light-theme value (#5b6573) already
+     clears 4.5:1 on its surfaces. Surfaced by the #991 panel a11y stories. */
+  --koi-muted: #858e9c;
   --koi-ink-soft: #aeb8c6;
 
   /* accents */
