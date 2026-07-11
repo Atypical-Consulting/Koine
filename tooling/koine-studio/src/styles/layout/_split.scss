@@ -71,8 +71,13 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--koi-space-1);
-  padding: var(--koi-space-2) var(--koi-space-1);
+  /* Stack the stripe as 36px icon boxes so it shares the shell's top-row rhythm: the deck-bar (Overview)
+     and #right-header are both 36px, so the FIRST stripe icon must centre on that same 18px line. A 28px
+     (.rstrip-btn) button in a 36px box means 4px of block padding at top/bottom and an 8px gap between
+     buttons (28 + 8 = 36px pitch) — the first icon then centres at 4 + 14 = 18px, level with the Overview
+     icon, and every icon below keeps the 36px cadence. */
+  gap: var(--koi-space-2);
+  padding: var(--koi-space-1);
   background: var(--koi-paper-2);
   border-left: 1px solid var(--koi-line);
   /* Override .pane's overflow:hidden so the buttons' left-pointing tooltips (_inspector.scss) can spill
