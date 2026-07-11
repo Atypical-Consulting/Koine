@@ -35,16 +35,16 @@
   <a href="https://github.com/Atypical-Consulting/Koine/stargazers"><img alt="Star Koine on GitHub" src="https://img.shields.io/github/stars/Atypical-Consulting/Koine?style=social" /></a>
 </p>
 
-<!-- Hero media. Placeholder = the live Studio screenshot; swapped for an animated demo (assets/koine-demo.gif) once the Remotion cut is rendered. -->
+<!-- Animated demo rendered from tooling/koine-demo (Remotion). Re-render with `npm run render:gif` there. -->
 <p align="center">
   <a href="https://atypical-consulting.github.io/Koine/studio/">
-    <img src="assets/koine-studio.png" width="100%"
-         alt="Koine Studio: a .koi domain model on the left, the C# it compiles to on the right, with no diagnostics — running entirely in the browser." />
+    <img src="assets/koine-demo.gif" width="100%"
+         alt="One Koine .koi model on the left compiling to idiomatic C#, TypeScript, Python and Rust on the right — value objects, entities, aggregates and invariants generated from the same source." />
   </a>
 </p>
 
 <p align="center">
-  <em>Your <code>.koi</code> model (left) and the code it compiles to (right), live in your browser — <a href="https://atypical-consulting.github.io/Koine/studio/">try it now, zero install</a>.</em>
+  <em>Write one <code>.koi</code> model; get idiomatic code in seven languages — live in your browser, <a href="https://atypical-consulting.github.io/Koine/studio/">zero install</a>.</em>
 </p>
 
 ## Table of Contents
