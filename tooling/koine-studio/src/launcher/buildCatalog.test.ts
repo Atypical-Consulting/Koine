@@ -243,6 +243,29 @@ describe('buildCatalog — commands', () => {
       },
     ]);
   });
+
+  // A command's `enabled()` (issue #1407) is the SECOND, independent activatability axis — a command
+  // can be visible (when()/isEnabled already decided that before it ever reaches buildCatalog) but not
+  // currently activatable, e.g. open-folder/new-model while a workspace-open op is busy. It must be
+  // carried through to the entry so the launcher's result row can render the busy-gated affordance —
+  // dropping it silently would regress a busy-gated command back to a plain runnable row.
+  test('carries a command\'s enabled() predicate through onto its action entry, live (not snapshotted)', async () => {
+    let busy = true;
+    const gated: Command = {
+      id: 'open-folder', title: 'Open folder…', group: 'File', run: () => {}, enabled: () => !busy,
+    };
+    const catalog = await buildCatalog({ ...sourcesWithGit, commands: () => [gated] });
+    const entry = catalog.find((e) => e.cat === 'action')!;
+
+    expect(entry.enabled?.()).toBe(false);
+    busy = false; // the same live predicate, called again, reflects the workspace op finishing
+    expect(entry.enabled?.()).toBe(true);
+  });
+
+  test('a command with no enabled() field carries no `enabled` predicate (always activatable)', async () => {
+    const actions = (await buildCatalog(sourcesWithGit)).filter((e) => e.cat === 'action');
+    expect(actions.every((e) => e.enabled === undefined)).toBe(true);
+  });
 });
 
 describe('buildCatalog — files', () => {

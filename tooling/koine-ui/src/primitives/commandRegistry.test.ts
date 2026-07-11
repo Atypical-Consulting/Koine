@@ -164,7 +164,60 @@ describe('run', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Command interface shape — optional fields
+// 4. enabled() / isActivatable — the activatability axis (issue #1407)
+// ---------------------------------------------------------------------------
+
+describe('isActivatable', () => {
+  test('a command with enabled: () => false is activatable=false but still isEnabled (visible)', () => {
+    const registry = createCommandRegistry();
+    registry.register(cmd('gated', 'Gated', { enabled: () => false }));
+    expect(registry.isActivatable('gated')).toBe(false);
+    expect(registry.isEnabled('gated')).toBe(true);
+  });
+
+  test('a command with no enabled field is activatable by default', () => {
+    const registry = createCommandRegistry();
+    registry.register(cmd('plain', 'Plain'));
+    expect(registry.isActivatable('plain')).toBe(true);
+  });
+
+  test('a command with enabled: () => true is activatable', () => {
+    const registry = createCommandRegistry();
+    registry.register(cmd('yes', 'Yes', { enabled: () => true }));
+    expect(registry.isActivatable('yes')).toBe(true);
+  });
+
+  test('a command whose when() is false is not activatable even if enabled() is true', () => {
+    const registry = createCommandRegistry();
+    registry.register(cmd('hidden', 'Hidden', { when: () => false, enabled: () => true }));
+    expect(registry.isActivatable('hidden')).toBe(false);
+  });
+
+  test('returns false for an unknown id', () => {
+    const registry = createCommandRegistry();
+    expect(registry.isActivatable('ghost')).toBe(false);
+  });
+});
+
+describe('run — activatability guard', () => {
+  test('run() does NOT invoke run() when enabled() returns false', () => {
+    const registry = createCommandRegistry();
+    const c = cmd('gated', 'Gated', { enabled: () => false });
+    registry.register(c);
+    registry.run('gated');
+    expect(c.run).not.toHaveBeenCalled();
+  });
+
+  test('run() is a guarded no-op (does not throw) when enabled() returns false', () => {
+    const registry = createCommandRegistry();
+    const c = cmd('gated', 'Gated', { enabled: () => false });
+    registry.register(c);
+    expect(() => registry.run('gated')).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Command interface shape — optional fields
 // ---------------------------------------------------------------------------
 
 describe('Command interface optional fields', () => {

@@ -204,6 +204,11 @@ function commandEntries(commands: Command[]): CatalogEntry[] {
     keywords: keywordsOf(cmd.title, cmd.group),
     cmdId: cmd.id,
     hint: cmd.hint,
+    // The live activatability predicate (issue #1407) — carried through so the result row can render a
+    // busy-gated command (e.g. open-folder/new-model while a workspace op is running) as
+    // visible-but-disabled instead of a plain runnable row that silently no-ops. See catalog.ts's field
+    // doc for the when()-vs-enabled() axis distinction.
+    enabled: cmd.enabled,
   }));
 }
 

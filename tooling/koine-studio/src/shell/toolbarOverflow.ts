@@ -16,6 +16,16 @@ export interface OverflowMenuItem {
   label: string;
   /** Activate the action. */
   run: () => void;
+  /**
+   * Render as visible-but-disabled (issue #1407): forwarded straight to `createFloatingMenu`'s own
+   * `FloatingMenuItem.disabled`, which renders a native `disabled` `<button>` (excluded from the menu's
+   * roving-focus/keyboard-nav set, no click listener attached at all — see floatingMenu.ts). None of the
+   * commands `buildOverflowItems` currently maps (Save to disk / Check / Theme / Settings) carry an
+   * `enabled()` gate, so this is defense-in-depth for a future command this menu starts reusing that
+   * does (mirrors the launcher's/palette's identical disabled-row affordance for the SAME reason: a
+   * busy-gated command must never render as a plain, silently-inert row).
+   */
+  disabled?: boolean;
 }
 
 export interface OverflowItemDeps {
@@ -47,7 +57,26 @@ export function buildOverflowItems(deps: OverflowItemDeps): OverflowMenuItem[] {
   const byId = new Map(deps.commands.map((c) => [c.id, c]));
   const fromCmd = (id: string, label: string): OverflowMenuItem | null => {
     const cmd = byId.get(id);
-    return cmd ? { id, label, run: () => cmd.run() } : null;
+    if (!cmd) return null;
+    // Command.enabled() is the SECOND, independent activatability axis (issue #1407) — when()/isEnabled
+    // already decided whether `cmd` is even in `deps.commands` at all. Absent enabled() ⇒ always
+    // activatable, matching the registry's own default. Defined once, called at both spots below that
+    // need it (mechanical dedup, issue #1407 review — was spelled two different ways): the item's
+    // initial `disabled` flag AND `run()`'s own re-check at activation time (not just the flag baked in
+    // here) — createFloatingMenu already refuses to wire a click handler for a `disabled: true` item,
+    // but a gated command's state can flip between this menu being built and an item inside it being
+    // activated, so `run()` re-checks fresh, the same belt-and-suspenders every other consumer of
+    // `Command.enabled()` applies (palette.ts's `runAt()`, the launcher's `runDefault()`).
+    const isDisabled = (): boolean => cmd.enabled != null && !cmd.enabled();
+    return {
+      id,
+      label,
+      run: () => {
+        if (isDisabled()) return;
+        cmd.run();
+      },
+      disabled: isDisabled(),
+    };
   };
   const items: Array<OverflowMenuItem | null> = [
     fromCmd(SAVE_CMD, 'Save to disk'),

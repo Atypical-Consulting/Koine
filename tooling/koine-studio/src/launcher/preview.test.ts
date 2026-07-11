@@ -117,6 +117,20 @@ describe('actionPreview', () => {
     const vm = actionPreview({ title: 'Open Settings' });
     expect(vm.meta).toBeUndefined();
   });
+
+  // Code-review follow-up (issue #1407): a busy-gated command (open-folder/new-model) stays visible
+  // but disabled while a workspace op is running — previewing it must not tell the user "Press ↵ to
+  // run." when Enter is now a guarded no-op for that row.
+  test('swaps the note for a disabled entry instead of the misleading "Press ↵ to run."', () => {
+    const vm = actionPreview({ title: 'Open folder…', disabled: true });
+    expect(vm.note).not.toBe('Press ↵ to run.');
+    expect(vm.note).toBe('Unavailable right now.');
+  });
+
+  test('an enabled entry keeps the "Press ↵ to run." note unchanged', () => {
+    const vm = actionPreview({ title: 'Generate' });
+    expect(vm.note).toBe('Press ↵ to run.');
+  });
 });
 
 describe('filePreview', () => {
@@ -224,6 +238,16 @@ describe('previewFor — dispatch', () => {
     const vm = previewFor(entry, {});
     expect(vm?.header.name).toBe('Generate');
     expect(vm?.meta).toContainEqual(['Shortcut', '⌘↵']);
+    expect(vm?.note).toBe('Press ↵ to run.');
+  });
+
+  // Code-review follow-up (issue #1407): a busy-gated command entry carries `enabled: () => false`
+  // (the same activatability axis ResultRow.tsx renders as `lx-item--disabled`) — the dispatched
+  // preview must reflect that in its note instead of always promising "Press ↵ to run."
+  test('action: reads entry.enabled() to swap the note when the entry is disabled', () => {
+    const entry: CatalogEntry = { id: 'cmd:open-folder', cat: 'action', title: 'Open folder…', enabled: () => false };
+    const vm = previewFor(entry, {});
+    expect(vm?.note).toBe('Unavailable right now.');
   });
 
   test('file: reconstructs the relative path from sub + title when no ctx.file is given', () => {
