@@ -244,14 +244,19 @@ public sealed class WorkspaceIndex
     /// token-text match sweeps in the other context's coincidentally-same-named declaration too.
     ///
     /// <para>Applies only to a <see cref="TypeSymbol"/>/<see cref="SpecSymbol"/> target — each is
-    /// declared exactly ONCE and interned as a single, workspace-stable instance, so a candidate can be
-    /// RE-RESOLVED at its own position (the exact same local-file-first-then-workspace-fallback walk
-    /// <see cref="ResolveTarget"/> performs for the cursor) and kept only when that resolves to the
-    /// EXACT SAME symbol instance. A candidate whose OWN file independently (re-)declares the same name
-    /// resolves LOCALLY to THAT file's own, different declaration and is excluded; a genuine cross-file
-    /// reference reached via <c>import</c> resolves, through the binder, to the SAME shared instance and
-    /// stays included. This is the same identity-scoping <see cref="IdentityReferences"/>/
-    /// <see cref="EnumMemberReferences"/> already apply to member/enum-member targets.</para>
+    /// declared exactly ONCE and interned as a single, workspace-stable instance. A candidate is
+    /// RE-RESOLVED at its own position, but only via <see cref="ResolveLocalTarget"/> (that file's OWN
+    /// model, no workspace-wide fallback): a candidate whose OWN file independently (re-)declares the
+    /// same name resolves LOCALLY to THAT file's own, different declaration and is excluded; a
+    /// candidate that resolves LOCALLY to the SAME instance (e.g. same-context resolution) stays
+    /// included; a candidate its OWN file cannot classify at all — a genuine cross-file reference
+    /// reached only via <c>import</c>, which the per-file binder cannot bind to a shared instance — is
+    /// conservatively KEPT, exactly like <see cref="FindReferences"/>'s existing "unclassifiable ⇒ keep"
+    /// philosophy (using the ambiguous workspace-wide <see cref="ResolveTarget"/> fallback here instead
+    /// would pick an ARBITRARY same-named declaration whenever ≥2 unrelated files declare one, wrongly
+    /// dropping the genuine reference). This is the same identity-scoping <see cref="IdentityReferences"/>/
+    /// <see cref="EnumMemberReferences"/> already apply to member/enum-member targets, adapted for a
+    /// candidate that may not be locally resolvable at all.</para>
     ///
     /// <para>An <see cref="IdValueObjectSymbol"/> target is deliberately left on <see cref="FindReferences"/>'s
     /// existing, unscoped text match: unlike a declared type, the <c>*Id</c> convention synthesizes an
@@ -261,7 +266,7 @@ public sealed class WorkspaceIndex
     /// the naming convention" ergonomic (<c>Rename_of_a_type_still_updates_all_references_across_files</c>)
     /// relies on exactly that unscoped match and must keep working.</para>
     /// </summary>
-    public IReadOnlyList<Reference> FindReferencesInOwnContext(string activeUri, string name, int? offset, string? enclosingType)
+    public IReadOnlyList<Reference> FindReferencesInOwnContext(string activeUri, string name, int? offset = null, string? enclosingType = null)
     {
         Symbol? target = ResolveTarget(activeUri, name, offset, enclosingType);
         if (target is not (TypeSymbol or SpecSymbol))
@@ -283,8 +288,8 @@ public sealed class WorkspaceIndex
                     continue;
                 }
 
-                Symbol? resolved = ResolveTarget(uri, name, tok.StartIndex, enclosingType: null);
-                if (resolved is not null && SymbolEqualityComparer.Default.Equals(resolved, target))
+                Symbol? resolved = ResolveLocalTarget(uri, name, tok.StartIndex, enclosingType: null);
+                if (resolved is null || SymbolEqualityComparer.Default.Equals(resolved, target))
                 {
                     refs.Add(ToReference(uri, tok));
                 }
@@ -300,11 +305,20 @@ public sealed class WorkspaceIndex
     /// so the rename must be rejected. The check is keyed by the target's KIND, never by bare name, so
     /// an unrelated same-named declaration in a different namespace does NOT block the rename:
     /// <list type="bullet">
-    /// <item><b>Type / spec / ID</b> (the type namespace): collides only with an existing
-    /// type/spec/ID of <paramref name="newName"/> declared in the target's OWN bounded context (#1376)
-    /// — a same-named enum member/field, or the SAME-named type in an UNRELATED context (legal per
-    /// <c>SemanticValidator</c> — two contexts may each declare their own <c>Cash</c>), never blocks
-    /// it.</item>
+    /// <item><b>Type / spec:</b> collides with an existing type/spec/ID of <paramref name="newName"/>
+    /// declared in the target's OWN bounded context (#1376) — a same-named enum member/field, or the
+    /// SAME-named type in an UNRELATED context (legal per <c>SemanticValidator</c> — two contexts may
+    /// each declare their own <c>Cash</c>), never blocks it. A candidate collision that is ITSELF an
+    /// <see cref="IdValueObjectSymbol"/> always blocks, unscoped (see next item for why).</item>
+    /// <item><b>ID value object:</b> collides with an existing type/spec/ID of <paramref name="newName"/>
+    /// ANYWHERE in the workspace — deliberately NOT context-scoped. Unlike a declared type/spec, the
+    /// <c>*Id</c> convention synthesizes an INDEPENDENT symbol instance in every file that merely
+    /// REFERENCES a <c>*Id</c>-suffixed name (even one with no local owning entity — see
+    /// <c>SymbolTable</c>'s convention-only fallback, which picks an ARBITRARY context from that
+    /// file), so its <see cref="Symbol.ContainingSymbol"/> is not a reliable "true" owning context —
+    /// scoping by it would let a rename invoked from a bare reference site (no local declaration)
+    /// silently bypass a collision that the SAME rename, invoked from the declaring entity's own file,
+    /// correctly blocks. Same reasoning <see cref="FindReferencesInOwnContext"/> excludes it for.</item>
     /// <item><b>Enum member:</b> collides only with a sibling member of the SAME owning enum — a
     /// same-named member in a different enum, or a same-named type, never blocks it.</item>
     /// <item><b>Member (field):</b> collides only with another member of the SAME owning type.</item>
@@ -323,14 +337,14 @@ public sealed class WorkspaceIndex
         switch (target)
         {
             // Type namespace: a declared type, a spec, or an ID value object all share one namespace.
-            // Block only when newName already names one of those WITHIN THE SAME bounded context as
-            // the renamed symbol — an unrelated context's own same-named declaration must not block it.
+            // Type/spec targets are scoped to their own context (#1376); an Id target — or an Id
+            // candidate on the other side — stays unscoped (see the doc comment above for why).
             case TypeSymbol or SpecSymbol or IdValueObjectSymbol:
-                var ownerContext = OwningContextName(target);
+                var ownerContext = target is IdValueObjectSymbol ? null : OwningContextName(target);
                 return _byUri.Values
                     .Select(sema => sema.GetSymbol(newName))
                     .Any(s => s is TypeSymbol or SpecSymbol or IdValueObjectSymbol
-                        && (ownerContext is null || OwningContextName(s) == ownerContext));
+                        && (ownerContext is null || s is IdValueObjectSymbol || OwningContextName(s) == ownerContext));
 
             // Enum member: block only when the SAME owning enum already declares newName, looked up
             // within the model that OWNS the target (the active document) — so a same-simple-name
@@ -429,42 +443,62 @@ public sealed class WorkspaceIndex
     /// the precise position→node resolution first (so a field reference inside an expression
     /// resolves to its member, and a declaration site resolves to its OWN declaration even when its
     /// name collides with another — e.g. an enum member vs a same-named type), then the
-    /// lexically-scoped name lookup. <c>null</c> when the cursor is not on a renameable name.
+    /// lexically-scoped name lookup, then a workspace-wide fallback for a name with no local
+    /// resolution at all (<see cref="ResolveLocalTarget"/>'s doc explains why that fallback is only
+    /// safe for a precise, user-supplied cursor position, not for scoring an arbitrary candidate
+    /// token). <c>null</c> when the cursor is not on a renameable name.
     /// </summary>
-    private Symbol? ResolveTarget(string activeUri, string name, int? offset, string? enclosingType)
-    {
-        if (_byUri.TryGetValue(activeUri, out SemanticModel? active))
-        {
-            if (offset is { } off && active.DefinitionAt(off) is { } byOffset)
-            {
-                return byOffset;
-            }
-
-            // The cursor sits on a declaration's own name: resolve to THAT declaration by position,
-            // so a same-named collision (enum member vs type) does not mis-target the rename.
-            if (offset is { } declOff && active.DeclaredSymbolAt(declOff) is { } byDecl)
-            {
-                return byDecl;
-            }
-
-            if (active.GetSymbol(name, enclosingType) is { } byName)
-            {
-                return byName;
-            }
-
-            // A bound reference the name path cannot classify — a member-access selector or a behavior
-            // parameter use — still names a renameable symbol (read from the binding table by position).
-            if (offset is { } refOff && active.ReferencedSymbolAt(refOff) is { } byReference)
-            {
-                return byReference;
-            }
-        }
-
+    private Symbol? ResolveTarget(string activeUri, string name, int? offset, string? enclosingType) =>
+        ResolveLocalTarget(activeUri, name, offset, enclosingType)
         // Fall back to the workspace-wide gate: a token whose declaration lives in another file
         // (e.g. a cross-file type reference) still names a renameable symbol.
-        return _byUri.Values
-            .Select(sema => sema.GetSymbol(name))
-            .FirstOrDefault(s => s is not null);
+        ?? _byUri.Values.Select(sema => sema.GetSymbol(name)).FirstOrDefault(s => s is not null);
+
+    /// <summary>
+    /// The LOCAL half of <see cref="ResolveTarget"/>: resolves <paramref name="name"/> within
+    /// <paramref name="activeUri"/>'s OWN <see cref="SemanticModel"/> only — position-based
+    /// declaration/reference resolution, then the lexically-scoped name lookup — WITHOUT the final
+    /// workspace-wide, order-dependent fallback. <c>null</c> when this ONE file cannot classify the
+    /// name at all (e.g. a name reached only via <c>import</c>, or the <c>*Id</c> convention with no
+    /// local owning entity): such a name genuinely can't be resolved to a specific symbol without
+    /// guessing, which is exactly why <see cref="FindReferencesInOwnContext"/> uses this — rather than
+    /// the full <see cref="ResolveTarget"/> — to test a CANDIDATE token: falling through to the
+    /// ambiguous "first file that resolves this bare name" fallback there would pick an ARBITRARY
+    /// same-named declaration when ≥2 unrelated files declare one, wrongly excluding a genuine
+    /// cross-file reference to the correct one.
+    /// </summary>
+    private Symbol? ResolveLocalTarget(string activeUri, string name, int? offset, string? enclosingType)
+    {
+        if (!_byUri.TryGetValue(activeUri, out SemanticModel? active))
+        {
+            return null;
+        }
+
+        if (offset is { } off && active.DefinitionAt(off) is { } byOffset)
+        {
+            return byOffset;
+        }
+
+        // The cursor sits on a declaration's own name: resolve to THAT declaration by position,
+        // so a same-named collision (enum member vs type) does not mis-target the rename.
+        if (offset is { } declOff && active.DeclaredSymbolAt(declOff) is { } byDecl)
+        {
+            return byDecl;
+        }
+
+        if (active.GetSymbol(name, enclosingType) is { } byName)
+        {
+            return byName;
+        }
+
+        // A bound reference the name path cannot classify — a member-access selector or a behavior
+        // parameter use — still names a renameable symbol (read from the binding table by position).
+        if (offset is { } refOff && active.ReferencedSymbolAt(refOff) is { } byReference)
+        {
+            return byReference;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -560,7 +594,10 @@ public sealed class WorkspaceIndex
     /// True when <paramref name="name"/> already names a type, spec, or ID value object anywhere in the
     /// workspace — the type-namespace collision check that gates a convention-linked <c>&lt;Root&gt;Id</c>
     /// co-rename (#550): if the proposed <c>&lt;NewRoot&gt;Id</c> would clash with an existing declaration,
-    /// the Id is left as-is rather than colliding. Mirrors the type-namespace branch of <see cref="WouldCollide"/>.
+    /// the Id is left as-is rather than colliding. Deliberately NOT context-scoped, unlike
+    /// <see cref="WouldCollide"/>'s type/spec branch (#1376) — <c>IdentityCoRenameEdits</c>'s own
+    /// <c>&lt;Root&gt;Id</c> co-rename conservatively leaves the id behind on ANY same-named collision,
+    /// matching this method's pre-#1376 workspace-wide check.
     /// </summary>
     internal bool DeclaresTypeLike(string name) =>
         _byUri.Values.Any(sema => sema.GetSymbol(name) is TypeSymbol or SpecSymbol or IdValueObjectSymbol);
