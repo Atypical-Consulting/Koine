@@ -154,24 +154,11 @@ public sealed partial class RustEmitter
             sb.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(m.Name));
             if (HasConstantDefault(m) && m.Type.IsOptional)
             {
-                var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
-
-                // Reconcile the default's inferred type with the field's declared underlying type — the
-                // constant-default dual of WriteDerived's coercion (#961). An optional field's literal
-                // default is always a bare underlying-type literal (Koine has no Option-literal syntax),
-                // so it's coerced against the underlying type and then Some(...)-wrapped (#1325).
-                var underlyingType = UnderlyingType(m.Type);
-                if (NumericCoercionWrap(underlyingType, translator.InferType(m.Initializer!)) is { } wrap)
-                {
-                    defaultValue = $"{wrap}({defaultValue})";
-                }
-                else if (underlyingType is { Name: "String" } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
-                {
-                    defaultValue += ".to_string()";
-                }
-
-                defaultValue = $"Some({defaultValue})";
-
+                // An optional field's literal default is always a bare underlying-type literal (Koine
+                // has no Option-literal syntax), so it's coerced against the underlying type — reusing
+                // the same shared helper the trailing-param unwrap above calls — then Some(...)-wrapped
+                // (#1325).
+                var defaultValue = $"Some({CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index)})";
                 sb.Append(": ").Append(defaultValue);
             }
             sb.Append(",\n");
@@ -374,8 +361,9 @@ public sealed partial class RustEmitter
     /// <summary>A scalar <c>Mul</c>/<c>Div</c> (e.g. <c>Money * quantity</c> or <c>fee / 2</c>): applies
     /// <paramref name="op"/> to each numeric field, carries the rest, and rebuilds through the validating
     /// constructor (#1270). <paramref name="op"/> is <c>"*"</c> or <c>"/"</c>. Each trailing
-    /// <paramref name="defaultedParams"/> member (#1436) draws its default rather than a caller-supplied
-    /// value, so the constructor call passes a plain <c>None</c> for it.</summary>
+    /// <paramref name="defaultedParams"/> member (#1436) is carried from <c>self</c> (<c>Some(self.field)</c>),
+    /// not reset to its default — the operator's <c>self</c> is owned, so no clone is needed, mirroring how
+    /// a non-numeric <paramref name="required"/> field is already carried below.</summary>
     private void WriteScalarOp(
         StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> defaultedParams,
         IReadOnlySet<string> scalars, string op)
@@ -388,7 +376,7 @@ public sealed partial class RustEmitter
         foreach (var (rustFactor, isDecimal) in ScalarFactors(scalars))
         {
             var args = required.Select(m => ScaleField(m, "self." + RustNaming.Field(m.Name), param, isDecimal, op))
-                .Concat(defaultedParams.Select(_ => "None"));
+                .Concat(defaultedParams.Select(m => $"Some(self.{RustNaming.Field(m.Name)})"));
 
             sb.Append('\n');
             sb.Append("impl std::ops::").Append(trait).Append('<').Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
@@ -403,8 +391,11 @@ public sealed partial class RustEmitter
     /// <summary>An additive <c>Add</c>/<c>Sub</c> (for <c>sum</c> folds and plain value-object arithmetic,
     /// #887): applies <paramref name="op"/> to each numeric field pairwise, carries the rest from self, and
     /// rebuilds through the validating constructor (#1270). <paramref name="op"/> is <c>"+"</c> or <c>"-"</c>.
-    /// Each trailing <paramref name="defaultedParams"/> member (#1436) draws its default rather than a
-    /// caller-supplied value, so the constructor call passes a plain <c>None</c> for it.</summary>
+    /// Each trailing <paramref name="defaultedParams"/> member (#1436) is likewise carried from <c>self</c>
+    /// (<c>Some(self.field)</c>), not reset to its default — e.g. combining two <c>Money</c> whose
+    /// overridden <c>currency</c> is <c>Usd</c> must not silently coerce the result back to the declared
+    /// default (the <c>EUR + USD -&gt; EUR</c> failure mode the C# emitter's own carried-member handling
+    /// guards against). <c>self</c> is owned here, so no clone is needed.</summary>
     private void WriteAdditiveOp(
         StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> defaultedParams, string op)
     {
@@ -421,7 +412,7 @@ public sealed partial class RustEmitter
                     ? $"self.{f}.zip({other}.{f}).map(|(a, b)| a {op} b)"
                     : $"self.{f} {op} {other}.{f}"
                 : "self." + f;
-        }).Concat(defaultedParams.Select(_ => "None"));
+        }).Concat(defaultedParams.Select(m => $"Some(self.{RustNaming.Field(m.Name)})"));
 
         sb.Append('\n');
         sb.Append("impl std::ops::").Append(trait).Append(" for ").Append(name).Append(" {\n");
@@ -517,9 +508,11 @@ public sealed partial class RustEmitter
             })) + Indent + Indent + "}";
 
         // Builds the `Name::new(...)` argument list over `required`, in declared order, substituting
-        // `amtExpr` for the amount field, then a trailing `None` per `defaultedParams` member (#1436) —
-        // the `&self` receiver means any other non-`Copy` carried field must be cloned out of `self`
-        // (units are `Copy` enums, so the common case clones nothing).
+        // `amtExpr` for the amount field, then a trailing `Some(self.field)` per `defaultedParams` member
+        // (#1436) — carried from `self`, not reset to its default, for the same reason `WriteAdditiveOp`/
+        // `WriteScalarOp` carry theirs. The `&self` receiver means any non-`Copy` carried field (required
+        // or defaulted) must be cloned out of `self` (units are `Copy` enums, so the common case clones
+        // nothing).
         IEnumerable<string> NewArgs(string amtExpr) =>
             required.Select(m =>
             {
@@ -529,7 +522,11 @@ public sealed partial class RustEmitter
                 }
                 var f = "self." + RustNaming.Field(m.Name);
                 return typeMapper.IsCopy(m.Type) ? f : f + ".clone()";
-            }).Concat(defaultedParams.Select(_ => "None"));
+            }).Concat(defaultedParams.Select(m =>
+            {
+                var f = "self." + RustNaming.Field(m.Name);
+                return typeMapper.IsCopy(m.Type) ? $"Some({f})" : $"Some({f}.clone())";
+            }));
 
         sb.Append('\n');
         sb.Append("impl ").Append(name).Append(" {\n");

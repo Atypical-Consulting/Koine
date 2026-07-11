@@ -252,6 +252,58 @@ public class RustConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    private const string ValueObjectDefaultedMemberSurvivesAdditiveOperatorModel = """
+        context Shop {
+          enum Currency { EUR, USD }
+
+          value Money {
+            amount: Decimal
+            currency: Currency = EUR
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+          value Line {
+            base: Money
+            combined: Money = base + base
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Code-review follow-up to #1436 Task 2: the additive operator's generated <c>Money::new(...)</c>
+    /// call must carry a defaulted member's ACTUAL runtime value forward (<c>Some(self.currency)</c>),
+    /// not silently reset it to the declared default — the value-object analogue of the C# emitter's
+    /// carried-member guard against an <c>EUR + USD -&gt; EUR</c> silent coercion
+    /// (<c>CSharpEmitter.ValueObjects.cs</c>'s <c>WriteAdditiveOperator</c>). Before this follow-up,
+    /// <c>WriteAdditiveOp</c> passed a bare <c>None</c> for every trailing defaulted parameter, so a
+    /// <c>Money</c> constructed with <c>currency: Some(Currency::Usd)</c> silently reverted to <c>EUR</c>
+    /// after ANY <c>+</c> — a real, observable data-corruption bug now that #1436 makes such a member
+    /// genuinely overridable.
+    /// </summary>
+    [Fact]
+    public void Value_object_defaulted_member_survives_additive_operator()
+    {
+        var result = new KoineCompiler().Compile(ValueObjectDefaultedMemberSurvivesAdditiveOperatorModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Currency, Money};
+
+            #[test]
+            fn overridden_currency_survives_addition() {
+                let usd = Money::new(Decimal::from(10), Some(Currency::Usd)).expect("valid Money");
+                let combined = usd.clone() + usd;
+                assert_eq!(combined.currency(), Currency::Usd);
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>
     /// Issue #1068: a <c>quantity</c> value object used directly in plain binary arithmetic —
     /// <c>combined: Weight = base + base</c> — must lower through its existing unit-checked
