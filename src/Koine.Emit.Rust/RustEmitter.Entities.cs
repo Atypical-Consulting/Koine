@@ -93,8 +93,7 @@ public sealed partial class RustEmitter
         // is then re-wrapped in `Some(...)`, mirroring its original hardcoded shape (#1437).
         foreach (Member m in defaultedParams)
         {
-            var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
-            var defaultValue = CoercedDefaultValue(m, underlyingType, translator, emit.Index);
+            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index);
 
             // `unwrap_or_else` (not `unwrap_or`): the latter always evaluates its argument eagerly,
             // so an overriding caller would still pay for constructing the discarded default.
@@ -177,10 +176,10 @@ public sealed partial class RustEmitter
     /// Translates a defaulted member's initializer and coerces/owns it to <paramref name="targetType"/> —
     /// Rust has no implicit numeric widening or <c>&amp;str</c>-&gt;<c>String</c> coercion, so a
     /// <c>Decimal</c> field defaulted to an <c>Int</c> literal, or a <c>String</c> field defaulted to a
-    /// string literal, must be widened/owned here or the consuming site (an <c>unwrap_or_else</c> closure
-    /// or a struct-literal field-init) is rejected as E0308 (#1319/#1324). Shared by <see cref="EmitEntity"/>'s
-    /// two defaulted-member binding shapes (a trailing <c>Option&lt;T&gt;</c> ctor parameter vs. an
-    /// already-optional-declared member's local <c>let</c>) so the one coercion rule has one home.
+    /// string literal, must be widened/owned here or the consuming site (an <c>unwrap_or_else</c> closure)
+    /// is rejected as E0308 (#1319/#1324). Used by <see cref="EmitEntity"/>'s single trailing-<c>Option&lt;T&gt;</c>
+    /// ctor-parameter unwrap loop, which every defaulted member goes through regardless of whether its
+    /// declared type is itself optional (#1380/#1437).
     /// </summary>
     private static string CoercedDefaultValue(Member m, TypeRef targetType, RustExpressionTranslator translator, ModelIndex index)
     {
@@ -535,11 +534,21 @@ public sealed partial class RustEmitter
                     owned = $"{wrap}({owned})";
                 }
 
-                args.Add($"Some({owned})");
+                // Wrap in `Some(...)` only when the initializing expression isn't already
+                // Option-typed — mirroring WriteCommand's Transition-handling guard above. Reachable
+                // now that this bucket also covers already-optional-declared members (#1437): the
+                // validator legally allows an Option-typed expression (e.g. another `T?` factory
+                // parameter) to initialize one, and unconditionally wrapping it would double-wrap
+                // into `Option<Option<T>>`, a real `cargo check` E0308.
+                args.Add(translator.IsOptional(value) ? owned : $"Some({owned})");
             }
-            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+            else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
-                args.Add($"Some({RustNaming.Field(m.Name)})"); // auto-bound same-named parameter
+                // Same guard for an auto-bound same-named parameter: AutoBinds permits a `T?`-typed
+                // parameter to bind to an optional-declared member, so the parameter itself may already
+                // be Option-typed.
+                var field = RustNaming.Field(m.Name);
+                args.Add(boundParam.Type.IsOptional ? field : $"Some({field})");
             }
             else
             {
