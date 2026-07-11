@@ -243,10 +243,13 @@ public sealed partial class PhpEmitter
     {
         // The `self $other` parameter type already guarantees the runtime type, so an `instanceof`
         // guard here is redundant (phpstan --level max flags it as always-true). Identity equality is
-        // the id comparison alone.
+        // the id comparison alone -- but the id itself is a branded value object (#686's structural-
+        // equals fix applies to it too), so it must be compared via its own `equals()`, never PHP's
+        // `===` (reference identity), matching the TypeScript (`this.id.equals(other.id)`) and Python
+        // (`self.id == other.id`, value-based via the frozen dataclass's generated `__eq__`) backends.
         sb.Append(Indent).Append("public function equals(self $other): bool\n");
         sb.Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append("return $this->id === $other->id;\n");
+        sb.Append(Indent).Append(Indent).Append("return $this->id->equals($other->id);\n");
         sb.Append(Indent).Append("}\n");
     }
 

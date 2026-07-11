@@ -494,6 +494,44 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #1377 acceptance: an entity's generated <c>equals()</c> must compare its <c>id</c> member
+    /// by <em>value</em> — via the branded id value object's own <c>equals()</c> — not by PHP's
+    /// <c>===</c> object-reference identity. Two <c>OrderId</c> instances wrapping the same underlying
+    /// value are the same identity even when they are two separate PHP objects (exactly what a
+    /// repository rehydrating an entity from a persisted id on two separate loads produces); <c>===</c>
+    /// on two PHP objects is reference identity and would wrongly report them as different entities.
+    /// Matches the TypeScript (<c>this.id.equals(other.id)</c>) and Python
+    /// (<c>self.id == other.id</c>, structural via the frozen dataclass) backends, and mirrors #686's
+    /// fix for nested value-object fields inside a value object's own <c>equals()</c>
+    /// (<c>PhpEmitter.ValueObjects.cs</c>'s <c>WriteEquals</c>) — that fix never propagated to the
+    /// entity-equals path. Always-on guard (no phpstan toolchain needed): asserts the emitted body calls
+    /// <c>$this-&gt;id-&gt;equals($other-&gt;id)</c> and never reference-compares the id with <c>===</c>.
+    /// </summary>
+    [Fact]
+    public void Entity_equals_compares_id_by_value_not_by_reference()
+    {
+        const string src =
+            "context Ordering {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      status: String = \"Draft\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderPhp = result.Files.Single(f => f.RelativePath.EndsWith("Order.php", StringComparison.Ordinal)).Contents;
+        orderPhp.ShouldContain("$this->id->equals($other->id)");
+        orderPhp.ShouldNotContain("$this->id === $other->id");
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #813 acceptance (guarded-optional face — the #787 deferred half): a guard-narrowed
     /// optional value-object operand in arithmetic — <c>if base.isPresent then base + base else base</c>
     /// on a <c>Money?</c> member — must type-check under <c>phpstan --level max</c>. Narrowing in Koine
