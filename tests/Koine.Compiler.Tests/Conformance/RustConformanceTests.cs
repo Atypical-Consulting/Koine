@@ -2345,4 +2345,121 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1437: an entity member that is both optional-declared and constant-defaulted
+    /// (<c>taxRate: Decimal? = 2</c>) must have a factory's explicit <c>taxRate -&gt; 5</c> initialization
+    /// actually reach the constructed value — before this fix, this member class had no constructor
+    /// parameter at all, so <c>BuildFactoryCtorArgs</c> never routed the factory's value anywhere and
+    /// <c>Product::make()</c> silently always yielded the hardcoded default. A sibling factory that never
+    /// touches <c>taxRate</c> must still fall back to the constructor's own default (#1325's coercion,
+    /// now reached via the <c>None</c> arm instead of a hardcoded local).
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_defaulted_member_reaches_the_constructor()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      taxRate -> 5\n" +
+            "    }\n" +
+            "\n" +
+            "    create makeDefault() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Product;
+
+            #[test]
+            fn factory_explicit_init_overrides_the_default() {
+                let product = Product::make().expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(5)));
+            }
+
+            #[test]
+            fn factory_with_no_init_falls_back_to_the_declared_default() {
+                let product = Product::make_default().expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(2)));
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Code-review follow-up to #1437: merging the optional-declared-defaulted bucket into
+    /// <c>defaultedParams</c> exposed <c>BuildFactoryCtorArgs</c>'s unconditional <c>Some(...)</c>-wrap
+    /// to a source value that can itself already be <c>Option</c>-typed — a factory parameter declared
+    /// <c>T?</c>, either explicitly initializing the member (<c>taxRate -&gt; rate</c>) or auto-binding to
+    /// it by name. Wrapping an already-<c>Option&lt;T&gt;</c> value in another <c>Some(...)</c> produces
+    /// <c>Option&lt;Option&lt;T&gt;&gt;</c> against the constructor's <c>Option&lt;T&gt;</c> parameter — a
+    /// real <c>cargo check</c> E0308, reproduced on the pre-fix code for both the explicit-init and the
+    /// auto-bind path.
+    /// </summary>
+    [Fact]
+    public void Factory_with_an_already_optional_source_value_does_not_double_wrap_a_defaulted_member()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "\n" +
+            "    create makeExplicit(rate: Decimal?) {\n" +
+            "      taxRate -> rate\n" +
+            "    }\n" +
+            "\n" +
+            "    create makeAutoBound(taxRate: Decimal?) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Product;
+
+            #[test]
+            fn explicit_init_from_an_optional_parameter_carries_a_set_value() {
+                let product = Product::make_explicit(Some(Decimal::from(7))).expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(7)));
+            }
+
+            #[test]
+            fn explicit_init_from_an_optional_parameter_falls_back_to_the_default_when_unset() {
+                let product = Product::make_explicit(None).expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(2)));
+            }
+
+            #[test]
+            fn auto_bound_optional_parameter_carries_a_set_value() {
+                let product = Product::make_auto_bound(Some(Decimal::from(9))).expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(9)));
+            }
+
+            #[test]
+            fn auto_bound_optional_parameter_falls_back_to_the_default_when_unset() {
+                let product = Product::make_auto_bound(None).expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(2)));
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

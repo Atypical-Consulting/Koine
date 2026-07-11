@@ -196,10 +196,11 @@ public class RustEmitterTests
         """;
 
     /// <summary>
-    /// Issue #1325: an <b>optional</b> entity constant-default field must be coerced to its declared
-    /// underlying Rust type <i>and</i> <c>Some(...)</c>-wrapped in the smart constructor's <c>let</c>-
-    /// binding loop — the entity dual of the value-object fix above; #1324 only handles the non-optional
-    /// case.
+    /// Issue #1325 (superseded by #1437): an <b>optional</b> entity constant-default field must be
+    /// coerced to its declared underlying Rust type <i>and</i> <c>Some(...)</c>-wrapped. Since #1437,
+    /// this member class is a trailing, overridable <c>Option&lt;T&gt;</c> constructor parameter (the
+    /// entity dual of #1380's non-optional case) rather than a hardcoded local — the coercion itself is
+    /// unchanged, only unwrapped from the parameter instead of the bare literal.
     /// </summary>
     [Fact]
     public void Entity_optional_constant_default_fields_coerce_and_some_wrap()
@@ -209,11 +210,45 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("let tax_rate = Some(Decimal::from(2));");
+        rust.ShouldContain("pub fn new(id: ProductId, amount: Decimal, tax_rate: Option<Decimal>, label: Option<String>) -> Result<Self, DomainError>");
+
+        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
+        rust.ShouldContain("let tax_rate = Some(tax_rate);");
+        rust.ShouldNotContain("let tax_rate = Some(Decimal::from(2));");
         rust.ShouldNotContain("let tax_rate = 2;");
 
-        rust.ShouldContain("let label = Some(\"std\".to_string());");
+        rust.ShouldContain("let label = label.unwrap_or_else(|| \"std\".to_string());");
+        rust.ShouldContain("let label = Some(label);");
+        rust.ShouldNotContain("let label = Some(\"std\".to_string());");
         rust.ShouldNotContain("let label = \"std\";");
+    }
+
+    private const string EntityOptionalDefaultedMemberBecomesTrailingParamModel = """
+        context Shop {
+          entity Product identified by ProductId {
+            taxRate: Decimal? = 2
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1437: an entity member that is both optional-declared (<c>T?</c>) and constant-defaulted
+    /// must become a trailing, overridable <c>Option&lt;T&gt;</c> constructor parameter — #1380 only
+    /// merged the non-optional-declared bucket into this shape, leaving the already-optional bucket
+    /// hardcoded and un-overridable.
+    /// </summary>
+    [Fact]
+    public void Entity_optional_declared_defaulted_member_becomes_trailing_option_ctor_parameter()
+    {
+        var result = new KoineCompiler().Compile(EntityOptionalDefaultedMemberBecomesTrailingParamModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn new(id: ProductId, tax_rate: Option<Decimal>) -> Result<Self, DomainError>");
+        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
+        rust.ShouldContain("let tax_rate = Some(tax_rate);");
+        rust.ShouldNotContain("let tax_rate = Some(Decimal::from(2));");
     }
 
     private const string OptionalDerivedNarrowerNumericModel = """

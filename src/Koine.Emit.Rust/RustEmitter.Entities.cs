@@ -27,13 +27,11 @@ public sealed partial class RustEmitter
         var derived = entity.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var required = stored.Where(m => m.Initializer is null).ToList();
 
-        // A defaulted member with a plain (non-optional-declared) type becomes a trailing `Option<T>`
-        // constructor parameter, unwrapped to its default — matching the C#/TypeScript/PHP emitters'
-        // "optional trailing parameter" shape for the same construct (#1380). A member that is already
-        // `T?`-declared *and* defaulted keeps its existing local-`let`/`Some(...)`-wrapped handling
-        // (#1319/#1324/#1325) — that combination is untouched.
-        var defaultedParams = stored.Where(m => m.Initializer is not null && !m.Type.IsOptional).ToList();
-        var defaulted = stored.Where(m => m.Initializer is not null && m.Type.IsOptional).ToList();
+        // Every defaulted member becomes a trailing `Option<T>` constructor parameter, unwrapped to its
+        // default — matching the C#/TypeScript/PHP emitters' "optional trailing parameter" shape for the
+        // same construct (#1380 for non-optional-declared members, #1437 for already-`T?`-declared ones).
+        // An already-optional-declared member is additionally re-wrapped in `Some(...)` after unwrapping.
+        var defaultedParams = stored.Where(m => m.Initializer is not null).ToList();
         var hasEmits = EmitsEvents(entity);
 
         // The synthetic domain-event collector's field name, chosen to dodge a user member literally
@@ -88,38 +86,26 @@ public sealed partial class RustEmitter
         body.Append(Indent).Append("/// Creates a validated `").Append(name).Append("`, running its invariants.\n");
         body.Append(Indent).Append("pub fn new(").Append(string.Join(", ", ctorParams)).Append(") -> Result<Self, DomainError> {\n");
 
-        // A non-optional defaulted member unwraps its `Option<T>` parameter to the declared default
-        // (so invariants can see the resolved value before the checks).
+        // A defaulted member unwraps its `Option<T>` parameter to the declared default (so invariants
+        // can see the resolved value before the checks). The default's inferred type is reconciled
+        // against the field's declared (underlying, if optional) type — the entity dual of the
+        // value-object smart constructor's coercion (#1319/#1325). An already-optional-declared member
+        // is then re-wrapped in `Some(...)`, mirroring its original hardcoded shape (#1437).
         foreach (Member m in defaultedParams)
         {
-            var defaultValue = CoercedDefaultValue(m, m.Type, translator, emit.Index);
+            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index);
 
             // `unwrap_or_else` (not `unwrap_or`): the latter always evaluates its argument eagerly,
             // so an overriding caller would still pay for constructing the discarded default.
             var field = RustNaming.Field(m.Name);
             body.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = ")
                 .Append(field).Append(".unwrap_or_else(|| ").Append(defaultValue).Append(");\n");
-        }
-
-        // Defaulted members are bound as locals (so invariants can see them) before the checks.
-        foreach (Member m in defaulted)
-        {
-            // Reconciles the default's inferred type against the field's declared (underlying, if
-            // optional) type — the entity dual of the value-object smart constructor's coercion (#1319).
-            // An optional field's literal default is always a bare underlying-type literal (Koine has no
-            // Option-literal syntax), so it's coerced against the underlying type and then Some(...)-
-            // wrapped (#1325).
-            var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
-            var defaultValue = CoercedDefaultValue(m, underlyingType, translator, emit.Index);
 
             if (m.Type.IsOptional)
             {
-                defaultValue = $"Some({defaultValue})";
+                body.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = Some(")
+                    .Append(field).Append(");\n");
             }
-
-            body.Append(Indent).Append(Indent).Append("let ").Append(RustNaming.Field(m.Name)).Append(" = ")
-                .Append(defaultValue)
-                .Append(";\n");
         }
 
         foreach (Invariant inv in entity.Invariants)
@@ -190,10 +176,10 @@ public sealed partial class RustEmitter
     /// Translates a defaulted member's initializer and coerces/owns it to <paramref name="targetType"/> —
     /// Rust has no implicit numeric widening or <c>&amp;str</c>-&gt;<c>String</c> coercion, so a
     /// <c>Decimal</c> field defaulted to an <c>Int</c> literal, or a <c>String</c> field defaulted to a
-    /// string literal, must be widened/owned here or the consuming site (an <c>unwrap_or_else</c> closure
-    /// or a struct-literal field-init) is rejected as E0308 (#1319/#1324). Shared by <see cref="EmitEntity"/>'s
-    /// two defaulted-member binding shapes (a trailing <c>Option&lt;T&gt;</c> ctor parameter vs. an
-    /// already-optional-declared member's local <c>let</c>) so the one coercion rule has one home.
+    /// string literal, must be widened/owned here or the consuming site (an <c>unwrap_or_else</c> closure)
+    /// is rejected as E0308 (#1319/#1324). Used by <see cref="EmitEntity"/>'s single trailing-<c>Option&lt;T&gt;</c>
+    /// ctor-parameter unwrap loop, which every defaulted member goes through regardless of whether its
+    /// declared type is itself optional (#1380/#1437).
     /// </summary>
     private static string CoercedDefaultValue(Member m, TypeRef targetType, RustExpressionTranslator translator, ModelIndex index)
     {
@@ -537,16 +523,32 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var owned = translator.TranslateOwned(value, expectedEnum);
-                if (NumericCoercionWrap(m.Type, translator.InferType(value)) is { } wrap)
+
+                // Coerce against the underlying (non-optional) type, never `m.Type` directly — for an
+                // already-optional-declared member, `NumericCoercionWrap` short-circuits on
+                // `declared.IsOptional` and would otherwise silently skip a real Int-into-Decimal
+                // mismatch, emitting `Some(5)` against an `Option<Decimal>` parameter (a real `cargo
+                // check` E0308, #1437).
+                if (NumericCoercionWrap(UnderlyingType(m.Type), translator.InferType(value)) is { } wrap)
                 {
                     owned = $"{wrap}({owned})";
                 }
 
-                args.Add($"Some({owned})");
+                // Wrap in `Some(...)` only when the initializing expression isn't already
+                // Option-typed — mirroring WriteCommand's Transition-handling guard above. Reachable
+                // now that this bucket also covers already-optional-declared members (#1437): the
+                // validator legally allows an Option-typed expression (e.g. another `T?` factory
+                // parameter) to initialize one, and unconditionally wrapping it would double-wrap
+                // into `Option<Option<T>>`, a real `cargo check` E0308.
+                args.Add(translator.IsOptional(value) ? owned : $"Some({owned})");
             }
-            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+            else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
-                args.Add($"Some({RustNaming.Field(m.Name)})"); // auto-bound same-named parameter
+                // Same guard for an auto-bound same-named parameter: AutoBinds permits a `T?`-typed
+                // parameter to bind to an optional-declared member, so the parameter itself may already
+                // be Option-typed.
+                var field = RustNaming.Field(m.Name);
+                args.Add(boundParam.Type.IsOptional ? field : $"Some({field})");
             }
             else
             {
