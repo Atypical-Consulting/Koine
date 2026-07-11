@@ -1190,9 +1190,22 @@ fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<Str
 
 /// Commit the staged area with `message` (`git commit -m`). `Err` (with git's stderr) when there is
 /// nothing staged or the identity is unset.
+///
+/// `amend` (defaulting to `false` when omitted, so every existing caller behaves identically)
+/// rewrites the tip commit instead of creating a new one (`git commit --amend`): a non-empty
+/// `message` replaces the tip's message (`-m <message>`), while an EMPTY `message` reuses the
+/// previous one unchanged (`--no-edit`) — the amend still picks up whatever is newly staged.
 #[tauri::command]
-fn git_commit(dir: String, message: String) -> Result<(), String> {
-    run_git(&dir, &["commit", "-m", &message]).map(|_| ())
+fn git_commit(dir: String, message: String, amend: Option<bool>) -> Result<(), String> {
+    if amend.unwrap_or(false) {
+        if message.is_empty() {
+            run_git(&dir, &["commit", "--amend", "--no-edit"]).map(|_| ())
+        } else {
+            run_git(&dir, &["commit", "--amend", "-m", &message]).map(|_| ())
+        }
+    } else {
+        run_git(&dir, &["commit", "-m", &message]).map(|_| ())
+    }
 }
 
 /// Push the current branch to its configured upstream (a bare `git push`). The panel offers push
@@ -1200,9 +1213,72 @@ fn git_commit(dir: String, message: String) -> Result<(), String> {
 /// (git's trimmed stderr) when there is no upstream or git refuses — non-fast-forward, auth, offline.
 /// `(async)` moves this network-bound command onto a background thread (Tauri's sync thread pool),
 /// so a slow or unreachable remote can never freeze the webview's main thread.
+///
+/// `set_upstream` (defaulting to `false` when omitted, so every existing caller behaves
+/// identically) is the "publish branch" case: instead of a bare push, it sets the tracking ref
+/// (`git push -u <remote> <current-branch>`), which succeeds even when the branch has no upstream
+/// yet and sets the tracking ref so subsequent status/push calls see it. The remote is resolved by
+/// [`resolve_publish_remote`] rather than hardcoded to `origin` (code review, #1401 — a repo whose
+/// only remote is named something else, e.g. opened via "Open Folder" rather than Studio's own
+/// clone, used to fail to publish even though a valid remote was configured). `Err` when HEAD is
+/// detached (`rev-parse --abbrev-ref HEAD` returns the literal `"HEAD"`, not a real branch) — a
+/// clear message instead of a confusing raw git error from the doomed push attempt.
 #[tauri::command(async)]
-fn git_push(dir: String) -> Result<(), String> {
-    run_git(&dir, &["push"]).map(|_| ())
+fn git_push(dir: String, set_upstream: Option<bool>) -> Result<(), String> {
+    if set_upstream.unwrap_or(false) {
+        let branch = run_git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"])?
+            .trim()
+            .to_string();
+        if branch == "HEAD" {
+            return Err("cannot publish from a detached HEAD — checkout a branch first".to_string());
+        }
+        let remote = resolve_publish_remote(&dir)?;
+        run_git(&dir, &["push", "-u", &remote, &branch]).map(|_| ())
+    } else {
+        run_git(&dir, &["push"]).map(|_| ())
+    }
+}
+
+/// Pick the remote `git_push`'s "publish branch" (`set_upstream`) push should target: `origin`
+/// when it's among the repo's configured remotes (preserves the original hardcoded behavior for
+/// the common case — a Studio-created clone always names its remote `origin`), the sole
+/// configured remote when there's exactly one and it isn't named `origin` (e.g. a folder opened
+/// via "Open Folder" whose clone used a different remote name), or a clear `Err` when picking one
+/// would be a guess: zero remotes configured, or multiple remotes with none named `origin`.
+fn resolve_publish_remote(dir: &str) -> Result<String, String> {
+    let out = run_git(dir, &["remote"])?;
+    let remotes: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if remotes.contains(&"origin") {
+        return Ok("origin".to_string());
+    }
+    match remotes.len() {
+        0 => Err("no remote configured — add one before publishing".to_string()),
+        1 => Ok(remotes[0].to_string()),
+        _ => Err("multiple remotes configured; publish only supports the 'origin' remote today".to_string()),
+    }
+}
+
+/// Fetch updates from the default remote (a bare `git fetch`) — refreshes the remote-tracking
+/// refs (e.g. `origin/main`) so [`git_status`]'s ahead/behind counts stay current, WITHOUT ever
+/// touching the checked-out branch or worktree. `Err` (git's trimmed stderr) when there is no
+/// remote configured or git refuses — auth, offline. `(async)` moves this network-bound command
+/// onto a background thread (Tauri's sync thread pool), so a slow or unreachable remote can never
+/// freeze the webview's main thread.
+#[tauri::command(async)]
+fn git_fetch(dir: String) -> Result<(), String> {
+    run_git(&dir, &["fetch"]).map(|_| ())
+}
+
+/// Pull the current branch's upstream with a fast-forward-only merge (`git pull --ff-only`):
+/// fetches, then advances the checked-out branch only when it can be done without fabricating a
+/// merge commit. `Err` (git's trimmed stderr) when there is no upstream, the histories have
+/// diverged (a real merge/rebase would be needed), or git refuses — auth, offline — so the panel
+/// surfaces the message instead of silently attempting a merge the user never asked for.
+/// `(async)` moves this network-bound command onto a background thread (Tauri's sync thread
+/// pool), so a slow or unreachable remote can never freeze the webview's main thread.
+#[tauri::command(async)]
+fn git_pull(dir: String) -> Result<(), String> {
+    run_git(&dir, &["pull", "--ff-only"]).map(|_| ())
 }
 
 /// Revert the commit `sha` (`git revert --no-edit <sha>`), recording a new commit that undoes it.
@@ -2275,6 +2351,8 @@ pub fn run() {
             git_discard,
             git_commit,
             git_push,
+            git_fetch,
+            git_pull,
             git_revert,
             git_init,
             git_branches,
@@ -3402,7 +3480,7 @@ mod tests {
         assert_eq!(before.ahead, 1);
 
         // Push → the upstream has the commit and the next status reads a truthful 0/0.
-        git_push(repo.path()).unwrap();
+        git_push(repo.path(), None).unwrap();
         let after = git_status(repo.path()).unwrap().upstream.expect("still tracking");
         assert_eq!(after.ahead, 0);
         assert_eq!(after.behind, 0);
@@ -3417,7 +3495,254 @@ mod tests {
         repo.git(&["add", "f.txt"]);
         repo.git(&["commit", "-m", "c1"]);
 
-        assert!(git_push(repo.path()).is_err());
+        assert!(git_push(repo.path(), None).is_err());
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_publishes_a_branch_with_no_upstream() {
+        // A bare local "remote" — the work repo has no upstream configured yet, the "publish
+        // branch" case (mirrors git_push_errors_when_the_branch_has_no_upstream's setup, but this
+        // time set_upstream should make the push succeed AND set the tracking ref).
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "origin", &remote_path]);
+
+        assert!(
+            git_status(repo.path()).unwrap().upstream.is_none(),
+            "starts with no upstream configured"
+        );
+
+        // A bare push would fail here (no upstream); `set_upstream` publishes the current branch
+        // instead (`git push -u origin <branch>`).
+        git_push(repo.path(), Some(true)).unwrap();
+
+        let after = git_status(repo.path()).unwrap().upstream.expect("push -u sets the tracking ref");
+        assert_eq!(after.r#ref, "origin/main");
+        assert_eq!(after.ahead, 0);
+        assert_eq!(after.behind, 0);
+
+        // The remote actually received the commit.
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
+        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        assert_eq!(remote_head, local_head);
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_uses_the_sole_remote_when_it_isnt_named_origin() {
+        // No remote named `origin` — only `upstream` — the case a hardcoded-`origin` push fails on
+        // even though a perfectly good remote is configured (e.g. a folder opened via "Open Folder"
+        // whose clone was set up with a different remote name). #1401 code review.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "upstream", &remote_path]);
+
+        git_push(repo.path(), Some(true)).unwrap();
+
+        // The remote actually received the commit...
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
+        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        assert_eq!(remote_head, local_head);
+        // ...and the tracking ref was set against the ACTUAL remote used, not a hardcoded `origin`.
+        let tracked = run_git(&repo.path(), &["rev-parse", "--abbrev-ref", "main@{upstream}"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(tracked, "upstream/main");
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_errors_clearly_with_no_remote_configured() {
+        // Zero remotes — resolve_publish_remote must not guess; it returns a clear Err instead of
+        // letting a hardcoded `git push -u origin <branch>` fail with a confusing raw git error.
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+
+        let err = git_push(repo.path(), Some(true)).unwrap_err();
+        assert!(err.contains("no remote configured"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_errors_ambiguously_with_multiple_non_origin_remotes() {
+        // Two remotes, neither named `origin` — picking either would be a guess, so this must fail
+        // with a clear, distinct message rather than silently choosing one.
+        let remote_a = TempRepo::new();
+        remote_a.git(&["init", "--bare", "-b", "main"]);
+        let remote_b = TempRepo::new();
+        remote_b.git(&["init", "--bare", "-b", "main"]);
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "a", &remote_a.path()]);
+        repo.git(&["remote", "add", "b", &remote_b.path()]);
+
+        let err = git_push(repo.path(), Some(true)).unwrap_err();
+        assert!(err.contains("multiple remotes"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_errors_clearly_on_a_detached_head() {
+        // `rev-parse --abbrev-ref HEAD` returns the literal "HEAD" (not a real branch) in detached
+        // HEAD state — publishing from there must fail with a clear message rather than attempting
+        // (and confusingly failing) `git push -u origin HEAD`. #1401 code review.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "origin", &remote_path]);
+        let sha = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        repo.git(&["checkout", &sha]);
+
+        let err = git_push(repo.path(), Some(true)).unwrap_err();
+        assert!(err.contains("detached HEAD"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn git_fetch_updates_the_remote_tracking_ref_without_touching_the_worktree() {
+        // A bare "remote" plus a work repo that pushes the first commit to it.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let origin = init_repo();
+        origin.write("f.txt", "1\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c1"]);
+        origin.git(&["remote", "add", "origin", &remote_path]);
+        origin.git(&["push", "-u", "origin", "main"]);
+
+        // Clone the remote — this is the repo under test, currently in sync with origin/main.
+        let parent = TempRepo::new();
+        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        // `git clone` doesn't inherit `init_repo`'s autocrlf pin, so a Windows runner's
+        // `core.autocrlf=true` default checks out the file with CRLF. Flipping the config alone
+        // doesn't retroactively rewrite an already-checked-out file — it only changes what future
+        // checkouts do — so without a fresh checkout the working tree keeps its literal CRLF bytes
+        // while the index still holds the LF blob, which `--reset --hard` re-normalizes under the
+        // new (now-disabled) setting; skipping this step also makes `--ff-only` pull wrongly see
+        // "local changes" (CRLF vs LF) and abort.
+        run_git(&clone_dir, &["config", "core.autocrlf", "false"]).unwrap();
+        run_git(&clone_dir, &["reset", "--hard"]).unwrap();
+
+        // Advance the remote past the clone with a second commit pushed from `origin`.
+        origin.write("f.txt", "2\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c2"]);
+        origin.git(&["push", "origin", "main"]);
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
+
+        // Before fetching, the clone's remote-tracking ref is still the stale first commit.
+        let stale = run_git(&clone_dir, &["rev-parse", "origin/main"]).unwrap().trim().to_string();
+        assert_ne!(stale, remote_head, "remote-tracking ref starts stale");
+
+        git_fetch(clone_dir.clone()).unwrap();
+
+        // Fetch catches the remote-tracking ref up to the remote's tip...
+        let fresh = run_git(&clone_dir, &["rev-parse", "origin/main"]).unwrap().trim().to_string();
+        assert_eq!(fresh, remote_head, "fetch updates the remote-tracking ref");
+
+        // ...but never touches the checked-out branch or worktree: same content, same local HEAD.
+        let contents = std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
+        assert_eq!(contents, "1\n", "fetch never touches the worktree");
+        let local_head = run_git(&clone_dir, &["rev-parse", "main"]).unwrap().trim().to_string();
+        assert_ne!(local_head, remote_head, "local branch stays exactly where it was");
+    }
+
+    #[test]
+    fn git_pull_fast_forwards_a_behind_clone() {
+        // A bare "remote" plus a work repo that pushes the first commit to it.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let origin = init_repo();
+        origin.write("f.txt", "1\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c1"]);
+        origin.git(&["remote", "add", "origin", &remote_path]);
+        origin.git(&["push", "-u", "origin", "main"]);
+
+        // Clone the remote — this is the repo under test, currently in sync with origin/main.
+        let parent = TempRepo::new();
+        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        // `git clone` doesn't inherit `init_repo`'s autocrlf pin, so a Windows runner's
+        // `core.autocrlf=true` default checks out the file with CRLF. Flipping the config alone
+        // doesn't retroactively rewrite an already-checked-out file — it only changes what future
+        // checkouts do — so without a fresh checkout the working tree keeps its literal CRLF bytes
+        // while the index still holds the LF blob, which `--reset --hard` re-normalizes under the
+        // new (now-disabled) setting; skipping this step also makes `--ff-only` pull wrongly see
+        // "local changes" (CRLF vs LF) and abort.
+        run_git(&clone_dir, &["config", "core.autocrlf", "false"]).unwrap();
+        run_git(&clone_dir, &["reset", "--hard"]).unwrap();
+
+        // Advance the remote past the clone with a second commit pushed from `origin`.
+        origin.write("f.txt", "2\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c2"]);
+        origin.git(&["push", "origin", "main"]);
+
+        git_pull(clone_dir.clone()).unwrap();
+
+        let contents = std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
+        assert_eq!(contents, "2\n", "pull fast-forwards the worktree to the remote's tip");
+    }
+
+    #[test]
+    fn git_pull_errors_on_divergent_histories() {
+        // A bare "remote" plus a work repo that pushes the first commit to it.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let origin = init_repo();
+        origin.write("f.txt", "1\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c1"]);
+        origin.git(&["remote", "add", "origin", &remote_path]);
+        origin.git(&["push", "-u", "origin", "main"]);
+
+        // Clone the remote — this is the repo under test.
+        let parent = TempRepo::new();
+        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        // `git clone` doesn't carry over a local identity, and the clone needs to make its own
+        // commit below — give it the same throwaway identity `init_repo` seeds.
+        let clone = TempRepo { dir: std::path::PathBuf::from(&clone_dir) };
+        clone.git(&["config", "user.email", "t@e.st"]);
+        clone.git(&["config", "user.name", "Tester"]);
+        clone.git(&["config", "commit.gpgsign", "false"]);
+
+        // The remote gains a commit the clone doesn't have...
+        origin.write("f.txt", "2\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c2"]);
+        origin.git(&["push", "origin", "main"]);
+
+        // ...while the clone independently gains a DIFFERENT commit of its own: the histories
+        // diverge, so a `--ff-only` pull can't reconcile them without a merge/rebase.
+        clone.write("g.txt", "local\n");
+        clone.git(&["add", "g.txt"]);
+        clone.git(&["commit", "-m", "local-only"]);
+
+        assert!(git_pull(clone_dir).is_err());
     }
 
     #[test]
@@ -3547,13 +3872,56 @@ mod tests {
         repo.write("c.txt", "hello\n");
         git_stage(repo.path(), vec!["c.txt".to_string()]).unwrap();
 
-        git_commit(repo.path(), "add c".to_string()).unwrap();
+        git_commit(repo.path(), "add c".to_string(), None).unwrap();
 
         let log = git_log(repo.path(), None).unwrap();
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].message, "add c");
         // Nothing left to commit afterwards.
         assert!(git_status(repo.path()).unwrap().files.is_empty());
+    }
+
+    #[test]
+    fn git_commit_amend_rewrites_the_tip_message_keeping_the_same_parent() {
+        let repo = init_repo();
+        repo.write("a.txt", "base\n");
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+        let base_sha = git_log(repo.path(), None).unwrap()[0].sha.clone();
+
+        repo.write("b.txt", "tip\n");
+        repo.git(&["add", "b.txt"]);
+        repo.git(&["commit", "-m", "tip original"]);
+
+        git_commit(repo.path(), "tip amended".to_string(), Some(true)).unwrap();
+
+        let log = git_log(repo.path(), None).unwrap();
+        assert_eq!(log.len(), 2, "amend replaces the tip commit, it doesn't add a new one");
+        assert_eq!(log[0].message, "tip amended");
+        let parent = run_git(&repo.path(), &["rev-parse", "HEAD^"]).unwrap().trim().to_string();
+        assert_eq!(parent, base_sha, "amend keeps the same parent commit");
+    }
+
+    #[test]
+    fn git_commit_amend_with_an_empty_message_reuses_the_previous_message() {
+        let repo = init_repo();
+        repo.write("a.txt", "one\n");
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "-m", "original message"]);
+
+        // Stage an additional change, then amend with an EMPTY message: `--no-edit` reuses the
+        // previous message while the new staged content joins the tip commit.
+        repo.write("b.txt", "two\n");
+        git_stage(repo.path(), vec!["b.txt".to_string()]).unwrap();
+        git_commit(repo.path(), String::new(), Some(true)).unwrap();
+
+        let log = git_log(repo.path(), None).unwrap();
+        assert_eq!(log.len(), 1, "amend still replaces the tip, not a new commit");
+        assert_eq!(log[0].message, "original message");
+        assert!(
+            git_status(repo.path()).unwrap().files.is_empty(),
+            "the staged content joined the amended commit"
+        );
     }
 
     #[test]
