@@ -218,6 +218,93 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1436, Task 2: a value object carrying BOTH a non-optional-declared constant-default member
+    /// (<c>taxRate: Decimal = 2</c>, now a trailing <c>Option&lt;Decimal&gt;</c> constructor parameter,
+    /// #1436 Task 1) AND demand-driven arithmetic (<c>combined: Money = base + base</c>, which emits
+    /// <c>WriteAdditiveOp</c>'s <c>impl std::ops::Add</c>) must still compile — the operator's generated
+    /// <c>Money::new(...)</c> call must append one <c>None</c> per trailing defaulted parameter, or a real
+    /// <c>cargo check</c> rejects it as E0061 (wrong number of arguments).
+    /// </summary>
+    [Fact]
+    public void Value_object_with_defaulted_member_and_additive_operator_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal = 2\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    combined: Money = base + base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Add for Money");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    private const string ValueObjectDefaultedMemberSurvivesAdditiveOperatorModel = """
+        context Shop {
+          enum Currency { EUR, USD }
+
+          value Money {
+            amount: Decimal
+            currency: Currency = EUR
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+          value Line {
+            base: Money
+            combined: Money = base + base
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Code-review follow-up to #1436 Task 2: the additive operator's generated <c>Money::new(...)</c>
+    /// call must carry a defaulted member's ACTUAL runtime value forward (<c>Some(self.currency)</c>),
+    /// not silently reset it to the declared default — the value-object analogue of the C# emitter's
+    /// carried-member guard against an <c>EUR + USD -&gt; EUR</c> silent coercion
+    /// (<c>CSharpEmitter.ValueObjects.cs</c>'s <c>WriteAdditiveOperator</c>). Before this follow-up,
+    /// <c>WriteAdditiveOp</c> passed a bare <c>None</c> for every trailing defaulted parameter, so a
+    /// <c>Money</c> constructed with <c>currency: Some(Currency::Usd)</c> silently reverted to <c>EUR</c>
+    /// after ANY <c>+</c> — a real, observable data-corruption bug now that #1436 makes such a member
+    /// genuinely overridable.
+    /// </summary>
+    [Fact]
+    public void Value_object_defaulted_member_survives_additive_operator()
+    {
+        var result = new KoineCompiler().Compile(ValueObjectDefaultedMemberSurvivesAdditiveOperatorModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Currency, Money};
+
+            #[test]
+            fn overridden_currency_survives_addition() {
+                let usd = Money::new(Decimal::from(10), Some(Currency::Usd)).expect("valid Money");
+                let combined = usd.clone() + usd;
+                assert_eq!(combined.currency(), Currency::Usd);
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1068: a <c>quantity</c> value object used directly in plain binary arithmetic —
     /// <c>combined: Weight = base + base</c> — must lower through its existing unit-checked
     /// <c>add</c>/<c>sub</c> methods, not the native <c>+</c>/<c>-</c> operator. Unlike a plain value
@@ -1342,15 +1429,15 @@ public class RustConformanceTests
 
             #[test]
             fn add_still_combines_amounts() {
-                let a = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
-                let b = Weight::new(Decimal::from(3)).expect("3 is a valid Weight");
-                assert_eq!(a.add(&b).unwrap(), Weight::new(Decimal::from(5)).unwrap());
+                let a = Weight::new(Decimal::from(2), None).expect("2 is a valid Weight");
+                let b = Weight::new(Decimal::from(3), None).expect("3 is a valid Weight");
+                assert_eq!(a.add(&b).unwrap(), Weight::new(Decimal::from(5), None).unwrap());
             }
 
             #[test]
             fn scale_still_scales_the_amount() {
-                let w = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
-                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6)).unwrap());
+                let w = Weight::new(Decimal::from(2), None).expect("2 is a valid Weight");
+                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6), None).unwrap());
             }
             """;
 

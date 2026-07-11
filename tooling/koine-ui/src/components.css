@@ -658,6 +658,97 @@
 }
 
 /* ---------------------------------------------------------------------------------------------------
+ * Command palette (tooling/koine-ui/src/primitives/palette.ts). Unlike the rest of this file, this
+ * component's DOM was moved into koine-ui straight from koine-studio's palette.ts (issue #905, Task 3)
+ * with no visual chrome ever ported alongside it — Studio hasn't wired createCommandPalette() into a
+ * live surface yet, so there was no SCSS to copy. This is the primitive's first styling: base panel
+ * chrome plus the visible-but-disabled row affordance (#1407) that only makes sense against it.
+ * --------------------------------------------------------------------------------------------------- */
+
+.koi-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--koi-z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: color-mix(in srgb, #000 45%, transparent);
+}
+
+.koi-palette {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  background: var(--koi-surface);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-lg);
+  box-shadow: var(--koi-shadow);
+  overflow: hidden;
+}
+
+.koi-palette-input {
+  flex: 0 0 auto;
+  padding: var(--koi-space-3) var(--koi-space-3-5);
+  border: none;
+  border-bottom: 1px solid var(--koi-line);
+  background: transparent;
+  color: var(--koi-fg);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-lg);
+}
+.koi-palette-input:focus {
+  outline: none;
+}
+
+.koi-palette-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--koi-space-1-5);
+}
+
+.koi-palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-2);
+  padding: var(--koi-space-2) var(--koi-space-2-5);
+  border-radius: var(--koi-radius-sm);
+  color: var(--koi-fg);
+  cursor: pointer;
+}
+.koi-palette-item[aria-selected='true'] {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+}
+
+.koi-palette-item-title {
+  flex: 1 1 auto;
+}
+
+.koi-palette-item-hint {
+  flex: 0 0 auto;
+  color: var(--koi-muted);
+  font-family: var(--koi-font-mono);
+  font-size: var(--koi-text-2xs);
+}
+
+.koi-palette-empty {
+  padding: var(--koi-space-3) var(--koi-space-2-5);
+  color: var(--koi-muted);
+}
+
+/* Visible-but-disabled row (#1407): a command gated by enabled() (activatability) stays in the list —
+   when() alone still governs visibility — but reads as inert: muted text, no pointer affordance. The
+   selected-row tint above still applies when a disabled row is the current selection, so keyboard
+   focus stays visible (WCAG's contrast minima don't apply to disabled controls, but the title is kept
+   legible rather than washed out — this is a lighter touch than .koi-palette-btn:disabled's 0.45). */
+.koi-palette-item--disabled {
+  opacity: 0.55;
+  color: var(--koi-muted);
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------------------------------------------
  * LeftRail (ported from Koine Studio's src/styles/layout/_leftrail.scss). Fully self-contained — no other
  * Studio component styles `.rail-*` / `.lstrip-*` / `#left-strip`, so this is the WHOLE partial, just
  * flattened from Sass nesting to plain CSS. The `#split.left-collapsed …` cross-file rules that respond

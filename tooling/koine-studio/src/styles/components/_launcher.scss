@@ -212,6 +212,21 @@
   background: var(--koi-accent-grad);
 }
 
+/* Visible-but-disabled row (#1407): a command entry gated by enabled() (activatability) — e.g.
+   open-folder/new-model while a workspace-open op is busy — stays in the results (when()/isEnabled
+   alone still governs whether it appears at all) but reads as inert: muted text, no pointer affordance.
+   Mirrors koine-ui's own `.koi-palette-item--disabled` (its command palette's identical affordance). The
+   `.sel` selection tint still applies when a disabled row is the current keyboard selection. */
+.lx-item--disabled {
+  opacity: 0.55;
+  color: var(--koi-muted);
+  cursor: default;
+}
+
+.lx-item--disabled:hover {
+  background: transparent;
+}
+
 .lx-kind {
   width: 26px;
   height: 26px;

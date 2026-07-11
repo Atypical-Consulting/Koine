@@ -53,6 +53,16 @@ export interface CatalogEntry {
   cmdId?: string;
   /** The command's keyboard-chord hint, e.g. `⌘N` (action entries), shown alongside the title. */
   hint?: string;
+  /**
+   * The command's live activatability predicate (action entries, issue #1407) — carried straight
+   * through from `Command.enabled`. `when()`/`isEnabled` already governs whether the entry appears in
+   * the catalog at all (see `buildCatalog.ts`'s `commandEntries`); this is the SECOND, independent axis:
+   * a command can be visible but not currently activatable (e.g. `open-folder`/`new-model` while a
+   * workspace-open op is busy). `ResultRow` calls this live (not a cached snapshot) to render the row
+   * as visible-but-disabled — the same `aria-disabled` affordance `koine-ui`'s command palette renders
+   * for a gated row. Absent ⇒ always activatable, matching `Command.enabled`'s own default.
+   */
+  enabled?: () => boolean;
   /** The declaration's `///` doc text (glossary entries): the live-preview pane's body (Task 5). */
   doc?: string | null;
   /** The commit's author-date, ISO-8601 (commit entries): the live-preview pane's "When" row (Task 5). */

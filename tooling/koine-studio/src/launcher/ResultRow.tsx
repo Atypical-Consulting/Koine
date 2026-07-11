@@ -107,15 +107,26 @@ export function ResultRow(props: ResultRowProps) {
   const { entry } = result;
   const chip = entry.cat === 'symbol' || entry.cat === 'event' ? KIND[entry.kind as keyof typeof KIND] : undefined;
   const segments = highlight(entry.title, result.ranges);
+  // A command entry gated by `Command.enabled()` (issue #1407): `when()`/`isEnabled` already governs
+  // whether the entry appears in the catalog at all (buildCatalog.ts's commandEntries), so the ONLY
+  // remaining reason this can read false here is the second, independent activatability axis — e.g.
+  // open-folder/new-model while a workspace-open op is busy. Re-evaluated on every render (not cached
+  // at catalog-build time) so the row flips back to normal the instant the busy op clears, without
+  // requiring the launcher to be reopened. Mirrors koine-ui's `koi-palette-item--disabled` affordance.
+  const disabled = entry.cat === 'action' && entry.enabled?.() === false;
+  const rowClass = ['lx-item', selected ? 'sel' : null, disabled ? 'lx-item--disabled' : null]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
-      class={selected ? 'lx-item sel' : 'lx-item'}
+      class={rowClass}
       // Stable per-entry id so the input's `aria-activedescendant` can point AT-readers at the active
       // option as ↑/↓ moves the selection (issue #1145 review); pairs with `role="option"` below.
       id={`lx-opt-${entry.id}`}
       role="option"
       aria-selected={selected}
+      aria-disabled={disabled || undefined}
       data-id={entry.id}
       onMouseMove={onHover}
       onClick={onRun}
@@ -141,7 +152,9 @@ export function ResultRow(props: ResultRowProps) {
       </div>
       <div class="lx-tail">
         <Tail entry={entry} />
-        {selected && onOpenMenu && (
+        {/* Suppressed for a disabled action row (#1407): its only quick action is Run, which is exactly
+            what's currently gated — a popover offering an inert "Run" would be a dead end. */}
+        {selected && onOpenMenu && !disabled && (
           <button
             type="button"
             class="lx-actbtn avail"

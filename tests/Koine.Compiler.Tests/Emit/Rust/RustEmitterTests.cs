@@ -62,9 +62,11 @@ public class RustEmitterTests
 
     /// <summary>
     /// Issue #1319: a value object's constant-default field must be coerced/owned to its declared Rust
-    /// type in the smart constructor's <c>Ok(Self { ... })</c> literal — a <c>Decimal</c> field defaulted
-    /// to a bare <c>Int</c> literal, or a <c>String</c> field defaulted to a string literal, otherwise
-    /// emits a raw uncoerced initializer that is a real <c>cargo check</c> <c>E0308</c>.
+    /// type in the smart constructor's <c>let</c>-binding loop — a <c>Decimal</c> field defaulted to a
+    /// bare <c>Int</c> literal, or a <c>String</c> field defaulted to a string literal, otherwise binds a
+    /// raw uncoerced value that is a real <c>cargo check</c> <c>E0308</c>. Since #1436, a non-optional
+    /// defaulted member is a trailing <c>Option&lt;T&gt;</c> constructor parameter unwrapped to the (still
+    /// coerced) default — the value-object dual of #1380's entity fix.
     /// </summary>
     [Fact]
     public void Value_object_constant_default_fields_coerce_to_their_declared_rust_type()
@@ -74,11 +76,45 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("tax_rate: Decimal::from(2),");
+        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
+        rust.ShouldNotContain("tax_rate: Decimal::from(2),");
         rust.ShouldNotContain("tax_rate: 2,");
 
-        rust.ShouldContain("label: \"std\".to_string(),");
+        rust.ShouldContain("let label = label.unwrap_or_else(|| \"std\".to_string());");
+        rust.ShouldNotContain("label: \"std\".to_string(),");
         rust.ShouldNotContain("label: \"std\",");
+    }
+
+    private const string ValueObjectDefaultedMemberBecomesTrailingParamModel = """
+        context Shop {
+          enum Currency { EUR, USD }
+
+          value Money {
+            amount: Decimal
+            currency: Currency = EUR
+            invariant amount >= 0 "an amount cannot be negative"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1436 (value-object dual of #1380's entity fix): a value object's non-optional-declared
+    /// constant-default member — one whose declared type is plain <c>T</c>, not <c>T?</c> — must become
+    /// a trailing, overridable <c>Option&lt;T&gt;</c> constructor parameter, not silently dropped from the
+    /// signature and hardcoded inline in <c>Ok(Self { ... })</c>. Mirrors the C# emitter's own
+    /// optional-parameter shape for the identical model.
+    /// </summary>
+    [Fact]
+    public void Value_object_non_optional_defaulted_member_becomes_trailing_option_ctor_parameter()
+    {
+        var result = new KoineCompiler().Compile(ValueObjectDefaultedMemberBecomesTrailingParamModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn new(amount: Decimal, currency: Option<Currency>) -> Result<Self, DomainError>");
+        rust.ShouldContain("let currency = currency.unwrap_or_else(|| Currency::Eur);");
+        rust.ShouldNotContain("currency: Currency::Eur,");
     }
 
     private const string EntityConstantDefaultCoercionModel = """

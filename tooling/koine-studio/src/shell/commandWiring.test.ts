@@ -457,15 +457,24 @@ describe('commandWiring', () => {
     });
   });
 
-  // #1275: while a workspace-opening op is queued or running, the commands that would enqueue ANOTHER
-  // workspace swap are gated — the palette hides them, run() no-ops, and the chords fall through — so
-  // the serialization the lock enforces is legible instead of piling silent deferred clicks onto it.
-  describe('workspace-open busy gating (#1275)', () => {
-    it('no-ops the new-model and open-folder commands (run() + chords) while workspaceOpBusy()', () => {
+  // #1275 → #1407: while a workspace-opening op is queued or running, new-model / open-folder are gated
+  // on the koine-ui CommandRegistry's *activatability* axis (enabled()), not its *visibility* axis
+  // (when()) — so the entries now STAY in the palette / launcher list as a legible "busy right now" row
+  // (Task 4 renders the visible-but-disabled affordance) instead of vanishing. run() and the chords still
+  // dispatch through registry.run(), which no-ops when isActivatable() is false, so the lock's
+  // serialization holds exactly as before (#1275) — only the palette's visibility changed.
+  describe('workspace-open busy gating (#1407, was when()-hidden under #1275)', () => {
+    it('keeps new-model and open-folder in the command list while workspaceOpBusy(), but no-ops run() + chords', () => {
       const deps = makeDeps({ workspaceOpBusy: vi.fn(() => true) });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
+      // Visible-but-disabled: enabled()-gated, not when()-gated, so it stays in the list.
+      const ids = wiring.getCommands().map((c) => c.id);
+      expect(ids).toContain('new-model');
+      expect(ids).toContain('open-folder');
+
+      // Not activatable, though: run() is a guarded no-op.
       wiring.run('new-model');
       wiring.run('open-folder');
       expect(deps.requestNewModel).not.toHaveBeenCalled();
@@ -476,20 +485,19 @@ describe('commandWiring', () => {
       window.dispatchEvent(key({ key: 'o', ctrlKey: true, shiftKey: true }));
       expect(deps.requestNewModel).not.toHaveBeenCalled();
       expect(deps.openFolder).not.toHaveBeenCalled();
-
-      // …and the palette / launcher lists mark them unavailable (filtered, like every when()-gated command).
-      const ids = wiring.getCommands().map((c) => c.id);
-      expect(ids).not.toContain('new-model');
-      expect(ids).not.toContain('open-folder');
     });
 
-    it('re-reads the busy probe live: an idle lock restores both commands', () => {
+    it('re-reads the busy probe live: an idle lock restores activatability (list membership was already unchanged)', () => {
       let busy = true;
       const deps = makeDeps({ workspaceOpBusy: vi.fn(() => busy) });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
-      expect(wiring.getCommands().map((c) => c.id)).not.toContain('new-model');
+      // Present even while busy…
+      expect(wiring.getCommands().map((c) => c.id)).toContain('new-model');
+      // …but not activatable yet.
+      wiring.run('open-folder');
+      expect(deps.openFolder).not.toHaveBeenCalled();
 
       busy = false; // the queue drained
       const ids = wiring.getCommands().map((c) => c.id);
@@ -499,6 +507,24 @@ describe('commandWiring', () => {
       expect(deps.openFolder).toHaveBeenCalledOnce();
       window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
       expect(deps.requestNewModel).toHaveBeenCalledOnce();
+    });
+
+    it('does not regress the still-when()-gated hidden-command path: stop-compile and the dev command stay absent while busy', () => {
+      // Characterization test: the enabled()-gating added for new-model/open-folder must not leak into
+      // commands that are still genuinely hidden via when() (canStopCompile() === false, DEV === false).
+      vi.stubEnv('DEV', false);
+      vi.mocked(canStopCompile).mockReturnValue(false);
+      const deps = makeDeps({ workspaceOpBusy: vi.fn(() => true) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const ids = wiring.getCommands().map((c) => c.id);
+      expect(ids).toContain('new-model'); // visible-but-disabled (enabled())
+      expect(ids).toContain('open-folder'); // visible-but-disabled (enabled())
+      expect(ids).not.toContain('stop-compile'); // still genuinely hidden (when())
+      expect(ids).not.toContain('toggle-store-inspector'); // still genuinely hidden (when())
+
+      vi.unstubAllEnvs();
     });
   });
 

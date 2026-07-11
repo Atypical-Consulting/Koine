@@ -80,8 +80,44 @@ framework or none):
 | `el()` | A typed, minimal DOM builder (`el(tag, options?, children?)`) — collapses the `createElement` + `className =` + `setAttribute` + `addEventListener` quartet into one expression. |
 | `createFloatingMenu()` (`FloatingMenuItem`, `FloatingMenuConfig`, `FloatingMenuOpenOptions`, `FloatingMenu`) | The shared floating "popup menu" engine: builds a `<ul role="menu">`, positions it (anchored under a trigger, or at an explicit viewport point for a context menu), dismisses on outside-pointerdown / Tab / Escape, and runs Arrow/Home/End keyboard nav. |
 | `registerOverlay()`, `visibleFocusables()`, `FOCUSABLE_SELECTOR`, `createModal()`, `createConfirmDialog()`, `createPromptDialog()`, `koiConfirm()`, `koiPrompt()` | Shared overlay infrastructure: a z-order Esc-stack (so a single Escape closes only the top-most open overlay) plus the common `.koi-modal*` chrome — backdrop, header/body/footer, backdrop-click-to-close, and focus capture/restore/trap. |
-| `createCommandRegistry()` (`Command`, `CommandRegistry`) | A DOM-free, host-agnostic command registry — the single source of truth for the `Command` interface that the palette, toolbar, and keymap all read from. |
-| `createCommandPalette()` (`PaletteHandle`) | A Cmd/Ctrl-K style command palette overlay that self-mounts to `document.body`; filters commands by case-insensitive subsequence match, wraps on Up/Down, and defers Esc handling to the shared overlay stack. |
+| `createCommandRegistry()` (`Command`, `CommandRegistry`) | A DOM-free, host-agnostic command registry — the single source of truth for the `Command` interface that the palette, toolbar, and keymap all read from. Exposes two independent gating predicates on `Command` — `when()` (visibility) and `enabled()` (activatability) — see "Two independent gates" below. |
+| `createCommandPalette()` (`PaletteHandle`) | A Cmd/Ctrl-K style command palette overlay that self-mounts to `document.body`; filters commands by case-insensitive subsequence match, wraps on Up/Down, and defers Esc handling to the shared overlay stack. Renders an `enabled()`-gated command as a visible-but-disabled row (`aria-disabled`, `.koi-palette-item--disabled`) rather than hiding it. |
+
+#### Two independent command gates: `when()` vs `enabled()` (issue #1407)
+
+`Command` (`commandRegistry.ts`) carries two separate, optional predicates, and it matters which one
+a new command (or a new consumer of `getCommands()`/the registry) reaches for:
+
+- **`when()` — visibility.** Governs whether the command exists in the current list at all.
+  `CommandRegistry.isEnabled(id)` (`when() ?? true`) is what `all().filter(...)`-style callers use to
+  build the list a palette/menu/overflow renders. A command whose `when()` is currently false simply
+  isn't there — e.g. Koine Studio's `stop-compile` command only appears while a compile is actually in
+  flight.
+- **`enabled()` — activatability.** A second, independent axis for a command that SHOULD stay visible
+  but currently can't be run — e.g. Koine Studio's `open-folder`/`new-model` commands while a
+  workspace-open operation is already busy. `CommandRegistry.isActivatable(id)` is `isEnabled(id) &&
+  (enabled?.() ?? true)`, and `CommandRegistry.run(id)` is a guarded no-op when it's false.
+
+The reason these are separate: a command hidden by `when()` teaches the user nothing (it looks like it
+never existed), while a command visible-but-disabled by `enabled()` teaches the user it exists and
+*why* it can't run right now (paired with a disabled-row affordance and, ideally, a tooltip/title
+explaining the gate). Collapsing the two into one boolean forces every gate to pick between "vanish"
+and "silently do nothing when clicked" — neither of which is honest for the busy-op case.
+
+**Building a new command-list consumer?** Never render a raw `Command[]` (or a `Command`-derived row
+template) as an unconditionally-clickable/runnable row without checking `enabled()`. Either:
+
+1. Render the row **visibly-but-disabled** when `cmd.enabled?.() === false` — grey it out, set
+   `aria-disabled="true"` (or your row primitive's native `disabled`, e.g. `createFloatingMenu`'s
+   `FloatingMenuItem.disabled`), and re-check `enabled()` fresh again at the moment of activation (not
+   a snapshot taken when the row was built — the gate can flip while the row is still on screen); or
+2. If your row template genuinely can't express a disabled state, filter to `isActivatable(id)` only
+   — but document why inline, since a silently-vanishing command is a worse user experience than a
+   disabled one and should be the exception, not the default.
+
+`createCommandPalette()` and Koine Studio's Spotlight launcher (`tooling/koine-studio/src/launcher/`)
+and mobile toolbar-overflow menu (`tooling/koine-studio/src/shell/toolbarOverflow.ts`) all follow
+option 1 above — see their own doc comments for the concrete wiring.
 
 **Store-free presentational Preact components** (each takes plain props/callbacks — no store, no
 host coupling):
