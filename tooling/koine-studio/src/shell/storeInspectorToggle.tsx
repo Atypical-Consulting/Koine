@@ -39,7 +39,8 @@ export function createStoreInspectorToggle(
       // Show: remount the component
       storeInspectorHost.hidden = false;
       if (storeInspectorComponent) {
-        render(<storeInspectorComponent store={store} />, storeInspectorHost);
+        const StoreInspectorComponent = storeInspectorComponent;
+        render(<StoreInspectorComponent store={store} />, storeInspectorHost);
       }
     } else {
       // Hide: unmount by rendering null, then set hidden
