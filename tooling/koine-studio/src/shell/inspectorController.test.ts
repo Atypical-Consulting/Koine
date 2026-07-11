@@ -1190,13 +1190,14 @@ describe('createInspectorController — bounded-context scope', () => {
     expect(finalIdx?.contexts).toEqual(['Billing']);
   });
 
-  // Baseline for #1457's LifecycleSequence swap: two builds racing WITHOUT an intervening
-  // invalidateDocViews() call — `cacheGeneration` is never bumped between them, so both builds share
-  // generation 0 and both pass the `gen === cacheGeneration` write guard. Whichever build COMPLETES
-  // last therefore wins, regardless of which one started first. This pins that as today's (pre-refactor)
-  // behavior; the swap to `modelDerivedSeq` changes the winner to whichever build STARTED last instead
-  // (see the sibling test after the refactor lands).
-  test('two getCachedDomainIndex() builds racing without an intervening invalidation: the one that completes last wins (pre-refactor baseline)', async () => {
+  // #1457: two builds racing WITHOUT an intervening invalidateDocViews() call. Under the
+  // `modelDerivedSeq` LifecycleSequence, EVERY build's own start mints a new token via next() (not just
+  // an invalidation, as `cacheGeneration` used to require) — so build B's start alone supersedes A's
+  // token the instant B kicks off, regardless of completion order. Whichever build STARTED last
+  // therefore wins — a behavior change from the pre-refactor `cacheGeneration` design (where both builds
+  // shared one generation and whichever COMPLETED last won instead). This is the accepted, documented new
+  // semantics (see the Spec's "Behavior" section on the issue).
+  test('two getCachedDomainIndex() builds racing without an intervening invalidation: the one that started last wins', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
@@ -1213,7 +1214,8 @@ describe('createInspectorController — bounded-context scope', () => {
     const buildA = ctl.getCachedDomainIndex(); // build A: kicks off, pends on contextMap
 
     // No invalidateDocViews() call here — cachedDomainIndex is still null (A hasn't written yet), so
-    // this starts a second, independent build against the default (fast-resolving) fixtures.
+    // this starts a second, independent build against the default (fast-resolving) fixtures. Its own
+    // next() call already supersedes A's token.
     const freshIdx = await ctl.getCachedDomainIndex(); // build B: starts second, completes first
     expect(freshIdx?.contexts).toEqual(['Billing']);
 
@@ -1223,10 +1225,10 @@ describe('createInspectorController — bounded-context scope', () => {
     await buildA;
     await flush();
 
-    // Today: A's late write is NOT guarded against B's (same generation), so A — the one that completed
-    // LAST — clobbers B's fresher value.
+    // B's token is still the current one (B started after A) — A's late write reads isCurrent() false
+    // and is dropped, so B — the one that STARTED last — wins, not A (the one that completed last).
     const finalIdx = await ctl.getCachedDomainIndex();
-    expect(finalIdx?.contexts).toEqual(['StaleWorld']);
+    expect(finalIdx?.contexts).toEqual(['Billing']);
   });
 
   test('a scope change fans out to the Files tree via scopeFiles (context, then null for All) — ADR 0009', async () => {
