@@ -435,6 +435,101 @@ describe('LauncherPanel — quick actions + action menu + toast (issue #1143, ta
   });
 });
 
+describe('LauncherPanel — visible-but-disabled command rows (issue #1407)', () => {
+  // open-folder / new-model flip from when() to enabled() while a workspace-open op is busy
+  // (commandWiring.ts, #1407 Task 3): they stay in the catalog (when()/isEnabled is unaffected) but
+  // must render as visible-but-disabled instead of a plain runnable row that silently no-ops. This
+  // stands in for either real command, gated on the same `enabled()` axis.
+  function gatedCommand(isBusy: () => boolean, run: () => void = vi.fn()): Command {
+    return { id: 'open-folder', title: 'Open folder…', hint: '⌘⇧O', group: 'File', run, enabled: () => !isBusy() };
+  }
+
+  // Switches the launcher into `>` (Commands) mode so the single injected command is the only
+  // rendered row — the curated empty-query default set never includes commands (defaults.ts).
+  async function mountInCommandsMode(commands: Command[], actionDeps: LauncherActionDeps = makeActionDeps()) {
+    const sources = makeSources({ commands: () => commands });
+    const view = mount(sources, vi.fn(), actionDeps);
+    const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
+    fireEvent.input(input, { target: { value: '>' } });
+    await waitFor(() => expect(view.container.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+    return view;
+  }
+
+  test('a busy-gated command row renders with the disabled class and aria-disabled', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => true)]);
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+
+    expect(row.textContent).toContain('Open folder');
+    expect(row.classList.contains('lx-item--disabled')).toBe(true);
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  test('the same command renders with no disabled marker once the op is no longer busy', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => false)]);
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+
+    expect(row.classList.contains('lx-item--disabled')).toBe(false);
+    expect(row.hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  test('a command with no enabled() field at all renders with no disabled marker (unaffected by this axis)', async () => {
+    const plain: Command = { id: 'search', title: 'Search across files…', run: vi.fn() };
+    const view = await mountInCommandsMode([plain]);
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+
+    expect(row.classList.contains('lx-item--disabled')).toBe(false);
+    expect(row.hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  test('clicking a busy-gated command row does not run it', async () => {
+    const runCommand = vi.fn();
+    const view = await mountInCommandsMode([gatedCommand(() => true)], makeActionDeps({ runCommand }));
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+
+    fireEvent.click(row);
+
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  test('selecting a busy-gated command row and pressing Enter does not run it', async () => {
+    const runCommand = vi.fn();
+    const view = await mountInCommandsMode([gatedCommand(() => true)], makeActionDeps({ runCommand }));
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'Enter' });
+
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  test('the row\'s "⌘K actions" quick-action trigger is suppressed for a disabled row (its only action is the gated Run)', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => true)]);
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+
+    expect(row.querySelector('.lx-actbtn')).toBeNull();
+  });
+
+  test('an enabled row still shows its "⌘K actions" trigger once selected', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => false)]);
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+
+    expect(row.querySelector('.lx-actbtn')).not.toBeNull();
+  });
+
+  test('re-evaluates enabled() fresh at click time rather than a stale catalog-build snapshot', async () => {
+    let busy = true;
+    const runCommand = vi.fn();
+    const view = await mountInCommandsMode([gatedCommand(() => busy)], makeActionDeps({ runCommand }));
+    const row = view.container.querySelector('.lx-item') as HTMLElement;
+
+    fireEvent.click(row);
+    expect(runCommand).not.toHaveBeenCalled();
+
+    busy = false; // the workspace op finishes while the launcher is still open — no re-open needed
+    fireEvent.click(row);
+    expect(runCommand).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {
   test('ArrowDown moves the .sel row forward and wraps at the end', async () => {
     const sources = makeKnownCatalogSources();

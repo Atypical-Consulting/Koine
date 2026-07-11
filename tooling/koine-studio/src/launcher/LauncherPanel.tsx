@@ -129,6 +129,13 @@ export function LauncherPanel(props: LauncherPanelProps) {
   const selectedActions = selected ? actionsFor(selected.entry, effectiveDeps) : [];
 
   function runDefault(entry: CatalogEntry): void {
+    // Re-check enabled() fresh at the moment of activation (issue #1407), mirroring koine-ui's
+    // palette.ts runAt() — a workspace op can start/finish while the launcher is still open, so a row
+    // rendered enabled may no longer be, or vice versa. `deps.runCommand` (commandWiring.ts) already
+    // routes 'action' entries through `registry.run`, which itself no-ops when not activatable (Task 1);
+    // this early return just keeps the two paths (click/Enter here, the quick-action menu's own `Run`)
+    // consistent and avoids constructing `actionsFor`'s closures for an entry that can't run anyway.
+    if (entry.cat === 'action' && entry.enabled?.() === false) return;
     void actionsFor(entry, effectiveDeps)[0]?.run();
   }
 

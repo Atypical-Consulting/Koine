@@ -67,6 +67,56 @@ describe('buildOverflowItems', () => {
     expect(items.some((i) => i.id === 'save-project-to-disk')).toBe(false);
   });
 
+  // A command gated by enabled() (issue #1407 — the SECOND, independent activatability axis, distinct
+  // from when()/isEnabled which already decided the command is even in `commands` at all) must never
+  // surface here as a plain, silently-inert menu item. None of the four commands this menu currently
+  // reuses (save-project-to-disk / check / toggle-theme / prefs) are enabled()-gated today, but the
+  // mapping must handle one correctly regardless — defense-in-depth for whatever command this menu
+  // reuses next.
+  test('propagates a command\'s enabled() as the item\'s disabled flag', () => {
+    const gated = cmds().map((c) => (c.id === 'check' ? { ...c, enabled: () => false } : c));
+    const items = buildOverflowItems({
+      commands: gated,
+      openPalette: () => {},
+      installAvailable: true,
+      install: () => {},
+    });
+    expect(items.find((i) => i.id === 'check')!.disabled).toBe(true);
+    expect(items.find((i) => i.id === 'save-project-to-disk')!.disabled).toBe(false);
+  });
+
+  test('a command with no enabled() field is never disabled', () => {
+    const items = buildOverflowItems({
+      commands: cmds(),
+      openPalette: () => {},
+      installAvailable: true,
+      install: () => {},
+    });
+    // 'install'/'palette' are synthetic (not built via fromCmd) and carry no `disabled` field at all —
+    // falsy either way is the contract (createFloatingMenu treats `disabled ?? false` identically).
+    expect(items.every((i) => !i.disabled)).toBe(true);
+  });
+
+  test('an enabled()-gated item\'s run() re-checks fresh at activation time and no-ops when disabled', () => {
+    let busy = true;
+    const onCheck = vi.fn();
+    const gated = cmds({ check: onCheck }).map((c) => (c.id === 'check' ? { ...c, enabled: () => !busy } : c));
+    const items = buildOverflowItems({
+      commands: gated,
+      openPalette: () => {},
+      installAvailable: false,
+      install: () => {},
+    });
+    const check = items.find((i) => i.id === 'check')!;
+
+    check.run();
+    expect(onCheck).not.toHaveBeenCalled();
+
+    busy = false;
+    check.run();
+    expect(onCheck).toHaveBeenCalledOnce();
+  });
+
   test('each item reuses the registered handler (palette + install wired to their thunks)', () => {
     const onCheck = vi.fn();
     const onPalette = vi.fn();
@@ -157,5 +207,31 @@ describe('overflow menu surface', () => {
     expect(document.activeElement).toBe(items[0]);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     expect(document.activeElement).toBe(items[1]);
+  });
+
+  // End-to-end through the SAME createFloatingMenu engine buildOverflowItems' disabled flag targets
+  // (issue #1407): a disabled item must render as a genuinely inert menu row, not merely a "disabled"
+  // JS object field that the DOM ignores.
+  test('a disabled item renders a native-disabled, non-activatable menu row', () => {
+    const trigger = kebab();
+    const onCheck = vi.fn();
+    const items: OverflowMenuItem[] = [
+      { id: 'save-project-to-disk', label: 'Save to disk', run: () => {} },
+      { id: 'check', label: 'Check', run: onCheck, disabled: true },
+    ];
+    openOverflowMenu(trigger, items);
+
+    const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    expect(rows[1].disabled).toBe(true);
+
+    rows[1].click();
+    expect(onCheck).not.toHaveBeenCalled();
+    expect(isOverflowMenuOpen()).toBe(true); // a disabled row can't even dismiss the menu it sits in
+
+    // Excluded from the roving-focus/keyboard-nav set (floatingMenu.ts's focusables() queries
+    // `:not([disabled])`) — with only one other (enabled) row, ArrowDown has nowhere else to land.
+    expect(document.activeElement).toBe(rows[0]);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(rows[0]);
   });
 });
