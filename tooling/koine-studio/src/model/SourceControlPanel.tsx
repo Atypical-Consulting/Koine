@@ -33,6 +33,8 @@ export type GitSurface = Pick<
   | 'gitDiscard'
   | 'gitCommit'
   | 'gitPush'
+  | 'gitPull'
+  | 'gitFetch'
   | 'gitBranches'
   | 'gitCheckout'
   | 'gitLog'
@@ -307,6 +309,51 @@ export function SourceControlPanel(props: {
   // lands in the existing actionError alert.
   const onPush = () => void mutate(() => git.gitPush(folderToken));
 
+  // Publish branch (#1401): the sync bar's live replacement for the old "No upstream" dead end — a push
+  // that also sets the tracking ref (`git push -u origin <branch>`), so it succeeds even though there's
+  // no upstream yet. Same mutate() path as every other mutation, so a refusal (auth, offline) lands in
+  // the existing actionError alert rather than a silent no-op.
+  const onPublish = () => void mutate(() => git.gitPush(folderToken, { setUpstream: true }));
+
+  // Pull (#1401): a fast-forward-only merge of the upstream into the checked-out branch. Same mutate()
+  // path as Push — a local/remote divergence (git refuses a non-ff merge) surfaces through the existing
+  // actionError alert rather than silently rewriting history.
+  const onPull = () => void mutate(() => git.gitPull(folderToken));
+
+  // Fetch (#1401): refreshes the remote-tracking refs without touching the checked-out branch — useful
+  // even with no upstream (it just needs a remote), so unlike Pull/Push it is never upstream-gated.
+  const onFetch = () => void mutate(() => git.gitFetch(folderToken));
+
+  // Amend last commit (#1401): rewrites the tip commit with whatever's currently in the composer
+  // textarea. An EMPTY message reuses the previous commit's message unchanged (gitCommit's `opts.amend`
+  // contract, `--no-edit`), so leaving the box blank amends without touching the message. Requires an
+  // existing commit to rewrite — gated on the log being non-empty, not on staged/dirty state.
+  const onAmend = () => {
+    void mutate(async () => {
+      await git.gitCommit(folderToken, message.trim(), { amend: true });
+      setMessage('');
+    });
+  };
+
+  // Commit & Push (#1401): one compound mutate() — commit the staged changes, then push. A rejected
+  // commit (nothing staged / git failure) throws before the push ever runs, so the push is skipped
+  // entirely and the failure surfaces through the same actionError alert every other mutation uses. A
+  // successful commit conditionally publishes: with no upstream tracked yet a bare push would itself be
+  // rejected, so `{ setUpstream: true }` is passed ONLY in that case — an already-tracked branch keeps
+  // the plain push every other Push control uses.
+  const onCommitAndPush = () => {
+    void mutate(async () => {
+      const msg = message.trim();
+      await git.gitCommit(folderToken, msg);
+      setMessage('');
+      if (upstream) {
+        await git.gitPush(folderToken);
+      } else {
+        await git.gitPush(folderToken, { setUpstream: true });
+      }
+    });
+  };
+
   const onCheckout = (branch: string) => {
     if (!status || branch === status.branch) return;
     void mutate(() => git.gitCheckout(folderToken, branch));
@@ -481,11 +528,10 @@ export function SourceControlPanel(props: {
     setShowAllCommits(true);
   };
 
-  // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
-  // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits,
-  // and — as of #1401 — Discard all changes / Push, wired to the same onDiscard/onPush the per-row and
-  // group controls already use). The DEFERRED items (Pull, Fetch) render disabled since neither has a
-  // Platform git op yet; disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
+  // Build + toggle the ⋮ overflow menu (#1153). Every item is now backed by a real git op (#1401
+  // finishes the wiring the menu shipped with): Refresh, Stage/Unstage all over the grouped paths,
+  // collapse/expand, reveal-all-commits, Discard all changes / Push (wired to the same onDiscard/onPush
+  // the per-row and group controls already use), and Pull/Fetch (onPull/onFetch, the new #1401 ops).
   const openOverflowMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     // Every unstaged (tracked) + untracked file — the same candidate set the per-group Discard-all
@@ -534,26 +580,29 @@ export function SourceControlPanel(props: {
         disabled: busy || discardCandidates.length === 0,
         run: () => onDiscard(discardCandidates, { untracked: false, group: 'the working tree' }),
       },
-      { id: 'pull', label: 'Pull', disabled: true, run: () => {} },
+      // Pull (#1401): a fast-forward-only merge from the upstream — disabled while busy or when the
+      // branch has no upstream to pull from (there's nothing to fast-forward against).
+      { id: 'pull', label: 'Pull', disabled: busy || !upstream, run: onPull },
       // Push (#1401): the same onPush the branch-bar push button uses — disabled while busy or when the
       // branch has no upstream to push to (mirrors that button's own gate, since there's nothing to push).
       { id: 'push', label: 'Push', disabled: busy || !upstream, run: onPush },
-      { id: 'fetch', label: 'Fetch', disabled: true, run: () => {} },
+      // Fetch (#1401): refreshes the remote-tracking refs only — never upstream-gated (it just needs a
+      // remote), so it stays enabled even on a branch that doesn't track one yet.
+      { id: 'fetch', label: 'Fetch', disabled: busy, run: onFetch },
     ];
     overflowMenuRef.current!.toggle({ trigger, items, align: 'right' });
   };
 
-  // Build + toggle the split-commit caret menu (#1153). Both items are DEFERRED placeholders: Amend needs a
-  // new `git commit --amend` Platform op, and Commit & Push — though gitPush itself now exists (#1150) —
-  // is a compound commit-then-push flow still awaiting its wiring; each a tracked sibling follow-up. They
-  // render disabled (never a live-but-inert no-op); the plain Commit action stays the split button itself.
-  // The caret is openable so the menu is discoverable, disabled only while the composer is busy (the same
-  // gate the message box uses).
+  // Build + toggle the split-commit caret menu (#1153). Both items are wired (#1401): Amend rewrites the
+  // tip commit (onAmend) — needs an existing commit to rewrite, so it's disabled on an empty log; Commit
+  // & Push (onCommitAndPush) runs the plain Commit flow then a push in one op — needs a staged change to
+  // commit. The plain Commit action stays the split button itself; the caret is disabled only while the
+  // composer is busy (the same gate the message box uses).
   const openCaretMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     const items: FloatingMenuItem[] = [
-      { id: 'amend', label: 'Amend last commit', disabled: true, run: () => {} },
-      { id: 'commit-push', label: 'Commit & Push', disabled: true, run: () => {} },
+      { id: 'amend', label: 'Amend last commit', disabled: busy || log.length === 0, run: onAmend },
+      { id: 'commit-push', label: 'Commit & Push', disabled: busy || !hasStaged, run: onCommitAndPush },
     ];
     caretMenuRef.current!.toggle({ trigger, items, align: 'right' });
   };
@@ -861,9 +910,29 @@ export function SourceControlPanel(props: {
               </button>
             </>
           ) : (
-            <div class="koi-sc-sync koi-sc-sync-none" title="This branch isn’t tracking an upstream">
-              No upstream
-            </div>
+            <>
+              <div class="koi-sc-sync koi-sc-sync-none" title="This branch isn’t tracking an upstream">
+                No upstream
+              </div>
+              {/* Publish branch (#1401): replaces the old dead end — a live action that pushes AND sets
+                  the tracking ref in one step (`git push -u origin <branch>`), so a branch with no
+                  upstream yet is no longer a conversational cul-de-sac. Only offered once the branch
+                  actually has a commit to publish — an empty repo's branch has no tip to push, so the
+                  plain "No upstream" hint stays the sole (inert) control rather than a live-but-pointless
+                  button. */}
+              {log.length > 0 && (
+                <button
+                  type="button"
+                  class="koi-sc-act"
+                  title="Publish branch"
+                  aria-label="Publish branch"
+                  disabled={busy}
+                  onClick={onPublish}
+                >
+                  Publish branch
+                </button>
+              )}
+            </>
           ))}
       </div>
 

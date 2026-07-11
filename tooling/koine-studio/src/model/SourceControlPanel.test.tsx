@@ -52,6 +52,8 @@ function makeGit(initial: GitFile[], upstream: GitUpstream | null = { ref: 'orig
       files = files.filter((f) => !gone.has(f.relPath));
     }),
     gitPush: vi.fn(async () => {}),
+    gitPull: vi.fn(async () => {}),
+    gitFetch: vi.fn(async () => {}),
     gitBranches: vi.fn(async () => ['main', 'feature']),
     gitCheckout: vi.fn(async () => {}),
     gitLog: vi.fn(
@@ -436,6 +438,8 @@ describe('SourceControlPanel', () => {
       gitDiscard: vi.fn(),
       gitCommit: vi.fn(),
       gitPush: vi.fn(),
+      gitPull: vi.fn(),
+      gitFetch: vi.fn(),
       gitBranches: vi.fn(async () => ['main']),
       gitCheckout: vi.fn(),
       gitLog: vi.fn(async () => [] as GitLogEntry[]),
@@ -480,6 +484,54 @@ describe('SourceControlPanel', () => {
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByRole('region', { name: 'Staged Changes' });
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SourceControlPanel — Publish branch (#1401)', () => {
+  test('no upstream + an existing commit: shows a live "Publish branch" action (replaces the old dead end)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+
+    const publish = (await view.findByRole('button', { name: 'Publish branch' })) as HTMLButtonElement;
+    expect(publish.disabled).toBe(false);
+  });
+
+  test('clicking "Publish branch" calls gitPush with setUpstream:true and re-fetches status', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const publish = await view.findByRole('button', { name: 'Publish branch' });
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+
+    fireEvent.click(publish);
+
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN, { setUpstream: true }));
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+  });
+
+  test('no upstream + zero commits: no "Publish branch" action (nothing to publish yet)', async () => {
+    const git = {
+      ...makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }], null),
+      gitLog: vi.fn(async () => []),
+    };
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    await view.findByText(/No commits yet/i);
+
+    expect(view.queryByRole('button', { name: 'Publish branch' })).toBeNull();
+    // The plain no-upstream hint is still shown — never a live-but-inert button.
+    expect(view.container.querySelector('.koi-sc-sync')?.textContent).toMatch(/no upstream/i);
+  });
+
+  test('an upstream already present: no "Publish branch" action (the ordinary Push button covers it)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 0, behind: 0 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+
+    expect(view.queryByRole('button', { name: 'Publish branch' })).toBeNull();
   });
 });
 
@@ -661,7 +713,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     expect(trigger.getAttribute('aria-label')).not.toMatch(/coming soon/i);
   });
 
-  test('clicking ⋮ opens a role="menu" of already-backed live actions plus the deferred disabled ones', async () => {
+  test('clicking ⋮ opens a role="menu" of fully-wired live actions (#1153, #1401)', async () => {
     // Seed > 10 commits so "View all commits" has something to reveal (it disables when the log fits in 10).
     const git = {
       ...makeGit([
@@ -694,10 +746,10 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     // controls already use — live with a non-staged discard candidate + a tracked upstream present.
     expect(item('Discard all changes').disabled).toBe(false);
     expect(item('Push').disabled).toBe(false);
-
-    // Deferred items — no backing Platform git op yet (sibling follow-ups): rendered disabled, never inert-live.
-    expect(item('Pull').disabled).toBe(true);
-    expect(item('Fetch').disabled).toBe(true);
+    // Pull/Fetch (#1401) are now wired to gitPull/gitFetch — Pull needs a tracked upstream (present by
+    // default here), Fetch needs only a remote (never upstream-gated).
+    expect(item('Pull').disabled).toBe(false);
+    expect(item('Fetch').disabled).toBe(false);
   });
 
   test('the ⋮ menu "Discard all changes" confirms then calls gitDiscard with the full tracked/untracked split', async () => {
@@ -800,6 +852,67 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
       (within(menu).getByRole('menuitem', { name: 'Discard all changes' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect((within(menu).getByRole('menuitem', { name: 'Push' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole('menuitem', { name: 'Pull' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(menu).getByRole('menuitem', { name: 'Fetch' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('the ⋮ menu "Pull" calls gitPull and re-fetches status (#1401)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 0, behind: 2 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Pull' }));
+
+    await waitFor(() => expect(git.gitPull).toHaveBeenCalledWith(TOKEN));
+    // The mutate() follow-up reload re-reads status, tracking the fast-forwarded branch.
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+  });
+
+  test('the ⋮ menu "Pull" is disabled when the branch has no upstream', async () => {
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    expect((within(menu).getByRole('menuitem', { name: 'Pull' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('a Pull rejected by local divergence (--ff-only) surfaces via the action-error alert, no other state change (#1401)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 1, behind: 1 },
+    );
+    git.gitPull.mockRejectedValue(new Error('fatal: Not possible to fast-forward, aborting.'));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Pull' }));
+
+    const alert = await view.findByRole('alert');
+    expect(alert.textContent).toContain('Not possible to fast-forward');
+    // No reload happened on failure — the staged file is still shown exactly as before.
+    expect(group(view.container, 'Staged Changes')!.textContent).toContain('a.koi');
+  });
+
+  test('the ⋮ menu "Fetch" calls gitFetch and re-fetches status, even with no upstream (#1401)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+
+    // Fetch is enabled with no upstream — it only needs a remote, not a tracked branch.
+    expect((within(menu).getByRole('menuitem', { name: 'Fetch' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Fetch' }));
+
+    await waitFor(() => expect(git.gitFetch).toHaveBeenCalledWith(TOKEN));
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
   });
 
   test('the ⋮ menu "Stage all changes" stages every unstaged + untracked path', async () => {
@@ -839,29 +952,118 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     expect(trigger.getAttribute('aria-label')).not.toMatch(/coming soon/i);
   });
 
-  test('opening the caret shows Amend last commit + Commit & Push, both disabled (deferred ops)', async () => {
+  test('opening the caret shows Amend last commit + Commit & Push both live with a commit + staged file (#1401)', async () => {
     const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByDisplayValue('main');
     const menu = await openCaret(view);
     const amend = within(menu).getByRole('menuitem', { name: 'Amend last commit' }) as HTMLButtonElement;
     const commitPush = within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement;
-    expect(amend.disabled).toBe(true);
-    expect(commitPush.disabled).toBe(true);
+    expect(amend.disabled).toBe(false);
+    expect(commitPush.disabled).toBe(false);
   });
 
-  test('the caret items are inert placeholders — activating them fires no git.* op', async () => {
-    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+  test('"Amend last commit" is disabled on a repo with zero commits (#1401)', async () => {
+    const git = { ...makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]), gitLog: vi.fn(async () => []) };
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByDisplayValue('main');
     const menu = await openCaret(view);
 
+    expect(
+      (within(menu).getByRole('menuitem', { name: 'Amend last commit' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  test('"Commit & Push" is disabled with no staged changes', async () => {
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openCaret(view);
+
+    expect(
+      (within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  test('clicking "Amend last commit" calls gitCommit with amend:true using the composer message, then re-fetches (#1401)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Fix the typo' } });
+    const menu = await openCaret(view);
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Amend last commit' }));
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Fix the typo', { amend: true }));
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+  });
+
+  test('clicking "Commit & Push" commits then pushes, in order (#1401)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 0, behind: 0 },
+    );
+    const order: string[] = [];
+    git.gitCommit.mockImplementation(async () => {
+      order.push('commit');
+    });
+    git.gitPush.mockImplementation(async () => {
+      order.push('push');
+    });
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    const menu = await openCaret(view);
+
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
-    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) op microtask flush
-    expect(git.gitCommit).not.toHaveBeenCalled();
-    expect(git.gitStage).not.toHaveBeenCalled();
-    expect(git.gitUnstage).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
+    expect(order).toEqual(['commit', 'push']);
+  });
+
+  test('"Commit & Push" skips the push entirely when the commit is rejected (#1401)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    git.gitCommit.mockRejectedValue(new Error('nothing staged'));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    const menu = await openCaret(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+
+    const alert = await view.findByRole('alert');
+    expect(alert.textContent).toContain('nothing staged');
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) push microtask flush
+    expect(git.gitPush).not.toHaveBeenCalled();
+  });
+
+  test('"Commit & Push" passes setUpstream:true only when there is no upstream yet (#1401)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    const menu = await openCaret(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN, { setUpstream: true }));
+  });
+
+  test('"Commit & Push" pushes plainly (no setUpstream) when the branch already tracks an upstream (#1401)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 0, behind: 0 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    const menu = await openCaret(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
   });
 });
 
