@@ -1198,7 +1198,7 @@ public sealed class KoineLanguageService
         }
 
         var offset = OffsetOf(source, line, character);
-        return compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        return compilation.WorkspaceIndex.FindReferencesInOwnContext(activeUri, name, offset, ctx.EnclosingTypeName);
     }
 
     /// <summary>
@@ -2515,7 +2515,7 @@ public sealed class KoineLanguageService
         // Only offer a rename range where a rename would actually produce edits: resolve the
         // symbol under the cursor exactly as RenameAt does (offset + enclosing-type scope).
         var offset = OffsetOf(source, line, character);
-        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = compilation.WorkspaceIndex.FindReferencesInOwnContext(activeUri, name, offset, ctx.EnclosingTypeName);
         if (refs.Count == 0)
         {
             return null;

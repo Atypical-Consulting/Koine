@@ -301,8 +301,10 @@ public sealed class WorkspaceIndex
     /// an unrelated same-named declaration in a different namespace does NOT block the rename:
     /// <list type="bullet">
     /// <item><b>Type / spec / ID</b> (the type namespace): collides only with an existing
-    /// type/spec/ID of <paramref name="newName"/> anywhere in the workspace — a same-named enum
-    /// member or field never blocks it.</item>
+    /// type/spec/ID of <paramref name="newName"/> declared in the target's OWN bounded context (#1376)
+    /// — a same-named enum member/field, or the SAME-named type in an UNRELATED context (legal per
+    /// <c>SemanticValidator</c> — two contexts may each declare their own <c>Cash</c>), never blocks
+    /// it.</item>
     /// <item><b>Enum member:</b> collides only with a sibling member of the SAME owning enum — a
     /// same-named member in a different enum, or a same-named type, never blocks it.</item>
     /// <item><b>Member (field):</b> collides only with another member of the SAME owning type.</item>
@@ -321,10 +323,14 @@ public sealed class WorkspaceIndex
         switch (target)
         {
             // Type namespace: a declared type, a spec, or an ID value object all share one namespace.
-            // Block only when newName already names one of those somewhere in the workspace.
+            // Block only when newName already names one of those WITHIN THE SAME bounded context as
+            // the renamed symbol — an unrelated context's own same-named declaration must not block it.
             case TypeSymbol or SpecSymbol or IdValueObjectSymbol:
-                return _byUri.Values.Any(sema =>
-                    sema.GetSymbol(newName) is TypeSymbol or SpecSymbol or IdValueObjectSymbol);
+                var ownerContext = OwningContextName(target);
+                return _byUri.Values
+                    .Select(sema => sema.GetSymbol(newName))
+                    .Any(s => s is TypeSymbol or SpecSymbol or IdValueObjectSymbol
+                        && (ownerContext is null || OwningContextName(s) == ownerContext));
 
             // Enum member: block only when the SAME owning enum already declares newName, looked up
             // within the model that OWNS the target (the active document) — so a same-simple-name
@@ -343,6 +349,25 @@ public sealed class WorkspaceIndex
             default:
                 return false; // parameters / locals: not gated
         }
+    }
+
+    /// <summary>
+    /// Walks <paramref name="symbol"/>'s <see cref="Symbol.ContainingSymbol"/> spine up to its owning
+    /// <see cref="ContextSymbol"/>, returning that context's name. Every non-context interned symbol
+    /// has a non-null containment chain that terminates at one (the <c>SymbolTable</c> build-ordering
+    /// invariant), so this is null only for the pathological zero-context-model edge case.
+    /// </summary>
+    private static string? OwningContextName(Symbol symbol)
+    {
+        for (Symbol? s = symbol; s is not null; s = s.ContainingSymbol)
+        {
+            if (s is ContextSymbol ctx)
+            {
+                return ctx.Name;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

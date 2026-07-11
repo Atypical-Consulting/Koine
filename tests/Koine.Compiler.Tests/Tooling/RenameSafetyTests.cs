@@ -35,6 +35,25 @@ public class RenameSafetyTests
     }
 
     [Fact]
+    public void Rename_of_a_type_is_not_blocked_by_an_unrelated_contexts_same_named_type()
+    {
+        // #1376: renaming Sales's Money to "Cash" must NOT be blocked just because a wholly UNRELATED
+        // context (Billing) happens to independently declare its OWN type literally named "Cash" — a
+        // collision only matters within the renamed symbol's OWN bounded context.
+        var sales = "context Sales {\n  value Money { amount: Decimal }\n}\n";
+        var billing = "context Billing {\n  value Cash { amount: Decimal }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///sales.koi"] = sales,
+            ["file:///billing.koi"] = billing,
+        };
+        var edits = Svc.RenameAt(docs, "file:///sales.koi", line: 1, character: 9, newName: "Cash");
+        edits.ShouldNotBeNull();
+        edits.ShouldHaveSingleItem();
+        edits.ShouldContain(r => r.Uri == "file:///sales.koi");
+    }
+
+    [Fact]
     public void Rename_of_a_type_is_not_blocked_by_a_same_named_enum_member()
     {
         // Renaming the type `Status` to `Foo` must NOT be blocked just because an unrelated enum has a
