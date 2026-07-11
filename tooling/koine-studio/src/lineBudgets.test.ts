@@ -211,7 +211,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // lspExtensions.ts (hover/inlay-hints/semantic-tokens + the LSP provider function types). editor.ts
   // now holds only the `.koi` editor core (createKoineEditor + its language/completions/touch theme)
   // plus the facade re-exports; end-state 938 LOC + ~15 lines headroom.
-  { file: 'src/editor/editor.ts', maxLines: 953 },
+  // Raised 953 → 1012: #431 adds the DOM-free `loadedReservedChords()` accessor (+ its BUILT_IN_CHORD_LABELS
+  // table and doc comments) so the Settings keybinding conflict-check derives its reserved set from the
+  // keymaps the editor actually loads (searchKeymap/defaultKeymap/Mod-Alt-h) instead of a hand-maintained
+  // table that could drift. It lives here by design — editor.ts is where those keymaps are composed, so a
+  // second module would just re-import them. Measured end-state (1012), no headroom; #986 owns the split.
+  { file: 'src/editor/editor.ts', maxLines: 1012 },
   // Frozen 2026-07-09 at 113 LOC, ceil(113 × 1.02) = 116. Guards the #986 split's new sibling from
   // regrowing unguarded — see #981/#757.
   { file: 'src/editor/cmTheme.ts', maxLines: 116 },
