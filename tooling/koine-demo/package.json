@@ -7,8 +7,8 @@
   "scripts": {
     "studio": "remotion studio",
     "render": "remotion render KoineDemo out/koine-demo.mp4 --log=verbose",
-    "render:gif": "remotion render KoineDemo out/koine-demo.gif --codec=gif --every-nth-frame=2 --log=verbose",
-    "still": "remotion still KoineDemo out/koine-poster.png --frame=320"
+    "render:gif": "npm run render && ffmpeg -y -i out/koine-demo.mp4 -vf \"fps=15,scale=960:540:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=none\" -loop 0 out/koine-demo.gif",
+    "still": "remotion still KoineDemo out/koine-poster.png --frame=340"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
