@@ -626,9 +626,39 @@
     font-weight: 600;
   }
 
-  [data-kind='file'] {
+  // A FILE row's contents (#1361): the `.fdot`/`.fname`/`.floc` triplet `generatedFileTree.ts`'s
+  // `buildRow` appends for the file branch — a small colored square (tinted per-row via the inline
+  // `--fc` custom property, restoring the pre-#871 flat rail's DDD-kind cue) and a muted trailing
+  // line-count number. Folder rows never get this — they keep the plain block layout above (their
+  // `<ul role="group">` of nested rows needs to stay a normal block child, not a flex sibling).
+  [role='treeitem'][data-kind='file'] {
     font-family: var(--koi-font-mono);
     font-size: 11.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .fdot {
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+      background: var(--fc, var(--koi-muted));
+      flex: 0 0 auto;
+    }
+
+    .fname {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .floc {
+      margin-left: auto;
+      font-size: 10px;
+      color: var(--koi-muted);
+      opacity: 0.7;
+      flex: 0 0 auto;
+    }
   }
 
   // A collapsed folder hides its children via CSS alone (#1366): the JS writes ONLY `aria-expanded` on

@@ -239,9 +239,9 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     li.dataset.path = node.path;
     li.dataset.kind = node.kind;
     li.tabIndex = -1;
-    li.textContent = node.name;
 
     if (node.kind === 'folder') {
+      li.textContent = node.name;
       li.setAttribute('aria-expanded', 'true'); // folders start expanded — a generated-output tree is
       // usually small enough to browse fully open; the caller can collapse via a click/Enter.
       const group = document.createElement('ul');
@@ -250,6 +250,24 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       li.appendChild(group);
     } else {
       li.setAttribute('aria-selected', 'false');
+
+      // #1361: restore the pre-#871 flat rail's per-file DDD-kind color dot and line-count badge —
+      // dropped when #871 rebuilt this as a nested tree. Same `.fdot`/`.fname`/`.floc` class names and
+      // `--fc` custom-property/fallback chain the old rail (`outputRail.ts`'s `renderOutputRail`) used,
+      // so the visual is a straight port onto the new row shape.
+      const dot = document.createElement('span');
+      dot.className = 'fdot';
+      dot.style.setProperty('--fc', `var(--koi-ddd-${node.dddKind ?? 'x'}, var(--koi-muted))`);
+
+      const name = document.createElement('span');
+      name.className = 'fname';
+      name.textContent = node.name;
+
+      const loc = document.createElement('span');
+      loc.className = 'floc';
+      loc.textContent = String(node.loc);
+
+      li.append(dot, name, loc);
     }
 
     byPath.set(node.path, li);

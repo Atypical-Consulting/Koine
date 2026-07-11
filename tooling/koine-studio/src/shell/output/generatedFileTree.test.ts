@@ -7,8 +7,13 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function emitFile(path: string, contents = `// ${path}`): EmitFile {
-  return { path, contents };
+function emitFile(path: string, contents = `// ${path}`, kind?: string | null): EmitFile {
+  return { path, contents, kind };
+}
+
+/** `n`-line contents (`n - 1` newlines) so a test can assert an exact `loc`. */
+function linesOf(n: number): string {
+  return Array.from({ length: n }, (_, i) => `line ${i}`).join('\n');
 }
 
 // Billing/ (folder) > ValueObjects/ (folder) > Money.cs (file); Billing/ > Order.cs (file);
@@ -65,7 +70,10 @@ describe('createGeneratedFileTree', () => {
     setFiles(sampleFiles());
 
     const file = element.querySelector<HTMLElement>('[data-path="Billing/Order.cs"]')!;
-    const textNode = file.firstChild!;
+    // The name now lives inside a `.fname` span (#1361, task 2 — sibling to the `.fdot`/`.floc`
+    // decorations), rather than being the li's own bare textContent — but its own first child is
+    // still a bare Text node, so the exact same Firefox click-on-text-node quirk still applies.
+    const textNode = file.querySelector('.fname')!.firstChild!;
     expect(textNode.nodeType).toBe(Node.TEXT_NODE);
 
     expect(() => {
@@ -400,6 +408,49 @@ describe('createGeneratedFileTree', () => {
       expect(byPath(element, 'Kitchen').classList.contains('dim')).toBe(false);
       expect(byPath(element, 'Ordering').getAttribute('aria-current')).toBeNull();
       expect(byPath(element, 'Kitchen').getAttribute('aria-current')).toBe('true');
+    });
+  });
+
+  // #1361: restores the pre-#871 flat rail's per-file DDD-kind color dot (`.fdot`, tinted via the same
+  // `--fc` custom property / `--koi-ddd-<kind>` fallback chain the old rail used) and line-count badge
+  // (`.floc`) onto FILE rows only. happy-dom's getComputedStyle returns '' for var()/custom-props
+  // resolved from a stylesheet, so these assert the INLINE custom property the JS sets (not a resolved
+  // color) and the badge's textContent — never a computed color.
+  describe('DDD-kind dot + line-count badge (file rows)', () => {
+    it('a file row with a DDD kind renders a dot tinted via --fc and a badge showing its line count', () => {
+      const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles([emitFile('Order.cs', linesOf(12), 'aggregate')]);
+
+      const file = element.querySelector<HTMLElement>('[data-path="Order.cs"]')!;
+      const dot = file.querySelector<HTMLElement>('.fdot')!;
+      const badge = file.querySelector<HTMLElement>('.floc')!;
+
+      expect(dot.style.getPropertyValue('--fc')).toBe('var(--koi-ddd-aggregate, var(--koi-muted))');
+      expect(badge.textContent).toBe('12');
+    });
+
+    it('a file with no kind and empty contents falls back to the muted tint and shows loc 0', () => {
+      const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles([emitFile('Runtime.cs', '')]);
+
+      const file = element.querySelector<HTMLElement>('[data-path="Runtime.cs"]')!;
+      const dot = file.querySelector<HTMLElement>('.fdot')!;
+      const badge = file.querySelector<HTMLElement>('.floc')!;
+
+      expect(dot.style.getPropertyValue('--fc')).toBe('var(--koi-ddd-x, var(--koi-muted))');
+      expect(badge.textContent).toBe('0');
+    });
+
+    it('a folder row renders neither a dot nor a line-count badge on its own row', () => {
+      const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(sampleFiles());
+
+      const folder = element.querySelector<HTMLElement>('[data-path="Billing"]')!;
+      // .children is DIRECT children only — a folder li's own children are just its nested
+      // `<ul role="group">`, so this can't be a false positive from a nested FILE row's .fdot/.floc.
+      const ownChildren = Array.from(folder.children);
+      expect(ownChildren.some((c) => c.classList.contains('fdot'))).toBe(false);
+      expect(ownChildren.some((c) => c.classList.contains('floc'))).toBe(false);
     });
   });
 
