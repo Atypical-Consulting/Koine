@@ -2721,4 +2721,104 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1468 — the <c>required</c> loop's explicit-init branch never coerces an <b>Option-typed</b>
+    /// initializing expression whose underlying numeric type differs from the declared member's (e.g. an
+    /// <c>Int?</c>-typed factory parameter initializing a <c>Decimal?</c> member). <c>NumericCoercionWrap</c>
+    /// unconditionally bails whenever the body's own inferred type is itself optional, so the raw
+    /// <c>Option&lt;i64&gt;</c> value was passed straight through against the constructor's
+    /// <c>Option&lt;Decimal&gt;</c> parameter — a real <c>cargo check</c> E0308.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_from_an_option_typed_mismatched_numeric_body_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(rate: Int?) {\n" +
+            "      total -> rate\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Option-typed, numerically-mismatched body
+        // must be `.map(...)`-coerced, not passed through bare.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, rate.clone().map(Decimal::from))");
+        rust.ShouldNotContain("Self::new(id, rate.clone())");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Same defect (#1468), the sibling <c>defaultedParams</c> loop: an Option-typed, numerically
+    /// mismatched initializing expression for a member with its own default (e.g. <c>total: Decimal? =
+    /// 1</c>) must also be <c>.map(...)</c>-coerced — the loop shares <c>NumericCoercionWrap</c> and
+    /// neither guards the body side, so this reproduces identically.
+    /// </summary>
+    [Fact]
+    public void Factory_defaulted_param_explicit_init_from_an_option_typed_mismatched_numeric_body_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal? = 1\n" +
+            "\n" +
+            "    create make(rate: Int?) {\n" +
+            "      total -> rate\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, rate.clone().map(Decimal::from))");
+        rust.ShouldNotContain("Self::new(id, rate.clone())");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Mirror direction (#1468): a <c>Decimal?</c>-typed body narrowing into an <c>Int?</c>-declared
+    /// member must compose the same way, via <c>dec_to_i64</c> instead of <c>Decimal::from</c>. A
+    /// <c>Decimal?</c>-into-<c>Int?</c> factory initialization is itself rejected upstream by the
+    /// semantic validator's <c>Assignable</c> check (<c>KOI0804</c>, the same narrowing guard
+    /// <c>NumericCoercionWrap</c>'s own doc comment calls out for its non-Option narrowing branch), so
+    /// there is no legal <c>.koi</c> source that reaches this branch through <c>KoineCompiler.Compile</c>.
+    /// Exercise the emitter directly against a parsed-but-unvalidated model instead — the same
+    /// "defensive for direct emitter use" contract the sibling branch already documents.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_from_an_option_typed_narrowing_numeric_body_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    count: Int?\n" +
+            "\n" +
+            "    create make(rate: Decimal?) {\n" +
+            "      count -> rate\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var (model, diagnostics) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull(string.Join("\n", diagnostics.Select(d => d.ToString())));
+
+        var files = new RustEmitter().Emit(model!);
+        var rust = string.Join("\n", files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, rate.clone().map(crate::koine_runtime::dec_to_i64))");
+        rust.ShouldNotContain("Self::new(id, rate.clone())");
+    }
 }

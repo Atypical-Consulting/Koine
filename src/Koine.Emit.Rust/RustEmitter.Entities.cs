@@ -493,15 +493,25 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var owned = translator.TranslateOwned(value, expectedEnum);
+                var underlyingDeclared = UnderlyingType(m.Type);
+                TypeRef? valueType = translator.InferType(value);
 
                 // Coerce against the underlying (non-optional) type, never m.Type directly — for an
                 // optional-declared member, NumericCoercionWrap short-circuits on declared.IsOptional
                 // and would otherwise silently skip a real Int-into-Decimal mismatch, emitting
                 // Some(5) against an Option<Decimal> parameter (the same gap #1437 fixed for the
                 // sibling defaultedParams loop below).
-                if (NumericCoercionWrap(UnderlyingType(m.Type), translator.InferType(value)) is { } wrap)
+                if (NumericCoercionWrap(underlyingDeclared, valueType) is { } wrap)
                 {
                     owned = $"{wrap}({owned})";
+                }
+                // The body-side dual (#1468): when the initializing expression is itself Option-typed
+                // (e.g. a `T?` factory parameter) and numerically mismatched, NumericCoercionWrap above
+                // bails on bodyType.IsOptional — the bare call-wrap it would return doesn't compose with
+                // an already-Option-shaped value, so `.map(...)` it instead.
+                else if (OptionBodyNumericCoercionMap(underlyingDeclared, valueType) is { } mapWrap)
+                {
+                    owned = $"{owned}.map({mapWrap})";
                 }
 
                 // Wrap in Some(...) only when the initializing expression isn't already Option-typed —
@@ -539,15 +549,24 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var owned = translator.TranslateOwned(value, expectedEnum);
+                var underlyingDeclared = UnderlyingType(m.Type);
+                TypeRef? valueType = translator.InferType(value);
 
                 // Coerce against the underlying (non-optional) type, never `m.Type` directly — for an
                 // already-optional-declared member, `NumericCoercionWrap` short-circuits on
                 // `declared.IsOptional` and would otherwise silently skip a real Int-into-Decimal
                 // mismatch, emitting `Some(5)` against an `Option<Decimal>` parameter (a real `cargo
                 // check` E0308, #1437).
-                if (NumericCoercionWrap(UnderlyingType(m.Type), translator.InferType(value)) is { } wrap)
+                if (NumericCoercionWrap(underlyingDeclared, valueType) is { } wrap)
                 {
                     owned = $"{wrap}({owned})";
+                }
+                // The body-side dual (#1468): an Option-typed, numerically mismatched initializing
+                // expression needs `.map(...)`, not the bare call-wrap above (which bails on an
+                // Option-typed body — see the sibling `required` loop's identical branch).
+                else if (OptionBodyNumericCoercionMap(underlyingDeclared, valueType) is { } mapWrap)
+                {
+                    owned = $"{owned}.map({mapWrap})";
                 }
 
                 // Wrap in `Some(...)` only when the initializing expression isn't already
