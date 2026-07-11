@@ -35,12 +35,9 @@ const LANG_MODES: Record<string, () => Extension> = {
   // Kotlin reuses the same clike legacy mode (which ships a `kotlin` tokenizer), so highlighting the
   // emitted `.kt` files adds no new dependency.
   kotlin: () => StreamLanguage.define(kotlin),
-  // JSON powers the read-only MCP configuration recipe in Settings (createJsonView). It uses the
-  // Lezer-based `@codemirror/lang-json` (the same grammar the editable settings.json editor uses),
-  // NOT the legacy-modes JSON tokenizer: the legacy tokenizer marks object keys with the CM5-era
-  // string token style `property`, which `@codemirror/language` can't map (the modern lezer tag is
-  // `propertyName`) and so warns `Unknown highlighting tag property` once per session. The Lezer
-  // grammar tags keys as `propertyName`, which `koineHighlight` colours directly — no warning.
+  // JSON powers the read-only MCP configuration recipe in Settings (createJsonView). Lezer-based
+  // lang-json, NOT the legacy-modes tokenizer: that one marks keys with the CM5-era string tag
+  // `property`, which @codemirror/language can't map (modern tag: `propertyName`) and warns about.
   json: () => jsonLang(),
   // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
   // default mixed-mode config highlights them correctly.
