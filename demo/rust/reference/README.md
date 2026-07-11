@@ -21,34 +21,11 @@ The `.rs.txt` suffix is on purpose: `demo/rust/run.sh` only ever builds `demo/ru
 as a crate (via `Cargo.toml`'s `koine-domain = { path = "generated" }`), so this reference copy is
 never picked up as a duplicate module.
 
-## The Rust-specific constructor gap (see `../src/main.rs` KNOWN GAP 2)
+## Constructor parity across targets
 
-Compare `Order::new` here to the sibling references:
-
-```rust
-// ordering.rs.txt (Rust) — no status parameter at all:
-pub fn new(id: OrderId, lines: Vec<OrderLine>) -> Result<Self, DomainError> {
-    let status = OrderStatus::Draft;
-    Ok(Self { id, lines, status })
-}
-```
-
-```typescript
-// ../../typescript/reference/Order.ts.txt — status is an optional trailing parameter:
-constructor(id: OrderId, lines: readonly OrderLine[], status: OrderStatusMember = OrderStatus.Draft) { ... }
-```
-
-```php
-// ../../php/reference/Order.php.txt — same shape, PHP's named/default parameter:
-public function __construct(OrderId $id, array $lines, OrderStatus $status = OrderStatus::DRAFT) { ... }
-```
-
-The C#, TypeScript, PHP, and Python emitters all render the default-valued `status` member as an
-*optional constructor parameter*, so a caller can pass a non-default value in directly. The Rust
-emitter drops it from `new(...)`'s signature entirely and always initializes `status` to the
-literal default inline — so from outside the crate there is no way to construct an `Order` whose
-`status` is anything but `Draft` (the struct's fields are private, and no setter is generated
-either). This is a genuine Rust-emitter parity gap, not touched by this demo (issue #1073 is
-demo-and-test-harness only) — a human should file a follow-up issue against
-`src/Koine.Emit.Rust/RustEmitter.Aggregates.cs` to render the same optional trailing parameter the
-other four emitters already do.
+`Order::new`'s trailing `status: Option<OrderStatus>` parameter (defaulting to `Draft` when
+omitted) now matches the same "optional trailing constructor parameter" shape the sibling
+TypeScript/PHP/C# references already render for this construct — see `../../typescript/reference/Order.ts.txt`
+and `../../php/reference/Order.php.txt`. Before #1380, the Rust emitter dropped this member from
+`new(...)`'s signature entirely and always initialized it to the literal default inline, with no way
+for a caller outside the crate to construct an `Order` whose `status` was anything but `Draft`.
