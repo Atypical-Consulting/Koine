@@ -18,7 +18,7 @@
 [![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
 [![NuGet](https://img.shields.io/nuget/v/Koine.Cli?logo=nuget&label=NuGet&color=3245b8)](https://www.nuget.org/packages/Koine.Cli)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
-[![Tests](https://img.shields.io/badge/tests-1900%2B%20passing-2ea44f)](tests/)
+[![Tests](https://img.shields.io/badge/tests-passing-2ea44f)](tests/)
 ![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20Java%20%C2%B7%20Kotlin%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -36,47 +36,28 @@ about get buried in plumbing.
 **Koine is a small, readable DSL for DDD.** You describe a bounded context using the same words your
 domain experts use, and the compiler emits the tactical code for you — correct, idiomatic, and with
 no runtime to reference. The model *is* the ubiquitous language: there is no second copy to keep in
-sync, and the rules stay front and centre instead of drowning in boilerplate.
+sync, and the rules stay front and center instead of drowning in boilerplate.
 
-The name evokes **Koine Greek**, the *common* language that became a lingua franca. The goal is to
-compile one domain model to many targets. **C# is the primary, most complete target**; a
-**TypeScript** emitter ships (`--target typescript`), a **Python** emitter ships (`--target python` →
-dependency-free Python 3.11+, `mypy --strict`-clean; the tactical core *and* the strategic/CQRS layer
-— read models, queries, policies, state machines, context maps/ACL), a **PHP 8.1**
-emitter ships (`--target php` → dependency-free PHP 8.1, typed properties, readonly promoted properties;
-the tactical core *and* the strategic/CQRS layer — read models, query handler seams, application
-services/use cases/operations, specifications, policies, context-map ACL translators and
-integration-event subscriber seams), a **Rust** emitter ships (`--target rust` → an idiomatic crate: value
-objects as structs with smart constructors returning `Result<_, DomainError>`, smart enums as Rust
-`enum`s matched exhaustively (with `Match`/`Switch`/`from_name`/`from_value` lookups), entities and
-aggregates with invariant-checked behaviors, factories that mint identities, domain events raised into
-a `Vec`-friendly `DomainEvent` collection, query DTOs and read-model projections, and repositories as
-`trait`s; **multi-context** models compile end-to-end via `crate::<module>` qualification — a type
-owned by *two* contexts and referenced from a *third* resolves to a deterministic canonical owner
-(shared with the Java target) and raises a `KOI1419` warning naming the chosen owner; depends only
-on `rust_decimal` for money and `regex` for `matches`, plus `uuid` when a model uses a factory), a
-**Java 17** emitter ships (`--target java` → dependency-free, stdlib-only Java 17: value objects and
-domain events as validating `record`s with compact constructors, smart enums as Java `enum`s (with
-per-constant associated data), entities and aggregates as classes with identity `equals`/`hashCode` and
-invariant-guarded behaviors, generated identities as branded `record`s minting `java.util.UUID`, domain
-events grouped under a per-context `sealed interface DomainEvent`, and repositories as `interface`s —
-one public type per `.java` file, `koine.runtime.DomainException` for invariant failures), a
-**Kotlin 2.x** emitter ships (`--target kotlin` → idiomatic, dependency-free Kotlin/JVM: value objects
-and domain events as `data class`es (invariants in an `init` block), generated identities as
-`@JvmInline value class`es minting `java.util.UUID`, smart enums as `enum class`es (constructor `val`
-accessors + neutral-key `fromKey`/`tryFromKey`), entities and aggregates as classes with `var … private
-set` state, identity `equals`/`hashCode`, and invariant-guarded behaviors, events under a per-context
-`sealed interface DomainEvent`, and repositories as `interface`s — optionality lives in the type system
-as `T?` (never `Optional`), `koine.runtime.DomainException` for invariant failures), a
-**docs** target emits living
-documentation (`--target docs` → Markdown + Mermaid diagrams) straight from the model, an
-**AsyncAPI 3.0** target emits a single event-API document (`--target asyncapi` → channels, messages,
-JSON-Schema payloads, and send/receive operations derived from the integration-event + context-map
-graph), an **OpenAPI** target emits an API contract (`--target openapi` → a deterministic OpenAPI 3.1
-YAML document per bounded context: value objects / read models / enums become `components/schemas`,
-commands become `POST` operations and queries become `GET` operations, and static value-object
-invariants lower to JSON-Schema validation keywords), and the parser and semantic model are kept
-strictly target-agnostic so further emitters can be added without touching them.
+The name evokes **Koine Greek**, the *common* language that became a lingua franca. The goal is the
+same: compile one domain model to many targets. The parser and semantic model are kept strictly
+target-agnostic, so a new backend is a new project, not a rewrite. **C# is the primary and most
+complete target**; the same model also compiles to six other languages and three spec/doc formats:
+
+| Target | Flag | Notes |
+|--------|------|-------|
+| **C#** | `--target csharp` | Primary target — tactical + strategic core, with opt-in application & EF Core layers |
+| **TypeScript** | `--target typescript` | `tsc --strict`-clean; tactical + CQRS, opt-in infrastructure layer |
+| **Python** 3.11+ | `--target python` | Dependency-free, `mypy --strict`-clean; opt-in infrastructure layer |
+| **PHP** 8.1 | `--target php` | Dependency-free; typed and readonly promoted properties |
+| **Rust** | `--target rust` | Idiomatic crate, multi-context; `cargo build` verifies it compiles |
+| **Java** 17 | `--target java` | stdlib-only records, sealed events; `javac` verifies |
+| **Kotlin** 2.x | `--target kotlin` | Idiomatic Kotlin/JVM data classes; `kotlinc` verifies |
+| **docs** | `--target docs` | Living documentation — Markdown + Mermaid diagrams |
+| **AsyncAPI** 3.0 | `--target asyncapi` | Event-API document from the integration-event + context-map graph |
+| **OpenAPI** 3.1 | `--target openapi` | REST contract per bounded context — schemas, paths, parameters |
+
+Every target's output is mapped construct-by-construct in the
+[feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/).
 
 ## See it run — in your browser
 
@@ -122,7 +103,7 @@ surface below is a click away in the [live Studio](https://atypical-consulting.g
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <a href="https://atypical-consulting.github.io/Koine/studio/"><img src="assets/studio/outline.png" width="100%" alt="The model outline in the left rail, the .koi source in the centre, and a bottom Events panel listing the domain events with their bounded context and 'when' descriptions." /></a>
+      <a href="https://atypical-consulting.github.io/Koine/studio/"><img src="assets/studio/outline.png" width="100%" alt="The model outline in the left rail, the .koi source in the center, and a bottom Events panel listing the domain events with their bounded context and 'when' descriptions." /></a>
       <br /><b>Model outline &amp; panels</b> — a structural outline of the model plus a bottom <b>Events &amp; Relationships</b> panel.
     </td>
     <td width="50%" valign="top">
@@ -248,54 +229,21 @@ Or run it straight from a clone of this repo with `dotnet run --project src/Koin
 # Build everything and run the tests
 ./scripts/build/build.sh         # or: dotnet build && dotnet test
 
-# Compile a domain model to C#
+# Compile a model to C# — swap --target for any target in the table above
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated
 
-# Add a runnable EF Core infrastructure layer (DbContext, repositories, unit of work, outbox, DI)
+# Add a runnable infrastructure layer — EF Core for C#, dependency-light for TypeScript/Python
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated --layers domain,infrastructure
 
-# Emit to TypeScript instead
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated
+# Add the opt-in C# Application layer (command/factory handlers, validators, query handlers, DI)
+dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --out ./generated --layers domain,application
 
-# Add the runnable, dependency-light TypeScript infrastructure layer (in-memory repositories, unit of
-# work, transactional outbox, validation/transaction behaviors, a composition-root factory)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target typescript --out ./generated --layers domain,infrastructure
-
-# Or to Python (tactical core + strategic/CQRS: read models, queries, policies, state machines, ACL)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py
-
-# Add the runnable, dependency-free Python infrastructure layer (in-memory repositories, unit of work,
-# transactional outbox, validation/transaction behaviors, a provider/composition helper)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target python --out ./generated_py --layers domain,infrastructure
-
-# Or to PHP 8.1 (tactical core + strategic/CQRS: read models, queries, services, policies, ACL)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target php --out ./generated_php
-
-# Or to Rust (multi-context + CQRS — an idiomatic crate; `cargo build` proves it compiles)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target rust --out ./generated_rs
-
-# Or to Java (dependency-free Java 17 — records, sealed events, invariant-guarded classes; `javac --release 17` proves it compiles)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target java --out ./generated_java
-
-# Or to Kotlin (idiomatic Kotlin 2.x/JVM — data classes, @JvmInline value-class IDs, sealed events, T? optionality; `kotlinc` proves it compiles)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target kotlin --out ./generated_kt
-
-# Emit the opt-in C# Application layer alongside the domain (handlers, validators, query handlers, DI)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target csharp --layers domain,application --out ./generated
-
-# Generate living documentation (Markdown + Mermaid state/class/context-map diagrams)
+# Spec/doc targets: living docs, an AsyncAPI 3.0 event API, an OpenAPI 3.1 REST contract
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target docs --out ./docs
-
-# Emit an AsyncAPI 3.0 document from the integration-event + context-map graph
 dotnet run --project src/Koine.Cli -- build templates/pizzeria --target asyncapi --out ./events
 
-# Emit an OpenAPI 3.1 spec (one <Context>/openapi.yaml per bounded context: schemas, paths, parameters)
-dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi --target openapi --out ./api
-
-# Just check a model parses & validates (no output)
+# Just check a model parses & validates (no output), or print the version
 dotnet run --project src/Koine.Cli -- build templates/starters/billing/billing.koi
-
-# Version
 dotnet run --project src/Koine.Cli -- --version
 ```
 
@@ -346,16 +294,9 @@ The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koi
 The layer is **off by default**, so an unconfigured emit is byte-identical to the historical output; the
 generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
 
-**Every** persisted aggregate round-trips — not just collection owners. A scalar-only root, a root that
-owns a scalar value object (`OwnsOne`), a versioned aggregate, and nested value objects all insert and
-re-query correctly: each persisted root (and any value object that owns a value object) gets a private
-parameterless persistence constructor EF Core materializes through, and plain scalar properties are
-mapped explicitly so EF persists the read-only auto-property via its backing field. A value-object
-**collection** (`list of <ValueObject>`) round-trips too: it is mapped with EF Core `OwnsMany` and
-backed by a mutable private `List<T>` (exposed read-only as `IReadOnlyList<T>`), with
-`PropertyAccessMode.Field` so EF can materialize owned children into it and a single-column surrogate key
-so the rows persist on every provider. Scalar (`String`/`Int`/…) collections are left to EF Core's
-primitive-collection convention.
+The C# EF Core mappings are exercised end-to-end: every persisted aggregate round-trips — scalar-only
+roots, owned scalar value objects, versioned aggregates, nested value objects, and value-object
+collections all insert and re-query correctly.
 
 Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `coverage` (proves
 *declared == emitted* and doubles as a CI gate), `fmt` (canonical formatter), `init` (scaffold a
@@ -499,21 +440,11 @@ multiple emitters possible.
 `Koine.Wasm` compiles the whole compiler to WebAssembly for the
 [Playground](https://atypical-consulting.github.io/Koine/playground/) and
 [Studio](https://atypical-consulting.github.io/Koine/studio/). The **deployed** bundle is
-**AOT-compiled** (opt-in `KoineWasmAot` MSBuild property, switched on by the docs-deploy job); a bare
+**AOT-compiled** (opt-in `KoineWasmAot` MSBuild property, switched on by the docs-deploy job) — roughly
+5× faster per-keystroke compile in exchange for a larger one-time (browser-cached) download. A bare
 `dotnet build`/`publish` and the dev inner loop stay on the fast interpreter build, so only the
-deployed/CI path pays the slower AOT publish. Measured trade-off (pizzeria template via
-`node src/Koine.Wasm/smoke-test.mjs --bench`, best/median of 10 warm runs):
-
-| Bundle | pizzeria compile (best / median) | `_framework` raw / gzip | publish (warm) |
-|---|---|---|---|
-| Interpreter (dev default) | 30 / 39 ms | 6.6 MB / 2.3 MB | ~4–10 s |
-| **AOT (deployed)** | **7 / 8 ms** | 20.3 MB / ~5.9 MB | ~24–32 s |
-
-≈5× faster per-keystroke compile for a ~3× larger (browser-cached, +3.6 MB gzipped) one-time
-download — worth it for the in-browser compiler, and the AOT-vs-interpreter lever
-[#219](https://github.com/Atypical-Consulting/Koine/issues/219) needs to pick a mobile fallback.
-`WasmStripILAfterAOT` is a no-op here (the compiler + ANTLR are rooted whole and reflect, so their IL
-metadata is retained either way). Full rationale: the comment block in `src/Koine.Wasm/Koine.Wasm.csproj`
+deployed/CI path pays the slower AOT publish. Full rationale, measured trade-offs, and the mobile
+fallback question live in the comment block in `src/Koine.Wasm/Koine.Wasm.csproj`
 (issue [#327](https://github.com/Atypical-Consulting/Koine/issues/327)).
 
 ## Koine as a platform
@@ -627,7 +558,7 @@ emitters = ./build/Acme.GoEmitter.dll
   every `.koi` file in the workspace. Setup in [`tooling/README.md`](tooling/README.md).
 - **AI agents (MCP server).** [`src/Koine.Mcp`](src/Koine.Mcp) is an
   [MCP](https://modelcontextprotocol.io) server (`koine-mcp`) that lets an AI agent author a complete
-  domain in `.koi`: tools to `koine_validate`, `koine_compile` (csharp/typescript/python/php/glossary/docs), and
+  domain in `.koi`: tools to `koine_validate`, `koine_compile` (to any built-in target), and
   `koine_format`, plus `koine_reference` and `koine_examples` so the agent learns the language. Install
   with `dotnet tool install -g Koine.Mcp`, then register it over **stdio** (the default, for editor-spawned
   clients like Claude Desktop):
