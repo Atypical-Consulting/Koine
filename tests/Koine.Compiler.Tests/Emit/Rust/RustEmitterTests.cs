@@ -108,10 +108,10 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or(Decimal::from(2));");
+        rust.ShouldContain("let tax_rate = tax_rate.unwrap_or_else(|| Decimal::from(2));");
         rust.ShouldNotContain("let tax_rate = 2;");
 
-        rust.ShouldContain("let label = label.unwrap_or(\"std\".to_string());");
+        rust.ShouldContain("let label = label.unwrap_or_else(|| \"std\".to_string());");
         rust.ShouldNotContain("let label = \"std\";");
     }
 

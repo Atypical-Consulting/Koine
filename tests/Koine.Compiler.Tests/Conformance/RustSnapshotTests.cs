@@ -156,7 +156,7 @@ public class RustSnapshotTests
         // A non-optional defaulted member (`status: Status = Active`) trails the constructor as an
         // `Option<T>` parameter, unwrapped to its declared default (#1380) — not hardcoded/unreachable.
         shop.ShouldContain("pub fn new(id: AccountId, balance: i64, status: Option<Status>) -> Result<Self, DomainError>");
-        shop.ShouldContain("let status = status.unwrap_or(Status::Active);");
+        shop.ShouldContain("let status = status.unwrap_or_else(|| Status::Active);");
 
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }

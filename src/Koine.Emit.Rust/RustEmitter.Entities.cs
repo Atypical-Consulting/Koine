@@ -92,44 +92,25 @@ public sealed partial class RustEmitter
         // (so invariants can see the resolved value before the checks).
         foreach (Member m in defaultedParams)
         {
-            var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
+            var defaultValue = CoercedDefaultValue(m, m.Type, translator, emit.Index);
 
-            if (NumericCoercionWrap(m.Type, translator.InferType(m.Initializer!)) is { } wrap)
-            {
-                defaultValue = $"{wrap}({defaultValue})";
-            }
-            else if (m.Type is { Name: "String" } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
-            {
-                defaultValue += ".to_string()";
-            }
-
+            // `unwrap_or_else` (not `unwrap_or`): the latter always evaluates its argument eagerly,
+            // so an overriding caller would still pay for constructing the discarded default.
             var field = RustNaming.Field(m.Name);
             body.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = ")
-                .Append(field).Append(".unwrap_or(").Append(defaultValue).Append(");\n");
+                .Append(field).Append(".unwrap_or_else(|| ").Append(defaultValue).Append(");\n");
         }
 
         // Defaulted members are bound as locals (so invariants can see them) before the checks.
         foreach (Member m in defaulted)
         {
-            var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
-
-            // Reconcile the default's inferred type with the field's declared (underlying, if optional)
-            // type — the entity dual of the value-object smart constructor's coercion (#1319). Rust has
-            // no implicit numeric widening or &str->String coercion, so a Decimal field defaulted to an
-            // Int literal, or a String field defaulted to a string literal, must be owned/widened here or
-            // the later struct-literal field-init site (`tax_rate,`) is rejected as E0308 (#1324). An
-            // optional field's literal default is always a bare underlying-type literal (Koine has no
+            // Reconciles the default's inferred type against the field's declared (underlying, if
+            // optional) type — the entity dual of the value-object smart constructor's coercion (#1319).
+            // An optional field's literal default is always a bare underlying-type literal (Koine has no
             // Option-literal syntax), so it's coerced against the underlying type and then Some(...)-
             // wrapped (#1325).
             var underlyingType = m.Type.IsOptional ? m.Type with { IsOptional = false } : m.Type;
-            if (NumericCoercionWrap(underlyingType, translator.InferType(m.Initializer!)) is { } wrap)
-            {
-                defaultValue = $"{wrap}({defaultValue})";
-            }
-            else if (underlyingType is { Name: "String" } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
-            {
-                defaultValue += ".to_string()";
-            }
+            var defaultValue = CoercedDefaultValue(m, underlyingType, translator, emit.Index);
 
             if (m.Type.IsOptional)
             {
@@ -203,6 +184,31 @@ public sealed partial class RustEmitter
         }
 
         body.Append("}\n");
+    }
+
+    /// <summary>
+    /// Translates a defaulted member's initializer and coerces/owns it to <paramref name="targetType"/> —
+    /// Rust has no implicit numeric widening or <c>&amp;str</c>-&gt;<c>String</c> coercion, so a
+    /// <c>Decimal</c> field defaulted to an <c>Int</c> literal, or a <c>String</c> field defaulted to a
+    /// string literal, must be widened/owned here or the consuming site (an <c>unwrap_or_else</c> closure
+    /// or a struct-literal field-init) is rejected as E0308 (#1319/#1324). Shared by <see cref="EmitEntity"/>'s
+    /// two defaulted-member binding shapes (a trailing <c>Option&lt;T&gt;</c> ctor parameter vs. an
+    /// already-optional-declared member's local <c>let</c>) so the one coercion rule has one home.
+    /// </summary>
+    private static string CoercedDefaultValue(Member m, TypeRef targetType, RustExpressionTranslator translator, ModelIndex index)
+    {
+        var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, index));
+
+        if (NumericCoercionWrap(targetType, translator.InferType(m.Initializer!)) is { } wrap)
+        {
+            defaultValue = $"{wrap}({defaultValue})";
+        }
+        else if (targetType is { Name: "String" } && m.Initializer is LiteralExpr { Kind: LiteralKind.String })
+        {
+            defaultValue += ".to_string()";
+        }
+
+        return defaultValue;
     }
 
     /// <summary>Emits one command as a <c>&amp;mut self</c> method returning <c>Result</c>.</summary>
@@ -524,7 +530,13 @@ public sealed partial class RustEmitter
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-                args.Add($"Some({translator.TranslateOwned(value, expectedEnum)})");
+                var owned = translator.TranslateOwned(value, expectedEnum);
+                if (NumericCoercionWrap(m.Type, translator.InferType(value)) is { } wrap)
+                {
+                    owned = $"{wrap}({owned})";
+                }
+
+                args.Add($"Some({owned})");
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {

@@ -245,7 +245,7 @@ impl std::hash::Hash for Order {
 impl Order {
     /// Creates a validated `Order`, running its invariants.
     pub fn new(id: OrderId, lines: i64, status: Option<OrderStatus>) -> Result<Self, DomainError> {
-        let status = status.unwrap_or(OrderStatus::Draft);
+        let status = status.unwrap_or_else(|| OrderStatus::Draft);
         Ok(Self {
             id,
             lines,

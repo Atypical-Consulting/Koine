@@ -2176,4 +2176,43 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1380 code-review finding: a factory that explicitly initializes a trailing
+    /// <c>Option&lt;T&gt;</c>-parameterized defaulted member (<c>taxRate -&gt; 5</c> for a <c>Decimal</c>
+    /// field) must have that value coerced the same way the constructor's own default-value computation
+    /// already is — <c>BuildFactoryCtorArgs</c>'s new <c>defaultedParams</c> branch originally wrapped
+    /// the initialization value in <c>Some(...)</c> with no <c>NumericCoercionWrap</c>, so an <c>Int</c>
+    /// literal assigned to a <c>Decimal</c> field emitted <c>Some(5)</c> against a <c>Some(Decimal)</c>-
+    /// typed parameter — a real <c>cargo check</c> E0308 the earlier fixture never exercised (its factory
+    /// never referenced the defaulted member at all).
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_defaulted_member_coerces_the_value()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    name: String\n" +
+            "    taxRate: Decimal = 2\n" +
+            "\n" +
+            "    create make(name: String) {\n" +
+            "      taxRate -> 5\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Int literal must be coerced to Decimal
+        // before being Some(...)-wrapped, not passed through raw.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Some(Decimal::from(5))");
+        rust.ShouldNotContain("Some(5)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
