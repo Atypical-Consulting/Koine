@@ -549,7 +549,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
     try {
       const [contextMap, glossaryModel] = await Promise.all([
         lsp.contextMap().catch(() => null),
-        lsp.glossaryModel().catch(() => null),
+        fetchGlossaryModel().catch(() => null),
       ]);
       const contexts = contextMap?.contexts ?? [];
       if (!contexts.length) return undefined;
@@ -762,7 +762,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // issue its OWN request for these same two endpoints — doubling them on every edit. Memoizing the
   // in-flight promise here means whichever caller asks first kicks off the one lsp call and the other
   // awaits that same promise, so the request count halves WITHOUT delaying either caller — both still
-  // kick off their fetch immediately, in parallel with everything else loadModel does.
+  // kick off their fetch immediately, in parallel with everything else loadModel does. `fetchGlossaryModel`
+  // now has four consumers sharing this one in-flight fetch: the navigator reload + ensureModelIndex above,
+  // activeContextController's refreshContextList (#1258, the third), and buildDomainIndex — the assistant's
+  // domain-index builder (#1405, the fourth) — below.
   let glossaryFetch: Promise<GlossaryModel> | null = null;
   function fetchGlossaryModel(): Promise<GlossaryModel> {
     glossaryFetch ??= lsp.glossaryModel().finally(() => {
