@@ -741,15 +741,19 @@ export function init(hooks: IdeHooks = {}): () => void {
   // because the toolbar stays interactive across the multi-second lsp.start() connect window.
   const workspaceOpLock = createWorkspaceOpLock();
 
-  // The LOCKED workspace-open facade (#1275): the only path to the raw newModel()/openFolder() closures
-  // for every consumer — toolbar, chords, palette, overlays, onWorkspaceEmptied. Wrapping at the
-  // definition seam (instead of per call site, as #1088 did) makes a NEW workspace-opening affordance
-  // reach the locked name by default; the sole legitimate bypass is the pair handed to
-  // createLifecycleBoot below under the explicit `…Unlocked` names (runStartIntent already holds the
-  // lock when it calls them, so locking those would deadlock the boot).
+  // The LOCKED workspace-open facade (#1275): the only path to the raw newModel()/openFolder()/
+  // exportShare.saveProjectToDisk() closures for every consumer — toolbar, chords, palette, overlays,
+  // onWorkspaceEmptied. Wrapping at the definition seam (instead of per call site, as #1088 did) makes a
+  // NEW workspace-opening affordance reach the locked name by default; the sole legitimate bypass is the
+  // pair handed to createLifecycleBoot below under the explicit `…Unlocked` names (runStartIntent already
+  // holds the lock when it calls them, so locking those would deadlock the boot). saveProjectToDisk joins
+  // the facade in #1404 — it reopens the saved folder, so the workspace *becomes* it, the same class of
+  // workspace-replacing operation as the other two (#1274 first gave it the lock, inline at the deps-bag
+  // call site below; this moves that wrap to the definition seam instead).
   const openWorkspace = {
     newModel: (): Promise<void> => workspaceOpLock.run(() => newModel()),
     openFolder: (): Promise<void> => workspaceOpLock.run(() => openFolder()),
+    saveProjectToDisk: (): Promise<void> => workspaceOpLock.run(() => exportShare.saveProjectToDisk()),
   };
 
   // --- open folder (directory-mode workspace) -------------------------------
@@ -1414,8 +1418,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     exportSourceZip: () => void exportShare.exportSourceZip(),
     exportActiveDiagram: (format) => void exportShare.exportActiveDiagram(format),
     copyActiveDiagramMermaid: () => void exportShare.copyActiveDiagramMermaid(),
-    // Save-to-disk's reopen-from-disk is a workspace-replacing operation too (#1274).
-    saveProjectToDisk: () => void workspaceOpLock.run(() => exportShare.saveProjectToDisk()),
+    // Save-to-disk's reopen-from-disk is a workspace-replacing operation too (#1274), now reached
+    // through the locked `openWorkspace` facade like its two siblings above (#1404) instead of a
+    // parallel inline workspaceOpLock.run() composition at this call site.
+    saveProjectToDisk: () => void openWorkspace.saveProjectToDisk(),
     canSaveProjects: platform.canSaveProjects,
     layoutActions,
     openSettings: panelHost.openSettings,
