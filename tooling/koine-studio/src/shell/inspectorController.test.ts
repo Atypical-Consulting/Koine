@@ -204,6 +204,20 @@ function makeLsp() {
 }
 type Lsp = ReturnType<typeof makeLsp>;
 
+// Makes the NEXT lsp.contextMap() call hang until the returned resolver is invoked — stands in for
+// "still in flight" when a later invalidation, or a second racing build, lands. Shared by the
+// getCachedDomainIndex() race tests below (#1447, #1457).
+function stallContextMap(lsp: Lsp): (result: ContextMapResult) => void {
+  let resolveIt!: (result: ContextMapResult) => void;
+  lsp.contextMap.mockImplementationOnce(
+    () =>
+      new Promise<ContextMapResult>((resolve) => {
+        resolveIt = resolve;
+      }),
+  );
+  return (result) => resolveIt(result);
+}
+
 // A no-op editor handle: the loaders only read editor.view.requestMeasure + jump-to-source (goto/
 // gotoRange), none of which need a live CodeMirror in these assertions.
 function fakeEditor(): InspectorControllerDeps['editor'] {
@@ -1162,13 +1176,7 @@ describe('createInspectorController — bounded-context scope', () => {
 
     // Build A's contextMap call never resolves in this test — stands in for "still in flight" when the
     // next edit's invalidation lands.
-    let resolveStaleContextMap!: (result: ContextMapResult) => void;
-    lsp.contextMap.mockImplementationOnce(
-      () =>
-        new Promise<ContextMapResult>((resolve) => {
-          resolveStaleContextMap = resolve;
-        }),
-    );
+    const resolveStaleContextMap = stallContextMap(lsp);
 
     const stalePromise = ctl.getCachedDomainIndex(); // build A: kicks off, pends on contextMap
 
@@ -1190,26 +1198,19 @@ describe('createInspectorController — bounded-context scope', () => {
     expect(finalIdx?.contexts).toEqual(['Billing']);
   });
 
-  // #1457: two builds racing WITHOUT an intervening invalidateDocViews() call. Under the
-  // `modelDerivedSeq` LifecycleSequence, EVERY build's own start mints a new token via next() (not just
-  // an invalidation, as `cacheGeneration` used to require) — so build B's start alone supersedes A's
-  // token the instant B kicks off, regardless of completion order. Whichever build STARTED last
-  // therefore wins — a behavior change from the pre-refactor `cacheGeneration` design (where both builds
-  // shared one generation and whichever COMPLETED last won instead). This is the accepted, documented new
-  // semantics (see the Spec's "Behavior" section on the issue).
+  // #1457: two getCachedDomainIndex() builds racing WITHOUT an intervening invalidateDocViews() call.
+  // Under `domainIndexGen` (a LifecycleSequence), EVERY build's own start mints a new token via next()
+  // (not just an invalidation, as `cacheGeneration` used to require) — so build B's start alone
+  // supersedes A's token the instant B kicks off, regardless of completion order. Whichever build
+  // STARTED last therefore wins — a behavior change from the pre-refactor `cacheGeneration` design (where
+  // both builds shared one generation and whichever COMPLETED last won instead). Accepted, intentional.
   test('two getCachedDomainIndex() builds racing without an intervening invalidation: the one that started last wins', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));
     ctl.init();
 
     // Build A's contextMap call stalls — it started first but will settle last.
-    let resolveStaleContextMap!: (result: ContextMapResult) => void;
-    lsp.contextMap.mockImplementationOnce(
-      () =>
-        new Promise<ContextMapResult>((resolve) => {
-          resolveStaleContextMap = resolve;
-        }),
-    );
+    const resolveStaleContextMap = stallContextMap(lsp);
 
     const buildA = ctl.getCachedDomainIndex(); // build A: kicks off, pends on contextMap
 
@@ -1229,6 +1230,46 @@ describe('createInspectorController — bounded-context scope', () => {
     // and is dropped, so B — the one that STARTED last — wins, not A (the one that completed last).
     const finalIdx = await ctl.getCachedDomainIndex();
     expect(finalIdx?.contexts).toEqual(['Billing']);
+  });
+
+  // Regression (#1457 code review): getCachedDomainIndex() and ensureModelIndex() guard two unrelated
+  // caches (cachedDomainIndex vs. modelIndex) and must NOT share one LifecycleSequence — sharing would
+  // let either build's mere START (next() runs there too, not just on invalidation) silently supersede
+  // the OTHER's still in-flight token even with no edit involved, dropping a perfectly valid write. Pins
+  // that domainIndexGen/modelIndexGen are independent: an ensureModelIndex() build in flight must still
+  // commit even though an unrelated getCachedDomainIndex() build starts (and finishes) in the meantime.
+  test('an in-flight ensureModelIndex() build is unaffected by an unrelated getCachedDomainIndex() build starting and completing', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    // ensureModelIndex()'s livingDocs call stalls — stands in for "still in flight".
+    let resolveStaleLivingDocs!: (docs: DocsResult) => void;
+    lsp.livingDocs.mockImplementationOnce(
+      () =>
+        new Promise<DocsResult>((resolve) => {
+          resolveStaleLivingDocs = resolve;
+        }),
+    );
+
+    const modelIndexPromise = ctl.ensureModelIndex(); // starts, pends on livingDocs
+
+    // An unrelated getCachedDomainIndex() build starts AND completes while ensureModelIndex() is still
+    // in flight — no invalidateDocViews() call anywhere in this test.
+    const domainIdx = await ctl.getCachedDomainIndex();
+    expect(domainIdx?.contexts).toEqual(['Billing']);
+
+    // Let ensureModelIndex() settle now, AFTER the unrelated domain-index build already completed.
+    resolveStaleLivingDocs({ files: [] });
+    const modelIdx = await modelIndexPromise;
+    await flush();
+
+    // The joined model index must still be the one just built — untouched by the unrelated domain-index
+    // build's own next() call, because the two caches now use independent sequences. If it had been
+    // dropped, modelIndex would still be null here and this call would start a FRESH build (a new,
+    // different object), failing the reference-equality check below.
+    const finalIdx = await ctl.ensureModelIndex();
+    expect(finalIdx).toBe(modelIdx);
   });
 
   test('a scope change fans out to the Files tree via scopeFiles (context, then null for All) — ADR 0009', async () => {

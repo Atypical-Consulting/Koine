@@ -536,16 +536,23 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (interactive) are not model-derived, so they're excluded; the Explorer/Overview ('model') is always
   // visible, so it repaints on every edit.
 
-  // A shared LifecycleSequence axis (#1352), replacing a hand-rolled `cacheGeneration` counter (#1447,
+  // Two LifecycleSequence axes (#1352), replacing a hand-rolled `cacheGeneration` counter (#1447,
   // refactored in #1457 to reuse the primitive DomainNavigator.tsx / contextMapPanel.tsx already use for
-  // this exact race). getCachedDomainIndex() and ensureModelIndex() each capture a token via next() before
-  // awaiting their build; invalidateModelDerivedCaches() also calls next() to supersede any in-flight
-  // build. Each write is guarded by isCurrent(token) — only the token minted by the LAST next() call (a
-  // new build starting, or an invalidation) is current, so a stale, now-superseded build that resolves
-  // late is dropped instead of clobbering fresher (possibly already-rebuilt, possibly still-null) cache
-  // state (TOCTOU race, #1447). isCurrent() also folds in the guard's disposed flag, so no separate
-  // `!lifecycle.isDisposed()` check is needed at each write site.
-  const modelDerivedSeq = lifecycle.createSequence();
+  // this exact race). getCachedDomainIndex() and ensureModelIndex() each capture a token via their OWN
+  // sequence's next() before awaiting their build, guard their post-await write with isCurrent(token), and
+  // invalidateModelDerivedCaches() calls next() on BOTH to supersede any in-flight build of either cache.
+  // isCurrent() also folds in the guard's disposed flag, so no separate `!lifecycle.isDisposed()` check is
+  // needed at each write site (see getCachedDomainIndex() below for the full guard rationale).
+  //
+  // Deliberately TWO independent sequences, not one shared between them: `cachedDomainIndex` and
+  // `modelIndex`/`indexPromise` are unrelated caches that can build concurrently (the assistant panel vs.
+  // a model reload/canvas click) — createSequence()'s own contract is "once per concurrent async race a
+  // controller runs" (lifecycleGuard.ts), and surfaceLoaders.tsx's own previewGen/diagramsGen split is the
+  // established precedent for this. A single shared sequence would let either build's mere START (next()
+  // is called there too, not just on invalidation) silently supersede the OTHER'S still in-flight token
+  // even with no edit involved, dropping a perfectly valid write and forcing a redundant LSP round-trip.
+  const domainIndexGen = lifecycle.createSequence();
+  const modelIndexGen = lifecycle.createSequence();
 
   // The assistant's domain index is another model-derived view (built from the same context-map +
   // glossary the views above use), so it's cached the same way: `null` = stale/unbuilt, `{ value }` =
@@ -606,13 +613,13 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // until the next edit clears it (invalidateDocViews). ide.ts's assistant getContext awaits this.
   async function getCachedDomainIndex(): Promise<DomainIndex | undefined> {
     if (cachedDomainIndex === null) {
-      const token = modelDerivedSeq.next();
+      const seq = domainIndexGen.next();
       const value = await buildDomainIndex();
-      // A later next() call — a fresher build starting, or an invalidation — already superseded this
-      // token while this build was in flight; drop this stale write and let the next caller redo the
-      // check-and-build itself. isCurrent() also returns false post-teardown, so a disposed facade can
-      // never resurrect a cache entry.
-      if (modelDerivedSeq.isCurrent(token)) cachedDomainIndex = { value };
+      // A later next() call on THIS sequence — a fresher getCachedDomainIndex() build starting, or an
+      // invalidation — already superseded this token while this build was in flight; drop this stale
+      // write and let the next caller redo the check-and-build itself. isCurrent() also returns false
+      // post-teardown, so a disposed facade can never resurrect a cache entry.
+      if (domainIndexGen.isCurrent(seq)) cachedDomainIndex = { value };
     }
     return cachedDomainIndex ? cachedDomainIndex.value : undefined;
   }
@@ -814,7 +821,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   function ensureModelIndex(): Promise<ModelIndex> {
     if (modelIndex) return Promise.resolve(modelIndex);
     if (indexPromise === null) {
-      const token = modelDerivedSeq.next();
+      const seq = modelIndexGen.next();
       indexPromise = Promise.all([
         fetchGlossaryModel(),
         lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
@@ -822,11 +829,14 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       ])
         .then(([glossary, docs, model]) => {
           const built = buildModelIndex(glossary, docs, model ?? undefined);
-          // Same TOCTOU guard as getCachedDomainIndex() (#1447, #1457): a later next() call already
-          // superseded this token while this build was in flight, so drop the stale write instead of
-          // clobbering the fresher (or freshly-rebuilt) modelIndex. isCurrent() also returns false
-          // post-teardown — a disposed facade must never resurrect a cache entry.
-          if (modelDerivedSeq.isCurrent(token)) modelIndex = built;
+          // Same TOCTOU guard as getCachedDomainIndex() above (#1447, #1457) — own sequence, own token.
+          if (modelIndexGen.isCurrent(seq)) modelIndex = built;
+          // Caller-facing asymmetry, accepted as-is (#1457): a dropped write still resolves THIS call to
+          // its own now-stale `built` (return type is Promise<ModelIndex>, so it can't resolve
+          // undefined), whereas getCachedDomainIndex() above resolves undefined in the same situation
+          // (its return type allows it). Both are safe — no crash, and getCachedDomainIndex()'s
+          // undefined is already null-guarded by its callers (e.g. panelHost.ts) — just a known, documented
+          // difference rather than a follow-up requirement.
           return modelIndex ?? built;
         })
         .finally(() => {
@@ -925,7 +935,8 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // assistant's domain index — so the next model load / getCachedDomainIndex call rebuilds against the
   // current model. Called from surfaceLoaders' invalidateDocViews() on every model edit.
   function invalidateModelDerivedCaches(): void {
-    modelDerivedSeq.next();
+    domainIndexGen.next();
+    modelIndexGen.next();
     modelIndex = null;
     indexPromise = null;
     // Drop the shared glossary/model in-flight fetch too (#484): without this, a fetch already in flight
