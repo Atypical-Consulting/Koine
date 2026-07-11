@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mountDomainNavigator, renderStrategic, renderTactical, type TacticalHandlers } from '@/model/domainNavigator';
+import { render as renderComponent } from '@testing-library/preact';
+import { h } from 'preact';
+import {
+  DomainNavigator,
+  mountDomainNavigator,
+  renderStrategic,
+  renderTactical,
+  type DomainNavigatorHandlers,
+  type TacticalHandlers,
+} from '@/model/domainNavigator';
+// The EXPLICIT `.tsx` specifier — the exact path the stories import (`DomainNavigator.tsx` and the
+// `domainNavigator.ts` barrel differ only by case, so a bare capital import can case-insensitively
+// resolve to the lowercase barrel on macOS and hand back `undefined` → Preact renders "[object Object]").
+import { DomainNavigator as DomainNavigatorViaTsx } from '@/model/DomainNavigator.tsx';
 import { createAppStore } from '@/store/index';
 import type { ContextMapResult, GlossaryEntry, GlossaryModel, ModelNode, Range } from '@/lsp/lsp';
 
@@ -381,5 +394,93 @@ describe('mountDomainNavigator', () => {
     expect(store2.getState().activeContext).not.toBe('Ordering');
     expect(host2.querySelector('.koi-breadcrumb-back')).toBeNull(); // still the strategic (non-drilled) view
     expect(host2.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // strategic context list, unaffected
+  });
+});
+
+// --- the DomainNavigator PRESENTER: a pure function of its props (#991 Task 1) ---------------------
+// The facade tests above drive the component through the store; these render it directly to pin that it
+// paints the level its altitude/scope props name and that the filter input is CONTROLLED by outlineFilter.
+describe('DomainNavigator component (props-driven)', () => {
+  const noopHandlers: DomainNavigatorHandlers = {};
+  const tacticalHandlers = noopTacticalHandlers();
+  const cache = {
+    model: fakeGlossary(['Ordering', 'Billing']),
+    relLinks: 4,
+    tree: ctxNode('Ordering', [aggNode('Order', [value('Money')]), value('Currency')]),
+  };
+  // The tactical branch resolves the scoped context from cache.tree — root children are the contexts.
+  const cacheWithModelRoot = { ...cache, tree: modelNode('model', '', [cache.tree]) };
+
+  it('renders the strategic context list + doorways when navAltitude is strategic', () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'strategic',
+        activeContext: 'all',
+        outlineFilter: '',
+        cache,
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+      }),
+    );
+    expect(container.querySelectorAll('.koi-ctx-row').length).toBe(2);
+    expect(container.querySelector('[data-door="glossary"]')).toBeTruthy();
+    expect(container.querySelector('.koi-breadcrumb-back')).toBeNull();
+  });
+
+  it('renders the tactical view for the scoped context when navAltitude is tactical', () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'tactical',
+        activeContext: 'Ordering',
+        outlineFilter: '',
+        cache: cacheWithModelRoot,
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+      }),
+    );
+    expect(container.querySelector('.koi-breadcrumb-back')).toBeTruthy();
+    expect(container.querySelector('[data-qname="Ordering.Order"]')).toBeTruthy();
+    expect(container.querySelector('.koi-ctx-row')).toBeNull(); // not the strategic list
+  });
+
+  it('the explicit `.tsx` import resolves to a real component (not the case-collision barrel) and renders rows', () => {
+    expect(typeof DomainNavigatorViaTsx).toBe('function');
+    const { container } = renderComponent(
+      h(DomainNavigatorViaTsx, {
+        store: createAppStore(),
+        navAltitude: 'strategic',
+        activeContext: 'all',
+        outlineFilter: '',
+        cache,
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+      }),
+    );
+    // A `undefined` component would make Preact render the literal "[object Object]" with no error.
+    expect(container.textContent).not.toContain('[object Object]');
+    expect(container.querySelectorAll('.koi-ctx-row').length).toBe(2);
+  });
+
+  it('the filter input is controlled by the outlineFilter prop', () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'strategic',
+        activeContext: 'all',
+        outlineFilter: 'Bill',
+        cache,
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+      }),
+    );
+    const filter = container.querySelector<HTMLInputElement>('input.koi-domain-filter')!;
+    expect(filter.value).toBe('Bill');
+    expect(filter.hidden).toBe(false);
   });
 });
