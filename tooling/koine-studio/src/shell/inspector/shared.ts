@@ -1,13 +1,12 @@
 // Shared helpers for the inspector facade and its #985 sub-modules (#1262). The decomposition's sibling
 // modules (contextMapPanel / activeContextController / surfaceLoaders / centerDeckController) deliberately
-// never import each other — only the facade wires cross-module effects — which left these four small
+// never import each other — only the facade wires cross-module effects — which left these three small
 // helpers duplicated in exactly two places each. This module is the ONE place they may share: it is
 // store/facade-free (no runtime import of the app store, the facade, or any sibling module — the slice
 // types below are type-only, erased at compile time), so importing it can never reintroduce the
 // import-cycle risk the split guards against. Keep it that way: pure functions over passed-in values
 // only; anything that needs the store instance, a deps bag, or a DOM lookup belongs in its consumer.
 import { render } from 'preact';
-import { isNarrowViewport } from '@/shared/breakpoint';
 import type { CenterView, DeckState } from '@/store/slices/uiChrome';
 
 /** The center surfaces visible under a deck state: overview shows all four (canonical order), focus shows
@@ -36,19 +35,4 @@ export function docMessage(view: HTMLElement, text: string, kind: 'muted' | 'err
   p.className = kind === 'error' ? 'doc-error' : 'muted';
   p.textContent = text;
   view.appendChild(p);
-}
-
-/** A `resize`-event handler that fires `onCross(narrow)` only when the viewport actually crosses
- *  $bp-narrow: it tracks its own last-narrow-ness (seeded at creation) so a resize TICK that doesn't
- *  cross the breakpoint is a no-op — on mobile the soft keyboard / address bar fire `resize` constantly,
- *  and reacting to every tick would thrash the UI. Each consumer creates, registers, and detaches its
- *  OWN handler (its own independent crossing state) rather than sharing one. */
-export function createNarrowCrossHandler(onCross: (narrow: boolean) => void): () => void {
-  let wasNarrow = isNarrowViewport();
-  return () => {
-    const narrow = isNarrowViewport();
-    if (narrow === wasNarrow) return; // not a cross — ignore the keyboard/address-bar resize churn
-    wasNarrow = narrow;
-    onCross(narrow);
-  };
 }

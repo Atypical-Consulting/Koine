@@ -61,7 +61,7 @@ import { CanvasPalette } from '@/diagrams/CanvasPalette';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
 import { createInspectorSheet, type InspectorSheet } from '@/shell/inspectorSheet';
-import { isNarrowViewport } from '@/shared/breakpoint';
+import { createNarrowCrossHandler, isNarrowViewport } from '@/shared/breakpoint';
 import { DEFAULT_CENTER, DEFAULT_DECK_STATE, isValidCenter, type DeckState, type RightView } from '@/store/slices/uiChrome';
 import type { DomainIndex } from '@/ai/aiPanel';
 import { fileUriToPath } from '@/shell/ideUtils';
@@ -74,7 +74,6 @@ import {
 } from '@/shell/inspector/activeContextController';
 import { createSurfaceLoaders } from '@/shell/inspector/surfaceLoaders';
 import { centerDeckInitialChrome, createCenterDeckController } from '@/shell/inspector/centerDeckController';
-import { createNarrowCrossHandler } from '@/shell/inspector/shared';
 
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /

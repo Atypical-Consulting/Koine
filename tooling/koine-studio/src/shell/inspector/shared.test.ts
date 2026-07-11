@@ -2,16 +2,10 @@
 // duplicated across sibling sub-modules (each pair byte-identical at extraction time), now extracted
 // into shared.ts. Each sibling's own suite still pins the behavior at its call sites; these pin the
 // shared contracts in isolation.
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { h, render } from 'preact';
-import {
-  contextWorkspaceKey,
-  createNarrowCrossHandler,
-  docMessage,
-  visibleCenters,
-} from '@/shell/inspector/shared';
+import { contextWorkspaceKey, docMessage, visibleCenters } from '@/shell/inspector/shared';
 import { DEFAULT_DECK_STATE } from '@/store/slices/uiChrome';
-import { BP_NARROW } from '@/shared/breakpoint';
 
 describe('visibleCenters', () => {
   test('overview mode shows all four surfaces in canonical order', () => {
@@ -76,52 +70,5 @@ describe('docMessage', () => {
     expect(host.querySelector('span')).toBeNull();
     expect(host.children).toHaveLength(1);
     expect(host.firstElementChild?.tagName).toBe('P');
-  });
-});
-
-describe('createNarrowCrossHandler', () => {
-  const origWidth = window.innerWidth;
-  const setWidth = (value: number) =>
-    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value });
-
-  afterEach(() => setWidth(origWidth));
-
-  test('a resize tick that does not cross the breakpoint is a no-op', () => {
-    setWidth(1280);
-    const onCross = vi.fn();
-    const handler = createNarrowCrossHandler(onCross);
-    setWidth(BP_NARROW + 1); // narrower, but still on the wide side
-    handler();
-    expect(onCross).not.toHaveBeenCalled();
-  });
-
-  test('crossing wide→narrow fires onCross(true) once; same-side churn after it stays silent', () => {
-    setWidth(1280);
-    const onCross = vi.fn();
-    const handler = createNarrowCrossHandler(onCross);
-    setWidth(500);
-    handler();
-    expect(onCross).toHaveBeenCalledTimes(1);
-    expect(onCross).toHaveBeenCalledWith(true);
-    handler(); // keyboard/address-bar churn on the narrow side — no re-fire
-    expect(onCross).toHaveBeenCalledTimes(1);
-  });
-
-  test('crossing back narrow→wide fires onCross(false)', () => {
-    setWidth(500);
-    const onCross = vi.fn();
-    const handler = createNarrowCrossHandler(onCross);
-    setWidth(1280);
-    handler();
-    expect(onCross).toHaveBeenCalledTimes(1);
-    expect(onCross).toHaveBeenCalledWith(false);
-  });
-
-  test('last-narrow-ness is seeded at creation, not on the first tick', () => {
-    setWidth(500); // created narrow
-    const onCross = vi.fn();
-    const handler = createNarrowCrossHandler(onCross);
-    handler(); // first tick, still narrow — not a cross
-    expect(onCross).not.toHaveBeenCalled();
   });
 });
