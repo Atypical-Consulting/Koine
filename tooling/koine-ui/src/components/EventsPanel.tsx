@@ -124,24 +124,24 @@ export function EventsPanel(props: {
   );
 }
 
-function EventFlowView(props: { flowNodes: EventFlowNodeView[]; scopeKey: string; renderFlow: FlowRenderer }) {
+function EventFlowView({ flowNodes, scopeKey, renderFlow }: { flowNodes: EventFlowNodeView[]; scopeKey: string; renderFlow: FlowRenderer }) {
   const hostRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     // The host owns the imperative maxGraph mount; re-frame it whenever the scope key changes, and dispose
     // exactly once on unmount / scope change (the cleanup runs before the next effect and on teardown).
-    const handle = props.renderFlow(host, props.scopeKey);
+    const handle = renderFlow(host, scopeKey);
     return () => handle.dispose();
-  }, [props.scopeKey, props.renderFlow]);
+  }, [scopeKey, renderFlow]);
   return (
     <div class="koi-event-flow">
       <div class="koi-event-flow-mount" ref={hostRef} aria-hidden="true" />
       <ul class="koi-event-flow-legend koi-sr-only" aria-label="Events in this flow">
-        {props.flowNodes.length === 0 ? (
+        {flowNodes.length === 0 ? (
           <li>No events to chart for this context.</li>
         ) : (
-          props.flowNodes.map((n) => (
+          flowNodes.map((n) => (
             <li key={n.id}>
               {n.label} — {KIND_LABEL[n.kind]}
               {n.context ? ` in ${n.context}` : ''}
