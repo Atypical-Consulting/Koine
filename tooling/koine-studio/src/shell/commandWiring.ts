@@ -137,13 +137,15 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       { id: 'redo', title: 'Redo', hint: 'mod+Shift+Z', group: 'Edit', run: () => deps.history.redo() },
       { id: 'format', title: 'Format document', hint: 'mod+S', group: 'Edit', run: () => void deps.format() },
       { id: 'home', title: 'Go to start screen', group: 'File', run: () => deps.goHome() },
-      // new-model / open-folder are when()-gated on the workspace-open lock (#1275): while an op is
-      // queued or running they leave the palette and their run()/chord dispatch is a guarded no-op.
-      // The lock still serializes everything (the gate closes no race); this only makes the wait
-      // legible instead of stacking silent deferred swaps behind e.g. an open native picker.
-      { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void deps.openFolder(), when: () => !deps.workspaceOpBusy() },
+      // new-model / open-folder are enabled()-gated on the workspace-open lock (#1275, flipped to the
+      // activatability axis in #1407): while an op is queued or running they STAY in the palette as a
+      // visible-but-disabled row (Task 4 renders the affordance) instead of vanishing, but their
+      // run()/chord dispatch is still a guarded no-op via CommandRegistry.isActivatable. The lock still
+      // serializes everything (the gate closes no race); this only makes the wait legible instead of
+      // stacking silent deferred swaps behind e.g. an open native picker.
+      { id: 'open-folder', title: 'Open folder…', hint: 'mod+Shift+O', group: 'File', run: () => void deps.openFolder(), enabled: () => !deps.workspaceOpBusy() },
       { id: 'search', title: 'Search across files…', hint: 'mod+Shift+F', group: 'Edit', run: () => deps.search.focus() },
-      { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void deps.requestNewModel(), when: () => !deps.workspaceOpBusy() },
+      { id: 'new-model', title: 'New model', hint: 'mod+N', group: 'File', run: () => void deps.requestNewModel(), enabled: () => !deps.workspaceOpBusy() },
       { id: 'save-all', title: 'Save all', hint: 'mod+Alt+S', group: 'File', run: () => void deps.workspace.saveAllDirty() },
       { id: 'share', title: 'Copy shareable link', group: 'File', run: () => void deps.copyShareLink() },
       { id: 'check', title: 'Check against baseline…', group: 'File', run: () => void deps.controller.runCheck() },

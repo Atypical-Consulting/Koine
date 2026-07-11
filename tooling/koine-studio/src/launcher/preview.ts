@@ -166,6 +166,11 @@ export interface ActionInput {
   title: string;
   sub?: string;
   hint?: string;
+  /** Whether the command is currently visible-but-disabled (issue #1407 code-review follow-up) — a
+   * busy-gated command (`open-folder`/`new-model` while a workspace op is running) stays in the
+   * catalog but isn't activatable. Swaps the note below so the preview never promises Enter will run
+   * something that's actually a guarded no-op right now. */
+  disabled?: boolean;
 }
 
 /** A launcher/command-palette action: no live description exists on `Command` (title/hint/group only),
@@ -176,7 +181,7 @@ export function actionPreview(cmd: ActionInput): PreviewViewModel {
   return {
     header: { glyph: 'action', name: cmd.title, sub: cmd.sub ?? 'command' },
     meta: meta.length ? meta : undefined,
-    note: 'Press ↵ to run.',
+    note: cmd.disabled ? 'Unavailable right now.' : 'Press ↵ to run.',
   };
 }
 
@@ -347,7 +352,9 @@ export function previewFor(entry: CatalogEntry, ctx: PreviewContext): PreviewVie
       return element ? eventPreview(element) : null;
     }
     case 'action':
-      return actionPreview(ctx.command ?? { title: entry.title, sub: entry.sub, hint: entry.hint });
+      return actionPreview(
+        ctx.command ?? { title: entry.title, sub: entry.sub, hint: entry.hint, disabled: entry.enabled?.() === false },
+      );
     case 'file': {
       if (ctx.file) return filePreview(ctx.file);
       if (!entry.file) return null;
