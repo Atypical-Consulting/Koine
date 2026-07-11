@@ -672,6 +672,7 @@ Koine.Compiler.Services.TypeHierarchyItem.Equals(Koine.Compiler.Services.TypeHie
 Koine.Compiler.Services.WorkspaceSymbol.<Clone>$() -> Koine.Compiler.Services.WorkspaceSymbol!
 Koine.Compiler.Services.WorkspaceSymbol.Deconstruct(out string! Name, out Koine.Compiler.Services.SymbolKind Kind, out string! Uri, out Koine.Compiler.Ast.SourceSpan Range, out string? ContainerName) -> void
 Koine.Compiler.Services.WorkspaceSymbol.Equals(Koine.Compiler.Services.WorkspaceSymbol? other) -> bool
+Koine.Compiler.Services.WorkspaceIndex.FindReferencesInOwnContext(string! activeUri, string! name, int? offset, string? enclosingType) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.Reference!>!
 abstract Koine.Compiler.Ast.Bound.BoundNode.<Clone>$() -> Koine.Compiler.Ast.Bound.BoundNode!
 abstract Koine.Compiler.Ast.KoineNode.<Clone>$() -> Koine.Compiler.Ast.KoineNode!
 override Koine.Compiler.Ast.AclMapping.<Clone>$() -> Koine.Compiler.Ast.AclMapping!

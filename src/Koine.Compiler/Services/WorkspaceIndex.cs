@@ -238,6 +238,63 @@ public sealed class WorkspaceIndex
     }
 
     /// <summary>
+    /// Like <see cref="FindReferences"/>, but scoped to the renamed symbol's OWN bounded context
+    /// (#1376): <c>SemanticValidator</c> allows two unrelated contexts to each declare their own
+    /// same-named <b>declared</b> type or spec, so <see cref="FindReferences"/>'s workspace-wide
+    /// token-text match sweeps in the other context's coincidentally-same-named declaration too.
+    ///
+    /// <para>Applies only to a <see cref="TypeSymbol"/>/<see cref="SpecSymbol"/> target — each is
+    /// declared exactly ONCE and interned as a single, workspace-stable instance, so a candidate can be
+    /// RE-RESOLVED at its own position (the exact same local-file-first-then-workspace-fallback walk
+    /// <see cref="ResolveTarget"/> performs for the cursor) and kept only when that resolves to the
+    /// EXACT SAME symbol instance. A candidate whose OWN file independently (re-)declares the same name
+    /// resolves LOCALLY to THAT file's own, different declaration and is excluded; a genuine cross-file
+    /// reference reached via <c>import</c> resolves, through the binder, to the SAME shared instance and
+    /// stays included. This is the same identity-scoping <see cref="IdentityReferences"/>/
+    /// <see cref="EnumMemberReferences"/> already apply to member/enum-member targets.</para>
+    ///
+    /// <para>An <see cref="IdValueObjectSymbol"/> target is deliberately left on <see cref="FindReferences"/>'s
+    /// existing, unscoped text match: unlike a declared type, the <c>*Id</c> convention synthesizes an
+    /// INDEPENDENT symbol instance in every file that merely REFERENCES a <c>*Id</c>-suffixed name (even
+    /// with no local owning entity — see <c>SymbolTable</c>'s convention-only fallback), so instance
+    /// identity is never stable across files for it; an established, tested cross-file "rename follows
+    /// the naming convention" ergonomic (<c>Rename_of_a_type_still_updates_all_references_across_files</c>)
+    /// relies on exactly that unscoped match and must keep working.</para>
+    /// </summary>
+    public IReadOnlyList<Reference> FindReferencesInOwnContext(string activeUri, string name, int? offset, string? enclosingType)
+    {
+        Symbol? target = ResolveTarget(activeUri, name, offset, enclosingType);
+        if (target is not (TypeSymbol or SpecSymbol))
+        {
+            // Unresolved, an IdValueObjectSymbol (see above), or already scoped precisely by identity
+            // in FindReferences itself (member / parameter / enum member).
+            return FindReferences(activeUri, name, offset, enclosingType);
+        }
+
+        var refs = new List<Reference>();
+        foreach (var (uri, text) in _documents)
+        {
+            _byUri.TryGetValue(uri, out SemanticModel? sema);
+            foreach (IToken tok in IdentifierTokens(text))
+            {
+                if (!string.Equals(tok.Text, name, StringComparison.Ordinal)
+                    || IsDifferentNamespaceDeclName(sema, tok, target))
+                {
+                    continue;
+                }
+
+                Symbol? resolved = ResolveTarget(uri, name, tok.StartIndex, enclosingType: null);
+                if (resolved is not null && SymbolEqualityComparer.Default.Equals(resolved, target))
+                {
+                    refs.Add(ToReference(uri, tok));
+                }
+            }
+        }
+
+        return refs;
+    }
+
+    /// <summary>
     /// True when renaming the symbol under the cursor in <paramref name="activeUri"/> to
     /// <paramref name="newName"/> would COLLIDE with an existing declaration in the SAME namespace —
     /// so the rename must be rejected. The check is keyed by the target's KIND, never by bare name, so

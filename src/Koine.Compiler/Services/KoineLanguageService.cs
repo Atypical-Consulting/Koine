@@ -2154,7 +2154,7 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        var refs = compilation.WorkspaceIndex.FindReferences(activeUri, name, offset, ctx.EnclosingTypeName);
+        var refs = compilation.WorkspaceIndex.FindReferencesInOwnContext(activeUri, name, offset, ctx.EnclosingTypeName);
         return refs.Count == 0 ? null : refs;
     }
 

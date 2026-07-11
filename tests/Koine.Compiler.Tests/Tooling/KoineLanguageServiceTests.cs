@@ -553,6 +553,29 @@ public class KoineLanguageServiceTests
     }
 
     [Fact]
+    public void Rename_of_a_type_does_not_touch_an_unrelated_contexts_same_named_type()
+    {
+        // #1376: two DIFFERENT, unrelated bounded contexts each independently declare their OWN value
+        // object literally named "Money" (SemanticValidator allows this — only per-context type names
+        // must be unique). Renaming Sales's Money must never touch Billing's unrelated Money, even
+        // though WorkspaceIndex.FindReferences matches by bare token text across the workspace.
+        var sales = "context Sales {\n  value Money { amount: Decimal }\n  value Line { total: Money }\n}\n";
+        var billing = "context Billing {\n  value Money { amount: Decimal }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///sales.koi"] = sales,
+            ["file:///billing.koi"] = billing,
+        };
+        // Cursor on Sales's "Money" declaration.
+        var edits = Svc.RenameAt(docs, "file:///sales.koi", line: 1, character: 9, newName: "SalesMoney");
+        edits.ShouldNotBeNull();
+        edits.Count.ShouldBe(2); // Sales's declaration + its use in Line
+        edits.ShouldAllBe(r => r.Uri == "file:///sales.koi");
+        // Billing's unrelated, same-named Money is left completely untouched.
+        edits.ShouldNotContain(r => r.Uri == "file:///billing.koi");
+    }
+
+    [Fact]
     public void Rename_of_a_type_does_not_touch_a_same_named_enum_member_or_field()
     {
         // The corruption repro: a TYPE Status, an enum member Status, and a field typed Status all
