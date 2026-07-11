@@ -54,6 +54,14 @@ export interface WorkspaceSlice {
    *  {@link upsertBuffer} for callers (like historyController.restore) that update several buffers as
    *  one logical transition. A true no-op (same Map reference, no notification) for an empty array. */
   upsertBuffers(patches: ReadonlyArray<Buffer>): void;
+  /** Replace the ENTIRE buffer collection with a NEW Map built in one pass (last-wins on a duplicate
+   *  uri) — a single store notification regardless of N, so a bulk workspace open/teardown is O(N)
+   *  instead of the O(N²) that N per-file {@link upsertBuffer}/{@link removeBuffer} calls cost (#1012).
+   *  Immutable: never mutates the previous Map. Does NOT read or write `activeUri`/`roots`/the seq
+   *  fields — the caller owns the active pointer (a dangling active uri after a clear is re-pointed by
+   *  the caller, exactly as today). `setBuffers([])` clears the set in one notification (unlike
+   *  {@link upsertBuffers}, whose empty-array case is a no-op). */
+  setBuffers(buffers: Iterable<Buffer>): void;
   /** Remove a buffer by uri (new Map); a no-op (same reference) when the uri isn't open. */
   removeBuffer(uri: string): void;
   /** Re-key `oldUri` → `next.uri` atomically; when `oldUri` was active, re-point `activeUri` in the
@@ -105,6 +113,14 @@ export function createWorkspaceSlice(
       if (patches.length === 0) return; // true no-op — no Map copy, no set()
       const next = new Map(get().buffers);
       for (const buf of patches) next.set(buf.uri, buf);
+      set({ buffers: next });
+    },
+    setBuffers: (buffers) => {
+      // Build ONE fresh Map from scratch (last-wins on a duplicate uri) and publish it in a single
+      // set() — one notification, one O(N) build, regardless of N. Never touches the previous Map
+      // (immutable) nor activeUri/roots/seq. Fires even for an empty iterable (the teardown/clear case).
+      const next = new Map<string, Buffer>();
+      for (const buf of buffers) next.set(buf.uri, buf);
       set({ buffers: next });
     },
     removeBuffer: (uri) => {

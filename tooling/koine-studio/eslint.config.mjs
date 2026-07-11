@@ -138,11 +138,6 @@ export default tseslint.config(
   // still add innerHTML while listed; that's the accepted cost of a zero-rewrite adoption, à la #757's
   // freeze-then-shrink direction.)
   {
-    // retired by #991 (self-contained panels → Preact: welcome/home, about, generate-project wizard)
-    files: ['src/welcome/welcome.ts', 'src/settings/about.ts', 'src/export/generateProjectWizard.ts'],
-    rules: { 'no-restricted-syntax': 'off' },
-  },
-  {
     // retired when the settings form is Preact-converted (migrated with the panels arc #991). #987 split
     // the settings form's innerHTML sites across three files (the category-tab icons stayed in prefs.ts;
     // the chip-list clear in prefsControls.ts; the type specimen in prefsSections/editor.ts) — all three

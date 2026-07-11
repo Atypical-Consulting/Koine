@@ -47,12 +47,13 @@ export function buildKeyboardSection(
     deps: KeyboardSectionDeps,
 ): PrefsSection & { suspend(): void } {
     // Editor shortcuts OUTSIDE the rebindable registry that a remap would silently shadow: the registry
-    // keymap compartment is registered at higher precedence than the editor's own Mod-Alt-h (call
-    // hierarchy) and the loaded CodeMirror keymaps (searchKeymap / defaultKeymap). We can't unbind these,
-    // but we warn before letting a remap mask one. The reserved set is DERIVED from the keymaps the editor
-    // actually loads via loadedReservedChords() (editor.ts) — re-read on each applyRecordedChord so it is
-    // exhaustive by construction and can never drift from the editor. Registry chords are excluded there
-    // (the inter-row conflict path below owns those); only non-rebindable built-ins remain.
+    // keymap compartment is registered at higher precedence than the loaded CodeMirror keymaps
+    // (searchKeymap / defaultKeymap). We can't unbind these, but we warn before letting a remap mask one.
+    // The reserved set is DERIVED from the keymaps the editor actually loads via loadedReservedChords()
+    // (editor.ts, #431) — re-read on each applyRecordedChord so it is exhaustive by construction and can
+    // never drift from the editor. Registry chords are excluded there (the inter-row conflict path below
+    // owns those) — which now INCLUDES call hierarchy: #432 made its former literal Mod-Alt-h a first-class
+    // rebindable row, so a clash with it is caught by findKbdDuplicate like any other command, not reserved.
 
     interface KbdRowState {
         chord: HTMLElement;
@@ -326,7 +327,20 @@ export function buildKeyboardSection(
         return r;
     }
 
-    const keyboardRows = KEYBINDINGS.map((b) => buildKbdRow(b.id, b.label));
+    // Rows grouped by scope (#432): editor-scope shortcuts act inside the code editor; global-scope ones
+    // (command palette, save all) fire app-wide with no editor focused. Each group carries a subheading so
+    // the two binding sites read distinctly, but every row stays a direct `.koi-kbd-row` in the panel so the
+    // record/reset/conflict wiring (and the panel-level `.koi-kbd-row` queries) are untouched.
+    const scopeHeading = (text: string, id: string): HTMLElement => {
+        const h = document.createElement("h3");
+        // Reuse the settings label typography; koi-kbd-subhead is the scope-heading hook (styling TBD).
+        h.className = "koi-set-label koi-kbd-subhead";
+        h.id = id;
+        h.textContent = text;
+        return h;
+    };
+    const rowsForScope = (scope: "editor" | "global"): HTMLElement[] =>
+        KEYBINDINGS.filter((b) => b.scope === scope).map((b) => buildKbdRow(b.id, b.label));
 
     const kbdResetAll = document.createElement("button");
     kbdResetAll.type = "button";
@@ -341,7 +355,10 @@ export function buildKeyboardSection(
 
     const keyboardPanel = panel(
         "keyboard",
-        ...keyboardRows,
+        scopeHeading("Editor", "koi-kbd-scope-editor"),
+        ...rowsForScope("editor"),
+        scopeHeading("Global", "koi-kbd-scope-global"),
+        ...rowsForScope("global"),
         row(
             "Reset all",
             "Restore the default shortcut for every command.",

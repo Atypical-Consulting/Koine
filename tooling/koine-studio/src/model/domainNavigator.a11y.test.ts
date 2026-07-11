@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { axe } from 'vitest-axe';
+import { render as renderComponent } from '@testing-library/preact';
+import { h } from 'preact';
 import {
+  DomainNavigator,
   mountDomainNavigator,
   renderStrategic,
   renderTactical,
+  type DomainNavigatorHandlers,
   type StrategicHandlers,
   type TacticalHandlers,
 } from '@/model/domainNavigator';
@@ -238,5 +242,53 @@ describe('Domain navigator a11y — focus continuity across drill/climb', () => 
     filter.focus();
     store.getState().setOutlineFilter('Bill'); // same-altitude repaint (what typing triggers)
     expect(document.activeElement).toBe(filter);
+  });
+});
+
+// --- component-level axe on BOTH altitudes (#991 Task 1) ------------------------------------------
+// The direct-DOM `renderStrategic` / `renderTactical` audits above cover the level builders in isolation;
+// this exercises the whole `DomainNavigator` presenter (the persistent filter input + the keyed level
+// body) at each altitude, seeding the cache + altitude directly the way the live facade does.
+const noopHandlers: DomainNavigatorHandlers = {};
+
+const strategicCache = {
+  model: fakeGlossary(['Ordering', 'Billing']),
+  relLinks: 4,
+  tree: node('model', '', [orderingCtxNode()]),
+};
+
+describe('DomainNavigator component a11y', () => {
+  it('the strategic altitude is axe-clean', async () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'strategic',
+        activeContext: 'all',
+        outlineFilter: '',
+        cache: strategicCache,
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers: noopTacticalHandlers(),
+      }),
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('the tactical altitude is axe-clean', async () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'tactical',
+        activeContext: 'Ordering',
+        outlineFilter: '',
+        cache: strategicCache,
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers: noopTacticalHandlers(),
+      }),
+    );
+    // The breadcrumb-backed tactical view (breadcrumb + the aggregate/leaf tree) has no violations.
+    expect(container.querySelector('.koi-breadcrumb-back')).toBeTruthy();
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

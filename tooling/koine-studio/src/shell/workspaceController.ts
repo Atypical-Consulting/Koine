@@ -28,7 +28,7 @@ import { pathToFileUri } from '@/shell/ideUtils';
 import { createWorkspaceSave } from './workspaceSave';
 import { createWorkspaceBuffers } from './workspaceBuffers';
 import { createWorkspaceMutations, nameOf } from './workspaceMutations';
-import { setLastSession } from '@/settings/persistence';
+import { setLastSession, updateRecentFolderMeta } from '@/settings/persistence';
 import type { FsEntry, KoiFile, Platform } from '@/host';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 import type { StoreApi } from 'zustand/vanilla';
@@ -448,19 +448,22 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     rootToken: string,
     records: { path: string; relPath: string; name: string; text: string }[],
   ): void {
-    for (const rec of records) {
-      const uri = pathToFileUri(rec.path);
-      st().upsertBuffer({
-        uri,
-        path: rec.path,
-        relPath: rec.relPath,
-        name: rec.name,
-        text: rec.text,
-        dirty: false,
-        rootToken,
-      });
-      lsp.openDoc(uri, rec.text);
-    }
+    // Write every buffer through the slice's BATCHED upsertBuffers — one Map build + one notification
+    // regardless of N (#1012), instead of N growing-Map upsertBuffer copies (the old O(N²)). upsertBuffers
+    // UNIONS into the current set, keeping this shared seam correct for BOTH openFolderPath (whose teardown
+    // empties the set first → the union lands on an empty Map = a replace) and addRoot (additive append →
+    // the union preserves prior roots' buffers). Per-uri lsp.openDoc stays — didOpen is per-doc protocol.
+    const patches: Buffer[] = records.map((rec) => ({
+      uri: pathToFileUri(rec.path),
+      path: rec.path,
+      relPath: rec.relPath,
+      name: rec.name,
+      text: rec.text,
+      dirty: false,
+      rootToken,
+    }));
+    st().upsertBuffers(patches);
+    for (const p of patches) lsp.openDoc(p.uri, p.text);
   }
 
   // Switch the editor + lsp to a different open buffer. Saves the current editor text back to
@@ -537,16 +540,23 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
   // early-returns (e.g. the reset deleted everything but re-creating model.koi failed).
   function reset(): void {
     save.clearAutoSaveTimer(); // tearing the workspace down — cancel any armed auto-save first
-    for (const uri of Array.from(st().buffers.keys())) {
-      lsp.closeDoc(uri);
-      st().removeBuffer(uri);
-    }
+    // Keep the per-uri LSP didClose (a per-doc protocol call), but drop the whole buffer set in ONE
+    // bulk clear (#1012) instead of N shrinking-Map removeBuffer copies. Skip the clear when nothing is
+    // open so an already-empty reset stays a true no-op (no needless notification), exactly as before.
+    const openUris = Array.from(st().buffers.keys());
+    for (const uri of openUris) lsp.closeDoc(uri);
+    if (openUris.length > 0) st().setBuffers([]);
     deps.clearDiagnostics();
   }
 
   // Persist a lightweight snapshot (project / active file / dirty count / now) for the Home resume card
   // (#1005) on open / dirty-change / save. Best-effort/guarded, and a no-op with no folder open. Reads
   // buffers/activeUri/roots through the store slice, the single owner since #982.
+  //
+  // `file` is DELIBERATELY the ACTIVE (group-A) buffer's relPath, even when a background group-B buffer
+  // is what went dirty (#1018): the card answers "where you were", not "what last changed", so the active
+  // editor is the right anchor. Intentional (Option A) — threading the changed uri (Option B) would repoint
+  // the card at a background file.
   function rememberLastSession(): void {
     const token = st().roots[0];
     if (!token) return;
@@ -607,10 +617,14 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     // folder switch is a single folderRootToken change (old → new) rather than old → '' → new, which
     // would flash the folder-derived <DocsPanelHost> through an empty key.
     save.clearAutoSaveTimer(); // a pending auto-save belongs to the workspace we're leaving — drop it
-    for (const uri of Array.from(st().buffers.keys())) {
-      lsp.closeDoc(uri);
-      st().removeBuffer(uri);
-    }
+    // Close every previously-open LSP doc (per-doc didClose), then drop the whole buffer set in ONE bulk
+    // clear (#1012) rather than N per-uri removeBuffer copies; populateBuffers below then rebuilds it in a
+    // single bulk write, so a folder switch pays one clear + one populate, not ~2N notifications. Skip the
+    // clear when nothing is open (a fresh boot open) so it stays a no-op. `roots` is NOT cleared here (see
+    // above) — only the buffers are emptied; roots flips old→new in ONE transition below.
+    const openUris = Array.from(st().buffers.keys());
+    for (const uri of openUris) lsp.closeDoc(uri);
+    if (openUris.length > 0) st().setBuffers([]);
     entriesByRoot.clear();
     deps.clearDiagnostics();
 
@@ -670,7 +684,13 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
         void (async () => {
           try {
             const status = await platform.gitStatus(folder);
-            if (status.branch) deps.pushRecentFolder?.(folder, { branch: status.branch, language });
+            // Guard the deferred enrichment (#1016): tag the branch only while THIS folder is still the
+            // active (primary) root, so a newer open isn't reordered by A's late git resolve. Route it
+            // through updateRecentFolderMeta — which preserves openedAt/pinned (no reorder) and no-ops if
+            // the entry was removed meanwhile (no resurrect) — NOT a re-stamping deps.pushRecentFolder.
+            if (status.branch && st().roots[0] === folder) {
+              updateRecentFolderMeta(folder, { branch: status.branch, language });
+            }
           } catch {
             // git unavailable / not a repository — leave the recent without a branch tag
           }
@@ -823,6 +843,9 @@ export function createWorkspaceController(deps: WorkspaceControllerDeps): Worksp
     syncActiveBuffer: buffers.syncActiveBuffer,
     syncBuffer: (uri: string, doc: string) => {
       const becameDirty = buffers.syncBuffer(uri, doc);
+      // Refresh the resume snapshot on any clean→dirty transition, INCLUDING a background group-B buffer
+      // (uri !== activeUri). We pass no uri on purpose: rememberLastSession records the ACTIVE file, not
+      // the changed one (#1018, Option A — see its contract above).
       if (becameDirty) rememberLastSession();
       return becameDirty;
     },

@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test, vi, type Mock } from 'vitest';
+import { axe } from 'vitest-axe';
 import { mountHome, filterTemplates, DIFFICULTY_ORDER, type WelcomeCallbacks } from '@/welcome/welcome';
 import type { Template } from '@/welcome/templates';
 import { MOD } from '@/shared/platform';
+import { installExplorerSyncRendering } from '../test-setup';
+
+// `mountHome` now renders the Preact `Home` component (#991 task 3) behind the same facade. This file
+// drives that facade the way it always did — a raw `.click()` / `.dispatchEvent(...)` immediately
+// followed by a DOM assertion, with no `act()` wrapper — so it opts into the same synchronous-render
+// shim explorer.test.ts uses (see test-setup.ts's "SYNC RENDERING" note). Scoped to this file's run.
+installExplorerSyncRendering();
 
 // Each test mounts a fresh welcome root into a container appended to document.body; the global
 // afterEach wipes the body so roots/handlers don't leak across cases.
@@ -1317,5 +1325,173 @@ describe('welcome baseName characterization (issue #793)', () => {
     document.body.appendChild(el);
     mountHome(el, makeCallbacks());
     expect(itemNames(el)).toEqual(['project']);
+  });
+});
+
+// --- migration pins (#991 task 3) -------------------------------------------------------------------
+// The controlled-input rewrite is meant to DELETE the old attach/detach + caret-preservation hacks, so
+// these lock the behaviors those hacks existed to guarantee — now that Preact's keyed reconciliation
+// (a stable input node) provides them for free.
+
+/** The "Start from an example" action button under a mounted Home root. */
+function exampleAction(root: HTMLElement): HTMLButtonElement {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('button.koi-welcome-action')).find(
+    (b) => b.querySelector('.koi-welcome-action-label')?.textContent === 'Start from an example',
+  )!;
+}
+
+describe('Home recents filter — controlled input (#991)', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  test('typing in the middle of the filter preserves the caret across the re-render', () => {
+    const many = Array.from({ length: 10 }, (_, i) => `/proj/folder-${i}`);
+    localStorage.setItem(KEY, JSON.stringify(many));
+    mountHome(container, makeCallbacks());
+    const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement;
+    filter.focus();
+    // Simulate the user having typed "foldXer" and placed the caret between "fold" and "Xer".
+    filter.value = 'foldXer';
+    filter.setSelectionRange(4, 4);
+    filter.dispatchEvent(new Event('input'));
+    // The controlled re-render must not tear the node down (focus) nor blow the caret to the end — the
+    // exact bug the retired attach/detach hack existed to avoid.
+    expect(document.querySelector('.koi-welcome-recent-filter')).toBe(filter);
+    expect(document.activeElement).toBe(filter);
+    expect(filter.selectionStart).toBe(4);
+  });
+
+  test('clear-all confirm empties everything even with an active filter (query resets)', async () => {
+    const many = Array.from({ length: 10 }, (_, i) => `/proj/folder-${i}`);
+    localStorage.setItem(KEY, JSON.stringify(many));
+    mountHome(container, makeCallbacks());
+    const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement;
+    filter.value = 'folder-3';
+    filter.dispatchEvent(new Event('input'));
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
+
+    (document.querySelector('.koi-welcome-recent-clear') as HTMLElement).click();
+    const confirmBtn = [...document.querySelectorAll<HTMLButtonElement>('.koi-confirm-btn')].find(
+      (b) => b.textContent === 'Clear',
+    );
+    confirmBtn!.click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Everything is gone (not just the filtered subset); the query reset means the empty-state shows.
+    expect(document.querySelector('.koi-welcome-empty')).not.toBeNull();
+    expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(0);
+  });
+});
+
+describe('Home gallery — search + roving tabindex (#991)', () => {
+  let container: HTMLElement;
+  let home: ReturnType<typeof mountHome> | null;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    home = null;
+  });
+
+  afterEach(() => {
+    home?.destroy();
+    home = null;
+  });
+
+  test('Esc in the gallery search clears the query without popping the gallery', () => {
+    home = mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    exampleAction(root).click();
+    const galleryView = root.querySelector<HTMLElement>('.koi-gallery-view')!;
+    expect(galleryView.hidden).toBe(false);
+
+    const search = root.querySelector<HTMLInputElement>('.koi-welcome-search-input')!;
+    search.value = 'billing';
+    search.dispatchEvent(new Event('input'));
+    expect(cardNames(root)).toEqual(['Billing']);
+
+    // Esc while the query is non-empty clears it and stays in the gallery (does not pop the overlay).
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(search.value).toBe('');
+    expect(galleryView.hidden).toBe(false);
+    // Cleared query restores every starter card.
+    expect(cardNames(root).sort()).toEqual(['Billing', 'Ordering']);
+  });
+
+  test('arrow keys rove across the non-empty level tabs, wrapping, with Home/End', () => {
+    home = mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    const tablist = root.querySelector<HTMLElement>('.koi-welcome-tablist')!;
+    const press = (key: string) => tablist.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    const selected = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>('.koi-welcome-tab')).find(
+        (t) => t.getAttribute('aria-selected') === 'true',
+      )?.dataset.level;
+
+    // present levels for SAMPLE: starter, intermediate, advanced (all non-empty), starter active.
+    expect(selected()).toBe('starter');
+    press('ArrowDown');
+    expect(selected()).toBe('intermediate');
+    press('ArrowDown');
+    expect(selected()).toBe('advanced');
+    press('ArrowDown'); // wraps back to the first
+    expect(selected()).toBe('starter');
+    press('End');
+    expect(selected()).toBe('advanced');
+    press('Home');
+    expect(selected()).toBe('starter');
+    press('ArrowUp'); // wraps up to the last
+    expect(selected()).toBe('advanced');
+  });
+
+  test('roving nav skips empty (search-emptied) levels', () => {
+    home = mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    exampleAction(root).click();
+    // A tag on library (intermediate) + saas (advanced); no starter match → starter tab is empty.
+    setSearch(root, 'ddd');
+    expect(tabFor(root, 'starter').classList.contains('is-empty')).toBe(true);
+    expect(tabFor(root, 'intermediate').getAttribute('aria-selected')).toBe('true');
+
+    const tablist = root.querySelector<HTMLElement>('.koi-welcome-tablist')!;
+    // ArrowDown from intermediate skips the empty starter and lands on advanced; again wraps to intermediate.
+    tablist.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(tabFor(root, 'advanced').getAttribute('aria-selected')).toBe('true');
+    tablist.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(tabFor(root, 'intermediate').getAttribute('aria-selected')).toBe('true');
+  });
+});
+
+describe('Home a11y (axe)', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  test('the start console has no axe violations', async () => {
+    localStorage.setItem(KEY, JSON.stringify(['/proj/one', '/proj/two']));
+    mountHome(container, makeCallbacks(), SAMPLE, true, { canClone: true, canResume: true });
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    expect(await axe(root)).toHaveNoViolations();
+  });
+
+  test('the example gallery has no axe violations', async () => {
+    const home = mountHome(container, makeCallbacks(), SAMPLE);
+    const root = document.querySelector<HTMLElement>('.koi-welcome')!;
+    exampleAction(root).click();
+    expect(root.querySelector<HTMLElement>('.koi-gallery-view')!.hidden).toBe(false);
+    expect(await axe(root)).toHaveNoViolations();
+    home.destroy();
   });
 });

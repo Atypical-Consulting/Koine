@@ -137,6 +137,54 @@ describe('workspace slice — owner API (#982)', () => {
     expect(s.getState().buffers).toBe(ref);
   });
 
+  test('setBuffers replaces the WHOLE set in ONE new Map / ONE notification, dropping old entries (#1012)', () => {
+    const s = make();
+    // Seed K existing buffers so a naive per-file path would copy the growing Map K+N times.
+    s.getState().upsertBuffers([buf('file://old1'), buf('file://old2'), buf('file://old3')]);
+    const before = s.getState().buffers;
+    let notifications = 0;
+    const unsubscribe = s.subscribe(() => {
+      notifications++;
+    });
+    s.getState().setBuffers([buf('file://n1', { text: 'a' }), buf('file://n2', { text: 'b' })]);
+    unsubscribe();
+    const after = s.getState().buffers;
+    // Exactly ONE notification regardless of the number of buffers replaced (O(N) build, not O(N²)).
+    expect(notifications).toBe(1);
+    // A NEW Map holding EXACTLY the new entries — every old entry is gone.
+    expect(after).not.toBe(before);
+    expect(after.size).toBe(2);
+    expect(after.has('file://old1')).toBe(false);
+    expect(after.get('file://n1')!.text).toBe('a');
+    expect(after.get('file://n2')!.text).toBe('b');
+    // Immutable: the previous Map is never mutated in place.
+    expect(before.size).toBe(3);
+  });
+
+  test('setBuffers([]) yields an empty Map, one notification, and leaves activeUri untouched (#1012)', () => {
+    const s = make();
+    s.getState().upsertBuffer(buf('file://a'));
+    s.getState().setActive('file://a');
+    let notifications = 0;
+    const unsubscribe = s.subscribe(() => {
+      notifications++;
+    });
+    s.getState().setBuffers([]);
+    unsubscribe();
+    // A clear is a real transition (one notification) — unlike upsertBuffers([]), which no-ops.
+    expect(notifications).toBe(1);
+    expect(s.getState().buffers.size).toBe(0);
+    // The bulk replace never touches the active pointer — the caller re-points a dangling active uri.
+    expect(s.getState().activeUri).toBe('file://a');
+  });
+
+  test('setBuffers is last-wins on a duplicate uri (#1012)', () => {
+    const s = make();
+    s.getState().setBuffers([buf('file://a', { text: 'first' }), buf('file://a', { text: 'second' })]);
+    expect(s.getState().buffers.size).toBe(1);
+    expect(s.getState().buffers.get('file://a')!.text).toBe('second');
+  });
+
   test('setRoots sets folderRootToken to roots[0] ?? "" atomically', () => {
     const s = make();
     s.getState().setRoots(['mem://x', 'mem://y']);

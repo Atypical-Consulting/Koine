@@ -39,6 +39,7 @@ import {
   removeRecentFolder,
   pinRecentFolder,
   clearRecentFolders,
+  updateRecentFolderMeta,
   workspaceKeyOf,
   loadWorkspaceOverrides,
   saveWorkspaceOverride,
@@ -593,6 +594,57 @@ describe('recent folder metadata (#1005)', () => {
     expect(legacy.language).toBeUndefined();
     expect(obj.branch).toBeUndefined();
     expect(obj.language).toBeUndefined();
+  });
+});
+
+describe('updateRecentFolderMeta — openedAt-preserving metadata patch (#1016)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('patches branch + language on an existing entry WITHOUT re-stamping openedAt or reordering', () => {
+    pushRecentFolder('/a');
+    pushRecentFolder('/b'); // /b is more-recent ⇒ sorts first
+    const beforeA = getRecentFolders().find((r) => r.path === '/a')!;
+    const orderBefore = getRecentFolders().map((r) => r.path);
+
+    updateRecentFolderMeta('/a', { branch: 'feat/x', language: 'typescript' });
+
+    const afterA = getRecentFolders().find((r) => r.path === '/a')!;
+    expect(afterA).toMatchObject({ path: '/a', branch: 'feat/x', language: 'typescript' });
+    // openedAt is preserved (NOT re-stamped to Date.now()), so /a never floats to the front.
+    expect(afterA.openedAt).toBe(beforeA.openedAt);
+    expect(getRecentFolders().map((r) => r.path)).toEqual(orderBefore);
+  });
+
+  it('preserves the pinned flag on the patched entry', () => {
+    pushRecentFolder('/a');
+    pinRecentFolder('/a', true);
+    updateRecentFolderMeta('/a', { branch: 'main' });
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/a', pinned: true, branch: 'main' });
+  });
+
+  it('is a no-op for a path NOT in recents — never resurrects a removed entry', () => {
+    pushRecentFolder('/a');
+    updateRecentFolderMeta('/ghost', { branch: 'main' });
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/a']);
+  });
+
+  it('overwrites only the supplied field, preserving the other prior metadata', () => {
+    pushRecentFolder('/a', { branch: 'main', language: 'csharp' });
+    updateRecentFolderMeta('/a', { branch: 'release' }); // only branch supplied
+    expect(getRecentFolders()[0]).toMatchObject({ path: '/a', branch: 'release', language: 'csharp' });
+  });
+
+  it('ignores an empty path (no throw, no write)', () => {
+    pushRecentFolder('/a');
+    updateRecentFolderMeta('', { branch: 'main' });
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/a']);
+  });
+
+  it('does not reorder when patching a NON-front entry (openedAt held, so the front entry stays first)', () => {
+    pushRecentFolder('/a');
+    pushRecentFolder('/b'); // /b front, /a second
+    updateRecentFolderMeta('/a', { branch: 'dev' }); // patch the OLDER one
+    expect(getRecentFolders().map((r) => r.path)).toEqual(['/b', '/a']); // /a did NOT jump ahead of /b
   });
 });
 

@@ -21,6 +21,7 @@ import {
 import { createAppStore } from '@/store/index';
 import { pathToFileUri } from '@/shell/ideUtils';
 import { newFileKey } from '@/ai/editSession';
+import { getLastSession, setLastSession, getRecentFolders, pushRecentFolder, removeRecentFolder } from '@/settings/persistence';
 import type { FsEntry, GitLogEntry, GitNumstatEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
 
@@ -56,7 +57,9 @@ class FakePlatform implements Platform {
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;
-  readonly canUseGit = false;
+  // Declared `boolean` (not the `false` literal) so the GitCapablePlatform subclass below can override it
+  // to `true` for the #1016 branch-capture tests without a TS2416 literal-narrowing mismatch.
+  readonly canUseGit: boolean = false;
   readonly canRevealInFileManager = false;
   readonly persistsWorkspace = true;
 
@@ -167,7 +170,7 @@ class FakePlatform implements Platform {
   private gitUnavailable(): Promise<never> {
     return Promise.reject(new Error('git is unavailable in this fake host'));
   }
-  gitStatus(): Promise<GitStatus> {
+  gitStatus(_folder: string): Promise<GitStatus> {
     return this.gitUnavailable();
   }
   gitDiff(): Promise<string> {
@@ -563,6 +566,91 @@ describe('createWorkspaceController — recent-folder language tag (#1015)', () 
   });
 });
 
+// A desktop-like host that reports canUseGit=true so openFolderPath's non-blocking branch capture runs.
+// `gitStatus` is overridden per-test with a controllable promise so we can resolve it AFTER a later open,
+// reproducing the #1016 race (A's deferred git resolves once B is the active root).
+class GitCapablePlatform extends FakePlatform {
+  readonly canUseGit = true;
+  // gitStatus is inherited from FakePlatform (now a 1-arg stub matching the Platform interface); each
+  // test reassigns platform.gitStatus with a controllable vi.fn to drive the branch-capture race.
+}
+
+describe('createWorkspaceController — deferred branch capture guard (#1016)', () => {
+  test('an async git resolve for a NO-LONGER-active root does not reorder recents or add a branch', async () => {
+    localStorage.clear();
+    const platform = new GitCapablePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    let resolveGitA!: (s: GitStatus) => void;
+    const gitA = new Promise<GitStatus>((res) => {
+      resolveGitA = res;
+    });
+    // A's git status stays pending until we release it; B's resolves immediately.
+    platform.gitStatus = vi.fn((folder: string) =>
+      folder === ROOT_A ? gitA : Promise.resolve({ branch: 'branchB' } as GitStatus),
+    );
+    // The synchronous recents write goes through the REAL pushRecentFolder so recents live in localStorage.
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { pushRecentFolder }));
+
+    await ws.openFolderPath(ROOT_A, { recent: true }); // A added to recents; A's git pending
+    await ws.openFolderPath(ROOT_B, { recent: true }); // B added → B is now the most-recent + active root
+
+    // A's git status resolves LATE, after B superseded it as the active root.
+    resolveGitA({ branch: 'branchA' } as GitStatus);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const recents = getRecentFolders();
+    // B stays first — A's late resolve must NOT float A back to the front (no reorder).
+    expect(recents[0]?.path).toBe(ROOT_B);
+    // And A never got its branch tag: the guard skipped it because A is no longer the active root.
+    expect(recents.find((r) => r.path === ROOT_A)?.branch).toBeUndefined();
+  });
+
+  test('an async git resolve for a REMOVED entry does not resurrect it', async () => {
+    localStorage.clear();
+    const platform = new GitCapablePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    let resolveGitA!: (s: GitStatus) => void;
+    const gitA = new Promise<GitStatus>((res) => {
+      resolveGitA = res;
+    });
+    platform.gitStatus = vi.fn(() => gitA);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { pushRecentFolder }));
+
+    await ws.openFolderPath(ROOT_A, { recent: true }); // A added; A's git pending; A is still the active root
+    expect(getRecentFolders().map((r) => r.path)).toContain(ROOT_A);
+
+    removeRecentFolder(ROOT_A); // the user removes A from Home BEFORE its git status resolves
+    expect(getRecentFolders()).toEqual([]);
+
+    resolveGitA({ branch: 'branchA' } as GitStatus); // A's git resolves late
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A is still the active root (roots[0] === ROOT_A), but the metadata patch no-ops on an absent path —
+    // so a just-removed entry is never re-added by the deferred enrichment.
+    expect(getRecentFolders()).toEqual([]);
+  });
+
+  test('the happy path still tags the branch when the folder stays the active root', async () => {
+    localStorage.clear();
+    const platform = new GitCapablePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.gitStatus = vi.fn(() => Promise.resolve({ branch: 'main' } as GitStatus));
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { pushRecentFolder }));
+
+    await ws.openFolderPath(ROOT_A, { recent: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The branch enrichment lands on the still-active root, and (being a metadata patch) leaves it on top.
+    const recents = getRecentFolders();
+    expect(recents[0]?.path).toBe(ROOT_A);
+    expect(recents[0]?.branch).toBe('main');
+  });
+});
+
 describe('createWorkspaceController — reset', () => {
   test('closes every open doc, clears buffers + the diagnostics cache, and does NOT re-open', async () => {
     const platform = new FakePlatform();
@@ -586,6 +674,80 @@ describe('createWorkspaceController — reset', () => {
     expect(ws.buffers.size).toBe(0);
     for (const uri of openedUris) expect(lsp.closeDoc).toHaveBeenCalledWith(uri);
     expect(deps.clearDiagnostics).toHaveBeenCalled();
+  });
+});
+
+describe('createWorkspaceController — bulk buffer writes are O(N) (#1012)', () => {
+  test('a fresh N-file open rebuilds the buffer Map in ONE bulk write, not one copy per file', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    for (let i = 0; i < 6; i++) platform.files.set(`f${i}.koi`, `context F${i} {}\n`);
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+
+    // Count ONLY the buffer-Map-changing notifications (isolate them from activeUri / roots / seq churn).
+    let bufferNotifications = 0;
+    const unsub = store.subscribe((s, prev) => {
+      if (s.buffers !== prev.buffers) bufferNotifications++;
+    });
+    await ws.openFolderPath(ROOT, { recent: false });
+    unsub();
+
+    // Same OBSERVABLE result as the per-file path: all six files buffered, first-by-relPath active.
+    expect(ws.buffers.size).toBe(6);
+    expect(ws.activeUri()).toBe(uriOf('f0.koi'));
+    // But the Map was replaced in a SINGLE bulk update, not six growing-Map copies (#1012): the count
+    // is bounded by a small constant, NOT proportional to the file count.
+    expect(bufferNotifications).toBeLessThanOrEqual(2);
+  });
+
+  test('reset clears the buffer set in ONE bulk update while still closing every LSP doc', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    for (let i = 0; i < 6; i++) platform.files.set(`f${i}.koi`, `context F${i} {}\n`);
+    const lsp = makeLsp([]);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT, { recent: false });
+    expect(ws.buffers.size).toBe(6);
+    lsp.closeDoc.mockClear();
+
+    let bufferNotifications = 0;
+    const unsub = store.subscribe((s, prev) => {
+      if (s.buffers !== prev.buffers) bufferNotifications++;
+    });
+    ws.reset();
+    unsub();
+
+    // Per-doc LSP didClose stays (one per file), but the buffer set empties in a SINGLE store update.
+    expect(lsp.closeDoc).toHaveBeenCalledTimes(6);
+    expect(ws.buffers.size).toBe(0);
+    expect(bufferNotifications).toBe(1);
+  });
+
+  test('switching folders replaces the buffer set in one bulk write (old files gone, new files in)', async () => {
+    const store = createAppStore();
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a1.koi', 'context A1 {}\n');
+    platform.seed(ROOT_A, 'a2.koi', 'context A2 {}\n');
+    platform.seed(ROOT_B, 'b1.koi', 'context B1 {}\n');
+    platform.seed(ROOT_B, 'b2.koi', 'context B2 {}\n');
+    platform.seed(ROOT_B, 'b3.koi', 'context B3 {}\n');
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([]), { store }));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    expect(ws.buffers.size).toBe(2);
+
+    let bufferNotifications = 0;
+    const unsub = store.subscribe((s, prev) => {
+      if (s.buffers !== prev.buffers) bufferNotifications++;
+    });
+    await ws.openFolderPath(ROOT_B, { recent: false });
+    unsub();
+
+    // A clean REPLACE: ROOT_A's buffers are gone, only ROOT_B's three remain (no union with the old set).
+    expect(ws.buffers.size).toBe(3);
+    expect(ws.buffers.has(uriUnder(ROOT_A, 'a1.koi'))).toBe(false);
+    expect(ws.buffers.has(uriUnder(ROOT_B, 'b1.koi'))).toBe(true);
+    // Teardown-clear + one bulk populate — bounded, not ∝ (old N + new N).
+    expect(bufferNotifications).toBeLessThanOrEqual(2);
   });
 });
 
@@ -1475,6 +1637,35 @@ describe('createWorkspaceController — syncBuffer (uri-keyed; group-B safety, #
     // The active buffer is untouched by a write to a uri that isn't open.
     expect(ws.buffers.get(aUri)!.text).toBe('context A {}\n');
     expect(ws.buffers.get(aUri)!.dirty).toBe(false);
+  });
+});
+
+describe('createWorkspaceController — resume-card snapshot semantics (#1018)', () => {
+  test('a background group-B dirty change records the ACTIVE (group-A) file — deliberately (Option A)', async () => {
+    setLastSession(null); // start from a clean snapshot (localStorage persists across tests in this file)
+    const platform = new FakePlatform();
+    platform.files.set('a.koi', 'context A {}\n'); // group A — active (first by relPath)
+    platform.files.set('b.koi', 'context B {}\n'); // group B — a background split-view buffer
+    const ws = createWorkspaceController(makeDeps(platform, makeLsp([]), makeEditor([])));
+    await ws.openFolderPath(ROOT, { recent: false });
+    const aUri = uriOf('a.koi');
+    const bUri = uriOf('b.koi');
+    expect(ws.activeUri()).toBe(aUri);
+
+    // Dirty ONLY the background group-B buffer (uri !== activeUri) — the split-view path ide.tsx routes
+    // group B's onChange through. This fires the snapshot via the syncBuffer facade's becameDirty hook.
+    const becameDirty = ws.syncBuffer(bUri, 'context B { value V {} }\n');
+    expect(becameDirty).toBe(true);
+
+    // Pin the deliberate choice (#1018 Option A): the resume snapshot records the ACTIVE (group-A) file,
+    // NOT the group-B file that actually changed. The card answers "where you were", not "what last
+    // changed", so a background edit must not repoint `file` at the background buffer. (Guards against an
+    // accidental switch to Option B — threading the changed uri — which would make this 'b.koi'.)
+    const snapshot = getLastSession();
+    expect(snapshot?.file).toBe('a.koi');
+    expect(snapshot?.file).not.toBe('b.koi');
+    // The dirty count still reflects the real edit (group-B is now unsaved).
+    expect(snapshot?.unsavedCount).toBe(1);
   });
 });
 

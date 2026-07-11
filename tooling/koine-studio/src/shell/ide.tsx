@@ -37,6 +37,7 @@ import {
   loadWorkspaceCenter,
   loadWorkspaceDeck,
   pushRecentFolder,
+  resolveKeybindings,
   saveActiveContext,
   saveWorkspaceCenter,
   saveWorkspaceDeck,
@@ -44,6 +45,7 @@ import {
   workspaceKeyOf,
   type Settings,
 } from '@/settings/persistence';
+import { globalChordFromEvent } from '@/editor/keybindings';
 import { type Template } from '@/welcome/templates';
 import { createCommandWiring } from '@/shell/commandWiring';
 import { createLayoutController } from '@/shell/layout';
@@ -1016,11 +1018,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     if (overlays.overlayOpen()) return; // don't act on the editor under an open overlay
-    // Mod+Alt+S → Save all. Match on e.code (the physical S key): on macOS, Option composes e.key
-    // into another glyph (e.g. 'ß'), so `e.key === 's'` would miss the chord.
-    if (e.altKey && e.code === 'KeyS') {
-      // Save-all dispatches through the command registry by id (#758); Save-active (below) has no command
-      // catalog entry, so it stays a direct call.
+    // Save all is now a rebindable GLOBAL chord (#432): match the keydown (code-aware for the letter base,
+    // so a macOS Option-composed 'ß' resolves) against the live resolved saveAll chord (default Mod-Alt-s).
+    if (globalChordFromEvent(e) === resolveKeybindings().saveAll) {
+      // Dispatches through the command registry by id (#758); Save-active (below) has no catalog entry.
       e.preventDefault();
       commandWiring.run('save-all');
     } else if (!e.altKey && (e.key === 's' || e.key === 'S')) {

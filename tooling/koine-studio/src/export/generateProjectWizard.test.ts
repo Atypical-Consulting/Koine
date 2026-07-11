@@ -3,6 +3,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import JSZip from 'jszip';
 import { createGenerateProject, type GenerateProjectDeps, type GenerateProjectHandle } from '@/export/generateProjectWizard';
 import type { EmitPreviewResult } from '@/lsp/lsp';
+import { axe } from 'vitest-axe';
+import { installExplorerSyncRendering } from '../test-setup';
+
+// The wizard is a Preact component since #991. These tests drive the public `{ open, close }` handle the
+// imperative predecessor exposed — raw `element.click()` / `dispatchEvent(...)` immediately followed by a
+// DOM assertion, with no `act()` and (in places) no awaited tick. Preact defers a state-driven re-render to
+// a microtask, so opt into synchronous rendering (the same test-infra `explorer.test.ts` adopted for its
+// #989 migration) so each re-render commits before the next assertion, exactly as the old direct-DOM writes
+// did. Only WHEN a re-render commits changes — never what it renders — so every behavioural assertion below
+// is the original, unchanged.
+installExplorerSyncRendering();
 
 // Flush queued microtasks + timers so the wizard's async steps (emitPreview, zip build) settle.
 function flush(): Promise<void> {
@@ -356,5 +367,42 @@ describe('generate-project wizard', () => {
     // The stale completion must NOT mark the fresh session done / show success.
     expect(document.querySelector('.koi-wizard-banner.success')).toBeNull();
     expect(primary().textContent).toBe('Next');
+  });
+});
+
+// Accessibility (the CONTRIBUTING recipe's story + axe gate). Each step's control set — the target
+// radiogroup, the artifact checkboxes, the name field with its live validity aria, the summary, and the
+// success banner — is audited under happy-dom axe so the migration provably preserves the a11y contract
+// (WCAG 2.1 AA per CLAUDE.md). The Storybook/Chromium project (GenerateProjectWizard.stories.tsx) adds the
+// color-contrast pass happy-dom can't run.
+describe('generate-project wizard accessibility', () => {
+  const wizard = (): HTMLElement => document.querySelector<HTMLElement>('.koi-wizard')!;
+
+  it('has no axe violations on the Language, Artifacts, Name, Generate, and success states', async () => {
+    const deps = makeDeps();
+    openWizard(deps);
+
+    // Language (the target radiogroup).
+    expect(await axe(wizard())).toHaveNoViolations();
+
+    await clickNext(); // → Artifacts (checkboxes, incl. the disabled always-on "Source files")
+    checkRowByText(/glossary/i).click(); // exercise the checked state too
+    expect(await axe(wizard())).toHaveNoViolations();
+
+    await clickNext(); // → Name
+    const nameInput = document.querySelector<HTMLInputElement>('#koi-gen-name')!;
+    nameInput.value = '1 invalid';
+    nameInput.dispatchEvent(new Event('input'));
+    // Invalid name: aria-invalid=true + aria-describedby pointing at the now-visible error message.
+    expect(await axe(wizard())).toHaveNoViolations();
+    nameInput.value = 'Shop';
+    nameInput.dispatchEvent(new Event('input'));
+    expect(await axe(wizard())).toHaveNoViolations();
+
+    await clickNext(); // → Generate (the summary)
+    expect(await axe(wizard())).toHaveNoViolations();
+
+    await clickGenerate(deps); // success: the ✓ banner + relabelled Close button
+    expect(await axe(wizard())).toHaveNoViolations();
   });
 });

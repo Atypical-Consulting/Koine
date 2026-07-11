@@ -54,6 +54,44 @@ describe("buildKeyboardSection — panel shape", () => {
             section.panel.querySelector(".koi-kbd-reset-all"),
         ).not.toBeNull();
     });
+
+    it("groups rows by scope under Editor / Global subheadings (#432)", () => {
+        const section = buildKeyboardSection({});
+        const subheads = [
+            ...section.panel.querySelectorAll<HTMLElement>(".koi-kbd-subhead"),
+        ].map((h) => h.textContent);
+        expect(subheads).toEqual(["Editor", "Global"]);
+
+        // The editor group carries call-hierarchy (folded in by #432); the global group carries the
+        // command palette + save-all.
+        expect(
+            section.panel.querySelector(
+                '.koi-kbd-row[data-binding-id="callHierarchy"]',
+            ),
+        ).not.toBeNull();
+        expect(
+            section.panel.querySelector(
+                '.koi-kbd-row[data-binding-id="commandPalette"]',
+            ),
+        ).not.toBeNull();
+        expect(
+            section.panel.querySelector(
+                '.koi-kbd-row[data-binding-id="saveAll"]',
+            ),
+        ).not.toBeNull();
+
+        // The Global heading sits AFTER every editor row and BEFORE the global rows (document order).
+        const kids = [...section.panel.children];
+        const globalHeadIdx = kids.findIndex((n) => n.id === "koi-kbd-scope-global");
+        const callHierIdx = kids.findIndex(
+            (n) => (n as HTMLElement).dataset?.bindingId === "callHierarchy",
+        );
+        const paletteIdx = kids.findIndex(
+            (n) => (n as HTMLElement).dataset?.bindingId === "commandPalette",
+        );
+        expect(callHierIdx).toBeLessThan(globalHeadIdx);
+        expect(globalHeadIdx).toBeLessThan(paletteIdx);
+    });
 });
 
 describe("buildKeyboardSection — arm/disarm listener pairing", () => {

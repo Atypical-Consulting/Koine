@@ -52,6 +52,7 @@ import { AdrPanel, NotesPanel, type DocsPanelHandlers } from '@/docs/DocsPanels'
 import { DocsPanelHost } from '@atypical/koine-ui';
 import { createDocsPanelHostStore } from '@/store/readableStores';
 import { guardedLoad } from '@/shell/guardedLoad';
+import { makeCopyButton } from '@/shell/copyFeedback';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 import { contextWorkspaceKey, docMessage, visibleCenters as deckVisibleCenters } from '@/shell/inspector/shared';
@@ -243,31 +244,8 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
   let selectedOutputPath: string | null = null;
 
   // The shared write-clipboard / flash-label / reset-after-1600ms sequence Copy file and Copy all both
-  // need — factored once so the two buttons don't duplicate the same three-branch promise chain. The
-  // button's OWN `disabled` state gates a click — NOT a falsy-string check on `getText()` (code-review
-  // fix: the Python emitter always emits an empty `py.typed` file, so an empty `writeText('')` must
-  // proceed). Returns the button + a `cancelReset` hook dispose() uses to drop any pending reset timer.
-  function makeCopyButton(cls: string, idleLabel: string, tip: string, getText: () => string): { el: HTMLButtonElement; cancelReset: () => void } {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = cls;
-    btn.textContent = idleLabel;
-    btn.dataset.tip = tip;
-    btn.disabled = true;
-    let resetTimer: ReturnType<typeof setTimeout> | undefined;
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      void navigator.clipboard
-        .writeText(getText())
-        .then(() => (btn.textContent = 'Copied ✓'))
-        .catch(() => (btn.textContent = 'Copy failed'))
-        .finally(() => {
-          clearTimeout(resetTimer);
-          resetTimer = setTimeout(() => (btn.textContent = idleLabel), 1600);
-        });
-    });
-    return { el: btn, cancelReset: () => clearTimeout(resetTimer) };
-  }
+  // need is the `@/shell/copyFeedback` module's `makeCopyButton` (#1362 — extracted from here, since
+  // `mcp.ts` reinvented the same idiom twice more with no shared helper anywhere in the package).
   // Derived fresh from lastFiles at click time, like copyAll's getText below — replaces the redundant
   // `lastPreview` mirror this used to read (code-review fix).
   const copyFile = makeCopyButton('out-copy out-copy-file', 'Copy file', 'Copy this file', () =>

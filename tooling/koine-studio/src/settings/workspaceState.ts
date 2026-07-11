@@ -133,6 +133,28 @@ export function pushRecentFolder(path: string, meta?: { branch?: string; languag
   persistRecents([entry, ...rest]);
 }
 
+/**
+ * Patch an EXISTING recent entry's enrichment metadata (git `branch` / emit `language`) in place,
+ * WITHOUT re-stamping `openedAt` or touching `pinned` — so an out-of-band, async enrichment (e.g. a
+ * non-blocking `git status` that resolves after the open) never reorders recents (#1016). A no-op when
+ * `path` isn't currently in recents, so a folder removed while its git lookup was still in flight is NOT
+ * resurrected. Supplied fields overwrite; omitted ones keep the entry's prior value. Distinct from
+ * {@link pushRecentFolder}, which is a recency signal (it re-stamps `openedAt` and re-adds a missing path).
+ */
+export function updateRecentFolderMeta(path: string, meta: { branch?: string; language?: string }): void {
+  if (typeof path !== 'string' || path.length === 0) return;
+  const existing = getRecentFolders();
+  if (!existing.some((r) => r.path === path)) return; // absent → don't resurrect a removed entry
+  const patched = existing.map((r) => {
+    if (r.path !== path) return r;
+    const next: RecentFolder = { ...r }; // keep openedAt + pinned intact — the branch is enrichment, not recency
+    if (typeof meta.branch === 'string' && meta.branch.length > 0) next.branch = meta.branch;
+    if (typeof meta.language === 'string' && meta.language.length > 0) next.language = meta.language;
+    return next;
+  });
+  persistRecents(patched); // capRecents sorts by (pinned, openedAt desc); openedAt unchanged ⇒ order held
+}
+
 /** Drop a single recent folder by path. */
 export function removeRecentFolder(path: string): void {
   persistRecents(getRecentFolders().filter((r) => r.path !== path));

@@ -6,13 +6,16 @@ import { loadedReservedChords } from "@/editor/editor";
 import { DEFAULT_BINDINGS } from "@/editor/keybindings";
 
 describe("loadedReservedChords", () => {
-    test("includes the four chords the old RESERVED_CHORDS hard-coded", () => {
+    test("still covers the non-rebindable built-ins the old RESERVED_CHORDS hard-coded", () => {
         const reserved = loadedReservedChords(DEFAULT_BINDINGS);
-        // These four were in the original hard-coded table and must remain covered.
+        // These three were in the original hard-coded table and are still non-rebindable built-ins.
         expect(reserved).toHaveProperty("Mod-f"); // openSearchPanel → Find
         expect(reserved).toHaveProperty("Mod-d"); // selectNextOccurrence
         expect(reserved).toHaveProperty("Mod-a"); // selectAll
-        expect(reserved).toHaveProperty("Mod-Alt-h"); // call hierarchy
+        // Mod-Alt-h is NO LONGER a reserved built-in: #432 made call hierarchy a rebindable registry row
+        // (DEFAULT_BINDINGS.callHierarchy = 'Mod-Alt-h'), so the registryChords guard excludes it here and
+        // the inter-row conflict path (findKbdDuplicate) owns a clash with it instead.
+        expect(reserved).not.toHaveProperty("Mod-Alt-h");
     });
 
     test("does NOT include Mod-z (historyKeymap is not loaded)", () => {
@@ -73,7 +76,6 @@ describe("loadedReservedChords", () => {
         const reserved = loadedReservedChords(DEFAULT_BINDINGS);
         expect(reserved["Mod-f"]).toBe("Find");
         expect(reserved["Mod-a"]).toBe("Select all");
-        expect(reserved["Mod-Alt-h"]).toBe("Call hierarchy");
     });
 
     test("labels are chord-keyed (minification-proof), not derived from the run function's name", () => {

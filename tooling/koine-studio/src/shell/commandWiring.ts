@@ -14,6 +14,8 @@ import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 import { formatChord } from '@/shared/platform';
+import { resolveKeybindings } from '@/settings/persistence';
+import { resolveGlobalKeybindings, globalChordFromEvent } from '@/editor/keybindings';
 import { toggleTheme } from '@/settings/theme';
 import { buildOverflowItems, toggleOverflowMenu } from '@/shell/toolbarOverflow';
 import { createLauncher } from '@/launcher/createLauncher';
@@ -408,11 +410,15 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod && e.key !== 'F1') return;
 
-    // mod+K always toggles the palette (so it can also dismiss itself); every other global
-    // shortcut is suppressed while an overlay is open so it doesn't act on the editor beneath.
-    if (mod && (e.key === 'k' || e.key === 'K')) {
-      // Dispatch through the registry so the chord resolves to a command id (#758) — the seam #432 lifts
-      // the rest of the global chords into.
+    // The command palette is a rebindable GLOBAL chord (#432): resolve it live from the keybindings
+    // registry (default Mod-k) instead of the old `e.key==='k'` literal — resolveKeybindings() is re-read
+    // on every keydown, so a Settings remap (onKeybindingsChanged) takes effect with no re-wiring. Matched
+    // code-aware via globalChordFromEvent for macOS Option-glyph safety. It ALWAYS toggles the palette (so
+    // it can also dismiss itself) and runs BEFORE the overlay-open guard, which suppresses every other
+    // global shortcut while an overlay is open so it doesn't act on the editor beneath.
+    if (globalChordFromEvent(e) === resolveGlobalKeybindings(resolveKeybindings()).commandPalette) {
+      // Dispatch through the registry so the chord resolves to a command id (#758) — the seam #432 folds
+      // the palette into.
       e.preventDefault();
       registry.run(PALETTE_COMMAND_ID);
       return;

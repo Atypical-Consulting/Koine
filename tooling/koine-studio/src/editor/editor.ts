@@ -278,10 +278,10 @@ export function loadedReservedChords(resolved: Record<BindingId, string>): Recor
   addKeymap(searchKeymap);
   addKeymap(defaultKeymap);
 
-  // The call-hierarchy shortcut is not part of CodeMirror's exported keymaps — it's a literal the
-  // editor binds itself (`callHierarchyKeys`) and is not user-rebindable yet (#266 scopes the
-  // expansion to the five LSP actions). Surface it explicitly.
-  if (!registryChords.has('Mod-Alt-h')) result['Mod-Alt-h'] = 'Call hierarchy';
+  // (Call hierarchy is NOT surfaced here anymore: #432 folded it from the former literal `callHierarchyKeys`
+  // keymap into a first-class rebindable registry row, so its chord is already in `registryChords` above and
+  // owned by the inter-row conflict path. Explicitly reserving `Mod-Alt-h` would falsely mark its OLD chord
+  // as a built-in after the user rebinds call hierarchy away from it.)
 
   return result;
 }
@@ -663,11 +663,13 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       ]
     : [];
 
-  // The five LSP-action shortcuts are now registry-driven (keybindings.ts) and live in a compartment so
-  // Settings can remap them live. Each handler keeps its exact provider guard + body from the old literals;
-  // they reference `view`/`editorHandle` (declared below) but only fire on keypress, so the late binding is
-  // fine — exactly as the prior literals did.
-  const keybindingHandlers: Record<BindingId, () => boolean> = {
+  // The EDITOR-scope shortcuts are registry-driven (keybindings.ts) and live in a compartment so Settings
+  // can remap them live. Each handler keeps its exact provider guard + body from the old literals; they
+  // reference `view`/`editorHandle` (declared below) but only fire on keypress, so the late binding is
+  // fine — exactly as the prior literals did. This is a Partial<Record<BindingId, …>>: it wires only the
+  // editor-scope ids; the global rows (commandPalette / saveAll) carry no editor handler — ide.tsx's
+  // window listeners dispatch those by commandId (#432) — and toKeyBindings skips any id without a handler.
+  const keybindingHandlers: Partial<Record<BindingId, () => boolean>> = {
     goToDefinition: () => {
       if (!opts.onDefinition) return false;
       void gotoDefinition(view.state.selection.main.head);
@@ -693,25 +695,20 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
       void showCodeActions();
       return true;
     },
+    // Call hierarchy (Mod-Alt-h) is now a rebindable editor row (#432) — folded out of its former literal
+    // keymap into the compartment so Settings can remap it like the other editor actions. Same provider
+    // guard + body the literal carried.
+    callHierarchy: () => {
+      if (!opts.onPrepareCallHierarchy || !opts.onNavigateLocation) return false;
+      if (!opts.onIncomingCalls && !opts.onOutgoingCalls) return false;
+      void showCallHierarchy(view.state.selection.main.head);
+      return true;
+    },
   };
   // The resolved (defaults + persisted overrides) keymap lives in its own compartment so Settings can
   // reconfigure it live (reconfigureKeybindings, below) without rebuilding the editor — same pattern as
   // lineWrap/minimap.
   const keybindingCompartment = new Compartment();
-  // Call hierarchy (Mod-Alt-h) is NOT user-customizable yet (#266 scopes the five LSP actions); keep it
-  // as its own literal keymap so it survives the move to the registry-driven compartment.
-  const callHierarchyKeys = keymap.of([
-    {
-      key: 'Mod-Alt-h',
-      preventDefault: true,
-      run: () => {
-        if (!opts.onPrepareCallHierarchy || !opts.onNavigateLocation) return false;
-        if (!opts.onIncomingCalls && !opts.onOutgoingCalls) return false;
-        void showCallHierarchy(view.state.selection.main.head);
-        return true;
-      },
-    },
-  ]);
 
   // Mod-Alt-m files a review comment on the current selection (#259). Collision-free against the editor's
   // bound chords (Mod-D, Mod-Alt-↑/↓, Mod-., F2, Shift-F12, Mod-Alt-h, Mod-S, Mod-K, F12, Ctrl-Space). The
@@ -831,7 +828,6 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         // LSP inlay hints (inferred type / parameter-name annotations) over the visible viewport.
         ...(opts.onInlayHints ? [inlayHintsExtension(opts.onInlayHints)] : []),
         keybindingCompartment.of(buildExtraKeys(resolveKeybindings(), keybindingHandlers)),
-        callHierarchyKeys,
         addCommentKeys,
         keymap.of([
           ...closeBracketsKeymap,

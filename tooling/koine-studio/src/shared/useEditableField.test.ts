@@ -188,3 +188,231 @@ describe('useEditableField', () => {
     expect(inputAfter.value).toBe('Item');
   });
 });
+
+// The transient-session mode (#1396): a caller that passes `onCancel` opts into "temporary row"
+// semantics — the field is a session that must DISAPPEAR on cancel, not a persistent field that resets
+// its DOM value. `validate`/`onInvalid` gate the commit: an invalid value keeps the edit open (Enter)
+// or cancels the session (blur); a valid changed value commits exactly once. This is ExplorerPanel's
+// inline create/rename editor generalized into the one blessed primitive.
+function SessionField(props: {
+  identity: string;
+  value: string;
+  onCommit: (next: string) => void;
+  onCancel: () => void;
+  onInvalid?: () => void;
+  validate?: (trimmed: string) => boolean;
+  commitBlank?: boolean;
+}) {
+  const field = useEditableField<HTMLInputElement>({
+    identity: props.identity,
+    value: props.value,
+    onCommit: props.onCommit,
+    onCancel: props.onCancel,
+    onInvalid: props.onInvalid,
+    validate: props.validate,
+    commitBlank: props.commitBlank,
+  });
+  return h('input', { 'aria-label': 'field', ...field });
+}
+
+// A file-name-ish validator for the session tests: reject a segment containing a slash (mirrors
+// ExplorerPanel's `invalidSegment` shape without importing it — the hook itself is domain-agnostic).
+const noSlash = (s: string): boolean => !s.includes('/');
+
+describe('useEditableField — transient-session mode (onCancel present)', () => {
+  test('Enter with an invalid value keeps the edit open, fires onInvalid, and neither blurs nor commits', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const onInvalid = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'create:ROOT:file', value: '', onCommit, onCancel, onInvalid, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, 'bad/name');
+    act(() => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+
+    expect(onInvalid).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(input); // edit stays open — never blurred
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  test('Enter with a valid, changed value blurs and commits exactly once (via the blur handler)', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'create:ROOT:file', value: '', onCommit, onCancel, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, 'catalog.koi');
+    act(() => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+
+    expect(document.activeElement).not.toBe(input); // Enter blurred it
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith('catalog.koi');
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  test('Escape cancels the session (onCancel), never commits', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'rename:X', value: 'Order', onCommit, onCancel, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, 'Whatever');
+    act(() => {
+      fireEvent.keyDown(input, { key: 'Escape' });
+    });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  test('blur on a blank value cancels the session (onCancel), never commits', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'create:ROOT:file', value: '', onCommit, onCancel, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, '   ');
+    act(() => input.blur());
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  test('blur on an invalid value cancels the session (onCancel), never commits (no trap)', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const onInvalid = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'create:ROOT:file', value: '', onCommit, onCancel, onInvalid, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, 'bad/name');
+    act(() => input.blur());
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  test('blur on a valid, changed value commits the trimmed text exactly once, never cancels', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'create:ROOT:file', value: '', onCommit, onCancel, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, '  catalog.koi  ');
+    act(() => input.blur());
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith('catalog.koi');
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  test('blur on a valid but UNCHANGED value cancels the session (no-op rename closes, skips commit)', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'rename:X', value: 'Order', onCommit, onCancel, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, 'Order'); // unchanged
+    act(() => input.blur());
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  test('blur on a DISCONNECTED element cancels the session and never commits (upstream removal mid-edit)', () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const { container } = render(
+      h(SessionField, { identity: 'rename:X', value: 'Order', onCommit, onCancel, validate: noSlash }),
+    );
+    const input = getInput(container);
+
+    type(input, 'RenamedButGone'); // a valid, changed value — would otherwise commit
+    input.remove(); // the entry vanished out from under the edit
+    expect(input.isConnected).toBe(false);
+
+    act(() => {
+      input.dispatchEvent(new Event('blur'));
+    });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled(); // never commit into a gone entry
+  });
+
+  // Regression: presence of `validate`/`onInvalid` WITHOUT `onCancel` must NOT switch modes — a caller
+  // is in persistent mode iff `onCancel` is absent, and then the new params are inert (today's exact
+  // behavior). Proven by an invalid value still riding the blur-commit path on Enter, exactly as before.
+  describe('persistent mode (no onCancel) is unchanged even when validate/onInvalid are passed', () => {
+    function PersistentWithValidate(props: {
+      identity: string;
+      value: string;
+      onCommit: (next: string) => void;
+      onInvalid?: () => void;
+      validate?: (trimmed: string) => boolean;
+    }) {
+      const field = useEditableField<HTMLInputElement>({
+        identity: props.identity,
+        value: props.value,
+        onCommit: props.onCommit,
+        onInvalid: props.onInvalid,
+        validate: props.validate,
+      });
+      return h('input', { 'aria-label': 'field', ...field });
+    }
+
+    test('Enter commits via blur and ignores validate/onInvalid (persistent field, not a session)', () => {
+      const onCommit = vi.fn();
+      const onInvalid = vi.fn();
+      const { container } = render(
+        h(PersistentWithValidate, { identity: 'id', value: 'Order', onCommit, onInvalid, validate: noSlash }),
+      );
+      const input = getInput(container);
+
+      type(input, 'bad/name'); // would be rejected in session mode
+      act(() => {
+        fireEvent.keyDown(input, { key: 'Enter' });
+      });
+
+      expect(onInvalid).not.toHaveBeenCalled(); // validate is inert without onCancel
+      expect(document.activeElement).not.toBe(input); // Enter still blurs (persistent behavior)
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(onCommit).toHaveBeenCalledWith('bad/name');
+    });
+
+    test('Escape resets the DOM value and blurs (persistent behavior), never cancels/commits', () => {
+      const onCommit = vi.fn();
+      const { container } = render(
+        h(PersistentWithValidate, { identity: 'id', value: 'Order', onCommit, validate: noSlash }),
+      );
+      const input = getInput(container);
+
+      type(input, 'Discarded');
+      act(() => {
+        fireEvent.keyDown(input, { key: 'Escape' });
+      });
+
+      expect(input.value).toBe('Order'); // reset to committed value (not removed)
+      expect(document.activeElement).not.toBe(input);
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+  });
+});

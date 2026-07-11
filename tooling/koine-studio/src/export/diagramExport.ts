@@ -265,7 +265,7 @@ export function diagramToMermaid(graph: DiagramGraph): string {
  *  label text (`--koi-fg`), the label-pill background (`--koi-paper`/`--koi-paper-2`) and the accent. */
 const SVG_PALETTE_DARK: Record<string, string> = {
   '--koi-line': '#2a3242',
-  '--koi-muted': '#7d8694',
+  '--koi-muted': '#858e9c',
   '--koi-diagram-edge': '#5d6b8e',
   '--koi-fg': '#d6dde8',
   '--koi-paper': '#0e1117',

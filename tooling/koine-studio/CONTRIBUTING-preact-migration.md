@@ -139,7 +139,23 @@ of disable comments (no `require-description` rule is configured). Reviewers hol
   `MdHtml`, also genuinely JSX since #992); the assistant chat —
   `src/ai/components/AssistantChat.tsx` (+ `Transcript`, `ChangeSetPanel`, `Composer`, `MdHtml`) over the
   `chat` slice (#984/#990); the file explorer — `src/shell/ExplorerPanel.tsx` (+ `ExplorerItem`,
-  `explorerModel.ts`) over the `uiChrome` slice's `explorerFilter`/`explorerCollapsed` fields (#989).
+  `explorerModel.ts`) over the `uiChrome` slice's `explorerFilter`/`explorerCollapsed` fields (#989); and
+  the **five self-contained surfaces migrated in #991** — the **Domain navigator**
+  (`src/model/DomainNavigator.tsx`, facade `domainNavigator.ts`, consuming the shared `rovingTreeNav.ts`
+  from #1105 rather than re-inlining roving-tabindex), the **Generate Project wizard**
+  (`src/export/GenerateProjectWizard.tsx`, facade `generateProjectWizard.ts`), the routed **Home** view
+  (`src/welcome/Home.tsx`, facade `welcome.ts` — stays store-free, mounts pre-IDE-boot), the **About**
+  panel (`src/settings/About.tsx`, facade `about.ts`), and the **keyboard-shortcuts** table
+  (`src/shared/HelpTable.tsx`, facade `help.ts`), each behind its unchanged factory facade so no
+  production caller changed. #991 is the **first application of this recipe beyond `src/shell`** — the
+  census greps below were written when every island lived in the shell; the recipe applies repo-wide
+  across `koine-studio/src` (`src/model`, `src/export`, `src/welcome`, `src/settings`, `src/shared`).
+  Two shared conventions this tranche established: (1) a `PascalCase.tsx` component whose facade shares
+  its basename in lowercase (`About.tsx`/`about.ts`) must be imported with an **explicit `.tsx`
+  extension** — a bare specifier resolves to the `.ts` facade first on a case-insensitive filesystem and
+  silently renders `[object Object]`; (2) a `.tsx` panel's static-constant `dangerouslySetInnerHTML`
+  (brand mark / hero SVG) carries a per-line `// eslint-disable-next-line no-restricted-syntax -- <reason>`
+  (About.tsx is the reference), since the file-level `innerHTML` allow-list does not cover the JSX form.
 
 > **The model/docs panels finished their arc in #992.** `PropertiesPanel`, `RelationshipsPanel` /
 > `EventsPanel` (via the shared `SortableTable` component), `GlossaryPanel`, and the Docs pages
