@@ -349,13 +349,31 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
     activeUri: () => deps.activeUri(),
     scope: { uriLabel: deps.uriLabel },
   });
+
+  // Mirror the Problems-tab pill from the same adapted store host-side. The host reads from
+  // stripStore's memoized selector (the same one-computation path the panel uses) and writes to the
+  // #diag-count element, so the pill and strip stay in lock-step. This replaces the old DiagnosticsStripPanel
+  // imperative countEl prop — after Task 2 removes that, the host owns the entire pill rendering.
+  function renderDiagPill(): void {
+    const slice = stripStore.getState();
+    deps.diagCount.textContent = slice.count;
+    deps.diagCount.dataset.kind = slice.kind;
+  }
+
   // The panel self-subscribes to the slice, but paintActive also re-renders it synchronously on each
   // active-file push — Preact's top-level render() reconciles into the same #diag-body node, so the host
   // keeps its identity, and the panel re-reads the adapted store during render, so the strip repaints
   // immediately (the same synchronous behavior the old imperative renderStrip had). It is mounted lazily
   // on the first paint (NOT at construction) because deps.activeUri() — read during the panel's render —
   // may close over wiring (e.g. ide.ts's workspace) that isn't assigned yet here.
+  let stripMounted = false;
   function renderStripPanel(): void {
+    // Wire the pill subscription on first mount (not before — deps.activeUri() may not be ready).
+    if (!stripMounted) {
+      stripMounted = true;
+      stripStore.subscribe(renderDiagPill);
+      renderDiagPill(); // Initialize the pill with current state.
+    }
     render(
       <DiagnosticsStripPanel
         store={stripStore}
@@ -392,6 +410,10 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
   function paintActive(diags: LspDiagnostic[]): void {
     setEditorDiagnostics(editor.view, diags);
     renderStripPanel();
+    // The adapter's selector reads deps.activeUri() in its closure, so an active-file switch changes
+    // the key but does NOT trigger a store notification (no state write). Call the mirror directly here
+    // to re-read the now-stale selection on the new file.
+    renderDiagPill();
     renderStatusBarProblems(diags);
     updateStatus(diags);
   }
