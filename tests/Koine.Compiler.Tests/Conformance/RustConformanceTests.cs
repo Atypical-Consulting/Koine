@@ -2345,4 +2345,56 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1437: an entity member that is both optional-declared and constant-defaulted
+    /// (<c>taxRate: Decimal? = 2</c>) must have a factory's explicit <c>taxRate -&gt; 5</c> initialization
+    /// actually reach the constructed value — before this fix, this member class had no constructor
+    /// parameter at all, so <c>BuildFactoryCtorArgs</c> never routed the factory's value anywhere and
+    /// <c>Product::make()</c> silently always yielded the hardcoded default. A sibling factory that never
+    /// touches <c>taxRate</c> must still fall back to the constructor's own default (#1325's coercion,
+    /// now reached via the <c>None</c> arm instead of a hardcoded local).
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_defaulted_member_reaches_the_constructor()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      taxRate -> 5\n" +
+            "    }\n" +
+            "\n" +
+            "    create makeDefault() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Product;
+
+            #[test]
+            fn factory_explicit_init_overrides_the_default() {
+                let product = Product::make().expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(5)));
+            }
+
+            #[test]
+            fn factory_with_no_init_falls_back_to_the_declared_default() {
+                let product = Product::make_default().expect("valid Product");
+                assert_eq!(product.tax_rate(), &Some(Decimal::from(2)));
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
