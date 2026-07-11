@@ -706,11 +706,18 @@ export function SourceControlPanel(props: {
             aria-expanded={expanded}
             onClick={() => void onToggleDiff(f)}
           >
-            {/* A trailing slash on the name is the folder cue — the same convention `relPath` itself
-                already used, so a directory row reads as one at a glance without a dedicated icon. */}
             <span class="koi-sc-name" aria-hidden="true">
-              {isDir ? `${name}/` : name}
+              {name}
             </span>
+            {/* The folder cue — the same trailing-slash convention `relPath` itself already uses — is a
+                separate, non-truncatable sibling (not appended inside `.koi-sc-name`) so a long folder
+                name's ellipsis truncation can never eat the only visual signal that the row is a
+                directory. */}
+            {isDir && (
+              <span class="koi-sc-dir-glyph" aria-hidden="true">
+                /
+              </span>
+            )}
             {dir && (
               <span class="koi-sc-dir" aria-hidden="true">
                 {dir}

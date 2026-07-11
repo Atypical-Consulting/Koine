@@ -620,11 +620,13 @@ describe('SourceControlPanel — Discard controls (#1151)', () => {
     });
     // Pre-fix bug: `lastIndexOf('/')` on a trailing-slash relPath finds the trailing slash itself, so
     // the folder's own name lands in the muted `.koi-sc-dir` line instead of the bold `.koi-sc-name`.
-    // The re-added trailing slash on the primary label is the folder cue (mirrors how git itself
-    // denotes a directory), so a directory row reads as one without a dedicated icon.
-    expect(row.querySelector('.koi-sc-name')?.textContent).toBe('scratch/');
+    expect(row.querySelector('.koi-sc-name')?.textContent).toBe('scratch');
     expect(row.querySelector('.koi-sc-dir')).toBeNull();
     expect(row.classList.contains('koi-sc-file--dir')).toBe(true);
+    // The folder cue (a trailing "/", mirroring how git itself denotes a directory) lives in its own
+    // non-truncatable sibling — not appended inside `.koi-sc-name` — so a long folder name's ellipsis
+    // truncation can never eat the only visual signal that the row is a directory.
+    expect(row.querySelector('.koi-sc-dir-glyph')?.textContent).toBe('/');
   });
 
   test('discarding an untracked DIRECTORY row asks with folder wording and routes the trailing-slash path through', async () => {

@@ -571,6 +571,14 @@
   font-size: var(--koi-text-sm);
 }
 
+/* The untracked-directory-row folder cue (#1462): `flex: none` so it never gets clipped by
+   `.koi-sc-name`'s own ellipsis — a long folder name truncates, the trailing "/" cue always survives. */
+.koi-sc-dir-glyph {
+  flex: none;
+  color: var(--koi-fg);
+  font-size: var(--koi-text-md);
+}
+
 /* Trailing +/− stat (mono) — fades out when the action cluster takes its place on hover/focus. */
 .koi-sc-stat {
   flex: none;
