@@ -3633,6 +3633,10 @@ mod tests {
         // Clone the remote — this is the repo under test, currently in sync with origin/main.
         let parent = TempRepo::new();
         let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        // `git clone` doesn't inherit `init_repo`'s autocrlf pin, so a Windows runner's
+        // `core.autocrlf=true` default would rewrite the checked-out file to CRLF, breaking the
+        // exact-content assertion below.
+        run_git(&clone_dir, &["config", "core.autocrlf", "false"]).unwrap();
 
         // Advance the remote past the clone with a second commit pushed from `origin`.
         origin.write("f.txt", "2\n");
@@ -3675,6 +3679,10 @@ mod tests {
         // Clone the remote — this is the repo under test, currently in sync with origin/main.
         let parent = TempRepo::new();
         let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        // `git clone` doesn't inherit `init_repo`'s autocrlf pin, so a Windows runner's
+        // `core.autocrlf=true` default would rewrite the checked-out file to CRLF, breaking the
+        // exact-content assertion below.
+        run_git(&clone_dir, &["config", "core.autocrlf", "false"]).unwrap();
 
         // Advance the remote past the clone with a second commit pushed from `origin`.
         origin.write("f.txt", "2\n");
