@@ -547,6 +547,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // throws. Returns undefined for a scratch/empty model so the system prompt stays clean.
   async function buildDomainIndex(): Promise<DomainIndex | undefined> {
     try {
+      // glossaryModel rides the shared fetchGlossaryModel() memoizer (#1405, the fourth consumer): a
+      // debounced post-edit refresh often has its own glossaryModel fetch already in flight when the
+      // assistant asks for a fresh domain index, so this reuses that one instead of paying for a second.
+      // contextMap has no memoizer — it's this builder's only per-edit consumer, so nothing to share.
       const [contextMap, glossaryModel] = await Promise.all([
         lsp.contextMap().catch(() => null),
         fetchGlossaryModel().catch(() => null),
