@@ -42,6 +42,7 @@ internal sealed class RustExpressionTranslator
     private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
     private readonly ISet<string> _derivedMembers;
+    private readonly ISet<string> _constantDefaultedMembers;
     private readonly string _memberReceiver;
     private readonly bool _membersAsAccessors;
 
@@ -72,6 +73,15 @@ internal sealed class RustExpressionTranslator
         // in an instance body must render as a call `self.x()`, never a field read `self.x`.
         _derivedMembers = new HashSet<string>(
             members.Where(m => MemberAnalysis.IsDerived(m, _memberNames)).Select(m => m.Name),
+            StringComparer.Ordinal);
+        // A constant-defaulted member (has an initializer that is NOT derived from siblings, e.g.
+        // `taxRate: Decimal? = 2`) is unconditionally resolved to a bare value by the smart
+        // constructor's `unwrap_or_else` before its invariant guards run (the `Some(...)` re-wrap, for
+        // an optional-declared one, happens only after — #1472). So within that invariant-evaluation
+        // window an `isPresent`/`isNone`/`isAbsent` check on it is statically known, not a real
+        // `Option` query — see WriteMemberAccess's short-circuit.
+        _constantDefaultedMembers = new HashSet<string>(
+            members.Where(m => m.Initializer is not null && !_derivedMembers.Contains(m.Name)).Select(m => m.Name),
             StringComparer.Ordinal);
     }
 
@@ -829,11 +839,11 @@ internal sealed class RustExpressionTranslator
                 sb.Append(t).Append(".trim().is_empty()");
                 return;
             case "isPresent":
-                sb.Append(t).Append(".is_some()");
+                sb.Append(IsConstantDefaultedTarget(ma.Target) ? "true" : t + ".is_some()");
                 return;
             case "isNone":
             case "isAbsent":
-                sb.Append(t).Append(".is_none()");
+                sb.Append(IsConstantDefaultedTarget(ma.Target) ? "false" : t + ".is_none()");
                 return;
             default:
                 // A field/derived-member access on another value: call its accessor.
@@ -841,6 +851,26 @@ internal sealed class RustExpressionTranslator
                 return;
         }
     }
+
+    /// <summary>
+    /// True when <paramref name="target"/> is a constant-defaulted member read in the smart-constructor
+    /// window — i.e. a bare <c>fieldName</c> identifier in <see cref="NameMode.Parameter"/> that is not
+    /// shadowed by a local. Only there has <c>unwrap_or_else</c> already resolved the member to a bare
+    /// <c>T</c> local (the <c>Some(...)</c> re-wrap runs after the guards, #1472), making its presence
+    /// statically known.
+    /// <para>
+    /// The <see cref="NameMode.Property"/> instance-body context is deliberately left alone: a derived
+    /// getter, or a command's post-transition invariant re-check, reads the stored
+    /// <c>self.&lt;field&gt;</c>, which really is an <c>Option&lt;T&gt;</c> and must keep querying it for
+    /// real. Locals are excluded because a factory parameter (or a <c>let</c> binding) shadows a
+    /// same-named member, and that parameter is a genuine <c>Option&lt;T&gt;</c>.
+    /// </para>
+    /// </summary>
+    private bool IsConstantDefaultedTarget(Expr target) =>
+        _mode == NameMode.Parameter
+        && target is IdentifierExpr id
+        && !_locals.Contains(id.Name)
+        && _constantDefaultedMembers.Contains(id.Name);
 
     private void WriteCall(CallExpr call, StringBuilder sb)
     {

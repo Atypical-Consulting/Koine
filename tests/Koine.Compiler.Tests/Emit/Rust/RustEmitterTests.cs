@@ -229,6 +229,89 @@ public class RustEmitterTests
         rust.ShouldNotContain("let label = \"std\";");
     }
 
+    private const string EntityInvariantReferencingConstantDefaultedOptionalMemberModel = """
+        context Shop {
+          entity Product identified by ProductId {
+            amount: Decimal
+            taxRate: Decimal? = 2
+            invariant taxRate >= amount when taxRate.isPresent "tax rate must be at least amount"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1472: an entity invariant's <c>isPresent</c> guard on a constant-defaulted, optional-
+    /// declared member must short-circuit to the literal <c>true</c> — by the time the invariant guards
+    /// run, the ctor's <c>unwrap_or_else</c> has already resolved the member to a bare, always-present
+    /// value (the <c>Some(...)</c> re-wrap now happens after, see #1472's entity/VO reorder fix), so
+    /// <c>.is_some()</c> would be a real <c>cargo check</c> <c>E0599</c> against that bare local.
+    /// </summary>
+    [Fact]
+    public void Entity_invariant_isPresent_on_constant_defaulted_member_short_circuits_to_true()
+    {
+        var result = new KoineCompiler().Compile(EntityInvariantReferencingConstantDefaultedOptionalMemberModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if true && !(tax_rate >= amount) {");
+        rust.ShouldNotContain("tax_rate.is_some()");
+    }
+
+    private const string ValueObjectInvariantReferencingConstantDefaultedOptionalMemberModel = """
+        context Shop {
+          value Money {
+            amount: Decimal
+            taxRate: Decimal? = 2
+            invariant taxRate >= amount when taxRate.isPresent "tax rate must be at least amount"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1472: the value-object dual of the entity case above — <c>WriteSmartConstructor</c>'s
+    /// invariant guards must see the same short-circuited <c>isPresent</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_invariant_isPresent_on_constant_defaulted_member_short_circuits_to_true()
+    {
+        var result = new KoineCompiler().Compile(ValueObjectInvariantReferencingConstantDefaultedOptionalMemberModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if true && !(tax_rate >= amount) {");
+        rust.ShouldNotContain("tax_rate.is_some()");
+    }
+
+    /// <summary>
+    /// Issue #1472 edge case: the short-circuit is scoped to the smart-constructor window, where
+    /// <c>unwrap_or_else</c> has already resolved the member to a bare local. A <b>derived</b> member's
+    /// getter is a different call site — it reads the stored <c>self.tax_rate</c>, which really is an
+    /// <c>Option&lt;Decimal&gt;</c> — so its <c>isPresent</c> must fall through to a real
+    /// <c>.is_some()</c> and NOT be folded to <c>true</c>.
+    /// </summary>
+    [Fact]
+    public void Derived_member_isPresent_on_constant_defaulted_member_still_emits_is_some()
+    {
+        const string model = """
+            context Shop {
+              value Money {
+                amount: Decimal
+                taxRate: Decimal? = 2
+                hasTaxRate: Bool = taxRate.isPresent
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.tax_rate.is_some()");
+    }
+
     private const string EntityOptionalDefaultedMemberBecomesTrailingParamModel = """
         context Shop {
           entity Product identified by ProductId {
