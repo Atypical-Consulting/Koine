@@ -149,6 +149,23 @@ describe('actionsFor — run() calls the injected deps', () => {
     expect(deps.copy).toHaveBeenCalledWith('root.koi');
   });
 
+  test("a file whose relPath diverges from sub+title uses relPath instead", async () => {
+    const deps = makeDeps();
+    const entry: CatalogEntry = {
+      id: 'file:x',
+      cat: 'file',
+      title: 'other.koi',
+      sub: 'display/dir',
+      relPath: 'src/deep/ordering.koi',
+    };
+
+    await actionsFor(entry, deps)[3].run();
+
+    expect(deps.copy).toHaveBeenCalledWith('src/deep/ordering.koi');
+    expect(deps.toast).toHaveBeenCalledTimes(1);
+    expect((deps.toast as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain('src/deep/ordering.koi');
+  });
+
   test("a commit's Copy hash calls deps.copy with the full sha and triggers deps.toast", async () => {
     const deps = makeDeps();
     const entry: CatalogEntry = { id: 'commit:abc', cat: 'commit', title: 'chore: x', hash: 'abc1234567890' };

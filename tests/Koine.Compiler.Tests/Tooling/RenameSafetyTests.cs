@@ -35,6 +35,88 @@ public class RenameSafetyTests
     }
 
     [Fact]
+    public void Rename_of_a_type_is_not_blocked_by_an_unrelated_contexts_same_named_type()
+    {
+        // #1376: renaming Sales's Money to "Cash" must NOT be blocked just because a wholly UNRELATED
+        // context (Billing) happens to independently declare its OWN type literally named "Cash" — a
+        // collision only matters within the renamed symbol's OWN bounded context.
+        var sales = "context Sales {\n  value Money { amount: Decimal }\n}\n";
+        var billing = "context Billing {\n  value Cash { amount: Decimal }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///sales.koi"] = sales,
+            ["file:///billing.koi"] = billing,
+        };
+        var edits = Svc.RenameAt(docs, "file:///sales.koi", line: 1, character: 9, newName: "Cash");
+        edits.ShouldNotBeNull();
+        edits.ShouldHaveSingleItem();
+        edits.ShouldContain(r => r.Uri == "file:///sales.koi");
+    }
+
+    [Fact]
+    public void Rename_of_an_id_convention_type_collides_consistently_regardless_of_invocation_site()
+    {
+        // #1376 follow-up: WouldCollide's Id-value-object branch is deliberately NOT context-scoped
+        // (unlike its type/spec branch) because a convention-only *Id symbol's own "owning context" is
+        // unreliable when resolved from a bare reference site (SymbolTable picks an ARBITRARY context
+        // as a fallback container). Renaming the SAME ProductId to "OrderId" — which already names a
+        // real entity's identity in Catalog — must be blocked identically whether invoked from the
+        // declaration itself (catalog.koi) or from a bare reference with no local declaration
+        // (ordering.koi) — never silently allowed from one site and blocked from the other.
+        var catalog =
+            "context Catalog {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    sku: String\n" +
+            "  }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    total: Decimal\n" +
+            "  }\n" +
+            "}\n";
+        var ordering = "context Ordering {\n  value Line { product: ProductId }\n}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///catalog.koi"] = catalog,
+            ["file:///ordering.koi"] = ordering,
+        };
+
+        var fromDeclarationSite = Svc.RenameAt(docs, "file:///catalog.koi", line: 1, character: 26, newName: "OrderId");
+        var fromReferenceSite = Svc.RenameAt(docs, "file:///ordering.koi", line: 1, character: 24, newName: "OrderId");
+
+        fromDeclarationSite.ShouldBeNull();
+        fromReferenceSite.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Rename_of_a_type_preserves_a_genuine_cross_file_import_reference_alongside_an_unrelated_collision()
+    {
+        // #1376 follow-up: Billing independently declares its OWN unrelated "Money" (must stay
+        // excluded, the core #1376 fix); Invoicing imports and references SALES's Money with no local
+        // declaration of its own (must stay INCLUDED — a genuine cross-file reference, not a
+        // coincidental collision). The presence of Billing's unrelated Money must not cause the
+        // candidate-resolution fallback to ambiguously misclassify Invoicing's legitimate reference.
+        var billing = "context Billing {\n  value Money { amount: Decimal }\n}\n";
+        var sales = "context Sales {\n  value Money { amount: Decimal }\n}\n";
+        var invoicing =
+            "context Invoicing {\n" +
+            "  import Sales.{ Money }\n" +
+            "  value Bill { total: Money }\n" +
+            "}\n";
+        var docs = new Dictionary<string, string>
+        {
+            ["file:///billing.koi"] = billing,
+            ["file:///sales.koi"] = sales,
+            ["file:///invoicing.koi"] = invoicing,
+        };
+
+        var edits = Svc.RenameAt(docs, "file:///sales.koi", line: 1, character: 9, newName: "Currency");
+
+        edits.ShouldNotBeNull();
+        edits.ShouldContain(r => r.Uri == "file:///sales.koi");
+        edits.ShouldContain(r => r.Uri == "file:///invoicing.koi");
+        edits.ShouldNotContain(r => r.Uri == "file:///billing.koi");
+    }
+
+    [Fact]
     public void Rename_of_a_type_is_not_blocked_by_a_same_named_enum_member()
     {
         // Renaming the type `Status` to `Foo` must NOT be blocked just because an unrelated enum has a
