@@ -4,14 +4,12 @@
 // here as `renderGlossary`/`renderEntry`/`renderDescription`/`openDescriptionEditor`; #992 moved it into
 // `GlossaryPanel.tsx` as real JSX (`GlossaryEntryRow`) — this module keeps only the pure functions its
 // importers (the panel, its tests) still consume.
-import type { GlossaryEntry, Range } from '@/lsp/lsp';
+import type { GlossaryEntry } from '@/lsp/lsp';
 
-export interface GlossaryHandlers {
-  /** Jump the editor to a declaration's name range. */
-  onGoto(range: Range): void;
-  /** Persist a description (write the `///` doc comment back to source). */
-  onSave(entry: GlossaryEntry, text: string): void;
-}
+// `GlossaryHandlers` used to live here, but the glossary editor moved to @atypical/koine-ui's
+// `GlossaryPanel` (issue #1408, fourth-tranche host-adapter migration), which declares its own
+// structural `GlossaryHandlers`; this module keeps only the pure `coverage`/`groupByContext` helpers the
+// host adapter (`createGlossaryPanelStore`) still consumes.
 
 /** Documentation coverage over the glossary entries (an entry counts as documented iff its doc is non-blank). */
 export function coverage(entries: GlossaryEntry[]): { documented: number; total: number; pct: number } {
