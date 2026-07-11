@@ -71,8 +71,9 @@ export interface CommandWiringDeps {
   toggleFileTree(): void;
   /**
    * True while a workspace-opening operation is queued or running (workspaceOpLock.busy, #1275). Gates
-   * the `new-model` / `open-folder` commands — palette entries, chords, and toolbar dispatch — so a
-   * busy lock reads as "unavailable right now" instead of silently queueing another workspace swap.
+   * the `new-model` / `open-folder` / `save-project-to-disk` commands (#1404) — palette entries, chords,
+   * and toolbar dispatch — so a busy lock reads as "unavailable right now" instead of silently queueing
+   * another workspace swap.
    */
   workspaceOpBusy(): boolean;
 
@@ -158,8 +159,11 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
       // Registered unconditionally but gated by when() on the host capability, so it is filtered out of
       // the palette when the host can't save (identical to the old conditional spread) AND the toolbar
       // button's run('save-project-to-disk') is a guarded no-op rather than an unknown-id warn if the
-      // hidden button is ever force-shown.
-      { id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void deps.saveProjectToDisk(), when: () => deps.canSaveProjects },
+      // hidden button is ever force-shown. Also enabled()-gated on the workspace-open lock (#1404): it is
+      // the THIRD workspace-replacing affordance (with new-model/open-folder, #1275/#1407) — it reopens
+      // the saved folder, so the workspace becomes it — so a busy lock greys it out the same way instead
+      // of letting it stack a silent deferred workspace swap behind whatever the lock is already running.
+      { id: 'save-project-to-disk', title: 'Save to disk…', group: 'File', run: () => void deps.saveProjectToDisk(), when: () => deps.canSaveProjects, enabled: () => !deps.workspaceOpBusy() },
       { id: 'toggle-theme', title: 'Toggle theme', group: 'View', run: () => toggleTheme() },
       // The editor-split + panel-reposition commands (issue #265). Built from the pure layoutCommands
       // module so the list is unit-tested; each run() drives the layoutActions wired at boot above.

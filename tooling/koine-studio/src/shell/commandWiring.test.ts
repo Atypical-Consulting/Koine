@@ -526,6 +526,34 @@ describe('commandWiring', () => {
 
       vi.unstubAllEnvs();
     });
+
+    // #1404: save-project-to-disk is the THIRD workspace-replacing affordance (it reopens the saved
+    // folder, so the workspace becomes it) — it now follows the same enabled()-gating as new-model /
+    // open-folder instead of staying ungated, while its pre-existing when() capability gate (host can't
+    // save projects) is untouched and composes independently.
+    it('extends the enabled()-gating to save-project-to-disk: stays listed but not activatable while busy, works once idle', () => {
+      let busy = true;
+      const deps = makeDeps({ canSaveProjects: true, workspaceOpBusy: vi.fn(() => busy) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      // Visible-but-disabled while busy, same as new-model/open-folder.
+      expect(wiring.getCommands().map((c) => c.id)).toContain('save-project-to-disk');
+      wiring.run('save-project-to-disk');
+      expect(deps.saveProjectToDisk).not.toHaveBeenCalled();
+
+      busy = false; // the queue drained
+      expect(wiring.getCommands().map((c) => c.id)).toContain('save-project-to-disk');
+      wiring.run('save-project-to-disk');
+      expect(deps.saveProjectToDisk).toHaveBeenCalledOnce();
+    });
+
+    it('keeps save-project-to-disk out of the palette via when() when the host cannot save projects, even while idle', () => {
+      const deps = makeDeps({ canSaveProjects: false, workspaceOpBusy: vi.fn(() => false) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+      expect(wiring.getCommands().map((c) => c.id)).not.toContain('save-project-to-disk');
+    });
   });
 
   describe('Spotlight launcher wiring (#1143)', () => {
