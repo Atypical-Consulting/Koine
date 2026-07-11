@@ -139,7 +139,7 @@ Geometry (all variants): hexagon `polygon points="106,60 83,99.84 37,99.84 14,60
 ## Design Tokens (full source: `tokens.css` — dark default + `html[data-theme='light']`)
 Use the `--koi-*` custom properties; never hardcode. Key values used here (dark):
 - **Surfaces:** paper `#0e1117` · paper-2 `#161b22` · surface `#1c2230` · line `#2a3242`.
-- **Text:** fg `#d6dde8` · muted `#7d8694` · ink-soft `#aeb8c6`.
+- **Text:** fg `#d6dde8` · muted `#858e9c` · ink-soft `#aeb8c6`.
 - **Accent:** `--koi-accent #5aa9ff` (light `#2f7fe0`) · on-accent `#08111f` · cyan `#34d3c4` · `--koi-accent-grad` = 135° accent→cyan.
 - **State:** error `#ff6b6b` · added = `--koi-hl-string #7ee787` · deleted = `--koi-error` · modified/ahead = `--koi-accent`.
 - **Radius:** 2xs 2 · xs 4 · sm 6 · base 8 · lg 10 · pill 999. (Note: the prototype's `.sc-composer` uses `var(--koi-radius-md, 10px)` — **`--koi-radius-md` is not a real token**; use `--koi-radius-lg`.)

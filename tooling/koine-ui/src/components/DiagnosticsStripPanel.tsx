@@ -1,4 +1,3 @@
-import { useLayoutEffect } from 'preact/hooks';
 import { useReadableStore, type ReadableStore } from '../host/store';
 
 /** A diagnostic's source range in 0-based LSP positions — structurally compatible with the host's
@@ -49,12 +48,12 @@ export interface DiagnosticsStripSlice {
 // are ported BYTE-FOR-BYTE from editorSession's old imperative `renderStrip` (a `clean` state,
 // `N error(s)` / `M warning(s)` joined with ` · `, an empty `No diagnostics.` body, and a
 // `error|warn LINE:COL  CODE MSG` row), so the observable output is identical — only the renderer moved.
-// The editor gutter paint and the status pill / #sb-validity mirror stay imperative in editorSession;
-// this panel owns ONLY the strip (and the #diag-count pill mirror below).
+// The editor gutter paint and the status-bar counts stay imperative in editorSession;
+// this panel owns ONLY the strip rendering.
 //
-// The Problems tab count pill (#diag-count) mirrors THIS panel's count (#1203): the host passes the pill
-// element as `countEl` and the panel writes the SAME text + data-kind it renders in its own count span —
-// so the pill is scoped exactly when the strip is scoped, from one computation. The status-bar problem
+// The Problems tab count pill (#diag-count) is mirrored host-side from the same adapted store (#1406):
+// the host adapter (editorSession's `renderDiagPill`) reads the same memoized slice and updates the
+// pill element, so pill and strip stay in lock-step from one computation. The status-bar problem
 // counts (#sb-problems-errors/-warnings) deliberately stay active-file, in editorSession.
 //
 // Moved from `koine-studio/src/diagnostics/DiagnosticsStripPanel.tsx` (issue #1244, third-tranche
@@ -69,10 +68,6 @@ export function DiagnosticsStripPanel(props: {
   /** Open a scoped row's file and jump to `range` (0-based LSP positions). Required whenever the host's
    *  adapter can yield `scoped: true` slices (i.e. it was built with scope-to-context support). */
   onOpen?: (uri: string, range: DiagnosticsStripRange) => void;
-  /** Optional external count badge — the Problems tab pill (#diag-count) — mirrored from this panel's
-   *  own count (#1203): same text + data-kind, scoped exactly when the strip is scoped. The status-bar
-   *  problem counts are NOT this mirror; they stay active-file (editorSession). */
-  countEl?: HTMLElement;
 }) {
   // Subscribe for host-notified changes (diagnostics pushes, scope switches)…
   useReadableStore(props.store);
@@ -83,16 +78,6 @@ export function DiagnosticsStripPanel(props: {
   // render fresh; `useReadableStore`'s cached copy alone would serve the previous file's slice until the
   // next notification.
   const { scoped, rows, count, kind } = props.store.getState();
-
-  // Mirror the count into the Problems tab pill (#diag-count). A layout effect so a synchronous
-  // top-level render (editorSession's paintActive) lands the pill write before the caller returns,
-  // matching the old imperative renderStrip timing.
-  const { countEl } = props;
-  useLayoutEffect(() => {
-    if (!countEl) return;
-    countEl.textContent = count;
-    countEl.dataset.kind = kind;
-  }, [countEl, count, kind]);
 
   return (
     <div class="koi-diag-strip">
