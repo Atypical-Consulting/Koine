@@ -4,11 +4,12 @@ import {
   createDiagnosticsStripStore,
   createDocsPanelHostStore,
   createHistoryControlsStore,
+  createRelationshipsPanelStore,
   createUnsavedIndicatorStore,
   createWorkspaceProblemsStore,
 } from '@/store/readableStores';
 import type { Buffer } from '@/shell/workspaceController';
-import type { LspDiagnostic } from '@/lsp/lsp';
+import type { DiagramEdge, DiagramGraph, DiagramNode, LspDiagnostic } from '@/lsp/lsp';
 import { ALL_CONTEXTS } from '@/model/activeContext';
 
 // Pins the REAL wiring end-to-end (a real createAppStore(), not a mock ReadableStore) so a change to the
@@ -299,6 +300,73 @@ describe('createDiagnosticsStripStore', () => {
 
     store.getState().setNavAltitude('tactical'); // unrelated write again → memo hit
     expect(readable.getState()).toBe(scoped);
+  });
+});
+
+describe('createRelationshipsPanelStore', () => {
+  const node = (id: string, qualifiedName: string, sourceSpan: DiagramNode['sourceSpan'] = null): DiagramNode => ({
+    id,
+    label: id,
+    kind: 'aggregate-root',
+    qualifiedName,
+    sourceSpan,
+    stereotype: null,
+    members: [],
+  });
+  const edge = (from: string, to: string): DiagramEdge => ({ from, to, label: null });
+  const span = { file: 'file:///m.koi', line: 3, column: 1, endLine: 3, endColumn: 6, offset: 0, length: 5 };
+
+  // A merged graph with a structural relation in Sales and one in Inv; scoping to "Sales" keeps the Sales
+  // row and drops the Inv one — exactly what the panel's slice must reflect.
+  const graph: DiagramGraph = {
+    nodes: [
+      node('Order', 'Sales.Order', span),
+      node('OrderItem', 'Sales.OrderItem', span),
+      node('Stock', 'Inv.Stock', span),
+      node('StockLevel', 'Inv.StockLevel', span),
+    ],
+    edges: [edge('Order', 'OrderItem'), edge('Stock', 'StockLevel')],
+  };
+
+  test('getState() pre-scopes + pre-extracts the structural rows; a scope change narrows them', () => {
+    const store = createAppStore(); // activeContext defaults to ALL_CONTEXTS
+    expect(store.getState().activeContext).toBe(ALL_CONTEXTS);
+    const readable = createRelationshipsPanelStore(store, graph);
+
+    // Unscoped → both contexts' structural relations are present.
+    expect(readable.getState().rows.map((r) => `${r.source}>${r.target}`)).toEqual(['Order>OrderItem', 'Stock>StockLevel']);
+
+    // Narrowing to Sales keeps Sales' row; drops Inv's.
+    store.getState().setActiveContext('Sales');
+    expect(readable.getState().rows.map((r) => `${r.source}>${r.target}`)).toEqual(['Order>OrderItem']);
+  });
+
+  test('notifies on a real activeContext change and not on an unrelated store write (element-wise isEqual)', () => {
+    const store = createAppStore();
+    const readable = createRelationshipsPanelStore(store, graph);
+    let calls = 0;
+    readable.subscribe(() => calls++);
+
+    store.getState().setNavAltitude('tactical'); // unrelated slice; scope unchanged → fresh-but-equal rows
+    expect(calls).toBe(0);
+
+    store.getState().setActiveContext('Sales'); // a real scope change → the rows narrow
+    expect(calls).toBe(1);
+  });
+
+  test('memoizes on activeContext: same scope → same slice reference, a scope change recomputes', () => {
+    const store = createAppStore();
+    const readable = createRelationshipsPanelStore(store, graph);
+
+    const first = readable.getState();
+    store.getState().setNavAltitude('tactical'); // unrelated write: activeContext unchanged
+    expect(readable.getState()).toBe(first); // reference-equal — the cached slice, not a rebuild
+
+    store.getState().setActiveContext('Sales'); // the scope key changes → a fresh slice
+    const scoped = readable.getState();
+    expect(scoped).not.toBe(first);
+    expect(scoped.rows).toHaveLength(1);
+    expect(readable.getState()).toBe(scoped); // and the new slice is itself served from the memo
   });
 });
 

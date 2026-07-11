@@ -93,3 +93,10 @@ export {
 // consumes; it has no store/Tauri coupling (only preact/hooks), so it moves verbatim. Old Studio path
 // (`@/shared/useCommittableField`) becomes a one-line re-export shim.
 export { useCommittableField, type CommittableField } from './useCommittableField';
+// RelationshipsPanel — the bottom-dock structural-relations table, typed against ReadableStore<Slice>;
+// the host adapter (`createRelationshipsPanelStore`) pre-scopes + pre-extracts the rows.
+export {
+  RelationshipsPanel,
+  type RelationshipsPanelSlice,
+  type RelationRowView,
+} from './components/RelationshipsPanel';

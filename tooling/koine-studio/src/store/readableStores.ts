@@ -1,10 +1,11 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { DiagnosticsStripRow, DiagnosticsStripSlice } from '@atypical/koine-ui';
+import type { DiagnosticsStripRow, DiagnosticsStripSlice, RelationshipsPanelSlice } from '@atypical/koine-ui';
 import type { AppState } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
-import { isAllContexts } from '@/model/activeContext';
+import { isAllContexts, scopeGraph } from '@/model/activeContext';
+import { extractRelationships } from '@/model/modelTables';
 import { severityErrorOrWarning } from '@/lsp/severity';
-import type { LspDiagnostic } from '@/lsp/lsp';
+import type { DiagramGraph, LspDiagnostic } from '@/lsp/lsp';
 import { shallowEqual, zustandToReadableStore } from '@/store/readableStoreAdapter';
 import { koiStem } from '@/shell/explorerModel';
 import { basename } from '@/shared/path';
@@ -233,6 +234,50 @@ function stripSliceEqual(a: DiagnosticsStripSlice, b: DiagnosticsStripSlice): bo
         r.range === o.range &&
         r.message === o.message &&
         r.code === o.code
+      );
+    })
+  );
+}
+
+/**
+ * Adapts the controller-fetched merged diagram graph + the active-context slice to `RelationshipsPanel`'s
+ * generic `ReadableStore<RelationshipsPanelSlice>` — already scoped to the active bounded context and
+ * extracted to plain structural rows (issue #1408, fourth-tranche host-adapter migration), so the panel
+ * never sees `DiagramGraph`, `scopeGraph`, or `extractRelationships` (those classifiers stay in their
+ * owning Studio modules). `graph` is fixed for this adapter instance (the controller re-creates the
+ * adapter per livingDocs fetch — see surfaceLoaders' bottomGraph), so only `s.activeContext` varies: the
+ * selector is memoised on it (rows rebuild only on a real scope change, not on unrelated store writes),
+ * with `relationshipsSliceEqual` as the notification gate for the rebuild — the freshly built rows array
+ * would never compare equal by reference. "All contexts" is scopeGraph's identity, so it yields every row.
+ */
+export function createRelationshipsPanelStore(store: StoreApi<AppState>, graph: DiagramGraph) {
+  let memo: { context: string; slice: RelationshipsPanelSlice } | undefined;
+  return zustandToReadableStore(
+    store,
+    (s): RelationshipsPanelSlice => {
+      if (memo != null && memo.context === s.activeContext) return memo.slice;
+      const slice: RelationshipsPanelSlice = { rows: extractRelationships(scopeGraph(graph, s.activeContext)) };
+      memo = { context: s.activeContext, slice };
+      return slice;
+    },
+    relationshipsSliceEqual,
+  );
+}
+
+/** Element-wise rows comparison (`span` by reference — a scoped graph's node spans are reference-stable for
+ *  this adapter instance) plus element-wise `contexts` — same rationale as `stripSliceEqual` above. */
+function relationshipsSliceEqual(a: RelationshipsPanelSlice, b: RelationshipsPanelSlice): boolean {
+  return (
+    a.rows.length === b.rows.length &&
+    a.rows.every((r, i) => {
+      const o = b.rows[i];
+      return (
+        r.source === o.source &&
+        r.relation === o.relation &&
+        r.target === o.target &&
+        r.span === o.span &&
+        r.contexts.length === o.contexts.length &&
+        r.contexts.every((c, j) => c === o.contexts[j])
       );
     })
   );

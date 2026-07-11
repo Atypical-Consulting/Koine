@@ -44,13 +44,12 @@ import { isAllContexts, scopeDocsFiles } from '@/model/activeContext';
 import { type GlossaryHandlers } from '@/model/glossary';
 import { GlossaryPanel } from '@/model/GlossaryPanel';
 import { EventsPanel } from '@/model/EventsPanel';
-import { RelationshipsPanel } from '@/model/RelationshipsPanel';
 import { SourceControlPanel, type SourceControlFocus } from '@/model/SourceControlPanel';
 import type { ModelIndex } from '@/model/modelIndex';
 import { createDocsStore } from '@/docs/docsStore';
 import { AdrPanel, NotesPanel, type DocsPanelHandlers } from '@/docs/DocsPanels';
-import { DocsPanelHost } from '@atypical/koine-ui';
-import { createDocsPanelHostStore } from '@/store/readableStores';
+import { DocsPanelHost, RelationshipsPanel } from '@atypical/koine-ui';
+import { createDocsPanelHostStore, createRelationshipsPanelStore } from '@/store/readableStores';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { makeCopyButton } from '@/shell/copyFeedback';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
@@ -656,7 +655,10 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       loading: () => docMessage(hosts.relationships, 'Loading relationships…'),
       fetch: () => bottomGraph(),
       render: (graph) =>
-        renderPanel(hosts.relationships, <RelationshipsPanel store={store} graph={graph} handlers={bottomTableHandlers} />),
+        renderPanel(
+          hosts.relationships,
+          <RelationshipsPanel store={createRelationshipsPanelStore(store, graph)} handlers={bottomTableHandlers} />,
+        ),
       onError: (e) => docMessage(hosts.relationships, 'Relationships request failed: ' + String(e), 'error'),
     });
   }

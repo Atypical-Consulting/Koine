@@ -1201,3 +1201,14 @@ th[aria-sort='descending'] .koi-th-sort::after {
   padding: var(--koi-space-2) 7px;
   font-style: italic;
 }
+
+/* ---------------------------------------------------------------------------------------------------
+ * RelationshipsPanel (ported from Koine Studio's src/styles/components/_diagnostics.scss — issue #1408,
+ * fourth-tranche host-adapter migration). COPIED, not moved: `.koi-rel-kind` is the Relation-column cell
+ * tint the migrated RelationshipsPanel renders via its `cellClass`; the class lives in Studio's shared
+ * `_diagnostics.scss` "model tables" block, which stays authoritative for the app. (`.koi-relationships-mount`
+ * is a layout-only wrapper with no dedicated rule — nothing to copy.)
+ * --------------------------------------------------------------------------------------------------- */
+.koi-rel-kind {
+  color: var(--koi-muted);
+}
