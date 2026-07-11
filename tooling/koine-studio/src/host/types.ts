@@ -431,14 +431,20 @@ export interface Platform {
   /**
    * Discard the working-tree changes of the given paths under the workspace folder — REVERT each
    * `trackedPaths` entry to its index state (`git restore --worktree`) and REMOVE each
-   * `untrackedPaths` entry from disk (`git clean -f`). The CALLER supplies the tracked/untracked
-   * split — the Source Control panel already knows each row's status — and the host runs each bucket
-   * verbatim: deriving the split host-side (via `git ls-files`) wasted a subprocess and SILENTLY
-   * no-opped on a C-quoted (non-ASCII) filename, where the quoted ls-files output never matched the
-   * raw path and `clean -f` then skipped the actually-tracked file while exiting 0. This is
-   * DESTRUCTIVE and not recoverable — the working-tree bytes are gone — so callers MUST confirm with
-   * the user first. Resolves once the working tree is reverted; rejects on git failure. Desktop only;
-   * the browser stub rejects. Callers must check {@link canUseGit} first.
+   * `untrackedPaths` entry from disk. The CALLER supplies the tracked/untracked split — the Source
+   * Control panel already knows each row's status — and the host runs each bucket verbatim: deriving
+   * the split host-side (via `git ls-files`) wasted a subprocess and SILENTLY no-opped on a C-quoted
+   * (non-ASCII) filename, where the quoted ls-files output never matched the raw path and `clean -f`
+   * then skipped the actually-tracked file while exiting 0.
+   *
+   * An `untrackedPaths` entry ending in `/` is the porcelain marker for an entirely-untracked directory
+   * `git status` collapsed into one row; the host cleans those via `git clean -fd` (pathspec-scoped to
+   * only the rows named as directories) so the folder itself is removed, not just its contents, while
+   * a plain file discard never gains directory-removal capability it doesn't need.
+   *
+   * This is DESTRUCTIVE and not recoverable — the working-tree bytes are gone — so callers MUST
+   * confirm with the user first. Resolves once the working tree is reverted; rejects on git failure.
+   * Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
    */
   gitDiscard(folderToken: string, trackedPaths: string[], untrackedPaths: string[]): Promise<void>;
 

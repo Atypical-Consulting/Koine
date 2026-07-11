@@ -1161,14 +1161,24 @@ fn git_unstage(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
 /// Discard the working-tree changes of the given paths — DESTRUCTIVE and unrecoverable, which is why
 /// the TS caller (the Source Control panel) always confirms with the user first. Each `tracked_paths`
 /// entry is REVERTED to its index state (`git restore --worktree -- <paths…>` — so a partially-staged
-/// file keeps its staged copy) and each `untracked_paths` entry is DELETED from disk
-/// (`git clean -f -- <paths…>`). The CALLER supplies the tracked/untracked split — the panel already
-/// knows each row's status, and deriving the split here via `git ls-files` both wasted a subprocess
-/// and SILENTLY no-opped on a C-quoted (non-ASCII) filename: ls-files quotes such a path, the quoted
-/// output never matches the raw pathspec, the file lands in the clean bucket, and `clean -f` skips
-/// tracked files while exiting 0 — so the discard did nothing and reported success. Both commands are
-/// always scoped by an explicit `--` pathspec and an empty call is a no-op up front — so a discard
-/// can never touch a file the caller didn't name. `Err` (git's trimmed stderr) when any step fails.
+/// file keeps its staged copy) and each `untracked_paths` entry is DELETED from disk. The CALLER
+/// supplies the tracked/untracked split — the panel already knows each row's status, and deriving the
+/// split here via `git ls-files` both wasted a subprocess and SILENTLY no-opped on a C-quoted
+/// (non-ASCII) filename: ls-files quotes such a path, the quoted output never matches the raw
+/// pathspec, the file lands in the clean bucket, and `clean -f` skips tracked files while exiting 0 —
+/// so the discard did nothing and reported success.
+///
+/// `untracked_paths` is further partitioned on a trailing `/`, the marker `git status --porcelain=v2`
+/// uses for an entirely-untracked directory it collapsed into one row: plain files clean via
+/// `git clean -f -- <files…>`, directory rows via `git clean -fd -- <dirs…>`. Scoping `-d` to only
+/// the rows the caller explicitly named as directories keeps least-privilege intent explicit in the
+/// command itself, even though git's pathspec matching already makes `-d` "irrelevant" once an
+/// explicit pathspec is given (see `git help clean`) — a plain file discard never gains
+/// directory-removal capability it doesn't need. Embedded git repositories (a directory with its own
+/// `.git`) remain protected by git's own default, since `-ff` is never passed. Every clean/restore
+/// call is always scoped by an explicit `--` pathspec, only runs when its bucket is non-empty, and an
+/// entirely-empty call is a no-op up front — so a discard can never touch a path the caller didn't
+/// name. `Err` (git's trimmed stderr) when any step fails.
 #[tauri::command]
 fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<String>) -> Result<(), String> {
     if tracked_paths.is_empty() && untracked_paths.is_empty() {
@@ -1181,9 +1191,18 @@ fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<Str
         run_git(&dir, &args)?;
     }
     if !untracked_paths.is_empty() {
-        let mut args: Vec<&str> = vec!["clean", "-f", "--"];
-        args.extend(untracked_paths.iter().map(String::as_str));
-        run_git(&dir, &args)?;
+        let (dirs, files): (Vec<&str>, Vec<&str>) =
+            untracked_paths.iter().map(String::as_str).partition(|p| p.ends_with('/'));
+        if !files.is_empty() {
+            let mut args: Vec<&str> = vec!["clean", "-f", "--"];
+            args.extend(files);
+            run_git(&dir, &args)?;
+        }
+        if !dirs.is_empty() {
+            let mut args: Vec<&str> = vec!["clean", "-fd", "--"];
+            args.extend(dirs);
+            run_git(&dir, &args)?;
+        }
     }
     Ok(())
 }
@@ -4030,6 +4049,33 @@ mod tests {
         let status = git_status(repo.path()).unwrap();
         assert!(has_file(&status.files, "p.txt", true, "modified"), "{:?}", status.files);
         assert!(!has_file(&status.files, "p.txt", false, "modified"), "{:?}", status.files);
+    }
+
+    #[test]
+    fn git_discard_removes_an_untracked_directory_row() {
+        let repo = init_repo();
+        repo.write("t.txt", "base\n");
+        repo.git(&["add", "t.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // An entirely-untracked directory and an unlisted untracked file that must survive.
+        repo.write("scratch/inner.txt", "new\n");
+        repo.write("u.txt", "scratch\n");
+
+        // Porcelain collapses the untracked directory into one `scratch/` entry.
+        let before = git_status(repo.path()).unwrap();
+        assert!(has_file(&before.files, "scratch/", false, "untracked"), "{:?}", before.files);
+        assert!(has_file(&before.files, "u.txt", false, "untracked"), "{:?}", before.files);
+
+        git_discard(repo.path(), vec![], vec!["scratch/".to_string()]).unwrap();
+
+        // The directory is gone from disk…
+        assert!(!repo.dir.join("scratch").exists());
+        // …and the unlisted untracked file was never touched.
+        assert!(repo.dir.join("u.txt").exists());
+        let after = git_status(repo.path()).unwrap();
+        assert!(!has_file(&after.files, "scratch/", false, "untracked"), "{:?}", after.files);
+        assert!(has_file(&after.files, "u.txt", false, "untracked"), "{:?}", after.files);
     }
 
     #[test]
