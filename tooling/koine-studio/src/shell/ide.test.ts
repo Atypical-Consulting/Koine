@@ -98,7 +98,7 @@ vi.mock('@/shell/commandWiring', async () => {
 // lifecycleBoot itself to capture its deps bag is NOT safe here: its module-level appStore/bootIntent
 // imports then resolve to different instances than the test's, breaking the route-intent tests.)
 const lockSeam = vi.hoisted(() => ({
-  current: null as null | { run<T>(op: () => Promise<T>): Promise<T> },
+  current: null as null | { run<T>(op: () => Promise<T>): Promise<T>; busy(): boolean },
 }));
 vi.mock('@/shell/workspaceOpLock', async () => {
   const actual = await vi.importActual<typeof import('@/shell/workspaceOpLock')>('@/shell/workspaceOpLock');
@@ -891,6 +891,43 @@ describe('ide init() — the workspace-open lock covers the toolbar entry points
     await settleBoot();
 
     expect(platform.saveProjectToRoot).toHaveBeenCalledOnce();
+  });
+
+  // #1404: saveProjectToDisk moved from an inline workspaceOpLock.run() composition at the deps-bag
+  // site onto a member of the `openWorkspace` facade itself (joining newModel/openFolder). Proves it now
+  // shares the SAME lock instance as its facade siblings: holding a save open (paused at its own
+  // name-prompt modal, an async hold point just like the shared-import gate above) blocks a queued New
+  // until the save settles — the reverse direction of the test above. A regression here would mean a
+  // future refactor unwrapped the facade member back to a parallel, un-serialized composition.
+  test('the Save-to-disk facade member holds the same lock as New/Open-folder: a held save blocks New until it settles', async () => {
+    const platform = installPlatform();
+    await boot({ platform });
+    const bootSeed = platform.defaultWorkspaceSeed; // the boot ladder's own default-workspace seed
+
+    // Start Save-to-disk: it pauses at the name-prompt modal awaiting confirm, holding the lock open.
+    cmdWiringSeam.deps!.saveProjectToDisk();
+    await settleBoot();
+    expect(lockSeam.current!.busy()).toBe(true);
+
+    // New is greyed out and a click is inert while the save is in flight.
+    const newBtn = document.getElementById('btn-new') as HTMLButtonElement;
+    expect(newBtn.disabled).toBe(true);
+    newBtn.click();
+    await settleBoot();
+    expect(platform.defaultWorkspaceSeed).toBe(bootSeed); // New queued, hasn't run yet
+
+    // Confirm the prompt to let the save complete and release the lock.
+    const input = document.querySelector('.koi-prompt-input') as HTMLInputElement;
+    input.value = 'my-project';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    (document.querySelector('.koi-confirm-btn-primary') as HTMLButtonElement).click();
+    await settleBoot();
+
+    expect(lockSeam.current!.busy()).toBe(false);
+    expect(newBtn.disabled).toBe(false);
+    newBtn.click();
+    await settleBoot();
+    expect(platform.defaultWorkspaceSeed).toContain('context NewModel'); // New ran once the lock freed up
   });
 
   // The other half of the invariant. The closures handed to createLifecycleBoot must stay UNWRAPPED:
