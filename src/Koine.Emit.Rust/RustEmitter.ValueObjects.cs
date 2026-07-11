@@ -342,6 +342,30 @@ public sealed partial class RustEmitter
     }
 
     /// <summary>
+    /// The <c>.map(...)</c>-suffix dual of <see cref="NumericCoercionWrap"/>, or <c>null</c> when none
+    /// is needed: when the initializing expression's own inferred type (<paramref name="bodyType"/>) is
+    /// itself <c>Option</c>-typed and its underlying numeric type differs from <paramref name="declared"/>
+    /// (a non-optional, e.g. already-<see cref="UnderlyingType"/>'d type), the bare call-wrap form
+    /// <c>NumericCoercionWrap</c> returns doesn't compose — <c>Decimal::from(some_option)</c> doesn't
+    /// compile — so the value needs <c>some_option.map(Decimal::from)</c> instead (#1468). Same-numeric,
+    /// non-numeric, and non-optional bodies are left to <see cref="NumericCoercionWrap"/> (or no coercion
+    /// at all) unchanged — the two helpers are mutually exclusive by construction.
+    /// </summary>
+    private static string? OptionBodyNumericCoercionMap(TypeRef declared, TypeRef? bodyType)
+    {
+        if (bodyType is not { IsOptional: true } || declared.IsOptional || !TypeResolver.IsNumeric(declared))
+        {
+            return null;
+        }
+        var bodyUnderlying = UnderlyingType(bodyType);
+        if (!TypeResolver.IsNumeric(bodyUnderlying) || declared.Name == bodyUnderlying.Name)
+        {
+            return null;
+        }
+        return declared.Name == "Decimal" ? "Decimal::from" : "crate::koine_runtime::dec_to_i64";
+    }
+
+    /// <summary>
     /// The non-optional view of a possibly-optional-declared type — gate ownership/coercion checks on
     /// this, never on <paramref name="declared"/> directly, or an optional-declared member's own bare
     /// or defaulted value falls through to the wrong branch (#1319/#1324, #1325, #1332: the same
