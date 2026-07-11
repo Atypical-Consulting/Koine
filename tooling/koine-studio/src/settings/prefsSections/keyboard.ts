@@ -32,6 +32,7 @@ import {
     DEFAULT_BINDINGS,
     type BindingId,
 } from "@/editor/keybindings";
+import { loadedReservedChords } from "@/editor/editor";
 import { chordFromEvent, prettyChord } from "@/shared/platform";
 import type { PrefsSection } from "@/settings/prefsSections/types";
 
@@ -47,16 +48,11 @@ export function buildKeyboardSection(
 ): PrefsSection & { suspend(): void } {
     // Editor shortcuts OUTSIDE the rebindable registry that a remap would silently shadow: the registry
     // keymap compartment is registered at higher precedence than the editor's own Mod-Alt-h (call
-    // hierarchy) and the loaded CodeMirror keymaps (search → Mod-f / Mod-d, default → Mod-a). We can't
-    // unbind these, but we warn before letting a remap mask one. Verified against editor.ts's loaded
-    // keymaps (note: historyKeymap is NOT loaded, so Mod-z is free); not exhaustive — built-in coverage
-    // can grow as more commands enter scope.
-    const RESERVED_CHORDS: Record<string, string> = {
-        "Mod-Alt-h": "Call hierarchy",
-        "Mod-f": "Find",
-        "Mod-d": "Select next occurrence",
-        "Mod-a": "Select all",
-    };
+    // hierarchy) and the loaded CodeMirror keymaps (searchKeymap / defaultKeymap). We can't unbind these,
+    // but we warn before letting a remap mask one. The reserved set is DERIVED from the keymaps the editor
+    // actually loads via loadedReservedChords() (editor.ts) — re-read on each applyRecordedChord so it is
+    // exhaustive by construction and can never drift from the editor. Registry chords are excluded there
+    // (the inter-row conflict path below owns those); only non-rebindable built-ins remain.
 
     interface KbdRowState {
         chord: HTMLElement;
@@ -168,7 +164,7 @@ export function buildKeyboardSection(
             deps.onKeybindingsChanged?.();
             return;
         }
-        const reserved = RESERVED_CHORDS[chord];
+        const reserved = loadedReservedChords(resolveKeybindings())[chord];
         if (reserved) {
             showKbdConflict(id, chord, reserved, null); // would shadow a built-in / call-hierarchy shortcut
             return;
