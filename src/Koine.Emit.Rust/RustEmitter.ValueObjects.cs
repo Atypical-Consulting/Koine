@@ -26,12 +26,11 @@ public sealed partial class RustEmitter
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var required = stored.Where(m => !HasConstantDefault(m)).ToList();
 
-        // A defaulted member with a plain (non-optional-declared) type becomes a trailing `Option<T>`
-        // constructor parameter, unwrapped to its default — matching the entity emitter's "optional
-        // trailing parameter" shape for the same construct (#1380). A member that is already
-        // `T?`-declared *and* defaulted keeps its existing inline `Ok(Self { ... })` coercion/Some-wrap
-        // (#1319/#1325) — that combination is untouched.
-        var defaultedParams = stored.Where(m => HasConstantDefault(m) && !m.Type.IsOptional).ToList();
+        // Every constant-defaulted member becomes a trailing `Option<T>` constructor parameter, unwrapped
+        // to its default — matching the entity emitter's "optional trailing parameter" shape for the same
+        // construct (#1380 for non-optional-declared members, #1463 for already-`T?`-declared ones). An
+        // already-optional-declared member is additionally re-wrapped in `Some(...)` after unwrapping.
+        var defaultedParams = stored.Where(HasConstantDefault).ToList();
 
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
         var translator = new RustExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, emit.EnumVariants, typeMapper, context);
@@ -128,17 +127,25 @@ public sealed partial class RustEmitter
         sb.Append(Indent).Append("/// Creates a validated `").Append(name).Append("`, running its invariants.\n");
         sb.Append(Indent).Append("pub fn new(").Append(string.Join(", ", ctorParams)).Append(") -> Result<Self, DomainError> {\n");
 
-        // A non-optional defaulted member unwraps its `Option<T>` parameter to the declared default
-        // (so invariants can see the resolved value before the checks) — the value-object dual of
-        // EmitEntity's identical handling (#1380/#1436). `unwrap_or_else` (not `unwrap_or`): the latter
-        // always evaluates its argument eagerly, so an overriding caller would still pay for
-        // constructing the discarded default.
+        // A defaulted member unwraps its `Option<T>` parameter to the declared default (so invariants can
+        // see the resolved value before the checks). The default's inferred type is reconciled against
+        // the field's declared (underlying, if optional) type — the value-object dual of EmitEntity's
+        // identical handling (#1380/#1436/#1437). `unwrap_or_else` (not `unwrap_or`): the latter always
+        // evaluates its argument eagerly, so an overriding caller would still pay for constructing the
+        // discarded default. An already-optional-declared member is then re-wrapped in `Some(...)`,
+        // mirroring its original hardcoded shape (#1463).
         foreach (Member m in defaultedParams)
         {
-            var defaultValue = CoercedDefaultValue(m, m.Type, translator, emit.Index);
+            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index);
             var field = RustNaming.Field(m.Name);
             sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = ")
               .Append(field).Append(".unwrap_or_else(|| ").Append(defaultValue).Append(");\n");
+
+            if (m.Type.IsOptional)
+            {
+                sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = Some(")
+                  .Append(field).Append(");\n");
+            }
         }
 
         foreach (Invariant inv in vo.Invariants)
@@ -146,22 +153,12 @@ public sealed partial class RustEmitter
             WriteInvariantGuard(sb, name, inv, translator, Indent + Indent);
         }
 
-        // Construct: required (and now-unwrapped defaulted-param) fields bind their same-named locals;
-        // an optional-declared constant-default field takes its inline default expr.
+        // Construct: every stored field (required and now-unwrapped defaulted-param alike) binds its
+        // same-named local.
         sb.Append(Indent).Append(Indent).Append("Ok(Self {\n");
         foreach (Member m in stored)
         {
-            sb.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(m.Name));
-            if (HasConstantDefault(m) && m.Type.IsOptional)
-            {
-                // An optional field's literal default is always a bare underlying-type literal (Koine
-                // has no Option-literal syntax), so it's coerced against the underlying type — reusing
-                // the same shared helper the trailing-param unwrap above calls — then Some(...)-wrapped
-                // (#1325).
-                var defaultValue = $"Some({CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index)})";
-                sb.Append(": ").Append(defaultValue);
-            }
-            sb.Append(",\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append(RustNaming.Field(m.Name)).Append(",\n");
         }
         sb.Append(Indent).Append(Indent).Append("})\n");
         sb.Append(Indent).Append("}\n");
