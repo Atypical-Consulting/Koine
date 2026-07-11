@@ -218,6 +218,41 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1436, Task 2: a value object carrying BOTH a non-optional-declared constant-default member
+    /// (<c>taxRate: Decimal = 2</c>, now a trailing <c>Option&lt;Decimal&gt;</c> constructor parameter,
+    /// #1436 Task 1) AND demand-driven arithmetic (<c>combined: Money = base + base</c>, which emits
+    /// <c>WriteAdditiveOp</c>'s <c>impl std::ops::Add</c>) must still compile — the operator's generated
+    /// <c>Money::new(...)</c> call must append one <c>None</c> per trailing defaulted parameter, or a real
+    /// <c>cargo check</c> rejects it as E0061 (wrong number of arguments).
+    /// </summary>
+    [Fact]
+    public void Value_object_with_defaulted_member_and_additive_operator_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal = 2\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "  value Line {\n" +
+            "    base: Money\n" +
+            "    combined: Money = base + base\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("impl std::ops::Add for Money");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1068: a <c>quantity</c> value object used directly in plain binary arithmetic —
     /// <c>combined: Weight = base + base</c> — must lower through its existing unit-checked
     /// <c>add</c>/<c>sub</c> methods, not the native <c>+</c>/<c>-</c> operator. Unlike a plain value
@@ -1342,15 +1377,15 @@ public class RustConformanceTests
 
             #[test]
             fn add_still_combines_amounts() {
-                let a = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
-                let b = Weight::new(Decimal::from(3)).expect("3 is a valid Weight");
-                assert_eq!(a.add(&b).unwrap(), Weight::new(Decimal::from(5)).unwrap());
+                let a = Weight::new(Decimal::from(2), None).expect("2 is a valid Weight");
+                let b = Weight::new(Decimal::from(3), None).expect("3 is a valid Weight");
+                assert_eq!(a.add(&b).unwrap(), Weight::new(Decimal::from(5), None).unwrap());
             }
 
             #[test]
             fn scale_still_scales_the_amount() {
-                let w = Weight::new(Decimal::from(2)).expect("2 is a valid Weight");
-                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6)).unwrap());
+                let w = Weight::new(Decimal::from(2), None).expect("2 is a valid Weight");
+                assert_eq!(w.scale(Decimal::from(3)), Weight::new(Decimal::from(6), None).unwrap());
             }
             """;
 

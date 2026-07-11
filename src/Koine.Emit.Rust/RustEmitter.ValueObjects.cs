@@ -74,7 +74,7 @@ public sealed partial class RustEmitter
 
         if (vo.IsQuantity)
         {
-            WriteQuantityOps(sb, name, required, stored, typeMapper);
+            WriteQuantityOps(sb, name, required, defaultedParams, stored, typeMapper);
         }
 
         // A quantity's scalar Mul/Div (`base * 2`, `fee / 2`) has no unit to check — unlike its Add/Sub,
@@ -86,7 +86,7 @@ public sealed partial class RustEmitter
         IReadOnlySet<string>? scalars = needs?.MultiplyFactors;
         if (scalars is { Count: > 0 } && stored.Any(IsNumericField))
         {
-            WriteScalarOp(sb, name, required, scalars, "*");
+            WriteScalarOp(sb, name, required, defaultedParams, scalars, "*");
         }
         // `Div` is the division dual of `Mul` (#879, follow-up to the C# emitter's #832):
         // demand-generated only where the model actually divides this value object by a scalar
@@ -94,7 +94,7 @@ public sealed partial class RustEmitter
         IReadOnlySet<string>? divScalars = needs?.DivideFactors;
         if (divScalars is { Count: > 0 } && stored.Any(IsNumericField))
         {
-            WriteScalarOp(sb, name, required, divScalars, "/");
+            WriteScalarOp(sb, name, required, defaultedParams, divScalars, "/");
         }
 
         if (!vo.IsQuantity)
@@ -109,11 +109,11 @@ public sealed partial class RustEmitter
             bool needsSub = needs?.BinaryOps.Contains(BinaryOp.Sub) ?? false;
             if (needsAdd)
             {
-                WriteAdditiveOp(sb, name, required, "+");
+                WriteAdditiveOp(sb, name, required, defaultedParams, "+");
             }
             if (needsSub)
             {
-                WriteAdditiveOp(sb, name, required, "-");
+                WriteAdditiveOp(sb, name, required, defaultedParams, "-");
             }
         }
     }
@@ -373,9 +373,12 @@ public sealed partial class RustEmitter
 
     /// <summary>A scalar <c>Mul</c>/<c>Div</c> (e.g. <c>Money * quantity</c> or <c>fee / 2</c>): applies
     /// <paramref name="op"/> to each numeric field, carries the rest, and rebuilds through the validating
-    /// constructor (#1270). <paramref name="op"/> is <c>"*"</c> or <c>"/"</c>.</summary>
+    /// constructor (#1270). <paramref name="op"/> is <c>"*"</c> or <c>"/"</c>. Each trailing
+    /// <paramref name="defaultedParams"/> member (#1436) draws its default rather than a caller-supplied
+    /// value, so the constructor call passes a plain <c>None</c> for it.</summary>
     private void WriteScalarOp(
-        StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlySet<string> scalars, string op)
+        StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> defaultedParams,
+        IReadOnlySet<string> scalars, string op)
     {
         bool isDiv = op == "/";
         var trait = isDiv ? "Div" : "Mul";
@@ -384,7 +387,8 @@ public sealed partial class RustEmitter
 
         foreach (var (rustFactor, isDecimal) in ScalarFactors(scalars))
         {
-            var args = required.Select(m => ScaleField(m, "self." + RustNaming.Field(m.Name), param, isDecimal, op));
+            var args = required.Select(m => ScaleField(m, "self." + RustNaming.Field(m.Name), param, isDecimal, op))
+                .Concat(defaultedParams.Select(_ => "None"));
 
             sb.Append('\n');
             sb.Append("impl std::ops::").Append(trait).Append('<').Append(rustFactor).Append("> for ").Append(name).Append(" {\n");
@@ -398,8 +402,11 @@ public sealed partial class RustEmitter
 
     /// <summary>An additive <c>Add</c>/<c>Sub</c> (for <c>sum</c> folds and plain value-object arithmetic,
     /// #887): applies <paramref name="op"/> to each numeric field pairwise, carries the rest from self, and
-    /// rebuilds through the validating constructor (#1270). <paramref name="op"/> is <c>"+"</c> or <c>"-"</c>.</summary>
-    private void WriteAdditiveOp(StringBuilder sb, string name, IReadOnlyList<Member> required, string op)
+    /// rebuilds through the validating constructor (#1270). <paramref name="op"/> is <c>"+"</c> or <c>"-"</c>.
+    /// Each trailing <paramref name="defaultedParams"/> member (#1436) draws its default rather than a
+    /// caller-supplied value, so the constructor call passes a plain <c>None</c> for it.</summary>
+    private void WriteAdditiveOp(
+        StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> defaultedParams, string op)
     {
         bool isSub = op == "-";
         var trait = isSub ? "Sub" : "Add";
@@ -414,7 +421,7 @@ public sealed partial class RustEmitter
                     ? $"self.{f}.zip({other}.{f}).map(|(a, b)| a {op} b)"
                     : $"self.{f} {op} {other}.{f}"
                 : "self." + f;
-        });
+        }).Concat(defaultedParams.Select(_ => "None"));
 
         sb.Append('\n');
         sb.Append("impl std::ops::").Append(trait).Append(" for ").Append(name).Append(" {\n");
@@ -476,8 +483,8 @@ public sealed partial class RustEmitter
     /// bodies (and reusing <see cref="WriteValidatingConstruction"/> for the same message shape).
     /// </summary>
     private void WriteQuantityOps(
-        StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> stored,
-        RustTypeMapper typeMapper)
+        StringBuilder sb, string name, IReadOnlyList<Member> required, IReadOnlyList<Member> defaultedParams,
+        IReadOnlyList<Member> stored, RustTypeMapper typeMapper)
     {
         Member? amount = stored.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
         Member? unit = stored.FirstOrDefault(m => !ReferenceEquals(m, amount) && !m.Type.IsOptional);
@@ -510,8 +517,9 @@ public sealed partial class RustEmitter
             })) + Indent + Indent + "}";
 
         // Builds the `Name::new(...)` argument list over `required`, in declared order, substituting
-        // `amtExpr` for the amount field. The `&self` receiver means any other non-`Copy` carried field
-        // must be cloned out of `self` (units are `Copy` enums, so the common case clones nothing).
+        // `amtExpr` for the amount field, then a trailing `None` per `defaultedParams` member (#1436) —
+        // the `&self` receiver means any other non-`Copy` carried field must be cloned out of `self`
+        // (units are `Copy` enums, so the common case clones nothing).
         IEnumerable<string> NewArgs(string amtExpr) =>
             required.Select(m =>
             {
@@ -521,7 +529,7 @@ public sealed partial class RustEmitter
                 }
                 var f = "self." + RustNaming.Field(m.Name);
                 return typeMapper.IsCopy(m.Type) ? f : f + ".clone()";
-            });
+            }).Concat(defaultedParams.Select(_ => "None"));
 
         sb.Append('\n');
         sb.Append("impl ").Append(name).Append(" {\n");
