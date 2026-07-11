@@ -115,7 +115,7 @@ Studio's `StoreApi<AppState>`):
 | `HistoryControls` | The top-bar Undo/Redo button pair; disabled state driven by `ReadableStore<HistoryControlsSlice>` (`{ canUndo, canRedo }`). |
 | `WorkspaceProblemsBadge` | The status-bar workspace-wide problems rollup; driven by `ReadableStore<WorkspaceProblemsSlice>` (`{ kind, parts, fileCount }` — already classified AND formatted, so this package never needs Koine Studio's `LspDiagnostic` type or re-derives its pluralisation wording). |
 | `UnsavedIndicator` | The status-bar "N unsaved" pill + document-title bullet. Renders no tree of its own — it OWNS the host page's static button via effects, driven by `ReadableStore<UnsavedIndicatorSlice>` (`{ dirtyCount }` — the host's adapter counts the dirty buffers, so this package never sees the buffer collection). |
-| `DiagnosticsStripPanel` | The editor's diagnostics strip: a count summary + one clickable row per diagnostic, optionally mirrored into an external `countEl` pill (#1203). Driven by `ReadableStore<DiagnosticsStripSlice>` (`{ scoped, rows, count, kind }` — already scoped to the active bounded context, severity-classified AND count-formatted by the host's adapter). |
+| `DiagnosticsStripPanel` | The editor's diagnostics strip: a count summary + one clickable row per diagnostic. Driven by `ReadableStore<DiagnosticsStripSlice>` (`{ scoped, rows, count, kind }` — already scoped to the active bounded context, severity-classified AND count-formatted by the host's adapter). |
 | `DocsPanelHost` | The folder-derived Documentation page host (Decisions/Notes): captures its mount node for the controller on first mount, reloads ONLY on a workspace-folder change. Driven by `ReadableStore<DocsPanelHostSlice>` (`{ folderRootToken }` — an opaque folder identity). |
 
 ### The host-adapter pattern — when to reach for it, and how
@@ -173,6 +173,29 @@ uniformly:
      in this PR's first pass — masked inside the full app, since both stylesheets load together, but
      it would have rendered unstyled in this package's own Storybook, the first real signal a
      standalone consumer would have caught).
+
+### Host-chrome mirrors — the convention
+
+A **host-chrome mirror** is host-side logic that echoes a component's rendered state into DOM the
+component doesn't own (e.g., a tab pill that mirrors the strip's count). The sealed convention:
+
+- **Components never accept raw host elements as props** — a component that reads `store` and renders
+  into its own subtree is predictable; one that imperatively mutates externally-passed DOM becomes a
+  side effect the component can't reason about (lifecycle ownership blurs, concurrent renders break).
+- **Host chrome mirrors subscribe to the same adapted `ReadableStore<Slice>` the component uses** —
+  not a separate path. Both read the one-source-of-truth selector on the host side (e.g.,
+  Koine Studio's `createDiagnosticsStripStore`'s memoized selector derives the count once;
+  `DiagnosticsStripPanel` renders it, and `renderDiagPill()` mirrors it to the `#diag-count` element).
+- **Mirror updates live in the host controller** (`editorSession.tsx`), next to other imperative
+  chrome (status bars, connection indicators) that deliberately stay imperative — not in the
+  component. Mirrors subscribe to store changes and also call `getState()` synchronously where a
+  repaint must land before the caller returns (see `editorSession.renderDiagPill`, which the
+  subscription drives AND which `paintActive` calls on active-file switches the selector's live
+  closure observes without a store notification).
+
+This keeps components portable and composable (any host can assemble them by wiring the same
+`ReadableStore` contract) while host chrome stays durable and testable in the host controller, not
+strewn across components.
 
 ## What stays out of this package
 
