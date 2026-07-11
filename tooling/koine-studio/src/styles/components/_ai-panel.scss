@@ -19,8 +19,11 @@
   overflow-y: auto;
   /* Now a full-width center pane (not a cramped sub-tab): cap the conversation to a readable measure
      and center it, so replies don't sprawl edge-to-edge on a wide monitor. The bubbles' own left/right
-     alignment then plays out within that centered column. Falls back to the base inset when narrower. */
-  padding: var(--koi-space-4) max(var(--koi-space-4-5), calc((100% - 860px) / 2));
+     alignment then plays out within that centered column. Falls back to the base inset when narrower —
+     var(--koi-space-3), matching #right-header's own inset (so the transcript lines up with the "AI Chat"
+     title above it) and .koi-assistant-controls below (which already used koi-space-3; this closes the
+     drift between the two so they actually share one column, as the controls' own comment assumes). */
+  padding: var(--koi-space-4) max(var(--koi-space-3), calc((100% - 860px) / 2));
   display: flex;
   flex-direction: column;
   gap: var(--koi-space-3);

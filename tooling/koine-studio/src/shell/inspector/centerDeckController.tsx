@@ -402,6 +402,10 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   // carries only a title header naming the active tool window. (Guarded lookup so DOM fixtures that omit
   // the header don't crash the controller.)
   const rightTitleEl = document.getElementById('right-title'); // eslint-disable-line no-restricted-properties -- intentionally optional: guarded so fixtures omitting the header don't crash
+  // The shared header's per-view actions slot (currently only Source Control portals its Refresh + ⋮
+  // overflow buttons into it — see SourceControlPanel). Shown only while that view is active, so switching
+  // to Properties/AI Chat/Syntax Tree doesn't leave a stale Source Control action pair in the title bar.
+  const rightHeaderActionsEl = document.getElementById('right-header-actions'); // eslint-disable-line no-restricted-properties -- intentionally optional: guarded so fixtures omitting the header don't crash
   const rightViewLabels: Record<RightView, string> = {
     props: 'Properties',
     assistant: 'AI Chat',
@@ -417,6 +421,7 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   function selectRightView(view: RightView): void {
     store.getState().setRight(view);
     if (rightTitleEl) rightTitleEl.textContent = rightViewLabels[view];
+    if (rightHeaderActionsEl) rightHeaderActionsEl.hidden = view !== 'source-control';
     for (const [key, node] of Object.entries(rightViews)) node.hidden = key !== view;
     // Source Control is lazily mounted + folder-derived (#272): paint it on first open and re-fetch git
     // status on every re-open. The Syntax Tree is lazily mounted + model-derived (#890): mount on first

@@ -456,6 +456,11 @@ $koi-inspector-constructs: (
   // or empty — align to one margin. #inspector-host is a bare `.rview` (no `.doc-view`), so the
   // padding rides on the content root here rather than the container.
   @include a.rail-panel-pad;
+  // ...but rail-panel-pad's 20px horizontal doesn't match #right-header's own `padding: 0 var(--koi-space-3)`
+  // (_inspector.scss), so Properties content drifted from the "Properties" title above it — override just
+  // the inline axis to that inset (same fix as .koi-sc / .koi-stree / .koi-assistant-transcript), keeping
+  // the mixin's koi-space-4 vertical rhythm.
+  padding-inline: var(--koi-space-3);
   font-family: var(--koi-font-body);
 }
 

@@ -2,7 +2,7 @@
 // actions. The pure `DeckSpine` component (concept-7 "Flush") lives in @atypical/koine-ui; it takes the
 // app's Canvas/Code/Output/Docs registry via the `surfaces` prop and hands back generic `string` ids,
 // which `isValidCenter` narrows to `CenterView` (defense-in-depth — the ids can only be ones we passed in).
-// It replaces the old two-row DeckBar + card-head: one 34px spine that is the surface switcher AND the
+// It replaces the old two-row DeckBar + card-head: one 36px spine that is the surface switcher AND the
 // pane title/facets/close, morphing between overview / 1-up / 2-up.
 import type { StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';

@@ -100,7 +100,7 @@ const APP_HTML = `
         </footer>
       </section>
       <aside id="right" class="pane">
-        <header id="right-header"><h2 id="right-title">Properties</h2></header>
+        <header id="right-header"><h2 id="right-title">Properties</h2><div id="right-header-actions" class="right-header-actions" hidden></div></header>
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
@@ -1342,6 +1342,28 @@ describe('createInspectorController — Source Control live refresh-on-save (#47
     ctl.refreshSourceControl();
     await new Promise((r) => setTimeout(r, 60)); // give any (erroneous) re-fetch time to fire
     expect(gitStatus.mock.calls.length).toBe(beforeNoop);
+  });
+
+  // The panel portals its Refresh + ⋮ overflow buttons into the shared #right-header-actions slot (so
+  // they sit beside the "Source Control" title rather than a separate row in the panel body). The slot
+  // must track the active right view: visible with the panel's actions while Source Control is open,
+  // hidden (and empty of those actions) the moment the user switches away.
+  test('Source Control portals Refresh + overflow into #right-header-actions, hidden on other views', async () => {
+    const { platform, gitStatus } = gitPlatform();
+    const ctl = createInspectorController(makeDeps(makeLsp(), { platform }));
+    ctl.init();
+
+    const headerActions = domById('right-header-actions');
+    expect(headerActions.hidden).toBe(true);
+
+    stripBtn('source-control').click();
+    await waitFor(() => expect(gitStatus.mock.calls.length).toBeGreaterThanOrEqual(1));
+    expect(headerActions.hidden).toBe(false);
+    expect(headerActions.querySelector('[title="Refresh"]')).not.toBeNull();
+    expect(headerActions.querySelector('[title="Views and more actions"]')).not.toBeNull();
+
+    stripBtn('props').click();
+    expect(headerActions.hidden).toBe(true);
   });
 });
 

@@ -32,11 +32,11 @@
   --ease: cubic-bezier(0.33, 1, 0.68, 1);
 }
 
-/* ---- Spine (concept-7 "Flush") — one 34px row replacing the deck-bar + card-head ------------ */
+/* ---- Spine (concept-7 "Flush") — one 36px row replacing the deck-bar + card-head ------------ */
 
 .fx-spine {
   flex: 0 0 auto;
-  height: 34px;
+  height: 36px;
   display: flex;
   align-items: stretch;
   background: var(--koi-paper-2);

@@ -1,3 +1,4 @@
+import { createPortal } from 'preact/compat';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, Platform } from '@/host/types';
 import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuItem } from '@atypical/koine-ui';
@@ -741,45 +742,55 @@ export function SourceControlPanel(props: {
     );
   };
 
+  // Refresh + the ⋮ overflow trigger (#1153): portaled into the shell's shared #right-header-actions slot
+  // so they sit beside the "Source Control" title instead of a separate row in the panel body — the same
+  // header every right-rail view shares (see centerDeckController's selectRightView, which shows/hides the
+  // slot per active view). Falls back to rendering inline when that host isn't present (Storybook /
+  // component tests that mount the panel standalone, without the shell chrome around it).
+  const headerActions = (
+    <div class="koi-sc-actions" role="toolbar" aria-label="Source control actions">
+      <button
+        type="button"
+        class={`koi-sc-hdr-ico${spin ? ' is-spinning' : ''}`}
+        title="Refresh"
+        aria-label="Refresh"
+        disabled={busy}
+        onClick={() => {
+          setSpin((s) => !s);
+          reload();
+        }}
+      >
+        <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M13 8a5 5 0 1 1-1.5-3.6" />
+          <path d="M13 2.5V5h-2.5" />
+        </svg>
+      </button>
+      {/* Overflow menu (#1153): a live createFloatingMenu trigger. The initial aria-expanded="false"
+          matches the WAI-ARIA menu-button pattern and the engine's other consumers (toolbarOverflow,
+          domainNavigator); the engine flips it on open/close via setAttribute, and Preact never clobbers
+          that runtime value because this static `false` prop is unchanged across re-renders. */}
+      <button
+        type="button"
+        class="koi-sc-hdr-ico"
+        title="Views and more actions"
+        aria-label="Views and more actions"
+        aria-haspopup="menu"
+        aria-expanded={false}
+        onClick={openOverflowMenu}
+      >
+        <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
+          <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
+          <circle cx="8" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
+    </div>
+  );
+  const headerActionsHost = document.getElementById('right-header-actions'); // eslint-disable-line no-restricted-properties -- guarded portal target; falls back to inline rendering when absent
+
   return (
     <div class="koi-sc" ref={hostRef}>
-      <div class="koi-sc-actions" role="toolbar" aria-label="Source control actions">
-        <button
-          type="button"
-          class={`koi-sc-hdr-ico${spin ? ' is-spinning' : ''}`}
-          title="Refresh"
-          aria-label="Refresh"
-          disabled={busy}
-          onClick={() => {
-            setSpin((s) => !s);
-            reload();
-          }}
-        >
-          <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M13 8a5 5 0 1 1-1.5-3.6" />
-            <path d="M13 2.5V5h-2.5" />
-          </svg>
-        </button>
-        {/* Overflow menu (#1153): a live createFloatingMenu trigger. The initial aria-expanded="false"
-            matches the WAI-ARIA menu-button pattern and the engine's other consumers (toolbarOverflow,
-            domainNavigator); the engine flips it on open/close via setAttribute, and Preact never clobbers
-            that runtime value because this static `false` prop is unchanged across re-renders. */}
-        <button
-          type="button"
-          class="koi-sc-hdr-ico"
-          title="Views and more actions"
-          aria-label="Views and more actions"
-          aria-haspopup="menu"
-          aria-expanded={false}
-          onClick={openOverflowMenu}
-        >
-          <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
-            <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
-            <circle cx="8" cy="12.5" r="1.1" fill="currentColor" stroke="none" />
-          </svg>
-        </button>
-      </div>
+      {headerActionsHost ? createPortal(headerActions, headerActionsHost) : headerActions}
 
       <div class="koi-sc-branchbar">
         {branchOptions.length > 0 ? (

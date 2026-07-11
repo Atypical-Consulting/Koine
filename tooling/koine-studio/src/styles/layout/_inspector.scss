@@ -36,6 +36,22 @@
   text-overflow: ellipsis;
 }
 
+/* Per-view header actions slot (currently Source Control's Refresh + ⋮ overflow, portaled in from
+   SourceControlPanel — see _source-control.scss). `margin-left: auto` pins it to the header's right edge
+   regardless of the title's width; `[hidden]` (toggled by centerDeckController per active right view)
+   takes it fully out of flow so an empty/inactive slot never reserves space. */
+#right-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: auto;
+  flex: none;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
 #right-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -55,12 +71,14 @@
 }
 
 /* Right-rail tool windows that reuse the .doc-view scroller (Source Control, Syntax Tree) carry their
-   own inner content padding (.koi-sc / .koi-stree / .koi-rview-empty), so the shared rail vertical inset
-   (koi-space-4) stacks on top and reads as too much headroom under #right-header. Drop the vertical rail
-   inset for these panels — only the Properties inspector (#inspector-host, a bare .rview, not a
-   .doc-view) keeps the koi-space-4 rail margin. */
+   own inner content padding (.koi-sc / .koi-stree / .koi-rview-empty), so the shared rail inset
+   (koi-space-4 vertical, 20px horizontal from rail-panel-pad) stacks on top of it in BOTH axes — too much
+   headroom under #right-header, and a body left/right inset that drifts wider than the header's own
+   `padding: 0 var(--koi-space-3)`, throwing the title/actions out of alignment with the panel content
+   below them. Drop the whole rail inset for these panels — only the Properties inspector (#inspector-host,
+   a bare .rview, not a .doc-view) keeps the rail-panel-pad margin. */
 .rview.doc-view {
-  padding-block: 0;
+  padding: 0;
 }
 
 /* --- right-edge tool-window stripe buttons (#500) ---
