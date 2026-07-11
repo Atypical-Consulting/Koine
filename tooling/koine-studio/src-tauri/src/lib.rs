@@ -1215,18 +1215,46 @@ fn git_commit(dir: String, message: String, amend: Option<bool>) -> Result<(), S
 /// so a slow or unreachable remote can never freeze the webview's main thread.
 ///
 /// `set_upstream` (defaulting to `false` when omitted, so every existing caller behaves
-/// identically) is the "publish branch" case: instead of a bare push, it runs `git push -u origin
-/// <current-branch>`, which succeeds even when the branch has no upstream yet and sets the
-/// tracking ref so subsequent status/push calls see it.
+/// identically) is the "publish branch" case: instead of a bare push, it sets the tracking ref
+/// (`git push -u <remote> <current-branch>`), which succeeds even when the branch has no upstream
+/// yet and sets the tracking ref so subsequent status/push calls see it. The remote is resolved by
+/// [`resolve_publish_remote`] rather than hardcoded to `origin` (code review, #1401 — a repo whose
+/// only remote is named something else, e.g. opened via "Open Folder" rather than Studio's own
+/// clone, used to fail to publish even though a valid remote was configured). `Err` when HEAD is
+/// detached (`rev-parse --abbrev-ref HEAD` returns the literal `"HEAD"`, not a real branch) — a
+/// clear message instead of a confusing raw git error from the doomed push attempt.
 #[tauri::command(async)]
 fn git_push(dir: String, set_upstream: Option<bool>) -> Result<(), String> {
     if set_upstream.unwrap_or(false) {
         let branch = run_git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"])?
             .trim()
             .to_string();
-        run_git(&dir, &["push", "-u", "origin", &branch]).map(|_| ())
+        if branch == "HEAD" {
+            return Err("cannot publish from a detached HEAD — checkout a branch first".to_string());
+        }
+        let remote = resolve_publish_remote(&dir)?;
+        run_git(&dir, &["push", "-u", &remote, &branch]).map(|_| ())
     } else {
         run_git(&dir, &["push"]).map(|_| ())
+    }
+}
+
+/// Pick the remote `git_push`'s "publish branch" (`set_upstream`) push should target: `origin`
+/// when it's among the repo's configured remotes (preserves the original hardcoded behavior for
+/// the common case — a Studio-created clone always names its remote `origin`), the sole
+/// configured remote when there's exactly one and it isn't named `origin` (e.g. a folder opened
+/// via "Open Folder" whose clone used a different remote name), or a clear `Err` when picking one
+/// would be a guess: zero remotes configured, or multiple remotes with none named `origin`.
+fn resolve_publish_remote(dir: &str) -> Result<String, String> {
+    let out = run_git(dir, &["remote"])?;
+    let remotes: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if remotes.contains(&"origin") {
+        return Ok("origin".to_string());
+    }
+    match remotes.len() {
+        0 => Err("no remote configured — add one before publishing".to_string()),
+        1 => Ok(remotes[0].to_string()),
+        _ => Err("multiple remotes configured; publish only supports the 'origin' remote today".to_string()),
     }
 }
 
@@ -3503,6 +3531,89 @@ mod tests {
         let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
         let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
         assert_eq!(remote_head, local_head);
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_uses_the_sole_remote_when_it_isnt_named_origin() {
+        // No remote named `origin` — only `upstream` — the case a hardcoded-`origin` push fails on
+        // even though a perfectly good remote is configured (e.g. a folder opened via "Open Folder"
+        // whose clone was set up with a different remote name). #1401 code review.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "upstream", &remote_path]);
+
+        git_push(repo.path(), Some(true)).unwrap();
+
+        // The remote actually received the commit...
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
+        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        assert_eq!(remote_head, local_head);
+        // ...and the tracking ref was set against the ACTUAL remote used, not a hardcoded `origin`.
+        let tracked = run_git(&repo.path(), &["rev-parse", "--abbrev-ref", "main@{upstream}"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(tracked, "upstream/main");
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_errors_clearly_with_no_remote_configured() {
+        // Zero remotes — resolve_publish_remote must not guess; it returns a clear Err instead of
+        // letting a hardcoded `git push -u origin <branch>` fail with a confusing raw git error.
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+
+        let err = git_push(repo.path(), Some(true)).unwrap_err();
+        assert!(err.contains("no remote configured"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_errors_ambiguously_with_multiple_non_origin_remotes() {
+        // Two remotes, neither named `origin` — picking either would be a guess, so this must fail
+        // with a clear, distinct message rather than silently choosing one.
+        let remote_a = TempRepo::new();
+        remote_a.git(&["init", "--bare", "-b", "main"]);
+        let remote_b = TempRepo::new();
+        remote_b.git(&["init", "--bare", "-b", "main"]);
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "a", &remote_a.path()]);
+        repo.git(&["remote", "add", "b", &remote_b.path()]);
+
+        let err = git_push(repo.path(), Some(true)).unwrap_err();
+        assert!(err.contains("multiple remotes"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_errors_clearly_on_a_detached_head() {
+        // `rev-parse --abbrev-ref HEAD` returns the literal "HEAD" (not a real branch) in detached
+        // HEAD state — publishing from there must fail with a clear message rather than attempting
+        // (and confusingly failing) `git push -u origin HEAD`. #1401 code review.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "origin", &remote_path]);
+        let sha = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        repo.git(&["checkout", &sha]);
+
+        let err = git_push(repo.path(), Some(true)).unwrap_err();
+        assert!(err.contains("detached HEAD"), "unexpected error: {err}");
     }
 
     #[test]

@@ -277,27 +277,50 @@ export function SourceControlPanel(props: {
   // re-derivation that could mis-bucket a path (see {@link Platform.gitDiscard}). A confirmed discard
   // runs through the same mutate() reload as every other mutation, so the groups re-derive from the
   // post-discard repository and a git failure lands in the existing actionError alert.
-  const onDiscard = (files: GitFile[], opts: { untracked: boolean; group?: string }) => {
+  //
+  // The tracked/untracked split is derived from `files` itself (`hasTracked`/`hasUntracked`) rather than
+  // taken as a caller-supplied flag (code review, #1401): the per-row and per-group call sites are always
+  // homogeneous (one file, or a whole group that's either all-tracked or all-untracked), so deriving it
+  // reproduces their exact prior copy — but the ⋮ "Discard all changes" aggregate spans BOTH unstaged and
+  // untracked files at once, and a caller-supplied `untracked: false` there used to always paint the
+  // tracked-only "reverts… can't be undone" copy even when the batch also permanently deletes untracked
+  // files. Deriving the split means every call site — including a future mixed one — gets accurate copy
+  // for free.
+  const onDiscard = (files: GitFile[], opts: { group?: string } = {}) => {
     if (files.length === 0) return; // defensive — an empty group renders no Discard-all at all
     const trackedPaths = files.filter((f) => f.status !== 'untracked').map((f) => f.relPath);
     const untrackedPaths = files.filter((f) => f.status === 'untracked').map((f) => f.relPath);
     const paths = files.map((f) => f.relPath);
     const single = paths.length === 1;
-    const copy = opts.untracked
-      ? {
-          title: single ? 'Delete untracked file?' : 'Delete untracked files?',
-          message: single
-            ? `Delete ${paths[0]}? This untracked file will be permanently removed.`
-            : `Delete all ${paths.length} untracked files in ${opts.group}? Each file will be permanently removed.`,
-          confirmLabel: single ? 'Delete file' : 'Delete all',
-        }
-      : {
-          title: 'Discard changes?',
-          message: single
-            ? `Discard changes to ${paths[0]}? This reverts your edits and can't be undone.`
-            : `Discard all ${paths.length} changes in ${opts.group}? This reverts every listed file and can't be undone.`,
-          confirmLabel: single ? 'Discard changes' : 'Discard all',
-        };
+    const hasTracked = trackedPaths.length > 0;
+    const hasUntracked = untrackedPaths.length > 0;
+    const copy =
+      hasTracked && hasUntracked
+        ? {
+            // A mixed batch (⋮ "Discard all changes" over unstaged + untracked at once): neither binary
+            // copy is accurate alone, so this variant names both consequences explicitly.
+            title: 'Discard all changes?',
+            message:
+              `Discard ${paths.length} changes in ${opts.group}? This reverts ${trackedPaths.length} tracked ` +
+              `file${trackedPaths.length === 1 ? '' : 's'} (can't be undone) and permanently deletes ` +
+              `${untrackedPaths.length} untracked file${untrackedPaths.length === 1 ? '' : 's'}.`,
+            confirmLabel: 'Discard all',
+          }
+        : hasUntracked
+          ? {
+              title: single ? 'Delete untracked file?' : 'Delete untracked files?',
+              message: single
+                ? `Delete ${paths[0]}? This untracked file will be permanently removed.`
+                : `Delete all ${paths.length} untracked files in ${opts.group}? Each file will be permanently removed.`,
+              confirmLabel: single ? 'Delete file' : 'Delete all',
+            }
+          : {
+              title: 'Discard changes?',
+              message: single
+                ? `Discard changes to ${paths[0]}? This reverts your edits and can't be undone.`
+                : `Discard all ${paths.length} changes in ${opts.group}? This reverts every listed file and can't be undone.`,
+              confirmLabel: single ? 'Discard changes' : 'Discard all',
+            };
     void (async () => {
       const ok = await koiConfirm({ ...copy, cancelLabel: 'Cancel', danger: true });
       if (!ok) return; // declined — the working tree survives untouched
@@ -324,25 +347,53 @@ export function SourceControlPanel(props: {
   // even with no upstream (it just needs a remote), so unlike Pull/Push it is never upstream-gated.
   const onFetch = () => void mutate(() => git.gitFetch(folderToken));
 
+  // Save-all-before-commit guard (#470), shared by every commit-shaped action (Commit / Amend / Commit &
+  // Push — factored out during #1401 code review: Amend and Commit & Push originally called gitCommit
+  // directly and skipped this guard, so an unsaved editor buffer would be silently excluded from an
+  // amend or a commit-that-then-gets-pushed). Git commits what's on disk, so with unsaved work this
+  // prompts a Save-all first (via {@link onSaveAll}) so the commit reflects what the editor shows.
+  // Returns `false` (abort — the caller must not proceed to gitCommit) when the user declines the
+  // prompt; a failed save propagates so the caller's `mutate()` surfaces it. No unsaved work (or the
+  // props omitted) resolves `true` immediately — the original "commit what's on disk" behavior.
+  async function ensureSaved(): Promise<boolean> {
+    const unsaved = props.dirtyCount ?? 0;
+    if (unsaved > 0 && props.onSaveAll) {
+      const ok = await koiConfirm({
+        title: 'Save changes before committing?',
+        message: `You have ${unsaved} unsaved file${unsaved === 1 ? '' : 's'}. Git commits what's saved to disk — save all first so this commit includes your latest edits.`,
+        confirmLabel: 'Save all & commit',
+        cancelLabel: 'Cancel',
+      });
+      if (!ok) return false; // declined — abort without touching a stale tree
+      await props.onSaveAll();
+    }
+    return true;
+  }
+
   // Amend last commit (#1401): rewrites the tip commit with whatever's currently in the composer
   // textarea. An EMPTY message reuses the previous commit's message unchanged (gitCommit's `opts.amend`
   // contract, `--no-edit`), so leaving the box blank amends without touching the message. Requires an
-  // existing commit to rewrite — gated on the log being non-empty, not on staged/dirty state.
+  // existing commit to rewrite — gated on the log being non-empty, not on staged/dirty state. Routes
+  // through the shared ensureSaved() guard first (code review) so an unsaved buffer never gets silently
+  // excluded from the rewritten commit.
   const onAmend = () => {
     void mutate(async () => {
+      if (!(await ensureSaved())) return;
       await git.gitCommit(folderToken, message.trim(), { amend: true });
       setMessage('');
     });
   };
 
-  // Commit & Push (#1401): one compound mutate() — commit the staged changes, then push. A rejected
-  // commit (nothing staged / git failure) throws before the push ever runs, so the push is skipped
-  // entirely and the failure surfaces through the same actionError alert every other mutation uses. A
-  // successful commit conditionally publishes: with no upstream tracked yet a bare push would itself be
-  // rejected, so `{ setUpstream: true }` is passed ONLY in that case — an already-tracked branch keeps
-  // the plain push every other Push control uses.
+  // Commit & Push (#1401): one compound mutate() — commit the staged changes, then push. Routes through
+  // the shared ensureSaved() guard first (code review) so an unsaved buffer never gets silently excluded
+  // from a commit that's about to be pushed. A rejected commit (nothing staged / git failure) throws
+  // before the push ever runs, so the push is skipped entirely and the failure surfaces through the same
+  // actionError alert every other mutation uses. A successful commit conditionally publishes: with no
+  // upstream tracked yet a bare push would itself be rejected, so `{ setUpstream: true }` is passed ONLY
+  // in that case — an already-tracked branch keeps the plain push every other Push control uses.
   const onCommitAndPush = () => {
     void mutate(async () => {
+      if (!(await ensureSaved())) return;
       const msg = message.trim();
       await git.gitCommit(folderToken, msg);
       setMessage('');
@@ -365,21 +416,12 @@ export function SourceControlPanel(props: {
     setCommitting(true);
     void mutate(async () => {
       try {
-        // Git commits what's on disk, so unsaved editor buffers would be silently excluded. With unsaved
-        // work, prompt a Save-all first (#470) so the commit reflects what the editor shows. Declining
-        // aborts the commit (the draft survives); a failed save propagates and `mutate` surfaces it — so we
-        // never commit a half-saved tree. No unsaved work (or props omitted) → straight to gitCommit.
-        const unsaved = props.dirtyCount ?? 0;
-        if (unsaved > 0 && props.onSaveAll) {
-          const ok = await koiConfirm({
-            title: 'Save changes before committing?',
-            message: `You have ${unsaved} unsaved file${unsaved === 1 ? '' : 's'}. Git commits what's saved to disk — save all first so this commit includes your latest edits.`,
-            confirmLabel: 'Save all & commit',
-            cancelLabel: 'Cancel',
-          });
-          if (!ok) return; // declined — abort without committing a stale tree
-          await props.onSaveAll();
-        }
+        // Git commits what's on disk, so unsaved editor buffers would be silently excluded — routes
+        // through the shared ensureSaved() guard (#470; factored out during #1401 code review so
+        // Amend/Commit & Push get the exact same guard). Declining aborts the commit (the draft
+        // survives); a failed save propagates and `mutate` surfaces it — so we never commit a
+        // half-saved tree. No unsaved work (or props omitted) → straight to gitCommit.
+        if (!(await ensureSaved())) return;
         await git.gitCommit(folderToken, msg);
         setMessage('');
       } finally {
@@ -548,6 +590,9 @@ export function SourceControlPanel(props: {
       ...(log.length ? [RECENT_COMMITS_LABEL] : []),
     ];
     const allCollapsed = groupLabels.length > 0 && groupLabels.every((l) => collapsedGroups.has(l));
+    // Pull and Push (#1401) share the identical gate — busy, or no upstream to sync against — factored
+    // into one named const (matching `commitDisabled` below) instead of the same inline expression twice.
+    const syncDisabled = busy || !upstream;
     const items: FloatingMenuItem[] = [
       { id: 'refresh', label: 'Refresh', disabled: busy, run: () => { setSpin((s) => !s); reload(); } },
       {
@@ -578,14 +623,14 @@ export function SourceControlPanel(props: {
         id: 'discard-all',
         label: 'Discard all changes',
         disabled: busy || discardCandidates.length === 0,
-        run: () => onDiscard(discardCandidates, { untracked: false, group: 'the working tree' }),
+        run: () => onDiscard(discardCandidates, { group: 'the working tree' }),
       },
       // Pull (#1401): a fast-forward-only merge from the upstream — disabled while busy or when the
       // branch has no upstream to pull from (there's nothing to fast-forward against).
-      { id: 'pull', label: 'Pull', disabled: busy || !upstream, run: onPull },
+      { id: 'pull', label: 'Pull', disabled: syncDisabled, run: onPull },
       // Push (#1401): the same onPush the branch-bar push button uses — disabled while busy or when the
       // branch has no upstream to push to (mirrors that button's own gate, since there's nothing to push).
-      { id: 'push', label: 'Push', disabled: busy || !upstream, run: onPush },
+      { id: 'push', label: 'Push', disabled: syncDisabled, run: onPush },
       // Fetch (#1401): refreshes the remote-tracking refs only — never upstream-gated (it just needs a
       // remote), so it stays enabled even on a branch that doesn't track one yet.
       { id: 'fetch', label: 'Fetch', disabled: busy, run: onFetch },
@@ -595,14 +640,15 @@ export function SourceControlPanel(props: {
 
   // Build + toggle the split-commit caret menu (#1153). Both items are wired (#1401): Amend rewrites the
   // tip commit (onAmend) — needs an existing commit to rewrite, so it's disabled on an empty log; Commit
-  // & Push (onCommitAndPush) runs the plain Commit flow then a push in one op — needs a staged change to
-  // commit. The plain Commit action stays the split button itself; the caret is disabled only while the
-  // composer is busy (the same gate the message box uses).
+  // & Push (onCommitAndPush) runs the plain Commit flow then a push in one op — it commits the composer's
+  // message just like the plain Commit button does, so it reuses `commitDisabled` directly (busy /
+  // committing / empty-message / no staged files — code review: the ad-hoc `busy || !hasStaged` it
+  // originally shipped with omitted the empty-message check the primary Commit button already enforces).
   const openCaretMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     const items: FloatingMenuItem[] = [
       { id: 'amend', label: 'Amend last commit', disabled: busy || log.length === 0, run: onAmend },
-      { id: 'commit-push', label: 'Commit & Push', disabled: busy || !hasStaged, run: onCommitAndPush },
+      { id: 'commit-push', label: 'Commit & Push', disabled: commitDisabled, run: onCommitAndPush },
     ];
     caretMenuRef.current!.toggle({ trigger, items, align: 'right' });
   };
@@ -680,7 +726,7 @@ export function SourceControlPanel(props: {
                 title="Discard changes"
                 aria-label={`Discard ${f.relPath} changes`}
                 disabled={busy}
-                onClick={() => onDiscard([f], { untracked: f.status === 'untracked' })}
+                onClick={() => onDiscard([f])}
               >
                 <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
@@ -777,7 +823,7 @@ export function SourceControlPanel(props: {
                   title="Discard all changes"
                   aria-label="Discard all changes"
                   disabled={busy}
-                  onClick={() => onDiscard(list, { untracked: label === UNTRACKED_LABEL, group: label })}
+                  onClick={() => onDiscard(list, { group: label })}
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M6.5 3h3M3.5 4.5h9M11.5 4.5l-.5 8a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1l-.5-8" />

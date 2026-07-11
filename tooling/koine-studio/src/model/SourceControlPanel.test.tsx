@@ -769,6 +769,12 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
     const req = vi.mocked(koiConfirm).mock.calls[0][0];
     expect(req.danger).toBe(true);
+    // The batch mixes a tracked file (b.koi, reverted) and an untracked one (c.koi, permanently deleted
+    // via `git clean -f`) — the confirm copy must name BOTH consequences (code review, #1401), not just
+    // the generic tracked-only "reverts… can't be undone" wording the aggregate call site used to always
+    // paint regardless of what the batch actually contained.
+    expect(req.message).toMatch(/revert/i);
+    expect(req.message).toMatch(/permanently delete/i);
 
     // The tracked/untracked split lands exactly like the per-row/group Discard controls: b.koi (tracked)
     // in the first bucket, c.koi (untracked) in the second.
@@ -952,15 +958,31 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     expect(trigger.getAttribute('aria-label')).not.toMatch(/coming soon/i);
   });
 
-  test('opening the caret shows Amend last commit + Commit & Push both live with a commit + staged file (#1401)', async () => {
+  test('opening the caret shows Amend last commit + Commit & Push both live with a commit + staged file + a message (#1401)', async () => {
     const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByDisplayValue('main');
+    // Commit & Push reuses `commitDisabled` (code review, #1401), which requires a non-empty message —
+    // exactly like the primary Commit button — so this scenario needs a typed message to be live.
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Fix the typo' } });
     const menu = await openCaret(view);
     const amend = within(menu).getByRole('menuitem', { name: 'Amend last commit' }) as HTMLButtonElement;
     const commitPush = within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement;
     expect(amend.disabled).toBe(false);
     expect(commitPush.disabled).toBe(false);
+  });
+
+  test('"Commit & Push" is disabled with staged files but an empty commit message (code review, #1401)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openCaret(view);
+
+    // No message typed — the composer stays at its default empty string.
+    expect(
+      (within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   test('"Amend last commit" is disabled on a repo with zero commits (#1401)', async () => {
@@ -1234,6 +1256,110 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(onSaveAll).not.toHaveBeenCalled();
     expect(git.gitCommit).not.toHaveBeenCalled();
+  });
+
+  // Amend and Commit & Push (#1401) originally called gitCommit directly, bypassing this guard entirely
+  // (code review) — an unsaved buffer would be silently excluded from an amend or a commit-that's-about-
+  // to-be-pushed. Both now route through the same shared ensureSaved() helper onCommit uses, so they get
+  // the identical prompt/decline/failure behavior — these tests mirror the onCommit cases above via the
+  // caret menu instead of the split Commit button.
+  async function openCaret(view: ReturnType<typeof render>) {
+    const trigger = await view.findByRole('button', { name: 'Commit options' });
+    fireEvent.click(trigger);
+    return waitFor(() => {
+      const menu = document.querySelector<HTMLElement>('[role="menu"]');
+      expect(menu).not.toBeNull();
+      return menu!;
+    });
+  }
+
+  async function amendWith(props: { dirtyCount?: number; onSaveAll?: () => Promise<void> }) {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const order: string[] = [];
+    git.gitCommit.mockImplementation(async () => {
+      order.push('commit');
+    });
+    const onSaveAll = props.onSaveAll
+      ? vi.fn(async () => {
+          order.push('saveAll');
+          await props.onSaveAll!();
+        })
+      : undefined;
+    const view = render(
+      <SourceControlPanel git={git} folderToken={TOKEN} dirtyCount={props.dirtyCount} onSaveAll={onSaveAll} />,
+    );
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Fix the typo' } });
+    const menu = await openCaret(view);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Amend last commit' }));
+    return { git, onSaveAll, order };
+  }
+
+  async function commitAndPushWith(props: { dirtyCount?: number; onSaveAll?: () => Promise<void> }) {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    const order: string[] = [];
+    git.gitCommit.mockImplementation(async () => {
+      order.push('commit');
+    });
+    git.gitPush.mockImplementation(async () => {
+      order.push('push');
+    });
+    const onSaveAll = props.onSaveAll
+      ? vi.fn(async () => {
+          order.push('saveAll');
+          await props.onSaveAll!();
+        })
+      : undefined;
+    const view = render(
+      <SourceControlPanel git={git} folderToken={TOKEN} dirtyCount={props.dirtyCount} onSaveAll={onSaveAll} />,
+    );
+    const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: 'Add order total' } });
+    const menu = await openCaret(view);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    return { git, onSaveAll, order };
+  }
+
+  test('Amend: unsaved buffers → confirm + await onSaveAll BEFORE gitCommit (code review, #1401)', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const { git, onSaveAll, order } = await amendWith({ dirtyCount: 2, onSaveAll: async () => {} });
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Fix the typo', { amend: true }));
+    expect(koiConfirm).toHaveBeenCalledTimes(1);
+    expect(onSaveAll).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['saveAll', 'commit']); // saved first, then (amend-)committed
+  });
+
+  test('Amend: declining the save prompt aborts WITHOUT calling gitCommit (code review, #1401)', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(false);
+    const { git, onSaveAll } = await amendWith({ dirtyCount: 1, onSaveAll: async () => {} });
+
+    await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) commit microtask flush
+    expect(onSaveAll).not.toHaveBeenCalled();
+    expect(git.gitCommit).not.toHaveBeenCalled();
+  });
+
+  test('Commit & Push: unsaved buffers → confirm + await onSaveAll BEFORE gitCommit, then push (code review, #1401)', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const { git, onSaveAll, order } = await commitAndPushWith({ dirtyCount: 3, onSaveAll: async () => {} });
+
+    await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalled());
+    expect(koiConfirm).toHaveBeenCalledTimes(1);
+    expect(onSaveAll).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['saveAll', 'commit', 'push']); // saved, then committed, then pushed
+  });
+
+  test('Commit & Push: declining the save prompt aborts WITHOUT calling gitCommit or gitPush (code review, #1401)', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(false);
+    const { git, onSaveAll } = await commitAndPushWith({ dirtyCount: 1, onSaveAll: async () => {} });
+
+    await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) commit/push microtask flush
+    expect(onSaveAll).not.toHaveBeenCalled();
+    expect(git.gitCommit).not.toHaveBeenCalled();
+    expect(git.gitPush).not.toHaveBeenCalled();
   });
 });
 
