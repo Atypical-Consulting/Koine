@@ -620,9 +620,11 @@ describe('SourceControlPanel — Discard controls (#1151)', () => {
     // host partitions it into a `clean -fd` call ({@link Platform.gitDiscard}).
     await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, [], ['scratch/']));
     // The confirm copy names it a folder, not a file — a directory has no single "file" being deleted.
+    // The trailing slash is stripped for display ("Delete scratch?", not the awkward "Delete scratch/?").
     const req = vi.mocked(koiConfirm).mock.calls[0][0];
     expect(req.title).toMatch(/folder/i);
-    expect(req.message).toContain('scratch/');
+    expect(req.message).toContain('scratch');
+    expect(req.message).not.toContain('scratch/');
     expect(req.message).toMatch(/folder/i);
     expect(req.message).toMatch(/permanently removed/i);
   });
@@ -645,6 +647,48 @@ describe('SourceControlPanel — Discard controls (#1151)', () => {
     const req = vi.mocked(koiConfirm).mock.calls[0][0];
     expect(req.message).toMatch(/2 untracked files/i);
     expect(req.message).toMatch(/permanently/i);
+  });
+
+  test('the Untracked group Discard-all asks with PLURAL folder wording when every row is a directory', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'scratch/', staged: false, status: 'untracked' },
+      { relPath: 'build/', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Untracked')).not.toBeNull());
+    fireEvent.click(
+      within(group(view.container, 'Untracked')!).getByRole('button', { name: /Discard all changes/i }),
+    );
+
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, [], ['scratch/', 'build/']));
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.title).toMatch(/folders\?/i);
+    expect(req.message).toMatch(/2 untracked folders/i);
+    expect(req.message).toMatch(/permanently/i);
+  });
+
+  test('a mixed untracked batch (a file row alongside a directory row) keeps the generic "files" wording', async () => {
+    // A batch of untracked-only rows where not EVERY path is a directory falls back to the existing
+    // "files" copy rather than mislabeling the plain file as a folder or vice versa (by design — see
+    // the onDiscard comment on `untrackedAreFolders`).
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'note.txt', staged: false, status: 'untracked' },
+      { relPath: 'scratch/', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Untracked')).not.toBeNull());
+    fireEvent.click(
+      within(group(view.container, 'Untracked')!).getByRole('button', { name: /Discard all changes/i }),
+    );
+
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, [], ['note.txt', 'scratch/']));
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.message).toMatch(/2 untracked files/i);
+    expect(req.title).not.toMatch(/folder/i);
   });
 
   test('a failed gitDiscard surfaces the action-error alert and leaves the group intact', async () => {
@@ -799,6 +843,26 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi'], ['c.koi']));
     // The staged file is untouched — Discard all never reaches into the Staged Changes group.
     await waitFor(() => expect(group(view.container, 'Staged Changes')?.textContent).toContain('a.koi'));
+  });
+
+  test('the ⋮ "Discard all changes" aggregate names an untracked directory a folder, not a file', async () => {
+    // The mixed tracked+untracked branch (neither binary copy alone is accurate) must ALSO stay
+    // folder-aware — a tracked edit alongside an untracked directory should say "folder", not "file".
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'scratch/', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+    const menu = await openOverflow(view);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Discard all changes' }));
+
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi'], ['scratch/']));
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.message).toMatch(/1 untracked folder\b/i);
+    expect(req.message).not.toMatch(/1 untracked file\b/i);
   });
 
   test('declining the "Discard all changes" confirm makes NO gitDiscard call', async () => {

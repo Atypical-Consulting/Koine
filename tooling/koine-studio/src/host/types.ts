@@ -437,7 +437,7 @@ export interface Platform {
    * (non-ASCII) filename, where the quoted ls-files output never matched the raw path and `clean -f`
    * then skipped the actually-tracked file while exiting 0.
    *
-   * A `untrackedPaths` entry ending in `/` is the porcelain marker for an entirely-untracked directory
+   * An `untrackedPaths` entry ending in `/` is the porcelain marker for an entirely-untracked directory
    * `git status` collapsed into one row; the host cleans those via `git clean -fd` (pathspec-scoped to
    * only the rows named as directories) so the folder itself is removed, not just its contents, while
    * a plain file discard never gains directory-removal capability it doesn't need.

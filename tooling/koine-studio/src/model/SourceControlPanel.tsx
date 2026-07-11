@@ -294,6 +294,11 @@ export function SourceControlPanel(props: {
     const single = paths.length === 1;
     const hasTracked = trackedPaths.length > 0;
     const hasUntracked = untrackedPaths.length > 0;
+    // A trailing `/` is the porcelain marker for an entirely-untracked directory collapsed into one
+    // row (see {@link Platform.gitDiscard}); "folder" copy applies only when EVERY untracked path in
+    // the batch is one — a mixed file+folder selection keeps the generic "files" wording rather than
+    // mislabeling a file as a folder or vice versa.
+    const untrackedAreFolders = hasUntracked && untrackedPaths.every((p) => p.endsWith('/'));
     const copy =
       hasTracked && hasUntracked
         ? {
@@ -303,19 +308,17 @@ export function SourceControlPanel(props: {
             message:
               `Discard ${paths.length} changes in ${opts.group}? This reverts ${trackedPaths.length} tracked ` +
               `file${trackedPaths.length === 1 ? '' : 's'} (can't be undone) and permanently deletes ` +
-              `${untrackedPaths.length} untracked file${untrackedPaths.length === 1 ? '' : 's'}.`,
+              `${untrackedPaths.length} untracked ${untrackedAreFolders ? 'folder' : 'file'}${untrackedPaths.length === 1 ? '' : 's'}.`,
             confirmLabel: 'Discard all',
           }
         : hasUntracked
-          ? // A trailing `/` is the porcelain marker for an entirely-untracked directory collapsed into
-            // one row (see {@link Platform.gitDiscard}); "folder" copy applies only when EVERY untracked
-            // path in this batch is one — a mixed file+folder selection keeps the generic "files" wording
-            // rather than mislabeling a file as a folder or vice versa.
-            untrackedPaths.every((p) => p.endsWith('/'))
+          ? untrackedAreFolders
             ? {
                 title: single ? 'Delete untracked folder?' : 'Delete untracked folders?',
+                // Strip the display-only trailing slash so the sentence doesn't read "…scratch/? This…";
+                // the raw (slash-kept) path still goes to gitDiscard via `untrackedPaths` above.
                 message: single
-                  ? `Delete ${paths[0]}? This untracked folder and its contents will be permanently removed.`
+                  ? `Delete ${paths[0].replace(/\/$/, '')}? This untracked folder and its contents will be permanently removed.`
                   : `Delete all ${paths.length} untracked folders in ${opts.group}? Each folder and its contents will be permanently removed.`,
                 confirmLabel: single ? 'Delete folder' : 'Delete all',
               }
