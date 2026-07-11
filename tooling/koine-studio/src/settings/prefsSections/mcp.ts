@@ -5,7 +5,8 @@
 // shown.
 //
 // This is the section with the async lifecycle: the sidecar start/stop round-trips through `deps`, two
-// copy-confirmation timers, a read-only CodeMirror view for the recipe snippet, and mcpGen — a monotonic
+// copy buttons wired via the shared `@/shell/copyFeedback` helper (#1362), a read-only CodeMirror view
+// for the recipe snippet, and mcpGen — a monotonic
 // token bumped by every enable/disable/reset/open. A slow async result (endpoint launch, probe) checks
 // its captured token before writing the UI and drops itself if a newer action has since superseded it —
 // so a late enable can't re-show a URL for a server the user just disabled, and a probe can't overwrite
@@ -41,6 +42,7 @@ import type { McpEndpoint } from "@/host/types";
 import type { Settings } from "@/settings/persistence";
 import { loadSettings } from "@/settings/persistence";
 import { row, panel, toggle, select, metricInput } from "@/settings/prefsControls";
+import { wireCopyButton } from "@/shell/copyFeedback";
 import { createJsonView } from "@/editor/editor";
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
 import type { PrefsSection, SectionCtx } from "@/settings/prefsSections/types";
@@ -111,22 +113,18 @@ export function buildMcpSection(
     mcpCopyBtn.type = "button";
     mcpCopyBtn.className = "koi-set-action";
     mcpCopyBtn.textContent = "Copy mcp.json";
-    let mcpCopyTimer: ReturnType<typeof setTimeout> | undefined;
-    mcpCopyBtn.addEventListener("click", () => {
-        const url = mcpUrlInput.value.trim();
-        if (!url) return;
-        navigator.clipboard
-            .writeText(mcpJsonSnippet(url))
-            .then(() => (mcpCopyBtn.textContent = "Copied ✓"))
-            .catch(() => (mcpCopyBtn.textContent = "Copy failed"))
-            .finally(() => {
-                clearTimeout(mcpCopyTimer);
-                mcpCopyTimer = setTimeout(
-                    () => (mcpCopyBtn.textContent = "Copy mcp.json"),
-                    1600,
-                );
-            });
+    // An empty URL (the sidecar hasn't resolved an endpoint yet) is a no-op — this guard is registered
+    // BEFORE wireCopyButton's own click listener below, so stopImmediatePropagation can veto the copy
+    // (no clipboard write, no label flash) before it runs (same-element listeners fire in registration
+    // order). Kept here rather than folded into `getText()` since #1362's shared helper always proceeds
+    // on whatever `getText()` returns (a genuinely empty string is a valid copy elsewhere), so an empty
+    // MCP endpoint URL needs its own pre-check, not a falsy-string one.
+    mcpCopyBtn.addEventListener("click", (e) => {
+        if (!mcpUrlInput.value.trim()) e.stopImmediatePropagation();
     });
+    const cancelMcpCopyReset = wireCopyButton(mcpCopyBtn, "Copy mcp.json", () =>
+        mcpJsonSnippet(mcpUrlInput.value.trim()),
+    );
 
     const mcpControl = document.createElement("div");
     mcpControl.className = "koi-mcp-control";
@@ -182,20 +180,9 @@ export function buildMcpSection(
     mcpRecipeCopy.type = "button";
     mcpRecipeCopy.className = "koi-set-action";
     mcpRecipeCopy.textContent = "Copy";
-    let mcpRecipeTimer: ReturnType<typeof setTimeout> | undefined;
-    mcpRecipeCopy.addEventListener("click", () => {
-        navigator.clipboard
-            .writeText(mcpSnippetView.getText())
-            .then(() => (mcpRecipeCopy.textContent = "Copied ✓"))
-            .catch(() => (mcpRecipeCopy.textContent = "Copy failed"))
-            .finally(() => {
-                clearTimeout(mcpRecipeTimer);
-                mcpRecipeTimer = setTimeout(
-                    () => (mcpRecipeCopy.textContent = "Copy"),
-                    1600,
-                );
-            });
-    });
+    const cancelMcpRecipeReset = wireCopyButton(mcpRecipeCopy, "Copy", () =>
+        mcpSnippetView.getText(),
+    );
 
     const mcpRecipeHead = document.createElement("div");
     mcpRecipeHead.className = "koi-mcp-recipe-head";
@@ -410,8 +397,8 @@ export function buildMcpSection(
     // destroy() owns the whole pane's layout, not just this section's.
     function destroy(): void {
         ++mcpGen;
-        clearTimeout(mcpCopyTimer);
-        clearTimeout(mcpRecipeTimer);
+        cancelMcpCopyReset();
+        cancelMcpRecipeReset();
         mcpSnippetView.destroy();
     }
 

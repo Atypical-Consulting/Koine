@@ -5,7 +5,7 @@
 // section-module tests. The real createJsonView (@/editor/editor) is used too (not mocked), matching
 // prefs.test.ts's own MCP-panel tests — CodeMirror's DOM (.cm-editor) is asserted on directly rather than
 // spying on a mocked destroy(), since that's the mocking (non-)pattern already established in this repo.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildMcpSection } from "@/settings/prefsSections/mcp";
 import { buildCtx } from "@/settings/prefsSections/testSupport";
 import { DEFAULT_SETTINGS, saveSettings, loadSettings } from "@/settings/persistence";
@@ -149,6 +149,102 @@ describe("buildMcpSection — showMcpOff bumps mcpGen internally", () => {
 
         expect(urlInput(section.panel).value).toBe("");
         expect(status(section.panel).dataset.state).toBe("off");
+    });
+});
+
+describe("buildMcpSection — copy-to-clipboard (#1362 shared copyFeedback helper)", () => {
+    const copyMcpJsonBtn = (panel: HTMLElement) =>
+        [...panel.querySelectorAll<HTMLButtonElement>(".koi-set-action")].find(
+            (b) => b.textContent === "Copy mcp.json" || b.textContent === "Copied ✓" || b.textContent === "Copy failed",
+        )!;
+    const copyRecipeBtn = (panel: HTMLElement) =>
+        panel.querySelector<HTMLButtonElement>(".koi-mcp-recipe-head .koi-set-action")!;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("Copy mcp.json is a no-op while the endpoint URL is still empty — no clipboard write, no flash", async () => {
+        const writeText = vi.fn(() => Promise.resolve());
+        Object.defineProperty(navigator, "clipboard", {
+            value: { writeText },
+            configurable: true,
+        });
+        const ctx = buildCtx();
+        // mcpEndpoint never resolves in this test, so the URL input stays empty the whole time.
+        const section = buildMcpSection(ctx, {
+            mcpEndpoint: () => new Promise<McpEndpoint>(() => {}),
+            mcpStop: async () => {},
+            mcpHostable: true,
+        });
+        document.body.appendChild(section.panel);
+        section.populate(loadSettings());
+        expect(urlInput(section.panel).value).toBe("");
+
+        copyMcpJsonBtn(section.panel).click();
+        await vi.advanceTimersByTimeAsync(2000);
+
+        expect(writeText).not.toHaveBeenCalled();
+        expect(copyMcpJsonBtn(section.panel).textContent).toBe("Copy mcp.json");
+    });
+
+    it("Copy mcp.json flashes \"Copied ✓\" then resets after 1600ms once a URL is live", async () => {
+        const writeText = vi.fn(() => Promise.resolve());
+        Object.defineProperty(navigator, "clipboard", {
+            value: { writeText },
+            configurable: true,
+        });
+        const ctx = buildCtx();
+        const section = buildMcpSection(ctx, {
+            mcpEndpoint: async () => ({ url: URL, fallback: false }),
+            mcpStop: async () => {},
+            mcpHostable: true,
+        });
+        document.body.appendChild(section.panel);
+        section.populate(loadSettings());
+
+        enableToggle(section.panel).click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(urlInput(section.panel).value).toBe(URL);
+
+        const btn = copyMcpJsonBtn(section.panel);
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(writeText).toHaveBeenCalledWith(expect.stringContaining(URL));
+        expect(btn.textContent).toBe("Copied ✓");
+
+        await vi.advanceTimersByTimeAsync(1600);
+        expect(btn.textContent).toBe("Copy mcp.json");
+    });
+
+    it("Copy (recipe) flashes \"Copied ✓\" then resets to \"Copy\" after 1600ms, with no URL precondition", async () => {
+        const writeText = vi.fn(() => Promise.resolve());
+        Object.defineProperty(navigator, "clipboard", {
+            value: { writeText },
+            configurable: true,
+        });
+        const ctx = buildCtx();
+        const section = buildMcpSection(ctx, {
+            mcpEndpoint: async () => ({ url: URL, fallback: false }),
+            mcpStop: async () => {},
+            mcpHostable: true,
+        });
+        document.body.appendChild(section.panel);
+        section.populate(loadSettings());
+        expect(urlInput(section.panel).value).toBe(""); // no enable — the recipe copy still works unconditionally
+
+        const btn = copyRecipeBtn(section.panel);
+        expect(btn.textContent).toBe("Copy");
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(writeText).toHaveBeenCalledTimes(1);
+        expect(btn.textContent).toBe("Copied ✓");
+
+        await vi.advanceTimersByTimeAsync(1600);
+        expect(btn.textContent).toBe("Copy");
     });
 });
 
