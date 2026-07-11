@@ -60,20 +60,22 @@ export function buildOverflowItems(deps: OverflowItemDeps): OverflowMenuItem[] {
     if (!cmd) return null;
     // Command.enabled() is the SECOND, independent activatability axis (issue #1407) — when()/isEnabled
     // already decided whether `cmd` is even in `deps.commands` at all. Absent enabled() ⇒ always
-    // activatable, matching the registry's own default. `run()` re-checks fresh at activation time (not
-    // just the `disabled` flag baked in at build time) — createFloatingMenu already refuses to wire a
-    // click handler for a `disabled: true` item, but a gated command's state can flip between this menu
-    // being built and an item inside it being activated, so this is the same re-check-at-activation
-    // belt-and-suspenders every other consumer of `Command.enabled()` applies (palette.ts's `runAt()`,
-    // the launcher's `runDefault()`).
+    // activatable, matching the registry's own default. Defined once, called at both spots below that
+    // need it (mechanical dedup, issue #1407 review — was spelled two different ways): the item's
+    // initial `disabled` flag AND `run()`'s own re-check at activation time (not just the flag baked in
+    // here) — createFloatingMenu already refuses to wire a click handler for a `disabled: true` item,
+    // but a gated command's state can flip between this menu being built and an item inside it being
+    // activated, so `run()` re-checks fresh, the same belt-and-suspenders every other consumer of
+    // `Command.enabled()` applies (palette.ts's `runAt()`, the launcher's `runDefault()`).
+    const isDisabled = (): boolean => cmd.enabled != null && !cmd.enabled();
     return {
       id,
       label,
       run: () => {
-        if (cmd.enabled && !cmd.enabled()) return;
+        if (isDisabled()) return;
         cmd.run();
       },
-      disabled: cmd.enabled ? !cmd.enabled() : false,
+      disabled: isDisabled(),
     };
   };
   const items: Array<OverflowMenuItem | null> = [

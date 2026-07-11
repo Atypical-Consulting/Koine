@@ -528,6 +528,52 @@ describe('LauncherPanel — visible-but-disabled command rows (issue #1407)', ()
     fireEvent.click(row);
     expect(runCommand).toHaveBeenCalledTimes(1);
   });
+
+  // Code-review follow-up (issue #1407): ResultRow.tsx suppresses its OWN inline `.lx-actbtn` for a
+  // disabled row (`selected && onOpenMenu && !disabled`), but `openMenu()` in LauncherPanel.tsx — the
+  // function BOTH the footer "⌘K actions" button and the global ⌘K/Ctrl+K chord (keys.ts's toggleMenu)
+  // call — only checked `!selected`. So a disabled row's popover was still reachable via those two
+  // entry points, offering a clickable "Run ↵" that silently no-ops — exactly the dead end ResultRow's
+  // own comment says must never happen.
+  test('the footer "⌘K actions" button does not open the popover for a disabled selected row', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => true)]);
+    const trigger = view.getByText('actions').closest('button') as HTMLButtonElement;
+
+    fireEvent.click(trigger);
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+  });
+
+  test('the global ⌘K chord does not open the popover for a disabled selected row', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => true)]);
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'k', metaKey: true });
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeNull();
+  });
+
+  // Characterization (no regression): an ENABLED action row must still open the popover through both
+  // of the same two entry points once the busy gate clears.
+  test('the footer "⌘K actions" button still opens the popover for an enabled selected row', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => false)]);
+    const trigger = view.getByText('actions').closest('button') as HTMLButtonElement;
+
+    fireEvent.click(trigger);
+
+    const menu = view.container.querySelector('.lx-actmenu') as HTMLElement;
+    expect(menu).toBeTruthy();
+    expect(menu.textContent).toContain('Run');
+  });
+
+  test('the global ⌘K chord still opens the popover for an enabled selected row', async () => {
+    const view = await mountInCommandsMode([gatedCommand(() => false)]);
+    const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
+
+    fireEvent.keyDown(scrim, { key: 'k', metaKey: true });
+
+    expect(view.container.querySelector('.lx-actmenu')).toBeTruthy();
+  });
 });
 
 describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {

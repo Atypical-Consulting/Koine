@@ -128,19 +128,35 @@ export function LauncherPanel(props: LauncherPanelProps) {
 
   const selectedActions = selected ? actionsFor(selected.entry, effectiveDeps) : [];
 
+  // Re-check enabled() fresh at the moment of activation (issue #1407), mirroring koine-ui's palette.ts
+  // runAt() — a workspace op can start/finish while the launcher is still open, so a row rendered
+  // enabled may no longer be, or vice versa. Shared by every entry point that can act on a selected
+  // row (`runDefault`'s click/Enter AND `openMenu`'s footer button + global ⌘K chord — code-review
+  // follow-up) so they can never disagree on what's activatable. Mirrors ResultRow.tsx's own
+  // `entry.cat === 'action' && entry.enabled?.() === false` row-disabled computation.
+  function isDisabledEntry(entry: CatalogEntry): boolean {
+    return entry.cat === 'action' && entry.enabled?.() === false;
+  }
+
   function runDefault(entry: CatalogEntry): void {
-    // Re-check enabled() fresh at the moment of activation (issue #1407), mirroring koine-ui's
-    // palette.ts runAt() — a workspace op can start/finish while the launcher is still open, so a row
-    // rendered enabled may no longer be, or vice versa. `deps.runCommand` (commandWiring.ts) already
-    // routes 'action' entries through `registry.run`, which itself no-ops when not activatable (Task 1);
-    // this early return just keeps the two paths (click/Enter here, the quick-action menu's own `Run`)
-    // consistent and avoids constructing `actionsFor`'s closures for an entry that can't run anyway.
-    if (entry.cat === 'action' && entry.enabled?.() === false) return;
+    // `deps.runCommand` (commandWiring.ts) already routes 'action' entries through `registry.run`,
+    // which itself no-ops when not activatable (Task 1); this early return just keeps the two paths
+    // (click/Enter here, the quick-action menu's own `Run`) consistent and avoids constructing
+    // `actionsFor`'s closures for an entry that can't run anyway.
+    if (isDisabledEntry(entry)) return;
     void actionsFor(entry, effectiveDeps)[0]?.run();
   }
 
   function openMenu(): void {
     if (!selected) return;
+    // Never open the quick-action popover for a disabled row (issue #1407 code-review follow-up):
+    // ResultRow.tsx already suppresses its OWN inline `.lx-actbtn` trigger for a disabled row
+    // (`selected && onOpenMenu && !disabled`), but this function is ALSO reachable via the footer
+    // "⌘K actions" button and the global ⌘K/Ctrl+K chord (keys.ts's toggleMenu) — neither of which
+    // independently checked activatability, so a disabled row's popover was still openable through
+    // those two entry points. A disabled entry's only quick action is the gated Run, so a popover
+    // offering it would be a dead end (see ResultRow.tsx's comment).
+    if (isDisabledEntry(selected.entry)) return;
     setMenuIndex(0);
     setMenuOpen(true);
   }
