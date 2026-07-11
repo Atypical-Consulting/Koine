@@ -140,3 +140,24 @@ describe('launcher match highlight contrast', () => {
     expect(contrastRatio(hlMatch, selectedRowBg)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+// Guards the --koi-muted a11y fix (issue #991, landed in PR #1416): --koi-muted previously read
+// #7d8694, which measured only ~4.31–4.32:1 on the dark --koi-surface — under WCAG AA (4.5:1) for
+// small text. This computes the real contrast ratio off the token hex values so a future edit to
+// either token (here, or in a design-synced source that could re-overwrite it) can't silently
+// regress below AA again.
+describe('muted text contrast', () => {
+  test('dark theme --koi-muted clears WCAG AA (>= 4.5:1) on --koi-surface', () => {
+    const darkBlock = extractThemeBlock(css, ':root');
+    const muted = extractToken(darkBlock, '--koi-muted');
+    const surface = extractToken(darkBlock, '--koi-surface');
+    expect(contrastRatio(muted, surface)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('light theme --koi-muted clears WCAG AA (>= 4.5:1) on --koi-surface', () => {
+    const lightBlock = extractThemeBlock(css, "html[data-theme='light']");
+    const muted = extractToken(lightBlock, '--koi-muted');
+    const surface = extractToken(lightBlock, '--koi-surface');
+    expect(contrastRatio(muted, surface)).toBeGreaterThanOrEqual(4.5);
+  });
+});

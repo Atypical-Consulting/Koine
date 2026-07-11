@@ -36,9 +36,9 @@ import {
   axisButtonsSelector,
   lstripAxisButtonsSelector,
 } from '@atypical/koine-ui';
-import { isNarrowViewport } from '@/shared/breakpoint';
+import { createNarrowCrossHandler, isNarrowViewport } from '@/shared/breakpoint';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
-import { createNarrowCrossHandler, visibleCenters as deckVisibleCenters } from '@/shell/inspector/shared';
+import { visibleCenters as deckVisibleCenters } from '@/shell/inspector/shared';
 import { loadLayout, saveLayout } from '@/shell/layoutStore';
 import { readRaw, writeRaw } from '@/shell/storage';
 import {

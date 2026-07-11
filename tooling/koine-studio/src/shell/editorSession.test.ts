@@ -284,6 +284,42 @@ describe('createEditorSession — the #diag-count pill obeys the active-context 
   });
 });
 
+describe('createEditorSession — host-side pill mirror (#1406)', () => {
+  test('the host mirrors the #diag-count pill from stripStore after subscription + active-file switch', () => {
+    const lsp = makeLsp();
+    const store = createAppStore();
+    // Track activeUri switches via a mutable ref (simulates ide.ts's activeUri getter).
+    let currentActiveUri = ACTIVE;
+    const deps = makeDeps(lsp, {
+      store,
+      activeUri: () => currentActiveUri,
+    });
+    const session = newSession(deps);
+
+    // Seed the ACTIVE file with clean diagnostics; the pill should reflect that.
+    act(() => lsp.firePublish(ACTIVE, []));
+    expect(domById('diag-count').textContent).toBe('clean');
+    expect(domById('diag-count').dataset.kind).toBe('clean');
+
+    // Push diagnostics to a NON-active file (OTHER). The store writes (triggering stripStore
+    // subscription), but paintActive is NOT called, so only the subscription's mirror fires.
+    act(() => lsp.firePublish(OTHER, [err(0, 'somewhere'), warn(1, 'maybe')]));
+    // The strip subscription's renderDiagPill runs, but OTHER is not active, so the pill stays clean.
+    expect(domById('diag-count').textContent).toBe('clean');
+    expect(domById('diag-count').dataset.kind).toBe('clean');
+
+    // Now switch the active file to OTHER and call paintActive (as showDiagnostics / an active-file
+    // click would). The selector's activeUri() closure now returns OTHER, but since no store write
+    // happened in paintActive, the subscription won't re-fire. The direct renderDiagPill() call in
+    // paintActive handles this.
+    currentActiveUri = OTHER;
+    act(() => session.showDiagnostics(OTHER));
+    // The pill now mirrors the OTHER file's diagnostics (scoped to the strip's state).
+    expect(domById('diag-count').textContent).toBe('1 error · 1 warning');
+    expect(domById('diag-count').dataset.kind).toBe('error');
+  });
+});
+
 describe('createEditorSession — the editor callback wall forwards to the LSP', () => {
   test('hover / completion / definition forward to the lsp spy with 0-based coordinates', async () => {
     const lsp = makeLsp();
