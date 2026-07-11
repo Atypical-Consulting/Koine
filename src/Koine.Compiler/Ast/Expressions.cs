@@ -17,6 +17,45 @@ public enum BinaryOp
     Add, Sub, Mul, Div
 }
 
+/// <summary>
+/// The single shared <see cref="BinaryOp"/> → symbol/verb mapping (#1313), replacing three independent
+/// switch expressions that had drifted apart (<c>Emit/ExprDescriber.cs</c> and <c>Ast/Bound/Lowerer.cs</c>
+/// rendered <c>Or</c>/<c>And</c> differently — one as the actual Koine operator tokens
+/// <c>"||"</c>/<c>"&amp;&amp;"</c> from <c>Grammar/KoineLexer.g4</c>'s <c>OR</c>/<c>AND</c>, the other as
+/// the English words <c>"or"</c>/<c>"and"</c>). <see cref="Symbol"/> unifies on the real grammar tokens —
+/// never exercised by an existing snapshot, so this changes no observed output.
+/// </summary>
+public static class BinaryOpExtensions
+{
+    /// <summary>The Koine source-syntax operator token for <paramref name="op"/>.</summary>
+    public static string Symbol(this BinaryOp op) => op switch
+    {
+        BinaryOp.Or => "||",
+        BinaryOp.And => "&&",
+        BinaryOp.Eq => "==",
+        BinaryOp.Neq => "!=",
+        BinaryOp.Lt => "<",
+        BinaryOp.Le => "<=",
+        BinaryOp.Gt => ">",
+        BinaryOp.Ge => ">=",
+        BinaryOp.Add => "+",
+        BinaryOp.Sub => "-",
+        BinaryOp.Mul => "*",
+        BinaryOp.Div => "/",
+        _ => "?"
+    };
+
+    /// <summary>The plain-English verb for one of the 4 arithmetic <see cref="BinaryOp"/> cases.</summary>
+    public static string Verb(this BinaryOp op) => op switch
+    {
+        BinaryOp.Add => "add",
+        BinaryOp.Sub => "subtract",
+        BinaryOp.Mul => "multiply",
+        BinaryOp.Div => "divide",
+        _ => throw new ArgumentOutOfRangeException(nameof(op), op, $"{nameof(Verb)} is only defined for the arithmetic operators")
+    };
+}
+
 public enum UnaryOp { Not, Negate }
 
 public enum LiteralKind { Int, Decimal, String, Bool }

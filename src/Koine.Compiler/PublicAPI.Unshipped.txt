@@ -364,6 +364,9 @@ Koine.Compiler.Ast.AggregateDecl.Deconstruct(out string! Name, out string! RootN
 Koine.Compiler.Ast.AggregateDecl.Equals(Koine.Compiler.Ast.AggregateDecl? other) -> bool
 Koine.Compiler.Ast.BinaryExpr.Deconstruct(out Koine.Compiler.Ast.BinaryOp Op, out Koine.Compiler.Ast.Expr! Left, out Koine.Compiler.Ast.Expr! Right) -> void
 Koine.Compiler.Ast.BinaryExpr.Equals(Koine.Compiler.Ast.BinaryExpr? other) -> bool
+Koine.Compiler.Ast.BinaryOpExtensions
+static Koine.Compiler.Ast.BinaryOpExtensions.Symbol(this Koine.Compiler.Ast.BinaryOp op) -> string!
+static Koine.Compiler.Ast.BinaryOpExtensions.Verb(this Koine.Compiler.Ast.BinaryOp op) -> string!
 Koine.Compiler.Ast.Bound.BoundBinary.Deconstruct(out Koine.Compiler.Ast.BinaryOp Op, out Koine.Compiler.Ast.Bound.BoundExpression! Left, out Koine.Compiler.Ast.Bound.BoundExpression! Right) -> void
 Koine.Compiler.Ast.Bound.BoundBinary.Equals(Koine.Compiler.Ast.Bound.BoundBinary? other) -> bool
 Koine.Compiler.Ast.Bound.BoundCall.Deconstruct(out Koine.Compiler.Ast.Bound.BoundExpression! Receiver, out string! Method, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Bound.BoundExpression!>! Args) -> void

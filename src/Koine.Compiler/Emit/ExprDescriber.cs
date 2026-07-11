@@ -38,7 +38,7 @@ public sealed class ExprDescriber : ExprVisitor<string>
 
     protected override string VisitUnary(UnaryExpr n) => (n.Op == UnaryOp.Not ? "!" : "-") + Visit(n.Operand);
 
-    protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {Operator(n.Op)} {Visit(n.Right)}";
+    protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {n.Op.Symbol()} {Visit(n.Right)}";
 
     protected override string VisitMatch(MatchExpr n) => $"{Visit(n.Target)} matches /{n.Pattern}/";
 
@@ -46,21 +46,4 @@ public sealed class ExprDescriber : ExprVisitor<string>
 
     protected override string VisitLet(LetExpr n) =>
         $"let {string.Join(", ", n.Bindings.Select(b => $"{b.Name} = {Visit(b.Value)}"))} in {Visit(n.Body)}";
-
-    private static string Operator(BinaryOp op) => op switch
-    {
-        BinaryOp.Or => "||",
-        BinaryOp.And => "&&",
-        BinaryOp.Eq => "==",
-        BinaryOp.Neq => "!=",
-        BinaryOp.Lt => "<",
-        BinaryOp.Le => "<=",
-        BinaryOp.Gt => ">",
-        BinaryOp.Ge => ">=",
-        BinaryOp.Add => "+",
-        BinaryOp.Sub => "-",
-        BinaryOp.Mul => "*",
-        BinaryOp.Div => "/",
-        _ => "?"
-    };
 }

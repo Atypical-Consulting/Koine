@@ -373,7 +373,7 @@ internal sealed class ExpressionChecker
             return; // same declared type
         }
 
-        var verb = DescribeBinaryOp(b.Op).Verb;
+        var verb = b.Op.Verb();
         if (leftDecl is { IsQuantity: true } && rightDecl is { IsQuantity: true })
         {
             Report(DiagnosticCodes.QuantityTypeMismatch,
@@ -493,7 +493,7 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        var verb = DescribeBinaryOp(b.Op).Verb;
+        var verb = b.Op.Verb();
         Report(DiagnosticCodes.ValueObjectMulDivMismatch,
             $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; no target ever generates a "
             + "'*'/'/' operator between two value-like operands, even of the SAME declared type", b);
@@ -558,7 +558,7 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        (string verb, string symbol) = DescribeBinaryOp(b.Op);
+        (string verb, string symbol) = (b.Op.Verb(), b.Op.Symbol());
         var culprit = leftKind is not null && rightKind is not null
             ? $"'{left.Name}' ({leftKind}) and '{right.Name}' ({rightKind})"
             : leftKind is not null
@@ -577,17 +577,6 @@ internal sealed class ExpressionChecker
         EntityDecl => "entity",
         AggregateDecl => "aggregate",
         _ => null
-    };
-
-    /// <summary>The plain-English verb and operator symbol for a binary arithmetic
-    /// <paramref name="op"/> (Add/Sub/Mul/Div), shared by every diagnostic message in this file that
-    /// names the offending operator.</summary>
-    private static (string Verb, string Symbol) DescribeBinaryOp(BinaryOp op) => op switch
-    {
-        BinaryOp.Add => ("add", "+"),
-        BinaryOp.Sub => ("subtract", "-"),
-        BinaryOp.Mul => ("multiply", "*"),
-        _ => ("divide", "/"),
     };
 
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
