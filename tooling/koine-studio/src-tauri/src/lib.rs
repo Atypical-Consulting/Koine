@@ -3434,6 +3434,69 @@ mod tests {
     }
 
     #[test]
+    fn git_status_reports_non_ascii_paths_verbatim_and_pathspecs_round_trip() {
+        let repo = init_repo();
+        repo.write("crème.koi", "one\n");
+        repo.git(&["add", "crème.koi"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Modify the tracked non-ASCII file and add an untracked one, both with non-ASCII names —
+        // porcelain v2 without `-z` would C-quote both (`core.quotePath` defaults to true).
+        repo.write("crème.koi", "two\n");
+        repo.write("naïve café.txt", "y\n");
+
+        let status = git_status(repo.path()).unwrap();
+
+        assert!(has_file(&status.files, "crème.koi", false, "modified"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "naïve café.txt", false, "untracked"),
+            "{:?}",
+            status.files
+        );
+        for f in &status.files {
+            assert!(!f.rel_path.starts_with('"'), "relPath still C-quoted: {:?}", f.rel_path);
+        }
+
+        // The relPath must round-trip as a pathspec straight back into git — this is what fails
+        // today under core.quotePath's default C-quoting.
+        assert!(git_stage(repo.path(), vec!["crème.koi".to_string()]).is_ok());
+        assert!(git_diff(repo.path(), "crème.koi".to_string(), true).is_ok());
+        assert!(
+            git_discard(repo.path(), Vec::new(), vec!["naïve café.txt".to_string()]).is_ok()
+        );
+    }
+
+    #[test]
+    fn git_status_parses_a_rename_entry_with_z_and_consumes_the_orig_path() {
+        let repo = init_repo();
+        repo.write("crème.koi", "one\n");
+        repo.write("other.txt", "x\n");
+        repo.git(&["add", "crème.koi", "other.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Stage a rename of the non-ASCII file, and leave another file untracked so the record
+        // FOLLOWING the rename in the porcelain output also has to parse correctly — proving the
+        // orig-path token (with `-z`, its own NUL-separated field) is consumed and not misread as
+        // the start of the next record.
+        repo.git(&["mv", "crème.koi", "brûlée.koi"]);
+        repo.write("zz-untracked.txt", "z\n");
+
+        let status = git_status(repo.path()).unwrap();
+
+        assert!(has_file(&status.files, "brûlée.koi", true, "renamed"), "{:?}", status.files);
+        assert!(
+            !status.files.iter().any(|f| f.rel_path == "crème.koi"),
+            "original path leaked as its own entry: {:?}",
+            status.files
+        );
+        assert!(
+            has_file(&status.files, "zz-untracked.txt", false, "untracked"),
+            "record after rename mis-parsed: {:?}",
+            status.files
+        );
+    }
+
+    #[test]
     fn git_log_returns_commits_newest_first_and_scopes_to_a_path() {
         let repo = init_repo();
         repo.write("a.txt", "a1\n");
