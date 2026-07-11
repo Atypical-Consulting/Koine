@@ -26,6 +26,8 @@ export const P = {
   enumC: "#f0b429",
   aggregate: "#b78cff",
   entity: "#7ee787",
+  eventC: "#f778ba",
+  commandC: "#ffa657",
 } as const;
 
 export const MONO =
@@ -33,10 +35,3 @@ export const MONO =
 export const SANS =
   'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
-// per-target accent used by the emit chip on the right panel
-export const TARGET_ACCENT: Record<string, string> = {
-  "C#": "#8a63ff",
-  TypeScript: "#3aa0ff",
-  Python: "#f0b429",
-  Rust: "#ff7043",
-};

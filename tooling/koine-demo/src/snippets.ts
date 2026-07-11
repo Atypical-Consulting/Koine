@@ -69,22 +69,34 @@ const KOINE_KEYWORDS = new Set([
   "context", "value", "entity", "aggregate", "root", "identified", "by",
   "invariant", "enum", "command", "event", "service", "usecase", "policy",
   "repository", "readmodel", "query", "import", "module", "when", "matches",
+  "requires", "emit",
 ]);
 
-const KOINE_SRC = `context Billing {
+// EXACTLY the source that produces the numbers below. Verified with the real
+// CLI: `koine build ordering.koi --target csharp` → 11 files, 365 lines.
+// If you edit this, re-run the compile and update KOI_LINE_COUNT + GEN_FILES.
+const KOINE_SRC = `context Ordering {
 
   value Money {
     amount: Decimal
-    currency: Currency
-    invariant amount >= 0
-      "must not be negative"
+    invariant amount >= 0  "must not be negative"
   }
-  enum Currency { EUR, USD, GBP }
-  aggregate Ordering root Order {
-    entity Order
-      identified by OrderId {
-      lines: List<OrderLine>
-      total: Money
+
+  enum OrderStatus { Draft, Placed }
+
+  aggregate Sales root Order {
+
+    event OrderPlaced { orderId: OrderId }
+
+    entity Order identified by OrderId {
+      total:  Money
+      status: OrderStatus = Draft
+
+      command place {
+        requires status == Draft  "already placed"
+        status -> Placed
+        emit OrderPlaced(orderId: id)
+      }
     }
   }
 }`;
@@ -96,105 +108,145 @@ export const KOINE_LINES = tokenize(KOINE_SRC, {
     enum: P.enumC,
     aggregate: P.aggregate,
     entity: P.entity,
+    event: P.eventC,
+    command: P.commandC,
   },
 });
 export const KOINE_CHARS = charCount(KOINE_LINES);
+export const KOI_LINE_COUNT = KOINE_SRC.split("\n").length; // 25
 
-// ── Emitted output per target (right panel) ─────────────────────────────────
-const CS = `public sealed record Money
-{
-  public Money(
-    decimal amount, Currency currency)
-  {
-    if (amount < 0)
-      throw new
-        DomainInvariantViolation(
-          "must not be negative");
-    Amount = amount;
-    Currency = currency;
-  }
-  public decimal Amount { get; }
-  public Currency Currency { get; }
-}`;
+// ── The generated files (right wall) ────────────────────────────────────────
+// One entry per file the compiler actually wrote, in stamping order. `loc` is
+// the file's real line count; `peek` lines are verbatim lines from the emitted
+// C# (leading indentation trimmed). `src` is the 1-based line range of the
+// .koi construct that produces the file, used for the highlight sweep.
 
-const TS = `export class Money {
-  constructor(
-    readonly amount: number,
-    readonly currency: Currency,
-  ) {
-    if (amount < 0)
-      throw new DomainInvariantViolation(
-        "must not be negative");
-  }
-}`;
+const CS_KW = new Set([
+  "public", "sealed", "class", "record", "interface", "readonly", "static",
+  "new", "void", "if", "throw", "get", "init", "set", "private", "protected",
+  "override", "abstract", "string", "int", "decimal", "bool", "using",
+  "namespace", "return", "yield",
+]);
 
-const PY = `@dataclass(frozen=True)
-class Money:
-    amount: Decimal
-    currency: "Currency"
+const cs = (code: string) => tokenize(code, { keywords: CS_KW });
 
-    def __post_init__(self) -> None:
-        if self.amount < 0:
-            raise DomainInvariantViolation(
-                "must not be negative")`;
-
-const RS = `pub struct Money {
-    amount: Decimal,
-    currency: Currency,
-}
-
-impl Money {
-    pub fn new(
-        amount: Decimal,
-        currency: Currency,
-    ) -> Self {
-        assert!(amount >= dec!(0),
-            "must not be negative");
-        Self { amount, currency }
-    }
-}`;
-
-const kw = (...w: string[]) => new Set(w);
-
-export interface Target {
-  name: string;
+export interface GenFile {
   file: string;
-  lines: Line[];
+  dir: string;
+  loc: number;
+  accent: string;
+  peek?: Line[];
+  src?: [number, number];
+  runtime?: boolean;
 }
 
-export const TARGETS: Target[] = [
+export const GEN_FILES: GenFile[] = [
   {
-    name: "C#",
     file: "Money.cs",
-    lines: tokenize(CS, {
-      keywords: kw("public", "sealed", "record", "class", "decimal", "if",
-        "throw", "new", "get", "return", "void", "var", "string", "int", "bool"),
-    }),
+    dir: "Ordering/ValueObjects",
+    loc: 32,
+    accent: P.value,
+    src: [3, 6],
+    peek: cs(
+      `public sealed class Money : ValueObject
+if (amount < 0)
+throw new DomainInvariantViolationException(`,
+    ),
   },
   {
-    name: "TypeScript",
-    file: "money.ts",
-    lines: tokenize(TS, {
-      keywords: kw("export", "class", "constructor", "readonly", "number",
-        "string", "if", "throw", "new", "return", "const", "boolean"),
-    }),
+    file: "OrderStatus.cs",
+    dir: "Ordering/Enums",
+    loc: 81,
+    accent: P.enumC,
+    src: [8, 8],
+    peek: cs(
+      `public static readonly OrderStatus Draft = new("Draft", 0);
+public static OrderStatus FromName(string name)
+public static IReadOnlyList<OrderStatus> All { get; }`,
+    ),
   },
   {
-    name: "Python",
-    file: "money.py",
-    lines: tokenize(PY, {
-      lineComment: "#",
-      keywords: kw("class", "def", "if", "raise", "return", "None", "self",
-        "import", "from", "True", "False"),
-    }),
+    file: "OrderPlaced.cs",
+    dir: "Ordering/Events",
+    loc: 18,
+    accent: P.eventC,
+    src: [12, 12],
+    peek: cs(
+      `public sealed record OrderPlaced : IDomainEvent
+public DateTimeOffset OccurredOn { get; init; }
+public OrderPlaced(OrderId orderId)`,
+    ),
   },
   {
-    name: "Rust",
-    file: "money.rs",
-    lines: tokenize(RS, {
-      lineComment: "//",
-      keywords: kw("pub", "struct", "impl", "fn", "let", "self", "Self",
-        "assert", "return", "mut", "match"),
-    }),
+    file: "OrderId.cs",
+    dir: "Ordering/ValueObjects",
+    loc: 25,
+    accent: P.value,
+    src: [14, 14],
+    peek: cs(
+      `public sealed class OrderId : ValueObject
+public Guid Value { get; }
+public static OrderId New()`,
+    ),
   },
+  {
+    file: "Order.cs",
+    dir: "Ordering",
+    loc: 58,
+    accent: P.entity,
+    src: [14, 23],
+    peek: cs(
+      `public void Place()
+Status = OrderStatus.Placed;
+_domainEvents.Add(new OrderPlaced(Id));`,
+    ),
+  },
+  {
+    file: "IOrderRepository.cs",
+    dir: "Ordering/Repositories",
+    loc: 19,
+    accent: P.aggregate,
+    src: [10, 10],
+    peek: cs(
+      `public interface IOrderRepository
+Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default);
+Task AddAsync(Order aggregate, CancellationToken ct = default);`,
+    ),
+  },
+  {
+    file: "IUnitOfWork.cs",
+    dir: "Ordering/Abstractions",
+    loc: 15,
+    accent: P.aggregate,
+    src: [10, 10],
+    peek: cs(
+      `public interface IUnitOfWork
+IOrderRepository Orders { get; }
+Task<int> SaveChangesAsync(CancellationToken ct = default);`,
+    ),
+  },
+  { file: "ValueObject.cs", dir: "Koine/Runtime", loc: 82, accent: P.brandLite, runtime: true },
+  {
+    file: "DomainInvariantViolationException.cs",
+    dir: "Koine/Runtime",
+    loc: 16,
+    accent: P.brandLite,
+    runtime: true,
+  },
+  { file: "IDomainEvent.cs", dir: "Koine/Runtime", loc: 12, accent: P.brandLite, runtime: true },
+  { file: "IAggregateRoot.cs", dir: "Koine/Runtime", loc: 7, accent: P.brandLite, runtime: true },
+];
+
+export const TOTAL_FILES = GEN_FILES.length; // 11
+export const TOTAL_LOC = GEN_FILES.reduce((n, f) => n + f.loc, 0); // 365
+
+// ── Outro chips: every ship-ready emitter target ────────────────────────────
+export const LANG_CHIPS: { name: string; accent: string }[] = [
+  { name: "C#", accent: "#8a63ff" },
+  { name: "TypeScript", accent: "#3aa0ff" },
+  { name: "Python", accent: "#f0b429" },
+  { name: "Java", accent: "#f89820" },
+  { name: "Kotlin", accent: "#c792ea" },
+  { name: "PHP", accent: "#8993be" },
+  { name: "Rust", accent: "#ff7043" },
 ];

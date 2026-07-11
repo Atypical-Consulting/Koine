@@ -39,12 +39,12 @@
 <p align="center">
   <a href="https://atypical-consulting.github.io/Koine/studio/">
     <img src="assets/koine-demo.gif" width="100%"
-         alt="One Koine .koi model on the left compiling to idiomatic C#, TypeScript, Python and Rust on the right — value objects, entities, aggregates and invariants generated from the same source." />
+         alt="A 25-line Koine .koi model on the left compiles construct by construct into a wall of generated C# files on the right — value objects with invariants, a smart enum, an aggregate with commands and events, repository and unit-of-work contracts: 11 files, 365 lines, none written by hand." />
   </a>
 </p>
 
 <p align="center">
-  <em>Write one <code>.koi</code> model; get idiomatic code in seven languages — live in your browser, <a href="https://atypical-consulting.github.io/Koine/studio/">zero install</a>.</em>
+  <em>25 lines of <code>.koi</code> → 11 files of idiomatic C# — every number in the loop is a real <code>koine build</code>. <a href="https://atypical-consulting.github.io/Koine/studio/">Try it in your browser, zero install</a>.</em>
 </p>
 
 ## Table of Contents

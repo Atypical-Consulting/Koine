@@ -1,7 +1,7 @@
 # koine-demo
 
 The [Remotion](https://www.remotion.dev/) source for the animated demo in the repository
-[`README.md`](../../README.md): **one `.koi` model compiling to many targets**.
+[`README.md`](../../README.md): **write the domain, not the boilerplate**.
 
 It's a programmatic video — the same story Koine tells (author declaratively, generate the
 artifact), told about itself. Re-render it whenever the language or branding changes; no screen
@@ -9,15 +9,31 @@ recording required.
 
 ## What it shows
 
-A ~12-second, seamless loop:
+A ~14-second, seamless loop:
 
-1. **Write your domain once** — the Koine mark and tagline.
-2. A `Billing.koi` model **types itself in** on the left, with Studio's concept colors
-   (value = blue, enum = amber, aggregate = indigo, entity = green).
-3. `koine build →` and a compile flash.
-4. The **emitted output** lands on the right, and the target chip cycles
-   **C# → TypeScript → Python → Rust** over the *same* model.
-5. Outro: *One model. Seven languages.* + the "try it in your browser" link.
+1. **Write the domain. Not the boilerplate.** — the hook.
+2. An `ordering.koi` model **types itself in** on the left, with Studio's concept colors
+   (value = blue, enum = amber, aggregate = indigo, entity = green, event = pink).
+3. **The assembly line** — `koine build` fires, a highlight sweep walks the source
+   construct by construct, and each one stamps a labeled file card onto the right-hand
+   wall (with a peek of its real emitted lines) while a live counter ticks up.
+4. **The number** — `25 lines of Koine → 11 files · 365 lines of C# · 0 written by you`.
+5. Outro: *The same model. Seven languages.* — target chips fan out, then the
+   "try it in your browser" link.
+
+### The numbers are real
+
+`src/snippets.ts` holds the **exact** `.koi` source shown on screen, and every count in the
+video (per-file line counts, 11 files, 365 lines) comes from actually compiling that source
+with the real CLI:
+
+```bash
+dotnet run --project ../../src/Koine.Cli -- build ordering.koi --target csharp --out ./out
+```
+
+The peek lines on each card are verbatim lines from the emitted C#. **If you edit the
+on-screen source, re-run the compile and update `GEN_FILES` + `KOI_LINE_COUNT`** so the
+video never advertises numbers the compiler doesn't produce.
 
 ## Develop
 
@@ -42,11 +58,13 @@ deterministic.
 
 ```bash
 npm run render      # out/koine-demo.mp4  (docs site / social cards)
-npm run render:gif  # out/koine-demo.gif  (the README embed; halved frame-rate for size)
-npm run still       # out/koine-poster.png (a poster frame)
+npm run render:gif  # out/koine-demo.gif  (the README embed: 960×540 · 15fps · dither=none — needs ffmpeg)
+npm run still       # out/koine-poster.png (a poster frame — "the number" beat)
 ```
 
-Remotion downloads a headless-Chromium shell on the first render.
+Remotion downloads a headless-Chromium shell on the first render. `render:gif` renders the MP4
+and then runs an ffmpeg palette pass (`fps=15,scale=960:540`, 128 colors, `dither=none`) — the
+smallest artifact that still reads; the flat panel-and-code palette needs no dithering.
 
 ### Updating the README GIF
 
@@ -54,20 +72,16 @@ The repo README embeds `assets/koine-demo.gif`. To refresh it:
 
 ```bash
 npm run render:gif
-# optionally shrink for the web, then copy into place:
 cp out/koine-demo.gif ../../assets/koine-demo.gif
 ```
-
-Then point the hero `<img>` in the root README at `assets/koine-demo.gif` (it currently falls back
-to `assets/koine-studio.png` until the GIF is committed).
 
 ## Layout
 
 | File | Purpose |
 | --- | --- |
-| `src/Root.tsx` | Registers the `KoineDemo` composition (1280×720, 30fps, 360 frames). |
-| `src/KoineDemo.tsx` | The timeline: intro → split editor → target cycling → outro. |
-| `src/snippets.ts` | The `.koi` source, the per-target output, and a tiny token colorizer. |
+| `src/Root.tsx` | Registers the `KoineDemo` composition (1280×720, 30fps, 432 frames). |
+| `src/KoineDemo.tsx` | The timeline: hook → type-in → assembly line → the number → polyglot outro. |
+| `src/snippets.ts` | The exact on-screen `.koi` source, the real generated-file data, and a tiny token colorizer. |
 | `src/components/CodeBlock.tsx` | Renders tokenized code with an optional typewriter reveal. |
 | `src/components/BrandMark.tsx` | The κ-in-hexagon brand mark as inline SVG. |
 | `src/palette.ts` | Brand + concept-color palette. |
