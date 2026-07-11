@@ -605,8 +605,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const value = await buildDomainIndex();
       // A later invalidateModelDerivedCaches() call already bumped the generation while this build was
       // in flight — a fresher build (or a fresh `null`) is already in place; drop this stale write and
-      // let the next caller redo the check-and-build itself.
-      if (gen === cacheGeneration) cachedDomainIndex = { value };
+      // let the next caller redo the check-and-build itself. Also drop it if the controller was torn
+      // down while awaiting — a disposed facade must never resurrect a cache entry post-teardown.
+      if (gen === cacheGeneration && !lifecycle.isDisposed()) cachedDomainIndex = { value };
     }
     return cachedDomainIndex ? cachedDomainIndex.value : undefined;
   }
@@ -818,8 +819,9 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
           const built = buildModelIndex(glossary, docs, model ?? undefined);
           // Same TOCTOU guard as getCachedDomainIndex() (#1447): a later invalidation already bumped
           // the generation while this build was in flight, so drop the stale write instead of
-          // clobbering the fresher (or freshly-rebuilt) modelIndex.
-          if (gen === cacheGeneration) modelIndex = built;
+          // clobbering the fresher (or freshly-rebuilt) modelIndex. Also drop it post-teardown — a
+          // disposed facade must never resurrect a cache entry.
+          if (gen === cacheGeneration && !lifecycle.isDisposed()) modelIndex = built;
           return modelIndex ?? built;
         })
         .finally(() => {
