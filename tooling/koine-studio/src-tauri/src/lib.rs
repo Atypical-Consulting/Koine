@@ -3464,13 +3464,26 @@ mod tests {
             assert!(!f.rel_path.starts_with('"'), "relPath still C-quoted: {:?}", f.rel_path);
         }
 
-        // The relPath must round-trip as a pathspec straight back into git — this is what fails
-        // today under core.quotePath's default C-quoting.
-        assert!(git_stage(repo.path(), vec!["crème.koi".to_string()]).is_ok());
-        assert!(git_diff(repo.path(), "crème.koi".to_string(), true).is_ok());
-        assert!(
-            git_discard(repo.path(), Vec::new(), vec!["naïve café.txt".to_string()]).is_ok()
-        );
+        // Feed git_status's OWN returned relPath back into git as a pathspec — the actual round
+        // trip the panel performs — rather than a hardcoded literal, so a future regression that
+        // quotes only the relPath (leaving the literal correct) would still be caught here.
+        let modified = status
+            .files
+            .iter()
+            .find(|f| f.rel_path == "crème.koi" && !f.staged)
+            .expect("crème.koi is present as an unstaged modification")
+            .rel_path
+            .clone();
+        let untracked = status
+            .files
+            .iter()
+            .find(|f| f.rel_path == "naïve café.txt")
+            .expect("naïve café.txt is present as untracked")
+            .rel_path
+            .clone();
+        assert!(git_stage(repo.path(), vec![modified.clone()]).is_ok());
+        assert!(git_diff(repo.path(), modified, true).is_ok());
+        assert!(git_discard(repo.path(), Vec::new(), vec![untracked]).is_ok());
     }
 
     #[test]
