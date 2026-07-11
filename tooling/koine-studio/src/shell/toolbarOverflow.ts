@@ -19,11 +19,13 @@ export interface OverflowMenuItem {
   /**
    * Render as visible-but-disabled (issue #1407): forwarded straight to `createFloatingMenu`'s own
    * `FloatingMenuItem.disabled`, which renders a native `disabled` `<button>` (excluded from the menu's
-   * roving-focus/keyboard-nav set, no click listener attached at all — see floatingMenu.ts). None of the
-   * commands `buildOverflowItems` currently maps (Save to disk / Check / Theme / Settings) carry an
-   * `enabled()` gate, so this is defense-in-depth for a future command this menu starts reusing that
-   * does (mirrors the launcher's/palette's identical disabled-row affordance for the SAME reason: a
-   * busy-gated command must never render as a plain, silently-inert row).
+   * roving-focus/keyboard-nav set, no click listener attached at all — see floatingMenu.ts). Of the
+   * commands `buildOverflowItems` currently maps (Save to disk / Check / Theme / Settings), `save-project-to-disk`
+   * carries a real `enabled()` gate (issue #1404, the workspace-open lock's busy state) — this menu
+   * reflects it generically for that command today, and remains defense-in-depth for any future command
+   * that starts reusing this menu with its own `enabled()` gate (mirrors the launcher's/palette's
+   * identical disabled-row affordance for the SAME reason: a busy-gated command must never render as a
+   * plain, silently-inert row).
    */
   disabled?: boolean;
 }

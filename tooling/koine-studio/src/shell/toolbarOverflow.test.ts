@@ -69,10 +69,10 @@ describe('buildOverflowItems', () => {
 
   // A command gated by enabled() (issue #1407 — the SECOND, independent activatability axis, distinct
   // from when()/isEnabled which already decided the command is even in `commands` at all) must never
-  // surface here as a plain, silently-inert menu item. None of the four commands this menu currently
-  // reuses (save-project-to-disk / check / toggle-theme / prefs) are enabled()-gated today, but the
-  // mapping must handle one correctly regardless — defense-in-depth for whatever command this menu
-  // reuses next.
+  // surface here as a plain, silently-inert menu item. Of the four commands this menu currently reuses
+  // (save-project-to-disk / check / toggle-theme / prefs), save-project-to-disk is enabled()-gated for
+  // real today (issue #1404); this synthetic `cmds()` fixture still gates `check` instead so the test
+  // stays independent of the real catalog — defense-in-depth for whatever command this menu reuses next.
   test('propagates a command\'s enabled() as the item\'s disabled flag', () => {
     const gated = cmds().map((c) => (c.id === 'check' ? { ...c, enabled: () => false } : c));
     const items = buildOverflowItems({
