@@ -223,12 +223,15 @@ internal sealed class TypeScriptExpressionTranslator
                 }
                 break;
             case ConditionalExpr cond:
+                TypeScope condScope = EffectiveScope();
+                TypeRef? thenType = _resolver.Infer(cond.Then, condScope);
+                TypeRef? elseType = _resolver.Infer(cond.Else, condScope);
                 sb.Append('(');
                 Write(cond.Condition, sb);
                 sb.Append(" ? ");
-                WriteReconciledBranch(cond.Then, cond.Else, sb);
+                WriteReconciledBranch(cond.Then, thenType, cond.Else, elseType, sb);
                 sb.Append(" : ");
-                WriteReconciledBranch(cond.Else, cond.Then, sb);
+                WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
@@ -299,12 +302,12 @@ internal sealed class TypeScriptExpressionTranslator
     /// <see cref="BranchReconciliation.Classify"/> (#1368); only the TypeScript RENDERING below is local
     /// (TS ignores the classifier's <see cref="BranchReconciliation.NeedsSomeWrap"/>, its optional being a
     /// plain <c>| undefined</c> union that needs no lift).
+    /// <paramref name="branchType"/>/<paramref name="siblingType"/> are inferred once by the caller and
+    /// passed in rather than re-inferred here — <c>Then</c>/<c>Else</c> would otherwise each be walked
+    /// twice per conditional (#1369).
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
     {
-        TypeScope scope = EffectiveScope();
-        TypeRef? branchType = _resolver.Infer(branch, scope);
-        TypeRef? siblingType = _resolver.Infer(sibling, scope);
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
         if (needs.NeedsWiden)

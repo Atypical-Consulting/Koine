@@ -163,12 +163,15 @@ internal sealed class KotlinExpressionTranslator
                 break;
             case ConditionalExpr cond:
                 // Kotlin `if` is an expression: `if (c) a else b`.
+                TypeScope condScope = EffectiveScope();
+                TypeRef? thenType = _resolver.Infer(cond.Then, condScope);
+                TypeRef? elseType = _resolver.Infer(cond.Else, condScope);
                 sb.Append("if (");
                 WriteTopLevel(cond.Condition, sb);
                 sb.Append(") ");
-                WriteReconciledBranch(cond.Then, cond.Else, sb);
+                WriteReconciledBranch(cond.Then, thenType, cond.Else, elseType, sb);
                 sb.Append(" else ");
-                WriteReconciledBranch(cond.Else, cond.Then, sb);
+                WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
                 break;
             case CoalesceExpr co:
                 // The left is nullable (T?); Koine `l ?? r` -> Kotlin elvis `l ?: r`, yielding the non-null T.
@@ -237,12 +240,12 @@ internal sealed class KotlinExpressionTranslator
     /// dimensions apply — is the shared, cross-target <see cref="BranchReconciliation.Classify"/> (#1368);
     /// only the Kotlin RENDERING below is local (Kotlin simply ignores the classifier's
     /// <see cref="BranchReconciliation.NeedsSomeWrap"/>, having no optional-lift to emit).
+    /// <paramref name="branchType"/>/<paramref name="siblingType"/> are inferred once by the caller and
+    /// passed in rather than re-inferred here — <c>Then</c>/<c>Else</c> would otherwise each be walked
+    /// twice per conditional (#1369).
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
     {
-        TypeScope scope = EffectiveScope();
-        TypeRef? branchType = _resolver.Infer(branch, scope);
-        TypeRef? siblingType = _resolver.Infer(sibling, scope);
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
         if (needs.NeedsWiden)

@@ -190,12 +190,15 @@ internal sealed class JavaExpressionTranslator
                 WriteUnary(un, sb);
                 break;
             case ConditionalExpr cond:
+                TypeScope condScope = EffectiveScope();
+                TypeRef? thenType = _resolver.Infer(cond.Then, condScope);
+                TypeRef? elseType = _resolver.Infer(cond.Else, condScope);
                 sb.Append('(');
                 WriteTopLevel(cond.Condition, sb);
                 sb.Append(" ? ");
-                WriteReconciledBranch(cond.Then, cond.Else, sb);
+                WriteReconciledBranch(cond.Then, thenType, cond.Else, elseType, sb);
                 sb.Append(" : ");
-                WriteReconciledBranch(cond.Else, cond.Then, sb);
+                WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
@@ -255,13 +258,12 @@ internal sealed class JavaExpressionTranslator
     /// non-optional, so a branch that is already <c>Optional</c>-shaped (<c>NeedsOptionalWiden</c>) never
     /// needs the extra <c>Optional.of(...)</c> wrap. The DECISION — which of the three dimensions apply —
     /// is the shared, cross-target <see cref="BranchReconciliation.Classify"/> (#1368); only the Java
-    /// RENDERING below is local.
+    /// RENDERING below is local. <paramref name="branchType"/>/<paramref name="siblingType"/> are inferred
+    /// once by the caller and passed in rather than re-inferred here — <c>Then</c>/<c>Else</c> would
+    /// otherwise each be walked twice per conditional (#1369).
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
+    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
     {
-        TypeScope scope = EffectiveScope();
-        TypeRef? branchType = _resolver.Infer(branch, scope);
-        TypeRef? siblingType = _resolver.Infer(sibling, scope);
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
         if (needs.NeedsSomeWrap)
