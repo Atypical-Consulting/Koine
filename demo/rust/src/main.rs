@@ -15,22 +15,6 @@
 //!    transition (e.g. Draft -> Shipped) is rejected, because nothing in the emitted code rejects
 //!    it. This is a property of the *template*, not a Rust-emitter bug -- identical to the
 //!    TypeScript, Python, and PHP demos of this same template.
-//!
-//! 2. RUST-SPECIFIC GAP (unlike the other three targets): the emitted `Order::new(id, lines)` has
-//!    NO `status` parameter at all -- it unconditionally initializes `status: OrderStatus::Draft`
-//!    inside the constructor body. The C#/TypeScript/Python/PHP emitters all render an *optional*
-//!    trailing `status` constructor parameter that defaults to `Draft` (e.g. TypeScript's
-//!    `constructor(id, lines, status = OrderStatus.Draft)`, PHP's `status: OrderStatus =
-//!    OrderStatus::DRAFT`), so those demos construct a `Placed`/`Shipped` `Order` directly. The
-//!    Rust emitter drops the default-valued `status` field from the generated `new(...)` signature
-//!    entirely -- a real Rust-emitter parity gap, flagged here rather than fixed (this demo does
-//!    not touch `src/Koine.Emit.Rust/`, per this issue's scope). This driver works around it by
-//!    exercising the `OrderStatus` enum's `Draft`/`Placed`/`Shipped`/`Cancelled` values directly
-//!    (they are public, freestanding, and constructible with zero dependency on `Order`) instead
-//!    of embedding them in a freshly-built `Order`, and only asserts entity-identity equality for
-//!    "same id, different lines" rather than "same id, different status" (which the constructor
-//!    cannot express). See reference/README.md for the exact repro and the follow-up this
-//!    warrants.
 
 use koine_domain::koine_runtime::Decimal;
 use koine_domain::ordering::{Order, OrderId, OrderLine, OrderStatus, ProductId};
@@ -72,10 +56,9 @@ fn main() {
         &format!("line2.subtotal should be 13.50 (3 * 4.50), got {}", line2.subtotal()),
     );
 
-    // --- Order: construction with two lines defaults to Draft (Order::new has no `status`
-    // parameter at all -- see KNOWN GAP 2 above). ---
+    // --- Order: omitting the trailing `status` parameter (`None`) defaults to Draft. ---
     let order_id = OrderId::new("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-    let draft_order = Order::new(order_id.clone(), vec![line1.clone(), line2.clone()])
+    let draft_order = Order::new(order_id.clone(), vec![line1.clone(), line2.clone()], None)
         .expect("draft_order declares no invariants, so construction cannot fail");
 
     check(
@@ -98,10 +81,27 @@ fn main() {
         "the second line should round-trip by value equality",
     );
 
+    // --- Order: passing `Some(...)` overrides the trailing `status` parameter, constructing a
+    // `Placed` order directly (#1380) -- mirroring the sibling TypeScript/Python/PHP drivers'
+    // equivalent assertion. ---
+    let placed_order = Order::new(
+        order_id.clone(),
+        vec![line1.clone(), line2.clone()],
+        Some(OrderStatus::Placed),
+    )
+    .expect("placed_order declares no invariants, so construction cannot fail");
+    check(
+        placed_order.status() == OrderStatus::Placed,
+        &format!(
+            "overriding the status parameter should construct a Placed order, got {:?}",
+            placed_order.status()
+        ),
+    );
+
     // --- Order identity: equality is by id, not by structural contents (aggregate roots are
-    // entities). Order::new has no `status` override (KNOWN GAP 2), so both instances below are
-    // Draft; this still proves identity ignores `lines` contents, just not `status`. ---
-    let same_id_different_lines = Order::new(order_id.clone(), vec![line1.clone()])
+    // entities) -- two orders with the same id are equal regardless of differing `lines` or
+    // `status`. ---
+    let same_id_different_lines = Order::new(order_id.clone(), vec![line1.clone()], None)
         .expect("same_id_different_lines declares no invariants, so construction cannot fail");
     check(
         draft_order == same_id_different_lines,
@@ -110,7 +110,7 @@ fn main() {
     );
 
     let different_order_id = OrderId::new("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
-    let different_order = Order::new(different_order_id, vec![line1.clone(), line2.clone()])
+    let different_order = Order::new(different_order_id, vec![line1.clone(), line2.clone()], None)
         .expect("different_order declares no invariants, so construction cannot fail");
     check(
         draft_order != different_order,
@@ -118,8 +118,7 @@ fn main() {
     );
 
     // --- OrderStatus: the Draft/Placed/Shipped/Cancelled lifecycle values are all constructible
-    // (as freestanding enum values -- see KNOWN GAP 2 above for why this driver cannot embed them
-    // in an Order) and mutually distinguishable, and round-trip through the generated
+    // as freestanding enum values, mutually distinguishable, and round-trip through the generated
     // `from_name`/`from_value` lookups and the `match_` exhaustive dispatch. ---
     check(
         OrderStatus::from_name("Placed") == Some(OrderStatus::Placed),
