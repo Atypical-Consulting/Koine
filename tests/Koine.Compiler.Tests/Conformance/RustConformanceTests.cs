@@ -2215,4 +2215,47 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1438 — the <c>required</c> loop in <c>BuildFactoryCtorArgs</c> lacked the identical
+    /// <c>NumericCoercionWrap</c> call its sibling <c>defaultedParams</c> loop already gained during
+    /// #1380's own code review: a factory's explicit <c>field -&gt; expr</c> initialization of a
+    /// <b>required</b> <c>Decimal</c> member with a bare <c>Int</c> literal emitted the raw, uncoerced
+    /// value (<c>Self::new(id, 5)</c>) instead of <c>Decimal::from(5)</c> — a real <c>cargo check</c>
+    /// E0308, not just a snapshot mismatch. Also settles the Design's open edge case: a required
+    /// <c>String</c> member explicitly initialized with a string literal needs no extra call-site
+    /// handling beyond what <c>TranslateOwned</c> already does — it owns any String-typed result via
+    /// <c>.to_string()</c> regardless of this fix, since <c>NumericCoercionWrap</c> only ever fires for
+    /// numeric mismatches.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_required_member_coerces_the_value()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "    label: String\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5\n" +
+            "      label -> \"std\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Int literal must be coerced to Decimal
+        // before being passed to Self::new, not passed through raw; the String literal is already
+        // owned correctly via TranslateOwned's existing .to_string() handling.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, Decimal::from(5), \"std\".to_string())");
+        rust.ShouldNotContain("Self::new(id, 5,");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
