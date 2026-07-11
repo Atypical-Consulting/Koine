@@ -947,6 +947,25 @@ describe('createInspectorController — loading states clear on success', () => 
     expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
   });
 
+  // Regression (#1397 follow-up on #484/#1258): the FIRST model load used to fetch glossaryModel()/
+  // model() TWICE — once from the Domain navigator's own unseeded first-mount doFetch, once from
+  // loadModel's ensureModelIndex — because the mount branch (unlike the reload branch) issued its own
+  // requests. ensureDomainNavigator() now seeds the mount too, so the very first load costs one of each,
+  // just like every subsequent edit.
+  test('the FIRST model load fetches glossaryModel()/model() once each — mount and reload both seeded', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    ctl.refreshActiveSurfaces(); // the FIRST load: mounts the navigator AND builds the index in one tick
+    await flush();
+
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
+    expect(lsp.model).toHaveBeenCalledTimes(1);
+    const domainPane = domById('rail-domain-pane');
+    expect(domainPane.querySelector('[data-ctx="Billing"]')).not.toBeNull();
+  });
+
   test('the glossary replaces its "Loading glossary…" line on success', async () => {
     const lsp = makeLsp();
     const ctl = createInspectorController(makeDeps(lsp));

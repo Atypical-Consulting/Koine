@@ -866,12 +866,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // promptly. Its Context Map / Glossary doorways route to the same focuses the docs footer used.
   function ensureDomainNavigator(): void {
     const hadIndex = modelIndex != null;
-    // The reload below is SEEDED with the same shared fetchGlossaryModel()/fetchStructuredModel() promises
-    // ensureModelIndex() is about to start (#484) — both calls land on the same in-flight fetch, so the
-    // navigator's own doFetch reuses it instead of re-issuing glossaryModel()/model(), halving the
-    // per-edit request count with no change to when the rail paints.
+    // Both branches below are SEEDED with the same shared fetchGlossaryModel()/fetchStructuredModel()
+    // promises ensureModelIndex() is about to start (#484, mount branch seeded #1397) — every call lands
+    // on the same in-flight fetch, so the navigator's own doFetch reuses it instead of re-issuing
+    // glossaryModel()/model(), halving the request count on both the first load and every edit after it.
     if (!domainNavigator) {
-      domainNavigator = mountDomainNavigator(domainPane, appStore, lsp, modelOutlineHandlers, tacticalHandlers);
+      domainNavigator = mountDomainNavigator(
+        domainPane,
+        appStore,
+        lsp,
+        modelOutlineHandlers,
+        tacticalHandlers,
+        { glossaryModel: fetchGlossaryModel(), model: fetchStructuredModel() },
+      );
     } else if (!hadIndex) {
       domainNavigator.reload({ glossaryModel: fetchGlossaryModel(), model: fetchStructuredModel() });
     }
