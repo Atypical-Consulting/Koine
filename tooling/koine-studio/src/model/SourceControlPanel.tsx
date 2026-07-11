@@ -307,13 +307,25 @@ export function SourceControlPanel(props: {
             confirmLabel: 'Discard all',
           }
         : hasUntracked
-          ? {
-              title: single ? 'Delete untracked file?' : 'Delete untracked files?',
-              message: single
-                ? `Delete ${paths[0]}? This untracked file will be permanently removed.`
-                : `Delete all ${paths.length} untracked files in ${opts.group}? Each file will be permanently removed.`,
-              confirmLabel: single ? 'Delete file' : 'Delete all',
-            }
+          ? // A trailing `/` is the porcelain marker for an entirely-untracked directory collapsed into
+            // one row (see {@link Platform.gitDiscard}); "folder" copy applies only when EVERY untracked
+            // path in this batch is one — a mixed file+folder selection keeps the generic "files" wording
+            // rather than mislabeling a file as a folder or vice versa.
+            untrackedPaths.every((p) => p.endsWith('/'))
+            ? {
+                title: single ? 'Delete untracked folder?' : 'Delete untracked folders?',
+                message: single
+                  ? `Delete ${paths[0]}? This untracked folder and its contents will be permanently removed.`
+                  : `Delete all ${paths.length} untracked folders in ${opts.group}? Each folder and its contents will be permanently removed.`,
+                confirmLabel: single ? 'Delete folder' : 'Delete all',
+              }
+            : {
+                title: single ? 'Delete untracked file?' : 'Delete untracked files?',
+                message: single
+                  ? `Delete ${paths[0]}? This untracked file will be permanently removed.`
+                  : `Delete all ${paths.length} untracked files in ${opts.group}? Each file will be permanently removed.`,
+                confirmLabel: single ? 'Delete file' : 'Delete all',
+              }
           : {
               title: 'Discard changes?',
               message: single

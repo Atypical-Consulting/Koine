@@ -609,6 +609,24 @@ describe('SourceControlPanel — Discard controls (#1151)', () => {
     await waitFor(() => expect(group(view.container, 'Untracked')).toBeNull());
   });
 
+  test('discarding an untracked DIRECTORY row asks with folder wording and routes the trailing-slash path through', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([{ relPath: 'scratch/', staged: false, status: 'untracked' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Discard scratch/ changes' }));
+
+    // Porcelain's collapsed directory row (trailing `/`) rides the untracked bucket unchanged — the
+    // host partitions it into a `clean -fd` call ({@link Platform.gitDiscard}).
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, [], ['scratch/']));
+    // The confirm copy names it a folder, not a file — a directory has no single "file" being deleted.
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.title).toMatch(/folder/i);
+    expect(req.message).toContain('scratch/');
+    expect(req.message).toMatch(/folder/i);
+    expect(req.message).toMatch(/permanently removed/i);
+  });
+
   test('the Untracked group Discard-all asks with group-level delete wording', async () => {
     vi.mocked(koiConfirm).mockResolvedValue(true);
     const git = makeGit([
