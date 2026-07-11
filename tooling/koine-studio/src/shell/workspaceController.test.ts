@@ -406,6 +406,8 @@ describe('createWorkspaceController — opening a folder', () => {
       throw new Error('this folder is no longer available — open it again');
     });
     const ws = createWorkspaceController(makeDeps(platform, lsp, editor, { hideWelcome }));
+    // openFolderPath catches the injected listKoiFiles rejection and logs it; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const result = await ws.openFolderPath(ROOT);
     expect(result).toEqual({ ok: false, reason: 'unreadable' });
     expect(hideWelcome).not.toHaveBeenCalled();
@@ -1031,6 +1033,8 @@ describe('createWorkspaceController — saveAllDirty', () => {
     writeBuffer(deps, ws, cUri, { dirty: true });
     platform.failWrites.add('c.koi');
 
+    // saveAllDirty logs the injected c.koi write failure; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await ws.saveAllDirty();
 
     // b saved (clean now); c's write failed so it stays dirty; the status reports the failure count.
@@ -1206,6 +1210,8 @@ describe('createWorkspaceController — saveAllDirty', () => {
     writeBuffer(deps, ws, bUri, { dirty: true });
     platform.failWrites.add('a.koi'); // the ACTIVE buffer's own write fails; b's write succeeds
 
+    // saveAllDirty logs the injected a.koi write failure; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await ws.saveAllDirty();
 
     expect(ws.buffers.get(aUri)!.dirty).toBe(true); // still dirty — its write failed
@@ -1424,6 +1430,8 @@ describe('createWorkspaceController — applyFileEdit', () => {
     const bUri = uriOf('b.koi'); // open but not active; clean, text matches disk
     platform.failWrites.add('b.koi');
 
+    // applyFileEdit catches the injected b.koi write failure and logs it; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await expect(ws.applyFileEdit(bUri, 'new body\n')).resolves.toBeNull();
 
     expect(ws.buffers.get(bUri)!.text).toBe('new body\n');
@@ -2052,6 +2060,8 @@ describe('createWorkspaceController — multi-root', () => {
     await ws.openFolderPath(ROOT_A, { recent: false });
 
     vi.spyOn(platform, 'listKoiFiles').mockRejectedValueOnce(new Error('gone'));
+    // addRoot catches the injected listKoiFiles rejection and logs it; silence the expected error.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const result = await ws.addRoot(ROOT_B);
 
     expect(result).toEqual({ ok: false, reason: 'unreadable' });

@@ -7,10 +7,11 @@ import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { csharp, java, kotlin } from '@codemirror/legacy-modes/mode/clike';
-import { typescript, json } from '@codemirror/legacy-modes/mode/javascript';
+import { typescript } from '@codemirror/legacy-modes/mode/javascript';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { php } from '@codemirror/lang-php';
+import { json as jsonLang } from '@codemirror/lang-json';
 import { koineHighlight, sharedTheme } from '@/editor/cmTheme';
 
 // --- read-only output viewer ------------------------------------------------
@@ -34,9 +35,13 @@ const LANG_MODES: Record<string, () => Extension> = {
   // Kotlin reuses the same clike legacy mode (which ships a `kotlin` tokenizer), so highlighting the
   // emitted `.kt` files adds no new dependency.
   kotlin: () => StreamLanguage.define(kotlin),
-  // JSON powers the read-only MCP configuration recipe in Settings (createJsonView); the
-  // legacy-modes JSON tokenizer is already bundled, so highlighting it adds no new dependency.
-  json: () => StreamLanguage.define(json),
+  // JSON powers the read-only MCP configuration recipe in Settings (createJsonView). It uses the
+  // Lezer-based `@codemirror/lang-json` (the same grammar the editable settings.json editor uses),
+  // NOT the legacy-modes JSON tokenizer: the legacy tokenizer marks object keys with the CM5-era
+  // string token style `property`, which `@codemirror/language` can't map (the modern lezer tag is
+  // `propertyName`) and so warns `Unknown highlighting tag property` once per session. The Lezer
+  // grammar tags keys as `propertyName`, which `koineHighlight` colours directly — no warning.
+  json: () => jsonLang(),
   // PHP uses the Lezer-based grammar (lang-php); emitted files open with `<?php`, so the
   // default mixed-mode config highlights them correctly.
   php: () => php(),

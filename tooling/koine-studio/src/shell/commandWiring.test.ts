@@ -152,6 +152,7 @@ describe('commandWiring', () => {
     dispose = null;
     document.body.innerHTML = '';
     clearKeybindingOverrides(); // #432: don't leak a palette remap into the next test
+    vi.restoreAllMocks(); // restore any per-test console.warn spy so a silence can't leak into the next test
   });
 
   describe('getCommands() assembly', () => {
@@ -417,6 +418,8 @@ describe('commandWiring', () => {
     });
 
     it('is a guarded no-op for an unknown id (never throws)', () => {
+      // The registry warns on the deliberate unknown-id dispatch; silence that expected console.warn.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       const wiring = createCommandWiring(makeDeps());
       dispose = wiring.dispose;
       expect(() => wiring.run('does-not-exist')).not.toThrow();
@@ -433,6 +436,8 @@ describe('commandWiring', () => {
     });
 
     it('no-ops Save-to-disk dispatch when the host cannot save projects (when-gated, not unknown)', () => {
+      // The registry warns on the deliberate disabled dispatch; silence that expected console.warn.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       const deps = makeDeps({ canSaveProjects: false });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -443,6 +448,8 @@ describe('commandWiring', () => {
     });
 
     it('no-ops a disabled command — stop-compile stays inert while idle, fires in flight', () => {
+      // The registry warns on the deliberate disabled stop-compile dispatch; silence that expected console.warn.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       vi.mocked(stopRunawayCompile).mockClear();
       const wiring = createCommandWiring(makeDeps());
       dispose = wiring.dispose;
@@ -465,6 +472,8 @@ describe('commandWiring', () => {
   // serialization holds exactly as before (#1275) — only the palette's visibility changed.
   describe('workspace-open busy gating (#1407, was when()-hidden under #1275)', () => {
     it('keeps new-model and open-folder in the command list while workspaceOpBusy(), but no-ops run() + chords', () => {
+      // The registry warns on the deliberate busy-gated dispatches; silence those expected console.warns.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       const deps = makeDeps({ workspaceOpBusy: vi.fn(() => true) });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -488,6 +497,8 @@ describe('commandWiring', () => {
     });
 
     it('re-reads the busy probe live: an idle lock restores activatability (list membership was already unchanged)', () => {
+      // The registry warns on the deliberate busy-gated dispatch; silence that expected console.warn.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       let busy = true;
       const deps = makeDeps({ workspaceOpBusy: vi.fn(() => busy) });
       const wiring = createCommandWiring(deps);
@@ -532,6 +543,8 @@ describe('commandWiring', () => {
     // open-folder instead of staying ungated, while its pre-existing when() capability gate (host can't
     // save projects) is untouched and composes independently.
     it('extends the enabled()-gating to save-project-to-disk: stays listed but not activatable while busy, works once idle', () => {
+      // The registry warns on the deliberate busy-gated dispatch; silence that expected console.warn.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       let busy = true;
       const deps = makeDeps({ canSaveProjects: true, workspaceOpBusy: vi.fn(() => busy) });
       const wiring = createCommandWiring(deps);
