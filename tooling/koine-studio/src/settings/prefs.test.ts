@@ -788,12 +788,17 @@ describe("keyboard settings", () => {
         );
     }
 
-    it("lists all five rebindable commands, each showing its resolved key", () => {
+    it("lists all rebindable commands (editor + global), each showing its resolved key", () => {
         openPrefs();
-        expect(rows()).toHaveLength(5);
+        // Six editor-scope rows + two global-scope rows (command palette, save all) after #432.
+        expect(rows()).toHaveLength(8);
         // happy-dom is a non-mac platform, so "Mod" renders as "Ctrl"; F12 has no modifier.
         expect(chordOf("goToDefinition").textContent).toBe("F12");
         expect(chordOf("format").textContent).toBe("Ctrl+S");
+        // The three commands #432 folded into the registry (call hierarchy = editor; palette + save-all = global).
+        expect(chordOf("callHierarchy").textContent).toBe("Ctrl+Alt+H");
+        expect(chordOf("commandPalette").textContent).toBe("Ctrl+K");
+        expect(chordOf("saveAll").textContent).toBe("Ctrl+Alt+S");
     });
 
     it("recording a chord persists the override, updates the display, and fires onKeybindingsChanged", () => {

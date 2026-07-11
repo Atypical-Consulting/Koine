@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandWiring, PALETTE_COMMAND_ID, type CommandWiringDeps } from '@/shell/commandWiring';
+import { saveKeybindingOverride, clearKeybindingOverrides } from '@/settings/persistence';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 import { createLauncher, type LauncherHandle } from '@/launcher/createLauncher';
 import type { LauncherSources } from '@/launcher/buildCatalog';
@@ -150,6 +151,7 @@ describe('commandWiring', () => {
     dispose?.();
     dispose = null;
     document.body.innerHTML = '';
+    clearKeybindingOverrides(); // #432: don't leak a palette remap into the next test
   });
 
   describe('getCommands() assembly', () => {
@@ -280,6 +282,19 @@ describe('commandWiring', () => {
 
       window.dispatchEvent(key({ key: 'k', ctrlKey: true }));
       expect(launcherToggle).toHaveBeenCalledTimes(2); // toggled again
+    });
+
+    it('rebinds the palette chord live from the keybindings registry — new chord toggles, default no longer does (#432)', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+
+      saveKeybindingOverride('commandPalette', 'Mod-j'); // remapped in Settings → Keyboard
+      // Read live on the next keydown: the rebound Ctrl-J now toggles the launcher…
+      window.dispatchEvent(key({ key: 'j', code: 'KeyJ', ctrlKey: true }));
+      expect(launcherToggle).toHaveBeenCalledTimes(1);
+      // …and the old default Ctrl-K is inert (it no longer resolves to the palette chord).
+      window.dispatchEvent(key({ key: 'k', code: 'KeyK', ctrlKey: true }));
+      expect(launcherToggle).toHaveBeenCalledTimes(1);
     });
 
     it('dispatches mod+N → requestNewModel, mod+Shift+F → search.toggle, F1 → toggleHelp', () => {

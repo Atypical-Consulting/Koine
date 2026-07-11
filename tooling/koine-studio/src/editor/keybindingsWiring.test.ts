@@ -66,4 +66,31 @@ describe('editor keybinding wiring', () => {
     await flush();
     expect(onFormat).toHaveBeenCalledTimes(1);
   });
+
+  // Call hierarchy is now a registry-driven EDITOR row (#432), not a literal keymap — a remap saved before
+  // the editor is built must move the chord, and the default Mod-Alt-h must stop firing.
+  it('honors a call-hierarchy remap (Ctrl-j opens it, Ctrl-Alt-h no longer does)', async () => {
+    saveKeybindingOverride('callHierarchy', 'Ctrl-j');
+    const onPrepareCallHierarchy = vi.fn(async () => []);
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const ed = createKoineEditor({
+      parent,
+      doc: 'value Money {}',
+      onPrepareCallHierarchy: onPrepareCallHierarchy as never,
+      onIncomingCalls: (async () => []) as never,
+      onNavigateLocation: () => {},
+    });
+    editors.push(ed);
+    ed.view.focus();
+
+    press(ed, { key: 'j', code: 'KeyJ', ctrlKey: true });
+    await flush();
+    expect(onPrepareCallHierarchy).toHaveBeenCalledTimes(1);
+
+    // The default Ctrl-Alt-h has been remapped away — it must not re-trigger call hierarchy.
+    press(ed, { key: 'h', code: 'KeyH', ctrlKey: true, altKey: true });
+    await flush();
+    expect(onPrepareCallHierarchy).toHaveBeenCalledTimes(1);
+  });
 });
