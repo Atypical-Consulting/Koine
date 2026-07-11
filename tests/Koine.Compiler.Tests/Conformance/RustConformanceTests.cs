@@ -2659,9 +2659,9 @@ public class RustConformanceTests
     /// field for a member whose declared type is optional but has no member-level default (e.g.
     /// <c>total: Decimal?</c>), when the auto-bound factory parameter itself is declared non-optional
     /// (e.g. <c>total: Decimal</c>). The sibling <c>defaultedParams</c> loop's own auto-bound branch
-    /// already carries this guard; only this loop's auto-bound branch was missing it — the third branch
-    /// of this loop to need the wrap (the explicit-init branch was #1452/PR #1464; the unset branch
-    /// already handles it correctly).
+    /// already carries this guard; only this loop's auto-bound branch was missing it — the second branch
+    /// of this loop to need the wrap, after the explicit-init branch (#1452/PR #1464); the unset branch
+    /// already handles it correctly and never needed a fix.
     /// </summary>
     [Fact]
     public void Factory_auto_bound_non_optional_parameter_binding_to_an_optional_declared_required_member_is_some_wrapped()

@@ -513,15 +513,12 @@ public sealed partial class RustEmitter
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
-                // Unlike the sibling defaultedParams loop (whose ctor parameter is always Option<T>),
-                // this required-bucket ctor parameter is Option<T> only when m.Type.IsOptional — a
-                // plain (non-optional-declared) required member's ctor parameter is bare T, and
-                // AutoBinds never permits an optional param to bind to a non-optional member, so `field`
-                // is already the correct bare type there. Wrap only when the member is optional-declared
-                // but the bound parameter itself is not (it would otherwise carry the bare, un-wrapped
-                // value against an Option<T> constructor parameter — a real cargo check E0308).
+                // AutoBinds never permits an optional param to bind to a non-optional member, so this
+                // only ever needs a wrap in one direction — an optional-declared member bound to a
+                // non-optional param — the same "wrap unless already Option-shaped" rule SomeWrapIfNeeded
+                // already applies elsewhere (WriteDerived, CarriedDefaultedArg).
                 var field = RustNaming.Field(m.Name); // auto-bound same-named parameter
-                args.Add(m.Type.IsOptional && !boundParam.Type.IsOptional ? $"Some({field})" : field);
+                args.Add(SomeWrapIfNeeded(field, m.Type, boundParam.Type));
             }
             else if (m.Type.IsOptional)
             {
