@@ -100,3 +100,15 @@ export {
   type RelationshipsPanelSlice,
   type RelationRowView,
 } from './components/RelationshipsPanel';
+// GlossaryPanel — the ubiquitous-language editor (coverage gauge + inline description editors); the host
+// adapter (`createGlossaryPanelStore`) pre-scopes/groups the model and computes coverage. Edit handlers
+// arrive as callback props; rows edit via the same-package useCommittableField.
+export {
+  GlossaryPanel,
+  type GlossaryPanelSlice,
+  type GlossaryGroupView,
+  type GlossaryEntryView,
+  type CoverageView,
+  type GlossaryRange,
+  type GlossaryHandlers,
+} from './components/GlossaryPanel';

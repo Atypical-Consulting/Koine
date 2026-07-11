@@ -1212,3 +1212,166 @@ th[aria-sort='descending'] .koi-th-sort::after {
 .koi-rel-kind {
   color: var(--koi-muted);
 }
+
+/* ---------------------------------------------------------------------------------------------------
+ * GlossaryPanel (ported from Koine Studio's src/styles/components/_glossary.scss "glossary editor" block
+ * — issue #1408, fourth-tranche host-adapter migration). COPIED, not moved: Studio's SCSS partial stays
+ * authoritative for the app; only the classes this panel's markup renders are copied, with the SCSS
+ * nesting (`&:hover`, `> h3`) flattened to plain CSS. `.koi-gloss-count` is a package-local rename of the
+ * app's global `.muted` utility (which is NOT in this package) — the coverage count's muted colour.
+ * --------------------------------------------------------------------------------------------------- */
+.koi-gloss {
+  padding: 0.5rem 0.75rem 1.25rem;
+}
+
+.koi-gloss-coverage {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.koi-gloss-count {
+  color: var(--koi-muted);
+}
+
+.koi-gloss-bar {
+  height: 6px;
+  border-radius: var(--koi-radius-pill);
+  background: color-mix(in srgb, var(--koi-fg) 12%, transparent);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.koi-gloss-bar-fill {
+  height: 100%;
+  background: var(--koi-accent-grad);
+  transition: width 0.25s ease;
+}
+
+.koi-gloss-ctx {
+  margin-bottom: 1.1rem;
+}
+.koi-gloss-ctx > h3 {
+  margin: 0 0 0.4rem;
+  font-size: var(--koi-text-base);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--koi-muted);
+}
+
+.koi-gloss-entry {
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--koi-radius);
+  border: 1px solid color-mix(in srgb, var(--koi-fg) 10%, transparent);
+  margin-bottom: 0.45rem;
+  background: color-mix(in srgb, var(--koi-surface) 60%, transparent);
+}
+
+.koi-gloss-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.koi-gloss-name {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--koi-accent);
+  cursor: pointer;
+}
+.koi-gloss-name:hover {
+  text-decoration: underline;
+}
+
+.koi-gloss-kind {
+  font-size: var(--koi-text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  /* --koi-ink-soft (not --koi-muted): at this tiny 2xs size, --koi-muted on the pill background only
+   * reaches ~3.8:1 in dark theme — below WCAG AA's 4.5:1. --koi-ink-soft clears the bar in both themes. */
+  color: var(--koi-ink-soft);
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--koi-radius-pill);
+  background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
+}
+
+.koi-gloss-body {
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.koi-gloss-doc {
+  margin: 0;
+  color: var(--koi-fg);
+  font-size: var(--koi-text-md);
+  line-height: 1.4;
+}
+
+.koi-gloss-needsdoc {
+  margin: 0;
+  color: var(--koi-muted);
+  font-style: italic;
+  font-size: var(--koi-text-base-plus);
+}
+
+.koi-gloss-edit {
+  flex: none;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 35%, transparent);
+  color: var(--koi-accent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.15rem 0.55rem;
+  font-size: var(--koi-text-sm);
+  cursor: pointer;
+}
+.koi-gloss-edit:hover {
+  background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+}
+
+.koi-gloss-input {
+  flex: 1;
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: var(--koi-text-md);
+  color: var(--koi-fg);
+  background: var(--koi-surface);
+  border: 1px solid color-mix(in srgb, var(--koi-accent) 40%, transparent);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.4rem 0.5rem;
+}
+
+.koi-gloss-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.koi-gloss-save,
+.koi-gloss-cancel {
+  font: inherit;
+  font-size: var(--koi-text-sm);
+  border-radius: var(--koi-radius-sm);
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.koi-gloss-save {
+  background: var(--koi-accent);
+  color: #fff;
+}
+
+.koi-gloss-cancel {
+  background: none;
+  border-color: color-mix(in srgb, var(--koi-fg) 20%, transparent);
+  color: var(--koi-muted);
+}

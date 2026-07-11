@@ -1,11 +1,17 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { DiagnosticsStripRow, DiagnosticsStripSlice, RelationshipsPanelSlice } from '@atypical/koine-ui';
+import type {
+  DiagnosticsStripRow,
+  DiagnosticsStripSlice,
+  GlossaryPanelSlice,
+  RelationshipsPanelSlice,
+} from '@atypical/koine-ui';
 import type { AppState } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
-import { isAllContexts, scopeGraph } from '@/model/activeContext';
+import { isAllContexts, scopeGlossaryModel, scopeGraph } from '@/model/activeContext';
 import { extractRelationships } from '@/model/modelTables';
+import { coverage, groupByContext } from '@/model/glossary';
 import { severityErrorOrWarning } from '@/lsp/severity';
-import type { DiagramGraph, LspDiagnostic } from '@/lsp/lsp';
+import type { DiagramGraph, GlossaryModel, LspDiagnostic } from '@/lsp/lsp';
 import { shallowEqual, zustandToReadableStore } from '@/store/readableStoreAdapter';
 import { koiStem } from '@/shell/explorerModel';
 import { basename } from '@/shared/path';
@@ -281,4 +287,63 @@ function relationshipsSliceEqual(a: RelationshipsPanelSlice, b: RelationshipsPan
       );
     })
   );
+}
+
+/**
+ * Adapts the controller-fetched glossary model + the active-context slice to `GlossaryPanel`'s generic
+ * `ReadableStore<GlossaryPanelSlice>` — already scoped to the active bounded context, grouped by context,
+ * and reduced to a documentation-coverage view (issue #1408), so the panel never sees `GlossaryModel`,
+ * `scopeGlossaryModel`, `groupByContext`, or `coverage` (those stay in their owning Studio modules). Like
+ * the relationships adapter, `model` is fixed for this adapter instance so the selector is memoised on
+ * `s.activeContext` (re-groups only on a real scope change), with `glossarySliceEqual` gating the rebuild
+ * notification. The panel's edit handlers persist through the host's `GlossaryHandlers`, keeping the
+ * `setDoc` write path Studio-side.
+ */
+export function createGlossaryPanelStore(store: StoreApi<AppState>, model: GlossaryModel) {
+  let memo: { context: string; slice: GlossaryPanelSlice } | undefined;
+  return zustandToReadableStore(
+    store,
+    (s): GlossaryPanelSlice => {
+      if (memo != null && memo.context === s.activeContext) return memo.slice;
+      const scoped = scopeGlossaryModel(model, s.activeContext);
+      const slice: GlossaryPanelSlice = {
+        groups: groupByContext(scoped.entries),
+        coverage: coverage(scoped.entries),
+      };
+      memo = { context: s.activeContext, slice };
+      return slice;
+    },
+    glossarySliceEqual,
+  );
+}
+
+/** Coverage scalars plus element-wise groups/entries (`nameRange` by reference — a scoped model's entries
+ *  are reference-stable for this adapter instance) — same rationale as `stripSliceEqual` above. */
+function glossarySliceEqual(a: GlossaryPanelSlice, b: GlossaryPanelSlice): boolean {
+  if (
+    a.coverage.documented !== b.coverage.documented ||
+    a.coverage.total !== b.coverage.total ||
+    a.coverage.pct !== b.coverage.pct ||
+    a.groups.length !== b.groups.length
+  ) {
+    return false;
+  }
+  return a.groups.every((g, i) => {
+    const og = b.groups[i];
+    return (
+      g.context === og.context &&
+      g.entries.length === og.entries.length &&
+      g.entries.every((e, j) => {
+        const oe = og.entries[j];
+        return (
+          e.id === oe.id &&
+          e.name === oe.name &&
+          e.kind === oe.kind &&
+          e.qualifiedName === oe.qualifiedName &&
+          e.doc === oe.doc &&
+          e.nameRange === oe.nameRange
+        );
+      })
+    );
+  });
 }

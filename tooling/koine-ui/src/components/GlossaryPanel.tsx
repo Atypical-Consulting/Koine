@@ -1,46 +1,84 @@
 import { useEffect, useRef } from 'preact/hooks';
-import type { StoreApi } from 'zustand/vanilla';
-import type { AppState } from '@/store/index';
-import { useAppStore } from '@/store/hooks';
-import type { GlossaryEntry, GlossaryModel } from '@/lsp/lsp';
-import { coverage, groupByContext, type GlossaryHandlers } from '@/model/glossary';
-import { scopeGlossaryModel } from '@/model/activeContext';
-import { useCommittableField } from '@/shared/useCommittableField';
+import { useReadableStore, type ReadableStore } from '../host/store';
+import { useCommittableField } from '../useCommittableField';
 
-// The ubiquitous-language glossary editor as a Preact panel (#193, #67, #146, #992). It subscribes to
-// the `activeContext` slice and narrows the glossary model to that bounded context, so switching scope
-// re-renders the glossary for the active context ("All contexts" is the identity). The model is passed
-// in — the controller owns the LSP fetch (glossaryModel) under the docViews stale-token discipline;
-// this panel only re-frames it. The coverage gauge, bar, and per-context sections render as real JSX;
-// each entry is a `GlossaryEntryRow` owning its own inline description editor (#992 retired the pure-DOM
-// `renderGlossary` builder and the callback-ref bridge that mounted it).
+// The ubiquitous-language glossary editor as a store-coupled koine-ui component (issue #1408,
+// fourth-tranche host-adapter migration; originally Koine Studio's src/model/GlossaryPanel.tsx — #67):
+// a documentation-coverage gauge plus per-context sections of concept rows, each with an inline
+// description editor. Migrated behind a narrow `ReadableStore<GlossaryPanelSlice>` seam — the HOST adapter
+// (`createGlossaryPanelStore`) scopes the glossary model to the active bounded context, groups it, and
+// computes coverage, so this package never sees `GlossaryModel`, `useAppStore`, or the
+// `scopeGlossaryModel`/`groupByContext`/`coverage` classifiers (they stay in their owning Studio modules).
+// The description editor uses the same-package `useCommittableField` (open-time capture / cancel-adopts /
+// commit-wins — #1385/#1398), so a Cancel/Escape after a Save reverts to the just-saved value, never a
+// stale prop.
+
+/** A structural mirror of the LSP `Range` — koine-ui never imports `@/lsp`. */
+export interface GlossaryRange {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+}
+
+/** A plain-primitive mirror of a glossary entry (Koine Studio's `GlossaryEntry`), pre-scoped + grouped by
+ *  the host adapter. Structurally identical to the source entry so the host's save handler stays a clean
+ *  pass-through (its persist path reads `entry.id`). */
+export interface GlossaryEntryView {
+  id: string;
+  name: string;
+  kind: string;
+  context: string;
+  qualifiedName: string;
+  doc: string | null;
+  nameRange: GlossaryRange;
+}
+
+/** One bounded context's entries, in declaration order (the panel renders the `context`-kind entry first). */
+export interface GlossaryGroupView {
+  context: string;
+  entries: GlossaryEntryView[];
+}
+
+/** Documentation coverage over the scoped entries (pre-computed host-side). */
+export interface CoverageView {
+  documented: number;
+  total: number;
+  pct: number;
+}
+
+/** The narrow slice this panel reads: the pre-scoped + pre-grouped entries and their coverage. */
+export interface GlossaryPanelSlice {
+  groups: GlossaryGroupView[];
+  coverage: CoverageView;
+}
+
+export interface GlossaryHandlers {
+  /** Jump the editor to a declaration's name range. */
+  onGoto(range: GlossaryRange): void;
+  /** Persist a description (write the `///` doc comment back to source). */
+  onSave(entry: GlossaryEntryView, text: string): void;
+}
+
 export function GlossaryPanel(props: {
-  store: StoreApi<AppState>;
-  model: GlossaryModel;
+  store: ReadableStore<GlossaryPanelSlice>;
   handlers: GlossaryHandlers;
-  /** A qualified-name term to scroll into view (issue #1165) — the launcher's "Open glossary" target. */
-  scrollToTerm?: string;
-  /** Bumped by the controller each time a NEW scroll target is requested, so it's applied once. */
-  scrollNonce?: number;
+  scrollToTerm?: string; // #1165
+  scrollNonce?: number; // bumped per new scroll target so it's applied once
 }) {
-  const scope = useAppStore(props.store, (s) => s.activeContext);
-  const scoped = scopeGlossaryModel(props.model, scope);
+  // Subscribe for host-notified slice changes (a scope change re-groups the entries host-side)…
+  useReadableStore(props.store);
+  // …but render from a fresh getState() read, mirroring the DiagnosticsStripPanel precedent.
+  const { groups, coverage } = props.store.getState();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appliedNonce = useRef(0);
 
-  // Scroll the requested term into view once per nonce (#1165). The `scoped` dep re-runs this after a
-  // scope change (so the anchor for the newly-scoped entries exists); the nonce guard keeps it firing
-  // exactly once. A term outside the active scope has no row — no scroll, no error.
   useEffect(() => {
     const nonce = props.scrollNonce ?? 0;
     if (!props.scrollToTerm || nonce === 0 || nonce === appliedNonce.current) return;
     const target = hostRef.current?.querySelector<HTMLElement>(`[data-qn="${props.scrollToTerm}"]`);
-    if (!target) return; // term not in the current scope — open, don't scroll (unchanged behavior)
+    if (!target) return;
     appliedNonce.current = nonce;
     target.scrollIntoView({ block: 'center' });
-  }, [props.scrollToTerm, props.scrollNonce, scoped]);
-
-  const { documented, total, pct } = coverage(scoped.entries);
+  }, [props.scrollToTerm, props.scrollNonce, groups]);
 
   return (
     <div class="koi-gloss" ref={hostRef}>
@@ -48,18 +86,16 @@ export function GlossaryPanel(props: {
         <span>
           <strong>Ubiquitous language</strong>
         </span>
-        <span class="muted">
-          {documented} / {total} documented · {pct}%
+        <span class="koi-gloss-count">
+          {coverage.documented} / {coverage.total} documented · {coverage.pct}%
         </span>
       </div>
       <div class="koi-gloss-bar">
-        <div class="koi-gloss-bar-fill" style={{ width: `${pct}%` }} />
+        <div class="koi-gloss-bar-fill" style={{ width: `${coverage.pct}%` }} />
       </div>
-
-      {groupByContext(scoped.entries).map((g) => (
+      {groups.map((g) => (
         <section class="koi-gloss-ctx" key={g.context}>
           <h3>{g.context}</h3>
-          {/* The context's own entry first (so its description can be authored), then its types. */}
           {g.entries
             .filter((e) => e.kind === 'context')
             .map((entry) => (
@@ -76,29 +112,17 @@ export function GlossaryPanel(props: {
   );
 }
 
-/**
- * One glossary row: name (jumps to source) + kind badge + description with an inline editor. The
- * edit-mode/draft/revert state is a `useCommittableField` (see `@/shared/useCommittableField` for the
- * contract): `draft` holds both the read view's current text AND the textarea's live value while
- * editing, and Cancel/Escape revert to the hook's own last-committed value — never the `entry.doc`
- * prop, which only refreshes on a debounced (350ms) reload and so can still hold the pre-save text
- * right after a Save (the #992-review bug class the hook exists to close).
- */
-function GlossaryEntryRow(props: { entry: GlossaryEntry; handlers: GlossaryHandlers }) {
+function GlossaryEntryRow(props: { entry: GlossaryEntryView; handlers: GlossaryHandlers }) {
   const { entry, handlers } = props;
   const { editing, draft, setDraft, openEditor, editorOnKeyDown, commit, cancel } = useCommittableField({
     committedValue: entry.doc?.trim() ?? '',
     onCommit: (next) => handlers.onSave(entry, next),
   });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-
-  // Focus the textarea once, right when editing STARTS — not on every keystroke (mirrors ExplorerItem's
-  // rename-input focus effect).
   useEffect(() => {
     if (!editing) return;
     inputRef.current?.focus();
   }, [editing]);
-
   const hasDoc = draft.trim().length > 0;
 
   return (
@@ -115,7 +139,6 @@ function GlossaryEntryRow(props: { entry: GlossaryEntry; handlers: GlossaryHandl
         </button>
         <span class="koi-gloss-kind">{entry.kind}</span>
       </div>
-
       <div class="koi-gloss-body">
         {editing ? (
           <>
@@ -132,7 +155,7 @@ function GlossaryEntryRow(props: { entry: GlossaryEntry; handlers: GlossaryHandl
                   e.preventDefault();
                   commit();
                 } else {
-                  editorOnKeyDown(e); // Escape → the hook's revert-and-close cancel
+                  editorOnKeyDown(e); // Escape → hook revert-and-close
                 }
               }}
             />

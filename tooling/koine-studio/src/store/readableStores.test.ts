@@ -3,13 +3,14 @@ import { createAppStore } from '@/store/index';
 import {
   createDiagnosticsStripStore,
   createDocsPanelHostStore,
+  createGlossaryPanelStore,
   createHistoryControlsStore,
   createRelationshipsPanelStore,
   createUnsavedIndicatorStore,
   createWorkspaceProblemsStore,
 } from '@/store/readableStores';
 import type { Buffer } from '@/shell/workspaceController';
-import type { DiagramEdge, DiagramGraph, DiagramNode, LspDiagnostic } from '@/lsp/lsp';
+import type { DiagramEdge, DiagramGraph, DiagramNode, GlossaryEntry, GlossaryModel, LspDiagnostic } from '@/lsp/lsp';
 import { ALL_CONTEXTS } from '@/model/activeContext';
 
 // Pins the REAL wiring end-to-end (a real createAppStore(), not a mock ReadableStore) so a change to the
@@ -366,6 +367,66 @@ describe('createRelationshipsPanelStore', () => {
     const scoped = readable.getState();
     expect(scoped).not.toBe(first);
     expect(scoped.rows).toHaveLength(1);
+    expect(readable.getState()).toBe(scoped); // and the new slice is itself served from the memo
+  });
+});
+
+describe('createGlossaryPanelStore', () => {
+  const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } };
+  const gentry = (name: string, context: string, kind = 'value', doc: string | null = null): GlossaryEntry => ({
+    id: `${context}.${name}`,
+    name,
+    kind,
+    context,
+    qualifiedName: `${context}.${name}`,
+    doc,
+    nameRange: range,
+  });
+  // Sales owns Order (documented), Inv owns Stock (undocumented); scoping to Sales keeps Order, drops Stock.
+  const model: GlossaryModel = {
+    entries: [gentry('Order', 'Sales', 'aggregate', 'A customer order.'), gentry('Stock', 'Inv', 'entity')],
+  };
+
+  test('getState() scopes + groups the model and computes coverage; a scope change re-groups it', () => {
+    const store = createAppStore();
+    expect(store.getState().activeContext).toBe(ALL_CONTEXTS);
+    const readable = createGlossaryPanelStore(store, model);
+
+    const all = readable.getState();
+    expect(all.groups.map((g) => g.context)).toEqual(['Sales', 'Inv']);
+    expect(all.coverage).toEqual({ documented: 1, total: 2, pct: 50 });
+
+    store.getState().setActiveContext('Sales');
+    const scoped = readable.getState();
+    expect(scoped.groups.map((g) => g.context)).toEqual(['Sales']);
+    expect(scoped.groups[0].entries.map((e) => e.name)).toEqual(['Order']);
+    expect(scoped.coverage).toEqual({ documented: 1, total: 1, pct: 100 });
+  });
+
+  test('notifies on a real activeContext change and not on an unrelated store write', () => {
+    const store = createAppStore();
+    const readable = createGlossaryPanelStore(store, model);
+    let calls = 0;
+    readable.subscribe(() => calls++);
+
+    store.getState().setNavAltitude('tactical'); // unrelated slice; scope unchanged
+    expect(calls).toBe(0);
+
+    store.getState().setActiveContext('Sales'); // a real scope change → the groups/coverage narrow
+    expect(calls).toBe(1);
+  });
+
+  test('memoizes on activeContext: same scope → same slice reference, a scope change recomputes', () => {
+    const store = createAppStore();
+    const readable = createGlossaryPanelStore(store, model);
+
+    const first = readable.getState();
+    store.getState().setNavAltitude('tactical'); // unrelated write: activeContext unchanged
+    expect(readable.getState()).toBe(first); // reference-equal — the cached slice, not a rebuild
+
+    store.getState().setActiveContext('Sales'); // the scope key changes → a fresh slice
+    const scoped = readable.getState();
+    expect(scoped).not.toBe(first);
     expect(readable.getState()).toBe(scoped); // and the new slice is itself served from the memo
   });
 });

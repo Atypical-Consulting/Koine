@@ -41,15 +41,17 @@ import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagra
 import { createLayoutStore } from '@/diagrams/layoutStore';
 import { mergeDiagramGraphs, type TableHandlers } from '@/model/modelTables';
 import { isAllContexts, scopeDocsFiles } from '@/model/activeContext';
-import { type GlossaryHandlers } from '@/model/glossary';
-import { GlossaryPanel } from '@/model/GlossaryPanel';
 import { EventsPanel } from '@/model/EventsPanel';
 import { SourceControlPanel, type SourceControlFocus } from '@/model/SourceControlPanel';
 import type { ModelIndex } from '@/model/modelIndex';
 import { createDocsStore } from '@/docs/docsStore';
 import { AdrPanel, NotesPanel, type DocsPanelHandlers } from '@/docs/DocsPanels';
-import { DocsPanelHost, RelationshipsPanel } from '@atypical/koine-ui';
-import { createDocsPanelHostStore, createRelationshipsPanelStore } from '@/store/readableStores';
+import { DocsPanelHost, GlossaryPanel, RelationshipsPanel, type GlossaryHandlers } from '@atypical/koine-ui';
+import {
+  createDocsPanelHostStore,
+  createGlossaryPanelStore,
+  createRelationshipsPanelStore,
+} from '@/store/readableStores';
 import { guardedLoad } from '@/shell/guardedLoad';
 import { makeCopyButton } from '@/shell/copyFeedback';
 import { renderCheckMarkdown } from '@/shell/ideUtils';
@@ -391,8 +393,7 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     renderPanel(
       hosts.glossary,
       <GlossaryPanel
-        store={store}
-        model={model}
+        store={createGlossaryPanelStore(store, model)}
         handlers={glossaryHandlers}
         scrollToTerm={glossaryScrollTerm}
         scrollNonce={glossaryScrollNonce}
