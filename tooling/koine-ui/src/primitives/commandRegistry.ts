@@ -26,6 +26,16 @@ export interface Command {
    * Evaluated on every isEnabled() / run() call (dynamic).
    */
   when?(): boolean;
+  /**
+   * Optional activatability predicate — a second, independent axis from `when()`.
+   * When absent the command is always activatable. Use this to gate a command on
+   * something like an in-flight workspace op without hiding it from the palette
+   * entirely: `when()` controls visibility, `enabled()` controls whether it can
+   * currently be invoked. A command visible-but-not-activatable renders as a
+   * greyed-out row instead of vanishing. Evaluated on every isActivatable() / run()
+   * call (dynamic).
+   */
+  enabled?(): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,8 +65,17 @@ export interface CommandRegistry {
   isEnabled(id: string): boolean;
 
   /**
-   * Invoke the command's run() if it is enabled.
-   * Guarded no-op (console.warn) for unknown or disabled commands — never throws.
+   * Evaluate whether the command is currently activatable, i.e. can be run.
+   * True iff isEnabled(id) (the when() visibility check) AND `enabled() ?? true`
+   * (the new activatability check). False for an unknown id. A command can be
+   * isEnabled (visible) but not activatable — the palette renders that as a
+   * visible-but-disabled row instead of hiding it.
+   */
+  isActivatable(id: string): boolean;
+
+  /**
+   * Invoke the command's run() if it is activatable.
+   * Guarded no-op (console.warn) for unknown or non-activatable commands — never throws.
    */
   run(id: string): void;
 }
@@ -93,18 +112,25 @@ export function createCommandRegistry(): CommandRegistry {
     return cmd.when ? cmd.when() : true;
   }
 
+  function isActivatable(id: string): boolean {
+    const cmd = commands.get(id);
+    if (!cmd) return false;
+    if (!isEnabled(id)) return false;
+    return cmd.enabled ? cmd.enabled() : true;
+  }
+
   function run(id: string): void {
     const cmd = commands.get(id);
     if (!cmd) {
       console.warn(`[CommandRegistry] Unknown command: "${id}"`);
       return;
     }
-    if (!isEnabled(id)) {
+    if (!isActivatable(id)) {
       console.warn(`[CommandRegistry] Command "${id}" is currently disabled`);
       return;
     }
     cmd.run();
   }
 
-  return { register, get, all, isEnabled, run };
+  return { register, get, all, isEnabled, isActivatable, run };
 }
