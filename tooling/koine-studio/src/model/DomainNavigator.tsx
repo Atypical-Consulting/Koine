@@ -739,6 +739,11 @@ export function DomainNavigator({
  * synchronous `store.subscribe` that both enforces the altitude-reset invariant and drives the Preact
  * re-render — see this file's header for why the subscription lives here rather than in a `useAppStore`
  * effect.
+ *
+ * `seed` (#1397) mirrors {@link DomainNavigatorHandle.reload}'s seed: a caller that already started the
+ * glossaryModel()/model() fetch (e.g. `ensureDomainNavigator()`'s memoized promises) hands them in so the
+ * first-mount `doFetch()` reuses them instead of issuing a duplicate pair. One-shot — consumed only here,
+ * never retained, so a later unseeded `reload()` self-fetches exactly as it does without a seed.
  */
 export function mountDomainNavigator(
   host: HTMLElement,
@@ -746,6 +751,7 @@ export function mountDomainNavigator(
   lsp: DomainNavigatorLsp,
   handlers: DomainNavigatorHandlers = {},
   tacticalHandlers: TacticalHandlers = noopTacticalHandlers(),
+  seed?: DomainNavigatorSeed,
 ): DomainNavigatorHandle {
   // The navigator data is fetched once and cached; store-driven changes (altitude / scope / filter)
   // re-render synchronously from the cache, and reload() re-fetches after an edit. `null` = not yet
@@ -861,7 +867,7 @@ export function mountDomainNavigator(
   }
 
   renderNow(); // paint the loading placeholder (or the cache, if a reload pre-seeded it) right away
-  void doFetch(); // then fetch the strategic data and repaint
+  void doFetch(seed); // then fetch the strategic data and repaint — reusing the mount-time seed, if any
 
   return {
     reload: (seed) => void doFetch(seed),

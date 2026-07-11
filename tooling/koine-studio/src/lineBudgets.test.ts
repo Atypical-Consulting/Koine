@@ -165,7 +165,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // `invalidateModelDerivedCaches()`, the hook `surfaceLoaders.tsx`'s `invalidateDocViews()` already
   // calls) land HERE, not on surfaceLoaders.tsx. Also folds in #484's unified `contextOf(name, fallback)`
   // helper into `nodeContext()`. Measured end-state (1269), ceil(1269 × 1.02) = 1295.
-  { file: 'src/shell/inspectorController.tsx', maxLines: 1295 },
+  // Raised 1295 → 1343: #1447 guards getCachedDomainIndex()/ensureModelIndex() against a stale, orphaned
+  // build clobbering fresher cache state after a later invalidateModelDerivedCaches() call — a
+  // `cacheGeneration` counter, bumped there and captured/checked around each post-await write. Measured
+  // end-state (1316), ceil(1316 × 1.02) = 1343.
+  { file: 'src/shell/inspectorController.tsx', maxLines: 1343 },
   // Frozen 2026-07-09 at 281 LOC, ceil(281 × 1.02) = 287. #985 Task 1's new sibling — the Context Map
   // panel (maxGraph handle lifecycle, Graph/Table toggle, hover tooltip, ADR 0009 scope-focus repaint)
   // extracted from inspectorController.tsx. Guards it from regrowing unguarded — see #981/#757.

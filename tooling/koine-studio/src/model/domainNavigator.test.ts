@@ -7,6 +7,7 @@ import {
   renderStrategic,
   renderTactical,
   type DomainNavigatorHandlers,
+  type DomainNavigatorSeed,
   type TacticalHandlers,
 } from '@/model/domainNavigator';
 // The EXPLICIT `.tsx` specifier — the exact path the stories import (`DomainNavigator.tsx` and the
@@ -367,6 +368,104 @@ describe('mountDomainNavigator', () => {
     // now-stale "no elements yet" empty state.
     expect(host.querySelector('.koi-domain-empty')).toBeNull();
     expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
+  });
+
+  // #1397: the mount-time seed mirrors the existing reload-seed (#484) — a caller that already started
+  // the glossaryModel()/model() fetch (e.g. ensureDomainNavigator()'s memoized promises) hands them in so
+  // the navigator's own first-mount doFetch() reuses them instead of issuing a duplicate pair.
+  it('a mount-time seed skips the navigator\'s own glossaryModel()/model() fetch', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    const lsp = fakeLsp();
+    const seed: DomainNavigatorSeed = {
+      glossaryModel: Promise.resolve(fakeGlossary(['Ordering', 'Billing'])),
+      model: Promise.resolve(null),
+    };
+
+    mountDomainNavigator(host, store, lsp, undefined, undefined, seed);
+    await flush();
+
+    expect(lsp.glossaryModel).not.toHaveBeenCalled();
+    expect(lsp.model).not.toHaveBeenCalled();
+    expect(lsp.contextMap).toHaveBeenCalledTimes(1); // navigator-only data, always fetched directly
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy();
+    expect(host.querySelector('[data-ctx="Billing"]')).toBeTruthy();
+  });
+
+  // The seed is one-shot: it's consumed only by the initial mount-time doFetch(), never retained — a
+  // later unseeded reload() (e.g. after an edit) must self-fetch exactly as it does today.
+  it('the mount seed is not retained — an unseeded reload() after a seeded mount still self-fetches', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    const lsp = fakeLsp();
+    const seed: DomainNavigatorSeed = {
+      glossaryModel: Promise.resolve(fakeGlossary(['Ordering', 'Billing'])),
+      model: Promise.resolve(null),
+    };
+
+    const handle = mountDomainNavigator(host, store, lsp, undefined, undefined, seed);
+    await flush();
+    expect(lsp.glossaryModel).not.toHaveBeenCalled();
+
+    handle.reload();
+    await flush();
+
+    expect(lsp.glossaryModel).toHaveBeenCalledTimes(1);
+    expect(lsp.model).toHaveBeenCalledTimes(1);
+  });
+
+  // Same disposal-race shape #1308 already covers for an UNSEEDED mount (below) — a seeded mount's
+  // `doFetch` runs through the identical isCurrent()/fetchGen guard, but nothing pinned that for the
+  // seed path specifically until now.
+  it('unmounting a SEEDED mount mid-fetch skips the cache write once the seed resolves late (#1397)', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    const lsp = fakeLsp();
+
+    let resolveSeed!: (m: GlossaryModel) => void;
+    const seed: DomainNavigatorSeed = {
+      glossaryModel: new Promise((resolve) => {
+        resolveSeed = resolve;
+      }),
+      model: Promise.resolve(null),
+    };
+
+    const handle = mountDomainNavigator(host, store, lsp, undefined, undefined, seed);
+    await flush(); // the mount-time render painted the loading placeholder; doFetch()'s Promise.all is pending on the seed
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
+
+    handle.unmount(); // torn down while the seeded doFetch() is still in flight
+
+    resolveSeed(fakeGlossary(['Ordering', 'Billing'])); // the stale seed resolves anyway
+    await flush();
+
+    // The disposed guard must have skipped the cache write and the trailing render() call — the host
+    // stays on the loading placeholder rather than painting the now-stale strategic context rows.
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeNull();
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
+  });
+
+  // A seeded mount's glossaryModel promise is a caller-supplied fetch (e.g. the real
+  // fetchGlossaryModel(), which has no internal catch) and so CAN reject — doFetch's outer try/catch
+  // must degrade it to the empty strategic state exactly like an unseeded lsp.glossaryModel() rejection.
+  it('a mount-time seed whose glossaryModel promise rejects degrades to the empty strategic state', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    const lsp = fakeLsp();
+    const seed: DomainNavigatorSeed = {
+      glossaryModel: Promise.reject(new Error('boom')),
+      model: Promise.resolve(null),
+    };
+
+    mountDomainNavigator(host, store, lsp, undefined, undefined, seed);
+    await flush();
+
+    expect(host.querySelector('.koi-domain-empty')).toBeTruthy();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeNull();
   });
 
   // #760: the navigator takes its store as a parameter (never the `appStore` singleton) precisely so two
