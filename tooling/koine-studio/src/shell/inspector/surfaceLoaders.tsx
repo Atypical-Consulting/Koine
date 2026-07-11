@@ -36,19 +36,26 @@ import { renderMarkdown } from '@/editor/editor';
 import type { Platform } from '@/host';
 import type { PreviewTarget } from '@/settings/persistence';
 import { currentTheme } from '@/settings/theme';
-import { renderDiagrams } from '@/diagrams/diagrams';
+import { renderDiagrams, renderEventFlowGraph, type EventFlowGraphHandle } from '@/diagrams/diagrams';
 import { setDiagramLayoutStore, setDiagramPersistScope } from '@/diagrams/diagramContract';
 import { createLayoutStore } from '@/diagrams/layoutStore';
-import { mergeDiagramGraphs, type TableHandlers } from '@/model/modelTables';
-import { isAllContexts, scopeDocsFiles } from '@/model/activeContext';
-import { EventsPanel } from '@/model/EventsPanel';
+import { extractEventFlow, mergeDiagramGraphs, type TableHandlers } from '@/model/modelTables';
+import { isAllContexts, scopeDocsFiles, scopeGraph } from '@/model/activeContext';
 import { SourceControlPanel, type SourceControlFocus } from '@/model/SourceControlPanel';
 import type { ModelIndex } from '@/model/modelIndex';
 import { createDocsStore } from '@/docs/docsStore';
 import { AdrPanel, NotesPanel, type DocsPanelHandlers } from '@/docs/DocsPanels';
-import { DocsPanelHost, GlossaryPanel, RelationshipsPanel, type GlossaryHandlers } from '@atypical/koine-ui';
+import {
+  DocsPanelHost,
+  EventsPanel,
+  GlossaryPanel,
+  RelationshipsPanel,
+  type FlowRenderer,
+  type GlossaryHandlers,
+} from '@atypical/koine-ui';
 import {
   createDocsPanelHostStore,
+  createEventsPanelStore,
   createGlossaryPanelStore,
   createRelationshipsPanelStore,
 } from '@/store/readableStores';
@@ -63,6 +70,7 @@ import type { EmitFile } from '@/lsp/protocol';
 import type { BottomTab, CenterView } from '@/store/slices/uiChrome';
 import type {
   CheckResult,
+  DiagramGraph,
   DocsResult,
   EmitPreviewResult,
   GlossaryEntry,
@@ -636,6 +644,27 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
     goto: (span: SourceSpan) => deps.gotoSourceSpan(span),
     onSelect: (qualifiedName: string, context: string) => store.getState().setSelection({ qualifiedName, context }),
   };
+  // The koine-ui EventsPanel owns the mount + the SR-only legend; the maxGraph flow CANVAS stays host-side
+  // (issue #1408). This thin wrapper over `renderEventFlowGraph` re-derives the flow for the given scope and
+  // manages the async render's in-flight/disposed lifecycle behind the synchronous `{ dispose }` handle the
+  // panel's effect expects — mirroring the retired EventFlowView's own effect.
+  function makeEventsFlowRenderer(graph: DiagramGraph): FlowRenderer {
+    return (host, scopeKey) => {
+      let current = true;
+      let handle: EventFlowGraphHandle | null = null;
+      const flow = extractEventFlow(scopeGraph(graph, scopeKey));
+      void renderEventFlowGraph(host, flow, () => current).then((h) => {
+        if (current) handle = h;
+        else h?.dispose();
+      });
+      return {
+        dispose() {
+          current = false;
+          handle?.dispose();
+        },
+      };
+    };
+  }
   async function loadEventsPanel(): Promise<void> {
     await guardedLoad({
       store,
@@ -644,7 +673,14 @@ export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoa
       loading: () => docMessage(hosts.events, 'Loading events…'),
       fetch: () => bottomGraph(),
       render: (graph) =>
-        renderPanel(hosts.events, <EventsPanel store={store} graph={graph} handlers={bottomTableHandlers} />),
+        renderPanel(
+          hosts.events,
+          <EventsPanel
+            store={createEventsPanelStore(store, graph)}
+            handlers={bottomTableHandlers}
+            renderFlow={makeEventsFlowRenderer(graph)}
+          />,
+        ),
       onError: (e) => docMessage(hosts.events, 'Events request failed: ' + String(e), 'error'),
     });
   }

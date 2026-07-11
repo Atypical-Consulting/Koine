@@ -3,6 +3,7 @@ import { createAppStore } from '@/store/index';
 import {
   createDiagnosticsStripStore,
   createDocsPanelHostStore,
+  createEventsPanelStore,
   createGlossaryPanelStore,
   createHistoryControlsStore,
   createRelationshipsPanelStore,
@@ -367,6 +368,75 @@ describe('createRelationshipsPanelStore', () => {
     const scoped = readable.getState();
     expect(scoped).not.toBe(first);
     expect(scoped.rows).toHaveLength(1);
+    expect(readable.getState()).toBe(scoped); // and the new slice is itself served from the memo
+  });
+});
+
+describe('createEventsPanelStore', () => {
+  const evNode = (id: string, label: string, kind: string, qualifiedName: string, sourceSpan: DiagramNode['sourceSpan'] = null): DiagramNode => ({
+    id,
+    label,
+    kind,
+    qualifiedName,
+    sourceSpan,
+    stereotype: null,
+    members: [],
+  });
+  const evEdge = (from: string, to: string, label: string | null = null): DiagramEdge => ({ from, to, label });
+  const evSpan = { file: 'file:///m.koi', line: 3, column: 1, endLine: 3, endColumn: 6, offset: 0, length: 5 };
+
+  // A domain event in Sales and one in Shipping; scoping to Sales keeps the Sales event and drops Shipping.
+  const graph: DiagramGraph = {
+    nodes: [
+      evNode('Order', 'Order', 'aggregate-root', 'Sales.Order', evSpan),
+      evNode('OrderPlaced', 'OrderPlaced', 'event', 'Sales.OrderPlaced', evSpan),
+      evNode('ShipDispatched', 'ShipDispatched', 'event', 'Shipping.ShipDispatched', evSpan),
+      evNode('Shipping', 'Shipping', 'aggregate-root', 'Shipping.Shipment', evSpan),
+    ],
+    edges: [evEdge('Order', 'OrderPlaced'), evEdge('Shipping', 'ShipDispatched')],
+  };
+
+  test('getState() pre-extracts rows + flow nodes + the scope key; a scope change narrows both', () => {
+    const store = createAppStore();
+    const readable = createEventsPanelStore(store, graph);
+
+    const all = readable.getState();
+    expect(all.scopeKey).toBe(ALL_CONTEXTS);
+    expect(all.rows.map((r) => r.name)).toEqual(['OrderPlaced', 'ShipDispatched']);
+    expect(all.flowNodes.map((n) => n.label)).toContain('OrderPlaced');
+    expect(all.flowNodes.map((n) => n.label)).toContain('ShipDispatched');
+
+    store.getState().setActiveContext('Sales');
+    const scoped = readable.getState();
+    expect(scoped.scopeKey).toBe('Sales');
+    expect(scoped.rows.map((r) => r.name)).toEqual(['OrderPlaced']);
+    expect(scoped.flowNodes.map((n) => n.label)).not.toContain('ShipDispatched');
+  });
+
+  test('notifies on a real activeContext change and not on an unrelated store write', () => {
+    const store = createAppStore();
+    const readable = createEventsPanelStore(store, graph);
+    let calls = 0;
+    readable.subscribe(() => calls++);
+
+    store.getState().setNavAltitude('tactical'); // unrelated slice; scope unchanged
+    expect(calls).toBe(0);
+
+    store.getState().setActiveContext('Sales'); // a real scope change → rows + flow narrow
+    expect(calls).toBe(1);
+  });
+
+  test('memoizes on activeContext: same scope → same slice reference, a scope change recomputes', () => {
+    const store = createAppStore();
+    const readable = createEventsPanelStore(store, graph);
+
+    const first = readable.getState();
+    store.getState().setNavAltitude('tactical'); // unrelated write: activeContext unchanged
+    expect(readable.getState()).toBe(first); // reference-equal — the cached slice, not a rebuild
+
+    store.getState().setActiveContext('Sales'); // the scope key changes → a fresh slice
+    const scoped = readable.getState();
+    expect(scoped).not.toBe(first);
     expect(readable.getState()).toBe(scoped); // and the new slice is itself served from the memo
   });
 });

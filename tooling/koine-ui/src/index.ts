@@ -112,3 +112,14 @@ export {
   type GlossaryRange,
   type GlossaryHandlers,
 } from './components/GlossaryPanel';
+// EventsPanel — the bottom-dock events table with a Table | Flow toggle; the maxGraph flow canvas is
+// rendered host-side via an injected `FlowRenderer` (maxGraph never enters koine-ui). The host adapter
+// (`createEventsPanelStore`) pre-scopes + pre-extracts the rows and the flow legend nodes.
+export {
+  EventsPanel,
+  type EventsPanelSlice,
+  type EventRowView,
+  type EventFlowNodeView,
+  type EventFlowKindView,
+  type FlowRenderer,
+} from './components/EventsPanel';

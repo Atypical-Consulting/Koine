@@ -1375,3 +1375,94 @@ th[aria-sort='descending'] .koi-th-sort::after {
   border-color: color-mix(in srgb, var(--koi-fg) 20%, transparent);
   color: var(--koi-muted);
 }
+
+/* ---------------------------------------------------------------------------------------------------
+ * EventsPanel (ported from Koine Studio's src/styles/components/_event-flow.scss — the Table | Flow
+ * toggle chrome + flow-mount layout — plus the `.koi-evt-*` Type-cell tints from _diagnostics.scss and
+ * the `.koi-sr-only` visually-hidden helper from base/_a11y.scss — issue #1408, fourth-tranche
+ * host-adapter migration). COPIED, not moved: Studio's SCSS partials stay authoritative for the app.
+ * The maxGraph card class (`.koi-eventflow-card`) is rendered by the HOST canvas renderer, not this
+ * package's markup, so it stays Studio's. (`.koi-events-mount` / `.koi-event-flow-legend` are layout-only
+ * wrappers with no dedicated rule — the legend is hidden via `.koi-sr-only`.)
+ * --------------------------------------------------------------------------------------------------- */
+.koi-events-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.koi-events-toolbar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 4px;
+  padding-bottom: var(--koi-space-2);
+}
+
+.koi-events-view-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 2px 10px;
+  border: 1px solid var(--koi-line);
+  border-radius: 999px;
+  background: var(--koi-paper);
+  color: var(--koi-muted);
+  cursor: pointer;
+}
+.koi-events-view-btn:hover {
+  color: var(--koi-fg);
+  border-color: var(--koi-accent);
+}
+/* The pressed state uses the accent-TINTED pill pattern (accent text on a faint accent-tinted background),
+ * not a solid accent fill: white-on-accent fails WCAG AA contrast, whereas accent text on paper clears it. */
+.koi-events-view-btn[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
+  border-color: var(--koi-accent);
+  color: var(--koi-accent);
+}
+.koi-events-view-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.koi-event-flow {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.koi-event-flow-mount {
+  height: 100%;
+  min-height: 220px;
+}
+
+/* Type badge: a small dot keys Domain vs Integration without relying on colour alone. */
+.koi-evt-type::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: var(--koi-space-1);
+  border-radius: var(--koi-radius-pill);
+  background: currentColor;
+  vertical-align: baseline;
+}
+.koi-evt-domain {
+  color: var(--koi-hl-type);
+}
+.koi-evt-integration {
+  color: var(--koi-hl-number);
+}
+
+/* Visually-hidden but screen-reader-available (the flow view's text-alternative legend). */
+.koi-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

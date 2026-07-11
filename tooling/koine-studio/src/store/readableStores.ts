@@ -2,13 +2,14 @@ import type { StoreApi } from 'zustand/vanilla';
 import type {
   DiagnosticsStripRow,
   DiagnosticsStripSlice,
+  EventsPanelSlice,
   GlossaryPanelSlice,
   RelationshipsPanelSlice,
 } from '@atypical/koine-ui';
 import type { AppState } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
 import { isAllContexts, scopeGlossaryModel, scopeGraph } from '@/model/activeContext';
-import { extractRelationships } from '@/model/modelTables';
+import { extractEventFlow, extractEvents, extractRelationships } from '@/model/modelTables';
 import { coverage, groupByContext } from '@/model/glossary';
 import { severityErrorOrWarning } from '@/lsp/severity';
 import type { DiagramGraph, GlossaryModel, LspDiagnostic } from '@/lsp/lsp';
@@ -345,5 +346,58 @@ function glossarySliceEqual(a: GlossaryPanelSlice, b: GlossaryPanelSlice): boole
         );
       })
     );
+  });
+}
+
+/**
+ * Adapts the controller-fetched merged diagram graph + the active-context slice to `EventsPanel`'s generic
+ * `ReadableStore<EventsPanelSlice>` — already scoped to the active bounded context and pre-extracted into
+ * the table rows AND the flow legend nodes (issue #1408), plus the `scopeKey` the panel uses to re-frame
+ * the host-owned maxGraph canvas. The panel never sees `DiagramGraph`, `extractEvents`, or `extractEventFlow`
+ * (they stay Studio-side), and the flow CANVAS is rendered by an injected `FlowRenderer` — maxGraph never
+ * enters koine-ui. Like the other tranche-4 adapters, `graph` is fixed for this instance so the selector is
+ * memoised on `s.activeContext`, with `eventsSliceEqual` gating the rebuild notification.
+ */
+export function createEventsPanelStore(store: StoreApi<AppState>, graph: DiagramGraph) {
+  let memo: { context: string; slice: EventsPanelSlice } | undefined;
+  return zustandToReadableStore(
+    store,
+    (s): EventsPanelSlice => {
+      if (memo != null && memo.context === s.activeContext) return memo.slice;
+      const scoped = scopeGraph(graph, s.activeContext);
+      const slice: EventsPanelSlice = {
+        rows: extractEvents(scoped),
+        scopeKey: s.activeContext,
+        flowNodes: extractEventFlow(scoped).nodes,
+      };
+      memo = { context: s.activeContext, slice };
+      return slice;
+    },
+    eventsSliceEqual,
+  );
+}
+
+/** `scopeKey` plus element-wise rows (`span` by reference) + flow legend nodes — same rationale as
+ *  `stripSliceEqual` above. */
+function eventsSliceEqual(a: EventsPanelSlice, b: EventsPanelSlice): boolean {
+  if (a.scopeKey !== b.scopeKey || a.rows.length !== b.rows.length || a.flowNodes.length !== b.flowNodes.length) {
+    return false;
+  }
+  const rowsEqual = a.rows.every((r, i) => {
+    const o = b.rows[i];
+    return (
+      r.name === o.name &&
+      r.qualifiedName === o.qualifiedName &&
+      r.type === o.type &&
+      r.publishedBy === o.publishedBy &&
+      r.context === o.context &&
+      r.when === o.when &&
+      r.span === o.span
+    );
+  });
+  if (!rowsEqual) return false;
+  return a.flowNodes.every((n, i) => {
+    const o = b.flowNodes[i];
+    return n.id === o.id && n.label === o.label && n.kind === o.kind && n.context === o.context;
   });
 }
