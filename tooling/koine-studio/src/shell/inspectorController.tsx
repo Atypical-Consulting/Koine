@@ -536,6 +536,12 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // (interactive) are not model-derived, so they're excluded; the Explorer/Overview ('model') is always
   // visible, so it repaints on every edit.
 
+  // Bumped by invalidateModelDerivedCaches() on every edit. getCachedDomainIndex() and ensureModelIndex()
+  // each capture this before awaiting their build and only apply the result if it's still unchanged
+  // after — a stale, now-superseded build that resolves late is dropped instead of clobbering fresher
+  // (possibly already-rebuilt, possibly still-null) cache state (TOCTOU race, #1447).
+  let cacheGeneration = 0;
+
   // The assistant's domain index is another model-derived view (built from the same context-map +
   // glossary the views above use), so it's cached the same way: `null` = stale/unbuilt, `{ value }` =
   // built (value undefined for a scratch/empty model). invalidateDocViews() clears it on any model
@@ -595,9 +601,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // until the next edit clears it (invalidateDocViews). ide.ts's assistant getContext awaits this.
   async function getCachedDomainIndex(): Promise<DomainIndex | undefined> {
     if (cachedDomainIndex === null) {
-      cachedDomainIndex = { value: await buildDomainIndex() };
+      const gen = cacheGeneration;
+      const value = await buildDomainIndex();
+      // A later invalidateModelDerivedCaches() call already bumped the generation while this build was
+      // in flight — a fresher build (or a fresh `null`) is already in place; drop this stale write and
+      // let the next caller redo the check-and-build itself. Also drop it if the controller was torn
+      // down while awaiting — a disposed facade must never resurrect a cache entry post-teardown.
+      if (gen === cacheGeneration && !lifecycle.isDisposed()) cachedDomainIndex = { value };
     }
-    return cachedDomainIndex.value;
+    return cachedDomainIndex ? cachedDomainIndex.value : undefined;
   }
 
   // --- Source Control (git) right-rail panel (#272) -------------------------
@@ -796,15 +808,26 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
    */
   function ensureModelIndex(): Promise<ModelIndex> {
     if (modelIndex) return Promise.resolve(modelIndex);
-    indexPromise ??= Promise.all([
-      fetchGlossaryModel(),
-      lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
-      fetchStructuredModel(),
-    ])
-      .then(([glossary, docs, model]) => (modelIndex = buildModelIndex(glossary, docs, model ?? undefined)))
-      .finally(() => {
-        indexPromise = null;
-      });
+    if (indexPromise === null) {
+      const gen = cacheGeneration;
+      indexPromise = Promise.all([
+        fetchGlossaryModel(),
+        lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
+        fetchStructuredModel(),
+      ])
+        .then(([glossary, docs, model]) => {
+          const built = buildModelIndex(glossary, docs, model ?? undefined);
+          // Same TOCTOU guard as getCachedDomainIndex() (#1447): a later invalidation already bumped
+          // the generation while this build was in flight, so drop the stale write instead of
+          // clobbering the fresher (or freshly-rebuilt) modelIndex. Also drop it post-teardown — a
+          // disposed facade must never resurrect a cache entry.
+          if (gen === cacheGeneration && !lifecycle.isDisposed()) modelIndex = built;
+          return modelIndex ?? built;
+        })
+        .finally(() => {
+          indexPromise = null;
+        });
+    }
     return indexPromise;
   }
 
@@ -897,6 +920,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // assistant's domain index — so the next model load / getCachedDomainIndex call rebuilds against the
   // current model. Called from surfaceLoaders' invalidateDocViews() on every model edit.
   function invalidateModelDerivedCaches(): void {
+    cacheGeneration++;
     modelIndex = null;
     indexPromise = null;
     // Drop the shared glossary/model in-flight fetch too (#484): without this, a fetch already in flight
