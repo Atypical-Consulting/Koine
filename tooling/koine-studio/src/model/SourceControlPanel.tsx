@@ -680,11 +680,21 @@ export function SourceControlPanel(props: {
     // the neutral `·`, never a misleading `+0`.
     const ns = numstat.get(`${f.staged}:${f.relPath}`);
     const stat = ns && ns.added !== null && ns.removed !== null ? { add: ns.added, del: ns.removed } : null;
-    const slash = f.relPath.lastIndexOf('/');
-    const name = slash >= 0 ? f.relPath.slice(slash + 1) : f.relPath;
-    const dir = slash >= 0 ? f.relPath.slice(0, slash) : '';
+    // A trailing `/` is the porcelain marker for a collapsed untracked-directory row (see `onDiscard`
+    // above). Split against the slash-stripped path so the folder's own name lands in `name` — splitting
+    // the raw path finds the trailing slash itself and puts the whole name in `dir` instead, leaving the
+    // primary label blank (#1462).
+    const isDir = f.relPath.endsWith('/');
+    const splitPath = isDir ? f.relPath.slice(0, -1) : f.relPath;
+    const slash = splitPath.lastIndexOf('/');
+    const name = slash >= 0 ? splitPath.slice(slash + 1) : splitPath;
+    const dir = slash >= 0 ? splitPath.slice(0, slash) : '';
     return (
-      <li key={`${f.staged ? 's' : 'w'}:${f.relPath}`} class="koi-sc-file" data-relpath={f.relPath}>
+      <li
+        key={`${f.staged ? 's' : 'w'}:${f.relPath}`}
+        class={`koi-sc-file${isDir ? ' koi-sc-file--dir' : ''}`}
+        data-relpath={f.relPath}
+      >
         <div class="koi-sc-file-row">
           <span class={`koi-sc-glyph koi-sc-glyph-${f.status}`} aria-hidden="true">
             {STATUS_GLYPH[f.status]}
@@ -696,8 +706,10 @@ export function SourceControlPanel(props: {
             aria-expanded={expanded}
             onClick={() => void onToggleDiff(f)}
           >
+            {/* A trailing slash on the name is the folder cue — the same convention `relPath` itself
+                already used, so a directory row reads as one at a glance without a dedicated icon. */}
             <span class="koi-sc-name" aria-hidden="true">
-              {name}
+              {isDir ? `${name}/` : name}
             </span>
             {dir && (
               <span class="koi-sc-dir" aria-hidden="true">

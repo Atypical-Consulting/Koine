@@ -609,6 +609,24 @@ describe('SourceControlPanel — Discard controls (#1151)', () => {
     await waitFor(() => expect(group(view.container, 'Untracked')).toBeNull());
   });
 
+  test('an untracked DIRECTORY row shows its folder name as the primary label, with a folder cue', async () => {
+    const git = makeGit([{ relPath: 'scratch/', staged: false, status: 'untracked' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const row = await waitFor(() => {
+      const el = view.container.querySelector<HTMLElement>('[data-relpath="scratch/"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    // Pre-fix bug: `lastIndexOf('/')` on a trailing-slash relPath finds the trailing slash itself, so
+    // the folder's own name lands in the muted `.koi-sc-dir` line instead of the bold `.koi-sc-name`.
+    // The re-added trailing slash on the primary label is the folder cue (mirrors how git itself
+    // denotes a directory), so a directory row reads as one without a dedicated icon.
+    expect(row.querySelector('.koi-sc-name')?.textContent).toBe('scratch/');
+    expect(row.querySelector('.koi-sc-dir')).toBeNull();
+    expect(row.classList.contains('koi-sc-file--dir')).toBe(true);
+  });
+
   test('discarding an untracked DIRECTORY row asks with folder wording and routes the trailing-slash path through', async () => {
     vi.mocked(koiConfirm).mockResolvedValue(true);
     const git = makeGit([{ relPath: 'scratch/', staged: false, status: 'untracked' }]);
