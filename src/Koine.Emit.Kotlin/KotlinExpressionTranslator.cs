@@ -225,25 +225,27 @@ internal sealed class KotlinExpressionTranslator
     /// null-safe-map-widened (<c>?.let { java.math.BigDecimal.valueOf(it) }</c>) when its own inferred type
     /// is an OPTIONAL <c>Int</c> while the SIBLING branch is <c>Decimal</c> — the branch's own rendering is
     /// already <c>Long?</c>-shaped, so a bare <c>BigDecimal.valueOf(...)</c> wrap around a nullable receiver
-    /// does not compile; mapping inside the nullable chain is required instead. <c>needsWiden</c> and
-    /// <c>needsOptionalWiden</c> are mutually exclusive (they key off the same branch's own optionality).
-    /// <b>Unlike Java/Rust, Kotlin needs no <c>needsSomeWrap</c> analogue</b>: Kotlin's <c>if</c>-expression
+    /// does not compile; mapping inside the nullable chain is required instead. <c>NeedsWiden</c> and
+    /// <c>NeedsOptionalWiden</c> are mutually exclusive (they key off the same branch's own optionality).
+    /// <b>Unlike Java/Rust, Kotlin needs no <c>NeedsSomeWrap</c> analogue</b>: Kotlin's <c>if</c>-expression
     /// least-upper-bound computation already infers <c>T?</c> when one arm is <c>T</c> and the sibling arm
     /// is <c>T?</c> of the SAME underlying type (after any widen above) — a plain non-nullable <c>T</c> is
     /// directly assignable wherever <c>T?</c> is expected, so an optionality-only mismatch (or a widen
     /// composed with a sibling-optional mismatch, e.g. the <c>Cash</c> fixture in
     /// <c>KotlinConformanceTests</c>) needs no extra wrap on either arm — confirmed by the accompanying
-    /// conformance tests compiling with a real <c>kotlinc</c> when available.
+    /// conformance tests compiling with a real <c>kotlinc</c> when available. The DECISION — which
+    /// dimensions apply — is the shared, cross-target <see cref="BranchReconciliation.Classify"/> (#1368);
+    /// only the Kotlin RENDERING below is local (Kotlin simply ignores the classifier's
+    /// <see cref="BranchReconciliation.NeedsSomeWrap"/>, having no optional-lift to emit).
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
         TypeScope scope = EffectiveScope();
         TypeRef? branchType = _resolver.Infer(branch, scope);
         TypeRef? siblingType = _resolver.Infer(sibling, scope);
-        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
-        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
+        BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
-        if (needsWiden)
+        if (needs.NeedsWiden)
         {
             // Reuses the same BigDecimal-position widening WriteBinary already applies to a plain
             // arithmetic/comparison operand, so a literal `0` branch gets its BigDecimal.ZERO shortcut here
@@ -252,7 +254,7 @@ internal sealed class KotlinExpressionTranslator
             return;
         }
 
-        if (needsOptionalWiden)
+        if (needs.NeedsOptionalWiden)
         {
             WriteAtom(branch, sb);
             sb.Append("?.let { java.math.BigDecimal.valueOf(it) }");

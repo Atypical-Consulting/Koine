@@ -311,18 +311,20 @@ internal sealed class PythonExpressionTranslator
     /// branch against an optional sibling needs no rendering change at all (mirrors the TypeScript/Kotlin
     /// conclusion for their own structural-union optional shapes).
     /// </para>
-    /// <c>needsWiden</c> and <c>needsOptionalWiden</c> are mutually exclusive (they key off the same
-    /// branch's own optionality).
+    /// <c>NeedsWiden</c> and <c>NeedsOptionalWiden</c> are mutually exclusive (they key off the same
+    /// branch's own optionality). The DECISION — which dimensions apply — is the shared, cross-target
+    /// <see cref="BranchReconciliation.Classify"/> (#1368); only the Python RENDERING below is local
+    /// (Python ignores the classifier's <see cref="BranchReconciliation.NeedsSomeWrap"/>, per the
+    /// no-lift-needed reasoning above).
     /// </summary>
     private void WriteReconciledBranch(Expr branch, Expr sibling, StringBuilder sb)
     {
         TypeScope scope = EffectiveScope();
         TypeRef? branchType = _resolver.Infer(branch, scope);
         TypeRef? siblingType = _resolver.Infer(sibling, scope);
-        var needsWiden = branchType is { Name: "Int", IsOptional: false } && siblingType?.Name == "Decimal";
-        var needsOptionalWiden = branchType is { Name: "Int", IsOptional: true } && siblingType?.Name == "Decimal";
+        BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
-        if (needsWiden)
+        if (needs.NeedsWiden)
         {
             sb.Append("Decimal(");
             Write(branch, sb);
@@ -330,7 +332,7 @@ internal sealed class PythonExpressionTranslator
             return;
         }
 
-        if (needsOptionalWiden)
+        if (needs.NeedsOptionalWiden)
         {
             // A walrus binding (not a duplicated `<branch>`, unlike the CoalesceExpr lowering above) —
             // `is not None` can only type-narrow a simple name/attribute chain under `mypy --strict`, not
