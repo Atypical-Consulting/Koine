@@ -20,36 +20,3 @@ dotnet run --project src/Koine.Cli -- build templates/starters/ordering --target
 The `.php.txt` suffix is on purpose: the demo's own `php -l` / `phpstan` run only ever checks
 `demo/php/{generated,main.php}`, so these reference copies are never picked up as duplicate class
 declarations.
-
-## A known emitter gap visible in `Order.php.txt`
-
-Line 31 of `Order.php.txt` reads:
-
-```php
-public function equals(self $other): bool
-{
-    return $this->id === $other->id;
-}
-```
-
-`===` on two PHP objects is **identity** comparison (same object instance), not value comparison.
-Contrast this with the same aggregate's TypeScript output (`this.id.equals(other.id)`, an explicit
-structural call) or its Python output (`self.id == other.id`, value-based via the dataclass's
-generated `__eq__`). A quick repro:
-
-```php
-$a = new Koine\Ordering\ValueObjects\OrderId('11111111-1111-4111-8111-111111111111');
-$b = new Koine\Ordering\ValueObjects\OrderId('11111111-1111-4111-8111-111111111111');
-var_dump($a === $b); // false -- same UUID string, different PHP object
-var_dump($a == $b);  // true  -- OrderId itself compares structurally (via PHP's `==`)
-```
-
-So two `Order` instances holding *value-equal but distinct* `OrderId` objects — exactly what a
-repository reconstructing an entity from a persisted string on two separate loads would produce —
-would incorrectly compare as unequal via the emitted `Order::equals()`. `demo/php/main.php` never
-exercises this cross-instance case (it reuses the very same `OrderId` PHP object reference for its
-"same identity" assertion, the same way the TypeScript/Python demos are written), so the demo itself
-stays green; this note — plus the `KNOWN GAPS` doc comment atop `main.php` — is the documented flag
-for the human follow-up the top-level task instructions call for: the PHP emitter's entity
-`equals()` should call `$this->id->equals($other->id)` (or use `==`) instead of `===`, matching the
-TypeScript/Python backends' value-based identity comparison.

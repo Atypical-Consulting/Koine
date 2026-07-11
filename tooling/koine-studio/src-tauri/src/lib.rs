@@ -999,50 +999,57 @@ fn parse_branch_ab(rest: &str) -> Option<(i64, i64)> {
 }
 
 /// `git status` for the open folder: the current branch plus every changed path. Parses
-/// `--porcelain=v2 -b` — the branch from the `# branch.head` header; the upstream ref + ahead/behind
-/// counts from `# branch.upstream` / `# branch.ab` (both emitted only when the branch tracks an
-/// upstream — `upstream` needs BOTH, so a gone upstream ref with no computable counts stays `None`);
-/// `1 <XY> …` ordinary entries (staged when X≠`.`, unstaged when Y≠`.`, so a both-areas file appears
-/// twice); `2 …` renames/copies (new path before the tab); `? …` untracked; `u …` unmerged →
-/// `conflicted`. `Err` when `dir` is not a work tree.
+/// `--porcelain=v2 -b -z` — NUL-terminated records, so every path is printed **verbatim** (never
+/// C-quoted, regardless of `core.quotePath` or non-ASCII/quote/backslash bytes in the name) and the
+/// output tokenizes with a plain `split('\0')`. The branch comes from the `# branch.head` header; the
+/// upstream ref + ahead/behind counts from `# branch.upstream` / `# branch.ab` (both emitted only when
+/// the branch tracks an upstream — `upstream` needs BOTH, so a gone upstream ref with no computable
+/// counts stays `None`); `1 <XY> …` ordinary entries (staged when X≠`.`, unstaged when Y≠`.`, so a
+/// both-areas file appears twice); `2 …` renames/copies (the entry token's last field is the new path,
+/// verbatim; with `-z` there is no tab — the original path has its own following NUL token, which is
+/// consumed and discarded here); `? …` untracked; `u …` unmerged → `conflicted`. `Err` when `dir` is not
+/// a work tree.
 #[tauri::command]
 fn git_status(dir: String) -> Result<GitStatus, String> {
-    let out = run_git(&dir, &["status", "--porcelain=v2", "-b"])?;
+    let out = run_git(&dir, &["status", "--porcelain=v2", "-b", "-z"])?;
     let mut branch = String::new();
     let mut upstream_ref: Option<String> = None;
     let mut ahead_behind: Option<(i64, i64)> = None;
     let mut files: Vec<GitFile> = Vec::new();
 
-    for line in out.lines() {
-        if let Some(rest) = line.strip_prefix("# branch.head ") {
+    let mut tokens = out.split('\0').filter(|t| !t.is_empty());
+    while let Some(token) = tokens.next() {
+        if let Some(rest) = token.strip_prefix("# branch.head ") {
             branch = rest.trim().to_string();
-        } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+        } else if let Some(rest) = token.strip_prefix("# branch.upstream ") {
             upstream_ref = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+        } else if let Some(rest) = token.strip_prefix("# branch.ab ") {
             ahead_behind = parse_branch_ab(rest);
-        } else if let Some(rest) = line.strip_prefix("? ") {
+        } else if let Some(rest) = token.strip_prefix("? ") {
             files.push(GitFile {
                 rel_path: rest.to_string(),
                 staged: false,
                 status: "untracked".to_string(),
             });
-        } else if let Some(rest) = line.strip_prefix("1 ") {
-            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>  (8 fields; path may contain spaces).
+        } else if let Some(rest) = token.strip_prefix("1 ") {
+            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>  (8 fields; -z prints the path verbatim,
+            // spaces included, with no trailing separator to strip).
             let mut fields = rest.splitn(8, ' ');
             let xy = fields.next().unwrap_or("..");
             if let Some(path) = fields.nth(6) {
                 push_xy_files(&mut files, xy, path);
             }
-        } else if let Some(rest) = line.strip_prefix("2 ") {
-            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>\t<origPath>  (9 fields).
+        } else if let Some(rest) = token.strip_prefix("2 ") {
+            // <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>  (9 fields). The original path is
+            // NOT part of this token under -z — it is the next NUL-separated token, consumed below so
+            // it isn't misparsed as its own record.
             let mut fields = rest.splitn(9, ' ');
             let xy = fields.next().unwrap_or("..");
-            if let Some(path_and_orig) = fields.nth(7) {
-                // The new path precedes the tab; the original path follows it.
-                let path = path_and_orig.split('\t').next().unwrap_or(path_and_orig);
+            if let Some(path) = fields.nth(7) {
                 push_xy_files(&mut files, xy, path);
             }
-        } else if let Some(rest) = line.strip_prefix("u ") {
+            tokens.next(); // discard the orig-path token
+        } else if let Some(rest) = token.strip_prefix("u ") {
             // Unmerged: <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>  (10 fields).
             let mut fields = rest.splitn(10, ' ');
             if let Some(path) = fields.nth(9) {
@@ -3431,6 +3438,82 @@ mod tests {
         // them into Staged Changes / Changes by the flag alone.
         assert!(has_file(&status.files, "b.txt", true, "modified"), "{:?}", status.files);
         assert!(has_file(&status.files, "b.txt", false, "modified"), "{:?}", status.files);
+    }
+
+    #[test]
+    fn git_status_reports_non_ascii_paths_verbatim_and_pathspecs_round_trip() {
+        let repo = init_repo();
+        repo.write("crème.koi", "one\n");
+        repo.git(&["add", "crème.koi"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Modify the tracked non-ASCII file and add an untracked one, both with non-ASCII names —
+        // porcelain v2 without `-z` would C-quote both (`core.quotePath` defaults to true).
+        repo.write("crème.koi", "two\n");
+        repo.write("naïve café.txt", "y\n");
+
+        let status = git_status(repo.path()).unwrap();
+
+        assert!(has_file(&status.files, "crème.koi", false, "modified"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "naïve café.txt", false, "untracked"),
+            "{:?}",
+            status.files
+        );
+        for f in &status.files {
+            assert!(!f.rel_path.starts_with('"'), "relPath still C-quoted: {:?}", f.rel_path);
+        }
+
+        // Feed git_status's OWN returned relPath back into git as a pathspec — the actual round
+        // trip the panel performs — rather than a hardcoded literal, so a future regression that
+        // quotes only the relPath (leaving the literal correct) would still be caught here.
+        let modified = status
+            .files
+            .iter()
+            .find(|f| f.rel_path == "crème.koi" && !f.staged)
+            .expect("crème.koi is present as an unstaged modification")
+            .rel_path
+            .clone();
+        let untracked = status
+            .files
+            .iter()
+            .find(|f| f.rel_path == "naïve café.txt")
+            .expect("naïve café.txt is present as untracked")
+            .rel_path
+            .clone();
+        assert!(git_stage(repo.path(), vec![modified.clone()]).is_ok());
+        assert!(git_diff(repo.path(), modified, true).is_ok());
+        assert!(git_discard(repo.path(), Vec::new(), vec![untracked]).is_ok());
+    }
+
+    #[test]
+    fn git_status_parses_a_rename_entry_with_z_and_consumes_the_orig_path() {
+        let repo = init_repo();
+        repo.write("crème.koi", "one\n");
+        repo.write("other.txt", "x\n");
+        repo.git(&["add", "crème.koi", "other.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Stage a rename of the non-ASCII file, and leave another file untracked so the record
+        // FOLLOWING the rename in the porcelain output also has to parse correctly — proving the
+        // orig-path token (with `-z`, its own NUL-separated field) is consumed and not misread as
+        // the start of the next record.
+        repo.git(&["mv", "crème.koi", "brûlée.koi"]);
+        repo.write("zz-untracked.txt", "z\n");
+
+        let status = git_status(repo.path()).unwrap();
+
+        assert!(has_file(&status.files, "brûlée.koi", true, "renamed"), "{:?}", status.files);
+        assert!(
+            !status.files.iter().any(|f| f.rel_path == "crème.koi"),
+            "original path leaked as its own entry: {:?}",
+            status.files
+        );
+        assert!(
+            has_file(&status.files, "zz-untracked.txt", false, "untracked"),
+            "record after rename mis-parsed: {:?}",
+            status.files
+        );
     }
 
     #[test]
