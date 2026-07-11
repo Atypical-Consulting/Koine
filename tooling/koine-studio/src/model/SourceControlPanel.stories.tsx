@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { expect, waitFor } from 'storybook/test';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
-import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus } from '@/host/types';
+import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, GitUpstream } from '@/host/types';
 
 // The right-rail Source Control panel (#272), converged to the PR #1140 handoff design (#1142): the
 // header actions + branch/sync bar, the bordered commit composer with its split ⌘⏎ button, the
@@ -18,10 +18,17 @@ import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus } from '@/host/ty
 const TOKEN = 'file:///work';
 
 /** A static in-memory git surface: gitStatus returns the given snapshot; gitNumstat feeds the eager
- *  per-row `+n/−n` counts (#1152); mutations are inert no-ops (stories don't drive interactions).
- *  `satisfies GitSurface` keeps it structurally exact. */
-function makeGit(files: GitFile[], log: GitLogEntry[] = [], numstat: GitNumstatEntry[] = []): GitSurface {
-  const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })) });
+ *  per-row `+n/−n` counts (#1152); `upstream` seeds the sync readout's ahead/behind data (#1150) —
+ *  defaulted to a diverged origin/main so the counts + push button render; pass null for a branch
+ *  with no upstream. Mutations are inert no-ops (stories don't drive interactions). `satisfies
+ *  GitSurface` keeps it structurally exact. */
+function makeGit(
+  files: GitFile[],
+  log: GitLogEntry[] = [],
+  numstat: GitNumstatEntry[] = [],
+  upstream: GitUpstream | null = { ref: 'origin/main', ahead: 2, behind: 1 },
+): GitSurface {
+  const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })), upstream });
   return {
     canUseGit: true,
     gitStatus: async () => snapshot(),
@@ -29,7 +36,9 @@ function makeGit(files: GitFile[], log: GitLogEntry[] = [], numstat: GitNumstatE
     gitNumstat: async () => numstat.map((e) => ({ ...e })),
     gitStage: async () => {},
     gitUnstage: async () => {},
+    gitDiscard: async () => {},
     gitCommit: async () => {},
+    gitPush: async () => {},
     gitBranches: async () => ['main', 'feature/scm'],
     gitCheckout: async () => {},
     gitLog: async () => log,
@@ -91,7 +100,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /** Desktop host with a dirty working tree: files grouped into Staged / Changes / Untracked, a branch
- *  switcher, and the recent-commit log. */
+ *  switcher, and the recent-commit log. The default fixture's diverged upstream (↑2 · ↓1 against
+ *  origin/main, #1150) renders the real-count sync readout with its accent-tinted push button. */
 export const Desktop: Story = {};
 
 /** The ⋮ header overflow menu opened (#1153): the live createFloatingMenu surface — Refresh / Stage all /
@@ -151,6 +161,14 @@ export const FullHistoryExpanded: Story = {
  *  clean" message still render. */
 export const CleanTree: Story = {
   args: { git: makeGit([], seededLog) },
+};
+
+/** A branch with no upstream (#1150) — detached HEAD, a fresh local branch, or a repo with no remote:
+ *  the sync slot shows a muted "No upstream" hint with no counts (a 0/0 would be a lie) and no push
+ *  button (a dead control would still be announced to AT users). */
+export const NoUpstream: Story = {
+  name: 'No upstream',
+  args: { git: makeGit(changedFiles, seededLog, changedNumstat, null) },
 };
 
 /** Browser host (`canUseGit === false`): the panel paints the "available in the desktop app" empty state

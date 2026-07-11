@@ -62,3 +62,17 @@ export { useReadableStore, type ReadableStore } from './host/store';
 // slice of host state instead of Koine Studio's concrete `StoreApi<AppState>`.
 export { HistoryControls, type HistoryControlsSlice } from './components/HistoryControls';
 export { WorkspaceProblemsBadge, type WorkspaceProblemsSlice } from './components/WorkspaceProblemsBadge';
+
+// --- Third-tranche host-adapter migrations (issue #1244) -------------------------------------
+// Moved from koine-studio's src/shell/UnsavedIndicator.tsx, src/diagnostics/DiagnosticsStripPanel.tsx
+// and src/docs/DocsPanelHost.tsx, continuing #944's pattern: each depends on `ReadableStore<T>` for its
+// slice of host state; the host-side classification/derivation stays in koine-studio's adapters
+// (src/store/readableStores.ts).
+export { UnsavedIndicator, type UnsavedIndicatorSlice } from './components/UnsavedIndicator';
+export {
+  DiagnosticsStripPanel,
+  type DiagnosticsStripSlice,
+  type DiagnosticsStripRow,
+  type DiagnosticsStripRange,
+} from './components/DiagnosticsStripPanel';
+export { DocsPanelHost, type DocsPanelHostSlice } from './components/DocsPanelHost';

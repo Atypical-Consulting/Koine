@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
-import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus } from '@/host/types';
+import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, GitUpstream } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
 import { axe } from 'vitest-axe';
 
@@ -21,10 +21,12 @@ const TOKEN = 'file:///work';
 // gitCommit clears it, so each mutation genuinely moves the file between groups on the next gitStatus
 // re-fetch — exactly as the real desktop host would. gitStatus returns a fresh snapshot every call, and
 // every method is a vi.fn so a test can assert the exact call. `satisfies GitSurface` keeps the concrete
-// Mock types so `.mock`/`toHaveBeenCalledWith` stay available on the returned object.
-function makeGit(initial: GitFile[]) {
+// Mock types so `.mock`/`toHaveBeenCalledWith` stay available on the returned object. `upstream` seeds
+// the snapshot's upstream-tracking data (#1150) — defaulted to an in-sync origin/main so most tests see
+// the counts + push affordance; pass null for a branch with no upstream.
+function makeGit(initial: GitFile[], upstream: GitUpstream | null = { ref: 'origin/main', ahead: 0, behind: 0 }) {
   let files: GitFile[] = initial.map((f) => ({ ...f }));
-  const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })) });
+  const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })), upstream });
   return {
     canUseGit: true,
     gitStatus: vi.fn(async () => snapshot()),
@@ -42,6 +44,14 @@ function makeGit(initial: GitFile[]) {
     gitCommit: vi.fn(async () => {
       files = [];
     }),
+    // A confirmed discard removes each named path's change from the backing model — a reverted tracked
+    // file and a deleted untracked one both vanish from the next gitStatus snapshot, as on the real
+    // host. The caller supplies the tracked/untracked split explicitly (the new gitDiscard contract).
+    gitDiscard: vi.fn(async (_token: string, trackedPaths: string[], untrackedPaths: string[]) => {
+      const gone = new Set([...trackedPaths, ...untrackedPaths]);
+      files = files.filter((f) => !gone.has(f.relPath));
+    }),
+    gitPush: vi.fn(async () => {}),
     gitBranches: vi.fn(async () => ['main', 'feature']),
     gitCheckout: vi.fn(async () => {}),
     gitLog: vi.fn(
@@ -174,6 +184,70 @@ describe('SourceControlPanel', () => {
     expect(view.getByRole('button', { name: /Refresh/i })).toBeTruthy();
   });
 
+  test('renders the REAL upstream ahead/behind counts and an accessible push action (#1150)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 2, behind: 1 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+
+    // The readout shows the snapshot's real counts, not a hard-coded 0/0…
+    const sync = view.container.querySelector('.koi-sc-sync')!;
+    expect(sync.textContent).toContain('↑2');
+    expect(sync.textContent).toContain('↓1');
+    // …and the sr-only sentence names the upstream ref with the same numbers.
+    expect(sync.textContent).toContain('2 commits ahead of, 1 behind origin/main');
+
+    // The push affordance is a real button, named for its target ref.
+    const push = view.getByRole('button', { name: 'Push to origin/main' }) as HTMLButtonElement;
+    expect(push.disabled).toBe(false);
+  });
+
+  test('clicking Push runs gitPush through mutate and re-fetches status (#1150)', async () => {
+    const git = makeGit(
+      [{ relPath: 'a.koi', staged: true, status: 'modified' }],
+      { ref: 'origin/main', ahead: 2, behind: 0 },
+    );
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const push = await view.findByRole('button', { name: 'Push to origin/main' });
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+    fireEvent.click(push);
+
+    await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
+    // The mutate() follow-up reload re-reads status, so the counts track the pushed repository.
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+  });
+
+  test('a rejected push surfaces as the action-error alert, not a crash (#1150)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
+    git.gitPush.mockRejectedValue(new Error('non-fast-forward'));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Push to origin/main' }));
+
+    const alert = await view.findByRole('alert');
+    expect(alert.textContent).toContain('non-fast-forward');
+  });
+
+  test('no upstream: no counts, no push button — a hint instead of a fake 0/0 (#1150)', async () => {
+    const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }], null);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await view.findByDisplayValue('main');
+
+    // The readout slot shows a plain no-upstream hint — never fake ↑0/↓0 counts…
+    const sync = view.container.querySelector('.koi-sc-sync')!;
+    expect(sync.textContent).toMatch(/no upstream/i);
+    expect(sync.textContent).not.toContain('↑');
+    expect(sync.textContent).not.toContain('↓');
+    // …and no push button (a dead control would still be announced to AT users).
+    expect(view.queryByRole('button', { name: /^Push to / })).toBeNull();
+
+    // The branch bar stays accessibility-clean in the no-upstream state too.
+    expect(await axe(view.container.querySelector('.koi-sc-branchbar')!)).toHaveNoViolations();
+  });
+
   test('a file focus opens the targeted file\'s diff, not just the panel (#1165)', async () => {
     const git = makeGit([
       { relPath: 'a.koi', staged: false, status: 'modified' },
@@ -269,16 +343,6 @@ describe('SourceControlPanel', () => {
     await waitFor(() => expect(git.gitUnstage).toHaveBeenCalledWith(TOKEN, ['a.koi', 'd.koi']));
   });
 
-  test('the non-staged group renders a disabled Discard-all placeholder (unwired)', async () => {
-    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
-    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
-
-    const discardAll = (await view.findByRole('button', {
-      name: /Discard all changes/i,
-    })) as HTMLButtonElement;
-    expect(discardAll.disabled).toBe(true);
-  });
-
   test('typing a message and clicking Commit calls gitCommit with the message', async () => {
     const git = makeGit([{ relPath: 'a.koi', staged: true, status: 'modified' }]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
@@ -369,7 +433,9 @@ describe('SourceControlPanel', () => {
       gitNumstat: vi.fn(async () => [] as GitNumstatEntry[]),
       gitStage: vi.fn(),
       gitUnstage: vi.fn(),
+      gitDiscard: vi.fn(),
       gitCommit: vi.fn(),
+      gitPush: vi.fn(),
       gitBranches: vi.fn(async () => ['main']),
       gitCheckout: vi.fn(),
       gitLog: vi.fn(async () => [] as GitLogEntry[]),
@@ -413,6 +479,158 @@ describe('SourceControlPanel', () => {
     ]);
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByRole('region', { name: 'Staged Changes' });
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SourceControlPanel — Discard controls (#1151)', () => {
+  beforeEach(() => {
+    vi.mocked(koiConfirm).mockReset();
+  });
+
+  test('a confirmed row Discard calls gitDiscard with that path and re-fetches status', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const discard = (await view.findByRole('button', { name: 'Discard b.koi changes' })) as HTMLButtonElement;
+    expect(discard.disabled).toBe(false);
+    const statusCallsBefore = git.gitStatus.mock.calls.length;
+    fireEvent.click(discard);
+
+    // A tracked (modified) row lands in the tracked bucket; the untracked bucket stays empty.
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi'], []));
+    expect(koiConfirm).toHaveBeenCalledTimes(1);
+    // The mutate() follow-up reload re-reads status, so the reverted file leaves its group.
+    await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
+    await waitFor(() => expect(group(view.container, 'Changes')).toBeNull());
+  });
+
+  test('declining the confirm aborts the discard — NO gitDiscard call, the change survives', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(false);
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Discard b.koi changes' }));
+
+    await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) discard microtask flush
+    expect(git.gitDiscard).not.toHaveBeenCalled();
+    expect(group(view.container, 'Changes')!.textContent).toContain('b.koi');
+  });
+
+  test('a confirmed group Discard-all passes every path of that group', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'modified' },
+      { relPath: 'a.koi', staged: true, status: 'modified' }, // staged — NOT part of the Changes group
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Changes')).not.toBeNull());
+    fireEvent.click(within(group(view.container, 'Changes')!).getByRole('button', { name: /Discard all changes/i }));
+
+    // The Changes group holds only tracked files, so the whole list rides the tracked bucket.
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi', 'c.koi'], []));
+    // The staged copy is untouched — group discard only covers the group's own paths.
+    await waitFor(() => expect(group(view.container, 'Staged Changes')!.textContent).toContain('a.koi'));
+  });
+
+  test('discarding an UNTRACKED row asks with delete wording and removes the file on confirm', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([{ relPath: 'c.koi', staged: false, status: 'untracked' }]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Discard c.koi changes' }));
+
+    // An untracked row lands in the untracked bucket (→ `git clean`); the tracked bucket stays empty.
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, [], ['c.koi']));
+    // An untracked file has no index/HEAD state to revert to — discard means DELETE, and the confirm
+    // copy must say so instead of the tracked-file "revert your edits" phrasing.
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.message).toContain('c.koi');
+    expect(req.message).toMatch(/permanently removed/i);
+    expect(req.message).not.toMatch(/revert/i);
+    expect(req.confirmLabel).toMatch(/delete/i);
+    // The confirmed delete removes the file on the next gitStatus → the Untracked group empties away.
+    await waitFor(() => expect(group(view.container, 'Untracked')).toBeNull());
+  });
+
+  test('the Untracked group Discard-all asks with group-level delete wording', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+      { relPath: 'd.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    await waitFor(() => expect(group(view.container, 'Untracked')).not.toBeNull());
+    fireEvent.click(
+      within(group(view.container, 'Untracked')!).getByRole('button', { name: /Discard all changes/i }),
+    );
+
+    // The Untracked group's whole list rides the untracked bucket; the tracked bucket stays empty.
+    await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, [], ['c.koi', 'd.koi']));
+    const req = vi.mocked(koiConfirm).mock.calls[0][0];
+    expect(req.message).toMatch(/2 untracked files/i);
+    expect(req.message).toMatch(/permanently/i);
+  });
+
+  test('a failed gitDiscard surfaces the action-error alert and leaves the group intact', async () => {
+    vi.mocked(koiConfirm).mockResolvedValue(true);
+    const git = makeGit([{ relPath: 'b.koi', staged: false, status: 'modified' }]);
+    git.gitDiscard.mockRejectedValue(new Error('restore failed'));
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    fireEvent.click(await view.findByRole('button', { name: 'Discard b.koi changes' }));
+
+    // The rejection lands in the same role="alert" every other mutation uses…
+    const alert = await view.findByRole('alert');
+    expect(alert.textContent).toContain('restore failed');
+    // …and the untouched file stays listed (no reload wiped the group on failure).
+    expect(group(view.container, 'Changes')!.textContent).toContain('b.koi');
+  });
+
+  test('rows in the Staged Changes group expose NO Discard button (mirrors the group header)', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' },
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await waitFor(() => expect(group(view.container, 'Staged Changes')).not.toBeNull());
+
+    // The staged group's header already withholds Discard-all; its rows must withhold the per-row
+    // Discard too — a staged row's "discard" would silently revert only the worktree delta, not the
+    // staged change the row shows (a data-loss trap).
+    expect(
+      within(group(view.container, 'Staged Changes')!).queryByRole('button', { name: /^Discard / }),
+    ).toBeNull();
+    // The non-staged row keeps its live Discard control.
+    expect(
+      within(group(view.container, 'Changes')!).getByRole('button', { name: 'Discard b.koi changes' }),
+    ).toBeTruthy();
+  });
+
+  test('the enabled Discard controls stay axe-clean and expose live (non-"coming soon") names (#1151)', async () => {
+    const git = makeGit([
+      { relPath: 'a.koi', staged: true, status: 'modified' }, // staged — contributes NO Discard control
+      { relPath: 'b.koi', staged: false, status: 'modified' },
+      { relPath: 'c.koi', staged: false, status: 'untracked' },
+    ]);
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+    await waitFor(() => expect(group(view.container, 'Changes')).not.toBeNull());
+
+    // Both non-staged per-row Discards and both group Discard-alls (Changes + Untracked) are live,
+    // enabled buttons — and exactly those four: the staged group (header AND row) offers none.
+    const discards = view.getAllByRole('button', { name: /^Discard / }) as HTMLButtonElement[];
+    expect(discards.length).toBe(4);
+    expect(discards.map((b) => b.getAttribute('aria-label'))).not.toContain('Discard a.koi changes');
+    for (const b of discards) {
+      expect(b.disabled).toBe(false);
+      expect(b.getAttribute('aria-label')).not.toMatch(/coming soon/i);
+    }
+
     expect(await axe(view.container)).toHaveNoViolations();
   });
 });

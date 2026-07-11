@@ -12,8 +12,11 @@
 // other Studio tree. Deliberately NOT a port of domainNavigator's/explorer's full machinery (drag-drop,
 // rename, context menus, filtering) — this is a small, self-contained widget over one pure interface.
 //
-// A folder row toggles `aria-expanded` (and hides/reveals its `<ul role="group">`) on click or
-// Enter/Space; a file row sets `aria-selected="true"` (clearing any prior selection — single-select)
+// A folder row toggles `aria-expanded` on click or Enter/Space — that ONE attribute is the sole
+// source of truth for collapse state (#1366): the stylesheet (`_deck.scss`) hides a collapsed folder's
+// `<ul role="group">` via `[role="treeitem"][aria-expanded="false"] > [role="group"] { display: none }`,
+// so the JS never writes a parallel `.hidden` that could drift out of sync. A file row sets
+// `aria-selected="true"` (clearing any prior selection — single-select)
 // and fires `onSelect(path)`. `setFiles` always rebuilds from scratch (a fresh `buildFileTree` call), so
 // a prior SELECTION never survives a rebuild — the caller re-asserts it via `selectPath` if it wants a
 // file to stay marked selected across a recompile. Collapsed-folder state, however, DOES survive a
@@ -45,6 +48,23 @@ export interface GeneratedFileTree {
    * in the current tree (absent entirely, or a folder path).
    */
   selectPath(path: string): boolean;
+  /**
+   * Apply ADR-0009 scope emphasis to the tree's TOP-LEVEL rows (the bounded-context folders/files,
+   * matched by path): the row whose path matches `activeContext` is marked `.on` and every other
+   * top-level row `.dim`, so the active scope reads without hiding anything (the whole-model overview
+   * stays browsable). Any previous emphasis is cleared first. `activeContext` of `null` (the *All
+   * contexts* case), or a scope that matches no top-level path, leaves every row neutral — a graceful
+   * no-op, the same behavior the old flat rail had.
+   *
+   * The matched row also gets `aria-current="true"` (cleared from every other top-level row first) —
+   * the `.on`/`.dim` classes alone are a COLOR-only signal (border-color + opacity), which fails WCAG
+   * AA's "don't rely on color alone" for the active-scope indicator this same ADR-0009 concern is
+   * enforced for elsewhere in this exact codebase: `inspectorController.tsx` (a leading `✓`) and
+   * `contextMapPanel.tsx`'s `emphasiseContextMapScope` (`aria-current="true"`, the pattern mirrored
+   * here). Owned by the tree itself (#1363) — it used to live in outputRail.ts, reaching into this
+   * widget's rendered DOM from outside.
+   */
+  emphasizeTopLevel(activeContext: string | null): void;
 }
 
 /**
@@ -59,11 +79,9 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   const tree = document.createElement('ul');
   element.appendChild(tree);
 
-  // path -> its <li role="treeitem"> in the CURRENT render, and folder <li> -> its own nested
-  // <ul role="group">, so click/selectPath/toggle resolve in O(1) instead of walking the DOM. Both
-  // reset on every setFiles() rebuild.
+  // path -> its <li role="treeitem"> in the CURRENT render, so click/selectPath/toggle resolve in O(1)
+  // instead of walking the DOM. Reset on every setFiles() rebuild.
   let byPath = new Map<string, HTMLElement>();
-  let folderGroups = new Map<HTMLElement, HTMLUListElement>();
 
   /** Every treeitem in the current render, in DOM/visual order — the one `querySelectorAll` both
    *  {@link visibleTreeItems} and {@link setRovingItem} derive from, so a call that needs both the full
@@ -72,17 +90,27 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
   }
 
+  /** Whether a row is reachable (not collapsed away): true unless some ANCESTOR folder row is collapsed.
+   *  Deliberately ancestor-only (#1366): `closest` tests the element ITSELF before its ancestors, and a
+   *  collapsed folder's own `<li>` also carries `aria-expanded="false"` — an `el.closest(...)` check
+   *  would wrongly exclude the collapsed folder's own (still visible, still tabbable) header row.
+   *  Starting the walk at `parentElement` skips the row itself, so only its DESCENDANTS disappear. A
+   *  top-level row has no collapsed ancestor to find, so it is always reachable. */
+  function isReachable(el: HTMLElement): boolean {
+    return !el.parentElement?.closest('[role="treeitem"][aria-expanded="false"]');
+  }
+
   /** The visible (not collapsed-away) treeitems, in DOM/visual order — a row is excluded once any
-   *  ancestor folder's `<ul role="group">` is `hidden`. */
+   *  ancestor folder is collapsed (see {@link isReachable}). */
   function visibleTreeItems(): HTMLElement[] {
-    return allTreeItems().filter((el) => el.closest('[hidden]') === null);
+    return allTreeItems().filter(isReachable);
   }
 
   /** Seed/refresh the roving tabindex: exactly one visible treeitem (`active`, else the first) is the
    *  lone tab stop; every other treeitem — visible or not — leaves the tab order. */
   function setRovingItem(active: HTMLElement | null): void {
     const all = allTreeItems();
-    const visible = all.filter((el) => el.closest('[hidden]') === null);
+    const visible = all.filter(isReachable);
     const tabbable = active && visible.includes(active) ? active : (visible[0] ?? null);
     for (const item of all) item.tabIndex = item === tabbable ? 0 : -1;
   }
@@ -129,11 +157,10 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
 
   /** Set a folder's expanded state directly (rather than toggling from its current state) — shared by
    *  `toggleFolder` (click/Enter/Space) and `navFor`'s `expand`/`collapse` (ArrowRight/ArrowLeft), which
-   *  each already know which direction they want rather than needing a flip. */
+   *  each already know which direction they want rather than needing a flip. `aria-expanded` is the ONLY
+   *  write (#1366): CSS derives the child group's visibility from it (see the module header). */
   function setFolderExpanded(li: HTMLElement, expanded: boolean): void {
     li.setAttribute('aria-expanded', String(expanded));
-    const group = folderGroups.get(li);
-    if (group) group.hidden = !expanded;
   }
 
   function toggleFolder(li: HTMLElement): void {
@@ -221,7 +248,6 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       group.setAttribute('role', 'group');
       for (const child of node.children) group.appendChild(buildRow(child, level + 1));
       li.appendChild(group);
-      folderGroups.set(li, group);
     } else {
       li.setAttribute('aria-selected', 'false');
     }
@@ -248,7 +274,6 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     }
 
     byPath = new Map();
-    folderGroups = new Map();
     const nodes = buildFileTree(files);
 
     if (nodes.length === 0) {
@@ -278,12 +303,11 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     const li = byPath.get(path);
     if (!li || li.dataset.kind !== 'file') return false;
 
-    // Expand every ancestor folder so the newly-selected file stays visible.
+    // Expand every ancestor folder so the newly-selected file stays visible (aria-expanded alone —
+    // CSS derives the child group's visibility from it, #1366).
     let ancestor = li.parentElement?.closest<HTMLElement>('[role="treeitem"]') ?? null;
     while (ancestor) {
       ancestor.setAttribute('aria-expanded', 'true');
-      const group = folderGroups.get(ancestor);
-      if (group) group.hidden = false;
       ancestor = ancestor.parentElement?.closest<HTMLElement>('[role="treeitem"]') ?? null;
     }
 
@@ -291,5 +315,24 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     return true;
   }
 
-  return { element, setFiles, selectPath };
+  function emphasizeTopLevel(activeContext: string | null): void {
+    // The top-level rows are exactly the tree `<ul>`'s direct `<li>` children — the widget's own
+    // structure, no attribute-selector re-derivation needed (setFiles builds them as `buildRow(node, 1)`).
+    const topLevel = Array.from(tree.children) as HTMLElement[];
+    for (const el of topLevel) {
+      el.classList.remove('on', 'dim');
+      el.removeAttribute('aria-current');
+    }
+
+    const matches = activeContext !== null && topLevel.some((el) => el.dataset.path === activeContext);
+    if (!matches) return;
+
+    for (const el of topLevel) {
+      const isActive = el.dataset.path === activeContext;
+      el.classList.add(isActive ? 'on' : 'dim');
+      if (isActive) el.setAttribute('aria-current', 'true');
+    }
+  }
+
+  return { element, setFiles, selectPath, emphasizeTopLevel };
 }

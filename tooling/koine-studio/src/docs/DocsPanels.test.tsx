@@ -195,6 +195,22 @@ describe('AdrPanel', () => {
     expect(container.querySelector('.koi-docs-name')?.textContent).toBe('#3 · Old title');
   });
 
+  // #1383: Escape in the body editor is the keyboard path to the exact revert-and-close the Cancel
+  // button performs (both call the hook's `cancel`) — matching GlossaryEntryRow's Escape convention.
+  it('Escape in the ADR editor discards the draft and returns to the (unchanged) read view', () => {
+    const handlers = makeHandlers();
+    const { container } = render(<AdrPanel data={full({ adrs: [adrFile(3, 'Old title', 'proposed')] })} handlers={handlers} />);
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-name')!);
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-edit')!);
+    const textarea = container.querySelector<HTMLTextAreaElement>('.koi-docs-input')!;
+    fireEvent.input(textarea, { target: { value: 'garbage' } });
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+
+    expect(handlers.onSaveAdr).not.toHaveBeenCalled();
+    expect(container.querySelector('.koi-docs-input')).toBeNull();
+    expect(container.querySelector('.koi-docs-name')?.textContent).toBe('#3 · Old title');
+  });
+
   it('rows are keyed by stable identity (ADR number), not list position or title', () => {
     const handlers = makeHandlers();
     const a = adrFile(1, 'Alpha', 'proposed');
@@ -385,6 +401,26 @@ describe('NotesPanel', () => {
     const textarea = container.querySelector<HTMLTextAreaElement>('.koi-docs-input')!;
     fireEvent.input(textarea, { target: { value: 'garbage draft' } });
     fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-detail .koi-docs-cancel')!);
+
+    expect(handlers.onSaveNote).not.toHaveBeenCalled();
+    expect(container.querySelector('.koi-docs-input')).toBeNull();
+    expect(container.querySelector('.koi-docs-prose')?.textContent).toContain('Step one.');
+  });
+
+  // #1383: Escape in the body editor is the keyboard path to the exact revert-and-close the Cancel
+  // button performs (both call the hook's `cancel`) — matching GlossaryEntryRow's Escape convention.
+  it('Escape in the note editor discards the draft and returns to the (unchanged) read view', async () => {
+    const handlers = makeHandlers();
+    const { container } = render(
+      <NotesPanel data={full({ notes: [noteFile('release-process.md', 'Release process')] })} handlers={handlers} />,
+    );
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-name')!);
+    await vi.waitFor(() => expect(container.querySelector('.koi-docs-prose')).not.toBeNull());
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-edit')!);
+    const textarea = container.querySelector<HTMLTextAreaElement>('.koi-docs-input')!;
+    fireEvent.input(textarea, { target: { value: 'garbage draft' } });
+    fireEvent.keyDown(textarea, { key: 'Escape' });
 
     expect(handlers.onSaveNote).not.toHaveBeenCalled();
     expect(container.querySelector('.koi-docs-input')).toBeNull();

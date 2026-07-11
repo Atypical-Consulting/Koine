@@ -877,6 +877,19 @@ struct GitFile {
     status: String,
 }
 
+/// Upstream-tracking state for the current branch: the tracked ref plus how far local has diverged —
+/// the TS `GitUpstream`. `ref` is a Rust keyword, so the field is `r#ref` renamed on serialization.
+#[derive(serde::Serialize, Debug)]
+struct GitUpstream {
+    /// The upstream ref name, e.g. `origin/main` (git's `# branch.upstream` header value).
+    #[serde(rename = "ref")]
+    r#ref: String,
+    /// Commits the local branch is AHEAD of its upstream (unpushed).
+    ahead: i64,
+    /// Commits the local branch is BEHIND its upstream (unpulled).
+    behind: i64,
+}
+
 /// A snapshot of `git status` for a workspace folder: the current branch plus its changed paths.
 /// `branch` and `files` are already camelCase, so no field rename is needed.
 #[derive(serde::Serialize)]
@@ -885,6 +898,9 @@ struct GitStatus {
     branch: String,
     /// Every changed path — staged, unstaged, and untracked entries (see [`GitFile`]).
     files: Vec<GitFile>,
+    /// Upstream-tracking counts for `branch`, or `None` (TS `null`) when it has no upstream —
+    /// a detached HEAD, a fresh local branch, or a repo with no remote.
+    upstream: Option<GitUpstream>,
 }
 
 /// One commit in `git log`, newest first. Fields are single words, already the camelCase the TS
@@ -920,12 +936,15 @@ struct GitNumstatEntry {
 
 /// Run `git -C <dir> <args…>` and return its stdout, or an `Err` shaped like `git_log_for_range`:
 /// a spawn failure (git not installed) → `git-unavailable: …`; a non-zero exit → the trimmed
-/// stderr. The thin core every source-control command shares.
+/// stderr. The thin core every source-control command shares. `GIT_TERMINAL_PROMPT=0` makes a
+/// network command that would ask for credentials (push/clone against an authed remote) FAIL FAST
+/// with a surfaced `Err` instead of hanging forever on a prompt no terminal will ever answer.
 fn run_git(dir: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(dir)
         .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| format!("git-unavailable: {e}"))?;
     if !output.status.success() {
@@ -969,20 +988,38 @@ fn push_xy_files(files: &mut Vec<GitFile>, xy: &str, path: &str) {
     }
 }
 
+/// Parse the porcelain-v2 `# branch.ab` payload (`+<ahead> -<behind>`) into `(ahead, behind)` counts.
+/// `None` on any unexpected shape so a malformed header degrades to "no upstream data" rather than a
+/// bogus 0/0 readout.
+fn parse_branch_ab(rest: &str) -> Option<(i64, i64)> {
+    let mut parts = rest.split_whitespace();
+    let ahead = parts.next()?.strip_prefix('+')?.parse().ok()?;
+    let behind = parts.next()?.strip_prefix('-')?.parse().ok()?;
+    Some((ahead, behind))
+}
+
 /// `git status` for the open folder: the current branch plus every changed path. Parses
-/// `--porcelain=v2 -b` — the branch from the `# branch.head` header; `1 <XY> …` ordinary entries
-/// (staged when X≠`.`, unstaged when Y≠`.`, so a both-areas file appears twice); `2 …` renames/
-/// copies (new path before the tab); `? …` untracked; `u …` unmerged → `conflicted`. `Err` when
-/// `dir` is not a work tree.
+/// `--porcelain=v2 -b` — the branch from the `# branch.head` header; the upstream ref + ahead/behind
+/// counts from `# branch.upstream` / `# branch.ab` (both emitted only when the branch tracks an
+/// upstream — `upstream` needs BOTH, so a gone upstream ref with no computable counts stays `None`);
+/// `1 <XY> …` ordinary entries (staged when X≠`.`, unstaged when Y≠`.`, so a both-areas file appears
+/// twice); `2 …` renames/copies (new path before the tab); `? …` untracked; `u …` unmerged →
+/// `conflicted`. `Err` when `dir` is not a work tree.
 #[tauri::command]
 fn git_status(dir: String) -> Result<GitStatus, String> {
     let out = run_git(&dir, &["status", "--porcelain=v2", "-b"])?;
     let mut branch = String::new();
+    let mut upstream_ref: Option<String> = None;
+    let mut ahead_behind: Option<(i64, i64)> = None;
     let mut files: Vec<GitFile> = Vec::new();
 
     for line in out.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
             branch = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+            upstream_ref = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+            ahead_behind = parse_branch_ab(rest);
         } else if let Some(rest) = line.strip_prefix("? ") {
             files.push(GitFile {
                 rel_path: rest.to_string(),
@@ -1018,7 +1055,15 @@ fn git_status(dir: String) -> Result<GitStatus, String> {
         }
     }
 
-    Ok(GitStatus { branch, files })
+    // Surface upstream data only when git reported BOTH the ref and computable counts, so a gone
+    // upstream (ref present, no `# branch.ab`) reads as "no upstream" rather than a fake 0/0.
+    let upstream = upstream_ref.zip(ahead_behind).map(|(r, (ahead, behind))| GitUpstream {
+        r#ref: r,
+        ahead,
+        behind,
+    });
+
+    Ok(GitStatus { branch, files, upstream })
 }
 
 /// The unified diff for one path: the worktree diff, or the staged (`--cached`) diff when `staged`.
@@ -1106,11 +1151,51 @@ fn git_unstage(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
     run_git(&dir, &args).map(|_| ())
 }
 
+/// Discard the working-tree changes of the given paths — DESTRUCTIVE and unrecoverable, which is why
+/// the TS caller (the Source Control panel) always confirms with the user first. Each `tracked_paths`
+/// entry is REVERTED to its index state (`git restore --worktree -- <paths…>` — so a partially-staged
+/// file keeps its staged copy) and each `untracked_paths` entry is DELETED from disk
+/// (`git clean -f -- <paths…>`). The CALLER supplies the tracked/untracked split — the panel already
+/// knows each row's status, and deriving the split here via `git ls-files` both wasted a subprocess
+/// and SILENTLY no-opped on a C-quoted (non-ASCII) filename: ls-files quotes such a path, the quoted
+/// output never matches the raw pathspec, the file lands in the clean bucket, and `clean -f` skips
+/// tracked files while exiting 0 — so the discard did nothing and reported success. Both commands are
+/// always scoped by an explicit `--` pathspec and an empty call is a no-op up front — so a discard
+/// can never touch a file the caller didn't name. `Err` (git's trimmed stderr) when any step fails.
+#[tauri::command]
+fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<String>) -> Result<(), String> {
+    if tracked_paths.is_empty() && untracked_paths.is_empty() {
+        return Ok(()); // never run an unscoped restore/clean
+    }
+
+    if !tracked_paths.is_empty() {
+        let mut args: Vec<&str> = vec!["restore", "--worktree", "--"];
+        args.extend(tracked_paths.iter().map(String::as_str));
+        run_git(&dir, &args)?;
+    }
+    if !untracked_paths.is_empty() {
+        let mut args: Vec<&str> = vec!["clean", "-f", "--"];
+        args.extend(untracked_paths.iter().map(String::as_str));
+        run_git(&dir, &args)?;
+    }
+    Ok(())
+}
+
 /// Commit the staged area with `message` (`git commit -m`). `Err` (with git's stderr) when there is
 /// nothing staged or the identity is unset.
 #[tauri::command]
 fn git_commit(dir: String, message: String) -> Result<(), String> {
     run_git(&dir, &["commit", "-m", &message]).map(|_| ())
+}
+
+/// Push the current branch to its configured upstream (a bare `git push`). The panel offers push
+/// only when [`git_status`] reported an upstream, which is exactly what a bare push targets. `Err`
+/// (git's trimmed stderr) when there is no upstream or git refuses — non-fast-forward, auth, offline.
+/// `(async)` moves this network-bound command onto a background thread (Tauri's sync thread pool),
+/// so a slow or unreachable remote can never freeze the webview's main thread.
+#[tauri::command(async)]
+fn git_push(dir: String) -> Result<(), String> {
+    run_git(&dir, &["push"]).map(|_| ())
 }
 
 /// Revert the commit `sha` (`git revert --no-edit <sha>`), recording a new commit that undoes it.
@@ -1188,8 +1273,9 @@ fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, St
 /// `..`) so the clone can never escape `parent_dir`; otherwise the name is derived from the url's
 /// last path segment with a trailing `.git` stripped (`…/repo.git` and `git@h:o/repo.git` → `repo`).
 /// `Err` (git's stderr) when the url is unreachable, and `Err` up front when `dir_name` — or the
-/// derived name — is unusable.
-#[tauri::command]
+/// derived name — is unusable. `(async)` moves this network-bound command onto a background thread
+/// (Tauri's sync thread pool), so a slow clone can never freeze the webview's main thread.
+#[tauri::command(async)]
 fn git_clone(url: String, parent_dir: String, dir_name: Option<String>) -> Result<String, String> {
     let dest_name = clone_dest_name(&url, dir_name.as_deref())?;
 
@@ -2179,7 +2265,9 @@ pub fn run() {
             git_numstat,
             git_stage,
             git_unstage,
+            git_discard,
             git_commit,
+            git_push,
             git_revert,
             git_init,
             git_branches,
@@ -3246,6 +3334,83 @@ mod tests {
             "{:?}",
             status.files
         );
+        // No upstream is configured, so the porcelain emits no `# branch.upstream`/`# branch.ab`
+        // headers and the snapshot carries no upstream — the panel shows no counts, never a fake 0/0.
+        assert!(status.upstream.is_none(), "no upstream configured");
+    }
+
+    #[test]
+    fn git_status_reports_upstream_ref_and_ahead_behind_counts_when_tracking() {
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+
+        // A local branch `up` diverges by one commit (main will be BEHIND it by 1)…
+        repo.git(&["checkout", "-b", "up"]);
+        repo.write("up.txt", "u\n");
+        repo.git(&["add", "up.txt"]);
+        repo.git(&["commit", "-m", "up-only"]);
+
+        // …while main gains two of its own commits (AHEAD of `up` by 2).
+        repo.git(&["checkout", "main"]);
+        repo.write("f.txt", "2\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c2"]);
+        repo.write("f.txt", "3\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c3"]);
+
+        // Track `up` — porcelain now emits `# branch.upstream up` and `# branch.ab +2 -1`, which
+        // git_status surfaces as the upstream field (a local branch works exactly like a remote ref).
+        repo.git(&["branch", "--set-upstream-to=up", "main"]);
+
+        let status = git_status(repo.path()).unwrap();
+        let up = status.upstream.expect("branch tracks an upstream");
+        assert_eq!(up.r#ref, "up");
+        assert_eq!(up.ahead, 2);
+        assert_eq!(up.behind, 1);
+    }
+
+    #[test]
+    fn git_push_pushes_the_current_branch_to_its_upstream_and_clears_ahead() {
+        // A bare local "remote" plus a work repo whose main tracks it — no network involved.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "origin", &remote_path]);
+        repo.git(&["push", "-u", "origin", "main"]);
+
+        // A new local commit → 1 ahead of origin/main.
+        repo.write("f.txt", "2\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c2"]);
+        let before = git_status(repo.path()).unwrap().upstream.expect("tracks origin/main");
+        assert_eq!(before.r#ref, "origin/main");
+        assert_eq!(before.ahead, 1);
+
+        // Push → the upstream has the commit and the next status reads a truthful 0/0.
+        git_push(repo.path()).unwrap();
+        let after = git_status(repo.path()).unwrap().upstream.expect("still tracking");
+        assert_eq!(after.ahead, 0);
+        assert_eq!(after.behind, 0);
+    }
+
+    #[test]
+    fn git_push_errors_when_the_branch_has_no_upstream() {
+        // No upstream configured → git refuses and the trimmed stderr surfaces as the Err the panel
+        // shows (the UI never offers push here — status.upstream is None — but the command stays honest).
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+
+        assert!(git_push(repo.path()).is_err());
     }
 
     #[test]
@@ -3358,6 +3523,73 @@ mod tests {
         let unstaged = git_status(repo.path()).unwrap();
         assert!(has_file(&unstaged.files, "e.txt", false, "modified"), "{:?}", unstaged.files);
         assert!(!has_file(&unstaged.files, "e.txt", true, "modified"));
+    }
+
+    #[test]
+    fn git_discard_reverts_a_tracked_file_and_removes_an_untracked_one() {
+        let repo = init_repo();
+        repo.write("t.txt", "base\n");
+        repo.write("keep.txt", "keep-base\n");
+        repo.git(&["add", "t.txt", "keep.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // A worktree edit on a tracked file, a brand-new untracked file, and an UNLISTED edit that
+        // the discard must leave alone (deleting too much is the worst failure mode here).
+        repo.write("t.txt", "edited\n");
+        repo.write("u.txt", "scratch\n");
+        repo.write("keep.txt", "keep-edited\n");
+        let before = git_status(repo.path()).unwrap();
+        assert!(has_file(&before.files, "t.txt", false, "modified"), "{:?}", before.files);
+        assert!(has_file(&before.files, "u.txt", false, "untracked"), "{:?}", before.files);
+
+        // One mixed call handles both kinds — exactly what a group Discard-all sends: the caller
+        // supplies the tracked/untracked split (the panel knows each row's status).
+        git_discard(repo.path(), vec!["t.txt".to_string()], vec!["u.txt".to_string()]).unwrap();
+
+        // The tracked file is reverted to its committed content…
+        assert_eq!(std::fs::read_to_string(repo.dir.join("t.txt")).unwrap(), "base\n");
+        // …the untracked file is deleted from disk…
+        assert!(!repo.dir.join("u.txt").exists());
+        // …and the unlisted file keeps its edit (still modified on the next status).
+        assert_eq!(std::fs::read_to_string(repo.dir.join("keep.txt")).unwrap(), "keep-edited\n");
+        let after = git_status(repo.path()).unwrap();
+        assert!(has_file(&after.files, "keep.txt", false, "modified"), "{:?}", after.files);
+        assert!(!has_file(&after.files, "t.txt", false, "modified"));
+        assert!(!has_file(&after.files, "u.txt", false, "untracked"));
+    }
+
+    #[test]
+    fn git_discard_reverts_only_the_worktree_delta_of_a_partially_staged_file() {
+        let repo = init_repo();
+        repo.write("p.txt", "1\n");
+        repo.git(&["add", "p.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+
+        // Stage one change, then edit again → modified in BOTH areas.
+        repo.write("p.txt", "2\n");
+        repo.git(&["add", "p.txt"]);
+        repo.write("p.txt", "3\n");
+
+        // The partially-staged file is TRACKED, so the panel sends it in the tracked bucket.
+        git_discard(repo.path(), vec!["p.txt".to_string()], vec![]).unwrap();
+
+        // The worktree reverts to the INDEX content (the staged "2"), never all the way to HEAD's "1"…
+        assert_eq!(std::fs::read_to_string(repo.dir.join("p.txt")).unwrap(), "2\n");
+        // …so the staged copy survives, and only the worktree row is gone.
+        let status = git_status(repo.path()).unwrap();
+        assert!(has_file(&status.files, "p.txt", true, "modified"), "{:?}", status.files);
+        assert!(!has_file(&status.files, "p.txt", false, "modified"), "{:?}", status.files);
+    }
+
+    #[test]
+    fn git_discard_with_no_paths_is_a_no_op_and_errors_on_a_non_git_dir() {
+        // An empty-total call is a defensive no-op — it must not shell out to a bare `git clean`/
+        // `restore` (unscoped, those would touch the whole tree), so it succeeds even outside a repo.
+        let plain = TempRepo::new();
+        assert!(git_discard(plain.path(), vec![], vec![]).is_ok());
+        // With paths in EITHER bucket, a non-repo dir surfaces git's error like every other git_* command.
+        assert!(git_discard(plain.path(), vec!["x.txt".to_string()], vec![]).is_err());
+        assert!(git_discard(plain.path(), vec![], vec!["x.txt".to_string()]).is_err());
     }
 
     #[test]

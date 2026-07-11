@@ -177,7 +177,15 @@ export class BrowserPlatform implements Platform {
     return this.gitUnavailable();
   }
 
+  gitDiscard(): Promise<void> {
+    return this.gitUnavailable();
+  }
+
   gitCommit(): Promise<void> {
+    return this.gitUnavailable();
+  }
+
+  gitPush(): Promise<void> {
     return this.gitUnavailable();
   }
 

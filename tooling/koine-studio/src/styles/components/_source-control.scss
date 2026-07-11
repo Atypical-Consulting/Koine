@@ -137,10 +137,9 @@
   white-space: nowrap;
 }
 
-/* Best-effort ahead/behind sync readout (mono). GitStatus carries no upstream counts, so it reads 0/0
-   until real sync wiring lands — the `ahead` count is tinted with the accent. */
-/* A non-interactive ahead/behind readout (a <div>, not a button) — no push action is wired, so it must
-   not read as a live control. */
+/* Ahead/behind sync readout (mono), fed real counts from GitStatus.upstream (#1150) — the `ahead`
+   count is tinted with the accent. Still a non-interactive <div>: the push ACTION is the adjacent
+   .koi-sc-push button, so the readout itself must not read as a live control. */
 .koi-sc-sync {
   flex: none;
   display: inline-flex;
@@ -166,6 +165,45 @@
 
   .sep {
     opacity: 0.4;
+  }
+}
+
+/* The readout slot for a branch with NO upstream (#1150): a plain muted hint — no counts (a 0/0 would
+   be a lie) and no push button beside it (a dead control would still be announced to AT users). */
+.koi-sc-sync-none {
+  white-space: nowrap;
+}
+
+/* The push action beside the readout (#1150) — a 30px icon pill matching the sync chrome, rendered
+   only when the branch tracks an upstream. `has-ahead` tints it with the accent while there are
+   unpushed commits, echoing the readout's `ahead` tint. */
+.koi-sc-push {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--koi-radius-sm);
+  border: 1px solid var(--koi-line);
+  background: transparent;
+  color: var(--koi-ink-soft);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
+    color: var(--koi-fg);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  &.has-ahead {
+    color: var(--koi-accent);
+    border-color: color-mix(in srgb, var(--koi-accent) 45%, var(--koi-line));
   }
 }
 

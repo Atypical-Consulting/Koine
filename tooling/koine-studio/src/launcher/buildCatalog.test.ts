@@ -252,11 +252,11 @@ describe('buildCatalog — files', () => {
       {
         id: 'file:file:///ws/src/Ordering/Order.koi', cat: 'file', title: 'Order.koi',
         sub: 'src/Ordering', ctx: 'src/Ordering', keywords: 'src/ordering/order.koi',
-        file: 'file:///ws/src/Ordering/Order.koi',
+        file: 'file:///ws/src/Ordering/Order.koi', relPath: 'src/Ordering/Order.koi',
       },
       {
         id: 'file:file:///ws/README.md', cat: 'file', title: 'README.md',
-        sub: '', ctx: '', keywords: 'readme.md', file: 'file:///ws/README.md',
+        sub: '', ctx: '', keywords: 'readme.md', file: 'file:///ws/README.md', relPath: 'README.md',
       },
     ]);
   });

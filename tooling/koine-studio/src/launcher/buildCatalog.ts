@@ -173,6 +173,9 @@ function fileEntries(files: { uri: string; relPath: string }[]): CatalogEntry[] 
       ctx: dir,
       keywords: relPath.toLowerCase(),
       file: uri,
+      // The un-split path, first-class (#1204): the Source-Control focus key `openFileChanges` reads,
+      // decoupled from the `sub`/`title` display split above.
+      relPath,
     };
   });
 }

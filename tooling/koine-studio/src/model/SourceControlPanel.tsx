@@ -13,8 +13,8 @@ import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuIte
 // methods reject (see {@link Platform}); the desktop host runs a real `git`, but a non-repo folder makes
 // `gitStatus` REJECT. The panel handles both: `canUseGit === false` paints a "desktop only" empty state
 // and makes NO git calls, and a rejected status paints a "not a git repository" empty state — neither
-// crashes. After every mutation (stage / unstage / commit / checkout) it RE-FETCHES status (and the log
-// after a commit) so the groups and recent-commit list track the repository.
+// crashes. After every mutation (stage / unstage / discard / commit / checkout) it RE-FETCHES status
+// (and the log after a commit) so the groups and recent-commit list track the repository.
 
 /**
  * The slice of {@link Platform} the panel calls — narrowed to the git surface so a test can hand it a
@@ -29,7 +29,9 @@ export type GitSurface = Pick<
   | 'gitNumstat'
   | 'gitStage'
   | 'gitUnstage'
+  | 'gitDiscard'
   | 'gitCommit'
+  | 'gitPush'
   | 'gitBranches'
   | 'gitCheckout'
   | 'gitLog'
@@ -261,6 +263,49 @@ export function SourceControlPanel(props: {
   const onStage = (relPath: string) => void mutate(() => git.gitStage(folderToken, [relPath]));
   const onUnstage = (relPath: string) => void mutate(() => git.gitUnstage(folderToken, [relPath]));
 
+  // Discard is DESTRUCTIVE — `git restore`/`git clean` throw the working-tree bytes away for good — so
+  // both Discard controls (per-row and group Discard-all, #1151) route through an explicit confirm;
+  // declining aborts with no git call. Discard is offered only for NON-STAGED rows/groups (the staged
+  // group header withholds Discard-all, and the per-row control mirrors that). The copy adapts to what
+  // actually happens: a tracked change is REVERTED, but an untracked file has no index/HEAD state to
+  // revert to — discarding it DELETES it from disk, and the dialog must say so. The panel already knows
+  // each row's tracked/untracked split (`f.status`), so it hands the host the two buckets EXPLICITLY —
+  // tracked paths go to `git restore --worktree`, untracked ones to `git clean -f`, with no host-side
+  // re-derivation that could mis-bucket a path (see {@link Platform.gitDiscard}). A confirmed discard
+  // runs through the same mutate() reload as every other mutation, so the groups re-derive from the
+  // post-discard repository and a git failure lands in the existing actionError alert.
+  const onDiscard = (files: GitFile[], opts: { untracked: boolean; group?: string }) => {
+    if (files.length === 0) return; // defensive — an empty group renders no Discard-all at all
+    const trackedPaths = files.filter((f) => f.status !== 'untracked').map((f) => f.relPath);
+    const untrackedPaths = files.filter((f) => f.status === 'untracked').map((f) => f.relPath);
+    const paths = files.map((f) => f.relPath);
+    const single = paths.length === 1;
+    const copy = opts.untracked
+      ? {
+          title: single ? 'Delete untracked file?' : 'Delete untracked files?',
+          message: single
+            ? `Delete ${paths[0]}? This untracked file will be permanently removed.`
+            : `Delete all ${paths.length} untracked files in ${opts.group}? Each file will be permanently removed.`,
+          confirmLabel: single ? 'Delete file' : 'Delete all',
+        }
+      : {
+          title: 'Discard changes?',
+          message: single
+            ? `Discard changes to ${paths[0]}? This reverts your edits and can't be undone.`
+            : `Discard all ${paths.length} changes in ${opts.group}? This reverts every listed file and can't be undone.`,
+          confirmLabel: single ? 'Discard changes' : 'Discard all',
+        };
+    void (async () => {
+      const ok = await koiConfirm({ ...copy, cancelLabel: 'Cancel', danger: true });
+      if (!ok) return; // declined — the working tree survives untouched
+      await mutate(() => git.gitDiscard(folderToken, trackedPaths, untrackedPaths));
+    })();
+  };
+  // Push through the same mutate() path every other op uses: the follow-up reload re-reads status, so
+  // the ahead count tracks the pushed repository, and a git refusal (non-fast-forward, auth, offline)
+  // lands in the existing actionError alert.
+  const onPush = () => void mutate(() => git.gitPush(folderToken));
+
   const onCheckout = (branch: string) => {
     if (!status || branch === status.branch) return;
     void mutate(() => git.gitCheckout(folderToken, branch));
@@ -409,6 +454,10 @@ export function SourceControlPanel(props: {
   const commitDisabled = busy || committing || message.trim().length === 0 || !hasStaged;
   // Surface the current branch even when it isn't in the local list (detached HEAD / fresh branch).
   const branchOptions = status && !branches.includes(status.branch) ? [status.branch, ...branches] : branches;
+  // The branch's upstream-tracking data (#1150): the tracked ref + real ahead/behind counts, or null
+  // when the branch has no upstream (detached HEAD / fresh branch / no remote) — the panel keys the
+  // whole sync readout + push affordance off this DATA, never off the platform kind.
+  const upstream = status?.upstream ?? null;
   // The recent-commit log is collapsible through the same `collapsedGroups`/`toggleGroup` infra the file
   // groups use — its section carries `collapsed` when its label is in the set (the CSS hides the list).
   const logCollapsed = collapsedGroups.has(RECENT_COMMITS_LABEL);
@@ -433,9 +482,10 @@ export function SourceControlPanel(props: {
 
   // Build + toggle the ⋮ overflow menu (#1153). The LIVE items are already backed by the panel's existing
   // handlers/data (Refresh, Stage/Unstage all over the grouped paths, collapse/expand, reveal-all-commits);
-  // the DEFERRED items render disabled because their Platform git op doesn't exist yet — each is a tracked
-  // sibling follow-up of #1146/#1142: Discard-all/revert, and the pull/push/fetch sync ops the ahead/behind
-  // readout also awaits. Disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
+  // the DEFERRED items render disabled — each a tracked sibling follow-up of #1146/#1142: the pull/fetch
+  // ops have no Platform git op yet, and wiring this menu's Discard-all / Push items to the gitDiscard
+  // (#1151) / gitPush (#1150) ops the panel controls now invoke rides along with that menu-wiring
+  // follow-up. Disabled (never a live-but-inert no-op) matches the panel's placeholder convention.
   const openOverflowMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     const unstagedPaths = [...unstaged, ...untracked].map((f) => f.relPath);
@@ -480,10 +530,11 @@ export function SourceControlPanel(props: {
   };
 
   // Build + toggle the split-commit caret menu (#1153). Both items are DEFERRED placeholders: Amend needs a
-  // new `git commit --amend` Platform op, and Commit & Push depends on the same push op the ahead/behind
-  // sync readout is waiting on — each a tracked sibling follow-up. They render disabled (never a live-but-
-  // inert no-op); the plain Commit action stays the split button itself. The caret is openable so the menu
-  // is discoverable, disabled only while the composer is busy (the same gate the message box uses).
+  // new `git commit --amend` Platform op, and Commit & Push — though gitPush itself now exists (#1150) —
+  // is a compound commit-then-push flow still awaiting its wiring; each a tracked sibling follow-up. They
+  // render disabled (never a live-but-inert no-op); the plain Commit action stays the split button itself.
+  // The caret is openable so the menu is discoverable, disabled only while the composer is busy (the same
+  // gate the message box uses).
   const openCaretMenu = (e: MouseEvent) => {
     const trigger = e.currentTarget as HTMLElement;
     const items: FloatingMenuItem[] = [
@@ -541,9 +592,8 @@ export function SourceControlPanel(props: {
               <span class="none">·</span>
             )}
           </span>
-          {/* Row actions, revealed on row hover / keyboard focus. Open changes + Stage/Unstage are wired;
-              Discard is a disabled placeholder — the Platform git surface exposes no discard/revert op, so
-              wiring it is a tracked follow-up (see the panel's design handoff). */}
+          {/* Row actions, revealed on row hover / keyboard focus: Open changes, the confirm-gated
+              Discard (#1151 — destructive, so it always asks first), and Stage/Unstage. */}
           <div class="koi-sc-row-actions">
             <button
               type="button"
@@ -557,17 +607,23 @@ export function SourceControlPanel(props: {
                 <circle cx="8" cy="8" r="1.8" />
               </svg>
             </button>
-            <button
-              type="button"
-              class="koi-sc-ract danger"
-              title="Discard changes (coming soon)"
-              aria-label={`Discard ${f.relPath} changes (coming soon)`}
-              disabled
-            >
-              <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
-              </svg>
-            </button>
+            {/* Discard only on NON-STAGED rows — mirroring the group headers, where the staged group
+                withholds Discard-all. A staged row's "discard" would silently revert only the worktree
+                delta (not the staged change the row actually shows) — a data-loss trap, so no control. */}
+            {!f.staged && (
+              <button
+                type="button"
+                class="koi-sc-ract danger"
+                title="Discard changes"
+                aria-label={`Discard ${f.relPath} changes`}
+                disabled={busy}
+                onClick={() => onDiscard([f], { untracked: f.status === 'untracked' })}
+              >
+                <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M11.5 4.5 8 8m0 0L4.5 4.5M8 8l3.5 3.5M8 8l-3.5 3.5" />
+                </svg>
+              </button>
+            )}
             {f.staged ? (
               <button
                 type="button"
@@ -609,8 +665,8 @@ export function SourceControlPanel(props: {
   // A named group landmark (`<section aria-label>`) for one bucket of files, omitted entirely when empty
   // so the rail doesn't carry hollow headers — the test relies on this to prove a file moved groups. Its
   // head is a collapse toggle (chevron + label + count pill) plus a hover/focus-revealed action cluster:
-  // Stage all / Unstage all are wired through `mutate`; Discard all is a disabled placeholder (the git
-  // surface exposes no discard/revert op — wiring it is a tracked follow-up).
+  // Stage all / Unstage all are wired through `mutate`; Discard all (#1151) passes the whole group's
+  // files through the confirm-gated onDiscard (which splits them into tracked/untracked buckets).
   const fileGroup = (label: string, list: GitFile[]) => {
     if (list.length === 0) return null;
     const isStaged = list.every((f) => f.staged);
@@ -650,14 +706,15 @@ export function SourceControlPanel(props: {
               </button>
             ) : (
               <>
-                {/* Discard has no backing Platform git op — render it as a disabled placeholder for visual
-                    fidelity; wiring Discard/Revert is a tracked follow-up (see the panel's design handoff). */}
+                {/* Group discard (#1151): every path of this group through the confirm-gated onDiscard —
+                    destructive, so it always asks before touching the working tree. */}
                 <button
                   type="button"
                   class="koi-sc-gact danger"
-                  title="Discard all changes (coming soon)"
-                  aria-label="Discard all changes (coming soon)"
-                  disabled
+                  title="Discard all changes"
+                  aria-label="Discard all changes"
+                  disabled={busy}
+                  onClick={() => onDiscard(list, { untracked: label === UNTRACKED_LABEL, group: label })}
                 >
                   <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M6.5 3h3M3.5 4.5h9M11.5 4.5l-.5 8a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1l-.5-8" />
@@ -742,26 +799,48 @@ export function SourceControlPanel(props: {
         ) : (
           <span class="koi-sc-branch koi-sc-branch-name">{status?.branch ?? '…'}</span>
         )}
-        {/* Best-effort ahead/behind READOUT — GitStatus carries no upstream counts, so it reads 0/0 until
-            real sync wiring lands (a follow-up). A non-interactive readout (not a button): there is no
-            push action to invoke, so a labelled button would announce a dead control to AT users. The
-            compact ↑/↓ glyphs are aria-hidden; an sr-only sentence carries the meaning. */}
-        <div class="koi-sc-sync" title={`0 ahead · 0 behind origin/${status?.branch ?? 'main'}`}>
-          <span class="koi-sr-only">0 commits ahead of, 0 behind origin/{status?.branch ?? 'main'}</span>
-          <span class="ahead" aria-hidden="true">
-            <i>↑</i>0
-          </span>
-          <span class="sep" aria-hidden="true">
-            ·
-          </span>
-          <span class="behind" aria-hidden="true">
-            <i>↓</i>0
-          </span>
-          <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M13 8a5 5 0 1 1-1.5-3.6" />
-            <path d="M13 2.5V5h-2.5" />
-          </svg>
-        </div>
+        {/* Ahead/behind sync readout + push (#1150), driven by status.upstream: real counts and a live
+            push button when the branch tracks an upstream; a plain "No upstream" hint — never fake 0/0
+            counts, never a dead disabled button announced to AT users — when it doesn't. The compact
+            ↑/↓ glyphs are aria-hidden; an sr-only sentence carries the meaning. Rendered only once
+            status resolves so the loading frame shows neither counts nor a misleading hint. */}
+        {status &&
+          (upstream ? (
+            <>
+              <div class="koi-sc-sync" title={`${upstream.ahead} ahead · ${upstream.behind} behind ${upstream.ref}`}>
+                <span class="koi-sr-only">
+                  {upstream.ahead} commits ahead of, {upstream.behind} behind {upstream.ref}
+                </span>
+                <span class="ahead" aria-hidden="true">
+                  <i>↑</i>
+                  {upstream.ahead}
+                </span>
+                <span class="sep" aria-hidden="true">
+                  ·
+                </span>
+                <span class="behind" aria-hidden="true">
+                  <i>↓</i>
+                  {upstream.behind}
+                </span>
+              </div>
+              <button
+                type="button"
+                class={`koi-sc-push${upstream.ahead > 0 ? ' has-ahead' : ''}`}
+                title={`Push to ${upstream.ref}`}
+                aria-label={`Push to ${upstream.ref}`}
+                disabled={busy}
+                onClick={onPush}
+              >
+                <svg class="koi-sc-ico" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 12.5v-8M4.5 8 8 4.5 11.5 8" />
+                </svg>
+              </button>
+            </>
+          ) : (
+            <div class="koi-sc-sync koi-sc-sync-none" title="This branch isn’t tracking an upstream">
+              No upstream
+            </div>
+          ))}
       </div>
 
       {actionError && (

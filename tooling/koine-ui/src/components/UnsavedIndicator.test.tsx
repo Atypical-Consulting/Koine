@@ -1,24 +1,13 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
-import { createAppStore } from '@/store/index';
-import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
-import type { Buffer } from '@/shell/workspaceController';
 import { axe } from 'vitest-axe';
+import { titleWithDirty, UnsavedIndicator, type UnsavedIndicatorSlice } from './UnsavedIndicator';
+import { createTestReadableStore } from '../host/storeTestUtils';
 
-// Build the real Buffer (uri, path, relPath, name, text, dirty, rootToken).
-const buf = (uri: string, dirty: boolean): Buffer => ({
-  uri,
-  path: uri,
-  relPath: uri,
-  name: uri,
-  text: '',
-  dirty,
-  rootToken: '',
-});
-
-// Seed the whole store-owned buffer Map (#982): the slice keys buffers by uri, so build the Map from
-// each buffer's own uri and set it wholesale (the ownership-inversion equivalent of the old setBuffers).
-const seed = (...bufs: Buffer[]): Map<string, Buffer> => new Map(bufs.map((b) => [b.uri, b]));
+// The shared ReadableStore<T> test double (host/storeTestUtils) — koine-ui is store-free, so it mocks
+// the contract directly instead of pulling in koine-studio's real Zustand store (which the ORIGINAL
+// koine-studio-side test used via createAppStore() + a seeded buffer Map). The dirty-count derivation
+// from the buffer set is the host adapter's job, pinned in koine-studio's readableStores.test.ts.
 
 // The static index.html host the indicator drives: a <button id="unsaved-indicator" hidden>.
 function host(): HTMLButtonElement {
@@ -36,10 +25,26 @@ afterEach(() => {
   document.title = '';
 });
 
+describe('titleWithDirty', () => {
+  test('prefixes a bullet when there are unsaved files', () => {
+    expect(titleWithDirty('Koine Studio', 1)).toBe('• Koine Studio');
+    expect(titleWithDirty('Koine Studio', 3)).toBe('• Koine Studio');
+  });
+
+  test('returns the base title unchanged when nothing is unsaved', () => {
+    expect(titleWithDirty('Koine Studio', 0)).toBe('Koine Studio');
+  });
+
+  test('does not double-prefix an already-marked title', () => {
+    expect(titleWithDirty('• Koine Studio', 2)).toBe('• Koine Studio');
+    expect(titleWithDirty('• Koine Studio', 0)).toBe('Koine Studio');
+  });
+});
+
 describe('UnsavedIndicator', () => {
-  test('shows the "N unsaved" pill for the dirty buffers and hides when all clean', () => {
+  test('shows the "N unsaved" pill for the dirty count and hides when all clean', () => {
     const button = host();
-    const store = createAppStore();
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 0 });
     document.title = 'Koine Studio';
 
     act(() => {
@@ -51,20 +56,21 @@ describe('UnsavedIndicator', () => {
     expect(button.textContent).toBe('');
     expect(document.title).toBe('Koine Studio');
 
-    // Two dirty buffers (plus a clean one): the pill shows "2 unsaved" and the title gains a bullet.
-    act(() => store.setState({ buffers: seed(buf('a', true), buf('b', true), buf('c', false)) }));
+    // Two dirty buffers: the pill shows "2 unsaved" and the title gains a bullet — SYNCHRONOUSLY with
+    // the store change (the component drives the host via a direct subscription, not a re-render).
+    store.set({ dirtyCount: 2 });
     expect(button.hidden).toBe(false);
     expect(button.textContent).toBe('2 unsaved');
     expect(button.getAttribute('aria-label')).toBe('Save 2 unsaved files');
     expect(document.title).toBe('• Koine Studio');
 
     // A single dirty buffer uses the singular aria-label.
-    act(() => store.setState({ buffers: seed(buf('a', true), buf('b', false)) }));
+    store.set({ dirtyCount: 1 });
     expect(button.textContent).toBe('1 unsaved');
     expect(button.getAttribute('aria-label')).toBe('Save 1 unsaved file');
 
     // Everything clean again: the pill hides and the title is unmarked.
-    act(() => store.setState({ buffers: seed(buf('a', false), buf('b', false)) }));
+    store.set({ dirtyCount: 0 });
     expect(button.hidden).toBe(true);
     expect(button.textContent).toBe('');
     expect(document.title).toBe('Koine Studio');
@@ -72,12 +78,11 @@ describe('UnsavedIndicator', () => {
 
   test('clicking the pill calls onSaveAll', () => {
     const button = host();
-    const store = createAppStore();
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 1 });
     const onSaveAll = vi.fn();
 
     act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={onSaveAll} />);
-      store.setState({ buffers: seed(buf('a', true)) });
     });
 
     button.click();
@@ -86,17 +91,16 @@ describe('UnsavedIndicator', () => {
 
   test('has no accessibility violations', async () => {
     const button = host();
-    const store = createAppStore();
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 2 });
     act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
-      store.setState({ buffers: seed(buf('a', true), buf('b', true)) });
     });
     expect(await axe(button)).toHaveNoViolations();
   });
 
   test('keeps a baseline aria-label even with no unsaved buffers (so the button is never label-less)', () => {
     const button = host();
-    const store = createAppStore();
+    const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 0 });
 
     // Mount with zero dirty buffers: the pill is hidden, but the host button must still carry a
     // non-empty baseline aria-label. axe (storybook's a11y addon on macOS CI, #747) can otherwise race

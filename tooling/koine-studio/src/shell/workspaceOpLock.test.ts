@@ -100,3 +100,93 @@ describe('workspaceOpLock (#1088)', () => {
     held.resolve();
   });
 });
+
+// The observable busy surface (#1275): true from the moment an op is enqueued until the queue drains,
+// so the UI can grey out the workspace-opening controls instead of letting a queued click read as a
+// hang. Derived from the queue itself — never tracked separately — so it cannot drift from reality.
+describe('workspaceOpLock busy state (#1275)', () => {
+  it('busy() is false when idle, true from enqueue until the op settles', async () => {
+    const lock = createWorkspaceOpLock();
+    expect(lock.busy()).toBe(false);
+
+    const held = deferred<void>();
+    void lock.run(() => held.promise);
+    // True SYNCHRONOUSLY at enqueue (the op only starts on the next microtask): a click handler that
+    // just queued an op must already see the lock busy, or two fast clicks slip through together.
+    expect(lock.busy()).toBe(true);
+    await flush();
+    expect(lock.busy()).toBe(true); // in flight
+
+    held.resolve();
+    await flush();
+    expect(lock.busy()).toBe(false); // drained
+  });
+
+  it('busy() stays true across a queued op’s whole wait and clears only when the queue drains', async () => {
+    const lock = createWorkspaceOpLock();
+    const first = deferred<void>();
+    const second = deferred<void>();
+    void lock.run(() => first.promise);
+    void lock.run(() => second.promise);
+    await flush();
+    expect(lock.busy()).toBe(true); // first in flight, second queued
+
+    first.resolve();
+    await flush();
+    expect(lock.busy()).toBe(true); // the queued op is now the in-flight one — no false window between
+
+    second.resolve();
+    await flush();
+    expect(lock.busy()).toBe(false);
+  });
+
+  it('onBusyChanged fires once per transition (not per enqueued op) and its unsubscribe stops delivery', async () => {
+    const lock = createWorkspaceOpLock();
+    const seen: boolean[] = [];
+    const unsub = lock.onBusyChanged((busy) => seen.push(busy));
+
+    const first = deferred<void>();
+    void lock.run(() => first.promise);
+    void lock.run(async () => undefined);
+    // One busy→true transition for the pair — a queued op lands on an already-busy lock.
+    expect(seen).toEqual([true]);
+
+    first.resolve();
+    await flush();
+    expect(seen).toEqual([true, false]); // one busy→false once the whole queue drained
+
+    unsub();
+    await lock.run(async () => undefined);
+    await flush();
+    expect(seen).toEqual([true, false]); // no delivery after unsubscribe
+  });
+
+  // The case that matters most: a stuck-disabled toolbar is worse than the race. A failed op (a
+  // rejected import, a picker error) must clear busy exactly as it releases the lock.
+  it('a REJECTED op still clears busy', async () => {
+    const lock = createWorkspaceOpLock();
+    const seen: boolean[] = [];
+    lock.onBusyChanged((busy) => seen.push(busy));
+
+    await expect(lock.run(async () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    await flush();
+
+    expect(lock.busy()).toBe(false);
+    expect(seen).toEqual([true, false]);
+  });
+
+  it('a rejected op ahead of a queued one keeps busy true until the queued op finishes', async () => {
+    const lock = createWorkspaceOpLock();
+    const next = deferred<string>();
+
+    const failing = lock.run(async () => Promise.reject(new Error('boom')));
+    const queued = lock.run(() => next.promise);
+    await expect(failing).rejects.toThrow('boom');
+    expect(lock.busy()).toBe(true); // the queued op is still owed its turn
+
+    next.resolve('ok');
+    await expect(queued).resolves.toBe('ok');
+    await flush();
+    expect(lock.busy()).toBe(false);
+  });
+});

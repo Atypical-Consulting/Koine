@@ -29,6 +29,7 @@ import type { DocumentSymbol, GlossaryModel } from '@/lsp/lsp';
 import { ALL_CONTEXTS, fileContextFollow, isAllContexts, listContexts, type ContextScope } from '@/model/activeContext';
 import { coverage } from '@/model/glossary';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
+import { contextWorkspaceKey as workspaceKeyFor } from '@/shell/inspector/shared';
 
 // LSP SymbolKind for a namespace — the kind the language service tags each top-level `context` document
 // symbol with. Used by followActiveFileContext to read a file's bounded context(s).
@@ -120,9 +121,11 @@ export function createActiveContextController(deps: ActiveContextControllerDeps)
     set: (scope) => store.getState().setActiveContext(scope),
   };
 
-  /** The per-workspace storage key for the active scope (folder identity, or 'scratch'). */
+  /** The per-workspace storage key for the active scope (folder identity, or 'scratch') — the shared
+   *  derivation (#1262, formerly this module's own copy), bound to the injected `folderRootToken` here so
+   *  the public zero-arg `contextWorkspaceKey()` contract is unchanged. */
   function contextWorkspaceKey(): string {
-    return deps.folderRootToken() || 'scratch';
+    return workspaceKeyFor(deps.folderRootToken());
   }
 
   /** Mirror the active scope onto the status-bar readout. The top-bar selector reflects the scope on its

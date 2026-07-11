@@ -16,7 +16,7 @@ import {
 } from '@/shell/ideUtils';
 import { createEditorSession } from '@/shell/editorSession';
 import { createInspectorController } from '@/shell/inspectorController';
-import { HistoryControls, initInstantTooltip, LEFT_RAIL_IDS, LeftRail, RightStrip, WorkspaceProblemsBadge } from '@atypical/koine-ui';
+import { HistoryControls, initInstantTooltip, LEFT_RAIL_IDS, LeftRail, RightStrip, UnsavedIndicator, WorkspaceProblemsBadge } from '@atypical/koine-ui';
 import { ensureOutputScaffold } from '@/shell/outputRail';
 import { createCanvasWrite } from '@/shell/canvasWrite';
 import { getPlatform } from '@/host';
@@ -55,7 +55,7 @@ import { initEdgeResizer } from '@/shell/resize';
 import { formatChord } from '@/shared/platform';
 import { setDefaultCanvasZoom } from '@/diagrams/diagramContract';
 import { appStore } from '@/store/index';
-import { createHistoryControlsStore, createWorkspaceProblemsStore } from '@/store/readableStores';
+import { createHistoryControlsStore, createUnsavedIndicatorStore, createWorkspaceProblemsStore } from '@/store/readableStores';
 import { badgeCounts, createDiagCountGate } from '@/diagnostics/diagCountGate';
 import { reanchorSelectionAfterRename, type SelectedElement } from '@/model/selection';
 import { renameStatusMessage, type InspectorElement } from '@/model/inspector';
@@ -66,7 +66,6 @@ import { handleBeforeUnload } from '@/shell/dirty';
 import { render } from 'preact';
 import { createHistoryController } from '@/shell/historyController';
 import { installExportMenuDismiss } from '@/shell/exportMenuDismiss';
-import { UnsavedIndicator } from '@/shell/UnsavedIndicator';
 import { CompilingIndicator } from '@/shell/CompilingIndicator';
 import { createEmitTargetControl } from '@/shell/emitTargetControl';
 import { createStatusBar } from '@/shell/statusBar';
@@ -247,10 +246,11 @@ export function init(hooks: IdeHooks = {}): () => void {
   // Global unsaved-work surfacing: the document title gains a `•` and a clickable "N unsaved" pill
   // appears in the status bar (beside validity/problems) whenever any open buffer is dirty. baseTitle
   // is captured once, clean.
-  // The pill is now the <UnsavedIndicator> Preact panel (#193) bound to the existing static button: it
-  // subscribes to the workspace slice's dirty count, sets the button's text/hidden/aria-label + the
+  // The pill is now the <UnsavedIndicator> Preact panel (#193, in @atypical/koine-ui since #1244) bound
+  // to the existing static button: it subscribes to the workspace slice's dirty count (via the generic
+  // ReadableStore adapter, store/readableStores.ts), sets the button's text/hidden/aria-label + the
   // title bullet, and wires Save-all. The workspace slice is the single owner of buffers/activeUri now
-  // (#982), so the panel re-renders inherently off every slice action — no manual projection push is
+  // (#982), so the panel repaints inherently off every slice action — no manual projection push is
   // needed. (The button stays index.html's element, so the controller's `domById(...)` lookups and the
   // test's getElementById are untouched.)
   const baseTitle = document.title;
@@ -260,7 +260,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   const unsavedHost = document.createElement('div');
   render(
     <UnsavedIndicator
-      store={appStore}
+      store={createUnsavedIndicatorStore(appStore)}
       host={unsavedEl}
       baseTitle={baseTitle}
       onSaveAll={() => commandWiring.run('save-all')}
@@ -758,10 +758,21 @@ export function init(hooks: IdeHooks = {}): () => void {
   // because the toolbar stays interactive across the multi-second lsp.start() connect window.
   const workspaceOpLock = createWorkspaceOpLock();
 
+  // The LOCKED workspace-open facade (#1275): the only path to the raw newModel()/openFolder() closures
+  // for every consumer — toolbar, chords, palette, overlays, onWorkspaceEmptied. Wrapping at the
+  // definition seam (instead of per call site, as #1088 did) makes a NEW workspace-opening affordance
+  // reach the locked name by default; the sole legitimate bypass is the pair handed to
+  // createLifecycleBoot below under the explicit `…Unlocked` names (runStartIntent already holds the
+  // lock when it calls them, so locking those would deadlock the boot).
+  const openWorkspace = {
+    newModel: (): Promise<void> => workspaceOpLock.run(() => newModel()),
+    openFolder: (): Promise<void> => workspaceOpLock.run(() => openFolder()),
+  };
+
   // --- open folder (directory-mode workspace) -------------------------------
 
   const openFolderBtn = domById<HTMLButtonElement>('btn-open-folder');
-  openFolderBtn.addEventListener('click', () => void workspaceOpLock.run(() => openFolder()));
+  openFolderBtn.addEventListener('click', () => void openWorkspace.openFolder());
   // Opening a folder relies on the File System Access API (Chromium-only). On browsers without it, the
   // button would look active but only ever raise an error toast — so disable it with an explanatory
   // tooltip rather than leaving a dead control. (Examples + share links + in-memory editing still work.)
@@ -769,6 +780,29 @@ export function init(hooks: IdeHooks = {}): () => void {
     openFolderBtn.disabled = true;
     openFolderBtn.title = 'Opening a folder needs a Chromium-based browser (try Chrome or Edge)';
   }
+
+  // Grey out the workspace-opening controls while a lock op is queued/running (#1275). The lock already
+  // serializes these entry points; without this the serialization is ILLEGIBLE — the Open-folder handler
+  // holds the lock across the native picker, so a queued op just looks like a hang. #btn-new's click is
+  // wired by commandWiring, but its busy chrome is lock-derived state owned here beside the lock. On
+  // idle, EACH button restores the idle title captured just below — for Open-folder that includes the
+  // capability gate (a drained queue must not resurrect a button a folder-less host permanently
+  // disabled). Unsubscribed via lifecycleBoot's disposers so a torn-down IDE can't be notified.
+  const newModelBtn = domById<HTMLButtonElement>('btn-new');
+  const newModelIdleTitle = newModelBtn.title;
+  const openFolderIdleDisabled = openFolderBtn.disabled;
+  const openFolderIdleTitle = openFolderBtn.title;
+  const unsubWorkspaceOpBusy = workspaceOpLock.onBusyChanged((busy) => {
+    const busyTitle = 'Waiting for the current workspace operation to finish…';
+    newModelBtn.disabled = busy;
+    openFolderBtn.disabled = busy || openFolderIdleDisabled;
+    newModelBtn.title = busy ? busyTitle : newModelIdleTitle;
+    openFolderBtn.title = busy ? busyTitle : openFolderIdleTitle;
+    for (const btn of [newModelBtn, openFolderBtn]) {
+      if (busy) btn.setAttribute('aria-disabled', 'true');
+      else btn.removeAttribute('aria-disabled');
+    }
+  });
 
   async function openFolder(): Promise<void> {
     if (!platform.canOpenFolders) {
@@ -873,7 +907,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     // The active buffer was deleted and the workspace is now empty: reset to a fresh blank model.
     // Locked (#1088) — it fires reactively, so it can land mid shared-import. Safe to lock: newModel()
     // clears the default workspace through the platform API, never re-entering onWorkspaceEmptied.
-    onWorkspaceEmptied: () => void workspaceOpLock.run(() => newModel()),
+    onWorkspaceEmptied: () => void openWorkspace.newModel(),
     pushRecentFolder,
     // Remember the opened workspace so a reload restores it instead of the empty default (#535). Gated
     // (in the controller) on the same `recent` flag as pushRecentFolder, so transient opens don't set it.
@@ -1239,7 +1273,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     // Backs requestNewModel() — the New button, mod+N, the palette (#1088). Only the RESET is locked:
     // requestNewModel's confirm dialog runs before this, and locking it would hold the queue for as
     // long as the modal is on screen.
-    newModel: () => workspaceOpLock.run(() => newModel()),
+    newModel: () => openWorkspace.newModel(),
   });
 
   // Desktop window-close guard (Tauri only): mirror the web beforeunload — confirm before closing
@@ -1388,7 +1422,7 @@ export function init(hooks: IdeHooks = {}): () => void {
     format: () => void formatActive(),
     goHome,
     // The palette's "Open folder…" entry and its mod+Shift+O chord (#1088).
-    openFolder: () => void workspaceOpLock.run(() => openFolder()),
+    openFolder: () => void openWorkspace.openFolder(),
     search,
     requestNewModel: () => void overlays.requestNewModel(),
     workspace: { saveAllDirty: () => void workspace.saveAllDirty(), buffers: () => workspace.buffers },
@@ -1411,6 +1445,9 @@ export function init(hooks: IdeHooks = {}): () => void {
     openUri,
     overlayOpen: () => overlays.overlayOpen(),
     toggleFileTree: () => layoutController.toggleFileTree(),
+    // Gates the new-model / open-folder commands (palette + chords) while a workspace-open op is
+    // queued or running (#1275) — the same lock-derived state that greys the toolbar buttons above.
+    workspaceOpBusy: () => workspaceOpLock.busy(),
     // Spotlight launcher seams (#1143): the joined model index, the host git surface, and the
     // open-file-and-reveal navigation the per-result quick actions dispatch to.
     modelIndex: () => controller.ensureModelIndex(),
@@ -1460,9 +1497,10 @@ export function init(hooks: IdeHooks = {}): () => void {
     showMemoryOnlyBanner: () => overlays.showMemoryOnlyBanner(),
     // RAW, deliberately unwrapped (#1088): runStartIntent already holds workspaceOpLock when it calls
     // these, and the FIFO queue has no re-entrancy detection — self-locking would enqueue behind the
-    // very op awaiting it and deadlock the boot. The wrapped variants are the closures above.
-    newModel: () => newModel(),
-    openFolder: () => openFolder(),
+    // very op awaiting it and deadlock the boot. Named for the exception they are (#1275); everything
+    // else goes through the locked `openWorkspace` facade above.
+    newModelUnlocked: () => newModel(),
+    openFolderUnlocked: () => openFolder(),
     openRecentFolder: (path) => openRecentFolder(path),
     openExample: (template) => openExample(template),
     disposers: {
@@ -1481,6 +1519,7 @@ export function init(hooks: IdeHooks = {}): () => void {
       editorKeys: () => disposeEditorKeys(),
       statusBar: () => statusBar.dispose(),
       explorer: () => explorer.dispose(),
+      workspaceOpBusy: () => unsubWorkspaceOpBusy(),
     },
   });
 

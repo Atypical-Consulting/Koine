@@ -95,18 +95,6 @@ export default tseslint.config(
       'no-restricted-syntax': ['error', ...selectorsExcept(DISPOSED_FLAG_SELECTOR, SEQ_COUNTER_SELECTOR)],
     },
   },
-  // src/shell/statusBar.tsx hand-rolls the exact same "am I still mounted" disposed flag as the six
-  // controllers migrated onto createLifecycleGuard() — lifecycleGuard.ts's own header comment calls this
-  // out by name as "the same disposed-only shape but out of this issue's scope — tracked as a follow-up
-  // rather than folded in here." So the disposed-flag selector is scoped off for just this file's existing
-  // declaration until that follow-up converts it; the Seq-counter selector stays active here (this file
-  // has no `…Seq` pattern today, so nothing depends on it being off).
-  {
-    files: ['src/shell/statusBar.tsx'],
-    rules: {
-      'no-restricted-syntax': ['error', ...selectorsExcept(DISPOSED_FLAG_SELECTOR)],
-    },
-  },
   // src/ai/ai.ts's `toolCallSeq` and src/shared/ids.ts's `idSeq` are plain monotonic id-minting counters
   // (correlating UI tool-call start/end events, and generating a no-crypto fallback unique id,
   // respectively) — not the createLifecycleGuard staleness sequence, which is minted via createSequence()

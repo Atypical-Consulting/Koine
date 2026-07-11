@@ -6,8 +6,8 @@
 // `const isCurrent = () => !disposed && seq === xSeq`). This is that pattern promoted to one shared,
 // tested primitive (#1352) so a controller declares its guard once and, per independent async race it
 // runs, a sequence — instead of re-deriving the disposed-flag/counter dance by hand in each file.
-// statusBar.tsx has the same disposed-only shape but is out of this issue's scope — tracked as a
-// follow-up rather than folded in here.
+// statusBar.tsx had the same disposed-only shape; it was out of #1352's scope and migrated in the
+// #1375 follow-up.
 /** An independent staleness axis a LifecycleGuard mints — call createSequence() once per concurrent
  *  async race a controller runs. Named and exported (rather than left as createSequence()'s inline
  *  return type) so a helper that wants to accept "a sequence" as a parameter has something to import. */

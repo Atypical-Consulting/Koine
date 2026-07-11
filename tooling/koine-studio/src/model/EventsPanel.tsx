@@ -74,6 +74,10 @@ export function EventsPanel(props: {
             columns={EVENT_COLUMNS}
             emptyText="No events yet — add a domain or integration event to your model."
             rowLabel={(r) => r.name}
+            // Key rows on the QUALIFIED name, not the simple-name label: under "All contexts" two bounded
+            // contexts may each declare an event named e.g. `OrderPlaced` (per-context uniqueness, R13.2),
+            // and duplicate sibling keys make the focused row land on the WRONG context's event after a sort.
+            rowKey={(r) => r.qualifiedName}
             handlers={props.handlers}
             // Clicking an event row also selects it, so the Properties inspector loads it (issue
             // follow-up): the bottom Events table is a list of event nodes; clicking one should inspect

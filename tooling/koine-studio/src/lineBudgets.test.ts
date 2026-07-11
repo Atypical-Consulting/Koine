@@ -97,7 +97,18 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 1489 → 1490: #760 injects the app store into createEditorSession instead of editorSession.tsx
   // reaching for the `appStore` singleton itself — the composition root now passes `store: appStore` into
   // the createEditorSession(...) call, +1 LOC. Measured end-state.
-  { file: 'src/shell/ide.tsx', maxLines: 1490 },
+  // Raised 1490 → 1502: #1275 routes every workspace-opening consumer through one locked `openWorkspace`
+  // facade defined beside the lock (the per-call-site `workspaceOpLock.run(...)` wraps #1088 added kept
+  // the raw closures freely callable, and a fifth bypass had already slipped in), and renames the
+  // deliberately-unlocked closures handed to createLifecycleBoot to `newModelUnlocked`/`openFolderUnlocked`.
+  // The growth is the facade + the comments naming the deadlock exception. Measured end-state — the
+  // facade must live here, beside the lock and above every consumer, so this cannot be extracted.
+  // Raised 1502 → 1531: #1275 item 2 surfaces the lock's busy state — the onBusyChanged subscription
+  // that greys out #btn-new/#btn-open-folder (aria-disabled + explanatory title, restoring the
+  // capability gate on idle), the `workspaceOpBusy` CommandWiringDeps seam, and the disposer that
+  // releases the subscription at teardown. Lock-derived chrome wired at the composition root beside
+  // the lock it reads. Measured end-state.
+  { file: 'src/shell/ide.tsx', maxLines: 1531 },
   // Frozen 2026-07-02 at 2286 LOC (grown from the audit's 2266 @ fc83bcf5), ceil(2286 × 1.02) = 2332.
   // #985 ratchets this down as it decomposes inspectorController.tsx. Freezing prevents further
   // regrowth; it does not mandate the split — #985 owns that.

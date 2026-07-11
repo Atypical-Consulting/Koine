@@ -74,6 +74,7 @@ import {
 } from '@/shell/inspector/activeContextController';
 import { createSurfaceLoaders } from '@/shell/inspector/surfaceLoaders';
 import { centerDeckInitialChrome, createCenterDeckController } from '@/shell/inspector/centerDeckController';
+import { createNarrowCrossHandler } from '@/shell/inspector/shared';
 
 // The center column's top-level views and the Code/Documentation sub-tabs (kept local — they're a UI
 // concern, not part of the target-agnostic model). They mirror the uiChrome slice's CenterView /
@@ -349,24 +350,19 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // when the active host changes across the breakpoint (#221) — Preact's render() leaves it otherwise.
   let inspectorMountHost: HTMLElement | null = null;
   // Widening past the breakpoint dismisses the sheet and hands Properties back to the fixed right rail;
-  // narrowing re-mounts it into the sheet body on the next render. Registered only when the sheet exists.
-  // Track the last narrow-ness so a resize TICK that does NOT cross the breakpoint is a no-op: on mobile
-  // the soft keyboard / address bar fire `resize` constantly, and re-mounting Properties on every one
-  // would thrash the panel. Only an actual narrow↔wide CROSS re-renders/re-mounts (a widen still dismisses
-  // the sheet first) — mirroring ide.tsx's diagram-resize cross guard.
-  // The #475 bottom-strip viewport-aware-default re-evaluation on this SAME cross now lives in
-  // centerDeckController's OWN independent `resize` listener (#985 Task 4 — each module tracks its own
-  // narrow↔wide crossing rather than sharing this flag, the same duplication precedent `visibleCenters()`
-  // already established). This listener only handles the #221 inspector-sheet narrow↔wide handling.
-  let wasNarrow = isNarrowViewport();
-  function onViewportResize(): void {
-    const narrow = isNarrowViewport();
-    if (narrow === wasNarrow) return; // not a cross — ignore the keyboard/address-bar resize churn
-    wasNarrow = narrow;
+  // narrowing re-mounts it into the sheet body on the next render. The crossing detection (only an actual
+  // narrow↔wide CROSS re-renders/re-mounts — a resize TICK that does not cross is a no-op, since on mobile
+  // the soft keyboard / address bar fire `resize` constantly and re-mounting Properties on every one would
+  // thrash the panel) is the shared createNarrowCrossHandler (#1262), mirroring ide.tsx's diagram-resize
+  // cross guard. The #475 bottom-strip viewport-aware-default re-evaluation on this SAME cross lives in
+  // centerDeckController's OWN independent `resize` listener (#985 Task 4 — each module keeps its own
+  // handler with its own crossing state, never a shared flag). This listener only handles the #221
+  // inspector-sheet narrow↔wide handling (a widen still dismisses the sheet first).
+  const onViewportResize = createNarrowCrossHandler((narrow) => {
     if (!inspectorSheet) return;
     if (!narrow && inspectorSheet.isOpen()) inspectorSheet.setDetent('peek');
     renderSelectedInspector(); // re-mount into the now-correct host (sheet body vs #inspector-host)
-  }
+  });
   // The `resize` listener is registered at the END of construction (just before `return`), not here: the
   // required DOM-host lookups below (`domById`/`domQueryAll`) THROW on a drifted layout, and registering a
   // global window listener before they run would leak a half-initialized closure into the page on failure.
@@ -478,7 +474,15 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
 
   activeContextCtrl = createActiveContextController({
     store: appStore,
-    lsp,
+    // The controller's glossary-model reads ride the facade's shared in-flight memoizer (#1258, the #484
+    // follow-up): onDocEdited's debounce fires refreshContextList() AND refreshActiveSurfaces() (→ the
+    // navigator's seeded reload + ensureModelIndex) in the same tick, so routing this THIRD consumer
+    // through fetchGlossaryModel() folds its formerly separate glossaryModel() request into the one
+    // shared fetch — one round-trip per edit instead of two. (`fetchGlossaryModel` is a hoisted function
+    // declaration further down this scope, and the controller only calls it post-construction, so
+    // referencing it here is safe.) documentSymbols passes through unmemoized — it's per-file, not
+    // per-model.
+    lsp: { glossaryModel: fetchGlossaryModel, documentSymbols: () => lsp.documentSymbols() },
     activeUri: deps.activeUri,
     folderRootToken: deps.folderRootToken,
     saveActiveContext: deps.saveActiveContext,

@@ -52,6 +52,15 @@ describe('TauriPlatform git surface', () => {
     expect(invokeMock).toHaveBeenCalledWith('git_unstage', { dir: '/work', relPaths: ['a.koi'] });
   });
 
+  it('gitDiscard invokes git_discard with { dir, trackedPaths, untrackedPaths } — the caller-supplied split', async () => {
+    await new TauriPlatform().gitDiscard('/work', ['a.koi'], ['scratch.koi']);
+    expect(invokeMock).toHaveBeenCalledWith('git_discard', {
+      dir: '/work',
+      trackedPaths: ['a.koi'],
+      untrackedPaths: ['scratch.koi'],
+    });
+  });
+
   it('gitCommit invokes git_commit with { dir, message }', async () => {
     await new TauriPlatform().gitCommit('/work', 'feat: add aggregate');
     expect(invokeMock).toHaveBeenCalledWith('git_commit', { dir: '/work', message: 'feat: add aggregate' });
@@ -60,6 +69,11 @@ describe('TauriPlatform git surface', () => {
   it('gitRevert invokes git_revert with { dir, sha }', async () => {
     await new TauriPlatform().gitRevert('/work', 'abc1234');
     expect(invokeMock).toHaveBeenCalledWith('git_revert', { dir: '/work', sha: 'abc1234' });
+  });
+
+  it('gitPush invokes git_push with { dir }', async () => {
+    await new TauriPlatform().gitPush('/work');
+    expect(invokeMock).toHaveBeenCalledWith('git_push', { dir: '/work' });
   });
 
   it('gitBranches invokes git_branches with { dir } and returns the branch names', async () => {

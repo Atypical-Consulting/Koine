@@ -62,8 +62,15 @@ export interface LifecycleBootDeps {
   persistsWorkspace: boolean;
   showMemoryOnlyBanner(): void;
   // Start-intent actions — reused from the in-editor start console so Home and the editor share one path.
-  newModel(): Promise<void>;
-  openFolder(): Promise<void>;
+  /**
+   * UNLOCKED on purpose (#1275): runStartIntent already holds {@link workspaceOpLock} when it calls
+   * these, and the FIFO queue has no re-entrancy detection — a locked variant would enqueue behind the
+   * very op awaiting it and deadlock the boot. This is the ONLY legitimate bypass; every other consumer
+   * gets ide.tsx's locked `openWorkspace` facade. Reach for that unless you are inside the lock.
+   */
+  newModelUnlocked(): Promise<void>;
+  /** UNLOCKED on purpose — same deadlock reason as {@link newModelUnlocked}. */
+  openFolderUnlocked(): Promise<void>;
   openRecentFolder(path: string): Promise<void>;
   openExample(template: Template): Promise<void>;
   // Teardown fan-out, called in order; lifecycleBoot adds its own route-intent unsubscribe.
@@ -94,6 +101,9 @@ export interface LifecycleBootDeps {
     /** Clear the explorer's pending filter debounce, close its floating menu, and detach its root el so
      *  its persistent listeners and deferred applyFilter can't fire after teardown. (#980) */
     explorer(): void;
+    /** Release the workspaceOpLock busy subscription (the New/Open-folder toolbar greying, #1275) so a
+     *  queue draining after teardown can't notify a torn-down IDE. Order-independent of the others. */
+    workspaceOpBusy(): void;
   };
 }
 
@@ -136,9 +146,10 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   //
   // The lock is INJECTED, not private (#1088): ide.tsx owns the single instance and shares it with the
   // toolbar / keyboard / palette / onWorkspaceEmptied entry points, which reach the same underlying
-  // newModel()/openFolder() without ever passing through this file. The raw `deps.newModel`/
-  // `deps.openFolder` closures handed to us stay UNwrapped — runStartIntent already holds the lock when
-  // it calls them, and the queue has no re-entrancy detection, so a self-locking action would deadlock.
+  // newModel()/openFolder() without ever passing through this file. The `deps.newModelUnlocked`/
+  // `deps.openFolderUnlocked` closures handed to us stay UNwrapped — runStartIntent already holds the
+  // lock when it calls them, and the queue has no re-entrancy detection, so a self-locking action would
+  // deadlock. Their names carry that exception (#1275) so no other consumer copies them.
   const withWorkspaceOpLock = <T>(op: () => Promise<T>): Promise<T> => deps.workspaceOpLock.run(op);
 
   // Boot/empty-state: open the host's persistent default workspace. The clearLegacyScratch + the
@@ -168,10 +179,10 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       if (opts.guarded && !(await deps.confirmReplaceWork('Replace your work?', 'Discard & continue'))) return;
       switch (intent.kind) {
         case 'new':
-          await deps.newModel();
+          await deps.newModelUnlocked();
           break;
         case 'open-folder':
-          await deps.openFolder();
+          await deps.openFolderUnlocked();
           break;
         case 'open-recent':
           await deps.openRecentFolder(intent.path);
@@ -348,6 +359,7 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
       deps.disposers.editorKeys();
       deps.disposers.statusBar();
       deps.disposers.explorer();
+      deps.disposers.workspaceOpBusy();
     },
   };
 }

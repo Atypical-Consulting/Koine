@@ -22,6 +22,15 @@ function treeitems(el: HTMLElement): HTMLElement[] {
   return Array.from(el.querySelectorAll<HTMLElement>('[role="treeitem"]'));
 }
 
+/** Whether a row is collapsed away per the CSS-driven contract (#1366): some ANCESTOR folder row carries
+ *  `aria-expanded="false"` — the exact DOM state the stylesheet's
+ *  `[role="treeitem"][aria-expanded="false"] > [role="group"] { display: none; }` rule keys off.
+ *  (vitest/happy-dom doesn't apply real CSS cascade, so tests assert the attribute state the rule reads.)
+ *  Ancestor-only on purpose: a collapsed folder's OWN row stays visible — only its descendants hide. */
+function collapsedAway(el: HTMLElement): boolean {
+  return Boolean(el.parentElement?.closest('[role="treeitem"][aria-expanded="false"]'));
+}
+
 describe('createGeneratedFileTree', () => {
   it('renders a [role="tree"] with one [role="treeitem"] per tree node', () => {
     const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
@@ -89,15 +98,27 @@ describe('createGeneratedFileTree', () => {
     const folder = element.querySelector<HTMLElement>('[data-path="Billing"]')!;
     const child = element.querySelector<HTMLElement>('[data-path="Billing/Order.cs"]')!;
     expect(folder.getAttribute('aria-expanded')).toBe('true');
-    expect(child.closest('[hidden]')).toBeNull();
+    expect(collapsedAway(child)).toBe(false);
 
     folder.click();
     expect(folder.getAttribute('aria-expanded')).toBe('false');
-    expect(child.closest('[hidden]')).not.toBeNull();
+    expect(collapsedAway(child)).toBe(true);
 
     folder.click();
     expect(folder.getAttribute('aria-expanded')).toBe('true');
-    expect(child.closest('[hidden]')).toBeNull();
+    expect(collapsedAway(child)).toBe(false);
+  });
+
+  // #1366: child visibility is CSS-driven from `aria-expanded` alone — collapsing must NOT write the old
+  // `.hidden` dual-write onto the child `<ul role="group">`; the stylesheet's
+  // `.generated-file-tree [role="treeitem"][aria-expanded="false"] > [role="group"]` rule owns hiding.
+  it('collapsing a folder writes aria-expanded only — never [hidden] on its child group', () => {
+    const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
+    setFiles(sampleFiles());
+
+    element.querySelector<HTMLElement>('[data-path="Billing"]')!.click(); // collapse Billing/
+
+    expect(element.querySelector('[role="group"][hidden]')).toBeNull();
   });
 
   it('setFiles rebuilds the tree from scratch, dropping any prior selection', () => {
@@ -129,9 +150,9 @@ describe('createGeneratedFileTree', () => {
     const rebuiltFolder = element.querySelector<HTMLElement>('[data-path="Billing"]')!;
     expect(rebuiltFolder.getAttribute('aria-expanded')).toBe('false');
     const child = element.querySelector<HTMLElement>('[data-path="Billing/Order.cs"]')!;
-    expect(child.closest('[hidden]')).not.toBeNull();
+    expect(collapsedAway(child)).toBe(true);
     // The unrelated new node is unaffected — still visible.
-    expect(element.querySelector<HTMLElement>('[data-path="New.cs"]')!.closest('[hidden]')).toBeNull();
+    expect(collapsedAway(element.querySelector<HTMLElement>('[data-path="New.cs"]')!)).toBe(false);
   });
 
   it('a folder path that no longer exists after setFiles simply loses its (moot) collapsed state', () => {
@@ -150,6 +171,8 @@ describe('createGeneratedFileTree', () => {
       const onSelect = vi.fn();
       const { element, setFiles, selectPath } = createGeneratedFileTree({ onSelect });
       setFiles(sampleFiles());
+      // Collapse Billing/ first so selectPath's ancestor re-expansion is actually exercised.
+      element.querySelector<HTMLElement>('[data-path="Billing"]')!.click();
 
       const result = selectPath('Billing/ValueObjects/Money.cs');
 
@@ -157,8 +180,8 @@ describe('createGeneratedFileTree', () => {
       expect(onSelect).not.toHaveBeenCalled();
       const money = element.querySelector<HTMLElement>('[data-path="Billing/ValueObjects/Money.cs"]')!;
       expect(money.getAttribute('aria-selected')).toBe('true');
-      // its ancestor folders must be expanded so the newly-selected file stays visible
-      expect(money.closest('[hidden]')).toBeNull();
+      // its ancestor folders must be (re-)expanded so the newly-selected file stays visible
+      expect(collapsedAway(money)).toBe(false);
     });
 
     it('returns false for a path absent from the current tree', () => {
@@ -245,6 +268,34 @@ describe('createGeneratedFileTree', () => {
       expect(document.activeElement).toBe(folder);
     });
 
+    // #1366 regression lock: a collapsed folder's OWN row must stay keyboard-reachable — only its
+    // DESCENDANTS leave the visible set. The reachability predicate must therefore test ANCESTORS only:
+    // the naive `el.closest('[aria-expanded="false"]')` would match the collapsed folder's own row
+    // (`closest` tests the element itself before its ancestors) and wrongly drop it from the
+    // roving-tabindex/arrow-nav set.
+    it("a collapsed folder's own row stays keyboard-reachable while its children are skipped", () => {
+      const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(sampleFiles());
+      document.body.appendChild(element);
+
+      const folder = element.querySelector<HTMLElement>('[data-path="Billing"]')!;
+      folder.click(); // collapse Billing/
+      expect(folder.getAttribute('aria-expanded')).toBe('false');
+
+      // The collapsed folder itself keeps the roving tab stop — its own row is still visible/reachable.
+      expect(folder.tabIndex).toBe(0);
+
+      // ArrowDown from it skips its collapsed-away children, landing on the next VISIBLE row …
+      folder.focus();
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      const program = element.querySelector<HTMLElement>('[data-path="Program.cs"]')!;
+      expect(document.activeElement).toBe(program);
+
+      // … and ArrowUp from that row comes straight back to the collapsed folder's own row.
+      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      expect(document.activeElement).toBe(folder);
+    });
+
     it('ArrowLeft on a file row ascends focus to its parent folder', () => {
       const { element, setFiles } = createGeneratedFileTree({ onSelect: () => {} });
       setFiles(sampleFiles());
@@ -270,6 +321,85 @@ describe('createGeneratedFileTree', () => {
 
       expect(onSelect).toHaveBeenCalledExactlyOnceWith('Program.cs');
       expect(file.getAttribute('aria-selected')).toBe('true');
+    });
+  });
+
+  // ADR-0009 scope emphasis over the tree's TOP-LEVEL (bounded-context) rows — owned by the tree itself
+  // (#1363; the logic previously lived in outputRail.ts's applyOutputTreeEmphasis, reaching into this
+  // widget's DOM from outside). Scenarios ported verbatim from outputRail.test.ts's emphasis block.
+  describe('emphasizeTopLevel (ADR 0009)', () => {
+    // Three top-level entries (two bounded-context folders + the shared runtime folder) — the shape the
+    // scope emphasis operates over.
+    function scopedFiles(): EmitFile[] {
+      return [
+        emitFile('Ordering/Order.cs'),
+        emitFile('Ordering/Money.cs'),
+        emitFile('Kitchen/Ticket.cs'),
+        emitFile('runtime/KoineRuntime.cs'),
+      ];
+    }
+    const topLevel = (el: HTMLElement): HTMLElement[] =>
+      Array.from(el.querySelectorAll<HTMLElement>('[role="treeitem"][aria-level="1"]'));
+    const byPath = (el: HTMLElement, path: string): HTMLElement =>
+      topLevel(el).find((e) => e.dataset.path === path) as HTMLElement;
+
+    it('emphasises the matching top-level node and de-emphasises the rest — never hiding any', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel('Ordering');
+      // Every top-level row is still rendered — emphasis, not hiding (the whole-model overview survives).
+      expect(topLevel(element)).toHaveLength(3); // Ordering, Kitchen, runtime (folders, one per top-level path)
+
+      expect(byPath(element, 'Ordering').classList.contains('on')).toBe(true);
+      expect(byPath(element, 'Ordering').classList.contains('dim')).toBe(false);
+      expect(byPath(element, 'Kitchen').classList.contains('dim')).toBe(true);
+      expect(byPath(element, 'Kitchen').classList.contains('on')).toBe(false);
+      expect(byPath(element, 'runtime').classList.contains('dim')).toBe(true);
+      expect(byPath(element, 'runtime').classList.contains('on')).toBe(false);
+
+      // WCAG AA non-color signal (ADR 0009): the active scope must not rely on color/hue alone.
+      expect(byPath(element, 'Ordering').getAttribute('aria-current')).toBe('true');
+      expect(byPath(element, 'Kitchen').getAttribute('aria-current')).toBeNull();
+      expect(byPath(element, 'runtime').getAttribute('aria-current')).toBeNull();
+    });
+
+    it('All contexts (activeContext null) leaves every top-level node plain', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel(null);
+      for (const el of topLevel(element)) {
+        expect(el.classList.contains('on')).toBe(false);
+        expect(el.classList.contains('dim')).toBe(false);
+        expect(el.getAttribute('aria-current')).toBeNull();
+      }
+    });
+
+    it('a scope matching no top-level node emphasises nothing — a graceful no-op', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel('Shipping'); // no Shipping/ output
+      for (const el of topLevel(element)) {
+        expect(el.classList.contains('on')).toBe(false);
+        expect(el.classList.contains('dim')).toBe(false); // NOT the whole tree dimmed
+        expect(el.getAttribute('aria-current')).toBeNull();
+      }
+    });
+
+    it('re-applying with a different context clears the previous emphasis first', () => {
+      const { element, setFiles, emphasizeTopLevel } = createGeneratedFileTree({ onSelect: () => {} });
+      setFiles(scopedFiles());
+
+      emphasizeTopLevel('Ordering');
+      emphasizeTopLevel('Kitchen');
+      expect(byPath(element, 'Ordering').classList.contains('on')).toBe(false);
+      expect(byPath(element, 'Ordering').classList.contains('dim')).toBe(true);
+      expect(byPath(element, 'Kitchen').classList.contains('on')).toBe(true);
+      expect(byPath(element, 'Kitchen').classList.contains('dim')).toBe(false);
+      expect(byPath(element, 'Ordering').getAttribute('aria-current')).toBeNull();
+      expect(byPath(element, 'Kitchen').getAttribute('aria-current')).toBe('true');
     });
   });
 

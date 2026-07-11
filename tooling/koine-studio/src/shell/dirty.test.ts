@@ -1,21 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { handleBeforeUnload, titleWithDirty } from '@/shell/dirty';
+import { handleBeforeUnload } from '@/shell/dirty';
 
-describe('titleWithDirty', () => {
-  test('prefixes a bullet when there are unsaved files', () => {
-    expect(titleWithDirty('Koine Studio', 1)).toBe('• Koine Studio');
-    expect(titleWithDirty('Koine Studio', 3)).toBe('• Koine Studio');
-  });
-
-  test('returns the base title unchanged when nothing is unsaved', () => {
-    expect(titleWithDirty('Koine Studio', 0)).toBe('Koine Studio');
-  });
-
-  test('does not double-prefix an already-marked title', () => {
-    expect(titleWithDirty('• Koine Studio', 2)).toBe('• Koine Studio');
-    expect(titleWithDirty('• Koine Studio', 0)).toBe('Koine Studio');
-  });
-});
+// (`titleWithDirty`'s tests moved to @atypical/koine-ui with the function — see
+// koine-ui/src/components/UnsavedIndicator.test.tsx, #1244.)
 
 describe('handleBeforeUnload', () => {
   function fakeEvent() {

@@ -91,6 +91,27 @@ vi.mock('@/shell/commandWiring', async () => {
   };
 });
 
+// Capture the boot's single workspaceOpLock instance (#1275), so a test can contend for the REAL lock
+// directly — hold it open with its own deferred op, or drive a rejecting op through it — instead of
+// only ever holding it indirectly via a gated shared import. workspaceOpLock.ts is a dependency-free
+// leaf module, so this delegating mock cannot skew any other module's instance graph. (Mocking
+// lifecycleBoot itself to capture its deps bag is NOT safe here: its module-level appStore/bootIntent
+// imports then resolve to different instances than the test's, breaking the route-intent tests.)
+const lockSeam = vi.hoisted(() => ({
+  current: null as null | { run<T>(op: () => Promise<T>): Promise<T> },
+}));
+vi.mock('@/shell/workspaceOpLock', async () => {
+  const actual = await vi.importActual<typeof import('@/shell/workspaceOpLock')>('@/shell/workspaceOpLock');
+  return {
+    ...actual,
+    createWorkspaceOpLock: () => {
+      const lock = actual.createWorkspaceOpLock();
+      lockSeam.current = lock;
+      return lock;
+    },
+  };
+});
+
 // #731: capture the `onOpenPrefs` callback ide.ts wires into the (lazily-created) Assistant panel, so a
 // test can invoke it and assert it routes to the Settings overlay. A partial mock: every other aiPanel
 // export is preserved, and createAssistantChat returns a minimal stub (the panel is created lazily on
@@ -288,7 +309,13 @@ class FakePlatform implements Platform {
   gitUnstage(): Promise<void> {
     return this.gitUnavailable();
   }
+  gitDiscard(): Promise<void> {
+    return this.gitUnavailable();
+  }
   gitCommit(): Promise<void> {
+    return this.gitUnavailable();
+  }
+  gitPush(): Promise<void> {
     return this.gitUnavailable();
   }
   gitRevert(): Promise<void> {
@@ -359,8 +386,8 @@ const APP_HTML = `
       <header id="toolbar">
         <button type="button" id="btn-home" class="brand"><span class="brand-logo"></span><span class="brand-text"><span class="brand-name">Koine</span><span class="brand-eyebrow">Studio</span></span></button>
         <div class="iconset" role="toolbar">
-          <button type="button" id="btn-new" class="t-ico">New</button>
-          <button type="button" id="btn-open-folder" class="t-ico">Open</button>
+          <button type="button" id="btn-new" class="t-ico" title="Start a new empty model (prompts if you have unsaved changes)">New</button>
+          <button type="button" id="btn-open-folder" class="t-ico" title="Open a folder of .koi models">Open</button>
           <div id="history-controls-host"></div>
         </div>
         <button type="button" id="palette-hint" class="cmd palette-hint"><span class="cmd-kbd" data-role="cmd-kbd"></span></button>
@@ -712,33 +739,36 @@ describe('ide init() — #-hash multi-file shared workspace', () => {
   });
 });
 
+/**
+ * Park the shared-workspace import inside `materializeWorkspace` until the returned `release()` is
+ * called — i.e. hold the workspace-open lock the way a slow host does — then let the real import run.
+ */
+function gateSharedImport(platform: FakePlatform): () => void {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const real = platform.materializeWorkspace.bind(platform);
+  platform.materializeWorkspace = async (name, files) => {
+    await gate;
+    return real(name, files);
+  };
+  return release;
+}
+
 // Regression (#1088): #1046's workspace-open lock lived inside createLifecycleBoot, so it only ever
 // serialized the boot ladder's own branches. The toolbar's New / Open-folder buttons — and the mod+N,
 // mod+Shift+O and palette entries that share their closures — reach the same underlying
-// newModel()/openFolder() straight from ide.tsx and never saw the lock. They stay clickable for the
+// newModel()/openFolder() straight from ide.tsx and never saw the lock. They stayed clickable for the
 // whole multi-second lsp.start() + import window, so either could land on top of an in-flight
 // shared-workspace import, with whichever settled last silently winning.
 //
-// These drive the REAL init() with the shared import held open, then click the real toolbar buttons.
+// These drive the REAL init() with the shared import held open. The toolbar buttons are DISABLED for
+// exactly that window now (#1275), so their pins assert the click is inert then works after release;
+// the thunk-level pins below still contend for the lock itself (a disabled control is UX, not a race
+// guard — the lock stays the mechanism that closes the race).
 describe('ide init() — the workspace-open lock covers the toolbar entry points (#1088)', () => {
-  /**
-   * Park the shared-workspace import inside `materializeWorkspace` until the returned `release()` is
-   * called — i.e. hold the workspace-open lock the way a slow host does — then let the real import run.
-   */
-  function gateSharedImport(platform: FakePlatform): () => void {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const real = platform.materializeWorkspace.bind(platform);
-    platform.materializeWorkspace = async (name, files) => {
-      await gate;
-      return real(name, files);
-    };
-    return release;
-  }
-
-  test('the toolbar Open-folder button defers to an in-flight shared import instead of racing it', async () => {
+  test('the toolbar Open-folder button cannot race an in-flight shared import (disabled, then works after)', async () => {
     setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
     const platform = installPlatform();
     const release = gateSharedImport(platform);
@@ -748,18 +778,24 @@ describe('ide init() — the workspace-open lock covers the toolbar entry points
 
     await boot({ platform }); // the ladder is parked mid-import, holding the lock
 
-    document.getElementById('btn-open-folder')!.click();
+    // The import is still in flight: the button is greyed out (#1275) and a click is inert, so the
+    // folder picker can never open on top of the import.
+    const openBtn = document.getElementById('btn-open-folder') as HTMLButtonElement;
+    expect(openBtn.disabled).toBe(true);
+    openBtn.click();
     await settleBoot();
-    // The import is still in flight, so the folder picker must not open on top of it.
     expect(pickFolder).not.toHaveBeenCalled();
 
     release();
     await settleBoot();
-    // Deferred, not dropped: once the import settles the queued open runs.
+    // Once the import settles the control comes back and opens the picker as usual.
+    expect(openBtn.disabled).toBe(false);
+    openBtn.click();
+    await settleBoot();
     expect(pickFolder).toHaveBeenCalledOnce();
   });
 
-  test('the toolbar New button defers to an in-flight shared import instead of racing it', async () => {
+  test('the toolbar New button cannot race an in-flight shared import (disabled, then works after)', async () => {
     setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
     const platform = installPlatform();
     const release = gateSharedImport(platform);
@@ -769,13 +805,21 @@ describe('ide init() — the workspace-open lock covers the toolbar entry points
     // "New ran": newModel() resets the default workspace via platform.defaultWorkspace(BLANK).
     expect(platform.defaultWorkspaceSeed).toBeNull();
 
-    document.getElementById('btn-new')!.click();
+    // The import is still in flight: the button is greyed out (#1275) and a click is inert, so the
+    // reset can never blow the import away. (The reactive-reset pin below still proves a newModel()
+    // that DOES land mid-import queues through the lock.)
+    const newBtn = document.getElementById('btn-new') as HTMLButtonElement;
+    expect(newBtn.disabled).toBe(true);
+    newBtn.click();
     await settleBoot();
-    // Nothing is dirty, so the New guard's confirm resolves straight through — but the reset itself
-    // must still wait for the in-flight import rather than blowing it away.
     expect(platform.defaultWorkspaceSeed).toBeNull();
 
     release();
+    await settleBoot();
+    // Once the import settles the control comes back; nothing is dirty, so the New guard's confirm
+    // resolves straight through and the reset runs.
+    expect(newBtn.disabled).toBe(false);
+    newBtn.click();
     await settleBoot();
     expect(platform.defaultWorkspaceSeed).not.toBeNull();
   });
@@ -865,8 +909,114 @@ describe('ide init() — the workspace-open lock covers the toolbar entry points
     appStore.setState({ route: 'editor' });
     await settleBoot();
 
-    // runStartIntent → the raw deps.newModel() ran to completion inside the lock, resetting to BLANK.
+    // runStartIntent → the raw deps.newModelUnlocked() ran to completion inside the lock, resetting to BLANK.
     expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
+  });
+
+  // #1275 hardening: the same invariant, contended through the REAL lock instance (the seam), not just
+  // the boot ladder's own shared import. A Home start-intent queued behind an arbitrary lock-holder
+  // must (a) DEFER — runStartIntent serializes on the one boot-wide lock the facade wraps — and then
+  // (b) COMPLETE once the holder releases, which is exactly what breaks if a refactor ever hands
+  // createLifecycleBoot the locked facade instead of the `…Unlocked` closures: runStartIntent would
+  // hold the lock while its newModel() waits behind it, and the release below would never unwedge it.
+  test('a Home start-intent queued behind a held lock defers, then completes on release (no double-lock)', async () => {
+    const { setStartIntent } = await import('@/shell/bootIntent');
+    const { appStore } = await import('@/store');
+
+    const { platform } = await boot();
+    expect(platform.defaultWorkspaceSeed).toContain('context Billing'); // the default boot's SEED
+
+    // Hold the boot's own lock with a deferred op — a stand-in for any slow workspace-opening op.
+    let release!: () => void;
+    void lockSeam.current!.run(() => new Promise<void>((resolve) => {
+      release = resolve;
+    }));
+    await settleBoot();
+
+    setStartIntent({ kind: 'new' });
+    appStore.setState({ route: 'editor' });
+    await settleBoot();
+    // The intent's reset queued behind the held lock instead of racing it.
+    expect(platform.defaultWorkspaceSeed).toContain('context Billing');
+
+    release();
+    await settleBoot();
+    // …and ran to completion once its turn came — the raw closure inside runStartIntent is unlocked.
+    expect(platform.defaultWorkspaceSeed).toContain('context NewModel');
+  });
+});
+
+// #1275 item 2 (approach C from #1088's spec): the lock already serializes the workspace-opening entry
+// points, but a control that LOOKS live while its click sits in the queue reads as a hang — e.g. the
+// Open-folder handler holds the lock across the native picker, stalling a queued boot-ladder import
+// with no visible reason. Reflect the lock's busy state onto the New / Open-folder toolbar buttons so
+// the deferral is legible. onWorkspaceEmptied stays UNgated (it is automatic; the lock defers it).
+describe('ide init() — workspace-opening controls grey out while an op is in flight (#1275)', () => {
+  function toolbarButtons(): { newBtn: HTMLButtonElement; openBtn: HTMLButtonElement } {
+    return {
+      newBtn: document.getElementById('btn-new') as HTMLButtonElement,
+      openBtn: document.getElementById('btn-open-folder') as HTMLButtonElement,
+    };
+  }
+
+  test('New and Open-folder disable (with an explanatory title) while the shared import holds the lock, and re-enable after', async () => {
+    setWorkspaceShareHash([{ relPath: 'a.koi', text: 'context A {}\n' }], 'a.koi');
+    const platform = installPlatform();
+    const release = gateSharedImport(platform);
+
+    await boot({ platform }); // parked mid-import, holding the lock
+    const { newBtn, openBtn } = toolbarButtons();
+    for (const btn of [newBtn, openBtn]) {
+      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.title).toMatch(/workspace/i); // says WHY, not just a dead control
+    }
+
+    release();
+    await settleBoot();
+    for (const btn of [newBtn, openBtn]) {
+      expect(btn.disabled).toBe(false);
+      expect(btn.hasAttribute('aria-disabled')).toBe(false);
+    }
+    // Idle restores EACH button's static index.html tooltip — the busy title must not linger, and the
+    // idle title must not be stripped (every boot fires busy→idle, so a strip would be permanent).
+    expect(newBtn.title).toBe('Start a new empty model (prompts if you have unsaved changes)');
+    expect(openBtn.title).toBe('Open a folder of .koi models');
+  });
+
+  // The busy flag must clear on a REJECTED op — the lock already releases; a toolbar stuck disabled
+  // would be strictly worse than the race the lock closes.
+  test('an op that REJECTS still re-enables the controls', async () => {
+    await boot();
+    const { newBtn, openBtn } = toolbarButtons();
+    expect(newBtn.disabled).toBe(false);
+
+    const failing = lockSeam.current!.run(async () => Promise.reject(new Error('boom')));
+    // Busy is synchronous at enqueue, so the controls grey out before the op even starts.
+    expect(newBtn.disabled).toBe(true);
+    expect(openBtn.disabled).toBe(true);
+
+    await expect(failing).rejects.toThrow('boom');
+    await settleBoot();
+    expect(newBtn.disabled).toBe(false);
+    expect(openBtn.disabled).toBe(false);
+  });
+
+  // The capability gate must win over a busy→idle re-enable: on a host that can't open folders the
+  // Open-folder button is permanently disabled with its own explanation, and a drained lock must not
+  // silently resurrect it (the #1088-era behavior this wiring composes over).
+  test('a host without folder support keeps Open-folder disabled (capability title restored) after the lock drains', async () => {
+    const platform = installPlatform();
+    (platform as { canOpenFolders: boolean }).canOpenFolders = false;
+    await boot({ platform });
+
+    const { newBtn, openBtn } = toolbarButtons();
+    await lockSeam.current!.run(async () => undefined);
+    await settleBoot();
+
+    expect(newBtn.disabled).toBe(false);
+    expect(openBtn.disabled).toBe(true);
+    expect(openBtn.title).toMatch(/Chromium-based browser/);
   });
 });
 

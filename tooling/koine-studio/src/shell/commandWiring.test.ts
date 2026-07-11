@@ -94,6 +94,8 @@ function makeDeps(over: Partial<CommandWiringDeps> = {}): CommandWiringDeps {
     openUri: vi.fn(),
     overlayOpen: vi.fn(() => false),
     toggleFileTree: vi.fn(),
+    // The workspace-open lock's busy probe (#1275): false = idle, the non-racing common case.
+    workspaceOpBusy: vi.fn(() => false),
     // Spotlight launcher seams (#1143): an empty model index, no git, a no-op reveal.
     modelIndex: vi.fn(async () => ({ glossary: { entries: [] }, byQn: new Map(), qnByCtxName: new Map() })),
     canUseGit: false,
@@ -440,6 +442,51 @@ describe('commandWiring', () => {
     });
   });
 
+  // #1275: while a workspace-opening op is queued or running, the commands that would enqueue ANOTHER
+  // workspace swap are gated — the palette hides them, run() no-ops, and the chords fall through — so
+  // the serialization the lock enforces is legible instead of piling silent deferred clicks onto it.
+  describe('workspace-open busy gating (#1275)', () => {
+    it('no-ops the new-model and open-folder commands (run() + chords) while workspaceOpBusy()', () => {
+      const deps = makeDeps({ workspaceOpBusy: vi.fn(() => true) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      wiring.run('new-model');
+      wiring.run('open-folder');
+      expect(deps.requestNewModel).not.toHaveBeenCalled();
+      expect(deps.openFolder).not.toHaveBeenCalled();
+
+      // The chords dispatch through the same registry entries, so the busy gate covers them too.
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      window.dispatchEvent(key({ key: 'o', ctrlKey: true, shiftKey: true }));
+      expect(deps.requestNewModel).not.toHaveBeenCalled();
+      expect(deps.openFolder).not.toHaveBeenCalled();
+
+      // …and the palette / launcher lists mark them unavailable (filtered, like every when()-gated command).
+      const ids = wiring.getCommands().map((c) => c.id);
+      expect(ids).not.toContain('new-model');
+      expect(ids).not.toContain('open-folder');
+    });
+
+    it('re-reads the busy probe live: an idle lock restores both commands', () => {
+      let busy = true;
+      const deps = makeDeps({ workspaceOpBusy: vi.fn(() => busy) });
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      expect(wiring.getCommands().map((c) => c.id)).not.toContain('new-model');
+
+      busy = false; // the queue drained
+      const ids = wiring.getCommands().map((c) => c.id);
+      expect(ids).toContain('new-model');
+      expect(ids).toContain('open-folder');
+      wiring.run('open-folder');
+      expect(deps.openFolder).toHaveBeenCalledOnce();
+      window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
+      expect(deps.requestNewModel).toHaveBeenCalledOnce();
+    });
+  });
+
   describe('Spotlight launcher wiring (#1143)', () => {
     it('builds LauncherSources.commands() from the studio catalog, without the palette-toggle or goto rows', () => {
       const buffers = new Map([['file:///a.koi', { uri: 'file:///a.koi', relPath: 'a.koi' }]]);
@@ -610,10 +657,47 @@ describe('commandWiring', () => {
         title: 'a.koi',
         sub: 'src',
         file: 'file:///ws/src/a.koi',
+        relPath: 'src/a.koi',
       } as unknown as CatalogEntry;
       capturedActionDeps.openFileChanges(entry);
       // Selects Source Control AND carries the file's workspace-relative path as the focus target…
       expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
+    });
+
+    it('openFileChanges reads the entry\'s first-class relPath, never re-deriving it from sub+title (#1204)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      // sub/title deliberately DISAGREE with relPath: the display split may be reformatted freely
+      // (truncated dir, decorated basename) without changing the Source-Control focus key.
+      const entry = {
+        id: 'file:x',
+        cat: 'file',
+        title: 'a.koi · modified',
+        sub: '…/deeply/nested',
+        file: 'file:///ws/src/a.koi',
+        relPath: 'src/a.koi',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openFileChanges(entry);
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
+    });
+
+    it('openFileChanges degrades to opening the panel without a focus key when relPath is missing (#1204)', () => {
+      const deps = makeDeps();
+      const wiring = createCommandWiring(deps);
+      dispose = wiring.dispose;
+
+      const entry = {
+        id: 'file:x',
+        cat: 'file',
+        title: 'a.koi',
+        sub: 'src',
+        file: 'file:///ws/src/a.koi',
+      } as unknown as CatalogEntry;
+      capturedActionDeps.openFileChanges(entry);
+      // Same degrade shape as viewCommit's missing hash: the panel still opens, just without scrolling.
+      expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control');
     });
 
     it('viewCommit focuses the specific commit in Source Control, not just the panel (#1165)', () => {

@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { applyOutputTreeEmphasis, ensureOutputScaffold, renderOutputCrumb, renderOutputRailHead } from '@/shell/outputRail';
-import { createGeneratedFileTree } from '@/shell/output/generatedFileTree';
-import type { EmitFile } from '@/lsp/protocol';
+import { ensureOutputScaffold, renderOutputCrumb, renderOutputRailHead } from '@/shell/outputRail';
 
 function host(): HTMLElement {
   const el = document.createElement('div');
@@ -9,13 +7,6 @@ function host(): HTMLElement {
   document.body.appendChild(el);
   return el;
 }
-
-const FILES: EmitFile[] = [
-  { path: 'Ordering/Order.cs', contents: 'x'.repeat(74) },
-  { path: 'Ordering/Money.cs', contents: 'x'.repeat(46) },
-  { path: 'Kitchen/Ticket.cs', contents: 'x'.repeat(61) },
-  { path: 'runtime/KoineRuntime.cs', contents: 'x'.repeat(112) },
-];
 
 describe('ensureOutputScaffold', () => {
   test('builds the rail/crumb/code grid inside the host', () => {
@@ -72,71 +63,8 @@ describe('renderOutputRailHead', () => {
   });
 });
 
-describe('applyOutputTreeEmphasis (ADR 0009) — replaces renderOutputRail\'s scope emphasis over the tree', () => {
-  // Builds a real generated-file tree (via the Task 2 widget) over FILES so these tests exercise the
-  // actual top-level treeitem shape (`[role="treeitem"][aria-level="1"]`, keyed by `data-path`) rather
-  // than a hand-rolled fixture.
-  function tree(): HTMLElement {
-    const t = createGeneratedFileTree({ onSelect: () => {} });
-    t.setFiles(FILES);
-    return t.element;
-  }
-  const topLevel = (root: HTMLElement): HTMLElement[] =>
-    Array.from(root.querySelectorAll<HTMLElement>('[role="treeitem"][aria-level="1"]'));
-  const byPath = (root: HTMLElement, path: string): HTMLElement =>
-    topLevel(root).find((e) => e.dataset.path === path) as HTMLElement;
-
-  test('emphasises the matching top-level node and de-emphasises the rest — never hiding any', () => {
-    const root = tree();
-    applyOutputTreeEmphasis(root, 'Ordering');
-    // Every top-level row is still rendered — emphasis, not hiding (the whole-model overview survives).
-    expect(topLevel(root)).toHaveLength(3); // Ordering, Kitchen, runtime (folders, one per top-level path)
-
-    expect(byPath(root, 'Ordering').classList.contains('on')).toBe(true);
-    expect(byPath(root, 'Ordering').classList.contains('dim')).toBe(false);
-    expect(byPath(root, 'Kitchen').classList.contains('dim')).toBe(true);
-    expect(byPath(root, 'Kitchen').classList.contains('on')).toBe(false);
-    expect(byPath(root, 'runtime').classList.contains('dim')).toBe(true);
-    expect(byPath(root, 'runtime').classList.contains('on')).toBe(false);
-
-    // WCAG AA non-color signal (ADR 0009): the active scope must not rely on color/hue alone.
-    expect(byPath(root, 'Ordering').getAttribute('aria-current')).toBe('true');
-    expect(byPath(root, 'Kitchen').getAttribute('aria-current')).toBeNull();
-    expect(byPath(root, 'runtime').getAttribute('aria-current')).toBeNull();
-  });
-
-  test('All contexts (activeContext null) leaves every top-level node plain', () => {
-    const root = tree();
-    applyOutputTreeEmphasis(root, null);
-    for (const el of topLevel(root)) {
-      expect(el.classList.contains('on')).toBe(false);
-      expect(el.classList.contains('dim')).toBe(false);
-      expect(el.getAttribute('aria-current')).toBeNull();
-    }
-  });
-
-  test('a scope matching no top-level node emphasises nothing — a graceful no-op', () => {
-    const root = tree();
-    applyOutputTreeEmphasis(root, 'Shipping'); // no Shipping/ output
-    for (const el of topLevel(root)) {
-      expect(el.classList.contains('on')).toBe(false);
-      expect(el.classList.contains('dim')).toBe(false); // NOT the whole tree dimmed
-      expect(el.getAttribute('aria-current')).toBeNull();
-    }
-  });
-
-  test('re-applying with a different context clears the previous emphasis first', () => {
-    const root = tree();
-    applyOutputTreeEmphasis(root, 'Ordering');
-    applyOutputTreeEmphasis(root, 'Kitchen');
-    expect(byPath(root, 'Ordering').classList.contains('on')).toBe(false);
-    expect(byPath(root, 'Ordering').classList.contains('dim')).toBe(true);
-    expect(byPath(root, 'Kitchen').classList.contains('on')).toBe(true);
-    expect(byPath(root, 'Kitchen').classList.contains('dim')).toBe(false);
-    expect(byPath(root, 'Ordering').getAttribute('aria-current')).toBeNull();
-    expect(byPath(root, 'Kitchen').getAttribute('aria-current')).toBe('true');
-  });
-});
+// ADR-0009 scope emphasis over the tree's top-level rows moved INTO the tree widget itself (#1363):
+// see `emphasizeTopLevel` in shell/output/generatedFileTree.ts and its tests in generatedFileTree.test.ts.
 
 describe('renderOutputCrumb', () => {
   test('builds path segments (leaf marked) + a language chip', () => {

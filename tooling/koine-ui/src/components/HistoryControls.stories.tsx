@@ -1,24 +1,18 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { HistoryControls, type HistoryControlsSlice } from './HistoryControls';
-import type { ReadableStore } from '../host/store';
+import { readableStoreOf } from '../host/storeTestUtils';
 
 // The undo/redo control pair. Disabled state is driven by the host's `ReadableStore<HistoryControlsSlice>`
 // (issue #944's host-adapter contract) instead of koine-studio's concrete Zustand store — this Storybook
-// file mocks that contract directly, matching HistoryControls.test.tsx's `createMockHistoryStore`.
-
-function readableStoreOf(initial: HistoryControlsSlice): ReadableStore<HistoryControlsSlice> {
-  return {
-    getState: () => initial,
-    subscribe: () => () => {},
-  };
-}
+// file mocks that contract directly via the shared `readableStoreOf` double (host/storeTestUtils),
+// matching HistoryControls.test.tsx's `createTestReadableStore`.
 
 const meta = {
   title: 'Panels/HistoryControls',
   component: HistoryControls,
   parameters: { layout: 'centered' },
   args: {
-    store: readableStoreOf({ canUndo: false, canRedo: false }),
+    store: readableStoreOf<HistoryControlsSlice>({ canUndo: false, canRedo: false }),
     onUndo: () => {},
     onRedo: () => {},
     undoTitle: 'Undo',
@@ -35,6 +29,6 @@ export const Disabled: Story = {};
 /** Both undo and redo available. */
 export const Enabled: Story = {
   args: {
-    store: readableStoreOf({ canUndo: true, canRedo: true }),
+    store: readableStoreOf<HistoryControlsSlice>({ canUndo: true, canRedo: true }),
   },
 };

@@ -481,9 +481,21 @@ export class TauriPlatform implements Platform {
     return invoke('git_unstage', { dir: folderToken, relPaths }) as Promise<void>;
   }
 
+  /** Discard the worktree changes of the given paths — revert `trackedPaths`, DELETE `untrackedPaths`.
+   *  The caller supplies the tracked/untracked split (the panel knows each row's status); the host runs
+   *  each bucket verbatim. Destructive and unrecoverable; the caller confirms before invoking. */
+  gitDiscard(folderToken: string, trackedPaths: string[], untrackedPaths: string[]): Promise<void> {
+    return invoke('git_discard', { dir: folderToken, trackedPaths, untrackedPaths }) as Promise<void>;
+  }
+
   /** Commit the currently-staged changes with `message` (`git commit -m`). */
   gitCommit(folderToken: string, message: string): Promise<void> {
     return invoke('git_commit', { dir: folderToken, message }) as Promise<void>;
+  }
+
+  /** Push the current branch to its upstream (`git push`); rejects with git's stderr when it refuses. */
+  gitPush(folderToken: string): Promise<void> {
+    return invoke('git_push', { dir: folderToken }) as Promise<void>;
   }
 
   /** Revert the commit `sha`, recording a new commit that undoes it (`git revert --no-edit <sha>`). */

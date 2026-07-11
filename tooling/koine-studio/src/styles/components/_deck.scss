@@ -629,6 +629,14 @@
     font-size: 11.5px;
   }
 
+  // A collapsed folder hides its children via CSS alone (#1366): the JS writes ONLY `aria-expanded` on
+  // the folder row (generatedFileTree.ts's setFolderExpanded) and this rule derives visibility from it —
+  // no parallel `.hidden` write to keep in sync. `display: none` on the nearest collapsed ancestor's
+  // group hides the whole subtree, so nested collapsed folders need no extra handling.
+  [role='treeitem'][aria-expanded='false'] > [role='group'] {
+    display: none;
+  }
+
   // The selected FILE row (single-select — set by generatedFileTree.ts's selectFile). Same visual intent
   // as the old flat rail's `.out-file.on`: an accent left-border + a tinted background.
   [aria-selected='true'] {
@@ -638,7 +646,7 @@
   }
 
   // Scope emphasis (ADR 0009 — the Output rail obeys the active bounded-context scope by EMPHASIS, never
-  // hiding), applied to TOP-LEVEL rows only (applyOutputTreeEmphasis in outputRail.ts): the active scope
+  // hiding), applied to TOP-LEVEL rows only (emphasizeTopLevel in generatedFileTree.ts): the active scope
   // is marked `.on`, every other top-level row `.dim`med. The whole-model overview survives; a
   // de-emphasised row restores on hover so it stays usable. Same visual intent as the old `.out-ctx.on`/
   // `.out-ctx.dim`, retargeted onto the tree's own rows.
