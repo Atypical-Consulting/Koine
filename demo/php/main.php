@@ -14,7 +14,7 @@ declare(strict_types=1);
  * the same way the Conformance/PhpConformanceTests harness exercises them (it writes files to a
  * temp directory and analyses them as-is, with no autoloader).
  *
- * KNOWN GAPS (see reference/README.md and ../README.md "What this demo does NOT prove"):
+ * KNOWN GAP (see ../README.md "What this demo does NOT prove"):
  *
  * 1. templates/starters/ordering's `states status { ... }` block has no paired `command`
  *    declarations, so -- per the documented Koine semantics ("the block by itself emits nothing;
