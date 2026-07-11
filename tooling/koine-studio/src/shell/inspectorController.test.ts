@@ -607,6 +607,43 @@ describe('createInspectorController — invalidation forces a refetch', () => {
     await flush();
   });
 
+  // Regression (#1447): ensureModelIndex()'s `.then` write was unconditional too, so a build started
+  // BEFORE a later invalidateDocViews() — still in flight when that invalidation lands — could resolve
+  // afterwards and clobber the fresher (already-rebuilt) modelIndex with its own now-stale object. Stall
+  // `lsp.livingDocs()` (the one dependency `ensureModelIndex()` doesn't route through a shared in-flight
+  // memoizer) rather than `glossaryModel`/`model` — those ARE memoized (`fetchGlossaryModel`/
+  // `fetchStructuredModel`), so stalling them would also block the second, "fresh" build from settling.
+  test('a stale ensureModelIndex() build settling after a later invalidation does not clobber the fresh value', async () => {
+    const lsp = makeLsp();
+    const ctl = createInspectorController(makeDeps(lsp));
+    ctl.init();
+
+    let resolveStaleLivingDocs!: (docs: DocsResult) => void;
+    lsp.livingDocs.mockImplementationOnce(
+      () =>
+        new Promise<DocsResult>((resolve) => {
+          resolveStaleLivingDocs = resolve;
+        }),
+    );
+
+    const stalePromise = ctl.ensureModelIndex(); // build A: kicks off, pends on livingDocs
+
+    ctl.invalidateDocViews(); // edit N+1 lands while A is still in flight
+
+    // Build B: modelIndex is still null (A hasn't written yet) so this starts its own build, against the
+    // default (fast-resolving) fixtures.
+    const freshIndex = await ctl.ensureModelIndex();
+
+    // Let A settle now, AFTER B has already written the fresh index.
+    resolveStaleLivingDocs({ files: [] });
+    await stalePromise;
+    await flush();
+
+    // A later reader must still see B's fresh (same-reference) index — A's late write was dropped.
+    const finalIndex = await ctl.ensureModelIndex();
+    expect(finalIndex).toBe(freshIndex);
+  });
+
   // A glossary with one context + one aggregate (root entity nested under it), so the built DomainIndex
   // carries a non-empty `aggregates` array — proving the data returned actually came from the SHARED
   // fetch, not a second, independently-resolved one.
