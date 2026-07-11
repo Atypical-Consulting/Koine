@@ -412,6 +412,20 @@ body[data-route='home'] #toolbar {
   }
 }
 
+/* Align the Settings gear with the right-rail (#right-strip) icon column so the top-bar utility and the
+   tool-window stripe share one vertical axis. The stripe is --koi-rstrip-w (2.625rem/42px) wide and flush
+   to the window edge, so its 28px icons centre 21px in from that edge — which is 5px LEFT of the toolbar's
+   own 16px right padding. Two steps get the 30px gear there:
+     · `order: 1` makes the persistent gear the RIGHTMOST toolbar control (the transient #status pill and
+        the mobile ⋮ kebab follow it in the DOM, so without this they'd sit to its right and it could never
+        reach the edge). It stays the last VISIBLE control on desktop, so DOM/focus order is unchanged.
+     · `margin-right` then pulls its border box past the padding onto the rail axis: the gear must end
+        (42-30)/2 = 6px from the window edge, i.e. 10px right of the 16px content edge → -10px. */
+#btn-prefs {
+  order: 1;
+  margin-right: calc((2.625rem - 30px) / 2 - var(--koi-space-4));
+}
+
 /* --- top-bar scope path (#146 / merged breadcrumb) ----------------------------------------------
    One breadcrumb that doubles as the scope control. The FIRST segment is a <select> dressed as a crumb
    (pick the active bounded context — scopes the outline, counts, diagram, inspector and bottom tables);
