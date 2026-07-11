@@ -21,8 +21,11 @@ export function wireCopyButton(btn: HTMLButtonElement, idleLabel: string, getTex
   const cancelReset = (): void => clearTimeout(resetTimer);
   btn.addEventListener('click', () => {
     if (btn.disabled) return;
-    void navigator.clipboard
-      .writeText(getText())
+    // `navigator.clipboard` is undefined in a non-secure context (plain http, some webviews), where
+    // `navigator.clipboard.writeText` would throw a SYNCHRONOUS TypeError that `.catch()` (rejected
+    // promises only) can't see. Optional-chain + a rejected fallback routes that case through the same
+    // 'Copy failed' flash instead of an uncaught throw.
+    void Promise.resolve(navigator.clipboard?.writeText(getText()) ?? Promise.reject(new Error('no clipboard')))
       .then(() => (btn.textContent = 'Copied ✓'))
       .catch(() => (btn.textContent = 'Copy failed'))
       .finally(() => {

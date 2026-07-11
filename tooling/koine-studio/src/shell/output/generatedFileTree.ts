@@ -258,6 +258,11 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       const dot = document.createElement('span');
       dot.className = 'fdot';
       dot.style.setProperty('--fc', `var(--koi-ddd-${node.dddKind ?? 'x'}, var(--koi-muted))`);
+      // Decorative visual cues: keep them OUT of the treeitem's accessible name (which stays the bare
+      // filename) — the color dot is aria-hidden with a `title` exposing the stereotype on hover, and the
+      // line-count badge is aria-hidden so a row announces as "Money.cs", not "Money.cs 12".
+      dot.setAttribute('aria-hidden', 'true');
+      if (node.dddKind) dot.title = node.dddKind;
 
       const name = document.createElement('span');
       name.className = 'fname';
@@ -266,6 +271,7 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       const loc = document.createElement('span');
       loc.className = 'floc';
       loc.textContent = String(node.loc);
+      loc.setAttribute('aria-hidden', 'true');
 
       li.append(dot, name, loc);
     }
