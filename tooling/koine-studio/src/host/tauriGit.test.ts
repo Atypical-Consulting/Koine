@@ -76,6 +76,16 @@ describe('TauriPlatform git surface', () => {
     expect(invokeMock).toHaveBeenCalledWith('git_push', { dir: '/work' });
   });
 
+  it('gitFetch invokes git_fetch with { dir }', async () => {
+    await new TauriPlatform().gitFetch('/work');
+    expect(invokeMock).toHaveBeenCalledWith('git_fetch', { dir: '/work' });
+  });
+
+  it('gitPull invokes git_pull with { dir }', async () => {
+    await new TauriPlatform().gitPull('/work');
+    expect(invokeMock).toHaveBeenCalledWith('git_pull', { dir: '/work' });
+  });
+
   it('gitBranches invokes git_branches with { dir } and returns the branch names', async () => {
     invokeMock.mockResolvedValue(['main', 'dev']);
 

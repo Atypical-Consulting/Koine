@@ -458,6 +458,24 @@ export interface Platform {
   gitPush(folderToken: string): Promise<void>;
 
   /**
+   * Fetch updates from the default remote of the workspace folder (`git fetch`) — refreshes the
+   * remote-tracking refs (e.g. `origin/main`) so {@link GitStatus}'s ahead/behind counts stay
+   * current, WITHOUT touching the checked-out branch or worktree. Resolves once the fetch
+   * completes; rejects when there is no remote configured or git refuses (auth, offline). Desktop
+   * only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitFetch(folderToken: string): Promise<void>;
+
+  /**
+   * Pull the current branch of the workspace folder with a fast-forward-only merge (`git pull
+   * --ff-only`): fetches, then advances the checked-out branch only when it can be done without a
+   * merge commit. Resolves once the pull completes; rejects when there is no upstream, the
+   * histories have diverged (a real merge/rebase would be needed), or git refuses (auth, offline).
+   * Desktop only; the browser stub rejects. Callers must check {@link canUseGit} first.
+   */
+  gitPull(folderToken: string): Promise<void>;
+
+  /**
    * Revert the commit `sha` of the workspace folder (`git revert --no-edit <sha>`), recording a new
    * commit that undoes it — a forward commit, never a history rewrite. Rejects (with git's stderr) on a
    * dirty working tree, a revert conflict, or a merge commit needing an explicit parent; the caller

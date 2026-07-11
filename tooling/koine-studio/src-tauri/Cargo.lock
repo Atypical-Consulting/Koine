@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "koine-studio"
-version = "0.248.0"
+version = "0.250.0"
 dependencies = [
  "nix 0.31.3",
  "objc2",

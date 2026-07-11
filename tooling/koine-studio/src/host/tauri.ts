@@ -498,6 +498,16 @@ export class TauriPlatform implements Platform {
     return invoke('git_push', { dir: folderToken }) as Promise<void>;
   }
 
+  /** Fetch the default remote (`git fetch`) — updates remote-tracking refs, never the worktree. */
+  gitFetch(folderToken: string): Promise<void> {
+    return invoke('git_fetch', { dir: folderToken }) as Promise<void>;
+  }
+
+  /** Pull the current branch's upstream with a fast-forward-only merge (`git pull --ff-only`). */
+  gitPull(folderToken: string): Promise<void> {
+    return invoke('git_pull', { dir: folderToken }) as Promise<void>;
+  }
+
   /** Revert the commit `sha`, recording a new commit that undoes it (`git revert --no-edit <sha>`). */
   gitRevert(folderToken: string, sha: string): Promise<void> {
     return invoke('git_revert', { dir: folderToken, sha }) as Promise<void>;

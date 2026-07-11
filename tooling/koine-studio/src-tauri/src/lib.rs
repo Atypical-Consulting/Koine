@@ -1205,6 +1205,29 @@ fn git_push(dir: String) -> Result<(), String> {
     run_git(&dir, &["push"]).map(|_| ())
 }
 
+/// Fetch updates from the default remote (a bare `git fetch`) — refreshes the remote-tracking
+/// refs (e.g. `origin/main`) so [`git_status`]'s ahead/behind counts stay current, WITHOUT ever
+/// touching the checked-out branch or worktree. `Err` (git's trimmed stderr) when there is no
+/// remote configured or git refuses — auth, offline. `(async)` moves this network-bound command
+/// onto a background thread (Tauri's sync thread pool), so a slow or unreachable remote can never
+/// freeze the webview's main thread.
+#[tauri::command(async)]
+fn git_fetch(dir: String) -> Result<(), String> {
+    run_git(&dir, &["fetch"]).map(|_| ())
+}
+
+/// Pull the current branch's upstream with a fast-forward-only merge (`git pull --ff-only`):
+/// fetches, then advances the checked-out branch only when it can be done without fabricating a
+/// merge commit. `Err` (git's trimmed stderr) when there is no upstream, the histories have
+/// diverged (a real merge/rebase would be needed), or git refuses — auth, offline — so the panel
+/// surfaces the message instead of silently attempting a merge the user never asked for.
+/// `(async)` moves this network-bound command onto a background thread (Tauri's sync thread
+/// pool), so a slow or unreachable remote can never freeze the webview's main thread.
+#[tauri::command(async)]
+fn git_pull(dir: String) -> Result<(), String> {
+    run_git(&dir, &["pull", "--ff-only"]).map(|_| ())
+}
+
 /// Revert the commit `sha` (`git revert --no-edit <sha>`), recording a new commit that undoes it.
 /// A revert is a FORWARD commit — it never rewrites history — so it is safe on a shared branch.
 /// `--no-edit` keeps it non-interactive (git's default `Revert "<subject>"` message). `Err` (git's
@@ -2275,6 +2298,8 @@ pub fn run() {
             git_discard,
             git_commit,
             git_push,
+            git_fetch,
+            git_pull,
             git_revert,
             git_init,
             git_branches,
@@ -3418,6 +3443,117 @@ mod tests {
         repo.git(&["commit", "-m", "c1"]);
 
         assert!(git_push(repo.path()).is_err());
+    }
+
+    #[test]
+    fn git_fetch_updates_the_remote_tracking_ref_without_touching_the_worktree() {
+        // A bare "remote" plus a work repo that pushes the first commit to it.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let origin = init_repo();
+        origin.write("f.txt", "1\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c1"]);
+        origin.git(&["remote", "add", "origin", &remote_path]);
+        origin.git(&["push", "-u", "origin", "main"]);
+
+        // Clone the remote — this is the repo under test, currently in sync with origin/main.
+        let parent = TempRepo::new();
+        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+
+        // Advance the remote past the clone with a second commit pushed from `origin`.
+        origin.write("f.txt", "2\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c2"]);
+        origin.git(&["push", "origin", "main"]);
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
+
+        // Before fetching, the clone's remote-tracking ref is still the stale first commit.
+        let stale = run_git(&clone_dir, &["rev-parse", "origin/main"]).unwrap().trim().to_string();
+        assert_ne!(stale, remote_head, "remote-tracking ref starts stale");
+
+        git_fetch(clone_dir.clone()).unwrap();
+
+        // Fetch catches the remote-tracking ref up to the remote's tip...
+        let fresh = run_git(&clone_dir, &["rev-parse", "origin/main"]).unwrap().trim().to_string();
+        assert_eq!(fresh, remote_head, "fetch updates the remote-tracking ref");
+
+        // ...but never touches the checked-out branch or worktree: same content, same local HEAD.
+        let contents = std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
+        assert_eq!(contents, "1\n", "fetch never touches the worktree");
+        let local_head = run_git(&clone_dir, &["rev-parse", "main"]).unwrap().trim().to_string();
+        assert_ne!(local_head, remote_head, "local branch stays exactly where it was");
+    }
+
+    #[test]
+    fn git_pull_fast_forwards_a_behind_clone() {
+        // A bare "remote" plus a work repo that pushes the first commit to it.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let origin = init_repo();
+        origin.write("f.txt", "1\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c1"]);
+        origin.git(&["remote", "add", "origin", &remote_path]);
+        origin.git(&["push", "-u", "origin", "main"]);
+
+        // Clone the remote — this is the repo under test, currently in sync with origin/main.
+        let parent = TempRepo::new();
+        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+
+        // Advance the remote past the clone with a second commit pushed from `origin`.
+        origin.write("f.txt", "2\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c2"]);
+        origin.git(&["push", "origin", "main"]);
+
+        git_pull(clone_dir.clone()).unwrap();
+
+        let contents = std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
+        assert_eq!(contents, "2\n", "pull fast-forwards the worktree to the remote's tip");
+    }
+
+    #[test]
+    fn git_pull_errors_on_divergent_histories() {
+        // A bare "remote" plus a work repo that pushes the first commit to it.
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let origin = init_repo();
+        origin.write("f.txt", "1\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c1"]);
+        origin.git(&["remote", "add", "origin", &remote_path]);
+        origin.git(&["push", "-u", "origin", "main"]);
+
+        // Clone the remote — this is the repo under test.
+        let parent = TempRepo::new();
+        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        // `git clone` doesn't carry over a local identity, and the clone needs to make its own
+        // commit below — give it the same throwaway identity `init_repo` seeds.
+        let clone = TempRepo { dir: std::path::PathBuf::from(&clone_dir) };
+        clone.git(&["config", "user.email", "t@e.st"]);
+        clone.git(&["config", "user.name", "Tester"]);
+        clone.git(&["config", "commit.gpgsign", "false"]);
+
+        // The remote gains a commit the clone doesn't have...
+        origin.write("f.txt", "2\n");
+        origin.git(&["add", "f.txt"]);
+        origin.git(&["commit", "-m", "c2"]);
+        origin.git(&["push", "origin", "main"]);
+
+        // ...while the clone independently gains a DIFFERENT commit of its own: the histories
+        // diverge, so a `--ff-only` pull can't reconcile them without a merge/rebase.
+        clone.write("g.txt", "local\n");
+        clone.git(&["add", "g.txt"]);
+        clone.git(&["commit", "-m", "local-only"]);
+
+        assert!(git_pull(clone_dir).is_err());
     }
 
     #[test]
