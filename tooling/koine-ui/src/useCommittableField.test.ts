@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/preact';
-import { useCommittableField } from '@/shared/useCommittableField';
+import { useCommittableField } from './useCommittableField';
 
 function setup(initial = 'old') {
   const onCommit = vi.fn();

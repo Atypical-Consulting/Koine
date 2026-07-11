@@ -89,3 +89,7 @@ export {
   type SourceSpan,
   type TableHandlers,
 } from './components/SortableTable';
+// useCommittableField — the controlled explicit edit-mode hook (#1385/#1398) the migrated GlossaryPanel
+// consumes; it has no store/Tauri coupling (only preact/hooks), so it moves verbatim. Old Studio path
+// (`@/shared/useCommittableField`) becomes a one-line re-export shim.
+export { useCommittableField, type CommittableField } from './useCommittableField';
