@@ -267,7 +267,7 @@ const APP_HTML = `
         </footer>
       </section>
       <aside id="right" class="pane">
-        <header id="right-header"><h2 id="right-title">Properties</h2></header>
+        <header id="right-header"><h2 id="right-title">Properties</h2><div id="right-header-actions" class="right-header-actions" hidden></div></header>
         <div id="right-body">
           <div id="inspector-host" class="rview" role="tabpanel"></div>
           <div id="rview-source-control" class="rview doc-view" role="tabpanel" hidden></div>

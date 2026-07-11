@@ -1,5 +1,5 @@
 // DeckSpine — the single chrome row above a deck stage (concept-7 "Flush"). It replaces the two-row
-// deck-bar + per-card deck-head of Deck v2 with ONE 34px spine that morphs by mode:
+// deck-bar + per-card deck-head of Deck v2 with ONE 36px spine that morphs by mode:
 //
 //   • overview   → the surface tab-strip (split-buttons) + an active Overview toggle.
 //   • focus 1-up → the tab-strip + the focused surface's inline facet strip + its tag + Overview.

@@ -1,7 +1,7 @@
 @use '../abstracts' as a;
 
 // Deck center chrome, tightened to concept-7 "Flush". The two-row Deck v2 chrome (deck-bar + per-card
-// deck-head) collapses into ONE 34px spine (the DeckSpine component, in @atypical/koine-ui — the spine +
+// deck-head) collapses into ONE 36px spine (the DeckSpine component, in @atypical/koine-ui — the spine +
 // card + tooltip CSS is mirrored in that package's components.css for Storybook). In focus the stage goes
 // flush: the card loses its inset / radius / shadow / dot-grid and fills edge-to-edge, and its header lives
 // in the spine. The floating-card workbench returns only in overview. The 2-up divider is a hairline seam;
@@ -16,7 +16,9 @@
 
 .fx-spine {
   flex: 0 0 auto;
-  height: 34px;
+  // 36px matches #right-header's min-height (2.25rem) so the spine and the right-rail panel headers read
+  // as one row height across the shell.
+  height: 36px;
   display: flex;
   align-items: stretch;
   background: var(--koi-paper-2);

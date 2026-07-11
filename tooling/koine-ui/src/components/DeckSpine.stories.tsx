@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { DeckSpine } from './DeckSpine';
 import { SAMPLE_SURFACES } from './deckFixtures';
 
-// The concept-7 "Flush" spine: one 34px chrome row that morphs by mode. Pure-props (a connected wrapper
+// The concept-7 "Flush" spine: one 36px chrome row that morphs by mode. Pure-props (a connected wrapper
 // binds it to the deck store). Each story sets a different deck state so the split-button tabs, the inline
 // facet strip, and the 2-up pane-headers + docked swap are all visible. Full-width chrome, so the stories
 // render fullscreen on the studio background.

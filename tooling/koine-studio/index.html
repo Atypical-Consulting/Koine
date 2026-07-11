@@ -159,7 +159,7 @@
              or editor, so it serves both Visual and Code (and is hidden on Documentation); Properties and
              the left sidebar therefore span full height. -->
         <section id="center" class="pane" aria-label="Editor">
-          <!-- The Deck spine (concept-7 "Flush"): one 34px row that is the surface switcher AND the pane
+          <!-- The Deck spine (concept-7 "Flush"): one 36px row that is the surface switcher AND the pane
                title / facets / close, morphing between overview / 1-up / 2-up. The DeckSpine Preact
                component renders here; the DeckStage renders into #center-body and hosts each center
                surface in its card body (flush in focus; floating cards only in overview). -->
@@ -248,6 +248,11 @@
                redundant tab row. inspectorController keeps #right-title in sync with the active RightView. -->
           <header id="right-header">
             <h2 id="right-title">Properties</h2>
+            <!-- Per-view header actions (currently Source Control's Refresh + ⋮ overflow), portaled in
+                 by the active panel so its actions sit beside the title instead of a separate row in the
+                 panel body. Hidden by default; inspectorController shows it only while Source Control is
+                 the active right view. -->
+            <div id="right-header-actions" class="right-header-actions" hidden></div>
           </header>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>

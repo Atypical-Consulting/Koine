@@ -8,8 +8,11 @@
    (#1098) — the host `.rview` has a definite height (position:absolute; inset:0), so `height:100%` here
    gives `.koi-stree-scroll` a real clientHeight to virtualize against instead of growing to full content
    height (which would make windowing inert and measure the whole tree as the "viewport"). */
+/* Horizontal inset matches #right-header's own `padding: 0 var(--koi-space-3)` (_inspector.scss) — same
+   alignment as .koi-sc (_source-control.scss) — so the tree lines up with the "Syntax Tree" title above
+   it instead of its own, narrower 0.55rem inset. */
 .koi-stree {
-  padding: 0.5rem 0.55rem 1.25rem;
+  padding: 0.5rem var(--koi-space-3) 1.25rem;
   font-size: var(--koi-text-base-plus);
   min-height: 0;
   height: 100%;

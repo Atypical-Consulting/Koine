@@ -5,8 +5,11 @@
    Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a commit box, and the recent
    commit log. Shares the docs/rview vocabulary (empty states reuse `.koi-rview-empty`, buttons reuse
    `.koi-docs-new-btn` / `.koi-docs-save`) so it reads of a piece with the other rail panels. */
+/* Horizontal inset matches #right-header's own `padding: 0 var(--koi-space-3)` (_inspector.scss) so the
+   body's content — branch bar, group labels, file rows — lines up with the "Source Control" title and
+   the portaled header actions above it, left and right, instead of drifting to its own narrower inset. */
 .koi-sc {
-  padding: 0.6rem 0.7rem 1.25rem;
+  padding: 0.5rem var(--koi-space-3) 0.75rem;
   font-size: var(--koi-text-base-plus);
 }
 
@@ -14,14 +17,14 @@
   padding: 0;
 }
 
-/* Header action row. The shell's #right-title already renders the "Source Control" title, so the panel
-   renders only its local actions (Refresh + overflow) — no in-panel title, to avoid double-titling. */
+/* Header action row (Refresh + overflow): portaled into the shell's shared #right-header-actions slot
+   (see _inspector.scss) so it sits beside the "Source Control" title instead of a separate row in the
+   panel body. Falls back to rendering here, inline, when that host isn't present — e.g. Storybook / a
+   component test that mounts the panel standalone. */
 .koi-sc-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 0.15rem;
-  margin-bottom: 0.35rem;
 }
 
 /* Ghost icon button (mirrors the toolbar chrome): transparent until hover. */
@@ -103,7 +106,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.9rem;
+  margin-bottom: 0.6rem;
 }
 
 .koi-sc-branch {
@@ -221,7 +224,7 @@
 .koi-sc-composer {
   display: flex;
   flex-direction: column;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.85rem;
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-lg);
   background: var(--koi-surface);
@@ -362,7 +365,7 @@
 
 /* File groups. */
 .koi-sc-group {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 /* File-group header: a collapse toggle (chevron + label + count pill) beside a hover/focus-revealed
@@ -372,8 +375,8 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  margin: 0 -0.5rem 0.4rem;
-  padding: 2px 0.5rem;
+  margin: 0 calc(-1 * var(--koi-space-3)) 0.4rem;
+  padding: 2px var(--koi-space-3);
 }
 
 /* The toggle owns the label + count and drives the collapsed state; borderless, mono, uppercase. */
@@ -494,8 +497,8 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 -0.5rem;
-  padding: 5px 0.5rem;
+  margin: 0 calc(-1 * var(--koi-space-3));
+  padding: 5px var(--koi-space-3);
   border-radius: var(--koi-radius-sm);
 
   &:hover {
@@ -596,7 +599,7 @@
    drop the buttons from the tab order, and :focus-within could never fire — an a11y regression.) */
 .koi-sc-row-actions {
   position: absolute;
-  right: 0.5rem;
+  right: var(--koi-space-3);
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
@@ -723,8 +726,8 @@
   display: flex;
   align-items: flex-start;
   gap: 0.6rem;
-  margin: 0 -0.5rem;
-  padding: 0.5rem;
+  margin: 0 calc(-1 * var(--koi-space-3));
+  padding: 0.5rem var(--koi-space-3);
   border-radius: var(--koi-radius-sm);
 
   &:hover {

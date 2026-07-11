@@ -466,7 +466,7 @@ const APP_HTML = `
         </section>
         <div class="koi-resizer" id="split-resizer"></div>
         <aside id="right" class="pane">
-          <header id="right-header"><h2 id="right-title">Properties</h2></header>
+          <header id="right-header"><h2 id="right-title">Properties</h2><div id="right-header-actions" class="right-header-actions" hidden></div></header>
           <div id="right-body">
             <div id="inspector-host" class="rview" role="tabpanel"></div>
             <section id="view-assistant" class="rview" role="tabpanel" hidden></section>
