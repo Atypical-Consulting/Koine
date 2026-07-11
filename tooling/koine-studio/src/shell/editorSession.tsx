@@ -380,9 +380,6 @@ export function createEditorSession(deps: EditorSessionDeps): EditorSession {
         onGoto={(line, col) => editor.goto(line, col)}
         // A scoped, cross-file row opens its file via the existing navigate seam.
         onOpen={(uri, range) => deps.onNavigate({ uri, range })}
-        // The Problems tab pill mirrors the panel's own (scope-aware) count (#1203) — one computation,
-        // two mirrors. The status-bar counts stay active-file via renderStatusBarProblems.
-        countEl={deps.diagCount}
       />,
       deps.diagBody,
     );
