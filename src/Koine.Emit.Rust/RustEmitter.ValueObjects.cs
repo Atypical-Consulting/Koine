@@ -361,9 +361,13 @@ public sealed partial class RustEmitter
     /// constructor parameter. An already-optional-declared field (#1463) is already <c>Option</c>-shaped —
     /// wrapping it again would double-wrap into <c>Option&lt;Option&lt;T&gt;&gt;</c>, a real <c>cargo
     /// check</c> <c>E0308</c> against the constructor parameter — so it's passed through unwrapped.
+    /// Reuses <see cref="SomeWrapIfNeeded"/> (the same "wrap unless already Option-shaped" rule
+    /// <see cref="WriteDerived"/> applies): the target is always the ctor's <c>Option&lt;T&gt;</c>
+    /// parameter shape, and the expression's current type is always <paramref name="m"/>'s own declared
+    /// type, since <paramref name="ownedFieldExpr"/> reads straight off the struct field.
     /// </summary>
     private static string CarriedDefaultedArg(Member m, string ownedFieldExpr) =>
-        m.Type.IsOptional ? ownedFieldExpr : $"Some({ownedFieldExpr})";
+        SomeWrapIfNeeded(ownedFieldExpr, m.Type with { IsOptional = true }, m.Type);
 
     /// <summary>A scalar <c>Mul</c>/<c>Div</c> (e.g. <c>Money * quantity</c> or <c>fee / 2</c>): applies
     /// <paramref name="op"/> to each numeric field, carries the rest, and rebuilds through the validating
