@@ -504,7 +504,12 @@ public sealed partial class RustEmitter
                     owned = $"{wrap}({owned})";
                 }
 
-                args.Add(m.Type.IsOptional ? $"Some({owned})" : owned);
+                // Wrap in Some(...) only when the initializing expression isn't already Option-typed —
+                // the validator legally allows an Option-typed expression (e.g. a `T?` factory
+                // parameter) to initialize an optional-declared required member, and unconditionally
+                // wrapping it would double-wrap into Option<Option<T>>, a real cargo check E0308
+                // (the same shape #1437's follow-up fixed for the sibling defaultedParams loop).
+                args.Add(m.Type.IsOptional && !translator.IsOptional(value) ? $"Some({owned})" : owned);
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {

@@ -2419,6 +2419,75 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Same defect (#1452), enum-typed member: confirms <c>expectedEnum</c>/<c>TranslateOwned</c> compose
+    /// correctly with the new <c>Some(...)</c> wrap — coerce/translate the bare enum member first, wrap
+    /// last — per the issue's Design edge cases.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_enum_member_is_some_wrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum Status { Draft, Active }\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    status: Status?\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      status -> Draft\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("Self::new(id, Some(Status::Draft))");
+        rust.ShouldNotContain("Self::new(id, Status::Draft)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Code-review follow-up to #1452 itself: the validator legally allows a `required`-bucket
+    /// optional-declared member to be explicitly initialized from an already-Option-typed source
+    /// expression (e.g. a same-shaped <c>T?</c> factory parameter, <c>total -&gt; rate</c>). The naive
+    /// <c>m.Type.IsOptional ? Some(owned) : owned</c> wrap this issue's own fix first added
+    /// unconditionally wraps that value, producing <c>Some(rate)</c> against the constructor's
+    /// <c>Option&lt;Decimal&gt;</c> parameter where <c>rate</c> is itself <c>Option&lt;Decimal&gt;</c> — a
+    /// real <c>cargo check</c> E0308 (<c>Option&lt;Option&lt;Decimal&gt;&gt;</c>), the exact double-wrap
+    /// shape #1437's follow-up already fixed for the sibling <c>defaultedParams</c> loop.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_required_member_from_an_already_optional_source_does_not_double_wrap()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(rate: Decimal?) {\n" +
+            "      total -> rate\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): an already-Option-typed source value must be
+        // passed through as-is, never re-wrapped in another Some(...).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldNotContain("Some(rate");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1437: an entity member that is both optional-declared and constant-defaulted
     /// (<c>taxRate: Decimal? = 2</c>) must have a factory's explicit <c>taxRate -&gt; 5</c> initialization
     /// actually reach the constructed value — before this fix, this member class had no constructor
