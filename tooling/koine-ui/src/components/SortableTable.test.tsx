@@ -1,13 +1,17 @@
 import { describe, expect, test, vi } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
-import { SortableTable, type SortableTableColumn } from '@/model/SortableTable';
-import type { SourceSpan } from '@/lsp/lsp';
+import { SortableTable, type SortableTableColumn, type SourceSpan } from './SortableTable';
+import { SortableTable as SortableTableFromBarrel } from '../index';
 
 // SortableTable<T> is the shared table the Events/Relationships panels render into (issue #992 task 3):
 // it replaces the pure-DOM renderTable/buildRow builder that used to rebuild the whole <table> (wiping
 // sort state) on every call. Rows/columns are generic; the only contract is a `span` field for
 // click/keyboard jump-to-source (mirrors the old renderTable<T extends { span: SourceSpan | null }>).
+//
+// Moved from koine-studio's src/model/SortableTable.tsx (issue #1408, fourth-tranche extraction): the
+// component is store-free so it moved almost verbatim; SourceSpan/TableHandlers are redeclared
+// structurally in koine-ui (SortableTable.tsx) rather than imported from koine-studio's @/lsp / @/model.
 
 interface Row {
   name: string;
@@ -36,6 +40,12 @@ const rows: Row[] = [
 ];
 
 describe('SortableTable', () => {
+  test('is re-exported from the package barrel', () => {
+    // The component is part of @atypical/koine-ui's public API (index.ts), so it must be importable
+    // from the barrel, not only the component file — this is what Studio's re-export shim consumes.
+    expect(SortableTableFromBarrel).toBe(SortableTable);
+  });
+
   test('renders a header row and one body row per input row, with the given columns', () => {
     const { container } = render(
       <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,

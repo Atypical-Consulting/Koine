@@ -1,10 +1,18 @@
 import type { StoreApi } from 'zustand/vanilla';
-import type { DiagnosticsStripRow, DiagnosticsStripSlice } from '@atypical/koine-ui';
+import type {
+  DiagnosticsStripRow,
+  DiagnosticsStripSlice,
+  EventsPanelSlice,
+  GlossaryPanelSlice,
+  RelationshipsPanelSlice,
+} from '@atypical/koine-ui';
 import type { AppState } from '@/store/index';
 import { diagnosticsSummary } from '@/diagnostics/diagnosticsSummary';
-import { isAllContexts } from '@/model/activeContext';
+import { isAllContexts, scopeGlossaryModel, scopeGraph } from '@/model/activeContext';
+import { extractEventFlow, extractEvents, extractRelationships } from '@/model/modelTables';
+import { coverage, groupByContext } from '@/model/glossary';
 import { severityErrorOrWarning } from '@/lsp/severity';
-import type { LspDiagnostic } from '@/lsp/lsp';
+import type { DiagramGraph, GlossaryModel, LspDiagnostic } from '@/lsp/lsp';
 import { shallowEqual, zustandToReadableStore } from '@/store/readableStoreAdapter';
 import { koiStem } from '@/shell/explorerModel';
 import { basename } from '@/shared/path';
@@ -236,4 +244,160 @@ function stripSliceEqual(a: DiagnosticsStripSlice, b: DiagnosticsStripSlice): bo
       );
     })
   );
+}
+
+/**
+ * Adapts the controller-fetched merged diagram graph + the active-context slice to `RelationshipsPanel`'s
+ * generic `ReadableStore<RelationshipsPanelSlice>` — already scoped to the active bounded context and
+ * extracted to plain structural rows (issue #1408, fourth-tranche host-adapter migration), so the panel
+ * never sees `DiagramGraph`, `scopeGraph`, or `extractRelationships` (those classifiers stay in their
+ * owning Studio modules). `graph` is fixed for this adapter instance (the controller re-creates the
+ * adapter per livingDocs fetch — see surfaceLoaders' bottomGraph), so only `s.activeContext` varies: the
+ * selector is memoised on it (rows rebuild only on a real scope change, not on unrelated store writes),
+ * with `relationshipsSliceEqual` as the notification gate for the rebuild — the freshly built rows array
+ * would never compare equal by reference. "All contexts" is scopeGraph's identity, so it yields every row.
+ */
+export function createRelationshipsPanelStore(store: StoreApi<AppState>, graph: DiagramGraph) {
+  let memo: { context: string; slice: RelationshipsPanelSlice } | undefined;
+  return zustandToReadableStore(
+    store,
+    (s): RelationshipsPanelSlice => {
+      if (memo != null && memo.context === s.activeContext) return memo.slice;
+      const slice: RelationshipsPanelSlice = { rows: extractRelationships(scopeGraph(graph, s.activeContext)) };
+      memo = { context: s.activeContext, slice };
+      return slice;
+    },
+    relationshipsSliceEqual,
+  );
+}
+
+/** Element-wise rows comparison (`span` by reference — a scoped graph's node spans are reference-stable for
+ *  this adapter instance) plus element-wise `contexts` — same rationale as `stripSliceEqual` above. */
+function relationshipsSliceEqual(a: RelationshipsPanelSlice, b: RelationshipsPanelSlice): boolean {
+  return (
+    a.rows.length === b.rows.length &&
+    a.rows.every((r, i) => {
+      const o = b.rows[i];
+      return (
+        r.source === o.source &&
+        r.relation === o.relation &&
+        r.target === o.target &&
+        r.span === o.span &&
+        r.contexts.length === o.contexts.length &&
+        r.contexts.every((c, j) => c === o.contexts[j])
+      );
+    })
+  );
+}
+
+/**
+ * Adapts the controller-fetched glossary model + the active-context slice to `GlossaryPanel`'s generic
+ * `ReadableStore<GlossaryPanelSlice>` — already scoped to the active bounded context, grouped by context,
+ * and reduced to a documentation-coverage view (issue #1408), so the panel never sees `GlossaryModel`,
+ * `scopeGlossaryModel`, `groupByContext`, or `coverage` (those stay in their owning Studio modules). Like
+ * the relationships adapter, `model` is fixed for this adapter instance so the selector is memoised on
+ * `s.activeContext` (re-groups only on a real scope change), with `glossarySliceEqual` gating the rebuild
+ * notification. The panel's edit handlers persist through the host's `GlossaryHandlers`, keeping the
+ * `setDoc` write path Studio-side.
+ */
+export function createGlossaryPanelStore(store: StoreApi<AppState>, model: GlossaryModel) {
+  let memo: { context: string; slice: GlossaryPanelSlice } | undefined;
+  return zustandToReadableStore(
+    store,
+    (s): GlossaryPanelSlice => {
+      if (memo != null && memo.context === s.activeContext) return memo.slice;
+      const scoped = scopeGlossaryModel(model, s.activeContext);
+      const slice: GlossaryPanelSlice = {
+        groups: groupByContext(scoped.entries),
+        coverage: coverage(scoped.entries),
+      };
+      memo = { context: s.activeContext, slice };
+      return slice;
+    },
+    glossarySliceEqual,
+  );
+}
+
+/** Coverage scalars plus element-wise groups/entries (`nameRange` by reference — a scoped model's entries
+ *  are reference-stable for this adapter instance) — same rationale as `stripSliceEqual` above. */
+function glossarySliceEqual(a: GlossaryPanelSlice, b: GlossaryPanelSlice): boolean {
+  if (
+    a.coverage.documented !== b.coverage.documented ||
+    a.coverage.total !== b.coverage.total ||
+    a.coverage.pct !== b.coverage.pct ||
+    a.groups.length !== b.groups.length
+  ) {
+    return false;
+  }
+  return a.groups.every((g, i) => {
+    const og = b.groups[i];
+    return (
+      g.context === og.context &&
+      g.entries.length === og.entries.length &&
+      g.entries.every((e, j) => {
+        const oe = og.entries[j];
+        return (
+          e.id === oe.id &&
+          e.name === oe.name &&
+          e.kind === oe.kind &&
+          e.qualifiedName === oe.qualifiedName &&
+          e.doc === oe.doc &&
+          e.nameRange === oe.nameRange
+        );
+      })
+    );
+  });
+}
+
+/**
+ * Adapts the controller-fetched merged diagram graph + the active-context slice to `EventsPanel`'s generic
+ * `ReadableStore<EventsPanelSlice>` — already scoped to the active bounded context and pre-extracted into
+ * the table rows AND the flow legend nodes (issue #1408), plus the `scopeKey` the panel uses to re-frame
+ * the host-owned maxGraph canvas. The panel never sees `DiagramGraph`, `extractEvents`, or `extractEventFlow`
+ * (they stay Studio-side), and the flow CANVAS is rendered by an injected `FlowRenderer` — maxGraph never
+ * enters koine-ui. Like the other tranche-4 adapters, `graph` is fixed for this instance so the selector is
+ * memoised on `s.activeContext`, with `eventsSliceEqual` gating the rebuild notification.
+ */
+export function createEventsPanelStore(store: StoreApi<AppState>, graph: DiagramGraph) {
+  let memo: { context: string; slice: EventsPanelSlice } | undefined;
+  return zustandToReadableStore(
+    store,
+    (s): EventsPanelSlice => {
+      if (memo != null && memo.context === s.activeContext) return memo.slice;
+      const scoped = scopeGraph(graph, s.activeContext);
+      const slice: EventsPanelSlice = {
+        rows: extractEvents(scoped),
+        scopeKey: s.activeContext,
+        flowNodes: extractEventFlow(scoped).nodes,
+      };
+      memo = { context: s.activeContext, slice };
+      return slice;
+    },
+    eventsSliceEqual,
+  );
+}
+
+/** `scopeKey` plus element-wise rows (`span` by reference) + flow legend nodes — same rationale as
+ *  `stripSliceEqual` above. */
+function eventsSliceEqual(a: EventsPanelSlice, b: EventsPanelSlice): boolean {
+  if (a.scopeKey !== b.scopeKey || a.rows.length !== b.rows.length || a.flowNodes.length !== b.flowNodes.length) {
+    return false;
+  }
+  const rowsEqual = a.rows.every((r, i) => {
+    const o = b.rows[i];
+    return (
+      r.name === o.name &&
+      r.qualifiedName === o.qualifiedName &&
+      r.type === o.type &&
+      r.publishedBy === o.publishedBy &&
+      r.context === o.context &&
+      r.when === o.when &&
+      r.span === o.span
+    );
+  });
+  if (!rowsEqual) return false;
+  return a.flowNodes.every((n, i) => {
+    const o = b.flowNodes[i];
+    return n.id === o.id && n.label === o.label && n.kind === o.kind && n.context === o.context;
+  });
 }

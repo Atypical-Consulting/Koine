@@ -76,3 +76,50 @@ export {
   type DiagnosticsStripRange,
 } from './components/DiagnosticsStripPanel';
 export { DocsPanelHost, type DocsPanelHostSlice } from './components/DocsPanelHost';
+
+// --- Fourth-tranche host-adapter migrations (issue #1408) ------------------------------------
+// Moved from koine-studio's src/model/SortableTable.tsx, continuing the extraction. SortableTable is
+// store-free (it takes plain props/callbacks), so it moves as-is; its `SourceSpan` and `TableHandlers`
+// row/handler types — which the Studio original imported from `@/lsp` / `@/model/modelTables` — are
+// redeclared STRUCTURALLY here so this package never imports a koine-studio module. Studio's own types
+// are structurally identical, so its call sites still type-check across the package boundary.
+export {
+  SortableTable,
+  type SortableTableColumn,
+  type SourceSpan,
+  type TableHandlers,
+} from './components/SortableTable';
+// useCommittableField — the controlled explicit edit-mode hook (#1385/#1398) the migrated GlossaryPanel
+// consumes; it has no store/Tauri coupling (only preact/hooks), so it moves verbatim. Old Studio path
+// (`@/shared/useCommittableField`) becomes a one-line re-export shim.
+export { useCommittableField, type CommittableField } from './useCommittableField';
+// RelationshipsPanel — the bottom-dock structural-relations table, typed against ReadableStore<Slice>;
+// the host adapter (`createRelationshipsPanelStore`) pre-scopes + pre-extracts the rows.
+export {
+  RelationshipsPanel,
+  type RelationshipsPanelSlice,
+  type RelationRowView,
+} from './components/RelationshipsPanel';
+// GlossaryPanel — the ubiquitous-language editor (coverage gauge + inline description editors); the host
+// adapter (`createGlossaryPanelStore`) pre-scopes/groups the model and computes coverage. Edit handlers
+// arrive as callback props; rows edit via the same-package useCommittableField.
+export {
+  GlossaryPanel,
+  type GlossaryPanelSlice,
+  type GlossaryGroupView,
+  type GlossaryEntryView,
+  type CoverageView,
+  type GlossaryRange,
+  type GlossaryHandlers,
+} from './components/GlossaryPanel';
+// EventsPanel — the bottom-dock events table with a Table | Flow toggle; the maxGraph flow canvas is
+// rendered host-side via an injected `FlowRenderer` (maxGraph never enters koine-ui). The host adapter
+// (`createEventsPanelStore`) pre-scopes + pre-extracts the rows and the flow legend nodes.
+export {
+  EventsPanel,
+  type EventsPanelSlice,
+  type EventRowView,
+  type EventFlowNodeView,
+  type EventFlowKindView,
+  type FlowRenderer,
+} from './components/EventsPanel';
