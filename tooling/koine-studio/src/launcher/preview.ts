@@ -11,7 +11,7 @@
 import type { ModelElement } from '@/model/modelIndex';
 import type { ModelMember } from '@/lsp/lsp';
 import type { GitLogEntry } from '@/host/types';
-import { KIND, type CatalogEntry } from '@/launcher/catalog';
+import { KIND, relPathOf, type CatalogEntry } from '@/launcher/catalog';
 import { normalizeKind } from '@/launcher/buildCatalog';
 
 /** The result card's icon: either a DDD chip (`chipSlug`, symbol/event/rule kinds) or a line-icon
@@ -313,11 +313,6 @@ function statePreview(entry: CatalogEntry, element: ModelElement): PreviewViewMo
   };
 }
 
-/** Reconstructs the workspace-relative path `buildCatalog.ts`'s `fileEntries` split off of, joining
- * `sub` (the directory) back to `title` (the basename) — the inverse of that split. */
-function relPathFromEntry(entry: CatalogEntry): string {
-  return entry.sub ? `${entry.sub}/${entry.title}` : entry.title;
-}
 
 /**
  * Optional OVERRIDES for a selected result's preview data — every field defaults to whatever the
@@ -356,7 +351,7 @@ export function previewFor(entry: CatalogEntry, ctx: PreviewContext): PreviewVie
     case 'file': {
       if (ctx.file) return filePreview(ctx.file);
       if (!entry.file) return null;
-      return filePreview({ relPath: relPathFromEntry(entry) });
+      return filePreview({ relPath: relPathOf(entry) });
     }
     case 'glossary':
       return glossPreview(ctx.glossary ?? { name: entry.title, doc: entry.doc ?? null });

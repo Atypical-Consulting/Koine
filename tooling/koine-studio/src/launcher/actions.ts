@@ -7,9 +7,10 @@
 // `platform`/`openUri`/clipboard (see scratchpad/SEAMS.md "LSP action seams").
 //
 // Import discipline (enforced by buildCatalog.test.ts's launcher-wide sweep): the only value import
-// allowed from outside `@/launcher/` is `import type` — this module imports nothing but `CatalogEntry`
-// as a type, so it carries no DOM/LSP/platform dependency of its own.
+// allowed from outside `@/launcher/` is `import type` — except for the shared pure constants module
+// (`catalog.ts`), which exports only types and side-effect-free helpers like `relPathOf`.
 import type { CatalogEntry } from '@/launcher/catalog';
+import { relPathOf } from '@/launcher/catalog';
 
 /** The 13 line-icon glyphs a quick action can render, ported verbatim (path data unchanged) from the
  * prototype's `I` map. `ActionMenu.tsx` owns the actual SVG path data keyed by this slug. */
@@ -76,12 +77,6 @@ export interface LauncherActionDeps {
   toast(message: string): void;
 }
 
-/** The workspace-relative path a file entry's row displays: `sub` (its directory) joined back to
- * `title` (its basename) — the same reconstruction `preview.ts`'s `relPathFromEntry` performs, kept
- * local here so this module has no value-dependency on another launcher module. */
-function pathOf(entry: CatalogEntry): string {
-  return entry.sub ? `${entry.sub}/${entry.title}` : entry.title;
-}
 
 async function copyAndToast(deps: LauncherActionDeps, text: string, message: string): Promise<void> {
   await deps.copy(text);
@@ -126,7 +121,7 @@ export function actionsFor(entry: CatalogEntry, deps: LauncherActionDeps): Launc
           label: 'Copy path',
           keycap: '⌘C',
           icon: 'copy',
-          run: () => copyAndToast(deps, pathOf(entry), `Copied "${pathOf(entry)}"`),
+          run: () => copyAndToast(deps, relPathOf(entry), `Copied "${relPathOf(entry)}"`),
         },
       ];
     case 'glossary':

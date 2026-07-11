@@ -232,6 +232,21 @@ describe('previewFor — dispatch', () => {
     expect(vm?.filePath).toBe('src/domain/ordering.koi');
   });
 
+  test('file: prefers relPath over the sub + title join when relPath diverges', () => {
+    const entry: CatalogEntry = {
+      id: 'file:diverg',
+      cat: 'file',
+      title: 'other.koi',
+      sub: 'display/dir',
+      relPath: 'src/deep/ordering.koi',
+      file: 'file:///ws/src/deep/ordering.koi',
+    };
+    const vm = previewFor(entry, {});
+    expect(vm?.filePath).toBe('src/deep/ordering.koi');
+    expect(vm?.header.name).toBe('ordering.koi');
+    expect(vm?.header.sub).toBe('src/deep');
+  });
+
   test('file: returns null when the entry carries no file identity at all', () => {
     const entry: CatalogEntry = { id: 'file:2', cat: 'file', title: 'orphan.koi' };
     expect(previewFor(entry, {})).toBeNull();
