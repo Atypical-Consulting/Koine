@@ -76,3 +76,16 @@ export {
   type DiagnosticsStripRange,
 } from './components/DiagnosticsStripPanel';
 export { DocsPanelHost, type DocsPanelHostSlice } from './components/DocsPanelHost';
+
+// --- Fourth-tranche host-adapter migrations (issue #1408) ------------------------------------
+// Moved from koine-studio's src/model/SortableTable.tsx, continuing the extraction. SortableTable is
+// store-free (it takes plain props/callbacks), so it moves as-is; its `SourceSpan` and `TableHandlers`
+// row/handler types — which the Studio original imported from `@/lsp` / `@/model/modelTables` — are
+// redeclared STRUCTURALLY here so this package never imports a koine-studio module. Studio's own types
+// are structurally identical, so its call sites still type-check across the package boundary.
+export {
+  SortableTable,
+  type SortableTableColumn,
+  type SourceSpan,
+  type TableHandlers,
+} from './components/SortableTable';

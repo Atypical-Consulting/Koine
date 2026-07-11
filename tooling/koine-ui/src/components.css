@@ -1104,3 +1104,100 @@
   font-style: normal;
   color: var(--koi-hl-string);
 }
+
+/* ---------------------------------------------------------------------------------------------------
+ * SortableTable — the shared model-table (ported from Koine Studio's src/styles/components/_diagnostics.scss
+ * "model tables (Events / Relationships)" block — issue #1408, fourth-tranche host-adapter migration).
+ * COPIED, not moved: the `.koi-table*` vocabulary is still rendered by non-migrating Studio panels (the
+ * Events/Relationships/Glossary tables have not moved yet), so Studio's SCSS partial stays untouched and
+ * authoritative for the app. Only the classes THIS component's markup renders are copied — the table,
+ * its sortable headers, the navigable rows and the empty-state note; the per-column badge classes the
+ * Events/Relationships columns supply via `cellClass` (`.koi-evt-*`, `.koi-rel-kind`) stay Studio's
+ * until those panels migrate.
+ *
+ * A dense, scannable table consistent with the diagnostics list: muted sticky header, subtle row
+ * separators, navigable rows that highlight on hover/focus.
+ * --------------------------------------------------------------------------------------------------- */
+
+.koi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: inherit;
+}
+.koi-table th {
+  position: sticky;
+  top: 0;
+  z-index: var(--koi-z-base);
+  background: var(--koi-paper-2);
+  text-align: left;
+  border-bottom: 1px solid var(--koi-line);
+  white-space: nowrap;
+  padding: 0; /* the sort button carries the padding so the whole header cell is clickable */
+}
+/* Each header is a sort button: clicking it orders the table by that column (aria-sort reflects state). */
+.koi-th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--koi-muted);
+  font: inherit;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.66rem;
+  text-align: left;
+  padding: var(--koi-space-1) 7px;
+  cursor: pointer;
+}
+.koi-th-sort:hover {
+  color: var(--koi-fg);
+}
+.koi-th-sort:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+/* Direction caret on the active sort column (the inactive columns show none). */
+.koi-th-sort::after {
+  content: '';
+  color: var(--koi-accent);
+  font-size: 0.6em;
+}
+th[aria-sort='ascending'] .koi-th-sort::after {
+  content: '▲';
+}
+th[aria-sort='descending'] .koi-th-sort::after {
+  content: '▼';
+}
+.koi-table td {
+  padding: var(--koi-space-1) 7px;
+  border-bottom: 1px solid var(--koi-line);
+  color: var(--koi-ink-soft);
+  vertical-align: top;
+}
+.koi-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.koi-row-link {
+  cursor: pointer;
+}
+.koi-row-link:hover td {
+  background: var(--koi-surface);
+  color: var(--koi-fg);
+}
+.koi-row-link:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: -2px;
+}
+
+.koi-table-empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--koi-muted);
+  padding: var(--koi-space-2) 7px;
+  font-style: italic;
+}
