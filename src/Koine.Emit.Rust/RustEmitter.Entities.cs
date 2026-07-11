@@ -511,9 +511,17 @@ public sealed partial class RustEmitter
                 // (the same shape #1437's follow-up fixed for the sibling defaultedParams loop).
                 args.Add(m.Type.IsOptional && !translator.IsOptional(value) ? $"Some({owned})" : owned);
             }
-            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+            else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
-                args.Add(RustNaming.Field(m.Name)); // auto-bound same-named parameter
+                // Unlike the sibling defaultedParams loop (whose ctor parameter is always Option<T>),
+                // this required-bucket ctor parameter is Option<T> only when m.Type.IsOptional — a
+                // plain (non-optional-declared) required member's ctor parameter is bare T, and
+                // AutoBinds never permits an optional param to bind to a non-optional member, so `field`
+                // is already the correct bare type there. Wrap only when the member is optional-declared
+                // but the bound parameter itself is not (it would otherwise carry the bare, un-wrapped
+                // value against an Option<T> constructor parameter — a real cargo check E0308).
+                var field = RustNaming.Field(m.Name); // auto-bound same-named parameter
+                args.Add(m.Type.IsOptional && !boundParam.Type.IsOptional ? $"Some({field})" : field);
             }
             else if (m.Type.IsOptional)
             {
