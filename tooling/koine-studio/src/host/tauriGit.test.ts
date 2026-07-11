@@ -61,9 +61,23 @@ describe('TauriPlatform git surface', () => {
     });
   });
 
-  it('gitCommit invokes git_commit with { dir, message }', async () => {
+  it('gitCommit invokes git_commit with { dir, message, amend: false } when opts is omitted', async () => {
     await new TauriPlatform().gitCommit('/work', 'feat: add aggregate');
-    expect(invokeMock).toHaveBeenCalledWith('git_commit', { dir: '/work', message: 'feat: add aggregate' });
+    expect(invokeMock).toHaveBeenCalledWith('git_commit', {
+      dir: '/work',
+      message: 'feat: add aggregate',
+      amend: false,
+    });
+  });
+
+  it('gitCommit passes amend: true through when opts.amend is set', async () => {
+    await new TauriPlatform().gitCommit('/work', '', { amend: true });
+    expect(invokeMock).toHaveBeenCalledWith('git_commit', { dir: '/work', message: '', amend: true });
+  });
+
+  it('gitCommit passes amend: false through when opts.amend is explicitly false', async () => {
+    await new TauriPlatform().gitCommit('/work', 'msg', { amend: false });
+    expect(invokeMock).toHaveBeenCalledWith('git_commit', { dir: '/work', message: 'msg', amend: false });
   });
 
   it('gitRevert invokes git_revert with { dir, sha }', async () => {
@@ -71,9 +85,14 @@ describe('TauriPlatform git surface', () => {
     expect(invokeMock).toHaveBeenCalledWith('git_revert', { dir: '/work', sha: 'abc1234' });
   });
 
-  it('gitPush invokes git_push with { dir }', async () => {
+  it('gitPush invokes git_push with { dir, setUpstream: false } when opts is omitted', async () => {
     await new TauriPlatform().gitPush('/work');
-    expect(invokeMock).toHaveBeenCalledWith('git_push', { dir: '/work' });
+    expect(invokeMock).toHaveBeenCalledWith('git_push', { dir: '/work', setUpstream: false });
+  });
+
+  it('gitPush passes setUpstream: true through when opts.setUpstream is set', async () => {
+    await new TauriPlatform().gitPush('/work', { setUpstream: true });
+    expect(invokeMock).toHaveBeenCalledWith('git_push', { dir: '/work', setUpstream: true });
   });
 
   it('gitFetch invokes git_fetch with { dir }', async () => {

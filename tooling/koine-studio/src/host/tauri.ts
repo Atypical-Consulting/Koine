@@ -488,14 +488,23 @@ export class TauriPlatform implements Platform {
     return invoke('git_discard', { dir: folderToken, trackedPaths, untrackedPaths }) as Promise<void>;
   }
 
-  /** Commit the currently-staged changes with `message` (`git commit -m`). */
-  gitCommit(folderToken: string, message: string): Promise<void> {
-    return invoke('git_commit', { dir: folderToken, message }) as Promise<void>;
+  /** Commit the currently-staged changes with `message` (`git commit -m`); `opts.amend` rewrites the
+   *  tip commit instead (`git commit --amend`, `--no-edit` when `message` is empty). */
+  gitCommit(folderToken: string, message: string, opts?: { amend?: boolean }): Promise<void> {
+    return invoke('git_commit', {
+      dir: folderToken,
+      message,
+      amend: opts?.amend ?? false,
+    }) as Promise<void>;
   }
 
-  /** Push the current branch to its upstream (`git push`); rejects with git's stderr when it refuses. */
-  gitPush(folderToken: string): Promise<void> {
-    return invoke('git_push', { dir: folderToken }) as Promise<void>;
+  /** Push the current branch to its upstream (`git push`); rejects with git's stderr when it refuses.
+   *  `opts.setUpstream` publishes the branch instead (`git push -u origin <branch>`). */
+  gitPush(folderToken: string, opts?: { setUpstream?: boolean }): Promise<void> {
+    return invoke('git_push', {
+      dir: folderToken,
+      setUpstream: opts?.setUpstream ?? false,
+    }) as Promise<void>;
   }
 
   /** Fetch the default remote (`git fetch`) — updates remote-tracking refs, never the worktree. */

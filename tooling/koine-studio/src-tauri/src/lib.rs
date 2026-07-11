@@ -1190,9 +1190,22 @@ fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<Str
 
 /// Commit the staged area with `message` (`git commit -m`). `Err` (with git's stderr) when there is
 /// nothing staged or the identity is unset.
+///
+/// `amend` (defaulting to `false` when omitted, so every existing caller behaves identically)
+/// rewrites the tip commit instead of creating a new one (`git commit --amend`): a non-empty
+/// `message` replaces the tip's message (`-m <message>`), while an EMPTY `message` reuses the
+/// previous one unchanged (`--no-edit`) — the amend still picks up whatever is newly staged.
 #[tauri::command]
-fn git_commit(dir: String, message: String) -> Result<(), String> {
-    run_git(&dir, &["commit", "-m", &message]).map(|_| ())
+fn git_commit(dir: String, message: String, amend: Option<bool>) -> Result<(), String> {
+    if amend.unwrap_or(false) {
+        if message.is_empty() {
+            run_git(&dir, &["commit", "--amend", "--no-edit"]).map(|_| ())
+        } else {
+            run_git(&dir, &["commit", "--amend", "-m", &message]).map(|_| ())
+        }
+    } else {
+        run_git(&dir, &["commit", "-m", &message]).map(|_| ())
+    }
 }
 
 /// Push the current branch to its configured upstream (a bare `git push`). The panel offers push
@@ -1200,9 +1213,21 @@ fn git_commit(dir: String, message: String) -> Result<(), String> {
 /// (git's trimmed stderr) when there is no upstream or git refuses — non-fast-forward, auth, offline.
 /// `(async)` moves this network-bound command onto a background thread (Tauri's sync thread pool),
 /// so a slow or unreachable remote can never freeze the webview's main thread.
+///
+/// `set_upstream` (defaulting to `false` when omitted, so every existing caller behaves
+/// identically) is the "publish branch" case: instead of a bare push, it runs `git push -u origin
+/// <current-branch>`, which succeeds even when the branch has no upstream yet and sets the
+/// tracking ref so subsequent status/push calls see it.
 #[tauri::command(async)]
-fn git_push(dir: String) -> Result<(), String> {
-    run_git(&dir, &["push"]).map(|_| ())
+fn git_push(dir: String, set_upstream: Option<bool>) -> Result<(), String> {
+    if set_upstream.unwrap_or(false) {
+        let branch = run_git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"])?
+            .trim()
+            .to_string();
+        run_git(&dir, &["push", "-u", "origin", &branch]).map(|_| ())
+    } else {
+        run_git(&dir, &["push"]).map(|_| ())
+    }
 }
 
 /// Fetch updates from the default remote (a bare `git fetch`) — refreshes the remote-tracking
@@ -3427,7 +3452,7 @@ mod tests {
         assert_eq!(before.ahead, 1);
 
         // Push → the upstream has the commit and the next status reads a truthful 0/0.
-        git_push(repo.path()).unwrap();
+        git_push(repo.path(), None).unwrap();
         let after = git_status(repo.path()).unwrap().upstream.expect("still tracking");
         assert_eq!(after.ahead, 0);
         assert_eq!(after.behind, 0);
@@ -3442,7 +3467,42 @@ mod tests {
         repo.git(&["add", "f.txt"]);
         repo.git(&["commit", "-m", "c1"]);
 
-        assert!(git_push(repo.path()).is_err());
+        assert!(git_push(repo.path(), None).is_err());
+    }
+
+    #[test]
+    fn git_push_with_set_upstream_publishes_a_branch_with_no_upstream() {
+        // A bare local "remote" — the work repo has no upstream configured yet, the "publish
+        // branch" case (mirrors git_push_errors_when_the_branch_has_no_upstream's setup, but this
+        // time set_upstream should make the push succeed AND set the tracking ref).
+        let remote = TempRepo::new();
+        remote.git(&["init", "--bare", "-b", "main"]);
+        let remote_path = remote.path();
+
+        let repo = init_repo();
+        repo.write("f.txt", "1\n");
+        repo.git(&["add", "f.txt"]);
+        repo.git(&["commit", "-m", "c1"]);
+        repo.git(&["remote", "add", "origin", &remote_path]);
+
+        assert!(
+            git_status(repo.path()).unwrap().upstream.is_none(),
+            "starts with no upstream configured"
+        );
+
+        // A bare push would fail here (no upstream); `set_upstream` publishes the current branch
+        // instead (`git push -u origin <branch>`).
+        git_push(repo.path(), Some(true)).unwrap();
+
+        let after = git_status(repo.path()).unwrap().upstream.expect("push -u sets the tracking ref");
+        assert_eq!(after.r#ref, "origin/main");
+        assert_eq!(after.ahead, 0);
+        assert_eq!(after.behind, 0);
+
+        // The remote actually received the commit.
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
+        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        assert_eq!(remote_head, local_head);
     }
 
     #[test]
@@ -3683,13 +3743,56 @@ mod tests {
         repo.write("c.txt", "hello\n");
         git_stage(repo.path(), vec!["c.txt".to_string()]).unwrap();
 
-        git_commit(repo.path(), "add c".to_string()).unwrap();
+        git_commit(repo.path(), "add c".to_string(), None).unwrap();
 
         let log = git_log(repo.path(), None).unwrap();
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].message, "add c");
         // Nothing left to commit afterwards.
         assert!(git_status(repo.path()).unwrap().files.is_empty());
+    }
+
+    #[test]
+    fn git_commit_amend_rewrites_the_tip_message_keeping_the_same_parent() {
+        let repo = init_repo();
+        repo.write("a.txt", "base\n");
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "-m", "base"]);
+        let base_sha = git_log(repo.path(), None).unwrap()[0].sha.clone();
+
+        repo.write("b.txt", "tip\n");
+        repo.git(&["add", "b.txt"]);
+        repo.git(&["commit", "-m", "tip original"]);
+
+        git_commit(repo.path(), "tip amended".to_string(), Some(true)).unwrap();
+
+        let log = git_log(repo.path(), None).unwrap();
+        assert_eq!(log.len(), 2, "amend replaces the tip commit, it doesn't add a new one");
+        assert_eq!(log[0].message, "tip amended");
+        let parent = run_git(&repo.path(), &["rev-parse", "HEAD^"]).unwrap().trim().to_string();
+        assert_eq!(parent, base_sha, "amend keeps the same parent commit");
+    }
+
+    #[test]
+    fn git_commit_amend_with_an_empty_message_reuses_the_previous_message() {
+        let repo = init_repo();
+        repo.write("a.txt", "one\n");
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "-m", "original message"]);
+
+        // Stage an additional change, then amend with an EMPTY message: `--no-edit` reuses the
+        // previous message while the new staged content joins the tip commit.
+        repo.write("b.txt", "two\n");
+        git_stage(repo.path(), vec!["b.txt".to_string()]).unwrap();
+        git_commit(repo.path(), String::new(), Some(true)).unwrap();
+
+        let log = git_log(repo.path(), None).unwrap();
+        assert_eq!(log.len(), 1, "amend still replaces the tip, not a new commit");
+        assert_eq!(log[0].message, "original message");
+        assert!(
+            git_status(repo.path()).unwrap().files.is_empty(),
+            "the staged content joined the amended commit"
+        );
     }
 
     #[test]

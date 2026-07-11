@@ -446,16 +446,25 @@ export interface Platform {
    * Commit the currently-staged changes of the workspace folder with `message` (`git commit -m`).
    * Resolves once the commit is recorded; rejects when nothing is staged or git fails. Desktop only;
    * the browser stub rejects. Callers must check {@link canUseGit} first.
+   *
+   * `opts.amend` (default `false`) rewrites the tip commit instead of creating a new one (`git
+   * commit --amend`): a non-empty `message` replaces the tip's message, while an EMPTY `message`
+   * reuses the previous one unchanged (`--no-edit`) — either way the amend picks up whatever is
+   * newly staged.
    */
-  gitCommit(folderToken: string, message: string): Promise<void>;
+  gitCommit(folderToken: string, message: string, opts?: { amend?: boolean }): Promise<void>;
 
   /**
    * Push the current branch of the workspace folder to its upstream (`git push`). Resolves once the
    * push completes; rejects when the branch has no upstream or git refuses (non-fast-forward, auth,
    * offline). Callers key the affordance off {@link GitStatus.upstream} being present. Desktop only;
    * the browser stub rejects. Callers must check {@link canUseGit} first.
+   *
+   * `opts.setUpstream` (default `false`) is the "publish branch" case: instead of a bare push, it
+   * runs `git push -u origin <current-branch>`, which succeeds even when the branch has no upstream
+   * yet and sets the tracking ref.
    */
-  gitPush(folderToken: string): Promise<void>;
+  gitPush(folderToken: string, opts?: { setUpstream?: boolean }): Promise<void>;
 
   /**
    * Fetch updates from the default remote of the workspace folder (`git fetch`) — refreshes the
