@@ -13,6 +13,7 @@ import {
   drawSelection,
   rectangularSelection,
   crosshairCursor,
+  type KeyBinding,
 } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import {
@@ -196,6 +197,94 @@ const narrowTouchTheme = EditorView.theme({
 // renderMarkdown was extracted to ./markdown (imported at the top of this file) so it can be unit-tested
 // without a CodeMirror view; re-export it so `@/editor/editor` consumers keep resolving it here.
 export { renderMarkdown };
+
+// --- loaded-keymap accessor (for the Settings conflict check) ---------------
+
+// Friendly display labels for the reserved chords worth naming, keyed by the NORMALIZED chord (the
+// same canonical form `chordFromEvent` emits) — NOT by the run function's name, which esbuild mangles
+// in a minified production build. Any loaded chord without an entry here degrades to "Editor command".
+const RESERVED_CHORD_LABELS: Readonly<Record<string, string>> = {
+  'Mod-f': 'Find',
+  'Mod-d': 'Select next occurrence',
+  'Mod-a': 'Select all',
+  'Mod-i': 'Expand selection',
+  'Mod-/': 'Toggle comment',
+  'Shift-Alt-a': 'Toggle block comment',
+  'Mod-[': 'Outdent',
+  'Mod-]': 'Indent',
+  'Mod-Alt-\\': 'Indent selection',
+  'Alt-ArrowUp': 'Move line up',
+  'Alt-ArrowDown': 'Move line down',
+  'Shift-Alt-ArrowUp': 'Copy line up',
+  'Shift-Alt-ArrowDown': 'Copy line down',
+  'Mod-Alt-ArrowUp': 'Add cursor above',
+  'Mod-Alt-ArrowDown': 'Add cursor below',
+  'Mod-Shift-k': 'Delete line',
+  'Mod-Shift-\\': 'Jump to matching bracket',
+  'Mod-Alt-h': 'Call hierarchy',
+};
+
+// Rewrite a CodeMirror keymap `key` string into the canonical chord form `chordFromEvent` emits, so a
+// recorded chord matches a loaded built-in by string equality regardless of how CodeMirror spelled it.
+// CodeMirror is inconsistent about modifier ORDER (`Shift-Mod-k`) and CASE (`Alt-A`); `chordFromEvent`
+// always emits `Mod-` then `Shift-` then `Alt-` then a lowercased single-char base. We also fold the
+// concrete `Ctrl`/`Cmd`/`Meta` prefixes onto the portable `Mod-`, and treat a single uppercase letter
+// as an implied Shift (CodeMirror's `Alt-A` ≡ `Shift-Alt-a`, per its own docs).
+function normalizeChord(cmKey: string): string {
+  const parts = cmKey.split('-');
+  let base = parts.pop() ?? '';
+  const mods = new Set(parts);
+  if (/^[A-Z]$/.test(base)) mods.add('Shift'); // uppercase letter implies the shifted key
+  if (base.length === 1) base = base.toLowerCase();
+  let prefix = '';
+  if (mods.has('Mod') || mods.has('Ctrl') || mods.has('Cmd') || mods.has('Meta')) prefix += 'Mod-';
+  if (mods.has('Shift')) prefix += 'Shift-';
+  if (mods.has('Alt')) prefix += 'Alt-';
+  return prefix + base;
+}
+
+/**
+ * Returns the editor's reserved chord → display-label map, derived from the keymaps the editor
+ * actually loads at runtime: `searchKeymap`, `defaultKeymap`, and the `Mod-Alt-h` call-hierarchy
+ * literal. This is what the Settings conflict-check consults so it stays exhaustive by construction
+ * and can never drift from the editor — because it *is* the editor's own keymap.
+ *
+ * DOM-free (no `EditorView` required), matching the `keybindings.ts` testable-seam style. Each keymap
+ * entry's portable `key` is run through {@link normalizeChord} so a recorded chord matches it by
+ * equality despite CodeMirror's modifier-order/case quirks. `mac`/`win`/`linux` platform variants
+ * (which carry no portable `key`) are skipped, since `chordFromEvent` always emits the portable `Mod-`
+ * form. `historyKeymap` is NOT loaded by the editor (see `createKoineEditor`), so `Mod-z`/`Mod-y`
+ * are deliberately absent.
+ *
+ * @param resolved The currently resolved keybinding map. Registry chords are excluded from the
+ *   returned set because the inter-row conflict logic (the `otherId != null` path in the Keyboard
+ *   section) already owns them; only non-rebindable built-ins belong here.
+ */
+export function loadedReservedChords(resolved: Record<BindingId, string>): Record<string, string> {
+  // Registry chords are handled by the inter-row conflict path — never double-count them here.
+  const registryChords = new Set(Object.values(resolved).filter((c) => c !== ''));
+
+  const result: Record<string, string> = {};
+
+  const addKeymap = (bindings: readonly KeyBinding[]): void => {
+    for (const b of bindings) {
+      if (!b.key) continue; // mac/win/linux-only variant — no cross-platform portable chord
+      const chord = normalizeChord(b.key);
+      if (registryChords.has(chord)) continue; // rebindable row — inter-row conflict logic owns this
+      result[chord] = RESERVED_CHORD_LABELS[chord] ?? 'Editor command';
+    }
+  };
+
+  addKeymap(searchKeymap);
+  addKeymap(defaultKeymap);
+
+  // (Call hierarchy is NOT surfaced here anymore: #432 folded it from the former literal `callHierarchyKeys`
+  // keymap into a first-class rebindable registry row, so its chord is already in `registryChords` above and
+  // owned by the inter-row conflict path. Explicitly reserving `Mod-Alt-h` would falsely mark its OLD chord
+  // as a built-in after the user rebinds call hierarchy away from it.)
+
+  return result;
+}
 
 // The LSP-backed CodeMirror extensions (hover, LSP completion source, inlay hints, semantic tokens) and
 // the provider function types live in ./lspExtensions (#986); re-exported so `@/editor/editor` consumers
