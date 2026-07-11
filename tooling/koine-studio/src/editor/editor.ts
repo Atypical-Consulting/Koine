@@ -13,6 +13,7 @@ import {
   drawSelection,
   rectangularSelection,
   crosshairCursor,
+  type KeyBinding,
 } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import {
@@ -196,6 +197,81 @@ const narrowTouchTheme = EditorView.theme({
 // renderMarkdown was extracted to ./markdown (imported at the top of this file) so it can be unit-tested
 // without a CodeMirror view; re-export it so `@/editor/editor` consumers keep resolving it here.
 export { renderMarkdown };
+
+// --- loaded-keymap accessor (for the Settings conflict check) ---------------
+
+// Small display-label table for the CodeMirror commands the editor's loaded keymaps bind. Keyed by
+// the run function's name; any unlabelled entry falls back to the function name (or "Editor command"
+// for anonymous/minified functions).
+const BUILT_IN_CHORD_LABELS: Readonly<Record<string, string>> = {
+  openSearchPanel: 'Find',
+  closeSearchPanel: 'Close find panel',
+  findNext: 'Find next',
+  findPrevious: 'Find previous',
+  selectNextOccurrence: 'Select next occurrence',
+  gotoLine: 'Go to line',
+  selectSelectionMatches: 'Select all occurrences',
+  selectAll: 'Select all',
+  moveLineUp: 'Move line up',
+  moveLineDown: 'Move line down',
+  copyLineUp: 'Copy line up',
+  copyLineDown: 'Copy line down',
+  addCursorAbove: 'Add cursor above',
+  addCursorBelow: 'Add cursor below',
+  simplifySelection: 'Collapse selection',
+  toggleComment: 'Toggle comment',
+  toggleBlockComment: 'Toggle block comment',
+  indentLess: 'Outdent',
+  indentMore: 'Indent',
+  indentSelection: 'Indent selection',
+  deleteLine: 'Delete line',
+  cursorMatchingBracket: 'Jump to matching bracket',
+  selectParentSyntax: 'Expand selection',
+  insertNewlineAndIndent: 'Insert newline',
+};
+
+/**
+ * Returns the editor's reserved chord → display-label map, derived from the keymaps the editor
+ * actually loads at runtime: `searchKeymap`, `defaultKeymap`, and the `Mod-Alt-h` call-hierarchy
+ * literal. This is what the Settings conflict-check consults so it stays exhaustive by construction
+ * and can never drift from the editor — because it *is* the editor's own keymap.
+ *
+ * DOM-free (no `EditorView` required), matching the `keybindings.ts` testable-seam style. Only the
+ * portable `key` property of each {@link KeyBinding} is surfaced — `mac`/`win`/`linux` platform
+ * variants are skipped, since chord recording via `chordFromEvent` always emits the portable `Mod-`
+ * form. `historyKeymap` is NOT loaded by the editor (see `createKoineEditor`), so `Mod-z`/`Mod-y`
+ * are deliberately absent.
+ *
+ * @param resolved The currently resolved keybinding map. Registry chords are excluded from the
+ *   returned set because the inter-row conflict logic (the `otherId != null` path in the Keyboard
+ *   section) already owns them; only non-rebindable built-ins belong here.
+ */
+export function loadedReservedChords(resolved: Record<BindingId, string>): Record<string, string> {
+  // Registry chords are handled by the inter-row conflict path — never double-count them here.
+  const registryChords = new Set(Object.values(resolved).filter((c) => c !== ''));
+
+  const result: Record<string, string> = {};
+
+  const addKeymap = (bindings: readonly KeyBinding[]): void => {
+    for (const b of bindings) {
+      const key = b.key;
+      if (!key) continue; // mac/win/linux-only variant — not cross-platform portable
+      if (registryChords.has(key)) continue; // rebindable row — inter-row conflict logic owns this
+      const runName = b.run?.name ?? '';
+      result[key] = BUILT_IN_CHORD_LABELS[runName] ?? (runName || 'Editor command');
+    }
+  };
+
+  addKeymap(searchKeymap);
+  addKeymap(defaultKeymap);
+
+  // The call-hierarchy shortcut is not part of CodeMirror's exported keymaps — it's a literal the
+  // editor binds itself (`callHierarchyKeys`) and is not user-rebindable yet (#266 scopes the
+  // expansion to the five LSP actions). Surface it explicitly.
+  if (!registryChords.has('Mod-Alt-h')) result['Mod-Alt-h'] = 'Call hierarchy';
+
+  return result;
+}
 
 // The LSP-backed CodeMirror extensions (hover, LSP completion source, inlay hints, semantic tokens) and
 // the provider function types live in ./lspExtensions (#986); re-exported so `@/editor/editor` consumers
