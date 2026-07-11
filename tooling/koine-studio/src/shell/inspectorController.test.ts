@@ -1518,7 +1518,7 @@ describe('createInspectorController — Source Control live refresh-on-save (#47
   // must track the active right view: visible with the panel's actions while Source Control is open,
   // hidden (and empty of those actions) the moment the user switches away.
   test('Source Control portals Refresh + overflow into #right-header-actions, hidden on other views', async () => {
-    const { platform, gitStatus } = gitPlatform();
+    const { platform } = gitPlatform();
     const ctl = createInspectorController(makeDeps(makeLsp(), { platform }));
     ctl.init();
 
@@ -1526,10 +1526,16 @@ describe('createInspectorController — Source Control live refresh-on-save (#47
     expect(headerActions.hidden).toBe(true);
 
     stripBtn('source-control').click();
-    await waitFor(() => expect(gitStatus.mock.calls.length).toBeGreaterThanOrEqual(1));
-    expect(headerActions.hidden).toBe(false);
-    expect(headerActions.querySelector('[title="Refresh"]')).not.toBeNull();
-    expect(headerActions.querySelector('[title="Views and more actions"]')).not.toBeNull();
+    // Wait on the ACTUAL observable state — the panel's Refresh + ⋮ overflow buttons being portaled into
+    // the shared header slot — not on a proxy like the mocked gitStatus call count. The panel's git fetch
+    // (which bumps that count) and the portal render that commits these buttons fire on different ticks, so
+    // keying off the call count let the assertions run before the portal committed — flaky under full-suite
+    // microtask contention (#1448). Polling the DOM condition itself removes that race.
+    await waitFor(() => {
+      expect(headerActions.hidden).toBe(false);
+      expect(headerActions.querySelector('[title="Refresh"]')).not.toBeNull();
+      expect(headerActions.querySelector('[title="Views and more actions"]')).not.toBeNull();
+    });
 
     stripBtn('props').click();
     expect(headerActions.hidden).toBe(true);
