@@ -8,19 +8,64 @@
   </picture>
 </p>
 
-# Koine
+<h1 align="center">Koine</h1>
 
-> Write your domain's **ubiquitous language** once, in `.koi` files. Koine compiles it to
-> idiomatic, self-contained C# — value objects, entities, aggregates, invariants, the whole
-> Domain-Driven Design toolkit.
+<p align="center">
+  <b>Write your domain's ubiquitous language once, in <code>.koi</code> files.</b><br />
+  Koine compiles it to idiomatic, self-contained code — value objects, entities, aggregates,
+  invariants, the whole Domain-Driven Design toolkit — in <b>7 languages</b>.
+</p>
 
-[![Try it in your browser](https://img.shields.io/badge/try-in%20your%20browser-3245b8)](https://atypical-consulting.github.io/Koine/studio/)
-[![Documentation](https://img.shields.io/badge/docs-koine-3245b8)](https://atypical-consulting.github.io/Koine/)
-[![NuGet](https://img.shields.io/nuget/v/Koine.Cli?logo=nuget&label=NuGet&color=3245b8)](https://www.nuget.org/packages/Koine.Cli)
-[![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
-[![Tests](https://img.shields.io/badge/tests-passing-2ea44f)](tests/)
-![Target](https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20Java%20%C2%B7%20Kotlin%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+<p align="center">
+  <a href="https://atypical-consulting.github.io/Koine/studio/"><img alt="Try it in your browser" src="https://img.shields.io/badge/try-in%20your%20browser-3245b8?logo=rocket&logoColor=white" /></a>
+  <a href="https://atypical-consulting.github.io/Koine/"><img alt="Documentation" src="https://img.shields.io/badge/docs-koine-3245b8" /></a>
+  <a href="https://www.nuget.org/packages/Koine.Cli"><img alt="NuGet" src="https://img.shields.io/nuget/v/Koine.Cli?logo=nuget&label=NuGet&color=3245b8" /></a>
+  <a href="https://www.nuget.org/packages/Koine.Cli"><img alt="NuGet downloads" src="https://img.shields.io/nuget/dt/Koine.Cli?logo=nuget&label=downloads&color=3245b8" /></a>
+  <a href="https://github.com/Atypical-Consulting/Koine/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Atypical-Consulting/Koine/ci.yml?branch=main&logo=githubactions&logoColor=white&label=CI" /></a>
+  <a href="https://dotnet.microsoft.com/"><img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white" /></a>
+  <a href="https://github.com/Atypical-Consulting/Koine/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/Atypical-Consulting/Koine?logo=github&color=3245b8" /></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue" /></a>
+</p>
+
+<p align="center">
+  <img alt="Emit targets" src="https://img.shields.io/badge/emits-C%23%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20PHP%20%C2%B7%20Rust%20%C2%B7%20Java%20%C2%B7%20Kotlin%20%C2%B7%20docs%20%C2%B7%20AsyncAPI%20%C2%B7%20OpenAPI-178600" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/Atypical-Consulting/Koine/stargazers"><img alt="Star Koine on GitHub" src="https://img.shields.io/github/stars/Atypical-Consulting/Koine?style=social" /></a>
+</p>
+
+<!-- Animated demo rendered from tooling/koine-demo (Remotion). Re-render with `npm run render:gif` there. -->
+<p align="center">
+  <a href="https://atypical-consulting.github.io/Koine/studio/">
+    <img src="assets/koine-demo.gif" width="100%"
+         alt="One Koine .koi model on the left compiling to idiomatic C#, TypeScript, Python and Rust on the right — value objects, entities, aggregates and invariants generated from the same source." />
+  </a>
+</p>
+
+<p align="center">
+  <em>Write one <code>.koi</code> model; get idiomatic code in seven languages — live in your browser, <a href="https://atypical-consulting.github.io/Koine/studio/">zero install</a>.</em>
+</p>
+
+## Table of Contents
+
+- [The problem](#the-problem)
+- [The solution](#the-solution)
+- [Features](#features)
+- [Try it in the browser](#try-it-in-the-browser)
+- [A taste of the language](#a-taste-of-the-language)
+- [Quick start (CLI)](#quick-start-cli)
+- [The language](#the-language)
+- [Architecture](#architecture)
+- [Koine as a platform](#koine-as-a-platform)
+- [Tooling](#tooling)
+- [Koine in the AI workflow](#koine-in-the-ai-workflow)
+- [Tech stack](#tech-stack)
+- [Status and roadmap](#status-and-roadmap)
+- [Templates](#templates)
+- [Demo](#demo)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## The problem
 
@@ -59,23 +104,44 @@ complete target**; the same model also compiles to six other languages and three
 Every target's output is mapped construct-by-construct in the
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/).
 
-## See it run — in your browser
+## Features
+
+- ✅ **One source of truth** — the model *is* the ubiquitous language; no drift between glossary and code.
+- 🌍 **7 language targets from one model** — C#, TypeScript, Python, PHP, Rust, Java, and Kotlin.
+- 📄 **3 spec/doc targets** — living docs (Markdown + Mermaid), AsyncAPI 3.0, and OpenAPI 3.1.
+- 🧱 **The full DDD toolkit** — value objects, entities, aggregates, smart enums, invariants, commands,
+  domain events, state machines, factories, specifications, services, policies, repositories,
+  optimistic concurrency, the application/CQRS layer, context maps, integration events, and model versioning.
+- 📦 **Dependency-free output** — generated code is plain, readable, and self-contained; nothing to install.
+- ⚙️ **Runnable infrastructure, opt-in** — EF Core (C#) or dependency-light stores (TS/Python) via `--layers`.
+- 🛡️ **Enforced DDD discipline** — reference rules are hard compiler errors (`KOI1601`–`KOI1605`), not lint.
+- 🌐 **Runs in your browser** — the compiler is compiled to WebAssembly; Studio + Playground need zero install.
+- 🔧 **First-class tooling** — a `koine lsp` language server, canonical formatter, an MCP server for AI
+  agents, and a TextMate grammar for VS Code / Rider.
+- ✔️ **A green build proves the domain** — every construct is snapshot-tested *and* compiled and executed
+  through an in-memory Roslyn meta-test, so a passing build means the generated code is correct and usable.
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
+
+## Try it in the browser
 
 The Koine compiler is itself compiled to WebAssembly, so you can write a model and watch it become
 C# without installing anything.
 
-<p align="center">
-  <a href="https://atypical-consulting.github.io/Koine/studio/">
-    <img src="assets/koine-studio.png" width="100%"
-         alt="Koine Studio: a .koi domain model on the left, the C# it compiles to on the right, with no diagnostics — running entirely in the browser." />
-  </a>
-</p>
+- **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE, running
+  the real compiler in your browser. *(Also ships as a native [Tauri](https://tauri.app/) desktop app —
+  same UI, see [`tooling/koine-studio`](tooling/koine-studio).)*
+- **[Playground](https://atypical-consulting.github.io/Koine/playground/)** — a lightweight,
+  zero-install editor that recompiles to C#/TypeScript the moment you stop typing. Great for a quick
+  taste or for following along with the [tutorial](https://atypical-consulting.github.io/Koine/start/your-first-model/).
 
-<p align="center">
-  <em>Koine Studio — your <code>.koi</code> model (left) and the C# it compiles to (right), live in the browser.</em>
-</p>
+> Both run the **same** parser, validator, and emitters as the `koine` CLI — what you see in the
+> browser is exactly what the build produces.
 
-### A tour of the IDE
+<details>
+<summary><b>🔍 Take the full IDE tour (6 views)</b></summary>
+
+<br />
 
 The hero above is the editor split — but Studio is a full IDE, and a single shot can't show it. Each
 surface below is a click away in the [live Studio](https://atypical-consulting.github.io/Koine/studio/):
@@ -114,15 +180,7 @@ surface below is a click away in the [live Studio](https://atypical-consulting.g
   </tr>
 </table>
 
-- **[Koine Studio](https://atypical-consulting.github.io/Koine/studio/)** — the full web IDE (every
-  view in the tour above), running the real compiler in your browser. *(Also ships as a native
-  [Tauri](https://tauri.app/) desktop app — same UI, see [`tooling/koine-studio`](tooling/koine-studio).)*
-- **[Playground](https://atypical-consulting.github.io/Koine/playground/)** — a lightweight,
-  zero-install editor that recompiles to C#/TypeScript the moment you stop typing. Great for a quick
-  taste or for following along with the [tutorial](https://atypical-consulting.github.io/Koine/start/your-first-model/).
-
-> Both run the **same** parser, validator, and emitters as the `koine` CLI — what you see in the
-> browser is exactly what the build produces.
+</details>
 
 **Concept Colors** — *one DDD concept, one color, everywhere.* An aggregate is the same indigo, a
 value object the same blue, an enum the same amber in the explorer, on the canvas, in the code editor,
@@ -133,6 +191,8 @@ signal, so the association carries from the tree straight into the source. See t
 📖 **Full docs → <https://atypical-consulting.github.io/Koine/>** — getting started, a six-part
 tutorial, the complete language reference, the feature catalogue, and the CLI. (Source in
 [`website/`](website/); run locally with `cd website && npm install && npm run dev`.)
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
 
 ## A taste of the language
 
@@ -185,24 +245,7 @@ That compiles to plain C# records and classes with validating constructors, valu
 a generated `OrderId`/`CustomerId`, an `IOrderRepository` contract, and the `Money * int` operator
 needed for `subtotal` — nothing for you to write, and nothing external to reference.
 
-## Why Koine?
-
-- **One source of truth.** The model *is* the ubiquitous language — no drift between the glossary
-  and the code.
-- **Idiomatic, dependency-free output.** Generated C# is plain, readable, and self-contained; the
-  `Koine.Runtime` markers are emitted alongside it, so there's nothing to install.
-- **The whole tactical *and* strategic toolkit.** Value objects, entities, aggregates, smart enums,
-  invariants, commands, domain events, state machines, factories, specifications, services,
-  policies, repositories, optimistic concurrency, the application layer (UoW, read models, CQRS),
-  multi-file modules, context maps, integration events, and model versioning — all shipped.
-- **Enforced DDD reference discipline.** The compiler keeps your building blocks honest: a value
-  object can't embed an entity or aggregate, commands and domain events carry data and identities
-  rather than live references, one aggregate references another only by its id, and an entity holds
-  domain state — never an event, read model, or query — violations are hard errors
-  (`KOI1601`–`KOI1605`), not lint.
-- **A green build proves the domain.** Every construct is snapshot-tested *and* compiled and executed
-  through an in-memory Roslyn meta-test, so a passing build means the generated C# is correct and
-  usable — not just that it parses.
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
 
 ## Quick start (CLI)
 
@@ -251,7 +294,16 @@ The generated C# in `./generated` is self-contained and compiles on its own. A p
 single `.koi` file **or a directory** — directory mode compiles every `.koi` underneath as one model,
 so cross-file imports, context maps, and integration events resolve.
 
-### C# layers (`--layers`)
+Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `coverage` (proves
+*declared == emitted* and doubles as a CI gate), `fmt` (canonical formatter), `init` (scaffold a
+project), `watch` (rebuild on change), `lsp` (language server over stdio), and `mcp` (the MCP server —
+stdio by default, or `--http` to serve it over HTTP). See the
+[CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).
+
+<details>
+<summary><b>C# layers (<code>--layers</code>): domain contracts + opt-in EF Core infrastructure</b></summary>
+
+<br />
 
 The C# target emits in composable **layers**, selected with `--layers` (or `targets.csharp.layers` in
 `koine.config`):
@@ -273,7 +325,16 @@ The infrastructure is **regenerated from the model on every build**, so it can n
 from the ubiquitous language. The provider (SQL Server, Postgres, …) is supplied by the caller through
 the `Action<DbContextOptionsBuilder>`, so the emitter stays provider-agnostic. EF Core only in v1.
 
-#### TypeScript & Python infrastructure (`--layers infrastructure`)
+The C# EF Core mappings are exercised end-to-end: every persisted aggregate round-trips — scalar-only
+roots, owned scalar value objects, versioned aggregates, nested value objects, and value-object
+collections all insert and re-query correctly.
+
+</details>
+
+<details>
+<summary><b>TypeScript &amp; Python infrastructure (<code>--layers infrastructure</code>)</b></summary>
+
+<br />
 
 The same `--layers infrastructure` selector now applies to the **TypeScript** and **Python** targets
 (issue #241), keeping the "write the ubiquitous language once, get a runnable stack" promise across all
@@ -294,17 +355,12 @@ The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koi
 The layer is **off by default**, so an unconfigured emit is byte-identical to the historical output; the
 generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
 
-The C# EF Core mappings are exercised end-to-end: every persisted aggregate round-trips — scalar-only
-roots, owned scalar value objects, versioned aggregates, nested value objects, and value-object
-collections all insert and re-query correctly.
+</details>
 
-Other CLI commands: `check` (model-versioning compatibility against a `--baseline`), `coverage` (proves
-*declared == emitted* and doubles as a CI gate), `fmt` (canonical formatter), `init` (scaffold a
-project), `watch` (rebuild on change), `lsp` (language server over stdio), and `mcp` (the MCP server —
-stdio by default, or `--http` to serve it over HTTP). See the
-[CLI reference](https://atypical-consulting.github.io/Koine/guides/cli/).
+<details>
+<summary><b>The C# Application layer (opt-in <code>--layers domain,application</code>)</b></summary>
 
-### The C# Application layer (opt-in)
+<br />
 
 By default `--target csharp` stops at the **application boundary**: it emits the *contracts* —
 `IUnitOfWork`, the `I<Service>` use-case interfaces, read-model projections, query objects and the
@@ -334,9 +390,19 @@ implementation throws `NotImplementedException` until wired — the generated co
 are the real entry points. `MediatR`/`FluentValidation`/`Mapperly` are C#-emitter concerns and never
 leak into the target-agnostic model.
 
+</details>
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
+
 ## The language
 
-### Constructs
+A `.koi` model is built from a handful of declarations that map directly to DDD building blocks. The
+core constructs and how they compile to C#:
+
+<details>
+<summary><b>Constructs → what they emit</b></summary>
+
+<br />
 
 | Construct | Emits |
 |-----------|-------|
@@ -360,13 +426,18 @@ The full construct set (commands, domain events, state machines, factories, spec
 policies, context maps, integration events, model versioning) is mapped construct-by-construct to the
 C# it emits in the [**feature catalogue**](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/).
 
-### Expression sublanguage
+</details>
 
-Small and pure (no statements, no I/O): comparisons (`== != < <= > >=`), arithmetic (`+ - * /`),
-logical (`&& || !`), member access (`lines.isEmpty`), regex `matches /…/`, a `when` guard,
-identifiers, and literals.
+<details>
+<summary><b>Expression sublanguage &amp; primitive type mapping</b></summary>
 
-### Primitive type mapping (Koine → C#)
+<br />
+
+**Expression sublanguage** — small and pure (no statements, no I/O): comparisons (`== != < <= > >=`),
+arithmetic (`+ - * /`), logical (`&& || !`), member access (`lines.isEmpty`), regex `matches /…/`, a
+`when` guard, identifiers, and literals.
+
+**Primitive type mapping (Koine → C#):**
 
 | Koine | C# | Notes |
 |-------|----|-------|
@@ -378,7 +449,12 @@ identifiers, and literals.
 | `List<T>` | `IReadOnlyList<T>` | defensively copied in the constructor |
 | `<XId>` | generated ID value object | a `record` wrapping a `Guid` |
 
-### Current limitations
+</details>
+
+<details>
+<summary><b>Current limitations</b></summary>
+
+<br />
 
 - **Soft keywords.** Most Koine keywords (`context`, `value`, `entity`, `aggregate`, `enum`, `command`,
   `service`, `policy`, `repository`, `readmodel`, `query`, `import`, `module`, …) may be used as field
@@ -388,6 +464,10 @@ identifiers, and literals.
   a negative operand needs a space (`x < -1`, not `x<-1`).
 - **Reserved type names.** `List`, `Set`, `Map`, and `Range` are built-in generics; a user type may not
   take one of these names.
+
+</details>
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
 
 ## Architecture
 
@@ -401,41 +481,54 @@ The pipeline is strictly layered so backends are pluggable:
   → IEmitter (Koine.Emit.CSharp, .TypeScript, .Python, .Php, .Rust, …) → source files
 ```
 
-```
-Koine.slnx
-├── src/
-│   ├── Koine.Compiler/     # parser, Ast/, semantics + emit CONTRACTS (IEmitter, EmitterRegistry, …)
-│   │   ├── Grammar/        # KoineLexer.g4, KoineParser.g4
-│   │   ├── Ast/            # semantic model + ModelIndex (NO target-specific concepts)
-│   │   ├── Parsing/        # KoineModelBuilderVisitor, SyntaxErrorListener
-│   │   ├── Semantics/      # SemanticValidator (+ focused validators)
-│   │   ├── Emit/           # IEmitter, IEmitterProvider, EmitterOptions, EmitterRegistry, EmitterLoader
-│   │   ├── Diagnostics/    # Diagnostic
-│   │   └── Services/       # KoineCompiler (orchestrator) + LSP/tooling backend
-│   ├── Koine.Emit.Common/  # shared emitter helpers (FactoryIdBinding, MarkdownDoc, OperatorNeedsAnalyzer)
-│   ├── Koine.Emit.CSharp/      # CSharpEmitter (primary target)  ── each emitter its own assembly (#861)
-│   ├── Koine.Emit.TypeScript/  # TypeScriptEmitter
-│   ├── Koine.Emit.Python/      # PythonEmitter (tactical core + strategic/CQRS layer)
-│   ├── Koine.Emit.Php/         # PhpEmitter (tactical core + strategic/CQRS layer, PHP 8.1)
-│   ├── Koine.Emit.Rust/        # RustEmitter (multi-context + CQRS read side)
-│   ├── Koine.Emit.Glossary/    # ubiquitous-language glossary
-│   ├── Koine.Emit.Docs/        # living documentation (Markdown + Mermaid diagrams)
-│   ├── Koine.Emit.AsyncApi/    # AsyncApiEmitter (AsyncAPI 3.0 doc from integration events)
-│   ├── Koine.Emit.OpenApi/     # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
-│   ├── Koine.Emit.All/     # aggregator: BuiltInEmitterProviders.All — one reference, all targets
-│   ├── Koine.Cli/          # `koine` command-line tool
-│   ├── Koine.Wasm/         # the compiler as a WebAssembly module (Playground + Studio web)
-│   └── Koine.Mcp/          # MCP server for AI agents
-└── tests/
-    └── Koine.Compiler.Tests/   # parsing, semantic, snapshot (Verify), Roslyn compile meta-tests
-```
-
 The grammar is split into a separate **lexer grammar** so that `matches /regex/` can use a lexer mode —
 this lets a regex literal be read as a single token without colliding with the `/` division operator.
 The single most important invariant: **no C#-specific concept lives in `Ast/`** — that is what keeps
 multiple emitters possible.
 
-### The browser bundle (AOT)
+<details>
+<summary><b>Project layout (<code>Koine.slnx</code>)</b></summary>
+
+<br />
+
+```
+Koine.slnx
+├── src/
+│   ├── Koine.Compiler/          # parser, Ast/, semantics + emit CONTRACTS (IEmitter, EmitterRegistry, …)
+│   │   ├── Grammar/             # KoineLexer.g4, KoineParser.g4
+│   │   ├── Ast/                 # semantic model + ModelIndex (NO target-specific concepts)
+│   │   ├── Parsing/             # KoineModelBuilderVisitor, SyntaxErrorListener
+│   │   ├── Semantics/           # SemanticValidator (+ focused validators)
+│   │   ├── Emit/                # IEmitter, IEmitterProvider, EmitterOptions, EmitterRegistry, EmitterLoader
+│   │   ├── Diagnostics/         # Diagnostic
+│   │   └── Services/            # KoineCompiler (orchestrator) + LSP/tooling backend
+│   ├── Koine.Compiler.SourceGen/ # Roslyn source generator supporting the compiler
+│   ├── Koine.Emit.Common/       # shared emitter helpers (FactoryIdBinding, MarkdownDoc, OperatorNeedsAnalyzer)
+│   ├── Koine.Emit.CSharp/        # CSharpEmitter (primary target)  ── each emitter its own assembly (#861)
+│   ├── Koine.Emit.TypeScript/    # TypeScriptEmitter
+│   ├── Koine.Emit.Python/        # PythonEmitter (tactical core + strategic/CQRS layer)
+│   ├── Koine.Emit.Php/           # PhpEmitter (tactical core + strategic/CQRS layer, PHP 8.1)
+│   ├── Koine.Emit.Rust/          # RustEmitter (multi-context + CQRS read side)
+│   ├── Koine.Emit.Java/          # JavaEmitter (stdlib-only records, sealed events; Java 17)
+│   ├── Koine.Emit.Kotlin/        # KotlinEmitter (idiomatic Kotlin/JVM data classes; Kotlin 2.x)
+│   ├── Koine.Emit.Glossary/      # ubiquitous-language glossary
+│   ├── Koine.Emit.Docs/          # living documentation (Markdown + Mermaid diagrams)
+│   ├── Koine.Emit.AsyncApi/      # AsyncApiEmitter (AsyncAPI 3.0 doc from integration events)
+│   ├── Koine.Emit.OpenApi/       # OpenApiEmitter (OpenAPI 3.1 spec per bounded context)
+│   ├── Koine.Emit.All/          # aggregator: BuiltInEmitterProviders.All — one reference, all targets
+│   ├── Koine.Cli/               # `koine` command-line tool
+│   ├── Koine.Wasm/              # the compiler as a WebAssembly module (Playground + Studio web)
+│   └── Koine.Mcp/               # MCP server for AI agents
+└── tests/
+    └── Koine.Compiler.Tests/    # parsing, semantic, snapshot (Verify), Roslyn compile meta-tests
+```
+
+</details>
+
+<details>
+<summary><b>The browser bundle (AOT)</b></summary>
+
+<br />
 
 `Koine.Wasm` compiles the whole compiler to WebAssembly for the
 [Playground](https://atypical-consulting.github.io/Koine/playground/) and
@@ -447,15 +540,24 @@ deployed/CI path pays the slower AOT publish. Full rationale, measured trade-off
 fallback question live in the comment block in `src/Koine.Wasm/Koine.Wasm.csproj`
 (issue [#327](https://github.com/Atypical-Consulting/Koine/issues/327)).
 
+</details>
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
+
 ## Koine as a platform
 
 `Koine.Compiler` ships as a NuGet library with a **frozen, contract-gated public API** (guarded by
 `Microsoft.CodeAnalysis.PublicApiAnalyzers`, so unintended public surface can never ship silently).
 You can embed the compiler, write your own analyzers, and ship your own emitters.
 
-**Embed the compiler.** `Koine.Compiler` carries the parser, semantic model, and emit **contracts**; the
-built-in emitters ship in `Koine.Emit.All` (the `BuiltInEmitterProviders.All` aggregator). Add both to
-resolve a target like `csharp`, then compile a model in process:
+<details>
+<summary><b>Embed the compiler</b></summary>
+
+<br />
+
+`Koine.Compiler` carries the parser, semantic model, and emit **contracts**; the built-in emitters ship
+in `Koine.Emit.All` (the `BuiltInEmitterProviders.All` aggregator). Add both to resolve a target like
+`csharp`, then compile a model in process:
 
 ```bash
 dotnet add package Koine.Compiler
@@ -479,8 +581,15 @@ else
         Console.Error.WriteLine(d);
 ```
 
-**Write an analyzer.** Implement `IModelAnalyzer` — a target-agnostic check over the resolved
-semantic model that reports `Diagnostic`s:
+</details>
+
+<details>
+<summary><b>Write an analyzer</b></summary>
+
+<br />
+
+Implement `IModelAnalyzer` — a target-agnostic check over the resolved semantic model that reports
+`Diagnostic`s:
 
 ```csharp
 using Koine.Compiler.Diagnostics;
@@ -510,8 +619,15 @@ paths) — any public parameterless-constructible `IModelAnalyzer` is loaded and
 analyzers = ./build/Acme.KoineAnalyzers.dll
 ```
 
-**Ship an emitter.** Implement `IEmitterProvider` (returning an `IEmitter` for your target) to add a
-brand-new backend without forking the compiler:
+</details>
+
+<details>
+<summary><b>Ship an emitter</b></summary>
+
+<br />
+
+Implement `IEmitterProvider` (returning an `IEmitter` for your target) to add a brand-new backend
+without forking the compiler:
 
 ```csharp
 using Koine.Compiler.Ast;
@@ -538,12 +654,16 @@ analyzers), so `koine build Models/ --target go` resolves your provider through 
 emitters = ./build/Acme.GoEmitter.dll
 ```
 
+</details>
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
+
 ## Tooling
 
 - **Web IDE.** [Koine Studio](https://atypical-consulting.github.io/Koine/studio/) and the
   [Playground](https://atypical-consulting.github.io/Koine/playground/) run the compiler in the
-  browser (WebAssembly) — see [*See it run*](#see-it-run--in-your-browser) above. Studio also ships as
-  a native desktop app ([`tooling/koine-studio`](tooling/koine-studio)). Its built-in **AI copilot**
+  browser (WebAssembly) — see [*Try it in the browser*](#try-it-in-the-browser) above. Studio also ships
+  as a native desktop app ([`tooling/koine-studio`](tooling/koine-studio)). Its built-in **AI copilot**
   makes the `.koi` it generates valid by construction: a grammar-capable local model is constrained to
   Koine's grammar (GBNF token masking), hosted APIs fall back to bounded parse-and-repair against the
   real parser, and *Apply to editor* stays disabled until the model parses. In a folder workspace it
@@ -582,7 +702,7 @@ emitters = ./build/Acme.GoEmitter.dll
   server with **Claude Desktop** in one step. Full tool list + the HTTP recipe in the
   [MCP guide](https://atypical-consulting.github.io/Koine/guides/mcp-server/).
 
-### Koine in the AI workflow
+## Koine in the AI workflow
 
 In spec-driven development, Koine is the **deterministic implementation step**. An AI agent authors a
 small `.koi` model (over the MCP server above) and a human reviews *that model* — not thousands of
@@ -593,6 +713,8 @@ generate-test-fix loop. Completeness isn't hoped-for: the compiler emits every d
 as a CI gate). See the
 [Model-as-spec guide](https://atypical-consulting.github.io/Koine/guides/model-as-spec/).
 
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
+
 ## Tech stack
 
 - .NET 10, C#
@@ -600,7 +722,7 @@ as a CI gate). See the
 - Tests: xUnit, [Verify](https://github.com/VerifyTests/Verify) snapshots, and an in-memory **Roslyn**
   meta-test that compiles and executes the emitted C#.
 
-## Status & roadmap
+## Status and roadmap
 
 Koine ships the full tactical *and* strategic DDD toolkit and **nine emitter targets alongside C#** —
 six languages (**TypeScript**, **Python**, **PHP 8.1**, **Rust**, **Java 17**, **Kotlin 2.x**) plus three
@@ -617,6 +739,8 @@ construct to the C# it emits. The current version is shown by the NuGet badge ab
 **NuGet.org** via Trusted Publishing — `dotnet tool install --global Koine.Cli`
 ([#1179](https://github.com/Atypical-Consulting/Koine/pull/1179)). The full roadmap lives in
 [`USER-STORIES.md`](USER-STORIES.md).
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
 
 ## Templates
 
@@ -640,7 +764,10 @@ Templates come in four difficulty levels — **starter**, **beginner**, **interm
 | [`library`](templates/library) | intermediate | A lending library across five contexts — Book vs BookCopy, loans, reservations, fines |
 | [`saas-subscription`](templates/saas-subscription) | advanced | Multi-tenant subscriptions with trials, metered quotas, dunning, and a payment-provider ACL |
 
-### The `template.json` manifest
+<details>
+<summary><b>The <code>template.json</code> manifest</b></summary>
+
+<br />
 
 Each template folder carries a `template.json` validated against
 [`templates/template.schema.json`](templates/template.schema.json):
@@ -659,6 +786,10 @@ Each template folder carries a `template.json` validated against
 | `teaches` | The Koine concepts / DDD patterns a learner picks up |
 | `icon` | An icon identifier (emoji or icon name) for the template card |
 
+</details>
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
+
 ## Demo
 
 [`demo/`](demo/) consumes the generated C# from a real .NET project. It compiles straight from the
@@ -674,7 +805,11 @@ Contributions are welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to b
 a change, and please follow our [Code of Conduct](CODE_OF_CONDUCT.md). Security issues should be reported
 privately — see [`SECURITY.md`](SECURITY.md). Notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
 
+⭐ **If Koine is useful to you, a star helps others find it** — thank you!
+
 ## License
 
 Koine is licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE). Copyright © 2026 Atypical
 Consulting / Philippe Matray.
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>

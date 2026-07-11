@@ -1,0 +1,23 @@
+{
+  "name": "koine-demo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Remotion source for the Koine README demo — one .koi model compiling to many targets.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render KoineDemo out/koine-demo.mp4 --log=verbose",
+    "render:gif": "remotion render KoineDemo out/koine-demo.gif --codec=gif --every-nth-frame=2 --log=verbose",
+    "still": "remotion still KoineDemo out/koine-poster.png --frame=320"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

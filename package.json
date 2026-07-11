@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "tooling/*",
+    "!tooling/koine-demo",
     "website"
   ],
   "scripts": {
