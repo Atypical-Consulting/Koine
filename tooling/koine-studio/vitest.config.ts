@@ -62,13 +62,26 @@ export default defineConfig({
   // Alias React's runtime to Preact's compat layer — the SAME alias vite.config.ts declares — so the
   // `zustand` React hook (`useStore`, imported from bare `react`) resolves under vitest's happy-dom
   // run. Vitest does not share vite.config.ts's resolve.alias, so the panel tests need it here too.
+  //
+  // `@atypical/koine-ui` is aliased straight to its TS source (not the npm-workspace-symlinked, built
+  // `dist/`): normally that dist is rebuilt by `npm install`'s postinstall, but nothing rebuilds it
+  // automatically between installs — a worktree/checkout whose node_modules predates a koine-ui source
+  // change (e.g. a newly added export) silently resolves that export to `undefined`. Preact then renders
+  // the resulting `h(undefined, …)` vnode as the literal text "[object Object]" with no thrown error,
+  // which is exactly the `GlossaryPanel` regression in #1470 — reproduced by deliberately building
+  // koine-ui's dist from before its `GlossaryPanel` export existed. Aliasing to source makes the test
+  // suite immune to that staleness class entirely, independent of node_modules/dist state. Array form
+  // (not the `{find: replacement}` object shorthand used elsewhere in this file) so the koine-ui find can
+  // be an exact-match RegExp — a plain string prefix-matches, which would also rewrite the unrelated deep
+  // import `@atypical/koine-ui/styles.css` (main.ts) onto a nonsensical path.
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-      react: 'preact/compat',
-      'react-dom': 'preact/compat',
-      'react/jsx-runtime': 'preact/jsx-runtime'
-    }
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+      { find: /^@atypical\/koine-ui$/, replacement: fileURLToPath(new URL('../koine-ui/src/index.ts', import.meta.url)) },
+      { find: 'react', replacement: 'preact/compat' },
+      { find: 'react-dom', replacement: 'preact/compat' },
+      { find: 'react/jsx-runtime', replacement: 'preact/jsx-runtime' }
+    ]
   },
   test: {
     projects: [{
