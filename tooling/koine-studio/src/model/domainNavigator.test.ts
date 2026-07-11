@@ -416,6 +416,58 @@ describe('mountDomainNavigator', () => {
     expect(lsp.model).toHaveBeenCalledTimes(1);
   });
 
+  // Same disposal-race shape #1308 already covers for an UNSEEDED mount (below) — a seeded mount's
+  // `doFetch` runs through the identical isCurrent()/fetchGen guard, but nothing pinned that for the
+  // seed path specifically until now.
+  it('unmounting a SEEDED mount mid-fetch skips the cache write once the seed resolves late (#1397)', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    const lsp = fakeLsp();
+
+    let resolveSeed!: (m: GlossaryModel) => void;
+    const seed: DomainNavigatorSeed = {
+      glossaryModel: new Promise((resolve) => {
+        resolveSeed = resolve;
+      }),
+      model: Promise.resolve(null),
+    };
+
+    const handle = mountDomainNavigator(host, store, lsp, undefined, undefined, seed);
+    await flush(); // the mount-time render painted the loading placeholder; doFetch()'s Promise.all is pending on the seed
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
+
+    handle.unmount(); // torn down while the seeded doFetch() is still in flight
+
+    resolveSeed(fakeGlossary(['Ordering', 'Billing'])); // the stale seed resolves anyway
+    await flush();
+
+    // The disposed guard must have skipped the cache write and the trailing render() call — the host
+    // stays on the loading placeholder rather than painting the now-stale strategic context rows.
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeNull();
+    expect(host.querySelector('.koi-domain-loading')).toBeTruthy();
+  });
+
+  // A seeded mount's glossaryModel promise is a caller-supplied fetch (e.g. the real
+  // fetchGlossaryModel(), which has no internal catch) and so CAN reject — doFetch's outer try/catch
+  // must degrade it to the empty strategic state exactly like an unseeded lsp.glossaryModel() rejection.
+  it('a mount-time seed whose glossaryModel promise rejects degrades to the empty strategic state', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    const lsp = fakeLsp();
+    const seed: DomainNavigatorSeed = {
+      glossaryModel: Promise.reject(new Error('boom')),
+      model: Promise.resolve(null),
+    };
+
+    mountDomainNavigator(host, store, lsp, undefined, undefined, seed);
+    await flush();
+
+    expect(host.querySelector('.koi-domain-empty')).toBeTruthy();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeNull();
+  });
+
   // #760: the navigator takes its store as a parameter (never the `appStore` singleton) precisely so two
   // instances can run side by side without leaking into one another. Pin that guarantee explicitly: two
   // navigators, each built with its OWN createAppStore(), and a drill through the first must never be
