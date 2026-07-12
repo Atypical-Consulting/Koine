@@ -61,4 +61,26 @@ public class RustExpressionTranslatorTests
 
         sb.ToString().ShouldBe("self.y.map(Decimal::from)");
     }
+
+    /// <summary>
+    /// Pins why <c>EmitCoerced</c> is the one optionality call site that does NOT route through the shared
+    /// <c>BranchReconciliation.Classify</c> (#1356). A local can be registered with NO type — <c>PushLocal</c>'s
+    /// type parameter is optional, and a lambda parameter whose element type does not resolve passes none —
+    /// so <c>ownType</c> is <see langword="null"/> here while <c>coerceTo</c> (from <c>TypeResolver</c>, via
+    /// <c>WriteBinary</c>) still says a <c>Decimal</c> is expected. <c>BranchReconciliation</c> degrades an
+    /// unresolved type to "reconcile nothing", which would drop the widen and emit a bare <c>y</c> — an
+    /// <c>i64</c> against a <c>Decimal</c> (<c>cargo check</c> E0308). The coercion must survive the unknown
+    /// type, so this asserts the <c>Decimal::from(...)</c> is still emitted.
+    /// </summary>
+    [Fact]
+    public void Write_identifier_case_widens_an_untyped_local_coerced_toward_decimal()
+    {
+        RustExpressionTranslator translator = NewTranslator();
+        translator.PushLocal("y");
+
+        var sb = new StringBuilder();
+        translator.WriteIdentifier("y", sb, null, new TypeRef("Decimal"));
+
+        sb.ToString().ShouldBe("Decimal::from(y)");
+    }
 }
