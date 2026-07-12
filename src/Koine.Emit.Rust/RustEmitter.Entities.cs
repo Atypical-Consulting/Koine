@@ -107,7 +107,7 @@ public sealed partial class RustEmitter
 
         foreach (Invariant inv in entity.Invariants)
         {
-            WriteInvariantGuard(body, name, inv, translator, Indent + Indent);
+            WriteInvariantGuard(body, name, inv, translator, Indent + Indent, typeMapper: typeMapper);
         }
 
         foreach (Member m in defaultedParams.Where(m => m.Type.IsOptional))
@@ -250,7 +250,7 @@ public sealed partial class RustEmitter
         // 3. Re-check the entity invariants over the post-transition state.
         foreach (Invariant inv in entity.Invariants)
         {
-            WriteInvariantGuard(body, typeName, inv, translator, Indent + Indent, RustExpressionTranslator.NameMode.Property);
+            WriteInvariantGuard(body, typeName, inv, translator, Indent + Indent, RustExpressionTranslator.NameMode.Property, typeMapper);
         }
 
         // 3b. Record the domain events the command raises (over the valid post-transition state).

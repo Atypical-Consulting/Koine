@@ -312,6 +312,169 @@ public class RustEmitterTests
         rust.ShouldContain("self.tax_rate.is_some()");
     }
 
+    /// <summary>
+    /// Issue #1489: a command's post-transition invariant re-check (<c>NameMode.Property</c>) reads a
+    /// presence-guarded member as the real stored <c>self.tax_rate: Option&lt;Decimal&gt;</c> — unlike the
+    /// smart constructor's <c>NameMode.Parameter</c> window, #1472's short-circuit doesn't apply here. The
+    /// guard must lower to Rust's <c>if let Some(tax_rate) = self.tax_rate { .. }</c> so the body compares
+    /// the bound, bare <c>Decimal</c> rather than the raw <c>Option&lt;Decimal&gt;</c> (a real <c>cargo
+    /// check</c> <c>E0308</c> otherwise).
+    /// </summary>
+    [Fact]
+    public void Command_post_transition_invariant_isPresent_on_optional_member_narrows_to_if_let()
+    {
+        const string model = """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal? = 2
+                invariant taxRate >= amount when taxRate.isPresent "tax rate must be at least amount"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if let Some(tax_rate) = self.tax_rate {");
+        rust.ShouldContain("if !(tax_rate >= self.amount) {");
+        rust.ShouldNotContain("self.tax_rate.is_some() && !(self.tax_rate >= self.amount)");
+    }
+
+    /// <summary>
+    /// Issue #1489 edge case: a genuinely-optional, <b>non-defaulted</b> member's ctor-side invariant
+    /// guard (<c>NameMode.Parameter</c>) hits the identical E0308 as the command re-check above — #1472's
+    /// short-circuit is scoped to constant-defaulted members only, so a required <c>Option&lt;T&gt;</c>
+    /// ctor parameter still needs the same <c>if let</c> narrowing.
+    /// </summary>
+    [Fact]
+    public void Ctor_invariant_isPresent_on_non_defaulted_optional_member_narrows_to_if_let()
+    {
+        const string model = """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                invariant taxRate >= amount when taxRate.isPresent "tax rate must be at least amount"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if let Some(tax_rate) = tax_rate {");
+        rust.ShouldNotContain("tax_rate.is_some() && !(tax_rate >= amount)");
+    }
+
+    /// <summary>
+    /// Issue #1489 code-review finding: the if-let narrowing shadows the presence-guarded member for the
+    /// WHOLE guard body — a body that itself re-queries presence on that SAME member (a redundant but
+    /// syntactically legal <c>taxRate.isPresent when taxRate.isPresent</c>) must fold that inner check to
+    /// the same known answer rather than calling <c>.is_some()</c> on the now-bare, non-<c>Option</c>
+    /// local (a real <c>cargo check</c> <c>E0599</c> otherwise, since <c>Decimal</c> has no such method).
+    /// </summary>
+    [Fact]
+    public void Command_post_transition_invariant_body_re_querying_isPresent_on_the_narrowed_member_folds_to_true()
+    {
+        const string model = """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal? = 2
+                invariant taxRate >= amount && taxRate.isPresent when taxRate.isPresent "tax rate must be at least amount"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if let Some(tax_rate) = self.tax_rate {");
+        rust.ShouldContain("if !((tax_rate >= self.amount) && true) {");
+        rust.ShouldNotContain("tax_rate.is_some()");
+    }
+
+    /// <summary>
+    /// Issue #1489 code-review finding: when the presence-guarded member is itself a DERIVED (computed)
+    /// member — exposed only via a get-only accessor method, never a stored field/ctor parameter — the
+    /// if-let narrowing must not fire (there is no addressable local/field to destructure). Left on the
+    /// pre-existing fallback path instead of trading one compile error for another.
+    /// </summary>
+    [Fact]
+    public void Command_post_transition_invariant_isPresent_on_a_derived_member_does_not_narrow()
+    {
+        const string model = """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                surcharge: Decimal? = taxRate
+                invariant surcharge >= amount when surcharge.isPresent "surcharge must be at least amount"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldNotContain("if let Some(surcharge)");
+        rust.ShouldContain("self.surcharge().is_some()");
+    }
+
+    /// <summary>
+    /// Issue #1489 code-review finding: a command PARAMETER that happens to share its name with an
+    /// unrelated, non-Copy optional member must not corrupt the presence-guard narrowing for a DIFFERENT,
+    /// Copy-typed member's invariant — the narrowing's type lookup must resolve the invariant's own
+    /// member against the type's declared member table, ignoring any local currently shadowing that name
+    /// for an unrelated reason.
+    /// </summary>
+    [Fact]
+    public void Command_parameter_shadowing_an_unrelated_member_name_does_not_corrupt_the_narrowing()
+    {
+        const string model = """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal? = 2
+                label: String?
+                invariant taxRate >= amount when taxRate.isPresent "tax rate must be at least amount"
+                command relabel(taxRate: String) {
+                  label -> taxRate
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(model, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if let Some(tax_rate) = self.tax_rate {");
+        rust.ShouldContain("if !(tax_rate >= self.amount) {");
+    }
+
     private const string EntityOptionalDefaultedMemberBecomesTrailingParamModel = """
         context Shop {
           entity Product identified by ProductId {

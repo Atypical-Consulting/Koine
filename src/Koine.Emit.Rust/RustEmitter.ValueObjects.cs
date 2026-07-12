@@ -147,7 +147,7 @@ public sealed partial class RustEmitter
 
         foreach (Invariant inv in vo.Invariants)
         {
-            WriteInvariantGuard(sb, name, inv, translator, Indent + Indent);
+            WriteInvariantGuard(sb, name, inv, translator, Indent + Indent, typeMapper: typeMapper);
         }
 
         foreach (Member m in defaultedParams.Where(m => m.Type.IsOptional))
@@ -171,13 +171,68 @@ public sealed partial class RustEmitter
     /// <summary>Emits one invariant guard: <c>if !(cond) { return Err(...) }</c> in the given name mode.</summary>
     internal void WriteInvariantGuard(
         StringBuilder sb, string typeName, Invariant inv, RustExpressionTranslator translator, string indent,
-        RustExpressionTranslator.NameMode mode = RustExpressionTranslator.NameMode.Parameter)
+        RustExpressionTranslator.NameMode mode = RustExpressionTranslator.NameMode.Parameter,
+        RustTypeMapper? typeMapper = null)
     {
+        // A presence-guarded invariant body (`taxRate >= amount when taxRate.isPresent`) genuinely
+        // querying an Option<T> member — anywhere that member isn't ALREADY known-present — mismatches
+        // `Option<T>` against a same-typed non-optional operand (E0308, #1489), even though the
+        // `is_some()` check dominates the comparison. That's every site except #1472's one exception: a
+        // constant-defaulted member's NameMode.Parameter window, where the smart constructor already
+        // resolves it to a bare local (and short-circuits isPresent to `true`) before any guard runs —
+        // untouched here, or this would re-wrap already-correct output and diverge from #1472's pinned
+        // shape. Everywhere else — a command's post-transition NameMode.Property re-check (the member is
+        // the real stored `self.field`), and a genuinely-optional, non-defaulted member's own
+        // NameMode.Parameter ctor guard (the member is the real, un-unwrapped ctor parameter) — lower the
+        // guard to Rust's `if let Some(field) = <recv> { .. }` so the body compares the bound, bare `T`
+        // instead of the raw Option<T>. Narrower than re-deriving optionality per-operand (Approach 2 in
+        // the issue), and it generalizes to any T?-vs-T invariant body rather than special-casing each
+        // call site again (the duplication this consolidation effort exists to eliminate).
+        //
+        // Gated on:
+        // - The member being a bare `<name>.isPresent` guard condition (a compound condition, e.g.
+        //   `when taxRate.isPresent && amount > 0`, still falls through unfixed — a separate, pre-
+        //   existing gap tracked as a follow-up, not widened here).
+        // - NOT a derived (computed) member: it has no backing field/ctor parameter to destructure —
+        //   `self.field`/bare `field` would be invalid Rust (must read via its `self.field()` accessor
+        //   instead, which this narrowing doesn't do). Left on the unfixed fallback path below, same as
+        //   before this fix (no worse, not better, for that shape).
+        // - The member's DECLARED type (via DeclaredMemberType, which resolves against the type's own
+        //   member table, ignoring any currently-pushed local) being optional — using the shadow-aware
+        //   InferType here would let a same-named command parameter (a local) shadow an unrelated
+        //   member's real type, corrupting both the Copy-gate and the narrowed local's type.
+        // - That declared type's underlying (non-optional) shape being `Copy` (true for every ordinal/
+        //   comparable type this applies to — Decimal/Int/Instant/Bool/enums): destructuring `Option<T>`
+        //   by value needs T: Copy, or (in Property mode) it would try to move a field out of `&self`. A
+        //   non-Copy member (e.g. `String?`) falls through to the unfixed fallback path — an explicit,
+        //   documented scope limit, not a regression.
+        if (typeMapper is not null
+            && inv.Condition is GuardExpr { Condition: MemberAccessExpr { MemberName: "isPresent" } presence } guard
+            && presence.Target is IdentifierExpr { Name: var memberName }
+            && !translator.IsDerivedMember(memberName)
+            && !(mode == RustExpressionTranslator.NameMode.Parameter && translator.IsConstantDefaultedMember(memberName))
+            && translator.DeclaredMemberType(presence.Target) is { IsOptional: true } memberType
+            && typeMapper.IsCopy(UnderlyingType(memberType)))
+        {
+            var field = RustNaming.Field(memberName);
+            var receiver = mode == RustExpressionTranslator.NameMode.Property ? translator.MemberReceiver + "." + field : field;
+            translator.PushLocal(memberName, UnderlyingType(memberType));
+            var narrowedTest = Negate(translator.Translate(guard.Body, mode));
+            translator.PopLocal(memberName);
+
+            sb.Append(indent).Append("if let Some(").Append(field).Append(") = ").Append(receiver).Append(" {\n");
+            sb.Append(indent).Append(Indent).Append("if ").Append(narrowedTest).Append(" {\n");
+            WriteInvariantViolationReturn(sb, typeName, inv, indent + Indent + Indent);
+            sb.Append(indent).Append(Indent).Append("}\n");
+            sb.Append(indent).Append("}\n");
+            return;
+        }
+
         string test;
-        if (inv.Condition is GuardExpr guard)
+        if (inv.Condition is GuardExpr guardExpr)
         {
             // `body when cond` only requires body to hold when cond is true: fail iff cond && !body.
-            test = translator.Translate(guard.Condition, mode) + " && " + Negate(translator.Translate(guard.Body, mode));
+            test = translator.Translate(guardExpr.Condition, mode) + " && " + Negate(translator.Translate(guardExpr.Body, mode));
         }
         else
         {
@@ -185,10 +240,15 @@ public sealed partial class RustEmitter
         }
 
         sb.Append(indent).Append("if ").Append(test).Append(" {\n");
-        sb.Append(indent).Append(Indent).Append("return Err(DomainError::InvariantViolation { type_name: \"")
-          .Append(typeName).Append("\", rule: ").Append(RuleLiteral(inv.Message ?? "invariant failed")).Append(" });\n");
+        WriteInvariantViolationReturn(sb, typeName, inv, indent + Indent);
         sb.Append(indent).Append("}\n");
     }
+
+    /// <summary>Shared <c>return Err(DomainError::InvariantViolation { .. })</c> line, used by both of
+    /// <see cref="WriteInvariantGuard"/>'s branches.</summary>
+    private static void WriteInvariantViolationReturn(StringBuilder sb, string typeName, Invariant inv, string indent) =>
+        sb.Append(indent).Append("return Err(DomainError::InvariantViolation { type_name: \"")
+          .Append(typeName).Append("\", rule: ").Append(RuleLiteral(inv.Message ?? "invariant failed")).Append(" });\n");
 
     /// <summary>Logically negates a translated condition, reusing its outer parens when fully wrapped.</summary>
     internal static string Negate(string condition) =>
