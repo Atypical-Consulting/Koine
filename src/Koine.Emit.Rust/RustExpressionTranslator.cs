@@ -980,15 +980,11 @@ internal sealed class RustExpressionTranslator
         }
 
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
-        var wasPresent = _localStacks.ContainsKey(lambda.Parameter);
         PushLocal(lambda.Parameter, element);
         var bodyBuf = new StringBuilder();
         Write(lambda.Body, bodyBuf, null);
         sb.Append(StripOuterParens(bodyBuf.ToString()));
-        if (!wasPresent)
-        {
-            PopLocal(lambda.Parameter);
-        }
+        PopLocal(lambda.Parameter);
     }
 
     /// <summary>
@@ -1004,15 +1000,11 @@ internal sealed class RustExpressionTranslator
         }
 
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
-        var wasPresent = _localStacks.ContainsKey(lambda.Parameter);
         PushLocal(lambda.Parameter, element);
         TypeRef? bodyType = _resolver.Infer(lambda.Body, EffectiveScope());
         var body = new StringBuilder();
         Write(lambda.Body, body, null);
-        if (!wasPresent)
-        {
-            PopLocal(lambda.Parameter);
-        }
+        PopLocal(lambda.Parameter);
 
         // A non-Copy projection (a value object) must be owned for the fold; `.clone()` makes a
         // stored-field reference owned (and is a harmless no-op shape on an already-owned temporary).
