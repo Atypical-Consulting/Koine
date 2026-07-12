@@ -924,4 +924,37 @@ public class RustEmitterTests
             ".map(Decimal::from) == Some(self.tax_rate)");
         rust.ShouldNotContain("Decimal::from(crate::koine_runtime::koine_max(");
     }
+
+    private const string NestedLetShadowingOuterBindingModel = """
+        context Shop {
+          value Money {
+            amount: Int?
+            rate: Decimal
+            hasMatchingRate: Bool = let n = amount in (let n = rate in n == rate) && n == rate
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1370: <c>PopLocal</c> unconditionally evicted a name from the flat <c>_locals</c>/
+    /// <c>_localTypes</c> tracking instead of restoring whatever was there before the matching
+    /// <c>PushLocal</c>. Here the inner <c>let n = rate in n == rate</c> shadows the outer
+    /// <c>let n = amount in ...</c> binding; once the inner <c>let</c>'s block closes, the corrupted
+    /// pop evicts <c>n</c> entirely rather than restoring the outer <c>n: Int?</c> binding — so the
+    /// second, outer <c>n == rate</c> comparison no longer recognizes <c>n</c> as a local at all and
+    /// renders it as a bare, uncoerced identifier instead of widening it via
+    /// <c>.map(Decimal::from)</c> against the <c>Decimal</c>-typed <c>rate</c> — a real
+    /// <c>cargo check</c> E0308 (comparing <c>Option&lt;i64&gt;</c> to <c>Decimal</c>).
+    /// </summary>
+    [Fact]
+    public void Nested_let_shadowing_an_outer_binding_restores_the_outer_binding_after_the_inner_pop()
+    {
+        var result = new KoineCompiler().Compile(NestedLetShadowingOuterBindingModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("n.map(Decimal::from) == Some(self.rate)");
+        rust.ShouldNotContain("n == self.rate");
+    }
 }
