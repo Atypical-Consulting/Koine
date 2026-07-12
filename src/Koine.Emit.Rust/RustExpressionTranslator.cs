@@ -44,7 +44,6 @@ internal sealed class RustExpressionTranslator
     private readonly Dictionary<string, Stack<TypeRef?>> _localStacks = new(StringComparer.Ordinal);
     private readonly ISet<string> _derivedMembers;
     private readonly ISet<string> _constantDefaultedMembers;
-    private readonly string _memberReceiver;
     private readonly bool _membersAsAccessors;
 
     private string? _expectedEnum;
@@ -62,7 +61,7 @@ internal sealed class RustExpressionTranslator
         _index = index;
         _resolver = new TypeResolver(index, context);
         _typeMapper = typeMapper;
-        _memberReceiver = memberReceiver;
+        MemberReceiver = memberReceiver;
         // Read-model projection bodies read from a borrowed source (`src`), whose fields are private —
         // so every member must go through its accessor, even the stored ones.
         _membersAsAccessors = membersAsAccessors;
@@ -118,6 +117,33 @@ internal sealed class RustExpressionTranslator
     /// narrowing (#1489) off the same source of truth rather than re-deriving it.
     /// </summary>
     public bool IsConstantDefaultedMember(string name) => _constantDefaultedMembers.Contains(name);
+
+    /// <summary>
+    /// True when <paramref name="name"/> is a derived (computed) member — exposed via a get-only
+    /// accessor method (<c>self.field()</c>), never a stored field/ctor parameter. A presence-guarded
+    /// invariant narrowing (#1489's <c>WriteInvariantGuard</c>) must not destructure such a member as if
+    /// it were an addressable local/field.
+    /// </summary>
+    public bool IsDerivedMember(string name) => _derivedMembers.Contains(name);
+
+    /// <summary>
+    /// The receiver an instance-body (<see cref="NameMode.Property"/>) member read is qualified with
+    /// (<c>self</c> for ordinary entity/VO bodies; a borrowed source name for a read-model projection —
+    /// see the constructor's <c>memberReceiver</c> parameter). Exposed so a caller building its own
+    /// receiver-qualified access (<c>WriteInvariantGuard</c>'s presence-guard narrowing, #1489) stays in
+    /// sync with this translator's own choice rather than hardcoding <c>"self"</c>.
+    /// </summary>
+    public string MemberReceiver { get; }
+
+    /// <summary>
+    /// Infers <paramref name="expr"/>'s DECLARED type against this type's own member table, ignoring any
+    /// local currently shadowing that name (unlike <see cref="InferType"/>, which honors
+    /// <see cref="EffectiveScope"/>'s local overlay). <c>WriteInvariantGuard</c>'s presence-guard
+    /// narrowing (#1489) needs the invariant's own member's real declared type — a same-named command
+    /// parameter (or other local) shadowing an unrelated member must not corrupt the narrowing's
+    /// Copy-gate or the type it pushes for the narrowed local.
+    /// </summary>
+    public TypeRef? DeclaredMemberType(Expr expr) => _resolver.Infer(expr, _scope);
 
     private TypeScope EffectiveScope()
     {
@@ -797,7 +823,7 @@ internal sealed class RustExpressionTranslator
                 {
                     // A stored field reads directly; a derived member (or any member in projection
                     // mode, reading from a borrowed source) reads through its accessor method.
-                    sb.Append(_memberReceiver).Append('.').Append(RustNaming.Field(name));
+                    sb.Append(MemberReceiver).Append('.').Append(RustNaming.Field(name));
                     if (_membersAsAccessors || _derivedMembers.Contains(name))
                     {
                         sb.Append("()");
@@ -905,11 +931,11 @@ internal sealed class RustExpressionTranslator
                 sb.Append(t).Append(".trim().is_empty()");
                 return;
             case "isPresent":
-                sb.Append(IsConstantDefaultedTarget(ma.Target) ? "true" : t + ".is_some()");
+                sb.Append(IsKnownPresentTarget(ma.Target) ? "true" : t + ".is_some()");
                 return;
             case "isNone":
             case "isAbsent":
-                sb.Append(IsConstantDefaultedTarget(ma.Target) ? "false" : t + ".is_none()");
+                sb.Append(IsKnownPresentTarget(ma.Target) ? "false" : t + ".is_none()");
                 return;
             default:
                 // A field/derived-member access on another value: call its accessor.
@@ -919,24 +945,47 @@ internal sealed class RustExpressionTranslator
     }
 
     /// <summary>
-    /// True when <paramref name="target"/> is a constant-defaulted member read in the smart-constructor
-    /// window — i.e. a bare <c>fieldName</c> identifier in <see cref="NameMode.Parameter"/> that is not
-    /// shadowed by a local. Only there has <c>unwrap_or_else</c> already resolved the member to a bare
-    /// <c>T</c> local (the <c>Some(...)</c> re-wrap runs after the guards, #1472), making its presence
-    /// statically known.
+    /// True when a presence check (<c>isPresent</c>/<c>isNone</c>/<c>isAbsent</c>) on
+    /// <paramref name="target"/> is statically resolved rather than a real <c>Option</c> query. Two
+    /// independent cases:
+    /// <list type="bullet">
+    /// <item>A constant-defaulted member read in the smart-constructor window — a bare
+    /// <c>fieldName</c> identifier in <see cref="NameMode.Parameter"/> that is not shadowed by a local.
+    /// Only there has <c>unwrap_or_else</c> already resolved the member to a bare <c>T</c> local (the
+    /// <c>Some(...)</c> re-wrap runs after the guards, #1472).</item>
+    /// <item>ANY identifier currently shadowed by a local (<see cref="PushLocal"/>) whose pushed type is
+    /// itself non-optional. <c>WriteInvariantGuard</c>'s presence-guard narrowing (#1489) pushes exactly
+    /// such a local — the underlying, non-optional type of a member it has already proven present (it's
+    /// translating the body of the <c>if let Some(field) = ..</c> that established that) — so a body that
+    /// itself re-queries presence on that same member (e.g. a redundant
+    /// <c>taxRate.isPresent when taxRate.isPresent</c>) must fold to the same known answer instead of
+    /// calling <c>.is_some()</c> on what is now a bare, non-<c>Option</c> local (a real <c>cargo check</c>
+    /// <c>E0599</c> otherwise). Since <c>isPresent</c>/<c>isNone</c> is only ever legal (per semantic
+    /// validation) on an originally-optional identifier, any local hit here is necessarily one of these
+    /// narrowed shadows — a genuinely non-optional local (a command parameter, a <c>let</c> binding of a
+    /// non-optional value) could never legally be the target of a presence check in the first place.</item>
+    /// </list>
     /// <para>
-    /// The <see cref="NameMode.Property"/> instance-body context is deliberately left alone: a derived
-    /// getter, or a command's post-transition invariant re-check, reads the stored
-    /// <c>self.&lt;field&gt;</c>, which really is an <c>Option&lt;T&gt;</c> and must keep querying it for
-    /// real. Locals are excluded because a factory parameter (or a <c>let</c> binding) shadows a
-    /// same-named member, and that parameter is a genuine <c>Option&lt;T&gt;</c>.
+    /// The <see cref="NameMode.Property"/> instance-body context is otherwise left alone: a derived
+    /// getter, or a command's post-transition invariant re-check outside the narrowed scope above, reads
+    /// the stored <c>self.&lt;field&gt;</c>, which really is an <c>Option&lt;T&gt;</c> and must keep
+    /// querying it for real.
     /// </para>
     /// </summary>
-    private bool IsConstantDefaultedTarget(Expr target) =>
-        _mode == NameMode.Parameter
-        && target is IdentifierExpr id
-        && !_localStacks.ContainsKey(id.Name)
-        && _constantDefaultedMembers.Contains(id.Name);
+    private bool IsKnownPresentTarget(Expr target)
+    {
+        if (target is not IdentifierExpr id)
+        {
+            return false;
+        }
+
+        if (_localStacks.TryGetValue(id.Name, out Stack<TypeRef?>? stack))
+        {
+            return stack.Peek() is { IsOptional: false };
+        }
+
+        return _mode == NameMode.Parameter && _constantDefaultedMembers.Contains(id.Name);
+    }
 
     private void WriteCall(CallExpr call, StringBuilder sb)
     {

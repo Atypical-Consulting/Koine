@@ -2114,6 +2114,95 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1489 code-review finding: a guard body that itself re-queries presence on the SAME
+    /// narrowed member (a redundant but syntactically legal <c>taxRate.isPresent when
+    /// taxRate.isPresent</c>) must compile and enforce the rule for real, not call <c>.is_some()</c> on
+    /// the narrowed, non-<c>Option</c> local.
+    /// </summary>
+    [Fact]
+    public void Command_post_transition_invariant_body_re_querying_isPresent_on_the_narrowed_member_compiles_and_enforces_the_rule()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount && taxRate.isPresent when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "    command reprice(newAmount: Decimal) {\n" +
+            "      amount -> newAmount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            #[test]
+            fn reprice_within_the_default_tax_rate_succeeds() {
+                let mut p = Product::new(ProductId::new("p-1"), Decimal::from(1), None).expect("valid Product");
+                assert!(p.reprice(Decimal::from(2)).is_ok());
+            }
+
+            #[test]
+            fn reprice_below_an_overridden_tax_rate_still_enforces_the_invariant() {
+                let mut p = Product::new(ProductId::new("p-2"), Decimal::from(1), Some(Decimal::from(1))).expect("valid Product");
+                assert!(p.reprice(Decimal::from(10)).is_err());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1489 code-review finding: a command PARAMETER that happens to share its name with the
+    /// presence-guarded member must not corrupt the narrowing — the invariant's own declared type governs
+    /// the narrowing, and the explicit push/pop around translating the guard body correctly shadows over
+    /// any pre-existing same-named parameter shadow for that translation.
+    /// </summary>
+    [Fact]
+    public void Command_parameter_sharing_the_presence_guarded_members_name_compiles_and_enforces_the_rule()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    label: String?\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "    command relabel(taxRate: String) {\n" +
+            "      label -> taxRate\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            #[test]
+            fn relabel_within_the_default_tax_rate_succeeds() {
+                let mut p = Product::new(ProductId::new("p-1"), Decimal::from(1), None, None).expect("valid Product");
+                assert!(p.relabel("new label".to_string()).is_ok());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1472 edge case: a genuinely-optional, <b>non-defaulted</b> member's <c>isPresent</c> must
     /// keep emitting a real <c>.is_some()</c> check — the constant-defaulted short-circuit is keyed off
     /// having an initializer, so a member with none must fall through unchanged. (A direct numeric

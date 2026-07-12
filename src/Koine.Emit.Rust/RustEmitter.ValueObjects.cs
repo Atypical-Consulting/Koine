@@ -188,26 +188,41 @@ public sealed partial class RustEmitter
         // instead of the raw Option<T>. Narrower than re-deriving optionality per-operand (Approach 2 in
         // the issue), and it generalizes to any T?-vs-T invariant body rather than special-casing each
         // call site again (the duplication this consolidation effort exists to eliminate).
-        // Gated on the member's underlying type being `Copy` (true for every ordinal/comparable type this
-        // applies to — Decimal/Int/Instant/Bool/enums): destructuring `Option<T>` by value needs T: Copy,
-        // or (in Property mode) it would try to move a field out of a shared `&self`.
+        //
+        // Gated on:
+        // - The member being a bare `<name>.isPresent` guard condition (a compound condition, e.g.
+        //   `when taxRate.isPresent && amount > 0`, still falls through unfixed — a separate, pre-
+        //   existing gap tracked as a follow-up, not widened here).
+        // - NOT a derived (computed) member: it has no backing field/ctor parameter to destructure —
+        //   `self.field`/bare `field` would be invalid Rust (must read via its `self.field()` accessor
+        //   instead, which this narrowing doesn't do). Left on the unfixed fallback path below, same as
+        //   before this fix (no worse, not better, for that shape).
+        // - The member's DECLARED type (via DeclaredMemberType, which resolves against the type's own
+        //   member table, ignoring any currently-pushed local) being optional — using the shadow-aware
+        //   InferType here would let a same-named command parameter (a local) shadow an unrelated
+        //   member's real type, corrupting both the Copy-gate and the narrowed local's type.
+        // - That declared type's underlying (non-optional) shape being `Copy` (true for every ordinal/
+        //   comparable type this applies to — Decimal/Int/Instant/Bool/enums): destructuring `Option<T>`
+        //   by value needs T: Copy, or (in Property mode) it would try to move a field out of `&self`. A
+        //   non-Copy member (e.g. `String?`) falls through to the unfixed fallback path — an explicit,
+        //   documented scope limit, not a regression.
         if (typeMapper is not null
             && inv.Condition is GuardExpr { Condition: MemberAccessExpr { MemberName: "isPresent" } presence } guard
             && presence.Target is IdentifierExpr { Name: var memberName }
+            && !translator.IsDerivedMember(memberName)
             && !(mode == RustExpressionTranslator.NameMode.Parameter && translator.IsConstantDefaultedMember(memberName))
-            && translator.InferType(presence.Target) is { IsOptional: true } memberType
-            && typeMapper.IsCopy(memberType with { IsOptional = false }))
+            && translator.DeclaredMemberType(presence.Target) is { IsOptional: true } memberType
+            && typeMapper.IsCopy(UnderlyingType(memberType)))
         {
             var field = RustNaming.Field(memberName);
-            var receiver = mode == RustExpressionTranslator.NameMode.Property ? "self." + field : field;
-            translator.PushLocal(memberName, memberType with { IsOptional = false });
+            var receiver = mode == RustExpressionTranslator.NameMode.Property ? translator.MemberReceiver + "." + field : field;
+            translator.PushLocal(memberName, UnderlyingType(memberType));
             var narrowedTest = Negate(translator.Translate(guard.Body, mode));
             translator.PopLocal(memberName);
 
             sb.Append(indent).Append("if let Some(").Append(field).Append(") = ").Append(receiver).Append(" {\n");
             sb.Append(indent).Append(Indent).Append("if ").Append(narrowedTest).Append(" {\n");
-            sb.Append(indent).Append(Indent).Append(Indent).Append("return Err(DomainError::InvariantViolation { type_name: \"")
-              .Append(typeName).Append("\", rule: ").Append(RuleLiteral(inv.Message ?? "invariant failed")).Append(" });\n");
+            WriteInvariantViolationReturn(sb, typeName, inv, indent + Indent + Indent);
             sb.Append(indent).Append(Indent).Append("}\n");
             sb.Append(indent).Append("}\n");
             return;
@@ -225,10 +240,15 @@ public sealed partial class RustEmitter
         }
 
         sb.Append(indent).Append("if ").Append(test).Append(" {\n");
-        sb.Append(indent).Append(Indent).Append("return Err(DomainError::InvariantViolation { type_name: \"")
-          .Append(typeName).Append("\", rule: ").Append(RuleLiteral(inv.Message ?? "invariant failed")).Append(" });\n");
+        WriteInvariantViolationReturn(sb, typeName, inv, indent + Indent);
         sb.Append(indent).Append("}\n");
     }
+
+    /// <summary>Shared <c>return Err(DomainError::InvariantViolation { .. })</c> line, used by both of
+    /// <see cref="WriteInvariantGuard"/>'s branches.</summary>
+    private static void WriteInvariantViolationReturn(StringBuilder sb, string typeName, Invariant inv, string indent) =>
+        sb.Append(indent).Append("return Err(DomainError::InvariantViolation { type_name: \"")
+          .Append(typeName).Append("\", rule: ").Append(RuleLiteral(inv.Message ?? "invariant failed")).Append(" });\n");
 
     /// <summary>Logically negates a translated condition, reusing its outer parens when fully wrapped.</summary>
     internal static string Negate(string condition) =>
