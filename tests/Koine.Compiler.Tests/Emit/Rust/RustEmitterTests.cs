@@ -1254,4 +1254,333 @@ public class RustEmitterTests
         rust.ShouldNotContain("-> &Option<Decimal>");
         rust.ShouldContain("self.d.amount().map(Decimal::from) == self.d.rate()");
     }
+
+    /// <summary>
+    /// Issue #1508: the same owned-vs-reference mismatch #1373 fixed for the primitives, for optional
+    /// smart ENUMS. Every enum emits as a unit-variant Rust enum deriving <c>Copy</c>, so
+    /// <c>Option&lt;Status&gt;</c> is Copy too and its accessor must return an owned value — otherwise
+    /// <c>self.status</c> (an owned bare field read) compared against <c>self.d.status()</c> (a borrowed
+    /// <c>&amp;Option&lt;Status&gt;</c>) is a real E0308.
+    /// </summary>
+    [Fact]
+    public void Optional_enum_accessor_returns_owned_value_so_two_optional_enum_operands_compare()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Status { Active, Inactive }
+              value Discount {
+                status: Status?
+              }
+              value Money {
+                status: Status?
+                d: Discount
+                isEq: Bool = status == d.status
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn status(&self) -> Option<Status> { self.status }");
+        rust.ShouldNotContain("-> &Option<Status>");
+    }
+
+    /// <summary>
+    /// Issue #1508 guard: dropping <c>IsCopy</c>'s optional short-circuit must NOT widen the Copy
+    /// classification to genuinely non-Copy optional types — an <c>String?</c> accessor still returns by
+    /// reference.
+    /// </summary>
+    [Fact]
+    public void Optional_non_copy_accessor_still_returns_by_reference()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                label: String?
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        string.Join("\n", result.Files.Select(f => f.Contents))
+            .ShouldContain("pub fn label(&self) -> &Option<String> { &self.label }");
+    }
+
+    /// <summary>
+    /// Issue #1500: a <c>ConditionalExpr</c> used DIRECTLY as a unary operand had its two arms rendered
+    /// independently — <c>WriteAtom</c> just parenthesizes and recurses — so arms disagreeing in
+    /// optionality emitted two different Rust types in one <c>if</c>/<c>else</c> (a real E0308: "`if` and
+    /// `else` have incompatible types"). The compound operand must route through the same
+    /// <c>WriteOwnedOperand</c>/<c>BranchReconciliation</c> machinery the binary operators already use,
+    /// so the non-optional arm is <c>Some(...)</c>-wrapped to agree with its optional sibling.
+    /// </summary>
+    [Fact]
+    public void Unary_operand_conditional_with_mismatched_optionality_arms_is_reconciled()
+    {
+        const string src =
+            """
+            context Shop {
+              value Invoice {
+                baseAmount: Int?
+                hasBase: Bool
+                negated: Int? = -(if hasBase then 0 else baseAmount)
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        // The `0` arm is Some-wrapped to agree with the optional `base_amount` arm, and #1372's
+        // `.map(|v| -v)` composes on top of the reconciled (optional) whole.
+        rust.ShouldContain("(if self.has_base { Some(0) } else { self.base_amount }).map(|v| -v)");
+        rust.ShouldNotContain("(if self.has_base { 0 } else { self.base_amount })");
+    }
+
+    /// <summary>
+    /// Issue #1500 regression guard: a compound unary operand whose arms ALREADY agree must render
+    /// exactly as before — reconciliation of an agreeing pair is a no-op, adding no gratuitous wrapping.
+    /// </summary>
+    [Fact]
+    public void Unary_operand_conditional_with_agreeing_arms_renders_unwrapped()
+    {
+        const string src =
+            """
+            context Shop {
+              value Invoice {
+                baseAmount: Int
+                hasBase: Bool
+                negated: Int = -(if hasBase then 0 else baseAmount)
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("-(if self.has_base { 0 } else { self.base_amount })");
+        rust.ShouldNotContain("Some(0)");
+    }
+
+    /// <summary>
+    /// Issue #1504: a <c>requires … when …</c> precondition SILENTLY DROPPED its guard. The generic
+    /// translate path renders a <c>GuardExpr</c> as its BODY ALONE (<c>when</c> has no runtime Rust
+    /// form), so the guard vanished and the body check ran unconditionally — wrong at runtime, with no
+    /// compile error to catch it when the body happens to type-check anyway (as here: a plain <c>Bool</c>
+    /// guard over a non-optional comparison).
+    /// </summary>
+    [Fact]
+    public void Requires_when_guard_on_a_plain_boolean_is_not_dropped()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                isPromotional: Bool
+                command reprice(newAmount: Decimal) {
+                  requires newAmount > 0 when isPromotional "promo price must be positive"
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        // Fail iff cond && !body — the same semantics an `invariant`'s guard already had.
+        rust.ShouldContain("if self.is_promotional && !(new_amount > Decimal::from(0i64)) {");
+    }
+
+    /// <summary>
+    /// Issue #1504 regression guard: an UN-guarded <c>requires</c> clause's emitted shape must not change.
+    /// </summary>
+    [Fact]
+    public void Requires_without_a_when_guard_renders_unchanged()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command reprice(newAmount: Decimal) {
+                  requires newAmount > 0 "price must be positive"
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        string.Join("\n", result.Files.Select(f => f.Contents))
+            .ShouldContain("if !(new_amount > Decimal::from(0i64)) {");
+    }
+
+    /// <summary>
+    /// Issue #1504: a presence-guarded <c>requires</c> clause gets the SAME <c>if let Some(..)</c>
+    /// narrowing an <c>invariant</c>'s guard already had (#1489), so the body compares the bound bare
+    /// <c>T</c> instead of the raw <c>Option&lt;T&gt;</c>.
+    /// </summary>
+    [Fact]
+    public void Requires_presence_guard_narrows_the_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                command reprice(newAmount: Decimal) {
+                  requires taxRate >= amount when taxRate.isPresent "tax rate must be at least amount"
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if let Some(tax_rate) = self.tax_rate {");
+        rust.ShouldContain("if !(tax_rate >= self.amount) {");
+    }
+
+    /// <summary>
+    /// Issue #1504 correctness guard: a <c>requires</c> clause is written INSIDE the command, so its
+    /// identifiers bind to the PARAMETERS first — unlike an entity-scoped <c>invariant</c>. When a
+    /// parameter shadows a same-named member, <c>when taxRate.isPresent</c> asks about the PARAMETER, so
+    /// the narrowing must decline and read the parameter's own <c>is_some()</c>. Destructuring the member
+    /// (<c>if let Some(tax_rate) = self.tax_rate</c>) would silently check the wrong value.
+    /// </summary>
+    [Fact]
+    public void Requires_presence_guard_on_a_parameter_shadowing_a_member_reads_the_parameter()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                command shadow(taxRate: Decimal?) {
+                  requires amount > 0 when taxRate.isPresent "amount must be positive"
+                  amount -> 5.0
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if tax_rate.is_some() && !(self.amount > Decimal::from(0i64)) {");
+        rust.ShouldNotContain("if let Some(tax_rate) = self.tax_rate {");
+    }
+
+    /// <summary>
+    /// Issue #1503 (a): the presence-guard narrowing only fired for a BARE <c>when x.isPresent</c>
+    /// condition, so a COMPOUND one (<c>when taxRate.isPresent &amp;&amp; amount &gt; 0</c>) fell through to
+    /// the raw <c>Option&lt;T&gt;</c>-vs-<c>T</c> comparison (E0308). A presence check anywhere in the
+    /// top-level <c>&amp;&amp;</c> chain DOMINATES the body, so it narrows — and the remaining conjuncts
+    /// relocate INSIDE the <c>if let</c>, which preserves the semantics exactly (every conjunct must hold
+    /// for the clause to fire).
+    /// </summary>
+    [Fact]
+    public void Compound_presence_guarded_invariant_narrows_and_relocates_the_other_conjuncts()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                invariant taxRate >= amount when taxRate.isPresent && amount > 0 "tax rate must be at least amount"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("if let Some(tax_rate) = self.tax_rate {");
+        rust.ShouldContain("if (self.amount > Decimal::from(0i64)) && !(tax_rate >= self.amount) {");
+    }
+
+    /// <summary>
+    /// Issue #1503 (b): the narrowing was gated on the member's underlying type being <c>Copy</c> (it
+    /// destructures the <c>Option&lt;T&gt;</c> by value), so a non-Copy member (<c>String?</c>) fell
+    /// through to the same raw comparison (E0308). It now borrows through the Option instead —
+    /// <c>if let Some(code) = self.code.as_ref()</c> binds <c>code</c> as <c>&amp;String</c>, which every
+    /// comparison the body can express accepts.
+    /// </summary>
+    [Fact]
+    public void Presence_guarded_invariant_on_a_non_copy_member_borrows_through_the_option()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                code: String?
+                invariant code == "X" when code.isPresent "code must be X"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        // Property mode (the command's post-transition re-check) borrows from `&self`; Parameter mode
+        // (the smart constructor) borrows the ctor parameter, leaving it usable for the construction.
+        rust.ShouldContain("if let Some(code) = self.code.as_ref() {");
+        rust.ShouldContain("if let Some(code) = code.as_ref() {");
+        rust.ShouldContain("if !(code == \"X\") {");
+    }
+
+    /// <summary>
+    /// Issue #1503 non-goal guard: a <c>||</c>-joined presence check does NOT dominate the body (the
+    /// clause can fire with the member absent), so it must decline to narrow and keep the plain test.
+    /// </summary>
+    [Fact]
+    public void Or_joined_presence_check_does_not_narrow()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                isPromotional: Bool
+                taxRate: Decimal?
+                invariant amount > 0 when taxRate.isPresent || isPromotional "amount must be positive"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        string.Join("\n", result.Files.Select(f => f.Contents))
+            .ShouldNotContain("if let Some(tax_rate)");
+    }
 }
