@@ -1983,6 +1983,82 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1489: #1472 (PR #1488) only fixed the smart-constructor half of this bug — a command's
+    /// <b>post-transition invariant re-check</b> (<c>WriteInvariantGuard</c> called in
+    /// <c>NameMode.Property</c>) still compared the raw <c>self.tax_rate</c> (a real
+    /// <c>Option&lt;Decimal&gt;</c>) against a same-typed non-optional operand, mismatching types
+    /// (<c>E0308</c>), even though the presence guard (<c>self.tax_rate.is_some()</c>) correctly dominates
+    /// the comparison.
+    /// </summary>
+    [Fact]
+    public void Command_post_transition_invariant_referencing_constant_defaulted_optional_member_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "    command reprice(newAmount: Decimal) {\n" +
+            "      amount -> newAmount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1489: the command re-check must not just compile, but still enforce the rule against the
+    /// post-transition state — narrowing the presence-guarded comparison must not weaken it into a no-op.
+    /// </summary>
+    [Fact]
+    public void Command_post_transition_invariant_referencing_constant_defaulted_optional_member_enforces_the_rule()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "    command reprice(newAmount: Decimal) {\n" +
+            "      amount -> newAmount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            #[test]
+            fn reprice_within_the_default_tax_rate_succeeds() {
+                let mut p = Product::new(ProductId::new("p-1"), Decimal::from(1), None).expect("valid Product");
+                assert!(p.reprice(Decimal::from(2)).is_ok());
+            }
+
+            #[test]
+            fn reprice_below_an_overridden_tax_rate_still_enforces_the_invariant() {
+                let mut p = Product::new(ProductId::new("p-2"), Decimal::from(1), Some(Decimal::from(1))).expect("valid Product");
+                assert!(p.reprice(Decimal::from(10)).is_err());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1472 edge case: a genuinely-optional, <b>non-defaulted</b> member's <c>isPresent</c> must
     /// keep emitting a real <c>.is_some()</c> check — the constant-defaulted short-circuit is keyed off
     /// having an initializer, so a member with none must fall through unchanged. (A direct numeric
