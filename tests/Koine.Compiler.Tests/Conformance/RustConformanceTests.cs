@@ -3014,13 +3014,19 @@ public class RustConformanceTests
     /// <c>BuildFactoryCtorArgs</c>: a derived/default member's body that is itself Option-typed and
     /// numerically mismatched against the declared (underlying) type is passed straight through
     /// uncoerced by <c>NumericCoercionWrap</c> (which bails whenever the body's own type is optional).
-    /// Must render as `.map(...)`-coerced instead — a real <c>cargo check</c> E0308 otherwise.
+    /// Must render as `.map(...)`-coerced instead — a real <c>cargo check</c> E0308 otherwise. Covers
+    /// both callers of the shared <c>WriteDerived</c> (value object and entity) in one model/one
+    /// compile, since it's the identical method for both.
     /// </summary>
     [Fact]
     public void Entity_derived_member_bare_body_from_an_option_typed_mismatched_numeric_body_is_map_coerced()
     {
         const string src =
             "context Shop {\n" +
+            "  value Money {\n" +
+            "    rate: Int?\n" +
+            "    total: Decimal? = rate\n" +
+            "  }\n" +
             "  entity Product identified by ProductId {\n" +
             "    rate: Int?\n" +
             "    total: Decimal? = rate\n" +
@@ -3030,9 +3036,10 @@ public class RustConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // Always-on guard (no Rust toolchain required): the Option-typed, numerically-mismatched body
-        // must be `.map(...)`-coerced, not passed through bare.
+        // must be `.map(...)`-coerced, not passed through bare, for both the value object AND the
+        // entity — WriteDerived is shared verbatim between EmitValueObject and EmitEntity.
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
-        rust.ShouldContain("self.rate.clone().map(Decimal::from)");
+        (rust.Split("self.rate.clone().map(Decimal::from)").Length - 1).ShouldBe(2);
 
         var r = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
@@ -3044,7 +3051,10 @@ public class RustConformanceTests
     /// Same defect (#1487), <c>WriteDerived</c>'s <c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>
     /// owned-value branch: a <c>let</c>-bound body that is itself Option-typed and numerically mismatched
     /// must also be `.map(...)`-coerced — this branch shares the identical
-    /// "<c>NumericCoercionWrap</c> bails on an optional body type" gap.
+    /// "<c>NumericCoercionWrap</c> bails on an optional body type" gap. Also covers a bare
+    /// <c>ConditionalExpr</c> body (both branches Option-typed) in the same model/compile, since the
+    /// owned-value branch dispatches all three of <c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>
+    /// through the identical code path.
     /// </summary>
     [Fact]
     public void Entity_derived_member_let_body_from_an_option_typed_mismatched_numeric_body_is_map_coerced()
@@ -3052,14 +3062,18 @@ public class RustConformanceTests
         const string src =
             "context Shop {\n" +
             "  entity Product identified by ProductId {\n" +
+            "    amount: Int\n" +
             "    rate: Int?\n" +
+            "    fallback: Int?\n" +
             "    total: Decimal? = let x = rate in x\n" +
+            "    totalCond: Decimal? = if amount > 0 then rate else fallback\n" +
             "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new RustEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("if self.amount > 0 { self.rate.clone() } else { self.fallback.clone() }.map(Decimal::from)");
         rust.ShouldContain("{ let x = self.rate.clone(); x.clone() }.map(Decimal::from)");
 
         var r = TestSupport.CompileRust(result.Files);
