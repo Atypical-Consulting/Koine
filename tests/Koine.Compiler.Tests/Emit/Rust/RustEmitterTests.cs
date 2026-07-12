@@ -996,4 +996,61 @@ public class RustEmitterTests
             "{ let n = self.amount.clone(); self.items.iter().any(|n| n > 0) && " +
             "(n.map(Decimal::from) == Some(self.rate)) }");
     }
+
+    private const string OptionalIntNegatedModel = """
+        context Shop {
+          value Invoice {
+            baseAmount: Int?
+            negated: Int? = -baseAmount
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1372: <c>WriteUnary</c> prepended a bare <c>-</c>/<c>!</c> to the rendered operand with
+    /// zero consultation of the operand's own optionality, unlike every other optionality-sensitive call
+    /// site in this file. <c>Option&lt;T&gt;</c> implements neither <c>Neg</c> nor <c>Not</c>, so negating
+    /// an optional <c>Int</c> emitted invalid Rust (<c>-self.base_amount</c>, E0600) — independent of any
+    /// comparison or arithmetic coercion. The fix maps inside the <c>Option</c> instead
+    /// (<c>self.base_amount.map(|v| -v)</c>).
+    /// </summary>
+    [Fact]
+    public void Negating_an_optional_int_operand_maps_inside_the_option()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntNegatedModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.base_amount.map(|v| -v)");
+        rust.ShouldNotContain("-self.base_amount");
+    }
+
+    private const string OptionalIntNegatedComposedWithDecimalModel = """
+        context Shop {
+          value Invoice {
+            baseAmount: Int?
+            taxRate: Decimal
+            isEq: Bool = -baseAmount == taxRate
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1372, composed shape discovered during #1354/#1357's code review: negating an optional
+    /// <c>Int</c> then comparing it against a <c>Decimal</c> sibling must map inside the <c>Option</c>
+    /// BEFORE <c>WriteArithmeticOperand</c>'s own <c>.map(Decimal::from)</c> composes on top —
+    /// <c>Option&lt;i64&gt;</c> has no <c>Neg</c> impl regardless of where <c>.map(...)</c> lands, so this
+    /// fails independent of <c>WriteArithmeticOperand</c>'s (already-correct) coercion logic.
+    /// </summary>
+    [Fact]
+    public void Negating_an_optional_int_operand_composes_with_decimal_coercion()
+    {
+        var result = new KoineCompiler().Compile(OptionalIntNegatedComposedWithDecimalModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.base_amount.map(|v| -v).map(Decimal::from) == Some(self.tax_rate)");
+    }
 }
