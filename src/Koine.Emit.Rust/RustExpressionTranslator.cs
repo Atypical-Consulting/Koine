@@ -274,15 +274,19 @@ internal sealed class RustExpressionTranslator
         // Option-shaped; symmetrically, an already-optional Decimal side stays Option-shaped regardless
         // of coercion. Either way, whichever side ends up non-optional after coercion must itself become
         // `Some(...)`-wrapped when its sibling is optional, or the two sides of the operator render as
-        // mismatched `Option<Decimal>` / `Decimal` types (#1343 — mirrors WriteReconciledBranch's
-        // NeedsSomeWrap, #1335, applied here to binary operands rather than conditional branches). Keyed
-        // on each side's OWN optionality (not on which side happens to be the Int-named one), so it
-        // fires both when the Int side is optional and when the already-Decimal side is optional.
-        // Gated on `coerceLeft`/`coerceRight` involvement so this never touches an unrelated type
-        // mismatch outside the Int-vs-Decimal coercion this issue scopes to.
+        // mismatched `Option<Decimal>` / `Decimal` types (#1343). An operand pair and a conditional's
+        // branch pair are the same `(mine, sibling)` question, so this asks the same shared
+        // BranchReconciliation.Classify WriteReconciledBranch does (#1356) — once per side, with the
+        // sides swapped — rather than re-deriving the predicate inline (#1335's rule and #1343's copy of
+        // it drifted apart for three PRs precisely because they were two implementations).
+        //
+        // Gated on `coerceLeft`/`coerceRight` involvement: Classify's NeedsSomeWrap keys on optionality
+        // ALONE, so ungated it would also fire on an unrelated optionality mismatch (two Strings, say)
+        // and emit a spurious `Some(...)`. The gate keeps it scoped to the Int-vs-Decimal coercion —
+        // widening that scope is an explicit non-goal of #1356.
         var involvesDecimalCoercion = coerceLeft is not null || coerceRight is not null;
-        var someWrapLeft = involvesDecimalCoercion && leftType is { IsOptional: false } && rightType is { IsOptional: true };
-        var someWrapRight = involvesDecimalCoercion && rightType is { IsOptional: false } && leftType is { IsOptional: true };
+        var someWrapLeft = involvesDecimalCoercion && BranchReconciliation.Classify(leftType, rightType).NeedsSomeWrap;
+        var someWrapRight = involvesDecimalCoercion && BranchReconciliation.Classify(rightType, leftType).NeedsSomeWrap;
 
         // Value-object arithmetic (e.g. Money * quantity) consumes `self` via std::ops, so a non-Copy
         // operand must evaluate to an owned value; comparisons borrow and need no clone.
@@ -406,26 +410,36 @@ internal sealed class RustExpressionTranslator
     /// never consults <paramref name="coerceTo"/> — closed by #1321 the same way, since a negation is
     /// likewise a tight-binding primary with no self-enclosing parens.
     /// </para>
+    /// <para>
+    /// The widen/map-widen DECISION is no longer re-derived here (#1356): it is the shared, cross-target
+    /// <see cref="BranchReconciliation.Classify"/> — the same one <see cref="WriteReconciledBranch"/> asks
+    /// of a conditional's two branches, and the same one <see cref="WriteBinary"/> asks for its operands'
+    /// <c>Some(...)</c>-wrapping. Only the Rust RENDERING (which prefix, which suffix, where) stays local.
+    /// </para>
     /// </summary>
     private void WriteArithmeticOperand(Expr expr, StringBuilder sb, string? enumHint, TypeRef? coerceTo, bool isArithmetic, TypeRef? type)
     {
-        // The wrap decision depends only on `coerceTo`/`type` (known up front), not on the rendered
-        // text, so it's computed once and shared by both branches below that need it.
-        var needsWrap = coerceTo is not null && type?.Name != coerceTo.Name;
+        // The same shared decision WriteReconciledBranch asks (#1356), with `coerceTo` standing in for the
+        // sibling's type: WriteBinary sets `coerceTo` non-null EXACTLY when it saw this side as an `Int`
+        // opposite a `Decimal` sibling (and it is this method's only caller), so Classify's
+        // `sibling?.Name == "Decimal"` test reads back the very fact that produced `coerceTo`. Depends only
+        // on the two types (known up front), not on the rendered text, so it's classified once and shared
+        // by both branches below. NeedsWiden = widen bare; NeedsOptionalWiden = widen inside the Option.
+        BranchReconciliation needs = BranchReconciliation.Classify(type, coerceTo);
+        var needsWrap = needs.NeedsWiden || needs.NeedsOptionalWiden;
 
         if (expr is ConditionalExpr or LetExpr or GuardExpr or BinaryExpr)
         {
             // An optional operand's owned rendering is already `Option<...>` — a bare `Decimal::from(...)`
-            // prefix around it doesn't compile (E0277), so map inside the Option instead (#1343, mirrors
-            // WriteReconciledBranch's NeedsOptionalWiden, #1335).
-            var needsMapWrap = needsWrap && type is { IsOptional: true };
-
+            // prefix around it doesn't compile (E0277), so map inside the Option instead (NeedsOptionalWiden:
+            // #1343, the same dimension #1335 gave conditional branches).
+            //
             // The prefix is picked before rendering and `WriteOwnedOperand` writes straight into `sb` —
             // no intermediate buffer needed.
-            sb.Append(needsWrap && !needsMapWrap ? "Decimal::from(" : "(");
+            sb.Append(needs.NeedsWiden ? "Decimal::from(" : "(");
             WriteOwnedOperand(expr, sb);
             sb.Append(')');
-            if (needsMapWrap)
+            if (needs.NeedsOptionalWiden)
             {
                 sb.Append(".map(Decimal::from)");
             }
@@ -437,13 +451,11 @@ internal sealed class RustExpressionTranslator
 
         if (expr is MemberAccessExpr or CallExpr or UnaryExpr && needsWrap)
         {
-            // Mirrors the compound-operand branch's needsMapWrap above: an optional operand's rendering
-            // is already `Option<...>` (or a reference to one, for an accessor call), so a bare
-            // `Decimal::from(...)` prefix around it doesn't compile (E0277) — map inside the Option
-            // instead (#1354, closing the same #1343/#1347 defect class for this remaining call site).
-            var needsMapWrap = type is { IsOptional: true };
-
-            if (needsMapWrap)
+            // Mirrors the compound-operand branch above: an optional operand's rendering is already
+            // `Option<...>` (or a reference to one, for an accessor call), so a bare `Decimal::from(...)`
+            // prefix around it doesn't compile (E0277) — map inside the Option instead (#1354, closing the
+            // same #1343/#1347 defect class for this remaining call site).
+            if (needs.NeedsOptionalWiden)
             {
                 WriteOperand(expr, sb, enumHint, coerceTo: null, clone);
                 sb.Append(".map(Decimal::from)");
@@ -779,6 +791,23 @@ internal sealed class RustExpressionTranslator
     /// the identifier's own <paramref name="ownType"/> is itself optional, maps inside the Option instead
     /// (<c>.map(Decimal::from)</c>): a bare <c>Decimal::from(...)</c> around an <c>Option&lt;i64&gt;</c>
     /// operand does not compile (#1343, mirrors WriteReconciledBranch's NeedsOptionalWiden, #1335).
+    /// <para>
+    /// <b>Deliberately NOT routed through <see cref="BranchReconciliation.Classify"/></b> (#1356), unlike
+    /// its three sibling call sites (<see cref="WriteBinary"/>, and both of
+    /// <see cref="WriteArithmeticOperand"/>'s branches). Those reconcile a value against a SIBLING whose
+    /// type is known; this one coerces a value toward a <paramref name="coerceTo"/> DIRECTIVE the caller
+    /// has already established — and the two disagree on exactly the case that matters here, an
+    /// <paramref name="ownType"/> that does not resolve. <see cref="BranchReconciliation"/> degrades a
+    /// <see langword="null"/> type to "reconcile nothing" (right for a branch pair: render it as-is), but a
+    /// <see langword="null"/> <paramref name="ownType"/> is reachable and must still widen — a local is
+    /// registered in <c>_locals</c> with its type in <c>_localTypes</c> only when one is known
+    /// (<see cref="PushLocal"/>'s type is optional; a lambda parameter whose element type does not resolve
+    /// passes none), while <c>coerceTo</c> comes from <see cref="TypeResolver"/> via
+    /// <see cref="WriteBinary"/>. So an unknown-typed local opposite a <c>Decimal</c> still needs its
+    /// <c>Decimal::from(...)</c>; classifying it would silently drop the widen and emit an
+    /// <c>i64</c> against a <c>Decimal</c> (a real <c>cargo check</c> E0308). Pinned by
+    /// <c>RustExpressionTranslatorTests.Write_identifier_case_widens_an_untyped_local_coerced_toward_decimal</c>.
+    /// </para>
     /// </summary>
     private static void EmitCoerced(StringBuilder sb, TypeRef? coerceTo, TypeRef? ownType, Action emit)
     {
