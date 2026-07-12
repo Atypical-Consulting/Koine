@@ -2456,6 +2456,44 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1378: <c>OwnDerived</c> never coerces a read-model projected field's numeric type mismatch —
+    /// unlike <c>WriteDerived</c> (#961), which wraps a numeric-widening-needing derived body in
+    /// <c>Decimal::from(...)</c>. A non-optional <c>Decimal</c>-declared field projected from a bare
+    /// <c>Int</c> source member renders the raw accessor with no coercion at all, so <c>cargo check</c>
+    /// rejects it (<c>E0308</c>). <c>totalOptional</c> pins the optional-declared sibling: it needs both
+    /// the <c>Decimal::from(...)</c> wrap AND the <c>Some(...)</c>-wrap, in that order.
+    /// </summary>
+    [Fact]
+    public void Read_model_derived_field_needing_numeric_widening_emits_compiling_rust()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      lines: Int\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow from Order {\n" +
+            "    id\n" +
+            "    total: Decimal = lines\n" +
+            "    totalOptional: Decimal? = lines\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("total: Decimal::from(src.lines()),");
+        rust.ShouldContain("total_optional: Some(Decimal::from(src.lines())),");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1380 — the compiling-code proof for the trailing <c>Option&lt;T&gt;</c> constructor
     /// parameter: a caller can both override a non-optional defaulted member (<c>Order::new(id, lines,
     /// Some(OrderStatus::Placed))</c>) and omit it (<c>Order::new(id, lines, None)</c>) to fall back to
