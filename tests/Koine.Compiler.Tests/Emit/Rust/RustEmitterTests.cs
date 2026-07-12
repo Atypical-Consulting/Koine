@@ -924,4 +924,76 @@ public class RustEmitterTests
             ".map(Decimal::from) == Some(self.tax_rate)");
         rust.ShouldNotContain("Decimal::from(crate::koine_runtime::koine_max(");
     }
+
+    private const string NestedLetShadowingOuterBindingModel = """
+        context Shop {
+          value Money {
+            amount: Int?
+            rate: Decimal
+            hasMatchingRate: Bool = let n = amount in (let n = rate in n == rate) && n == rate
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1370: <c>PopLocal</c> unconditionally evicted a name from the flat <c>_locals</c>/
+    /// <c>_localTypes</c> tracking instead of restoring whatever was there before the matching
+    /// <c>PushLocal</c>. Here the inner <c>let n = rate in n == rate</c> shadows the outer
+    /// <c>let n = amount in ...</c> binding; once the inner <c>let</c>'s block closes, the corrupted
+    /// pop evicts <c>n</c> entirely rather than restoring the outer <c>n: Int?</c> binding — so the
+    /// second, outer <c>n == rate</c> comparison no longer recognizes <c>n</c> as a local at all and
+    /// renders it as a bare, uncoerced identifier instead of widening it via
+    /// <c>.map(Decimal::from)</c> against the <c>Decimal</c>-typed <c>rate</c> — a real
+    /// <c>cargo check</c> E0308 (comparing <c>Option&lt;i64&gt;</c> to <c>Decimal</c>).
+    /// </summary>
+    [Fact]
+    public void Nested_let_shadowing_an_outer_binding_restores_the_outer_binding_after_the_inner_pop()
+    {
+        var result = new KoineCompiler().Compile(NestedLetShadowingOuterBindingModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        // The inner `let n = rate in n == rate` legitimately renders as `n == self.rate` (both operands
+        // Decimal, no coercion needed) — asserting on the whole method body (rather than a bare
+        // `ShouldNotContain("n == self.rate")`) avoids colliding with that correct inner occurrence while
+        // still pinning that the OUTER `n` (still `Int?`, restored after the inner pop) is widened.
+        rust.ShouldContain(
+            "{ let n = self.amount.clone(); ({ let n = self.rate; n == self.rate }) && " +
+            "(n.map(Decimal::from) == Some(self.rate)) }");
+    }
+
+    private const string LambdaParameterShadowingOuterBindingModel = """
+        context Shop {
+          value Money {
+            amount: Int?
+            rate: Decimal
+            items: List<Int>
+            hasMatchingRate: Bool = let n = amount in items.any(n => n > 0) && n == rate
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1370, lambda-parameter variant: <c>WriteLambdaBody</c>/<c>MapProjection</c> used to guard
+    /// their <c>PopLocal</c> call behind a <c>wasPresent</c> check (only pop if the name wasn't already
+    /// bound outside the lambda) — a workaround for the same flat-eviction defect the shadow-stack fixes.
+    /// Since Task 3 deletes that workaround in favor of an unconditional <c>PopLocal</c>, this pins that
+    /// the lambda parameter <c>n</c> (shadowing the outer <c>let n = amount</c>) is popped cleanly once
+    /// <c>items.any(n =&gt; n &gt; 0)</c> closes, restoring the outer <c>n: Int?</c> binding for the trailing
+    /// <c>n == rate</c> comparison — which still needs <c>.map(Decimal::from)</c>/<c>Some(...)</c> to
+    /// compare against the <c>Decimal</c>-typed <c>rate</c>.
+    /// </summary>
+    [Fact]
+    public void Lambda_parameter_shadowing_an_outer_binding_restores_the_outer_binding_after_the_lambda_pop()
+    {
+        var result = new KoineCompiler().Compile(LambdaParameterShadowingOuterBindingModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain(
+            "{ let n = self.amount.clone(); self.items.iter().any(|n| n > 0) && " +
+            "(n.map(Decimal::from) == Some(self.rate)) }");
+    }
 }
