@@ -128,29 +128,33 @@ public sealed partial class RustEmitter
         sb.Append(Indent).Append("pub fn new(").Append(string.Join(", ", ctorParams)).Append(") -> Result<Self, DomainError> {\n");
 
         // A defaulted member unwraps its `Option<T>` parameter to the declared default (so invariants can
-        // see the resolved value before the checks). The default's inferred type is reconciled against
-        // the field's declared (underlying, if optional) type — the value-object dual of EmitEntity's
-        // identical handling (#1380/#1436/#1437). `unwrap_or_else` (not `unwrap_or`): the latter always
-        // evaluates its argument eagerly, so an overriding caller would still pay for constructing the
-        // discarded default. An already-optional-declared member is then re-wrapped in `Some(...)`,
-        // mirroring its original hardcoded shape (#1463).
+        // see the resolved, bare value before the checks — and so does `isPresent`/`isNone`, see
+        // RustExpressionTranslator's constant-defaulted short-circuit, #1472). The default's inferred
+        // type is reconciled against the field's declared (underlying, if optional) type — the
+        // value-object dual of EmitEntity's identical handling (#1380/#1436/#1437). `unwrap_or_else`
+        // (not `unwrap_or`): the latter always evaluates its argument eagerly, so an overriding caller
+        // would still pay for constructing the discarded default. An already-optional-declared member
+        // is re-wrapped in `Some(...)` only AFTER the invariant guards run (#1472) — wrapping it first
+        // would make any invariant comparing it against a same-typed non-optional operand mismatch
+        // `Option<T>` against `T` (a real `cargo check` E0308).
         foreach (Member m in defaultedParams)
         {
             var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index);
             var field = RustNaming.Field(m.Name);
             sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = ")
               .Append(field).Append(".unwrap_or_else(|| ").Append(defaultValue).Append(");\n");
-
-            if (m.Type.IsOptional)
-            {
-                sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = Some(")
-                  .Append(field).Append(");\n");
-            }
         }
 
         foreach (Invariant inv in vo.Invariants)
         {
             WriteInvariantGuard(sb, name, inv, translator, Indent + Indent);
+        }
+
+        foreach (Member m in defaultedParams.Where(m => m.Type.IsOptional))
+        {
+            var field = RustNaming.Field(m.Name);
+            sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = Some(")
+              .Append(field).Append(");\n");
         }
 
         // Construct: every stored field (required and now-unwrapped defaulted-param alike) binds its

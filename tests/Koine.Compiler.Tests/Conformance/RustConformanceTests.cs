@@ -1789,6 +1789,193 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1472: an entity <c>invariant</c> comparing a constant-defaulted, optional-declared
+    /// member against a same-typed non-optional operand (guarded by <c>isPresent</c>) must compile —
+    /// before the fix, the member's ctor-local was re-wrapped in <c>Some(...)</c> before the invariant
+    /// guards ran, so the comparison mismatched <c>Option&lt;Decimal&gt;</c> against <c>Decimal</c>
+    /// (<c>E0308</c>).
+    /// </summary>
+    [Fact]
+    public void Entity_invariant_referencing_constant_defaulted_optional_member_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1472: the value-object dual of the entity case above — <c>WriteSmartConstructor</c>
+    /// re-wraps a constant-defaulted optional member the same way, so it hits the identical
+    /// <c>E0308</c> once an invariant references it.
+    /// </summary>
+    [Fact]
+    public void Value_object_invariant_referencing_constant_defaulted_optional_member_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1472: the entity invariant referencing a constant-defaulted optional member doesn't just
+    /// compile — it must actually enforce the rule, both when the member is left at its default and
+    /// when a caller overrides it with a violating value.
+    /// </summary>
+    [Fact]
+    public void Entity_invariant_referencing_constant_defaulted_optional_member_enforces_the_rule()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            #[test]
+            fn default_tax_rate_passes_the_invariant() {
+                let p = Product::new(ProductId::new("p-1"), Decimal::from(1), None);
+                assert!(p.is_ok());
+            }
+
+            #[test]
+            fn overridden_tax_rate_still_enforces_the_invariant() {
+                let p = Product::new(ProductId::new("p-2"), Decimal::from(10), Some(Decimal::from(1)));
+                assert!(p.is_err());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1472: the value-object dual of the runtime-behavior test above.
+    /// </summary>
+    [Fact]
+    public void Value_object_invariant_referencing_constant_defaulted_optional_member_enforces_the_rule()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal? = 2\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Money;
+
+            #[test]
+            fn default_tax_rate_passes_the_invariant() {
+                let m = Money::new(Decimal::from(1), None);
+                assert!(m.is_ok());
+            }
+
+            #[test]
+            fn overridden_tax_rate_still_enforces_the_invariant() {
+                let m = Money::new(Decimal::from(10), Some(Decimal::from(1)));
+                assert!(m.is_err());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1472 edge case: a genuinely-optional, <b>non-defaulted</b> member's <c>isPresent</c> must
+    /// keep emitting a real <c>.is_some()</c> check — the constant-defaulted short-circuit is keyed off
+    /// having an initializer, so a member with none must fall through unchanged. (A direct numeric
+    /// comparison of such a member against a non-optional operand, e.g. <c>taxRate &gt;= amount when
+    /// taxRate.isPresent</c>, is a separate, pre-existing Option-vs-T coercion gap for genuinely-optional
+    /// members — out of scope here per this issue's non-goals — so this only exercises a standalone
+    /// presence check, which does compile today.)
+    /// </summary>
+    [Fact]
+    public void Value_object_isPresent_on_a_non_defaulted_optional_member_still_emits_is_some()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal?\n" +
+            "    hasTaxRate: Bool = taxRate.isPresent\n" +
+            "    invariant amount >= 0 \"an amount cannot be negative\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("tax_rate.is_some()");
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::Money;
+
+            #[test]
+            fn absent_tax_rate_reports_not_present() {
+                let m = Money::new(Decimal::from(1), None).expect("valid Money");
+                assert!(!m.has_tax_rate());
+            }
+
+            #[test]
+            fn present_tax_rate_reports_present() {
+                let m = Money::new(Decimal::from(1), Some(Decimal::from(2))).expect("valid Money");
+                assert!(m.has_tax_rate());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1329: an optional-declared derived (computed) member whose bare or conditional body is a
     /// non-optional numeric value must be coerced to the declared underlying type and <c>Some(...)</c>-
     /// wrapped — <c>WriteDerived</c>'s coercion sites otherwise left it entirely uncoerced/unwrapped
