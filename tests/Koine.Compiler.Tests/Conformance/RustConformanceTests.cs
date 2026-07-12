@@ -344,7 +344,7 @@ public class RustConformanceTests
             fn overridden_tax_rate_survives_addition() {
                 let overridden = Money::new(Decimal::from(10), Some(Decimal::from(9))).expect("valid Money");
                 let combined = overridden.clone() + overridden;
-                assert_eq!(combined.tax_rate(), &Some(Decimal::from(9)));
+                assert_eq!(combined.tax_rate(), Some(Decimal::from(9)));
             }
             """;
 
@@ -3076,13 +3076,13 @@ public class RustConformanceTests
             #[test]
             fn factory_explicit_init_overrides_the_default() {
                 let product = Product::make().expect("valid Product");
-                assert_eq!(product.tax_rate(), &Some(Decimal::from(5)));
+                assert_eq!(product.tax_rate(), Some(Decimal::from(5)));
             }
 
             #[test]
             fn factory_with_no_init_falls_back_to_the_declared_default() {
                 let product = Product::make_default().expect("valid Product");
-                assert_eq!(product.tax_rate(), &Some(Decimal::from(2)));
+                assert_eq!(product.tax_rate(), Some(Decimal::from(2)));
             }
             """;
 
@@ -3129,25 +3129,25 @@ public class RustConformanceTests
             #[test]
             fn explicit_init_from_an_optional_parameter_carries_a_set_value() {
                 let product = Product::make_explicit(Some(Decimal::from(7))).expect("valid Product");
-                assert_eq!(product.tax_rate(), &Some(Decimal::from(7)));
+                assert_eq!(product.tax_rate(), Some(Decimal::from(7)));
             }
 
             #[test]
             fn explicit_init_from_an_optional_parameter_falls_back_to_the_default_when_unset() {
                 let product = Product::make_explicit(None).expect("valid Product");
-                assert_eq!(product.tax_rate(), &Some(Decimal::from(2)));
+                assert_eq!(product.tax_rate(), Some(Decimal::from(2)));
             }
 
             #[test]
             fn auto_bound_optional_parameter_carries_a_set_value() {
                 let product = Product::make_auto_bound(Some(Decimal::from(9))).expect("valid Product");
-                assert_eq!(product.tax_rate(), &Some(Decimal::from(9)));
+                assert_eq!(product.tax_rate(), Some(Decimal::from(9)));
             }
 
             #[test]
             fn auto_bound_optional_parameter_falls_back_to_the_default_when_unset() {
                 let product = Product::make_auto_bound(None).expect("valid Product");
-                assert_eq!(product.tax_rate(), &Some(Decimal::from(2)));
+                assert_eq!(product.tax_rate(), Some(Decimal::from(2)));
             }
             """;
 
@@ -3252,8 +3252,8 @@ public class RustConformanceTests
         // Always-on guard (no Rust toolchain required): the Option-typed, numerically-mismatched body
         // must be `.map(...)`-coerced, not passed through bare.
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
-        rust.ShouldContain("Self::new(id, rate.clone().map(Decimal::from))");
-        rust.ShouldNotContain("Self::new(id, rate.clone())");
+        rust.ShouldContain("Self::new(id, rate.map(Decimal::from))");
+        rust.ShouldNotContain("Self::new(id, rate)");
 
         var r = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
@@ -3284,8 +3284,8 @@ public class RustConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
-        rust.ShouldContain("Self::new(id, rate.clone().map(Decimal::from))");
-        rust.ShouldNotContain("Self::new(id, rate.clone())");
+        rust.ShouldContain("Self::new(id, rate.map(Decimal::from))");
+        rust.ShouldNotContain("Self::new(id, rate)");
 
         var r = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
@@ -3321,8 +3321,8 @@ public class RustConformanceTests
 
         var files = new RustEmitter().Emit(model!);
         var rust = string.Join("\n", files.Select(f => f.Contents));
-        rust.ShouldContain("Self::new(id, rate.clone().map(crate::koine_runtime::dec_to_i64))");
-        rust.ShouldNotContain("Self::new(id, rate.clone())");
+        rust.ShouldContain("Self::new(id, rate.map(crate::koine_runtime::dec_to_i64))");
+        rust.ShouldNotContain("Self::new(id, rate)");
     }
 
     /// <summary>
@@ -3355,7 +3355,7 @@ public class RustConformanceTests
         // must be `.map(...)`-coerced, not passed through bare, for both the value object AND the
         // entity — WriteDerived is shared verbatim between EmitValueObject and EmitEntity.
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
-        (rust.Split("self.rate.clone().map(Decimal::from)").Length - 1).ShouldBe(2);
+        (rust.Split("self.rate.map(Decimal::from)").Length - 1).ShouldBe(2);
 
         var r = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
@@ -3389,8 +3389,8 @@ public class RustConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
-        rust.ShouldContain("if self.amount > 0 { self.rate.clone() } else { self.fallback.clone() }.map(Decimal::from)");
-        rust.ShouldContain("{ let x = self.rate.clone(); x.clone() }.map(Decimal::from)");
+        rust.ShouldContain("if self.amount > 0 { self.rate } else { self.fallback }.map(Decimal::from)");
+        rust.ShouldContain("{ let x = self.rate; x }.map(Decimal::from)");
 
         var r = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
@@ -3422,6 +3422,38 @@ public class RustConformanceTests
 
         var files = new RustEmitter().Emit(model!);
         var rust = string.Join("\n", files.Select(f => f.Contents));
-        rust.ShouldContain("self.rate.clone().map(crate::koine_runtime::dec_to_i64)");
+        rust.ShouldContain("self.rate.map(crate::koine_runtime::dec_to_i64)");
+    }
+
+    /// <summary>
+    /// Issue #1373: comparing two optional operands where at least one is reached through a nested value
+    /// object's accessor (<c>d.amount == d.rate</c>, both <c>Option</c>-typed) used to fail a real
+    /// <c>cargo check</c> with E0308 — the coerced left operand
+    /// (<c>self.d.amount().map(Decimal::from)</c>) evaluates to owned <c>Option&lt;Decimal&gt;</c>, but
+    /// <c>self.d.rate()</c> returned a borrowed <c>&amp;Option&lt;Decimal&gt;</c>. Fixing
+    /// <c>RustTypeMapper.IsCopy</c>/<c>WriteAccessor</c> to return optional-but-Copy-inner fields by
+    /// value closes the mismatch.
+    /// </summary>
+    [Fact]
+    public void Two_optional_operands_compared_via_a_nested_accessor_compiles()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Discount {\n" +
+            "    amount: Int?\n" +
+            "    rate: Decimal?\n" +
+            "  }\n" +
+            "  value Money {\n" +
+            "    d: Discount\n" +
+            "    isEq: Bool = d.amount == d.rate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 }

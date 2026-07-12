@@ -86,6 +86,24 @@ public class RustTypeMapperTests
         mapper.IsCopy(new TypeRef("Bare")).ShouldBeTrue();
         mapper.IsCopy(new TypeRef("Data")).ShouldBeTrue();
         mapper.IsCopy(new TypeRef("String")).ShouldBeFalse();
-        mapper.IsCopy(new TypeRef("Int", IsOptional: true)).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1373: an optional-but-Copy-inner primitive (<c>Int?</c>/<c>Bool?</c>/<c>Decimal?</c>/
+    /// <c>Instant?</c>) is itself Copy in the emitted Rust — <c>Option&lt;T&gt;</c> is <c>Copy</c>
+    /// whenever <c>T: Copy</c> — matching how a bare <c>self</c>-field read of such a type already
+    /// behaves. An optional non-Copy inner type (<c>String?</c>, an entity/value type, a smart enum —
+    /// the enum case is a deliberately out-of-scope follow-up, #1508) must still classify non-Copy.
+    /// </summary>
+    [Fact]
+    public void Copy_is_true_for_optional_copy_inner_primitives_but_not_other_optional_types()
+    {
+        var mapper = new RustTypeMapper(IndexWithEnums());
+        mapper.IsCopy(new TypeRef("Int", IsOptional: true)).ShouldBeTrue();
+        mapper.IsCopy(new TypeRef("Bool", IsOptional: true)).ShouldBeTrue();
+        mapper.IsCopy(new TypeRef("Decimal", IsOptional: true)).ShouldBeTrue();
+        mapper.IsCopy(new TypeRef("Instant", IsOptional: true)).ShouldBeTrue();
+        mapper.IsCopy(new TypeRef("String", IsOptional: true)).ShouldBeFalse();
+        mapper.IsCopy(new TypeRef("Bare", IsOptional: true)).ShouldBeFalse();
     }
 }
