@@ -147,7 +147,7 @@ public sealed partial class RustEmitter
 
         foreach (Invariant inv in vo.Invariants)
         {
-            WriteInvariantGuard(sb, name, inv, translator, Indent + Indent);
+            WriteInvariantGuard(sb, name, inv, translator, Indent + Indent, typeMapper: typeMapper);
         }
 
         foreach (Member m in defaultedParams.Where(m => m.Type.IsOptional))
@@ -174,32 +174,37 @@ public sealed partial class RustEmitter
         RustExpressionTranslator.NameMode mode = RustExpressionTranslator.NameMode.Parameter,
         RustTypeMapper? typeMapper = null)
     {
-        // A command's post-transition re-check (NameMode.Property) reads a presence-guarded member as
-        // the real stored `self.<field>: Option<T>` — unlike the smart constructor's `NameMode.Parameter`
-        // window, where #1472 already resolved a constant-defaulted member to a bare local before the
-        // guards run. So a guard body comparing that member against a same-typed non-optional operand
-        // (`taxRate >= amount when taxRate.isPresent`) mismatches `Option<T>` against `T` (E0308, #1489),
-        // even though the `is_some()` presence check genuinely dominates the comparison. Lower such a
-        // guard to Rust's `if let Some(field) = self.field { .. }` so the body compares the bound, bare
-        // `T` instead — narrower than re-deriving optionality per-operand (Approach 2 in the issue), and
-        // it generalizes to any T?-vs-T invariant body, not just constant-defaulted members (a genuinely-
-        // optional, non-defaulted member hits the identical E0308 today and is fixed the same way).
+        // A presence-guarded invariant body (`taxRate >= amount when taxRate.isPresent`) genuinely
+        // querying an Option<T> member — anywhere that member isn't ALREADY known-present — mismatches
+        // `Option<T>` against a same-typed non-optional operand (E0308, #1489), even though the
+        // `is_some()` check dominates the comparison. That's every site except #1472's one exception: a
+        // constant-defaulted member's NameMode.Parameter window, where the smart constructor already
+        // resolves it to a bare local (and short-circuits isPresent to `true`) before any guard runs —
+        // untouched here, or this would re-wrap already-correct output and diverge from #1472's pinned
+        // shape. Everywhere else — a command's post-transition NameMode.Property re-check (the member is
+        // the real stored `self.field`), and a genuinely-optional, non-defaulted member's own
+        // NameMode.Parameter ctor guard (the member is the real, un-unwrapped ctor parameter) — lower the
+        // guard to Rust's `if let Some(field) = <recv> { .. }` so the body compares the bound, bare `T`
+        // instead of the raw Option<T>. Narrower than re-deriving optionality per-operand (Approach 2 in
+        // the issue), and it generalizes to any T?-vs-T invariant body rather than special-casing each
+        // call site again (the duplication this consolidation effort exists to eliminate).
         // Gated on the member's underlying type being `Copy` (true for every ordinal/comparable type this
-        // applies to — Decimal/Int/Instant/Bool/enums): destructuring `Option<T>` by value out of `&self`
-        // needs T: Copy, or it would try to move a field out of a shared reference.
-        if (mode == RustExpressionTranslator.NameMode.Property
-            && typeMapper is not null
+        // applies to — Decimal/Int/Instant/Bool/enums): destructuring `Option<T>` by value needs T: Copy,
+        // or (in Property mode) it would try to move a field out of a shared `&self`.
+        if (typeMapper is not null
             && inv.Condition is GuardExpr { Condition: MemberAccessExpr { MemberName: "isPresent" } presence } guard
             && presence.Target is IdentifierExpr { Name: var memberName }
+            && !(mode == RustExpressionTranslator.NameMode.Parameter && translator.IsConstantDefaultedMember(memberName))
             && translator.InferType(presence.Target) is { IsOptional: true } memberType
             && typeMapper.IsCopy(memberType with { IsOptional = false }))
         {
             var field = RustNaming.Field(memberName);
+            var receiver = mode == RustExpressionTranslator.NameMode.Property ? "self." + field : field;
             translator.PushLocal(memberName, memberType with { IsOptional = false });
             var narrowedTest = Negate(translator.Translate(guard.Body, mode));
             translator.PopLocal(memberName);
 
-            sb.Append(indent).Append("if let Some(").Append(field).Append(") = self.").Append(field).Append(" {\n");
+            sb.Append(indent).Append("if let Some(").Append(field).Append(") = ").Append(receiver).Append(" {\n");
             sb.Append(indent).Append(Indent).Append("if ").Append(narrowedTest).Append(" {\n");
             sb.Append(indent).Append(Indent).Append(Indent).Append("return Err(DomainError::InvariantViolation { type_name: \"")
               .Append(typeName).Append("\", rule: ").Append(RuleLiteral(inv.Message ?? "invariant failed")).Append(" });\n");

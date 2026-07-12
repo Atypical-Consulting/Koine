@@ -2059,6 +2059,61 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1489 edge case: a genuinely-optional, <b>non-defaulted</b> member hits the identical
+    /// <c>E0308</c> in a command's post-transition re-check — the fix in <c>WriteInvariantGuard</c> keys
+    /// only off the guard shape (a <c>NameMode.Property</c> presence check dominating the comparison), not
+    /// off the member being constant-defaulted (unlike #1472's constructor-side short-circuit, which is
+    /// deliberately scoped to constant-defaulted members only), so it must compile and enforce the rule
+    /// here too.
+    /// </summary>
+    [Fact]
+    public void Command_post_transition_invariant_referencing_non_defaulted_optional_member_emits_compiling_rust_and_enforces_the_rule()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    taxRate: Decimal?\n" +
+            "    invariant taxRate >= amount when taxRate.isPresent \"tax rate must be at least amount\"\n" +
+            "    command reprice(newAmount: Decimal) {\n" +
+            "      amount -> newAmount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            #[test]
+            fn reprice_with_no_tax_rate_set_skips_the_guarded_invariant() {
+                let mut p = Product::new(ProductId::new("p-1"), Decimal::from(1), None).expect("valid Product");
+                assert!(p.reprice(Decimal::from(1000)).is_ok());
+            }
+
+            #[test]
+            fn reprice_within_an_explicit_tax_rate_succeeds() {
+                let mut p = Product::new(ProductId::new("p-2"), Decimal::from(1), Some(Decimal::from(5))).expect("valid Product");
+                assert!(p.reprice(Decimal::from(5)).is_ok());
+            }
+
+            #[test]
+            fn reprice_below_an_explicit_tax_rate_enforces_the_invariant() {
+                let mut p = Product::new(ProductId::new("p-3"), Decimal::from(1), Some(Decimal::from(1))).expect("valid Product");
+                assert!(p.reprice(Decimal::from(10)).is_err());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1472 edge case: a genuinely-optional, <b>non-defaulted</b> member's <c>isPresent</c> must
     /// keep emitting a real <c>.is_some()</c> check — the constant-defaulted short-circuit is keyed off
     /// having an initializer, so a member with none must fall through unchanged. (A direct numeric

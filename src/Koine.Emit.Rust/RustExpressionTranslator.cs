@@ -109,6 +109,16 @@ internal sealed class RustExpressionTranslator
         }
     }
 
+    /// <summary>
+    /// True when <paramref name="name"/> is a constant-defaulted member (see the constructor doc) — i.e.
+    /// its <see cref="NameMode.Parameter"/> smart-constructor window already resolves it to a bare,
+    /// unwrapped local before any invariant guard runs (#1472), so a presence-guarded invariant
+    /// referencing it there needs no further narrowing. Exposed so <c>WriteInvariantGuard</c>
+    /// (<c>RustEmitter.ValueObjects.cs</c>) can gate its own <see cref="NameMode.Parameter"/>-side
+    /// narrowing (#1489) off the same source of truth rather than re-deriving it.
+    /// </summary>
+    public bool IsConstantDefaultedMember(string name) => _constantDefaultedMembers.Contains(name);
+
     private TypeScope EffectiveScope()
     {
         TypeScope scope = _scope;

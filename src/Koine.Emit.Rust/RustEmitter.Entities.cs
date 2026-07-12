@@ -107,7 +107,7 @@ public sealed partial class RustEmitter
 
         foreach (Invariant inv in entity.Invariants)
         {
-            WriteInvariantGuard(body, name, inv, translator, Indent + Indent);
+            WriteInvariantGuard(body, name, inv, translator, Indent + Indent, typeMapper: typeMapper);
         }
 
         foreach (Member m in defaultedParams.Where(m => m.Type.IsOptional))
