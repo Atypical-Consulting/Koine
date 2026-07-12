@@ -203,16 +203,32 @@ internal sealed class RustExpressionTranslator
         }
     }
 
+    /// <summary>
+    /// Writes a <c>UnaryExpr</c> (<c>Neg</c>/<c>Not</c>). Unlike every other optionality-sensitive call
+    /// site in this file (<c>EmitCoerced</c>, <see cref="WriteArithmeticOperand"/>,
+    /// <see cref="WriteReconciledBranch"/>), this used to prepend the bare `-`/`!` operator with zero
+    /// consultation of the operand's own inferred type. That is correct when the operand is non-optional
+    /// (#1316/#1321), but <c>Option&lt;T&gt;</c> implements neither <c>Neg</c> nor <c>Not</c>, so negating
+    /// an optional operand emitted invalid Rust (E0600) regardless of any surrounding coercion (#1372).
+    /// The fix maps inside the <c>Option</c> instead. No explicit clone is needed for either a bare field
+    /// read or an accessor call: <c>Neg</c>/<c>Not</c> only ever apply to Copy scalars (<c>Int</c>/
+    /// <c>Bool</c>/<c>Decimal</c>), so the <c>Option</c> auto-copies through <c>&amp;self</c> the same way
+    /// <see cref="WriteArithmeticOperand"/>'s <c>MemberAccessExpr</c>/<c>CallExpr</c>/<c>UnaryExpr</c>
+    /// branch already relies on.
+    /// </summary>
     private void WriteUnary(UnaryExpr un, StringBuilder sb)
     {
-        if (un.Op == UnaryOp.Not)
+        var op = un.Op == UnaryOp.Not ? '!' : '-';
+        TypeRef? operandType = _resolver.Infer(un.Operand, EffectiveScope());
+
+        if (operandType?.IsOptional == true)
         {
-            sb.Append('!');
             WriteAtom(un.Operand, sb);
+            sb.Append(".map(|v| ").Append(op).Append("v)");
             return;
         }
 
-        sb.Append('-');
+        sb.Append(op);
         WriteAtom(un.Operand, sb);
     }
 
