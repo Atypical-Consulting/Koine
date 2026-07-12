@@ -271,6 +271,14 @@ public sealed partial class RustEmitter
             {
                 body = $"{ownedWrap}({body})";
             }
+            // The body-side dual (#1487, mirrors #1468's BuildFactoryCtorArgs fix): when the owned body
+            // is itself Option-typed and numerically mismatched, NumericCoercionWrap above bails on
+            // ownedBodyType.IsOptional — the bare call-wrap it would return doesn't compose with an
+            // already-Option-shaped value, so `.map(...)` it instead.
+            else if (OptionBodyNumericCoercionMap(underlyingType, ownedBodyType) is { } ownedMapWrap)
+            {
+                body = $"{body}.map({ownedMapWrap})";
+            }
             body = SomeWrapIfNeeded(body, m.Type, ownedBodyType);
         }
         else
@@ -301,6 +309,15 @@ public sealed partial class RustEmitter
             else if (m.Initializer is IdentifierExpr or MemberAccessExpr && !typeMapper.IsCopy(m.Type))
             {
                 body += ".clone()";
+            }
+            // The body-side dual (#1487, mirrors #1468's BuildFactoryCtorArgs fix): an Option-typed,
+            // numerically mismatched body needs `.map(...)`, not the bare call-wrap NumericCoercionWrap
+            // above returns (it bails whenever bodyType.IsOptional). Applied after the clone/`to_string`
+            // branch above (not as another arm of that chain) since the two independently compose — the
+            // owned/cloned-out Option value still needs `.map(...)`-coercing on top.
+            if (OptionBodyNumericCoercionMap(underlyingType, bodyType) is { } mapWrap)
+            {
+                body += $".map({mapWrap})";
             }
 
             body = SomeWrapIfNeeded(body, m.Type, bodyType);
