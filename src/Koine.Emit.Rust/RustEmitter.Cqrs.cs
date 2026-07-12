@@ -163,10 +163,14 @@ public sealed partial class RustEmitter
     /// and (deliberately, #1378) no numeric coercion is attempted here either: an already-Option-shaped
     /// body is out of scope, matching <c>NumericCoercionWrap</c>'s own short-circuit on an optional
     /// <paramref name="bodyType"/>. Otherwise, when <paramref name="bodyType"/>'s inferred numeric type
-    /// differs from the field's underlying declared type, the rendered expression is wrapped via the
-    /// shared <see cref="CoerceNumericBody"/> dispatcher (#961's <c>WriteDerived</c> precedent, #1491's
-    /// consolidation) — the wrapped value is always a <c>Copy</c> primitive, so this takes precedence over
-    /// the String/Copy/clone ownership decisions below (#1378, the read-model dual of #961's gap).
+    /// differs from the field's underlying declared type, the rendered expression is wrapped via
+    /// <see cref="NumericCoercionWrap"/> (#961's <c>WriteDerived</c> precedent) — the wrapped value is
+    /// always a <c>Copy</c> primitive, so this takes precedence over the String/Copy/clone ownership
+    /// decisions below (#1378, the read-model dual of #961's gap). Composed directly here, mirroring
+    /// <see cref="CoercedDefaultValue"/> and <see cref="WriteDerived"/>'s bare-body branch rather than
+    /// routed through the <see cref="CoerceNumericBody"/> dispatcher (#1491): that dispatcher also probes
+    /// <see cref="OptionBodyNumericCoercionMap"/>, which requires an optional <paramref name="bodyType"/> —
+    /// already excluded by the branch above — so it could never fire at this call site.
     /// Otherwise, a non-optional String body (a bare accessor returning <c>&amp;str</c>, a <c>.trim()</c>
     /// chain, a concatenation, ...) is owned via <c>.to_string()</c> — safe whether the rendered
     /// expression is a borrowed <c>&amp;str</c> or an already-owned <c>String</c> (#1332's
@@ -190,9 +194,9 @@ public sealed partial class RustEmitter
         {
             owned = "(" + rendered + ").clone()";
         }
-        else if (NumericCoercionWrap(underlyingType, bodyType) is not null)
+        else if (NumericCoercionWrap(underlyingType, bodyType) is { } wrap)
         {
-            owned = CoerceNumericBody(underlyingType, bodyType, rendered);
+            owned = $"{wrap}({rendered})";
         }
         else if (typeMapper.IsCopy(underlyingType))
         {
