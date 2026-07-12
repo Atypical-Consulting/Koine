@@ -219,9 +219,8 @@ internal sealed class RustExpressionTranslator
     private void WriteUnary(UnaryExpr un, StringBuilder sb)
     {
         var op = un.Op == UnaryOp.Not ? '!' : '-';
-        TypeRef? operandType = _resolver.Infer(un.Operand, EffectiveScope());
 
-        if (operandType?.IsOptional == true)
+        if (IsOptional(un.Operand))
         {
             WriteAtom(un.Operand, sb);
             sb.Append(".map(|v| ").Append(op).Append("v)");
