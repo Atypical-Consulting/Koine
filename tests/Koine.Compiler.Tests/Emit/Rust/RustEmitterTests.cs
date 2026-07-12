@@ -645,7 +645,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
-        rust.ShouldContain("if self.amount > 0 { self.bonus.clone() } else { self.fallback.clone() }");
+        rust.ShouldContain("if self.amount > 0 { self.bonus } else { self.fallback }");
         rust.ShouldNotContain("Some(if self.amount > 0");
     }
 
@@ -675,7 +675,7 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("if self.amount > 0 { Some(self.amount) } else { self.bonus.clone() }");
+        rust.ShouldContain("if self.amount > 0 { Some(self.amount) } else { self.bonus }");
         rust.ShouldNotContain("{ self.amount } else");
     }
 
@@ -703,7 +703,7 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("if self.amount > 0 { Some(Decimal::from(self.amount)) } else { self.bonus_amount.clone() }");
+        rust.ShouldContain("if self.amount > 0 { Some(Decimal::from(self.amount)) } else { self.bonus_amount }");
         rust.ShouldNotContain("Decimal::from(Some(");
         rust.ShouldNotContain("{ Decimal::from(self.amount) } else");
     }
@@ -734,7 +734,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
-        rust.ShouldContain("self.bonus.clone().or_else(|| self.fallback.clone())");
+        rust.ShouldContain("self.bonus.or_else(|| self.fallback)");
         rust.ShouldNotContain(".unwrap_or_else(");
     }
 
@@ -762,7 +762,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain("pub fn total(&self) -> i64 {");
-        rust.ShouldContain("self.bonus.clone().unwrap_or_else(|| 0)");
+        rust.ShouldContain("self.bonus.unwrap_or_else(|| 0)");
     }
 
     private const string NestedCoalesceBothOptionalModel = """
@@ -794,7 +794,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain("pub fn total(&self) -> Option<i64> {");
-        rust.ShouldContain("self.bonus.clone().or_else(|| self.fallback.clone().or_else(|| self.backup.clone()))");
+        rust.ShouldContain("self.bonus.or_else(|| self.fallback.or_else(|| self.backup))");
         rust.ShouldNotContain(".unwrap_or_else(");
     }
 
@@ -861,7 +861,7 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("if self.decimal_amount > Decimal::from(0i64) { Some(self.decimal_amount) } else { self.int_bonus.clone().map(Decimal::from) }");
+        rust.ShouldContain("if self.decimal_amount > Decimal::from(0i64) { Some(self.decimal_amount) } else { self.int_bonus.map(Decimal::from) }");
         rust.ShouldNotContain("Decimal::from(self.int_bonus");
     }
 
@@ -890,7 +890,7 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("if self.amount > 0 { self.bonus_decimal.clone() } else { self.bonus_int.clone().map(Decimal::from) }");
+        rust.ShouldContain("if self.amount > 0 { self.bonus_decimal } else { self.bonus_int.map(Decimal::from) }");
         rust.ShouldNotContain("Decimal::from(self.bonus_int");
     }
 
@@ -954,7 +954,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain(
-            "(if self.flag { Some(self.x) } else { self.y.clone() }).map(Decimal::from) == Some(self.c)");
+            "(if self.flag { Some(self.x) } else { self.y }).map(Decimal::from) == Some(self.c)");
         rust.ShouldNotContain("Decimal::from(if ");
     }
 
@@ -1083,7 +1083,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain(
-            "crate::koine_runtime::koine_max(self.items.iter().map(|i| i.bonus().clone()))" +
+            "crate::koine_runtime::koine_max(self.items.iter().map(|i| i.bonus()))" +
             ".map(Decimal::from) == Some(self.tax_rate)");
         rust.ShouldNotContain("Decimal::from(crate::koine_runtime::koine_max(");
     }
@@ -1122,7 +1122,7 @@ public class RustEmitterTests
         // `ShouldNotContain("n == self.rate")`) avoids colliding with that correct inner occurrence while
         // still pinning that the OUTER `n` (still `Int?`, restored after the inner pop) is widened.
         rust.ShouldContain(
-            "{ let n = self.amount.clone(); ({ let n = self.rate; n == self.rate }) && " +
+            "{ let n = self.amount; ({ let n = self.rate; n == self.rate }) && " +
             "(n.map(Decimal::from) == Some(self.rate)) }");
     }
 
@@ -1156,7 +1156,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain(
-            "{ let n = self.amount.clone(); self.items.iter().any(|n| n > 0) && " +
+            "{ let n = self.amount; self.items.iter().any(|n| n > 0) && " +
             "(n.map(Decimal::from) == Some(self.rate)) }");
     }
 

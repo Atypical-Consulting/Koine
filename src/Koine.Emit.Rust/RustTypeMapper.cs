@@ -186,17 +186,21 @@ internal sealed class RustTypeMapper
     /// </summary>
     public bool IsCopy(TypeRef type)
     {
+        // These primitives (and `Option<T>` over them) are `Copy` in the emitted Rust regardless of
+        // optionality — a bare `self`-field read already produces an owned value via Rust's own Copy
+        // semantics, so an accessor for the same field must match (#1373).
+        if (type.Name is "Int" or "Bool" or "Decimal" or "Instant")
+        {
+            return true;
+        }
+
         if (type.IsOptional)
         {
             return false;
         }
 
-        return type.Name switch
-        {
-            // All smart enums emit as unit-variant Rust enums deriving `Copy` (associated data is
-            // exposed via accessor methods, never as payload), so every enum value is `Copy`.
-            "Int" or "Bool" or "Decimal" or "Instant" => true,
-            _ => _index.Classify(type.Name) == TypeKind.Enum,
-        };
+        // All smart enums emit as unit-variant Rust enums deriving `Copy` (associated data is exposed
+        // via accessor methods, never as payload), so every enum value is `Copy`.
+        return _index.Classify(type.Name) == TypeKind.Enum;
     }
 }
