@@ -3008,4 +3008,90 @@ public class RustConformanceTests
         rust.ShouldContain("Self::new(id, rate.clone().map(crate::koine_runtime::dec_to_i64))");
         rust.ShouldNotContain("Self::new(id, rate.clone())");
     }
+
+    /// <summary>
+    /// Issue #1487 — <c>WriteDerived</c>'s bare-body branch has the same gap #1468 fixed for
+    /// <c>BuildFactoryCtorArgs</c>: a derived/default member's body that is itself Option-typed and
+    /// numerically mismatched against the declared (underlying) type is passed straight through
+    /// uncoerced by <c>NumericCoercionWrap</c> (which bails whenever the body's own type is optional).
+    /// Must render as `.map(...)`-coerced instead — a real <c>cargo check</c> E0308 otherwise.
+    /// </summary>
+    [Fact]
+    public void Entity_derived_member_bare_body_from_an_option_typed_mismatched_numeric_body_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    rate: Int?\n" +
+            "    total: Decimal? = rate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the Option-typed, numerically-mismatched body
+        // must be `.map(...)`-coerced, not passed through bare.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.rate.clone().map(Decimal::from)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Same defect (#1487), <c>WriteDerived</c>'s <c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>
+    /// owned-value branch: a <c>let</c>-bound body that is itself Option-typed and numerically mismatched
+    /// must also be `.map(...)`-coerced — this branch shares the identical
+    /// "<c>NumericCoercionWrap</c> bails on an optional body type" gap.
+    /// </summary>
+    [Fact]
+    public void Entity_derived_member_let_body_from_an_option_typed_mismatched_numeric_body_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    rate: Int?\n" +
+            "    total: Decimal? = let x = rate in x\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("{ let x = self.rate.clone(); x.clone() }.map(Decimal::from)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Mirror direction (#1487): a <c>Decimal?</c>-typed bare body narrowing into an <c>Int?</c>-declared
+    /// derived member must compose the same way, via <c>dec_to_i64</c> instead of <c>Decimal::from</c>.
+    /// A <c>Decimal?</c>-into-<c>Int?</c> derived body is itself rejected upstream by the semantic
+    /// validator (<c>KOI0217</c>, the same narrowing guard <c>NumericCoercionWrap</c>'s own doc comment
+    /// calls out), so there is no legal <c>.koi</c> source that reaches this branch through
+    /// <c>KoineCompiler.Compile</c>. Exercise the emitter directly against a parsed-but-unvalidated
+    /// model instead, mirroring #1468's own narrowing test.
+    /// </summary>
+    [Fact]
+    public void Entity_derived_member_bare_body_from_an_option_typed_narrowing_numeric_body_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    rate: Decimal?\n" +
+            "    count: Int? = rate\n" +
+            "  }\n" +
+            "}\n";
+        var (model, diagnostics) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull(string.Join("\n", diagnostics.Select(d => d.ToString())));
+
+        var files = new RustEmitter().Emit(model!);
+        var rust = string.Join("\n", files.Select(f => f.Contents));
+        rust.ShouldContain("self.rate.clone().map(crate::koine_runtime::dec_to_i64)");
+    }
 }
