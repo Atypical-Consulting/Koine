@@ -2772,6 +2772,47 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1495: <c>OwnDerived</c>'s already-optional-body branch (<c>bodyType is { IsOptional: true
+    /// }</c>) unconditionally clones with no numeric coercion at all — #1378/PR #1494 fixed this method's
+    /// non-optional-body branch but explicitly deferred the optional/optional-mismatch passthrough as a
+    /// Non-goal. A <c>Decimal?</c>-declared projected field whose body is an already-optional,
+    /// numerically mismatched <c>Int?</c> source member renders a bare <c>.clone()</c> with no
+    /// <c>.map(Decimal::from)</c>, so <c>cargo check</c> rejects it (<c>E0308</c>). <c>creditOut</c> pins
+    /// the same-type sibling: it must keep rendering the unchanged plain <c>.clone()</c>, no
+    /// <c>.map(...)</c> appended.
+    /// </summary>
+    [Fact]
+    public void Read_model_optional_derived_field_from_an_option_typed_mismatched_numeric_body_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  aggregate Shop root Person {\n" +
+            "    entity Person identified by PersonId {\n" +
+            "      bonus: Int?\n" +
+            "      credit: Decimal?\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel PersonSummary from Person {\n" +
+            "    id\n" +
+            "    total: Decimal? = bonus\n" +
+            "    creditOut: Decimal? = credit\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("total: (src.bonus()).clone().map(Decimal::from),");
+        rust.ShouldContain("credit_out: (src.credit()).clone(),");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1380 — the compiling-code proof for the trailing <c>Option&lt;T&gt;</c> constructor
     /// parameter: a caller can both override a non-optional defaulted member (<c>Order::new(id, lines,
     /// Some(OrderStatus::Placed))</c>) and omit it (<c>Order::new(id, lines, None)</c>) to fall back to
