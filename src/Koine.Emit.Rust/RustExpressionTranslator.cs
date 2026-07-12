@@ -127,6 +127,22 @@ internal sealed class RustExpressionTranslator
     public bool IsDerivedMember(string name) => _derivedMembers.Contains(name);
 
     /// <summary>
+    /// True when <paramref name="name"/> is currently bound as a LOCAL (a command/factory parameter, a
+    /// <c>let</c> binding, a lambda parameter) and therefore SHADOWS any same-named member — so a
+    /// reference to it resolves to the local, not the member (see <see cref="WriteIdentifier"/>'s
+    /// locals-first order).
+    /// <para>
+    /// Exposed so the presence-guard narrowing (<c>WriteGuardedClause</c>) can decline to narrow such a
+    /// name: a <c>requires amount &gt; 0 when taxRate.isPresent</c> inside
+    /// <c>command shadow(taxRate: Decimal?)</c> asks about the PARAMETER, so destructuring the member
+    /// (<c>if let Some(tax_rate) = self.tax_rate</c>) would silently check the wrong value. Such a name
+    /// falls through to the plain <c>cond &amp;&amp; !body</c> test, where it correctly reads the local's
+    /// own <c>is_some()</c>.
+    /// </para>
+    /// </summary>
+    public bool IsShadowedByLocal(string name) => _localStacks.ContainsKey(name);
+
+    /// <summary>
     /// The receiver an instance-body (<see cref="NameMode.Property"/>) member read is qualified with
     /// (<c>self</c> for ordinary entity/VO bodies; a borrowed source name for a read-model projection —
     /// see the constructor's <c>memberReceiver</c> parameter). Exposed so a caller building its own
@@ -258,13 +274,41 @@ internal sealed class RustExpressionTranslator
 
         if (IsOptional(un.Operand))
         {
-            WriteAtom(un.Operand, sb);
+            WriteUnaryOperand(un.Operand, sb);
             sb.Append(".map(|v| ").Append(op).Append("v)");
             return;
         }
 
         sb.Append(op);
-        WriteAtom(un.Operand, sb);
+        WriteUnaryOperand(un.Operand, sb);
+    }
+
+    /// <summary>
+    /// Writes a unary operator's operand. A block-producing compound operand (a conditional, and the
+    /// <c>let</c>/<c>when</c> forms that wrap one) routes through <see cref="WriteOwnedOperand"/> — the
+    /// same machinery <see cref="WriteArithmeticOperand"/>'s compound branch uses — so a conditional's
+    /// two arms are reconciled against EACH OTHER (<see cref="WriteReconciledBranch"/> →
+    /// <see cref="BranchReconciliation.Classify"/>) before the operator applies. <see cref="WriteAtom"/>'s
+    /// plain recursive <c>Write</c> renders the arms independently, so a pair disagreeing in optionality
+    /// or numeric width emitted two different Rust types in one <c>if</c>/<c>else</c> — a real
+    /// <c>cargo check</c> E0308 (#1500), the last operand position still missing the reconciliation
+    /// #1335/#1343/#1354 gave the binary operators. Arms that already agree reconcile to a no-op, so this
+    /// leaves every previously-compiling shape byte-identical. Every other operand shape keeps
+    /// <see cref="WriteAtom"/>'s tight-binding rendering: routing a bare place through
+    /// <see cref="WriteOwnedOperand"/> would clone it (needless for the Copy scalars <c>Neg</c>/<c>Not</c>
+    /// apply to) and, for a <c>BinaryExpr</c>, there are no sibling arms to reconcile in the first place.
+    /// </summary>
+    private void WriteUnaryOperand(Expr expr, StringBuilder sb)
+    {
+        if (expr is ConditionalExpr or LetExpr or GuardExpr)
+        {
+            sb.Append('(');
+            WriteOwnedOperand(expr, sb);
+            sb.Append(')');
+            return;
+        }
+
+        WriteAtom(expr, sb);
     }
 
     /// <summary>Writes an operand, parenthesizing a compound expression for safe precedence.</summary>
@@ -780,7 +824,18 @@ internal sealed class RustExpressionTranslator
         // (1) Local (lambda/command/factory parameter, let binding): verbatim snake_case.
         if (_localStacks.TryGetValue(name, out Stack<TypeRef?>? localStack))
         {
-            TypeRef? ownType = localStack.Peek();
+            // A local pushed with NO type (a let binding whose value the resolver couldn't infer, or a
+            // collection-lambda parameter whose element type didn't resolve) has an unknown optionality.
+            // Defaulting that to `null` makes EmitCoerced read it as non-optional and wrap it in a bare
+            // `Decimal::from(...)` — invalid Rust (E0277) if it is really an `Option`. When such a local
+            // SHADOWS a member, fall back to the resolver: EffectiveScope only overlays locals with a
+            // known type, so an untyped one falls through to the shadowed member's declared type — the
+            // best available evidence, and exactly what this branch resolved before #1367 replaced a
+            // caller-threaded `ownType` with the precise `_localStacks` lookup (#1374). Gated on the
+            // Decimal coercion EmitCoerced actually consults, mirroring the member branch below, so the
+            // common case pays no resolver walk.
+            TypeRef? ownType = localStack.Peek()
+                ?? (coerceTo?.Name == "Decimal" ? InferType(new IdentifierExpr(name)) : null);
             EmitCoerced(sb, coerceTo, ownType, () => sb.Append(RustNaming.Field(name)));
             return;
         }

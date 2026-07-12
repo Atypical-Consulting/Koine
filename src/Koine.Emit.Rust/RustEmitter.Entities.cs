@@ -224,7 +224,7 @@ public sealed partial class RustEmitter
         // 1. Preconditions.
         foreach (RequiresClause stmt in cmd.Body.OfType<RequiresClause>())
         {
-            WriteRequires(body, typeName, stmt, translator);
+            WriteRequires(body, typeName, stmt, translator, typeMapper);
         }
 
         // 2. State transitions.
@@ -277,16 +277,22 @@ public sealed partial class RustEmitter
         }
     }
 
-    /// <summary>Emits a precondition guard: <c>if !(cond) { return Err(...) }</c> (Property mode).</summary>
-    private void WriteRequires(StringBuilder body, string typeName, RequiresClause req, RustExpressionTranslator translator)
-    {
-        var test = Negate(translator.Translate(req.Condition, RustExpressionTranslator.NameMode.Property));
-        body.Append(Indent).Append(Indent).Append("if ").Append(test).Append(" {\n");
-        body.Append(Indent).Append(Indent).Append(Indent)
-            .Append("return Err(DomainError::InvariantViolation { type_name: \"").Append(typeName)
-            .Append("\", rule: ").Append(RuleLiteral(req.Message ?? "precondition failed")).Append(" });\n");
-        body.Append(Indent).Append(Indent).Append("}\n");
-    }
+    /// <summary>
+    /// Emits a precondition guard: <c>if !(cond) { return Err(...) }</c> (Property mode). Shares
+    /// <see cref="WriteGuardedClause"/> with <see cref="WriteInvariantGuard"/> so a <c>when</c> guard gets
+    /// the same lowering an invariant's already had — this path used to translate the condition through
+    /// the generic <c>Write</c> path, which renders a <c>GuardExpr</c> as its body alone and so dropped the
+    /// guard entirely (#1504).
+    /// </summary>
+    private void WriteRequires(
+        StringBuilder body, string typeName, RequiresClause req, RustExpressionTranslator translator,
+        RustTypeMapper typeMapper) =>
+        WriteGuardedClause(
+            body, typeName, req.Condition, req.Message ?? "precondition failed", translator,
+            Indent + Indent, RustExpressionTranslator.NameMode.Property, typeMapper,
+            // A `requires` clause is written INSIDE the command/factory, so its identifiers bind to the
+            // parameters first — unlike an entity-scoped `invariant`.
+            localsCanShadow: true);
 
     /// <summary>
     /// The collision-free name for the entity's synthetic <c>Vec&lt;DomainEvent&gt;</c> collector. Built from
@@ -421,7 +427,7 @@ public sealed partial class RustEmitter
         // 2. Preconditions — checked before any state is constructed.
         foreach (RequiresClause req in factory.Body.OfType<RequiresClause>())
         {
-            WriteRequires(body, typeName, req, translator);
+            WriteRequires(body, typeName, req, translator, typeMapper);
         }
 
         // 3. Creation events, built from the id + params *before* they are moved into the constructor.

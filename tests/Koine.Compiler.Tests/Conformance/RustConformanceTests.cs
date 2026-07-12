@@ -3497,4 +3497,342 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1508: comparing two optional smart-enum operands where one is reached through a nested value
+    /// object's accessor must compile — the accessor for an optional enum used to return a borrowed
+    /// <c>&amp;Option&lt;Status&gt;</c> against the owned <c>Option&lt;Status&gt;</c> of a bare field read
+    /// (E0308). Real <c>cargo check</c>.
+    /// </summary>
+    [Fact]
+    public void Two_optional_enum_operands_compared_via_a_nested_accessor_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Status { Active, Inactive }
+              value Discount {
+                status: Status?
+              }
+              value Money {
+                status: Status?
+                d: Discount
+                isEq: Bool = status == d.status
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1500: a conditional used directly as a unary operand, whose arms disagree in optionality,
+    /// must reconcile its arms rather than render them independently ("`if` and `else` have incompatible
+    /// types"). Real <c>cargo check</c>.
+    /// </summary>
+    [Fact]
+    public void Unary_operand_conditional_with_mismatched_optionality_arms_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              value Invoice {
+                baseAmount: Int?
+                hasBase: Bool
+                negated: Int? = -(if hasBase then 0 else baseAmount)
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1503: a presence-guarded invariant must compile under real <c>cargo check</c> for BOTH
+    /// shapes the #1489 narrowing didn't cover — a COMPOUND guard condition (the presence check ANDed
+    /// with other clauses) and a NON-COPY optional member (<c>String?</c>) — in the constructor and in a
+    /// command's post-transition re-check alike.
+    /// </summary>
+    [Fact]
+    public void Compound_and_non_copy_presence_guarded_invariants_compile()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal? = 2
+                code: String?
+                invariant taxRate >= amount when taxRate.isPresent && amount > 0 "tax rate must be at least amount"
+                invariant code == "X" when code.isPresent "code must be X"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1503: the compound/non-Copy narrowings must be semantically right, not merely compilable —
+    /// a real <c>cargo test</c> exercising both invariants through the constructor and a command.
+    /// </summary>
+    [Fact]
+    public void Compound_and_non_copy_presence_guarded_invariants_enforce_the_rule()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                code: String?
+                invariant taxRate >= amount when taxRate.isPresent && amount > 0 "tax rate must be at least amount"
+                invariant code == "X" when code.isPresent "code must be X"
+                command reprice(newAmount: Decimal) {
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            // The compound guard `when taxRate.isPresent && amount > 0` — absent taxRate skips the check.
+            #[test]
+            fn absent_tax_rate_skips_the_compound_guard() {
+                assert!(Product::new(ProductId::new("p-1"), Decimal::from(5), None, None).is_ok());
+            }
+
+            #[test]
+            fn present_tax_rate_below_amount_violates_the_compound_guard() {
+                let p = Product::new(ProductId::new("p-2"), Decimal::from(5), Some(Decimal::from(1)), None);
+                assert!(p.is_err(), "taxRate(1) < amount(5) with amount > 0 must violate");
+            }
+
+            #[test]
+            fn present_tax_rate_above_amount_satisfies_the_compound_guard() {
+                assert!(Product::new(ProductId::new("p-3"), Decimal::from(5), Some(Decimal::from(9)), None).is_ok());
+            }
+
+            // The non-Copy `String?` guard `when code.isPresent`.
+            #[test]
+            fn absent_code_skips_the_non_copy_guard() {
+                assert!(Product::new(ProductId::new("p-4"), Decimal::from(5), None, None).is_ok());
+            }
+
+            #[test]
+            fn present_wrong_code_violates_the_non_copy_guard() {
+                let p = Product::new(ProductId::new("p-5"), Decimal::from(5), None, Some("Y".to_string()));
+                assert!(p.is_err(), "code Y != X must violate");
+            }
+
+            #[test]
+            fn present_right_code_satisfies_the_non_copy_guard() {
+                assert!(Product::new(ProductId::new("p-6"), Decimal::from(5), None, Some("X".to_string())).is_ok());
+            }
+
+            // The command's post-transition re-check re-runs both narrowed invariants.
+            #[test]
+            fn command_recheck_enforces_the_compound_guard() {
+                let mut p = Product::new(ProductId::new("p-7"), Decimal::from(5), Some(Decimal::from(9)), None)
+                    .expect("valid Product");
+                assert!(p.reprice(Decimal::from(20)).is_err(), "taxRate(9) < new amount(20) must violate");
+                assert!(p.reprice(Decimal::from(7)).is_ok());
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1504: a <c>requires … when …</c> precondition used to SILENTLY DROP its guard — the body
+    /// check ran unconditionally. This is the failure mode with NO compile error to catch it (a plain
+    /// <c>Bool</c> guard over a non-optional comparison type-checks either way), so it can only be pinned
+    /// by a real <c>cargo test</c>: the precondition must be SKIPPED when the guard is false and ENFORCED
+    /// when it is true.
+    /// </summary>
+    [Fact]
+    public void Requires_when_guard_is_honored_at_runtime()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                isPromotional: Bool
+                command reprice(newAmount: Decimal) {
+                  requires newAmount > 0 when isPromotional "promo price must be positive"
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            #[test]
+            fn a_false_guard_skips_the_precondition() {
+                // NOT promotional: the `when` guard is false, so `newAmount > 0` must NOT be checked.
+                // Before #1504 the guard was dropped entirely and this wrongly returned Err.
+                let mut p = Product::new(ProductId::new("p-1"), Decimal::from(10), false).expect("valid Product");
+                assert!(p.reprice(Decimal::from(-5)).is_ok(), "guard false -> precondition must be skipped");
+            }
+
+            #[test]
+            fn a_true_guard_enforces_the_precondition() {
+                let mut p = Product::new(ProductId::new("p-2"), Decimal::from(10), true).expect("valid Product");
+                assert!(p.reprice(Decimal::from(-5)).is_err(), "guard true -> precondition must fire");
+                assert!(p.reprice(Decimal::from(7)).is_ok(), "guard true, value valid -> ok");
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1504: a PRESENCE-guarded <c>requires</c> clause gets the same <c>if let Some(..)</c>
+    /// narrowing an invariant's guard already had, so it both compiles (no raw
+    /// <c>Option&lt;T&gt;</c>-vs-<c>T</c> comparison) and enforces the rule only when the member is
+    /// present. Real <c>cargo test</c>.
+    /// </summary>
+    [Fact]
+    public void Presence_guarded_requires_clause_compiles_and_enforces_the_rule()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                command reprice(newAmount: Decimal) {
+                  requires taxRate >= amount when taxRate.isPresent "tax rate must be at least amount"
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            #[test]
+            fn an_absent_tax_rate_skips_the_precondition() {
+                let mut p = Product::new(ProductId::new("p-1"), Decimal::from(5), None).expect("valid Product");
+                assert!(p.reprice(Decimal::from(9)).is_ok(), "taxRate absent -> precondition skipped");
+            }
+
+            #[test]
+            fn a_present_tax_rate_below_the_amount_is_rejected() {
+                let mut p = Product::new(ProductId::new("p-2"), Decimal::from(5), Some(Decimal::from(3)))
+                    .expect("valid Product");
+                assert!(p.reprice(Decimal::from(9)).is_err(), "taxRate(3) < amount(5) -> rejected");
+            }
+
+            #[test]
+            fn a_present_tax_rate_above_the_amount_is_accepted() {
+                let mut p = Product::new(ProductId::new("p-3"), Decimal::from(5), Some(Decimal::from(8)))
+                    .expect("valid Product");
+                assert!(p.reprice(Decimal::from(9)).is_ok(), "taxRate(8) >= amount(5) -> accepted");
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1504 correctness guard: a <c>requires</c> clause's identifiers bind to the command's
+    /// PARAMETERS first (it is written inside the command), unlike an entity-scoped <c>invariant</c>.
+    /// When a parameter shadows a same-named member, <c>when taxRate.isPresent</c> asks about the
+    /// PARAMETER — so the guard must track the argument passed in, not the stored field. Real
+    /// <c>cargo test</c>: the stored member is always absent here, so a narrowing that wrongly read
+    /// <c>self.tax_rate</c> would skip the precondition every time and this would fail.
+    /// </summary>
+    [Fact]
+    public void Requires_presence_guard_on_a_shadowing_parameter_tracks_the_parameter()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                taxRate: Decimal?
+                command reprice(newAmount: Decimal, taxRate: Decimal?) {
+                  requires newAmount > 0 when taxRate.isPresent "promo price must be positive"
+                  amount -> newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string integrationTest =
+            """
+            use koine_domain::koine_runtime::Decimal;
+            use koine_domain::shop::{Product, ProductId};
+
+            // The entity's OWN `tax_rate` member stays None throughout; only the PARAMETER varies. So a
+            // narrowing that wrongly destructured `self.tax_rate` would skip the check in both cases.
+            #[test]
+            fn an_absent_parameter_skips_the_precondition() {
+                let mut p = Product::new(ProductId::new("p-1"), Decimal::from(10), None).expect("valid Product");
+                assert!(p.reprice(Decimal::from(-5), None).is_ok(), "param absent -> precondition skipped");
+            }
+
+            #[test]
+            fn a_present_parameter_enforces_the_precondition() {
+                let mut p = Product::new(ProductId::new("p-2"), Decimal::from(10), None).expect("valid Product");
+                assert!(
+                    p.reprice(Decimal::from(-5), Some(Decimal::from(1))).is_err(),
+                    "param present -> precondition must fire on a negative newAmount"
+                );
+            }
+            """;
+
+        var r = TestSupport.RunRust(result.Files, integrationTest);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
