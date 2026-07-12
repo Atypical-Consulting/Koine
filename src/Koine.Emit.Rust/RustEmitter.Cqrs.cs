@@ -159,10 +159,13 @@ public sealed partial class RustEmitter
     /// projection's own inferred <paramref name="bodyType"/> is itself optional (e.g. a bare reference to
     /// another optional-declared source member), its accessor already returns a reference to an
     /// <c>Option&lt;...&gt;</c> regardless of the underlying type's Copy-ness, so it's always owned via
-    /// <c>.clone()</c> — <c>.to_string()</c> would not type-check against <c>&amp;Option&lt;String&gt;</c>,
-    /// and (deliberately, #1378) no numeric coercion is attempted here either: an already-Option-shaped
-    /// body is out of scope, matching <c>NumericCoercionWrap</c>'s own short-circuit on an optional
-    /// <paramref name="bodyType"/>. Otherwise, when <paramref name="bodyType"/>'s inferred numeric type
+    /// <c>.clone()</c> — <c>.to_string()</c> would not type-check against <c>&amp;Option&lt;String&gt;</c>.
+    /// When the body's own underlying numeric type is itself mismatched against the field's underlying
+    /// declared type, <see cref="OptionBodyNumericCoercionMap"/>'s <c>.map(...)</c> suffix is appended
+    /// after the clone (#1495, mirroring <c>WriteDerived</c>'s bare-body branch, #1487) —
+    /// <see cref="NumericCoercionWrap"/>'s bare call-wrap form can never apply here since
+    /// <paramref name="bodyType"/> is already known optional by this branch's own condition. Otherwise,
+    /// when <paramref name="bodyType"/>'s inferred numeric type
     /// differs from the field's underlying declared type, the rendered expression is wrapped via
     /// <see cref="NumericCoercionWrap"/> (#961's <c>WriteDerived</c> precedent) — the wrapped value is
     /// always a <c>Copy</c> primitive, so this takes precedence over the String/Copy/clone ownership
@@ -193,6 +196,10 @@ public sealed partial class RustEmitter
         if (bodyType is { IsOptional: true })
         {
             owned = "(" + rendered + ").clone()";
+            if (OptionBodyNumericCoercionMap(underlyingType, bodyType) is { } mapWrap)
+            {
+                owned += $".map({mapWrap})";
+            }
         }
         else if (NumericCoercionWrap(underlyingType, bodyType) is { } wrap)
         {
