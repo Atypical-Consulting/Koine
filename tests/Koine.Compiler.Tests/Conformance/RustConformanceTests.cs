@@ -1674,6 +1674,64 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1372: <c>WriteUnary</c> prepended a bare <c>-</c> to the operand with no consultation of
+    /// its own optionality — <c>Option&lt;i64&gt;</c> does not implement <c>Neg</c>, so negating an
+    /// optional <c>Int</c> emitted invalid Rust (<c>-self.base_amount</c>, a real <c>cargo check</c>
+    /// E0600) even in isolation, with no comparison or arithmetic coercion involved at all.
+    /// </summary>
+    [Fact]
+    public void Negating_an_optional_int_operand_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int?\n" +
+            "    negated: Int? = -baseAmount\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.base_amount.map(|v| -v)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1372, composed shape discovered during #1354/#1357's review: negating an optional
+    /// <c>Int</c> then comparing it to a <c>Decimal</c> sibling must map inside the <c>Option</c> before
+    /// <c>WriteArithmeticOperand</c>'s own <c>.map(Decimal::from)</c> composes on top of it — either way,
+    /// <c>Option&lt;i64&gt;</c> has no <c>Neg</c> impl, so this fails independent of that (already-correct)
+    /// coercion logic.
+    /// </summary>
+    [Fact]
+    public void Negating_an_optional_int_operand_composed_with_decimal_coercion_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Invoice {\n" +
+            "    baseAmount: Int?\n" +
+            "    taxRate: Decimal\n" +
+            "    isEq: Bool = -baseAmount == taxRate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.base_amount.map(|v| -v).map(Decimal::from) == Some(self.tax_rate)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1319: a value object's constant-default field must be coerced to its declared Rust type in
     /// the smart constructor, or the emitted crate does not compile at all. Before the fix, a
     /// <c>Decimal</c> field defaulted to an <c>Int</c> literal emitted the raw literal (<c>tax_rate:
