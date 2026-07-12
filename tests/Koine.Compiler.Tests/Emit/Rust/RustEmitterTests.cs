@@ -954,7 +954,12 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("n.map(Decimal::from) == Some(self.rate)");
-        rust.ShouldNotContain("n == self.rate");
+        // The inner `let n = rate in n == rate` legitimately renders as `n == self.rate` (both operands
+        // Decimal, no coercion needed) — asserting on the whole method body (rather than a bare
+        // `ShouldNotContain("n == self.rate")`) avoids colliding with that correct inner occurrence while
+        // still pinning that the OUTER `n` (still `Int?`, restored after the inner pop) is widened.
+        rust.ShouldContain(
+            "{ let n = self.amount.clone(); ({ let n = self.rate; n == self.rate }) && " +
+            "(n.map(Decimal::from) == Some(self.rate)) }");
     }
 }

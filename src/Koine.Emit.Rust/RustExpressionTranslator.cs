@@ -39,8 +39,9 @@ internal sealed class RustExpressionTranslator
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
     private readonly IReadOnlyDictionary<(string Context, string Enum), IReadOnlyDictionary<string, string>> _enumVariants;
 
-    private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
+    // Per-name shadow stack: pushing a name that's already bound stacks the new binding on top rather
+    // than evicting the outer one, so popping it back off restores whatever was there before (#1370).
+    private readonly Dictionary<string, Stack<TypeRef?>> _localStacks = new(StringComparer.Ordinal);
     private readonly ISet<string> _derivedMembers;
     private readonly ISet<string> _constantDefaultedMembers;
     private readonly string _memberReceiver;
@@ -87,25 +88,36 @@ internal sealed class RustExpressionTranslator
 
     public void PushLocal(string name, TypeRef? type = null)
     {
-        _locals.Add(name);
-        if (type is not null)
+        if (!_localStacks.TryGetValue(name, out Stack<TypeRef?>? stack))
         {
-            _localTypes[name] = type;
+            stack = new Stack<TypeRef?>();
+            _localStacks[name] = stack;
         }
+
+        stack.Push(type);
     }
 
     public void PopLocal(string name)
     {
-        _locals.Remove(name);
-        _localTypes.Remove(name);
+        if (_localStacks.TryGetValue(name, out Stack<TypeRef?>? stack) && stack.Count > 0)
+        {
+            stack.Pop();
+            if (stack.Count == 0)
+            {
+                _localStacks.Remove(name);
+            }
+        }
     }
 
     private TypeScope EffectiveScope()
     {
         TypeScope scope = _scope;
-        foreach (KeyValuePair<string, TypeRef> kv in _localTypes)
+        foreach (KeyValuePair<string, Stack<TypeRef?>> kv in _localStacks)
         {
-            scope = scope.WithRef(kv.Key, kv.Value, _index);
+            if (kv.Value.Peek() is { } type)
+            {
+                scope = scope.WithRef(kv.Key, type, _index);
+            }
         }
 
         return scope;
@@ -705,7 +717,7 @@ internal sealed class RustExpressionTranslator
     /// unreachable from any real <c>.koi</c> model today (#1355), so this is the only way to pin its
     /// behavior independent of <see cref="WriteOperand"/>'s already-covered path.
     /// <para>
-    /// Resolves the identifier's own optionality internally (locals via <c>_localTypes</c>, members via
+    /// Resolves the identifier's own optionality internally (locals via <c>_localStacks</c>, members via
     /// <see cref="TypeResolver.Infer"/>) rather than depending on a caller-supplied <c>ownType</c> — the
     /// two call sites (this one and <see cref="WriteOperand"/>'s) can no longer silently diverge, since
     /// neither threads its own type through anymore (#1355, closes the gap #1347 patched at only one of
@@ -715,9 +727,9 @@ internal sealed class RustExpressionTranslator
     internal void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo)
     {
         // (1) Local (lambda/command/factory parameter, let binding): verbatim snake_case.
-        if (_locals.Contains(name))
+        if (_localStacks.TryGetValue(name, out Stack<TypeRef?>? localStack))
         {
-            TypeRef? ownType = _localTypes.GetValueOrDefault(name);
+            TypeRef? ownType = localStack.Peek();
             EmitCoerced(sb, coerceTo, ownType, () => sb.Append(RustNaming.Field(name)));
             return;
         }
@@ -800,7 +812,7 @@ internal sealed class RustExpressionTranslator
     /// <paramref name="ownType"/> that does not resolve. <see cref="BranchReconciliation"/> degrades a
     /// <see langword="null"/> type to "reconcile nothing" (right for a branch pair: render it as-is), but a
     /// <see langword="null"/> <paramref name="ownType"/> is reachable and must still widen — a local is
-    /// registered in <c>_locals</c> with its type in <c>_localTypes</c> only when one is known
+    /// registered in <c>_localStacks</c> with a <see langword="null"/> top-of-stack type when one isn't known
     /// (<see cref="PushLocal"/>'s type is optional; a lambda parameter whose element type does not resolve
     /// passes none), while <c>coerceTo</c> comes from <see cref="TypeResolver"/> via
     /// <see cref="WriteBinary"/>. So an unknown-typed local opposite a <c>Decimal</c> still needs its
@@ -833,7 +845,7 @@ internal sealed class RustExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus::Cancelled`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.Contains(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_localStacks.ContainsKey(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append("::").Append(VariantOf(qualifier.Name, ma.MemberName));
             return;
@@ -898,7 +910,7 @@ internal sealed class RustExpressionTranslator
     private bool IsConstantDefaultedTarget(Expr target) =>
         _mode == NameMode.Parameter
         && target is IdentifierExpr id
-        && !_locals.Contains(id.Name)
+        && !_localStacks.ContainsKey(id.Name)
         && _constantDefaultedMembers.Contains(id.Name);
 
     private void WriteCall(CallExpr call, StringBuilder sb)
@@ -968,7 +980,7 @@ internal sealed class RustExpressionTranslator
         }
 
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
-        var wasPresent = _locals.Contains(lambda.Parameter);
+        var wasPresent = _localStacks.ContainsKey(lambda.Parameter);
         PushLocal(lambda.Parameter, element);
         var bodyBuf = new StringBuilder();
         Write(lambda.Body, bodyBuf, null);
@@ -992,7 +1004,7 @@ internal sealed class RustExpressionTranslator
         }
 
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
-        var wasPresent = _locals.Contains(lambda.Parameter);
+        var wasPresent = _localStacks.ContainsKey(lambda.Parameter);
         PushLocal(lambda.Parameter, element);
         TypeRef? bodyType = _resolver.Infer(lambda.Body, EffectiveScope());
         var body = new StringBuilder();
