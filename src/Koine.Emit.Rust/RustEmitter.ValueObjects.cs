@@ -341,7 +341,7 @@ public sealed partial class RustEmitter
     /// glue that was hand-copied at each of their call sites (#1468, #1487) before this helper existed
     /// (#1491). Used wherever the two checks are genuinely adjacent: <see cref="WriteDerived"/>'s
     /// owned-value (<c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>) branch, and
-    /// <c>BuildFactoryCtorArgs</c>'s two loops in <c>RustEmitter.Entities.cs</c>. <see cref="WriteDerived"/>'s
+    /// <see cref="BuildFactoryCtorArgs"/>'s two loops in <c>RustEmitter.Entities.cs</c>. <see cref="WriteDerived"/>'s
     /// bare-body branch keeps its own two separate calls instead — see the comment at its
     /// <see cref="OptionBodyNumericCoercionMap"/> call site for why that composition can't route through
     /// here.
