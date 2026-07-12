@@ -267,18 +267,7 @@ public sealed partial class RustEmitter
         {
             body = translator.TranslateOwned(m.Initializer!, EnumExpectedRef(m, typeMapper));
             TypeRef? ownedBodyType = translator.InferType(m.Initializer!);
-            if (NumericCoercionWrap(underlyingType, ownedBodyType) is { } ownedWrap)
-            {
-                body = $"{ownedWrap}({body})";
-            }
-            // The body-side dual (#1487, mirrors #1468's BuildFactoryCtorArgs fix): when the owned body
-            // is itself Option-typed and numerically mismatched, NumericCoercionWrap above bails on
-            // ownedBodyType.IsOptional — the bare call-wrap it would return doesn't compose with an
-            // already-Option-shaped value, so `.map(...)` it instead.
-            else if (OptionBodyNumericCoercionMap(underlyingType, ownedBodyType) is { } ownedMapWrap)
-            {
-                body = $"{body}.map({ownedMapWrap})";
-            }
+            body = CoerceNumericBody(underlyingType, ownedBodyType, body);
             body = SomeWrapIfNeeded(body, m.Type, ownedBodyType);
         }
         else
@@ -314,7 +303,11 @@ public sealed partial class RustEmitter
             // numerically mismatched body needs `.map(...)`, not the bare call-wrap NumericCoercionWrap
             // above returns (it bails whenever bodyType.IsOptional). Applied after the clone/`to_string`
             // branch above (not as another arm of that chain) since the two independently compose — the
-            // owned/cloned-out Option value still needs `.map(...)`-coercing on top.
+            // owned/cloned-out Option value still needs `.map(...)`-coercing on top. Kept as two separate
+            // calls rather than routed through CoerceNumericBody (#1491): that dispatcher assumes the wrap
+            // and map checks are adjacent, but here the wrap check must gate clone/`to_string` (or an
+            // optional-declared member's numerically-mismatched body picks up a spurious `.clone()`) while
+            // the map check must run after them — a composition CoerceNumericBody can't express.
             if (OptionBodyNumericCoercionMap(underlyingType, bodyType) is { } mapWrap)
             {
                 body += $".map({mapWrap})";
@@ -341,6 +334,22 @@ public sealed partial class RustEmitter
     /// </summary>
     private static string SomeWrapIfNeeded(string body, TypeRef declared, TypeRef? bodyType) =>
         declared.IsOptional && bodyType is { IsOptional: false } ? $"Some({body})" : body;
+
+    /// <summary>
+    /// Applies whichever of <see cref="NumericCoercionWrap"/> / <see cref="OptionBodyNumericCoercionMap"/>
+    /// applies to <paramref name="body"/>, or returns it unchanged when neither does — the shared dispatch
+    /// glue that was hand-copied at each of their call sites (#1468, #1487) before this helper existed
+    /// (#1491). Used wherever the two checks are genuinely adjacent: <see cref="WriteDerived"/>'s
+    /// owned-value (<c>ConditionalExpr</c>/<c>LetExpr</c>/<c>GuardExpr</c>) branch, and
+    /// <c>BuildFactoryCtorArgs</c>'s two loops in <c>RustEmitter.Entities.cs</c>. <see cref="WriteDerived"/>'s
+    /// bare-body branch keeps its own two separate calls instead — see the comment at its
+    /// <see cref="OptionBodyNumericCoercionMap"/> call site for why that composition can't route through
+    /// here.
+    /// </summary>
+    private static string CoerceNumericBody(TypeRef declared, TypeRef? bodyType, string body) =>
+        NumericCoercionWrap(declared, bodyType) is { } wrap ? $"{wrap}({body})"
+        : OptionBodyNumericCoercionMap(declared, bodyType) is { } mapWrap ? $"{body}.map({mapWrap})"
+        : body;
 
     /// <summary>
     /// The Rust conversion function to wrap a derived member's body in when its inferred numeric type

@@ -504,19 +504,11 @@ public sealed partial class RustEmitter
                 // optional-declared member, NumericCoercionWrap short-circuits on declared.IsOptional
                 // and would otherwise silently skip a real Int-into-Decimal mismatch, emitting
                 // Some(5) against an Option<Decimal> parameter (the same gap #1437 fixed for the
-                // sibling defaultedParams loop below).
-                if (NumericCoercionWrap(underlyingDeclared, valueType) is { } wrap)
-                {
-                    owned = $"{wrap}({owned})";
-                }
-                // The body-side dual (#1468): when the initializing expression is itself Option-typed
-                // (e.g. a `T?` factory parameter) and numerically mismatched, NumericCoercionWrap above
-                // bails on bodyType.IsOptional — the bare call-wrap it would return doesn't compose with
-                // an already-Option-shaped value, so `.map(...)` it instead.
-                else if (OptionBodyNumericCoercionMap(underlyingDeclared, valueType) is { } mapWrap)
-                {
-                    owned = $"{owned}.map({mapWrap})";
-                }
+                // sibling defaultedParams loop below). CoerceNumericBody (#1491) dispatches to whichever
+                // of NumericCoercionWrap / OptionBodyNumericCoercionMap applies — see #1468 for why the
+                // latter (the `.map(...)` form) is needed when the initializing expression is itself
+                // Option-typed and numerically mismatched.
+                owned = CoerceNumericBody(underlyingDeclared, valueType, owned);
 
                 // Wrap in Some(...) only when the initializing expression isn't already Option-typed —
                 // the validator legally allows an Option-typed expression (e.g. a `T?` factory
@@ -560,18 +552,11 @@ public sealed partial class RustEmitter
                 // already-optional-declared member, `NumericCoercionWrap` short-circuits on
                 // `declared.IsOptional` and would otherwise silently skip a real Int-into-Decimal
                 // mismatch, emitting `Some(5)` against an `Option<Decimal>` parameter (a real `cargo
-                // check` E0308, #1437).
-                if (NumericCoercionWrap(underlyingDeclared, valueType) is { } wrap)
-                {
-                    owned = $"{wrap}({owned})";
-                }
-                // The body-side dual (#1468): an Option-typed, numerically mismatched initializing
-                // expression needs `.map(...)`, not the bare call-wrap above (which bails on an
-                // Option-typed body — see the sibling `required` loop's identical branch).
-                else if (OptionBodyNumericCoercionMap(underlyingDeclared, valueType) is { } mapWrap)
-                {
-                    owned = $"{owned}.map({mapWrap})";
-                }
+                // check` E0308, #1437). CoerceNumericBody (#1491) dispatches to whichever of
+                // NumericCoercionWrap / OptionBodyNumericCoercionMap applies — see #1468 for why the
+                // latter (the `.map(...)` form) is needed when the initializing expression is itself
+                // Option-typed and numerically mismatched (see the sibling `required` loop above).
+                owned = CoerceNumericBody(underlyingDeclared, valueType, owned);
 
                 // Wrap in `Some(...)` only when the initializing expression isn't already
                 // Option-typed — mirroring WriteCommand's Transition-handling guard above. Reachable
