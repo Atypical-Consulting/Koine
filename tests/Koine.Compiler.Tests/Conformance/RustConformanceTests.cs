@@ -3424,4 +3424,36 @@ public class RustConformanceTests
         var rust = string.Join("\n", files.Select(f => f.Contents));
         rust.ShouldContain("self.rate.clone().map(crate::koine_runtime::dec_to_i64)");
     }
+
+    /// <summary>
+    /// Issue #1373: comparing two optional operands where at least one is reached through a nested value
+    /// object's accessor (<c>d.amount == d.rate</c>, both <c>Option</c>-typed) used to fail a real
+    /// <c>cargo check</c> with E0308 — the coerced left operand
+    /// (<c>self.d.amount().map(Decimal::from)</c>) evaluates to owned <c>Option&lt;Decimal&gt;</c>, but
+    /// <c>self.d.rate()</c> returned a borrowed <c>&amp;Option&lt;Decimal&gt;</c>. Fixing
+    /// <c>RustTypeMapper.IsCopy</c>/<c>WriteAccessor</c> to return optional-but-Copy-inner fields by
+    /// value closes the mismatch.
+    /// </summary>
+    [Fact]
+    public void Two_optional_operands_compared_via_a_nested_accessor_compiles()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Discount {\n" +
+            "    amount: Int?\n" +
+            "    rate: Decimal?\n" +
+            "  }\n" +
+            "  value Money {\n" +
+            "    d: Discount\n" +
+            "    isEq: Bool = d.amount == d.rate\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

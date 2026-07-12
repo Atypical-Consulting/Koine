@@ -1216,4 +1216,42 @@ public class RustEmitterTests
 
         rust.ShouldContain("self.base_amount.map(|v| -v).map(Decimal::from) == Some(self.tax_rate)");
     }
+
+    private const string TwoOptionalOperandsComparedViaNestedAccessorModel = """
+        context Shop {
+          value Discount {
+            amount: Int?
+            rate: Decimal?
+          }
+          value Money {
+            d: Discount
+            isEq: Bool = d.amount == d.rate
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1373: comparing two optional operands where at least one is reached through a nested value
+    /// object's accessor (<c>d.rate</c>, an <c>Option&lt;Decimal&gt;</c> field) used to hit E0308 —
+    /// <c>WriteAccessor</c> always returned a <em>reference</em> (<c>&amp;Option&lt;Decimal&gt;</c>) for
+    /// any optional field regardless of the inner type's own Copy-ness, while the coerced left operand
+    /// (<c>self.d.amount().map(Decimal::from)</c>) evaluates to an <em>owned</em>
+    /// <c>Option&lt;Decimal&gt;</c>. Both <c>Int</c> and <c>Decimal</c> are Copy in the emitted Rust, so
+    /// <c>Option&lt;Int&gt;</c>/<c>Option&lt;Decimal&gt;</c> are themselves Copy — the accessor should
+    /// return owned, matching how a bare <c>self</c>-field read already behaves (#1343).
+    /// </summary>
+    [Fact]
+    public void Optional_copy_inner_accessor_returns_owned_value_so_two_optional_operands_compare()
+    {
+        var result = new KoineCompiler().Compile(TwoOptionalOperandsComparedViaNestedAccessorModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("pub fn amount(&self) -> Option<i64> { self.amount }");
+        rust.ShouldContain("pub fn rate(&self) -> Option<Decimal> { self.rate }");
+        rust.ShouldNotContain("-> &Option<i64>");
+        rust.ShouldNotContain("-> &Option<Decimal>");
+        rust.ShouldContain("self.d.amount().map(Decimal::from) == self.d.rate()");
+    }
 }
