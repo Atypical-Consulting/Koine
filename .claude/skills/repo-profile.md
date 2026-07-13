@@ -27,6 +27,21 @@
 - `dotnet build`
 - `dotnet test`
 - `dotnet format Koine.slnx --verify-no-changes --no-restore`
+- **Resolving CI status programmatically:** never trust `gh pr checks` or `mergeStateStatus` alone to
+  decide "is `build-and-test` (or any draft-gated job) green" — a draft PR that receives its last push
+  while still draft, then is later flipped ready without an intervening push, deterministically gets
+  **two** `build-and-test` check-runs on that final head SHA (one `skipped`, one real), because GitHub
+  Actions can't retroactively void an already-completed `skipped` run when `ready_for_review` re-triggers
+  the job (#1530; the `ready_for_review` re-trigger itself is #1481/PR #1515). `gh pr checks`'s per-name
+  summary keys off whichever check-run started most recently, so it can report "skipping" even when the
+  real run passed. Resolve status via the check-runs API instead: `success` if *any* check-run with that
+  name on the current head SHA has `conclusion == "success"`; otherwise the most-recent non-success
+  conclusion/status.
+  ```bash
+  gh api "repos/{owner}/{repo}/commits/<headSHA>/check-runs" \
+    --jq '[.check_runs[] | select(.name=="build-and-test") | (.conclusion // .status)]'
+  ```
+  The `merge-pr` and `auto-dev` skills (and the `auto-dev-worker` command) already gate this way.
 
 ## Integration style
 - **Merge mode:** squash
