@@ -60,13 +60,17 @@ which the REST PATCH rejects. Always go through the REST comments endpoint:
 ```bash
 if [ "$PLAN_SRC" = comment ]; then
   # All comments, newest-relevant plan comment wins. The marker is the bold header create-issue posted.
-  PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
-    --jq 'map(select(.body | contains("🛠️ Implementation plan"))) | last | .id')
+  # --slurp piped to a separate jq (gh's --jq can't combine with --slurp) flattens every page's
+  # array into one list before `last` picks the actual latest match — `--paginate --jq` alone runs
+  # the filter independently per page and concatenates the results, so `last` only sees whichever
+  # page happens to print after the others.
+  PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate --slurp \
+    | jq -r '[.[][] | select(.body | contains("🛠️ Implementation plan"))] | last | .id')
 
   # Fallback if no marker (older/hand-written plan): latest comment that has checkbox lines.
   if [ -z "$PLAN_COMMENT_ID" ]; then
-    PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
-      --jq 'map(select(.body | (contains("- [ ]") or contains("- [x]")))) | last | .id')
+    PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate --slurp \
+      | jq -r '[.[][] | select(.body | (contains("- [ ]") or contains("- [x]")))] | last | .id')
   fi
 
   # Nothing in the body AND nothing in comments? Stop — there is no plan to execute (Autonomy contract).
@@ -77,10 +81,14 @@ if [ "$PLAN_SRC" = comment ]; then
 fi
 ```
 
-`--paginate` matters: a busy issue can have >30 comments and the plan may not be on page one. Either
-way `/tmp/koine-plan-$ISSUE.md` now holds the plan text; a body-sourced file also carries the template
-fields and collapsed brainstorm/spec above it, which is fine — §3/§4 only ever touch `### Task`
-checkbox lines.
+`--paginate` matters: a busy issue can have >30 comments and the plan may not be on page one. And it
+must be `--paginate --slurp` piped to a separate `jq`, not `--paginate --jq` — `gh api`'s `--jq` runs
+its filter independently *per page* and concatenates the results rather than merging pages first, so a
+`last | .id` filter picks the last match on whichever page happens to print last, not the true latest
+match across the whole comment history; `--slurp` (which can't combine with `--jq`) flattens every
+page into one array before `jq` sees it. Either way `/tmp/koine-plan-$ISSUE.md` now holds the plan
+text; a body-sourced file also carries the template fields and collapsed brainstorm/spec above it,
+which is fine — §3/§4 only ever touch `### Task` checkbox lines.
 
 ---
 

@@ -98,8 +98,10 @@ if grep -q '🛠️ Implementation plan' /tmp/koine-plan-$ISSUE.md; then
   PLAN_SRC=body                       # Step 6 ticks boxes by PATCHing the issue body
 else
   PLAN_SRC=comment                    # legacy issue: the plan is a comment — locate and pull it instead
-  PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate \
-    --jq 'map(select(.body | contains("🛠️ Implementation plan"))) | last | .id')
+  # --slurp piped to a separate jq (gh's --jq can't combine with --slurp) flattens every page's
+  # array into one list before `last` picks the actual latest match.
+  PLAN_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate --slurp \
+    | jq -r '[.[][] | select(.body | contains("🛠️ Implementation plan"))] | last | .id')
   gh api "repos/{owner}/{repo}/issues/comments/$PLAN_COMMENT_ID" --jq .body > /tmp/koine-plan-$ISSUE.md
 fi
 ```
