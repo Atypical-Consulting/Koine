@@ -25,9 +25,10 @@ public class RustExpressionTranslatorTests
 
     /// <summary>
     /// Like <see cref="NewTranslator"/>, but the backing model also declares a smart enum
-    /// <c>Currency(symbol: String, decimals: Int)</c> and a value <c>Label { text: String }</c>, so
+    /// <c>Currency(symbol: String, decimals: Int)</c> and a value <c>Label { text: String, shout: String
+    /// =&gt; text.upper }</c> (a STORED field plus a DERIVED one), so
     /// <see cref="RustExpressionTranslator.ProducesBorrowedStr"/> tests can exercise a real
-    /// enum-associated-data resolution instead of an empty index.
+    /// enum-associated-data resolution and a stored-vs-derived distinction instead of an empty index.
     /// </summary>
     private static RustExpressionTranslator NewTranslatorWithEnum(IReadOnlyList<Member> members)
     {
@@ -37,7 +38,10 @@ public class RustExpressionTranslatorTests
               enum Currency(symbol: String, decimals: Int) {
                 EUR("€", 2)
               }
-              value Label { text: String }
+              value Label {
+                text: String
+                shout: String = text.upper
+              }
               value V { x: Int }
             }
             """;
@@ -286,16 +290,37 @@ public class RustExpressionTranslatorTests
     }
 
     /// <summary>
-    /// Issue #1533 guard: a plain value object's <c>String</c> field read (its accessor already returns
-    /// an owned <c>String</c>) must NOT be classified as borrowed — only the enum-accessor shape is.
+    /// Issue #1533 (Task 4 audit gap, found on this PR's own review): a STORED <c>String</c> field on
+    /// another value object also returns a borrowed <c>&amp;str</c> from its accessor
+    /// (<c>RustEmitter.ValueObjects.WriteAccessor</c> deliberately avoids cloning on every field read) —
+    /// not just a smart-enum's associated data. Confirmed against a real <c>cargo check</c> E0308 before
+    /// this fix (a nested value's plain String field read into a derived member).
     /// </summary>
     [Fact]
-    public void ProducesBorrowedStr_is_false_for_a_plain_String_field_read()
+    public void ProducesBorrowedStr_is_true_for_a_stored_String_field_on_another_value()
     {
         RustExpressionTranslator translator = NewTranslatorWithEnum(
             [new Member("label", new TypeRef("Label"), null)]);
 
         var expr = new MemberAccessExpr(new IdentifierExpr("label"), "text");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1533 guard: a DERIVED <c>String</c> member on another value object is NOT borrowed — its
+    /// own accessor (<c>RustEmitter.ValueObjects.WriteDerived</c>) always returns an owned
+    /// <c>String</c>, unlike a stored field's <c>&amp;str</c> accessor. Distinguishes the two via
+    /// <see cref="MemberAnalysis.IsDerived"/> rather than treating every <c>String</c>-typed member the
+    /// same.
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_false_for_a_derived_String_member_on_another_value()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("label", new TypeRef("Label"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("label"), "shout");
 
         translator.ProducesBorrowedStr(expr).ShouldBeFalse();
     }

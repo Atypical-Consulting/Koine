@@ -4168,6 +4168,70 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1533 (Task 4 audit gap, found on this PR's own review): a nested value object's plain,
+    /// STORED <c>String</c> field read into a derived member must also be owned — not just a smart
+    /// enum's associated data. <c>Address.street</c>'s accessor returns a borrowed <c>&amp;str</c> just
+    /// like a smart-enum accessor does (<c>RustEmitter.ValueObjects.WriteAccessor</c> deliberately avoids
+    /// cloning on every field read), so <c>self.address.street().clone()</c> is the same class of real
+    /// <c>cargo check</c> E0308 <c>ProducesBorrowedStr</c> already fixes for enum accessors.
+    /// </summary>
+    [Fact]
+    public void Stored_String_field_on_a_nested_value_read_into_a_derived_member_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              value Address {
+                street: String
+              }
+              value Person {
+                address: Address
+                label: String = address.street
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1533 guard: a DERIVED <c>String</c> member on a nested value must stay unaffected — its own
+    /// accessor already returns an owned <c>String</c> (<c>RustEmitter.ValueObjects.WriteDerived</c>), so
+    /// reading it into another derived member must still emit <c>.to_string()</c> (owning whatever the
+    /// resolved type says, per <see cref="RustExpressionTranslator.TranslateOwned"/>'s sibling logic) and
+    /// must NOT be misclassified as already-borrowed by <c>ProducesBorrowedStr</c>.
+    /// </summary>
+    [Fact]
+    public void Derived_String_member_on_a_nested_value_read_into_another_derived_member_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              value Address {
+                street: String
+                shout: String = street.upper
+              }
+              value Person {
+                address: Address
+                label: String = address.shout
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1523: a command's <c>result</c> expression never <c>Some(...)</c>-wraps toward an
     /// optional-declared return type — an <c>Int</c> literal result must compile against <c>Decimal?</c>
     /// (composing with #1511's numeric widening as <c>Ok(Some(Decimal::from(5)))</c>).

@@ -1194,19 +1194,22 @@ internal sealed class RustExpressionTranslator
     /// True when <paramref name="expr"/>'s emitted Rust evaluates to a BORROWED <c>&amp;str</c> rather
     /// than an owned <c>String</c> — decided from the resolved AST/type, not by inspecting the rendered
     /// text (#1533; replaces a <c>body.EndsWith(".trim()")</c> heuristic that only recognized one of the
-    /// two borrowed shapes). Two independent sources render borrowed:
+    /// borrowed shapes below). Three independent sources render borrowed:
     /// <list type="bullet">
     /// <item>a <c>.trim()</c> string member op (<c>str::trim</c> borrows its receiver);</item>
     /// <item>a smart enum's <c>String</c>-typed associated-data accessor (<c>fn symbol(&amp;self) -&gt;
     /// &amp;'static str</c>, deliberately <c>const</c>-shaped) — a <see cref="MemberAccessExpr"/> whose
     /// receiver resolves to a <see cref="TypeKind.Enum"/> and whose member resolves through
-    /// <see cref="ModelIndex.TryGetMemberType(string,string,out TypeRef)"/> to a non-optional
-    /// <c>String</c>.</item>
+    /// <see cref="ModelIndex.TryGetMemberType(string?,string,string,out TypeRef)"/> to a non-optional
+    /// <c>String</c>;</item>
+    /// <item>a STORED (non-derived) <c>String</c> field on another value/entity/event — its accessor
+    /// (<c>RustEmitter.ValueObjects.WriteAccessor</c>) deliberately returns <c>&amp;str</c> too, to avoid
+    /// cloning on every field read. A DERIVED member's own accessor always returns an owned
+    /// <c>String</c> instead (<c>WriteDerived</c>'s return type), so it is excluded via
+    /// <see cref="MemberAnalysis.IsDerived"/>.</item>
     /// </list>
     /// A caller that needs an owned value from such a body must append <c>.to_string()</c>, not
-    /// <c>.clone()</c> — cloning a <c>&amp;str</c> is still a <c>&amp;str</c>. A plain field/derived-member
-    /// read (any other <see cref="MemberAccessExpr"/>) already returns an owned <c>String</c> from its
-    /// accessor, so it is NOT borrowed.
+    /// <c>.clone()</c> — cloning a <c>&amp;str</c> is still a <c>&amp;str</c>.
     /// </summary>
     internal bool ProducesBorrowedStr(Expr expr)
     {
@@ -1221,10 +1224,51 @@ internal sealed class RustExpressionTranslator
         }
 
         TypeRef? receiverType = _resolver.Infer(ma.Target, EffectiveScope());
-        return receiverType is not null
-            && _index.Classify(receiverType.Name) == TypeKind.Enum
-            && _index.TryGetMemberType(receiverType.Name, ma.MemberName, out TypeRef memberType)
-            && memberType is { Name: "String", IsOptional: false };
+        if (receiverType is null)
+        {
+            return false;
+        }
+
+        // Context-aware (R13.2): a bare `Currency` may resolve differently per bounded context, so the
+        // lookups below must resolve against the SAME context TypeResolver.Infer just used — mirroring
+        // TypeResolver.VisitMemberAccess and every sibling emitter's identical MemberAccessExpr check
+        // (CSharp/Java/Kotlin/Php/Python/TypeScript), rather than a context-blind global overload.
+        string? context = receiverType.Qualifier ?? _resolver.Context;
+
+        if (_index.Classify(receiverType.Name) == TypeKind.Enum)
+        {
+            return _index.TryGetMemberType(context, receiverType.Name, ma.MemberName, out TypeRef enumMemberType)
+                && enumMemberType is { Name: "String", IsOptional: false };
+        }
+
+        if (ResolveDecl(context, receiverType.Name) is not { } decl)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Member>? members = decl switch
+        {
+            ValueObjectDecl v => v.Members,
+            EntityDecl e => e.Members,
+            EventDecl ev => ev.Members,
+            IntegrationEventDecl ie => ie.Members,
+            _ => null
+        };
+
+        Member? member = members?.FirstOrDefault(m => string.Equals(m.Name, ma.MemberName, StringComparison.Ordinal));
+        return member is { Type: { Name: "String", IsOptional: false } }
+            && !MemberAnalysis.IsDerived(member, members!.Select(m => m.Name));
+    }
+
+    /// <summary>Resolves a type declaration context-first (R13.2), falling back to the global view.</summary>
+    private TypeDecl? ResolveDecl(string? context, string typeName)
+    {
+        if (context is not null && _index.TryGetDeclIn(context, typeName, out TypeDecl inContext))
+        {
+            return inContext;
+        }
+
+        return _index.TryGetDecl(typeName, out TypeDecl global) ? global : null;
     }
 
     /// <summary>True when an expression's inferred type is optional — used to decide <c>Some(...)</c> wrapping.</summary>
