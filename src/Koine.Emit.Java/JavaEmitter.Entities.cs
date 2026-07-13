@@ -532,9 +532,19 @@ public sealed partial class JavaEmitter
                     ? $"java.util.Optional.of({translated})"
                     : translated);
             }
-            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
+            else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
-                args.Add(JavaNaming.Member(m.Name)); // auto-bound same-named parameter
+                var field = JavaNaming.Member(m.Name); // auto-bound same-named parameter
+
+                // Wrap in Optional.of(...) only when the bound parameter isn't itself Optional-typed —
+                // AutoBinds legally permits a non-optional parameter to bind to an optional-declared
+                // required member (the constructor still declares Optional<T> since the member can be
+                // legitimately unset in other factories), but a param that is already optional-typed is
+                // already the correct Optional<T> shape, and wrapping it again would double-wrap into
+                // Optional<Optional<T>>, a real javac "incompatible types" error.
+                args.Add(m.Type.IsOptional && !boundParam.Type.IsOptional
+                    ? $"java.util.Optional.of({field})"
+                    : field);
             }
             else if (m.Type.IsOptional)
             {
