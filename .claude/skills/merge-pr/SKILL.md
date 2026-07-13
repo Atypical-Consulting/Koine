@@ -120,8 +120,10 @@ check-runs on the PR's head SHA, not `gh pr checks` — #1530 means `gh pr check
 
 ```bash
 SHA=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
-runs=$(gh api "repos/{owner}/{repo}/commits/$SHA/check-runs" --paginate \
-         --jq '[.check_runs[] | {name, state: (.conclusion // .status)}]')
+# --slurp piped to a separate jq (gh's --jq can't combine with --slurp) flattens every page's
+# {total_count, check_runs:[...]} into one list — safe even if check-runs ever exceed a page.
+runs=$(gh api "repos/{owner}/{repo}/commits/$SHA/check-runs" --paginate --slurp \
+         | jq '[.[].check_runs[] | {name, state: (.conclusion // .status)}]')
 
 failed=$(printf '%s' "$runs"  | jq '[.[] | select(.state=="failure" or .state=="cancelled" or .state=="timed_out" or .state=="action_required")]')
 pending=$(printf '%s' "$runs" | jq '[.[] | select(.state=="queued" or .state=="in_progress")]')
@@ -130,6 +132,8 @@ pending=$(printf '%s' "$runs" | jq '[.[] | select(.state=="queued" or .state=="i
 While `pending` is non-empty, wait (re-poll, or come back later via `ScheduleWakeup` rather than
 busy-looping) — then judge:
 
+- **`runs` is empty** (no check-runs at all) → the PR has no CI; treat CI as satisfied and let Step 4's
+  merge-state be the gate.
 - `failed` non-empty → read which and why before reacting; the failure feeds Step 4's correction (below).
 - `failed` empty → Step 4 to confirm mergeability (nothing-failed ≠ mergeable; `main` may have moved).
 

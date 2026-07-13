@@ -66,8 +66,10 @@ trusted directly:
 
 ```bash
 SHA=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
-runs=$(gh api "repos/{owner}/{repo}/commits/$SHA/check-runs" --paginate \
-         --jq '[.check_runs[] | {name, state: (.conclusion // .status)}]')
+# --slurp piped to a separate jq (gh's --jq can't combine with --slurp) flattens every page's
+# {total_count, check_runs:[...]} into one list — safe even if check-runs ever exceed a page.
+runs=$(gh api "repos/{owner}/{repo}/commits/$SHA/check-runs" --paginate --slurp \
+         | jq '[.[].check_runs[] | {name, state: (.conclusion // .status)}]')
 
 failed=$(printf '%s' "$runs"  | jq '[.[] | select(.state=="failure" or .state=="cancelled" or .state=="timed_out" or .state=="action_required")]')
 pending=$(printf '%s' "$runs" | jq '[.[] | select(.state=="queued" or .state=="in_progress")]')
