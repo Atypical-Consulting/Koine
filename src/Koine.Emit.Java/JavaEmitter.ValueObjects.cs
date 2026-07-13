@@ -244,9 +244,22 @@ public sealed partial class JavaEmitter
             WriteNormalization(sb, m, Indent + Indent);
         }
 
+        // The compact constructor's own PARAMETERS are the record's stored components — reserve them
+        // before translating any invariant (NameMode.Parameter reads them bare), so a `let` binding whose
+        // name collides with one alpha-renames instead of re-declaring it (#1536).
+        foreach (Member m in stored)
+        {
+            translator.PushLocal(m.Name, m.Type);
+        }
+
         foreach (Invariant inv in vo.Invariants)
         {
             WriteInvariantGuard(sb, inv, translator, Indent + Indent);
+        }
+
+        foreach (Member m in stored)
+        {
+            translator.PopLocal(m.Name);
         }
 
         sb.Append(Indent).Append("}\n");

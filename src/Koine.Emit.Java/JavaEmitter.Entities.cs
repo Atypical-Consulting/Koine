@@ -179,12 +179,29 @@ public sealed partial class JavaEmitter
               .Append(NormalizedCtorArg(m)).Append(";\n");
         }
 
+        // The constructor's own PARAMETERS ("id" and each required member) are live Java locals for the
+        // rest of the constructor body — reserve them before translating a defaulted member's initializer
+        // (NameMode.Parameter reads them bare), so a `let` binding whose name collides with one
+        // alpha-renames instead of re-declaring it (#1536). Mirrors the factory's own id/parameter scope.
+        translator.PushLocal("id", new TypeRef(entity.IdentityName));
+        foreach (Member m in required)
+        {
+            translator.PushLocal(m.Name, m.Type);
+        }
+
         foreach (Member m in defaulted)
         {
             var value = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
             sb.Append(Indent).Append(Indent).Append("this.").Append(JavaNaming.Member(m.Name)).Append(" = ")
               .Append(value).Append(";\n");
         }
+
+        foreach (Member m in required)
+        {
+            translator.PopLocal(m.Name);
+        }
+
+        translator.PopLocal("id");
 
         if (entity.Invariants.Count > 0)
         {

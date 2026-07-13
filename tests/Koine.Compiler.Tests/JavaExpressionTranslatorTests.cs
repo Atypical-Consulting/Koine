@@ -344,4 +344,69 @@ public class JavaExpressionTranslatorTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// A value object's COMPACT CONSTRUCTOR implicitly parameterizes over its own stored components (a
+    /// record's components are bare parameters inside <c>public Money { ... }</c>), so an invariant's
+    /// <c>let</c> binding that collides with a component name must alpha-rename exactly like it would
+    /// against a command parameter — a collision source the initial fix missed (only command/factory
+    /// parameters were reserved, not a value object's own record components).
+    /// </summary>
+    [Fact]
+    public void LetCollidingWithAValueObjectsOwnComponent_AlphaRenamesTheLetBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                amount: Int
+                invariant (let amount = 5 in amount) > 0 "must be positive"
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
+
+        money.ShouldContain("var amount$1 = 5L; return amount$1;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// An entity's DEFAULTED-MEMBER initializer translates inside the validating constructor
+    /// (<c>NameMode.Parameter</c>, so it reads the constructor's own "id"/required-member parameters
+    /// bare) — a <c>let</c> binding that collides with one of those parameters must alpha-rename, the
+    /// same collision source as the value-object compact constructor, missed by the initial fix.
+    /// </summary>
+    [Fact]
+    public void LetCollidingWithAnEntityConstructorParameter_AlphaRenamesTheLetBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Order identified by OrderId {
+                total: Int
+                fee: Int = let total = 5 in total + 1
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java")).Contents;
+
+        order.ShouldContain("var total$1 = 5L; return total$1 + 1L;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
