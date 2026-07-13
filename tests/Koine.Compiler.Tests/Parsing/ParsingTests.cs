@@ -198,4 +198,32 @@ public class ParsingTests
         model.ShouldNotBeNull();
         model.Contexts.ShouldHaveSingleItem();
     }
+
+    [Theory]
+    // Audit finding while fixing #1512 (a `let` expression with a missing body): a truncated
+    // `if <cond> then` / `if <cond> then <e> else` — nothing follows `then` or `else` — used to
+    // crash the compiler the same way. `BuildCond`'s recursive `condExpr(i)` call and
+    // `BuildCoalesce`'s `coalesceExpr()` fallback both dereferenced a context that ANTLR's
+    // recovery can leave null/empty; guarded the same way as `BuildLet`/`BuildGuard`.
+    [InlineData("context C {\n  value V {\n    a: Int\n    result: Int = if a > 0 then\n  }\n}\n")]        // missing then-branch
+    [InlineData("context C {\n  value V {\n    a: Int\n    result: Int = if a > 0 then 1 else\n  }\n}\n")] // missing else-branch
+    public void Truncated_conditional_yields_a_syntax_diagnostic_not_a_throw(string source)
+    {
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(source, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    // Positive-regression companion: a well-formed if/then/else is completely unaffected.
+    public void Well_formed_conditional_parses_without_syntax_errors()
+    {
+        const string source = "context C {\n  value V {\n    a: Int\n    result: Int = if a > 0 then 1 else 0\n  }\n}\n";
+
+        var (model, diagnostics) = new KoineCompiler().Parse(source, "t.koi");
+
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
 }
