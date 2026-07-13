@@ -189,6 +189,42 @@ public class R2OptionalityTests
     }
 
     [Fact]
+    public void Sum_over_a_guard_narrowed_optional_selector_is_rejected()
+    {
+        // #1556: `qty` is guard-narrowed to present for the `then` branch, but the selector's
+        // inferred TypeRef still carries IsOptional (narrowing is checker-only, never fed back
+        // into TypeResolver), and the TS emitter can't render an optional-typed fold as valid
+        // `tsc --strict` output — so this must be rejected here, at the validator, uniformly
+        // across every emitter.
+        const string src =
+            "context C {\n" +
+            "  value V {\n" +
+            "    rate:  Decimal\n" +
+            "    qty:   Int?\n" +
+            "    rates: List<Decimal>\n" +
+            "    total: Decimal? = if qty.isPresent then rates.sum(r => qty + r) else rate\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldContain(d => d.Message.Contains("sum requires a non-optional selector"));
+    }
+
+    [Fact]
+    public void Sum_over_a_selector_resolved_via_coalesce_is_accepted()
+    {
+        // `qty ?? 0` fully resolves to a non-optional Int before it ever reaches the selector body,
+        // so the aggregate-selector check must not flag it.
+        const string src =
+            "context C {\n" +
+            "  value V {\n" +
+            "    qty:   Int?\n" +
+            "    rates: List<Int>\n" +
+            "    total: Int = rates.sum(r => (qty ?? 0) + r)\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Coalesce_with_optional_fallback_stays_optional()
     {
         // name is also optional, so `nickname ?? name` is still optional -> can't fill String.

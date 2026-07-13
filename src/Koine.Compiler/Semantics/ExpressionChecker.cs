@@ -1041,6 +1041,20 @@ internal sealed class ExpressionChecker
             return;
         }
 
+        // Guard-narrowing (`if x.isPresent then …`) is validator-only bookkeeping (see
+        // IsUnguardedOptional) that never feeds back into TypeResolver, so a selector built from a
+        // guard-narrowed optional operand still infers as optional here — exactly the case where an
+        // emitter (e.g. TypeScript, whose own closure-scoped narrowing can't see the guard either)
+        // would otherwise have to render a fold over a possibly-absent element. Reject it uniformly
+        // instead of letting the shape reach any emitter; a selector resolved with '??' first is
+        // already non-optional by the time it gets here, so it's unaffected.
+        if (selector.IsOptional)
+        {
+            Report(DiagnosticCodes.AggregateSelectorOptional,
+                $"{op} requires a non-optional selector; guard with isPresent or use '??' before folding", call);
+            return;
+        }
+
         if (op == "sum")
         {
             if (!TypeResolver.IsNumeric(selector) && _index.Classify(selector.Name) != TypeKind.Value)

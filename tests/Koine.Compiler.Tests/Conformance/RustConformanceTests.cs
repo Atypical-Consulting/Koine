@@ -2600,12 +2600,14 @@ public class RustConformanceTests
     }
 
     /// <summary>
-    /// Issue #1354, second shape: the same fix for a <c>CallExpr</c> operand (an aggregate over an
-    /// optional <c>Int?</c> selector) compared to a non-optional <c>Decimal</c> — confirms the branch
-    /// keys off the operand's own type, not its expression shape.
+    /// Issue #1354, second shape: a <c>CallExpr</c> operand (an aggregate over an optional <c>Int?</c>
+    /// selector) compared to a non-optional <c>Decimal</c> used to confirm the operand-wrap fix keyed
+    /// off the operand's own type, not its expression shape. #1556 subsequently rejects an optional
+    /// <c>max</c>/<c>min</c>/<c>sum</c> selector at semantic validation, so this model no longer reaches
+    /// any emitter; this test now pins that rejection instead of a Rust compile.
     /// </summary>
     [Fact]
-    public void Optional_int_call_operand_compared_to_decimal_emits_compiling_rust()
+    public void Optional_selector_for_max_is_rejected_before_reaching_any_emitter()
     {
         const string src =
             "context Shop {\n" +
@@ -2619,12 +2621,8 @@ public class RustConformanceTests
             "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new RustEmitter());
-        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
-
-        var r = TestSupport.CompileRust(result.Files);
-        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
-
-        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+        result.Success.ShouldBeFalse();
+        result.Diagnostics.ShouldContain(d => d.Message.Contains("max requires a non-optional selector"));
     }
 
     /// <summary>

@@ -300,6 +300,7 @@ Koine.Compiler.Services.TypeHierarchyItemKind.ReadModel = 3 -> Koine.Compiler.Se
 Koine.Compiler.Services.TypeHierarchyItemKind.Value = 2 -> Koine.Compiler.Services.TypeHierarchyItemKind
 Koine.Compiler.Services.VersionInfo
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI0109" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateSelectorOptional = "KOI0404" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI0809" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DivisionByZeroInConstantDefault = "KOI1606" -> string!
