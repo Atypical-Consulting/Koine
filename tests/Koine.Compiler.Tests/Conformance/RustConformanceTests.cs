@@ -4036,6 +4036,38 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1533 edge case: an OPTIONAL-declared <c>String?</c> derived member whose body is a smart
+    /// enum's <c>String</c> associated-data accessor must be owned (<c>.to_string()</c>) BEFORE
+    /// <c>SomeWrapIfNeeded</c> wraps it in <c>Some(...)</c> — mirrors #1332's ordering for the sibling
+    /// <c>.trim()</c> shape. A bare <c>Some(self.currency.symbol())</c> would wrap the borrowed
+    /// <c>&amp;'static str</c> straight into <c>Option&lt;String&gt;</c>, a real E0308.
+    /// </summary>
+    [Fact]
+    public void Smart_enum_String_associated_data_read_into_an_optional_derived_member_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+                USD("$", 2)
+              }
+              value Price {
+                currency: Currency
+                label: String? = currency.symbol
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1523: a command's <c>result</c> expression never <c>Some(...)</c>-wraps toward an
     /// optional-declared return type — an <c>Int</c> literal result must compile against <c>Decimal?</c>
     /// (composing with #1511's numeric widening as <c>Ok(Some(Decimal::from(5)))</c>).
