@@ -200,7 +200,9 @@ public class RustExpressionTranslatorTests
 
         var comparison = new BinaryExpr(BinaryOp.Eq, new IdentifierExpr("n"), new IdentifierExpr("rate"));
 
-        translator.Translate(comparison).ShouldBe("n == self.rate");
+        // Before: `Decimal::from(n) == self.rate` — the widen driven by the member `n: Int` the local
+        // merely shares a name with.
+        translator.Translate(comparison).ShouldBe("(n == self.rate)");
     }
 
     /// <summary>
