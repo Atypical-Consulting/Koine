@@ -190,3 +190,5 @@ export function installExplorerSyncRendering(): void {
     }
   };
 }
+
+// scratch: verifying the issue #1486 front-end-only path filter; this PR is closed, never merged.
