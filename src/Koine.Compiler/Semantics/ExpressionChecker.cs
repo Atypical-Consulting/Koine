@@ -859,12 +859,12 @@ internal sealed class ExpressionChecker
     /// A receiver whose member set the model can enumerate, so an access naming something outside it is
     /// definitively an unknown member rather than something we simply can't check: a value/entity (its
     /// declared members) or an enum (its associated-data signature — empty for a bare-name enum, so every
-    /// member access on one is unknown). Both resolve through the same <see cref="ModelIndex"/> surface
-    /// <see cref="TypeResolver.Infer"/> uses, so the checker and the resolver agree on what a member
-    /// access means (#1498).
+    /// member access on one is unknown). All three resolve through the same <see cref="ModelIndex"/>
+    /// surface <see cref="TypeResolver.Infer"/> uses, so the checker and the resolver agree on what a
+    /// member access means (#1498). Classifies once — this runs per member access.
     /// </summary>
     private bool HasKnownMemberSet(TypeRef t) =>
-        _resolver.IsUserType(t) || _index.Classify(t.Name) == TypeKind.Enum;
+        _index.Classify(t.Name) is TypeKind.Value or TypeKind.Entity or TypeKind.Enum;
 
     /// <summary>List/Set/Map — types that expose count/isEmpty/isNotEmpty.</summary>
     private bool IsCollection(TypeRef t) =>

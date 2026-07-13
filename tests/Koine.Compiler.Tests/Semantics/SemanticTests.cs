@@ -202,4 +202,51 @@ public class SemanticTests
             """;
         Validate(src).ShouldBeEmpty();
     }
+
+    /// <summary>
+    /// Issue #1498, the other receiver kind the same gap left unvalidated: a <c>Range</c> has no members
+    /// at all, so — like a primitive — every member access on one names something it does not have.
+    /// </summary>
+    [Fact]
+    public void Unknown_member_on_a_range_receiver_is_reported()
+    {
+        const string src =
+            """
+            context C {
+              value V {
+                r: Range<Int>
+                b: Bool = r.bogus
+              }
+            }
+            """;
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownMember && d.Message.Contains("'Range'"));
+    }
+
+    /// <summary>
+    /// Issue #1498's #605 corollary: a declared member named after a built-in member-op SHADOWS the op
+    /// (resolve it as an ordinary field access, no collection-op diagnostic) — a rule that until now
+    /// applied only to value/entity receivers, so a smart enum whose associated data happened to be
+    /// called <c>count</c> was UNUSABLE: reading it raised
+    /// <c>KOI0207: collection operation 'count' cannot be applied to 'E'</c>. Extending the gate to enums
+    /// makes the checker agree with <c>TypeResolver.VisitMemberAccess</c>, which already resolved any
+    /// declared member ahead of the built-in ops.
+    /// </summary>
+    [Fact]
+    public void Smart_enum_datum_named_after_a_builtin_op_shadows_the_op()
+    {
+        const string src =
+            """
+            context C {
+              enum E(count: Int) {
+                A(1)
+                B(2)
+              }
+              value V {
+                e: E
+                n: Int = e.count
+              }
+            }
+            """;
+        Validate(src).ShouldBeEmpty();
+    }
 }

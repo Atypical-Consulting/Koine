@@ -693,6 +693,13 @@ public sealed class ModelIndex
     /// <summary>
     /// The declared member names of a value/entity/enum type (for suggestions) — for a smart enum, its
     /// associated-data parameters, the same set <see cref="MemberTypeOf"/> resolves against.
+    /// <para>
+    /// NOT the same list as <see cref="EnumDecl.MemberNames"/>, which is the enum's VARIANT names: for
+    /// <c>enum Currency(symbol: String, decimals: Int) { EUR("€", 2) }</c> this returns
+    /// <c>symbol</c>/<c>decimals</c> (what a <c>currency.x</c> access may name) while
+    /// <see cref="EnumDecl.MemberNames"/> returns <c>EUR</c> (what a <c>Currency.X</c> qualified
+    /// reference may name). Reach for whichever question you are actually asking.
+    /// </para>
     /// </summary>
     public IEnumerable<string> MemberNames(string typeName) => _byName.TryGetValue(typeName, out TypeDecl? decl)
         ? decl switch
