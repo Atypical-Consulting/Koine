@@ -1168,14 +1168,22 @@ internal sealed class RustExpressionTranslator
     public TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
 
     /// <summary>
-    /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position: a non-Copy
-    /// place (a field/local such as the entity <c>id</c>, or a <c>.field()</c> accessor result) is cloned
-    /// so the value is moved out by value rather than borrowed from <c>&amp;self</c>. A bare
-    /// conditional/let/guard (no arithmetic operator at all) routes through <see cref="WriteOwnedOperand"/>
-    /// instead, so a leaf place a branch would otherwise move out of <c>&amp;self</c> is cloned too
-    /// (#1282) — the non-compound cases below are unchanged.
+    /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position, or a
+    /// command transition's assignment RHS: a non-Copy place (a field/local such as the entity
+    /// <c>id</c>, or a <c>.field()</c> accessor result) is cloned so the value is moved out by value
+    /// rather than borrowed from <c>&amp;self</c>. A bare conditional/let/guard (no arithmetic operator
+    /// at all) routes through <see cref="WriteOwnedOperand"/> instead, so a leaf place a branch would
+    /// otherwise move out of <c>&amp;self</c> is cloned too (#1282) — the non-compound cases below are
+    /// unchanged. <paramref name="coerceTo"/> is an optional widening directive (#1511): when the
+    /// caller has already established the RHS is a numeric mismatch against a target field's declared
+    /// type (e.g. an <c>Int</c> value into a <c>Decimal</c> field), passing the target's underlying type
+    /// widens a leaf place/literal via the same <see cref="EmitCoerced"/> a sibling-operand coercion
+    /// already uses (so a literal like <c>5</c> renders <c>Decimal::from(5i64)</c>, not a bare
+    /// post-string-wrapped <c>Decimal::from(5)</c>), and wraps a compound body's already-reconciled
+    /// rendering the same way <see cref="WriteBinary"/>'s operand coercion does. Left <see langword="null"/> by
+    /// every pre-existing call site, so this is purely additive.
     /// </summary>
-    public string TranslateOwned(Expr expr, string? expectedEnum = null)
+    public string TranslateOwned(Expr expr, string? expectedEnum = null, TypeRef? coerceTo = null)
     {
         if (expr is ConditionalExpr or LetExpr or GuardExpr)
         {
@@ -1186,10 +1194,28 @@ internal sealed class RustExpressionTranslator
             WriteOwnedOperand(expr, ownedSb);
             _expectedEnum = null;
             _mode = prevMode;
-            return ownedSb.ToString();
+            var owned = ownedSb.ToString();
+            if (coerceTo is null)
+            {
+                return owned;
+            }
+
+            // The branches are already reconciled against EACH OTHER (WriteReconciledBranch); this
+            // wraps the whole, already-owned rendering toward `coerceTo` the same way a leaf place does.
+            TypeRef? ownedType = _resolver.Infer(expr, EffectiveScope());
+            var coercedSb = new StringBuilder();
+            EmitCoerced(coercedSb, coerceTo, ownedType, () => coercedSb.Append(owned));
+            return coercedSb.ToString();
         }
 
-        var rendered = Translate(expr, expectedEnum);
+        var prevMode2 = _mode;
+        _mode = NameMode.Property;
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+        Write(expr, sb, coerceTo);
+        _expectedEnum = null;
+        _mode = prevMode2;
+        var rendered = sb.ToString();
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
 
         // A String result may be `&str` (a `.trim` accessor, a nested value's String field, a literal)

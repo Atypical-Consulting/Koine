@@ -230,14 +230,32 @@ public sealed partial class RustEmitter
         // 2. State transitions.
         foreach (Transition t in cmd.Body.OfType<Transition>())
         {
+            Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
+
+            // Widen an Int-inferred RHS toward a Decimal-declared field, mirroring the smart
+            // constructor's default path (CoercedDefaultValue) and BuildFactoryCtorArgs (#1511) — Rust
+            // has no implicit numeric widening, so `amount -> 5` on a `Decimal` field would otherwise
+            // emit an uncoerced `5` (E0308). Gated on an actual Int-vs-Decimal mismatch (never on the
+            // field's own optionality) so an already-matching RHS renders byte-identical.
+            TypeRef? coerceTo = null;
+            if (field is not null)
+            {
+                TypeRef fieldUnderlying = UnderlyingType(field.Type);
+                TypeRef? valueUnderlying = translator.InferType(t.Value) is { } vt ? UnderlyingType(vt) : null;
+                if (fieldUnderlying is { Name: "Decimal" } && valueUnderlying is { Name: "Int" })
+                {
+                    coerceTo = fieldUnderlying;
+                }
+            }
+
             // Own the RHS so a non-Copy place (another field) or a String accessor/literal is moved
             // by value into the field rather than borrowed from `&mut self`.
             var value = RustExpressionTranslator.StripOuterParens(
-                translator.TranslateOwned(t.Value, TransitionEnum(entity, t, emit.Index)));
+                translator.TranslateOwned(t.Value, TransitionEnum(entity, t, emit.Index), coerceTo));
 
             // Assigning a non-optional value into an `Option<T>` field (e.g. `started_at <- now`) wraps
-            // it in `Some(...)`; an already-optional RHS flows through unchanged.
-            Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
+            // it in `Some(...)`; an already-optional RHS flows through unchanged. Composes with the
+            // widening above as `Some(Decimal::from(...))` — widen inside, wrap outside.
             if (field is { Type.IsOptional: true } && !translator.IsOptional(t.Value))
             {
                 value = $"Some({value})";
