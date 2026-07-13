@@ -4068,6 +4068,106 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1533 Task 4 audit: a factory's explicit <c>field -&gt; expr</c> initialization of a required
+    /// <c>String</c> member with a smart-enum <c>String</c> associated-data read. <c>BuildFactoryCtorArgs</c>
+    /// already routes through <see cref="RustExpressionTranslator.TranslateOwned"/>, which owns any
+    /// <c>String</c>-typed result via <c>.to_string()</c> from the RESOLVED type — not the rendered body
+    /// text — so this site was never actually reachable by the #1533 bug; this test proves it stays green.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_String_member_from_a_smart_enum_associated_data_read_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+              }
+              entity Product identified by ProductId {
+                currency: Currency
+                label: String
+                create make(currency: Currency) {
+                  label -> currency.symbol
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1533 Task 4 audit: a command transition (<c>field -&gt; expr</c>) assigning a <c>String</c>
+    /// member from a smart-enum <c>String</c> associated-data read. Same <c>TranslateOwned</c> call site
+    /// as the factory case above — proves the transition path stays green too.
+    /// </summary>
+    [Fact]
+    public void Transition_of_a_String_member_from_a_smart_enum_associated_data_read_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+              }
+              entity Product identified by ProductId {
+                currency: Currency
+                label: String
+                command relabel() {
+                  label -> currency.symbol
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1533 Task 4 audit: an <c>emit</c> event-payload argument of a smart-enum <c>String</c>
+    /// associated-data read into a <c>String</c>-typed event field. Same <c>TranslateOwned</c> call site —
+    /// proves the emit-payload path stays green too.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_a_smart_enum_associated_data_read_into_a_String_field_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+              }
+              event Labeled {
+                label: String
+              }
+              entity Product identified by ProductId {
+                currency: Currency
+                command relabel() {
+                  emit Labeled(label: currency.symbol)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1523: a command's <c>result</c> expression never <c>Some(...)</c>-wraps toward an
     /// optional-declared return type — an <c>Int</c> literal result must compile against <c>Decimal?</c>
     /// (composing with #1511's numeric widening as <c>Ok(Some(Decimal::from(5)))</c>).
