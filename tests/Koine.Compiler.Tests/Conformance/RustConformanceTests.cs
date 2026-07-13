@@ -4001,4 +4001,90 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1523: a command's <c>result</c> expression never <c>Some(...)</c>-wraps toward an
+    /// optional-declared return type — an <c>Int</c> literal result must compile against <c>Decimal?</c>
+    /// (composing with #1511's numeric widening as <c>Ok(Some(Decimal::from(5)))</c>).
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_an_Int_literal_into_an_optional_Decimal_return_type_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command computeBonus(): Decimal? {
+                  result 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1523: an exactly-matching (non-numeric) <c>result</c> value must also compile against an
+    /// optional-declared return type — isolating the optionality gap alone, with no numeric coercion
+    /// involved at all.
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_a_matching_Decimal_into_an_optional_Decimal_return_type_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command reprice(newAmount: Decimal): Decimal? {
+                  result newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1523: the sibling <c>emit</c> event-payload path shares the identical missing-wrap gap as
+    /// the <c>result</c> clause — an <c>Int</c> argument for an optional-declared event field must compile.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_an_Int_literal_into_an_optional_Decimal_field_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal?
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump() {
+                  emit Bumped(amount: 5)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
