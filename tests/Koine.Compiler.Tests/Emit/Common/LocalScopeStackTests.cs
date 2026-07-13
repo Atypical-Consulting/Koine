@@ -211,24 +211,6 @@ public class LocalScopeStackTests
         stack.RenderedNameOf("n").ShouldBe("n");
     }
 
-    [Fact]
-    public void IsRenderedNameInUse_TrueForTheInnermostRenderedNameOfAnyActiveBinding()
-    {
-        var stack = new LocalScopeStack();
-
-        stack.IsRenderedNameInUse("n$1").ShouldBeFalse();
-
-        stack.PushLocal("n", Type("Int"), renderedName: "n");
-        stack.PushLocal("other", Type("String"), renderedName: "n$1");
-
-        stack.IsRenderedNameInUse("n").ShouldBeTrue();
-        stack.IsRenderedNameInUse("n$1").ShouldBeTrue();
-        stack.IsRenderedNameInUse("n$2").ShouldBeFalse();
-
-        stack.PopLocal("other");
-        stack.IsRenderedNameInUse("n$1").ShouldBeFalse();
-    }
-
     /// <summary>
     /// <see cref="LocalScopeStack.Overlay"/> is every translator's <c>EffectiveScope()</c>: the member
     /// scope with the active locals layered on top, so a local SHADOWS a same-named member for type

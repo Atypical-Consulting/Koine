@@ -121,26 +121,6 @@ internal sealed class LocalScopeStack
             : name;
 
     /// <summary>
-    /// True when <paramref name="renderedName"/> is the innermost rendered identifier of SOME currently
-    /// active binding (any name, not just <paramref name="renderedName"/>'s own Koine name). A target that
-    /// alpha-renames a colliding binding (Java; #1536) needs this to pick a fresh identifier that collides
-    /// with none of the OTHER locals — including a shadowed OUTER binding of the very name it is
-    /// renaming — that are still lexically enclosing at the point of the new binding.
-    /// </summary>
-    public bool IsRenderedNameInUse(string renderedName)
-    {
-        foreach (Stack<Binding> stack in _stacks.Values)
-        {
-            if (stack.Count > 0 && stack.Peek().RenderedName == renderedName)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Layers the currently-bound names, at their innermost known type, over <paramref name="memberScope"/>
     /// — the effective scope a translator resolves an expression in, where a local shadows a same-named
     /// member. Names whose innermost binding has no known type are skipped (there is no type to overlay),

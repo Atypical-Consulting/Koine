@@ -65,6 +65,15 @@ internal sealed class JavaExpressionTranslator
     // than evicting the outer one, so popping it back off restores whatever was there before (#1497).
     private readonly LocalScopeStack _locals = new();
 
+    // Every Java identifier CURRENTLY declared by an open local — a let binding, a lambda / command /
+    // factory parameter — regardless of which Koine name it renders. Distinct from `_locals`, which is
+    // keyed by KOINE name and drives identifier RESOLUTION: a local's Java scope begins at its own
+    // initializer (JLS §6.4/§6.3), so `let n = (let n = 10 in n) in n + 1` collides even though the
+    // inner `n` never shadows the outer one in Koine's own scoping, and a lambda parameter collides with
+    // an outer local exactly like a nested `let` does. Reserved the moment an identifier is CHOSEN (before
+    // its value/body is translated) and released only once its own scope fully closes (#1536).
+    private readonly HashSet<string> _reservedJavaIdentifiers = new(StringComparer.Ordinal);
+
     private NameMode _mode = NameMode.Parameter;
     private string? _expectedEnum;
 
@@ -111,15 +120,53 @@ internal sealed class JavaExpressionTranslator
         new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>
-    /// Registers a local (a lambda / command parameter, or a <c>let</c> binding) for the body about to be
-    /// translated, rendering as its Java-cased/escaped identifier — <see cref="JavaNaming.Member"/> —
-    /// unless <see cref="WriteLet"/> alpha-renamed it to avoid colliding with an already-live local
-    /// (#1536).
+    /// Registers a local (a lambda / command / factory parameter, or a <c>let</c> binding) for the body
+    /// about to be translated, rendering as its Java-cased/escaped identifier (<see cref="JavaNaming.Member"/>)
+    /// unless that identifier is already RESERVED by another currently-open local, in which case it
+    /// alpha-renames to a fresh <c>&lt;name&gt;$&lt;k&gt;</c> — Java forbids two same-named local
+    /// declarations sharing a scope (JLS §6.4), a redeclaration a lambda/command/factory parameter can
+    /// trigger exactly as a <c>let</c> binding can (#1536).
     /// </summary>
-    public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type, JavaNaming.Member(name));
+    public void PushLocal(string name, TypeRef? type = null)
+    {
+        var rendered = RenderIdentifier(name);
+        _reservedJavaIdentifiers.Add(rendered);
+        _locals.PushLocal(name, type, rendered);
+    }
 
-    /// <summary>Removes a previously-registered local, restoring whatever binding it shadowed.</summary>
-    public void PopLocal(string name) => _locals.PopLocal(name);
+    /// <summary>Removes a previously-registered local, restoring whatever binding it shadowed and releasing its reserved identifier.</summary>
+    public void PopLocal(string name)
+    {
+        _reservedJavaIdentifiers.Remove(_locals.RenderedNameOf(name));
+        _locals.PopLocal(name);
+    }
+
+    /// <summary>
+    /// The Java identifier a fresh local named <paramref name="name"/> should render as: its plain
+    /// Java-cased/escaped spelling (<see cref="JavaNaming.Member"/>), or — when that identifier is already
+    /// RESERVED by another currently-open local — the smallest unused <c>&lt;name&gt;$&lt;k&gt;</c> (k ≥ 1).
+    /// Checked against every declared MEMBER name too (so a model that happens to declare one literally
+    /// named <c>n$1</c> cannot collide with the freshly allocated name either), but never against member
+    /// names for the base (unsuffixed) spelling — a local legitimately SHADOWS a same-named member in Java
+    /// with no rename needed (#1497); only a live LOCAL forces the rename (#1536).
+    /// </summary>
+    private string RenderIdentifier(string name)
+    {
+        var baseName = JavaNaming.Member(name);
+        if (!_reservedJavaIdentifiers.Contains(baseName))
+        {
+            return baseName;
+        }
+
+        for (var k = 1; ; k++)
+        {
+            var candidate = baseName + "$" + k;
+            if (!_memberNames.Contains(candidate) && !_reservedJavaIdentifiers.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
 
     /// <summary>The member scope extended with any known local (parameter/binding) types.</summary>
     private TypeScope EffectiveScope()
@@ -682,18 +729,18 @@ internal sealed class JavaExpressionTranslator
                 sb.Append(')');
                 return;
             case "all":
-                sb.Append(t).Append(".stream().allMatch(").Append(LambdaParam(call)).Append(" -> ");
-                WriteLambdaBody(call, sb);
+                sb.Append(t).Append(".stream().allMatch(");
+                WriteLambdaHeaderAndBody(call, sb);
                 sb.Append(')');
                 return;
             case "any":
-                sb.Append(t).Append(".stream().anyMatch(").Append(LambdaParam(call)).Append(" -> ");
-                WriteLambdaBody(call, sb);
+                sb.Append(t).Append(".stream().anyMatch(");
+                WriteLambdaHeaderAndBody(call, sb);
                 sb.Append(')');
                 return;
             case "none":
-                sb.Append(t).Append(".stream().noneMatch(").Append(LambdaParam(call)).Append(" -> ");
-                WriteLambdaBody(call, sb);
+                sb.Append(t).Append(".stream().noneMatch(");
+                WriteLambdaHeaderAndBody(call, sb);
                 sb.Append(')');
                 return;
             case "sum":
@@ -725,8 +772,8 @@ internal sealed class JavaExpressionTranslator
             // (emitted on the record by the value-object slice). A seedless reduce yields Optional, so an
             // empty collection throws — matching the C#/Rust/TS `sum` semantics.
             var voType = _typeMapper.Map(new TypeRef(selector.Name));
-            sb.Append(target).Append(".stream().map(").Append(LambdaParam(call)).Append(" -> ");
-            WriteLambdaBody(call, sb);
+            sb.Append(target).Append(".stream().map(");
+            WriteLambdaHeaderAndBody(call, sb);
             sb.Append(").reduce(").Append(voType).Append("::plus).orElseThrow(() -> ")
               .Append("new koine.runtime.DomainException(\"cannot sum an empty collection\"))");
             return;
@@ -734,14 +781,14 @@ internal sealed class JavaExpressionTranslator
 
         if (selector?.Name == "Decimal")
         {
-            sb.Append(target).Append(".stream().map(").Append(LambdaParam(call)).Append(" -> ");
-            WriteLambdaBody(call, sb);
+            sb.Append(target).Append(".stream().map(");
+            WriteLambdaHeaderAndBody(call, sb);
             sb.Append(").reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add)");
             return;
         }
 
-        sb.Append(target).Append(".stream().mapToLong(").Append(LambdaParam(call)).Append(" -> ");
-        WriteLambdaBody(call, sb);
+        sb.Append(target).Append(".stream().mapToLong(");
+        WriteLambdaHeaderAndBody(call, sb);
         sb.Append(").sum()");
     }
 
@@ -749,23 +796,26 @@ internal sealed class JavaExpressionTranslator
     private void WriteMinMax(CallExpr call, string target, StringBuilder sb, bool isMin)
     {
         var op = isMin ? "min" : "max";
-        sb.Append(target).Append(".stream().map(").Append(LambdaParam(call)).Append(" -> ");
-        WriteLambdaBody(call, sb);
+        sb.Append(target).Append(".stream().map(");
+        WriteLambdaHeaderAndBody(call, sb);
         sb.Append(").").Append(op).Append("(java.util.Comparator.naturalOrder())")
           .Append(".orElseThrow(() -> new koine.runtime.DomainException(\"cannot take ")
           .Append(op).Append(" of an empty collection\"))");
     }
 
-    /// <summary>The escaped Java lambda parameter name for a collection-op call.</summary>
-    private static string LambdaParam(CallExpr call) =>
-        call.Args is [LambdaExpr lambda] ? JavaNaming.Member(lambda.Parameter) : "x";
-
-    /// <summary>Writes a lambda body with its parameter pushed as a local (the receiver's element type).</summary>
-    private void WriteLambdaBody(CallExpr call, StringBuilder sb)
+    /// <summary>
+    /// Writes a full collection-op lambda <c>&lt;param&gt; -&gt; &lt;body&gt;</c>, pushing the parameter as
+    /// a local (the receiver's element type) FIRST so the header spelling and every body reference agree —
+    /// the parameter is a local exactly like a <c>let</c> binding, and can just as easily collide with an
+    /// already-open outer local, forcing the very same alpha-rename (#1536). Writing the header from
+    /// <c>PushLocal</c>'s OWN rendered spelling (rather than a separately-computed one) is what keeps the
+    /// two in lock-step.
+    /// </summary>
+    private void WriteLambdaHeaderAndBody(CallExpr call, StringBuilder sb)
     {
         if (call.Args is not [LambdaExpr lambda])
         {
-            sb.Append("false");
+            sb.Append("x -> false");
             return;
         }
 
@@ -776,6 +826,7 @@ internal sealed class JavaExpressionTranslator
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
         PushLocal(lambda.Parameter, element);
 
+        sb.Append(_locals.RenderedNameOf(lambda.Parameter)).Append(" -> ");
         WriteTopLevel(lambda.Body, sb);
 
         PopLocal(lambda.Parameter);
@@ -824,11 +875,13 @@ internal sealed class JavaExpressionTranslator
         var pushed = new List<string>();
         foreach (LetBinding b in let.Bindings)
         {
-            // Java forbids a lambda body from redeclaring a local of the enclosing method (JLS §6.4), so
-            // a binding whose name is already a live local — a nested same-name `let`, or one colliding
-            // with a command/factory parameter — must alpha-rename or the two `var`s are a hard javac
-            // error (#1536). A non-colliding binding renders exactly as before (zero snapshot churn).
-            var rendered = _locals.IsLocal(b.Name) ? AllocateAlphaRenamedIdentifier(b.Name) : JavaNaming.Member(b.Name);
+            // Reserve the binding's identifier BEFORE translating its own value: a local's Java scope
+            // begins at its own initializer (JLS §6.3), so `let n = (let n = 10 in n) in ...` collides
+            // even though the inner `n` never shadows the outer one in Koine's own scoping (#1536). Only
+            // pushed to `_locals` (name RESOLUTION) AFTER the value is translated, so `let n = n + 1 in
+            // …` still resolves the value's `n` to whatever this binding itself shadows, not to itself.
+            var rendered = RenderIdentifier(b.Name);
+            _reservedJavaIdentifiers.Add(rendered);
             sb.Append("var ").Append(rendered).Append(" = ");
             WriteTopLevel(b.Value, sb);
             sb.Append("; ");
@@ -843,26 +896,6 @@ internal sealed class JavaExpressionTranslator
         for (var i = pushed.Count - 1; i >= 0; i--)
         {
             PopLocal(pushed[i]);
-        }
-    }
-
-    /// <summary>
-    /// Picks the smallest unused Java identifier <c>&lt;name&gt;$&lt;k&gt;</c> (k ≥ 1) for a <c>let</c>
-    /// binding whose name is already a live local. Checked against every declared MEMBER name and every
-    /// currently rendered LOCAL identifier — not just the base name — so a model that happens to declare
-    /// a member or local literally named <c>n$1</c> cannot collide with the freshly allocated name
-    /// either, and three-deep shadowing correctly escalates to <c>n$1</c>, then <c>n$2</c> (#1536).
-    /// </summary>
-    private string AllocateAlphaRenamedIdentifier(string name)
-    {
-        var baseName = JavaNaming.Member(name);
-        for (var k = 1; ; k++)
-        {
-            var candidate = baseName + "$" + k;
-            if (!_memberNames.Contains(candidate) && !_locals.IsRenderedNameInUse(candidate))
-            {
-                return candidate;
-            }
         }
     }
 

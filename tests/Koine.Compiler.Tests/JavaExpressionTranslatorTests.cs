@@ -13,6 +13,10 @@ namespace Koine.Compiler.Tests;
 /// </summary>
 public class JavaExpressionTranslatorTests
 {
+    private const string NoToolchainNotice =
+        "No usable JDK 17+ toolchain (javac >= 17) available; javac not run. " +
+        "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.";
+
     // A model index over an empty model — primitives (String/Int/Decimal/Bool/Instant) classify without
     // any declaration, which is all the type-directed operator lowering needs.
     private static readonly ModelIndex Index = new(new KoineModel(Array.Empty<ContextNode>()));
@@ -189,9 +193,7 @@ public class JavaExpressionTranslatorTests
         money.ShouldNotContain("+ this.n()");
 
         var r = TestSupport.CompileJava(result.Files);
-        TestSupport.RequireOrSkip(r.ToolchainAvailable,
-            "No usable JDK 17+ toolchain (javac >= 17) available; javac not run. " +
-            "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.");
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
@@ -233,9 +235,112 @@ public class JavaExpressionTranslatorTests
         order.ShouldContain("var n$1 = n + 1L; return n$1; })).get() > 0L");
 
         var r = TestSupport.CompileJava(result.Files);
-        TestSupport.RequireOrSkip(r.ToolchainAvailable,
-            "No usable JDK 17+ toolchain (javac >= 17) available; javac not run. " +
-            "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.");
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// A LAMBDA PARAMETER (a collection-op selector, e.g. <c>.any(n =&gt; …)</c>) is a local exactly like a
+    /// <c>let</c> binding or a command parameter — so it must alpha-rename when it collides with an
+    /// already-open outer local too, not only when a <c>let</c> collides with another <c>let</c>.
+    /// </summary>
+    [Fact]
+    public void LambdaParameterCollidingWithAnOuterLet_AlphaRenamesTheLambdaParameter()
+    {
+        const string src =
+            """
+            context Shop {
+              value Basket {
+                items: List<Int>
+                threshold: Int
+                hasAboveThreshold: Bool = let n = threshold in items.any(n => n > 0) && n > 0
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var basket = result.Files.Single(f => f.RelativePath.EndsWith("Basket.java")).Contents;
+
+        // The lambda parameter `n` shadowing the outer `let n = threshold` must alpha-rename to `n$1`;
+        // the trailing `n > 0` outside the lambda still refers to the OUTER let-bound `n`.
+        basket.ShouldContain(".anyMatch(n$1 -> n$1 > 0L)");
+        basket.ShouldContain(") && n > 0L");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Java's local-variable scope begins at its OWN initializer (JLS §6.3), so a <c>let</c> binding whose
+    /// VALUE expression itself contains an unrelated nested <c>let</c> of the same name collides too — even
+    /// though, in Koine's own scoping, the inner binding's scope never touches the outer one (it's fully
+    /// confined to its own body, entirely inside the outer's value position).
+    /// </summary>
+    [Fact]
+    public void LetWhoseOwnValueContainsANestedSameNameLet_AlphaRenamesTheInnerBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                base: Int
+                calc: Int = let n = (let n = 10 in n) in base + n
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
+
+        // The inner `let n = 10` — nested inside the OUTER `n`'s own value expression — must alpha-rename
+        // to `n$1`; the outer `n` keeps its plain spelling.
+        money.ShouldContain("var n$1 = 10L; return n$1;");
+        money.ShouldContain("var n = ((java.util.function.Supplier<Long>)(() -> { var n$1 = 10L; return n$1; })).get();");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// A collision is a RENDERED-identifier collision, not a raw-Koine-name one: Koine identifiers are
+    /// case-sensitive (<c>n</c> and <c>N</c> are distinct locals — <see cref="LocalScopeStackTests.NamesAreMatchedOrdinally"/>),
+    /// but <see cref="JavaNaming.Member"/> folds a leading-uppercase name to the same camelCase spelling as
+    /// its lowercase counterpart, so a nested <c>let N = …</c> under an outer <c>let n = …</c> renders the
+    /// SAME Java identifier unless the collision check keys off the RENDERED name.
+    /// </summary>
+    [Fact]
+    public void LetCollidingOnlyAfterJavaCasing_AlphaRenamesTheInnerBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                base: Int
+                calc: Int = base + (let n = 10 in (let N = 20 in N) + n)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
+
+        // `N` renders to the same Java identifier `n` as the outer `let n = 10`, so it must alpha-rename
+        // to `n$1` even though `n` and `N` are DIFFERENT Koine locals.
+        money.ShouldContain("var n$1 = 20L; return n$1; })).get() + n;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
