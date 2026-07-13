@@ -1175,8 +1175,16 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         // empty identifier rather than throwing. The syntax error is reported elsewhere.
         ctx is null ? new IdentifierExpr(string.Empty) : BuildLet(ctx.letExpr());
 
-    private Expr BuildLet(KoineParser.LetExprContext ctx)
+    private Expr BuildLet(KoineParser.LetExprContext? ctx)
     {
+        // A recovered parse of a `let ... in` whose body is missing or unparseable leaves the
+        // recursive `letExpr()` (the body) null; guard before dereferencing it so the walk yields
+        // a placeholder instead of an NRE (#1512).
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         // No `let` keyword => the plain `guardExpr` fall-through (every existing expression).
         if (ctx.LET() is null)
         {
@@ -1197,8 +1205,16 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new LetExpr(bindings, body) { Span = SpanOf(ctx) };
     }
 
-    private Expr BuildGuard(KoineParser.GuardExprContext ctx)
+    private Expr BuildGuard(KoineParser.GuardExprContext? ctx)
     {
+        // A recovered parse of a `let ... in` whose body is missing leaves not just the body's
+        // `letExpr()` null but, one level down, its `guardExpr()` fallback null too (#1512) —
+        // guard the same way `BuildLet` does rather than dereferencing a null context.
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         Expr body = BuildCond(ctx.condExpr(0));
 
         if (ctx.WHEN() is null)
@@ -1210,8 +1226,16 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new GuardExpr(body, condition) { Span = SpanOf(ctx) };
     }
 
-    private Expr BuildCond(KoineParser.CondExprContext ctx)
+    private Expr BuildCond(KoineParser.CondExprContext? ctx)
     {
+        // A recovered parse of a truncated `if <c> then` (nothing follows `then`) leaves the
+        // then-branch `condExpr` outright null rather than an empty-but-present node (#1512,
+        // same shape as `BuildLet`/`BuildGuard`/`BuildCoalesce`); guard before dereferencing.
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         if (ctx.IF() is null)
         {
             return BuildCoalesce(ctx.coalesceExpr());
@@ -1223,8 +1247,16 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new ConditionalExpr(condition, then, @else) { Span = SpanOf(ctx) };
     }
 
-    private Expr BuildCoalesce(KoineParser.CoalesceExprContext ctx)
+    private Expr BuildCoalesce(KoineParser.CoalesceExprContext? ctx)
     {
+        // A recovered parse of a truncated `if ... then` / `if ... then ... else` leaves the
+        // missing branch's `condExpr` non-null but empty — its own `coalesceExpr()` fallback is
+        // then null too (#1512, same shape as `BuildLet`/`BuildGuard`); guard before dereferencing.
+        if (ctx is null)
+        {
+            return new IdentifierExpr(string.Empty);
+        }
+
         KoineParser.OrExprContext[]? operands = ctx.orExpr();
         Expr result = BuildOr(operands[0]);
 
