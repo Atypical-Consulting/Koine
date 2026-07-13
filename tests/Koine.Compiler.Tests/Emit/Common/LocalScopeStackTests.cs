@@ -164,6 +164,53 @@ public class LocalScopeStackTests
         stack.TypeOf("N").ShouldBeNull();
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // #1536 — a per-binding RENDERED name, for a target (Java) whose lowering must alpha-rename a
+    // colliding binding rather than merely resolving it (the local's IDENTITY is unaffected — #1497 —
+    // but its SPELLING in the emitted source must differ from whatever it shadows).
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void PushLocal_WithARenderedName_ReportsItFromRenderedNameOf()
+    {
+        var stack = new LocalScopeStack();
+
+        stack.PushLocal("n", Type("Int"), renderedName: "n$1");
+
+        stack.RenderedNameOf("n").ShouldBe("n$1");
+    }
+
+    [Fact]
+    public void PushLocal_WithNoRenderedName_FallsBackToTheBindingsOwnName()
+    {
+        var stack = new LocalScopeStack();
+
+        stack.PushLocal("n", Type("Int"));
+
+        stack.RenderedNameOf("n").ShouldBe("n");
+    }
+
+    [Fact]
+    public void RenderedNameOf_OfAnUnboundName_FallsBackToTheNameItself()
+    {
+        var stack = new LocalScopeStack();
+
+        stack.RenderedNameOf("never-pushed").ShouldBe("never-pushed");
+    }
+
+    [Fact]
+    public void NestedPushWithARenderedName_ShadowsTheOuterRenderedName_RestoredOnPop()
+    {
+        var stack = new LocalScopeStack();
+        stack.PushLocal("n", Type("Int"), renderedName: "n");
+
+        stack.PushLocal("n", Type("Int"), renderedName: "n$1");
+        stack.RenderedNameOf("n").ShouldBe("n$1");
+
+        stack.PopLocal("n");
+        stack.RenderedNameOf("n").ShouldBe("n");
+    }
+
     /// <summary>
     /// <see cref="LocalScopeStack.Overlay"/> is every translator's <c>EffectiveScope()</c>: the member
     /// scope with the active locals layered on top, so a local SHADOWS a same-named member for type

@@ -883,4 +883,35 @@ public class JavaConformanceTests
         skipped.ToolchainAvailable.ShouldBeFalse();
         skipped.Ok.ShouldBeFalse();
     }
+
+    /// <summary>
+    /// Issue #1536 — a nested same-name <c>let</c> shadowing a same-named MEMBER must emit Java that a
+    /// real <c>javac</c> accepts: before the fix, both bindings spelled themselves <c>var n</c>, a hard
+    /// redeclaration error (JLS §6.4); the inner binding now alpha-renames to <c>n$1</c>. Closes the
+    /// verification gap #1497's own regression test could not close (it had no compiling shape to check).
+    /// </summary>
+    [Fact]
+    public void Harness_accepts_a_nested_same_name_let_shadowing_a_member()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                n:    String
+                base: Int
+                calc: Int = base + (let n = 10 in (let n = 20 in n) + n)
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("var n$1 = 20L;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
