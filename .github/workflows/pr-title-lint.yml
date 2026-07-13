@@ -8,7 +8,9 @@ on:
   pull_request_target:
     # A code push (`synchronize`) can't change the PR title, so re-linting on it is wasted
     # work; lint only when the title can actually change (open/edit) or a closed PR reopens.
-    types: [opened, edited, reopened]
+    # ready_for_review is included so the draft gate below re-evaluates when a draft PR flips
+    # to ready — otherwise a title set while in draft never gets linted for real (issue #1481).
+    types: [opened, edited, reopened, ready_for_review]
 
 permissions:
   pull-requests: write
@@ -16,6 +18,8 @@ permissions:
 jobs:
   lint-pr-title:
     # Skip draft PRs — a draft's title isn't final yet, so don't flag it before the author is ready.
+    # This gate only re-evaluates if the trigger's `types:` above includes `ready_for_review` —
+    # dropping it would let a ready-flip merge with this check permanently SKIPPED (issue #1481).
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
