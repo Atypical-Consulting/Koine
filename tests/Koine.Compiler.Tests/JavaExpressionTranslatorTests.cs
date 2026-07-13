@@ -182,8 +182,60 @@ public class JavaExpressionTranslatorTests
 
         var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
 
-        // The outer `n` must still resolve to the LOCAL `var n = 10L`, never to the member accessor.
-        money.ShouldContain("var n = 20L; return n; })).get() + n;");
+        // The outer `n` must still resolve to the LOCAL `var n = 10L`, never to the member accessor, and
+        // the inner binding now alpha-renames to `n$1` so both `var`s are legal Java (#1536).
+        money.ShouldContain("var n$1 = 20L; return n$1; })).get() + n;");
         money.ShouldNotContain("+ this.n()");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable,
+            "No usable JDK 17+ toolchain (javac >= 17) available; javac not run. " +
+            "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.");
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1536 — a nested same-name `let` (or one colliding with a command parameter) must alpha-rename
+    // the inner binding so the emitted Java compiles: a lambda body may not redeclare a local of the
+    // enclosing method (JLS §6.4), so two `var n` declarations are a hard javac error, not a shadow.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A <c>let</c> whose name collides with a COMMAND PARAMETER hits the same javac redeclaration rule
+    /// as the nested-<c>let</c> case, from a different collision source (#1536's second edge case): the
+    /// parameter and the lambda-local share the method's declaration scope.
+    /// </summary>
+    [Fact]
+    public void LetCollidingWithACommandParameter_AlphaRenamesTheLetBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Order identified by OrderId {
+                total: Int
+                command adjust(n: Int) {
+                  requires (let n = n + 1 in n) > 0 "n must stay positive"
+                  total -> total + n
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java")).Contents;
+
+        // The `let n = …` shadowing the `n` parameter must alpha-rename to `n$1`; its own value
+        // expression (n + 1) still refers to the PARAMETER `n`, and its body echoes the renamed local.
+        order.ShouldContain("var n$1 = n + 1L; return n$1; })).get() > 0L");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable,
+            "No usable JDK 17+ toolchain (javac >= 17) available; javac not run. " +
+            "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.");
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 }

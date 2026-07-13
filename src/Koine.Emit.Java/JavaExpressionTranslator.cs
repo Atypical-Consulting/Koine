@@ -110,8 +110,13 @@ internal sealed class JavaExpressionTranslator
     private static readonly IReadOnlyDictionary<string, string> EmptyEnumMap =
         new Dictionary<string, string>(StringComparer.Ordinal);
 
-    /// <summary>Registers a local (a lambda / command parameter, or a <c>let</c> binding) for the body about to be translated.</summary>
-    public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
+    /// <summary>
+    /// Registers a local (a lambda / command parameter, or a <c>let</c> binding) for the body about to be
+    /// translated, rendering as its Java-cased/escaped identifier — <see cref="JavaNaming.Member"/> —
+    /// unless <see cref="WriteLet"/> alpha-renamed it to avoid colliding with an already-live local
+    /// (#1536).
+    /// </summary>
+    public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type, JavaNaming.Member(name));
 
     /// <summary>Removes a previously-registered local, restoring whatever binding it shadowed.</summary>
     public void PopLocal(string name) => _locals.PopLocal(name);
@@ -513,10 +518,13 @@ internal sealed class JavaExpressionTranslator
 
     private void WriteIdentifier(string name, StringBuilder sb, string? enumHint)
     {
-        // (1) A local (lambda / command / factory parameter, or a `let` binding): verbatim camelCase.
+        // (1) A local (lambda / command / factory parameter, or a `let` binding): its RENDERED identifier
+        // — ordinarily the plain camelCase name, but a `let` binding that collided with an already-live
+        // local alpha-renames to a fresh one (#1536), and every reference inside its scope must spell
+        // that same renamed identifier.
         if (_locals.IsLocal(name))
         {
-            sb.Append(JavaNaming.Member(name));
+            sb.Append(_locals.RenderedNameOf(name));
             return;
         }
 
@@ -816,10 +824,15 @@ internal sealed class JavaExpressionTranslator
         var pushed = new List<string>();
         foreach (LetBinding b in let.Bindings)
         {
-            sb.Append("var ").Append(JavaNaming.Member(b.Name)).Append(" = ");
+            // Java forbids a lambda body from redeclaring a local of the enclosing method (JLS §6.4), so
+            // a binding whose name is already a live local — a nested same-name `let`, or one colliding
+            // with a command/factory parameter — must alpha-rename or the two `var`s are a hard javac
+            // error (#1536). A non-colliding binding renders exactly as before (zero snapshot churn).
+            var rendered = _locals.IsLocal(b.Name) ? AllocateAlphaRenamedIdentifier(b.Name) : JavaNaming.Member(b.Name);
+            sb.Append("var ").Append(rendered).Append(" = ");
             WriteTopLevel(b.Value, sb);
             sb.Append("; ");
-            PushLocal(b.Name, _resolver.Infer(b.Value, EffectiveScope()));
+            _locals.PushLocal(b.Name, _resolver.Infer(b.Value, EffectiveScope()), rendered);
             pushed.Add(b.Name);
         }
 
@@ -830,6 +843,26 @@ internal sealed class JavaExpressionTranslator
         for (var i = pushed.Count - 1; i >= 0; i--)
         {
             PopLocal(pushed[i]);
+        }
+    }
+
+    /// <summary>
+    /// Picks the smallest unused Java identifier <c>&lt;name&gt;$&lt;k&gt;</c> (k ≥ 1) for a <c>let</c>
+    /// binding whose name is already a live local. Checked against every declared MEMBER name and every
+    /// currently rendered LOCAL identifier — not just the base name — so a model that happens to declare
+    /// a member or local literally named <c>n$1</c> cannot collide with the freshly allocated name
+    /// either, and three-deep shadowing correctly escalates to <c>n$1</c>, then <c>n$2</c> (#1536).
+    /// </summary>
+    private string AllocateAlphaRenamedIdentifier(string name)
+    {
+        var baseName = JavaNaming.Member(name);
+        for (var k = 1; ; k++)
+        {
+            var candidate = baseName + "$" + k;
+            if (!_memberNames.Contains(candidate) && !_locals.IsRenderedNameInUse(candidate))
+            {
+                return candidate;
+            }
         }
     }
 
