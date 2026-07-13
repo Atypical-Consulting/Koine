@@ -199,9 +199,10 @@ ISSUE: <N> | PR: <number|none> | STATUS: MERGED|BLOCKED|FAILED | DETAIL: … | F
 
 Why those clauses earn their place (don't trim them from the command): *own worktree* — parallel
 workers sharing a checkout corrupt each other; *mandatory merge / don't idle at ready* — the #1 failure
-is stopping at "ready", so the explicit "drive to MERGED, keep polling CI" closes that gap; *off-scope
-protocol* — keeps the backlog truthful instead of scope-creeping the PR; *structured report* — your
-reconciliation needs a terse parseable signal, not prose.
+is stopping at "ready", so the explicit "drive to MERGED, keep re-checking against `merge-pr`'s
+check-runs gate" closes that gap; *off-scope protocol* — keeps the backlog truthful instead of
+scope-creeping the PR; *structured report* — your reconciliation needs a terse parseable signal, not
+prose.
 
 ## Step 4 — Supervise (the loop)
 
@@ -211,7 +212,7 @@ You're woken by a worker's report, an **idle notification**, or your heartbeat. 
 merged) rather than re-typing the gh queries each tick. Then, per slot:
 
 - **Reported MERGED** (GitHub agrees) → **end the agent** (send a shutdown request) and **refill the slot**: pick the next queued issue whose area isn't currently held, dispatch a fresh worker (Step 3). Keeps the fleet at N.
-- **Idle, but PR is READY and unmerged** → it stalled at "ready." Message it to run `merge-pr <PR>` now and not idle until merged. `mergeable=UNKNOWN` is usually a transient recompute after `main` moved — its `merge-pr` will sync and resolve; nudge a main-sync if it persists. If a worker idles at "ready" **twice**, take over: once CI is green, land it (`gh pr merge <PR> --squash --delete-branch`) and shut the worker down.
+- **Idle, but PR is READY and unmerged** → it stalled at "ready." Message it to run `merge-pr <PR>` now and not idle until merged. `mergeable=UNKNOWN` is usually a transient recompute after `main` moved — its `merge-pr` will sync and resolve; nudge a main-sync if it persists. If a worker idles at "ready" **twice**, take over: once the PR clears `merge-pr` SKILL.md Step 3's gate (nothing failed, nothing pending, not draft, `mergeStateStatus == CLEAN` — read via the check-runs API, not `gh pr checks`, which #1530 can misreport), land it (`gh pr merge <PR> --squash --delete-branch`) and shut the worker down.
 - **Idle with a draft PR / no PR yet** → still implementing; leave it. If long with no progress, send a one-line status ping (don't read its transcript).
 - **Reported BLOCKED/FAILED** → first **tier-escalate if it was on a lower model**: if the failure looks like the model wasn't strong enough (rather than a genuine hard blocker — un-mergeable conflict, missing approval, no plan), re-dispatch the *same* issue **once** on the top model. If already on top, or it fails again → record it, surface it, end the agent, refill the slot (don't let one blocked issue stall the fleet). This escalation is what makes cheap-by-default tiering safe.
 
@@ -268,6 +269,14 @@ that frees. Hold the line at N unless told otherwise.
 ## Gotchas (hard-won)
 
 - **"Ready" is not "merged."** Throughput is gated on actually *landing* PRs; the #1 stall is idling at ready. Verify merge state from GitHub on every signal; re-drive or take over.
+- **Never gate merge-readiness on `build-and-test == success`, or on `gh pr checks`.** `merge-pr`
+  SKILL.md Step 3 is the one source of truth: nothing failed, nothing pending, PR not a draft,
+  `mergeStateStatus == CLEAN`, read from the check-runs API on the head SHA. A front-end-only PR
+  (`tooling/koine-studio/**` / `tooling/koine-ui/**` only) *correctly* shows `build-and-test: skipped`
+  (#1486) — that is not "CI didn't run," and waiting for it to turn `success` hangs forever. The
+  not-draft condition is what still protects against merging an untested draft-flipped-to-ready PR
+  (#1481); `gh pr checks` can additionally show a phantom `skipped` twin (#1530), which is another
+  reason not to read it as the authority.
 - **Don't read a worker's transcript** — it overflows your context. Use its structured report + `gh`.
 - **One area per concurrent worker** — the entire conflict strategy. If the next-queued issue shares an area with an in-flight one, skip down to a disjoint area (note the reorder).
 - **`mergeable=UNKNOWN` is normal right after `main` moves** — GitHub recomputes; it resolves to CLEAN once the branch syncs. Not a blocker.
