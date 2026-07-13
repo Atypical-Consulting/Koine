@@ -178,9 +178,71 @@ jobs:
               @{N='Free(GB)';E={[Math]::Round($_.Free/1GB,2)}} |
             Format-Table -AutoSize
 
+      # Issue #1486: make a native crash on this leg diagnosable. `npm test` died with exit code
+      # 3221225477 (0xC0000005, STATUS_ACCESS_VIOLATION) after a fully green suite — an opaque native
+      # fault with no stack, no failing assertion, nothing to debug. Windows Error Reporting can write a
+      # full user-mode dump of the crashing process if asked to beforehand, so ask: any node.exe that
+      # faults from here on drops a .dmp into RUNNER_TEMP (the D: drive — same headroom reasoning as the
+      # TEMP redirect above), which the upload step below publishes as an artifact. Nothing is produced
+      # unless a process actually crashes. Best-effort by construction: a diagnostics step must never be
+      # the reason a build goes red, so a registry write that fails (permissions, image change) warns and
+      # carries on rather than failing the job.
+      - name: Enable crash dumps for node.exe (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dumpDir = Join-Path $env:RUNNER_TEMP 'node-crash-dumps'
+          try {
+            New-Item -ItemType Directory -Force -Path $dumpDir | Out-Null
+            $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\node.exe'
+            New-Item -Path $key -Force | Out-Null
+            # DumpType 2 = full dump: a native access violation needs every thread's stack (the whole
+            # point is to learn WHICH thread and which native frame faulted), which a mini dump elides.
+            New-ItemProperty -Path $key -Name DumpFolder -Value $dumpDir -PropertyType ExpandString -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpType   -Value 2        -PropertyType DWord        -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpCount  -Value 3        -PropertyType DWord        -Force | Out-Null
+            Write-Host "WER local dumps for node.exe -> $dumpDir"
+          } catch {
+            Write-Host "::warning::Could not enable WER local dumps ($($_.Exception.Message)); continuing without crash-dump capture."
+          }
+          "KOINE_NODE_CRASH_DUMPS=$dumpDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Issue #1486, the fix. A bare `vitest run` executes BOTH projects — `unit` (happy-dom, and on
+      # Windows the worker_threads pool that #414 forced us onto) and `storybook` (Playwright/Chromium) —
+      # concurrently in one Node process. On Windows that makes a native fault in a test worker fatal to
+      # the whole run (0xC0000005), because a worker_thread shares the process with the browser project's
+      # runtime; on Linux/macOS the same fault would only kill a `forks` child and be reported. Splitting
+      # the run into two sequential processes decouples them without reverting the #414 `threads` fix.
+      # See the header comment in tooling/koine-studio/vitest.config.ts for the full mechanism.
+      #
+      # `npm test -- --project X` forwards to the very same `vitest run` the other legs use — identical
+      # binary resolution, identical config, identical tests; only the process boundary differs. The
+      # non-Windows legs keep the single combined run (they are green; do not perturb them).
+      - name: Test frontend (npm — projects split, issue #1486)
+        if: runner.os == 'Windows'
+        working-directory: tooling/koine-studio
+        shell: bash
+        run: |
+          npm test -- --project unit
+          npm test -- --project storybook
+
       - name: Test frontend (npm)
+        if: runner.os != 'Windows'
         working-directory: tooling/koine-studio
         run: npm test
+
+      # Publish whatever WER captured, so a recurrence is debugged from a faulting stack instead of a
+      # third round of inference from an exit code. `if-no-files-found: ignore` keeps an ordinary red
+      # test — which crashes nothing and so dumps nothing — from bolting a spurious warning onto the
+      # real failure.
+      - name: Upload node crash dumps (Windows)
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: studio-windows-node-crash-dumps-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.KOINE_NODE_CRASH_DUMPS }}
+          if-no-files-found: ignore
+          retention-days: 14
 
       # --- Release-only: build the distributable installers and upload them. ---
       # `tauri build` runs beforeBuildCommand (npm run build) then a cargo release build + bundles

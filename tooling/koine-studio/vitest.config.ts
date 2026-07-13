@@ -35,6 +35,30 @@ const dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(file
 // EditorView in `afterEach`, so no measure stays queued past a test. `src/test-setup.ts` also installs a
 // setTimeout-backed requestAnimationFrame shim as defense-in-depth (inert under happy-dom 20, which
 // already ships rAF; it guards a future happy-dom that drops it, and never clobbers a real browser rAF).
+//
+// A THIRD Windows crash (#1486) has the same "green suite, dying teardown" shape but a different
+// mechanism again: `npm test` exited 3221225477 — 0xC0000005, STATUS_ACCESS_VIOLATION — immediately
+// after the last test of a happy-dom file (`src/ai/aiPanel.test.ts`) passed. A native fault, not a JS
+// throw and not an assertion, so it left no diagnostic beyond the exit code. What singles Windows out
+// is measure 1 above: it is the ONLY leg on `pool: 'threads'`, and a threads-pool worker is a
+// worker_thread INSIDE the main vitest process rather than a child process. In CI — but never in local
+// dev, which runs `--project '!storybook'` — that one process is simultaneously hosting the `storybook`
+// project's browser runtime (Playwright driving Chromium), because a bare `vitest run` executes both
+// projects concurrently. So on Windows a native fault anywhere in that shared process (a worker's libuv
+// loop, a thread teardown racing a pending handle) kills the entire run as a bare access violation,
+// while the very same fault under `forks` on Linux/macOS would take down only a child and surface as a
+// reported worker error. That is exactly the asymmetry observed: identical test set, three legs green,
+// Windows dead with no JS-level signal.
+//
+// The fix therefore does NOT revert measure 1 (that would resurrect #414). It removes the coupling
+// instead: the two projects are given names, and the Windows CI leg runs them as two SEQUENTIAL
+// `vitest run --project` processes (see the `Test frontend (npm)` steps in
+// .github/workflows/studio-build.yml), so the threads-pool teardown no longer shares a process with the
+// browser project's Chromium/Playwright surface. The same tests run, in the same pools, on every leg.
+// Because this is a hypothesis that only a real Windows runner can falsify, the same workflow also
+// enables Windows Error Reporting local dumps for node.exe and uploads any dump as an artifact — so if
+// an access violation does recur, the next investigation starts from a faulting stack rather than a
+// third round of inference from an exit code.
 // @ts-expect-error process is a nodejs global
 const isOneShotRun = process.argv.includes('run');
 // @ts-expect-error process is a nodejs global
@@ -87,6 +111,11 @@ export default defineConfig({
     projects: [{
       extends: true,
       test: {
+        // Named so it can be selected on its own (`--project unit`) — the Windows CI leg runs the two
+        // projects as two sequential processes to keep the threads-pool teardown out of the same
+        // process as the browser project (#1486). An unnamed project cannot be targeted by --project;
+        // `--project '!storybook'` (the documented local command) keeps working either way.
+        name: 'unit',
         environment: 'happy-dom',
         // Measure 1 (see the header note): the operative fix for the #414 Windows fs-event abort.
         // On windows-latest the default `forks` pool's worker holds a native libuv `fs.watch` that

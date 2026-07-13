@@ -20,11 +20,99 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Does this PR need the .NET job at all? `build-and-test` is the long pole gating every merge, and on
+  # a high-merge-volume day most PRs are front-end-only (Studio / koine-ui TypeScript) — each paying a
+  # full .NET build + ~2900-test run + conformance + demo + wasm smoke for a compiler that cannot have
+  # changed. One of the two PRs that burned a 30-minute timeout in issue #1486 (#1466) touched exactly
+  # one file: a TypeScript test. This gate answers one question — "did anything outside the two
+  # front-end packages change?" — so build-and-test can skip when the answer is no.
+  #
+  # Hand-rolled rather than a third-party paths-filter action (the plan floated dorny/paths-filter):
+  # the rule is a single grep, it adds no supply-chain surface to a workflow that pins every action by
+  # SHA, and — unlike picomatch's negation + predicate-quantifier semantics — it can be run against a
+  # real PR and proven before it lands (it was: #1454 and #1466 → false, #1464 and #1526 → true).
+  #
+  # FAIL-OPEN by construction: `dotnet` reads 'false' only when the file list was fetched AND every
+  # file in it is front-end. An empty list, a failed API call, an unexpected shape — all leave it
+  # 'true' and the .NET job runs. The asymmetry is deliberate: a wrong 'true' wastes ~8 minutes, a
+  # wrong 'false' merges a compiler change untested.
+  changes:
+    # Same draft gate as build-and-test below: while a PR is a draft the .NET job is skipped anyway, so
+    # there is nothing for this gate to decide — and the fleet pushes a great many draft commits. The
+    # `ready_for_review` trigger type (issue #1481) is what re-runs both on the ready-flip.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      dotnet: ${{ steps.filter.outputs.dotnet }}
+    steps:
+      - name: Detect whether anything outside the front-end packages changed
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+
+          # Ask for BOTH paths of every touched file. A rename reports only its NEW path under
+          # `.filename`, so a file moved OUT of the .NET tree INTO tooling/koine-studio/ would look
+          # front-end-only — and skip the very job that would have caught the removal on the .NET side.
+          # `.previous_filename` closes that hole. Never abort on a bad API call: a transient blip must
+          # fall through to 'true', not redden the PR.
+          if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+                         --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
+            files=""
+          fi
+
+          # GitHub's "list PR files" endpoint truncates at 3000 entries. A truncated list could hide a
+          # .NET file behind 3000 front-end ones and produce a confidently wrong 'false', so cross-check
+          # the listing against the PR's own file count and fail open if they disagree. (Renames add a
+          # second path, so the listing may legitimately exceed changed_files — only a SHORTFALL is
+          # evidence of truncation.)
+          expected=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.changed_files' 2>/dev/null || true)
+          # `gh api` prints the error BODY to stdout on a failed call, so `expected` can come back as a
+          # JSON blob rather than a number. Force it to digits-or-empty, or the numeric test below dies
+          # on it and the truncation guard silently stops guarding.
+          case "${expected}" in ''|*[!0-9]*) expected="" ;; esac
+          actual=$(printf '%s\n' "${files}" | grep -c . || true)
+
+          if [ -z "${files}" ] || [ -z "${expected}" ] || [ "${actual}" -lt "${expected}" ]; then
+            echo "::warning::Changed-file list unusable (got ${actual:-0} paths, PR reports ${expected:-?} files) — running build-and-test (fail-open)."
+            echo "dotnet=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "Changed paths (${actual}):"
+          printf '%s\n' "${files}"
+          outside=$(printf '%s\n' "${files}" | grep -vE '^tooling/koine-(studio|ui)/' || true)
+          if [ -n "${outside}" ]; then
+            echo "dotnet=true" >> "${GITHUB_OUTPUT}"
+            echo "Files outside the front-end packages changed → build-and-test runs."
+          else
+            echo "dotnet=false" >> "${GITHUB_OUTPUT}"
+            echo "Front-end-only PR (tooling/koine-studio, tooling/koine-ui) → build-and-test skipped."
+          fi
+
   build-and-test:
     # Skip draft PRs — they're not ready for review/merge yet, so don't burn CI minutes on every push.
     # This gate only re-evaluates if the trigger's `types:` above includes `ready_for_review` —
     # dropping it would let a ready-flip merge with build-and-test permanently SKIPPED (issue #1481).
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    #
+    # …and skip front-end-only PRs, per the `changes` gate above (issue #1486). Two subtleties, both
+    # load-bearing: (1) a job with `needs:` is skipped whenever that dependency is skipped — which
+    # `changes` is on every push to main — so the condition needs a status function (`!cancelled()`)
+    # just to be evaluated at all; (2) the test is `!= 'false'`, NOT `== 'true'`, so a gate that was
+    # skipped, failed, or returned nothing still runs the .NET job. Only a positive "front-end-only"
+    # verdict skips it. Inverting either of these would let a compiler change merge untested.
+    needs: changes
+    if: >-
+      !cancelled()
+      && (github.event_name != 'pull_request'
+          || (github.event.pull_request.draft == false
+              && needs.changes.outputs.dotnet != 'false'))
     runs-on: ubuntu-latest
     # Backstop so a hung step (stalled restore, wedged toolchain fetch) fails fast instead
     # of running to the 6-hour default. Cold build+test+demo lands well under this.
@@ -174,10 +262,44 @@ jobs:
       # since all four toolchains are installed above, no RequireOrSkip-based conformance test may
       # report Skipped in CI, so a toolchain quietly dropping off the runner reddens the build instead
       # of passing silently.
+      #
+      # The `--blame-hang-*` flags are hang DIAGNOSTICS (issue #1486), not a behavior change. Twice in
+      # one day this job ran out its full 30-minute `timeout-minutes` budget and was killed with no
+      # signal at all — and in both traces the same single assembly was the culprit: the other three
+      # (Koine.Compiler.PublicApiConsumer, Koine.Wasm.Tests, Koine.Mcp.Tests) each printed `Passed!`
+      # within a minute, while Koine.Compiler.Tests never printed a pass/fail line and the runner's
+      # orphan-process sweep killed it still running. A job cancelled by the workflow timeout leaves
+      # nothing behind to debug, so the next occurrence must capture evidence instead.
+      #
+      # VSTest's blame collector fires when no test-completion event arrives within the timeout: it
+      # dumps the hung test host (managed + native stacks) and writes a Sequence.xml naming the test
+      # that was in flight. The whole suite runs in ~3 minutes, so 15m per test is a vast margin that no
+      # healthy test can trip — and it fires ~10 minutes shy of the job's 30-minute ceiling, leaving
+      # room to write the dump and upload it (the plan's 20m would leave ~6, too tight for a full dump).
+      # On a healthy run this is a no-op beyond the collector's per-test bookkeeping. Deliberately NOT
+      # paired with a `timeout-minutes` bump: the ceiling is what surfaces the bug (issue #1486's
+      # "Alternatives considered"), so it stays put — this just makes the hang diagnosable when it hits.
       - name: Test
         env:
           KOINE_REQUIRE_CONFORMANCE: 1
-        run: dotnet test Koine.slnx -c Release --no-build
+        run: >-
+          dotnet test Koine.slnx -c Release --no-build
+          --results-directory "${{ github.workspace }}/TestResults"
+          --blame-hang --blame-hang-timeout 15m --blame-hang-dump-type full
+
+      # The hang dump + Sequence.xml are worthless if they die with the runner. Publish them on any
+      # failure of the job (a hang now fails the Test step rather than silently eating the whole
+      # 30-minute budget), so the next recurrence is diagnosed from an artifact instead of a third
+      # live incident. `if-no-files-found: ignore` keeps an ordinary red test — which writes no dump —
+      # from adding a spurious "no artifact" annotation on top of the real failure.
+      - name: Upload test hang diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/TestResults
+          if-no-files-found: ignore
+          retention-days: 14
 
       # End-to-end guard: the demo regenerates C# from .koi and compiles it.
       # A demo build failure is a CI failure (it proves the emitter still works).
