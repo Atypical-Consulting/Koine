@@ -234,4 +234,147 @@ public class LetBindingTests
         var total = pricing.GetProperty("Total")!.GetValue(p);
         ((decimal)total!).ShouldBe(30m);
     }
+
+    // ---- Robustness (error recovery, #1512) --------------------------------
+    //
+    // On a recovered parse (a `let ... in` whose body is missing or unparseable) ANTLR leaves
+    // `ctx.letExpr()` null. `BuildLet` used to dereference it unconditionally and crash the whole
+    // compiler with a NullReferenceException instead of surfacing the syntax error that the parser
+    // already reported. Same defect family as #595/#596/#597/#602/#603/#1298.
+
+    [Fact]
+    public void Let_with_missing_body_reports_a_diagnostic_not_a_throw()
+    {
+        const string src = """
+            context Shop {
+              value Money {
+                c: Decimal
+                isEq: Bool = (let z = 1 in) == c
+              }
+            }
+            """;
+
+        var result = Should.NotThrow(() => new KoineCompiler().Compile(src, new CSharpEmitter()));
+
+        result.Success.ShouldBeFalse();
+        result.Diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+        var error = result.Diagnostics.First(d => d.Severity == DiagnosticSeverity.Error);
+        error.Line.ShouldBeGreaterThan(0);
+        error.Column.ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public void Let_with_missing_body_via_unparseable_call_reports_a_diagnostic_not_a_throw()
+    {
+        // A bare `foo()` is not a legal expression, so recovery nulls the body the same way.
+        const string src = """
+            context Shop {
+              value Money {
+                c: Decimal
+                isEq: Bool = (let z = foo() in z) == c
+              }
+            }
+            """;
+
+        var result = Should.NotThrow(() => new KoineCompiler().Compile(src, new CSharpEmitter()));
+
+        result.Success.ShouldBeFalse();
+        result.Diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Let_with_missing_body_via_parse_api_returns_a_partial_model_not_a_throw()
+    {
+        // This is the user-facing regression: the error-tolerant Parse API is what the LSP/Studio
+        // call on every keystroke, and `let x = 1 in` is a state a user types through.
+        const string src = """
+            context Shop {
+              value Money {
+                c: Decimal
+                isEq: Bool = (let z = 1 in) == c
+              }
+            }
+            """;
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(src, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Nested_let_with_missing_inner_body_reports_a_diagnostic_not_a_throw()
+    {
+        const string src = """
+            context C {
+              value V {
+                a: Int
+                result: Int = let x = a in let y = 1 in
+              }
+            }
+            """;
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(src, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Let_with_multiple_bindings_and_missing_body_reports_a_diagnostic_not_a_throw()
+    {
+        const string src = """
+            context C {
+              value V {
+                a: Int
+                b: Int
+                result: Int = let x = a, y = b in
+              }
+            }
+            """;
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(src, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Let_inside_a_when_guard_with_missing_body_reports_a_diagnostic_not_a_throw()
+    {
+        // The placeholder must flow through the surrounding guard builder without a second NRE.
+        const string src = """
+            context C {
+              value V {
+                a: Int
+                result: Bool = a > 0 when (let z = 1 in)
+              }
+            }
+            """;
+
+        var (model, diagnostics) = Should.NotThrow(() => new KoineCompiler().Parse(src, "t.koi"));
+
+        model.ShouldNotBeNull();
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Well_formed_let_in_a_boolean_comparison_still_compiles_with_no_diagnostics()
+    {
+        // Zero-change guard: a well-formed `let` sitting in the exact same position as the crashing
+        // cases above must be completely unaffected.
+        const string src = """
+            context Shop {
+              value Money {
+                c: Decimal
+                isEq: Bool = (let z = 1 in z) == c
+              }
+            }
+            """;
+
+        var (model, diagnostics) = new KoineCompiler().Parse(src, "t.koi");
+
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+    }
 }
