@@ -77,6 +77,7 @@ internal sealed class ExpressionChecker
 
             case UnaryExpr u:
                 Check(u.Operand, scope);
+                CheckUnaryOperandType(u, scope);
                 break;
 
             case MatchExpr m:
@@ -227,6 +228,31 @@ internal sealed class ExpressionChecker
             {
                 Report(DiagnosticCodes.RelationalOnNonOrderable, $"relational operator cannot be applied to '{operand.Name}'", b);
             }
+        }
+    }
+
+    /// <summary>
+    /// Rejects a <c>Neg</c> (<c>-</c>) operand that isn't numeric (<c>Int</c>/<c>Decimal</c>, optionally
+    /// optional) or a <c>Not</c> (<c>!</c>) operand that isn't <c>Bool</c> (optionally optional) — every
+    /// target's <c>WriteUnary</c> only ever generates the corresponding native operator for those operand
+    /// types, so anything else (a <c>String</c>, a value object, an entity reference) fails inside the
+    /// target's own compiler instead of Koine's. An undeterminable operand type (already reported
+    /// elsewhere, e.g. an unknown field) is skipped to avoid a redundant cascading diagnostic.
+    /// </summary>
+    private void CheckUnaryOperandType(UnaryExpr u, TypeScope scope)
+    {
+        TypeRef? operand = _resolver.Infer(u.Operand, scope);
+        if (operand is null)
+        {
+            return;
+        }
+
+        var ok = u.Op == UnaryOp.Not ? TypeResolver.IsBool(operand) : TypeResolver.IsNumeric(operand);
+        if (!ok)
+        {
+            var symbol = u.Op == UnaryOp.Not ? "!" : "-";
+            Report(DiagnosticCodes.UnaryOperandTypeMismatch,
+                $"unary operator '{symbol}' cannot be applied to '{operand.Name}'", u);
         }
     }
 
