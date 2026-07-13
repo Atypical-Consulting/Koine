@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Explicit so `ready_for_review` can be added below — the default types omit it, and
+    # build-and-test's draft gate needs it to re-evaluate when a draft PR flips to ready
+    # (issue #1481). opened/synchronize/reopened are the defaults, kept explicit here.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -18,6 +22,8 @@ concurrency:
 jobs:
   build-and-test:
     # Skip draft PRs — they're not ready for review/merge yet, so don't burn CI minutes on every push.
+    # This gate only re-evaluates if the trigger's `types:` above includes `ready_for_review` —
+    # dropping it would let a ready-flip merge with build-and-test permanently SKIPPED (issue #1481).
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     # Backstop so a hung step (stalled restore, wedged toolchain fetch) fails fast instead
