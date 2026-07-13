@@ -36,8 +36,9 @@ internal sealed class TypeScriptExpressionTranslator
     private readonly ISet<string> _memberNames;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
 
-    private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
+    // Per-name shadow stack: pushing a name that's already bound stacks the new binding on top rather
+    // than evicting the outer one, so popping it back off restores whatever was there before (#1497).
+    private readonly LocalScopeStack _locals = new();
 
     // When set, a member identifier renders as `receiver.<camelCase>` (e.g. a read-model projection
     // whose members read off the `src` parameter), the TS analogue of the C# translator's
@@ -74,25 +75,14 @@ internal sealed class TypeScriptExpressionTranslator
         _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
-    public void PushLocal(string name, TypeRef? type = null)
-    {
-        _locals.Add(name);
-        if (type is not null)
-        {
-            _localTypes[name] = type;
-        }
-    }
+    public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
 
-    public void PopLocal(string name)
-    {
-        _locals.Remove(name);
-        _localTypes.Remove(name);
-    }
+    public void PopLocal(string name) => _locals.PopLocal(name);
 
     private TypeScope EffectiveScope()
     {
         TypeScope scope = _scope;
-        foreach (KeyValuePair<string, TypeRef> kv in _localTypes)
+        foreach (KeyValuePair<string, TypeRef> kv in _locals.ActiveBindings)
         {
             scope = scope.WithRef(kv.Key, kv.Value, _index);
         }
@@ -613,7 +603,7 @@ internal sealed class TypeScriptExpressionTranslator
     private void WriteIdentifier(string name, StringBuilder sb, string? enumHint = null)
     {
         // Local (lambda/command/factory parameter, let binding): verbatim camelCase.
-        if (_locals.Contains(name))
+        if (_locals.IsLocal(name))
         {
             sb.Append(TypeScriptNaming.ToCamelCase(name));
             return;
@@ -678,7 +668,7 @@ internal sealed class TypeScriptExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus.Cancelled` -> the PascalCase const member.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.Contains(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(TypeScriptNaming.ToPascalCase(qualifier.Name)).Append('.')
               .Append(TypeScriptNaming.ToPascalCase(ma.MemberName));
@@ -935,15 +925,15 @@ internal sealed class TypeScriptExpressionTranslator
             return "/* expected lambda */ () => undefined";
         }
 
-        var wasPresent = _locals.Contains(lambda.Parameter);
+        // Unconditional push/pop: the shadow stack restores whatever the parameter shadowed — an outer
+        // `let`/parameter of the same name keeps BOTH its presence and its own type once the lambda
+        // closes. The old name-only `wasPresent` guard preserved the name but left the parameter's
+        // element type overwriting the outer binding's (#1497).
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
         PushLocal(lambda.Parameter, element);
         var body = new StringBuilder();
         Write(lambda.Body, body);
-        if (!wasPresent)
-        {
-            PopLocal(lambda.Parameter);
-        }
+        PopLocal(lambda.Parameter);
 
         return $"({TypeScriptNaming.ToCamelCase(lambda.Parameter)}) => {body}";
     }

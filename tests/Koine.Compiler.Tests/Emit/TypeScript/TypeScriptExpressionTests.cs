@@ -398,4 +398,95 @@ public class TypeScriptExpressionTests
         var runtime = result.Files.Single(f => f.RelativePath.EndsWith("runtime.ts")).Contents;
         runtime.ShouldContain("timeoutMs?: number");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1497 — local-binding shadow tracking (the TS half of the #1370 PopLocal-eviction bug class).
+    // ---------------------------------------------------------------------------------------------
+
+    private const string NoTscNotice =
+        "no TypeScript toolchain (node + tsc) on PATH — set KOINE_TSC/KOINE_NODE to type-check the emitted TS";
+
+    /// <summary>
+    /// A <c>let</c> that shadows a same-named MEMBER, with a second <c>let</c> shadowing it again:
+    /// popping the inner binding must restore the OUTER LOCAL, not evict it.
+    /// <para>
+    /// The old flat <c>_locals</c>/<c>_localTypes</c> pair could only evict, so after the inner
+    /// <c>let n = 20</c> popped, <c>n</c> stopped being a local at all — and the trailing <c>+ n</c>
+    /// silently re-bound to the MEMBER <c>n</c>, emitting <c>this.n</c>. The member is a
+    /// <c>String</c> here, so the mis-binding is not merely wrong at runtime (it would have read the
+    /// member instead of <c>10</c>): it makes the getter return a string from a <c>number</c>-typed
+    /// accessor, which <c>tsc --strict</c> rejects outright.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void NestedLetShadowingAMember_RestoresTheOuterLocal_NotTheMember()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                n:    String
+                base: Int
+                calc: Int = base + (let n = 10 in (let n = 20 in n) + n)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.ts")).Contents;
+
+        // The outer `n` must still resolve to the LOCAL const, never to the member.
+        money.ShouldContain("return ((() => { const n = 20; return n; })() + n);");
+        money.ShouldNotContain("+ this.n)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a let shadowing a same-named member must not leak the member into the outer binding's scope:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The narrower lambda-parameter variant: a collection-op lambda parameter that shadows a same-named
+    /// outer <c>let</c> of a DIFFERENT type. <c>RenderLambda</c>'s old name-only <c>wasPresent</c> guard
+    /// kept the outer NAME bound but left the lambda parameter's <c>TypeRef</c> overwriting the outer
+    /// one, so the outer binding was re-typed for the rest of its scope.
+    /// <para>
+    /// Here <c>x</c> is a <c>Decimal</c> (<c>rate</c>) shadowed by an <c>Int</c> element parameter. After
+    /// the lambda closes, <c>x + rate</c> must render as <c>Decimal</c> arithmetic
+    /// (<c>x.add(this.rate)</c>); with the leaked <c>Int</c> type it rendered as raw
+    /// <c>(x + this.rate)</c>, which <c>tsc --strict</c> rejects — <c>+</c> does not apply to the runtime
+    /// <c>Decimal</c> class.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void LambdaParameterShadowingAnOuterLet_RestoresTheOuterBindingsType_AfterTheLambdaCloses()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                qtys:  List<Int>
+                rate:  Decimal
+                total: Decimal = let x = rate in (if qtys.any(x => x > 0) then x + rate else x)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+
+        // `x` is a Decimal again once the lambda closes — so its arithmetic goes through Decimal.add.
+        order.ShouldContain("x.add(this.rate)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a lambda parameter shadowing an outer let must not leak its element type into the outer binding:\n"
+            + string.Join("\n", check.Errors));
+    }
 }
