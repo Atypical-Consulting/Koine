@@ -176,8 +176,15 @@ public sealed class TypeResolver
                 : ErrorType.Instance;
         }
 
-        protected override KoineType VisitUnary(UnaryExpr n) =>
-            n.Op == UnaryOp.Not ? Bool : Visit(n.Operand);
+        // `Not` only ever short-circuits to `Bool` when the operand actually IS Bool/Bool? — for any
+        // other operand type (a mismatch ExpressionChecker.CheckUnaryOperandType reports separately),
+        // propagate the operand's real type instead of masking it as "Bool", so a declared-vs-inferred
+        // comparison elsewhere sees the mismatch too rather than always agreeing with itself.
+        protected override KoineType VisitUnary(UnaryExpr n)
+        {
+            KoineType operand = Visit(n.Operand);
+            return n.Op == UnaryOp.Not && operand.Name == "Bool" ? Bool : operand;
+        }
 
         protected override KoineType VisitMatch(MatchExpr n) => Bool;
 
