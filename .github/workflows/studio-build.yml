@@ -32,6 +32,10 @@ jobs:
     name: studio (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    # See ci.yml's build-and-test job for why: MSBuild node reuse can wedge a job on a runner that
+    # gets reused (issue #1552). Cheap insurance here too, since this job also runs `dotnet test`.
+    env:
+      MSBUILDDISABLENODEREUSE: 1
     strategy:
       fail-fast: false
       matrix:
@@ -88,7 +92,7 @@ jobs:
         run: dotnet publish src/Koine.Cli -p:PublishProfile=${{ matrix.rid }}
 
       - name: Run headless LSP tests
-        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release --filter "FullyQualifiedName~LspServerTests"
+        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release -nodereuse:false --filter "FullyQualifiedName~LspServerTests"
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6

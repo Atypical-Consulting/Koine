@@ -80,6 +80,10 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    # See ci.yml's build-and-test job for why (issue #1552): cheap insurance against a runner that
+    # gets reused sharing a wedged MSBuild node with this job's `dotnet publish`.
+    env:
+      MSBUILDDISABLENODEREUSE: 1
     permissions:
       contents: write
     strategy:
@@ -145,8 +149,11 @@ jobs:
       id-token: write # request the GitHub OIDC token for NuGet Trusted Publishing
     # Job-level so the publish steps' `if` can read it — a STEP-level env is NOT visible to that
     # same step's own `if` conditional. Empty until the maintainer sets the secret → steps no-op.
+    # MSBUILDDISABLENODEREUSE: see ci.yml's build-and-test job (issue #1552) — cheap insurance for
+    # this job's several `dotnet pack` invocations too.
     env:
       NUGET_USER: ${{ secrets.NUGET_USER }}
+      MSBUILDDISABLENODEREUSE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7

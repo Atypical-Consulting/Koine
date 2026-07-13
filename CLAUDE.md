@@ -56,8 +56,19 @@ derive the next semantic version and changelog entry — see
 > them once: `dotnet workload install wasm-tools wasm-experimental`. Without them the solution
 > restore/build fails on the wasm project. (CI installs the same pair; see `.github/workflows/ci.yml`.)
 
+> **Concurrent worktrees:** agents routinely work this repo from several git worktrees at once, and
+> `dotnet build`/`dotnet test` share MSBuild's persistent build nodes across ALL of them — the node is
+> keyed by a toolset-derived pipe name, not by working directory. Two worktrees building at the same
+> time can end up on the same node and **deadlock at 0% CPU forever, with no timeout** (issue #1552).
+> `scripts/build/build.sh|.ps1|.cmd` already set `MSBUILDDISABLENODEREUSE=1` and pass `-nodereuse:false`
+> to both commands, and `build.sh` additionally wraps each command in a hard timeout (600s build / 900s
+> test by default — override with `KOINE_BUILD_TIMEOUT_SECS`/`KOINE_TEST_TIMEOUT_SECS` if a legitimately
+> slow cold build ever needs more headroom) so a deadlock fails loud instead of hanging silently — use
+> them, or when invoking `dotnet build`/`dotnet test` directly from a worktree, pass `-nodereuse:false`
+> yourself (and set `MSBUILDDISABLENODEREUSE=1`) rather than relying on the bare command.
+
 ```bash
-./scripts/build/build.sh    # dotnet build && dotnet test (build.ps1 / build.cmd are equivalents)
+./scripts/build/build.sh    # dotnet build && dotnet test, node-reuse off + a hard timeout (build.ps1 / build.cmd are equivalents, sans the timeout)
 dotnet build                # build only
 dotnet test                 # run all tests (~1900)
 dotnet test --filter "FullyQualifiedName~R9ValueObjectTests"   # a single test class
