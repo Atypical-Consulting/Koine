@@ -209,6 +209,26 @@ public class R2OptionalityTests
     }
 
     [Fact]
+    public void Max_over_a_selector_that_is_both_optional_and_not_orderable_reports_both_defects()
+    {
+        // Code-review finding on #1556: an early return after the new optionality diagnostic used to
+        // swallow the pre-existing "not orderable" diagnostic below it, hiding one of two independent
+        // defects until a second compile. Both must surface together.
+        const string src =
+            "context C {\n" +
+            "  value Money { amount: Int }\n" +
+            "  value Item { price: Money? }\n" +
+            "  value V {\n" +
+            "    items:   List<Item>\n" +
+            "    biggest: Money = items.max(i => i.price)\n" +
+            "  }\n" +
+            "}\n";
+        var diagnostics = Diagnose(src);
+        diagnostics.ShouldContain(d => d.Message.Contains("max requires a non-optional selector"));
+        diagnostics.ShouldContain(d => d.Message.Contains("max requires a comparable selector; 'Money' is not orderable"));
+    }
+
+    [Fact]
     public void Sum_over_a_selector_resolved_via_coalesce_is_accepted()
     {
         // `qty ?? 0` fully resolves to a non-optional Int before it ever reaches the selector body,

@@ -1052,7 +1052,6 @@ internal sealed class ExpressionChecker
         {
             Report(DiagnosticCodes.AggregateSelectorOptional,
                 $"{op} requires a non-optional selector; guard with isPresent or use '??' before folding", call);
-            return;
         }
 
         if (op == "sum")
