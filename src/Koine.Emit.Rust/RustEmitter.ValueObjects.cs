@@ -433,11 +433,14 @@ public sealed partial class RustEmitter
             {
                 body = $"{wrap}({body})";
             }
-            // A String-typed derived member whose body yields a borrowed &str (e.g. `name.trim`) must be
-            // owned; a bare non-Copy field read must be cloned out of `&self`. Gated on `underlyingType`
-            // (not `m.Type`) so an optional-declared `String?` member's `.trim()` body is owned too,
-            // before `SomeWrapIfNeeded` below wraps it (#1332, mirrors #1325's constant-default fix).
-            else if (underlyingType is { Name: "String" } && body.EndsWith(".trim()", StringComparison.Ordinal))
+            // A String-typed derived member whose body yields a borrowed &str (e.g. `name.trim`, or a
+            // smart enum's String-typed associated-data accessor, #1533) must be owned; a bare non-Copy
+            // field read must be cloned out of `&self`. Gated on `underlyingType` (not `m.Type`) so an
+            // optional-declared `String?` member's borrowed body is owned too, before `SomeWrapIfNeeded`
+            // below wraps it (#1332, mirrors #1325's constant-default fix). Decided from the resolved
+            // AST/type via `ProducesBorrowedStr` rather than a syntactic `body.EndsWith(".trim()")` test
+            // — the latter missed the enum-accessor shape entirely (#1533).
+            else if (underlyingType is { Name: "String" } && translator.ProducesBorrowedStr(m.Initializer!))
             {
                 body += ".to_string()";
             }

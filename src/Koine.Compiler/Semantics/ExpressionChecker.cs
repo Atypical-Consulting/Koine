@@ -24,6 +24,15 @@ internal sealed class ExpressionChecker
     // (flow narrowing). Saved/restored around guarded sub-expressions.
     private HashSet<string> _present = new(StringComparer.Ordinal);
 
+    // Value-object/entity arithmetic sub-expressions (by reference) already reported as a type
+    // mismatch by one of the checks below. TypeResolver's best-effort inference deliberately does
+    // NOT collapse a mismatched BinaryExpr to ErrorType (only VisitUnary does this, #1501) — other,
+    // unrelated inference relies on the operand's best-guess type still flowing through. So an OUTER
+    // check inspecting the SAME mismatched sub-expression as its own operand would otherwise
+    // independently "discover" and re-report the identical defect (#1525, an echo, not a second
+    // defect); consulting this set lets it recognize "already reported" and skip.
+    private readonly HashSet<Expr> _reportedInvalid = new(ReferenceEqualityComparer.Instance);
+
     public ExpressionChecker(
         ModelIndex index,
         TypeResolver resolver,
@@ -237,10 +246,17 @@ internal sealed class ExpressionChecker
     /// target's <c>WriteUnary</c> only ever generates the corresponding native operator for those operand
     /// types, so anything else (a <c>String</c>, a value object, an entity reference) fails inside the
     /// target's own compiler instead of Koine's. An undeterminable operand type (already reported
-    /// elsewhere, e.g. an unknown field) is skipped to avoid a redundant cascading diagnostic.
+    /// elsewhere, e.g. an unknown field) is skipped to avoid a redundant cascading diagnostic — as is
+    /// an operand a value-object/entity arithmetic check already reported invalid (#1525), since
+    /// <see cref="TypeResolver"/> still resolves such a mismatch to a non-error best-guess type here.
     /// </summary>
     private void CheckUnaryOperandType(UnaryExpr u, TypeScope scope)
     {
+        if (IsAlreadyInvalid(u.Operand))
+        {
+            return;
+        }
+
         TypeRef? operand = _resolver.Infer(u.Operand, scope);
         if (operand is null)
         {
@@ -253,6 +269,7 @@ internal sealed class ExpressionChecker
             var symbol = u.Op == UnaryOp.Not ? "!" : "-";
             Report(DiagnosticCodes.UnaryOperandTypeMismatch,
                 $"unary operator '{symbol}' cannot be applied to '{operand.Name}'", u);
+            MarkInvalid(u);
         }
     }
 
@@ -297,6 +314,15 @@ internal sealed class ExpressionChecker
 
         TypeRef vo = voOnLeft ? left! : right!;
 
+        // #1525: the value-object-bearing operand is itself an already-reported mismatch (e.g. the
+        // inner `w + m` of `(w + m) + 5`) — TypeResolver still resolves it to its own best-guess type
+        // rather than ErrorType, so without this guard this check would independently "discover" and
+        // echo the same defect a sibling check already reported.
+        if (IsAlreadyInvalid(voOnLeft ? b.Left : b.Right))
+        {
+            return;
+        }
+
         // Supported SCALING forms: `vo * scalar` / `scalar * vo` (multiply is commutative) and
         // `vo / scalar` (division scales down; the reversed `scalar / vo` is an unsupported form
         // handled by the KOI0215 path below). Every emitter demand-generates the scalar operator
@@ -310,6 +336,7 @@ internal sealed class ExpressionChecker
             {
                 Report(DiagnosticCodes.ValueObjectScalarArithmeticNoNumericField,
                     $"cannot scale value object '{vo.Name}' by a scalar; it has no numeric field to multiply or divide", b);
+                MarkInvalid(b);
             }
 
             return;
@@ -327,6 +354,7 @@ internal sealed class ExpressionChecker
             : "a value object scales by a scalar with '*', not '+'/'-'";
         Report(DiagnosticCodes.ValueObjectScalarArithmetic,
             $"cannot {verb} value object '{vo.Name}'; {tail}", b);
+        MarkInvalid(b);
     }
 
     /// <summary>
@@ -399,6 +427,15 @@ internal sealed class ExpressionChecker
             return; // same declared type
         }
 
+        // #1525: either operand is itself an already-reported mismatch (e.g. `(w + m) + (x + y)`,
+        // where BOTH `w + m` and `x + y` were already flagged) — TypeResolver still resolves each to
+        // its own best-guess type, so without this guard the outer combination would independently
+        // "discover" and echo a third diagnostic on top of the two real ones.
+        if (IsAlreadyInvalid(b.Left) || IsAlreadyInvalid(b.Right))
+        {
+            return;
+        }
+
         var verb = b.Op.Verb();
         if (leftDecl is { IsQuantity: true } && rightDecl is { IsQuantity: true })
         {
@@ -410,6 +447,8 @@ internal sealed class ExpressionChecker
             Report(DiagnosticCodes.ValueObjectTypeMismatch,
                 $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; a value object's '+'/'-' only combines two instances of the SAME declared type", b);
         }
+
+        MarkInvalid(b);
     }
 
     /// <summary>
@@ -519,10 +558,17 @@ internal sealed class ExpressionChecker
             return;
         }
 
+        // #1525: don't echo a sibling check's already-reported mismatch on either operand.
+        if (IsAlreadyInvalid(b.Left) || IsAlreadyInvalid(b.Right))
+        {
+            return;
+        }
+
         var verb = b.Op.Verb();
         Report(DiagnosticCodes.ValueObjectMulDivMismatch,
             $"cannot {verb} value objects '{left.Name}' and '{right.Name}'; no target ever generates a "
             + "'*'/'/' operator between two value-like operands, even of the SAME declared type", b);
+        MarkInvalid(b);
     }
 
     /// <summary>
@@ -584,6 +630,12 @@ internal sealed class ExpressionChecker
             return;
         }
 
+        // #1525: don't echo a sibling check's already-reported mismatch on either operand.
+        if (IsAlreadyInvalid(b.Left) || IsAlreadyInvalid(b.Right))
+        {
+            return;
+        }
+
         (string verb, string symbol) = (b.Op.Verb(), b.Op.Symbol());
         var culprit = leftKind is not null && rightKind is not null
             ? $"'{left.Name}' ({leftKind}) and '{right.Name}' ({rightKind})"
@@ -593,6 +645,7 @@ internal sealed class ExpressionChecker
         Report(DiagnosticCodes.EntityOperandArithmetic,
             $"cannot {verb} '{left.Name}' and '{right.Name}'; {culprit} — entities and aggregates never "
             + $"have a generated '{symbol}' operator, regardless of the other operand", b);
+        MarkInvalid(b);
     }
 
     /// <summary>"entity"/"aggregate" for <see cref="DiagnosticCodes.EntityOperandArithmetic"/>'s
@@ -696,6 +749,20 @@ internal sealed class ExpressionChecker
     /// <summary>An optional operand that has not been narrowed to present by a guard.</summary>
     private bool IsUnguardedOptional(Expr expr, TypeRef? type) =>
         type is { IsOptional: true } && !IsNarrowed(expr);
+
+    /// <summary>
+    /// True when a value-object/entity arithmetic check already reported <paramref name="operand"/>
+    /// itself as an invalid mismatch (#1525) — an outer check that would otherwise flag it again
+    /// (via <see cref="TypeResolver"/>'s non-error best-guess type) should skip instead, since doing
+    /// so would just echo the same defect.
+    /// </summary>
+    private bool IsAlreadyInvalid(Expr operand) => _reportedInvalid.Contains(operand);
+
+    /// <summary>
+    /// Marks <paramref name="expr"/> as reported so an outer check consulting
+    /// <see cref="IsAlreadyInvalid"/> on it — as its own operand — skips re-reporting the same defect.
+    /// </summary>
+    private void MarkInvalid(Expr expr) => _reportedInvalid.Add(expr);
 
     /// <summary>True when the expression is a field already proven present in this scope.</summary>
     private bool IsNarrowed(Expr expr) => expr is IdentifierExpr id && _present.Contains(id.Name);

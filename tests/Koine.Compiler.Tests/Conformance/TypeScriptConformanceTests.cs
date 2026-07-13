@@ -585,4 +585,81 @@ public class TypeScriptConformanceTests
         run.Stdout.ShouldContain("\"negative\":-3");
         run.Stdout.ShouldContain("\"fractional\":7");
     }
+
+    /// <summary>
+    /// Issue #1537 acceptance: Decimal arithmetic against a non-Decimal Int operand — an Int LITERAL,
+    /// an Int MEMBER, on either side of the operator, across all four of <c>+ - * /</c>, and a guarded
+    /// OPTIONAL Int member — must all widen to <c>Decimal</c> at the call site and type-check under
+    /// <c>tsc --strict</c>. Before the fix, <c>rate + 1</c> emitted the bare literal
+    /// <c>this.rate.add(1)</c> against the runtime's strict <c>add(other: Decimal)</c> — a TS2345 on
+    /// the single most ordinary Decimal-arithmetic shape in the language, needing no shadowing, no
+    /// <c>let</c>, no lambda.
+    /// </summary>
+    [Fact]
+    public void Decimal_arithmetic_against_int_operands_typechecks_under_strict()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:       Decimal
+                qty:        Int
+                discount:   Int?
+                literalPlus:    Decimal = rate + 1
+                literalOnLeft:  Decimal = 1 + rate
+                memberPlus:     Decimal = rate + qty
+                memberMinus:    Decimal = rate - qty
+                memberTimes:    Decimal = rate * qty
+                memberDivided:  Decimal = rate / qty
+                withOptional:   Decimal? = if discount.isPresent then rate - discount else rate
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "Decimal arithmetic against Int literals/members/an optional member should type-check under --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1557 acceptance: a guarded OPTIONAL <c>Decimal</c> operand — the sibling bug class to
+    /// #1537's optional-Int case above — must map-widen the same way when consumed inside a NESTED
+    /// closure (a <c>distinctBy</c> selector lambda), where TypeScript's own control-flow narrowing of
+    /// the outer guard doesn't reach. Also covers a guarded optional <c>Decimal</c> AND a guarded
+    /// optional <c>Int</c> together in the SAME value object (independent guards, each consumed in its
+    /// own nested closure) so both optional-widen paths are exercised side by side in one conformance
+    /// case. Before the fix, <c>this.discount.add(r)</c> rendered bare — a real <c>tsc</c> TS2532
+    /// (<c>this.discount</c> still typed <c>Decimal | undefined</c> inside the closure).
+    /// </summary>
+    [Fact]
+    public void Decimal_and_int_guarded_optionals_inside_nested_closures_typecheck_under_strict()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:            Decimal
+                discount:        Decimal?
+                qty:             Int?
+                rates:           List<Decimal>
+                discountApplied: Bool = if discount.isPresent then rates.distinctBy(r => discount + r) else true
+                qtyApplied:      Bool = if qty.isPresent then rates.distinctBy(r => rate + qty) else true
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "a guarded optional Decimal and a guarded optional Int, each consumed inside a nested "
+            + "closure, should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
 }

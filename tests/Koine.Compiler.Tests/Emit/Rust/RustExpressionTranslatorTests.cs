@@ -24,6 +24,38 @@ public class RustExpressionTranslatorTests
     }
 
     /// <summary>
+    /// Like <see cref="NewTranslator"/>, but the backing model also declares a smart enum
+    /// <c>Currency(symbol: String, decimals: Int)</c> and a value <c>Label { text: String, shout: String
+    /// =&gt; text.upper }</c> (a STORED field plus a DERIVED one), so
+    /// <see cref="RustExpressionTranslator.ProducesBorrowedStr"/> tests can exercise a real
+    /// enum-associated-data resolution and a stored-vs-derived distinction instead of an empty index.
+    /// </summary>
+    private static RustExpressionTranslator NewTranslatorWithEnum(IReadOnlyList<Member> members)
+    {
+        const string src =
+            """
+            context C {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+              }
+              value Label {
+                text: String
+                shout: String = text.upper
+              }
+              value V { x: Int }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        ModelIndex index = new SemanticModel(result.Model!).Index;
+        return new RustExpressionTranslator(
+            index,
+            members: members,
+            enumMemberToType: new Dictionary<string, string>(),
+            enumVariants: new Dictionary<(string, string), IReadOnlyDictionary<string, string>>(),
+            typeMapper: new RustTypeMapper(index));
+    }
+
+    /// <summary>
     /// <see cref="RustExpressionTranslator.Write"/>'s own <c>IdentifierExpr</c> case calls
     /// <c>WriteIdentifier(id.Name, sb, null, coerceTo)</c> with no <c>ownType</c> argument — exactly the
     /// shape reproduced here. An optional <c>Int</c> local coerced toward <c>Decimal</c> must map inside
@@ -228,5 +260,83 @@ public class RustExpressionTranslatorTests
         translator.WriteIdentifier("y", sb, null, new TypeRef("Decimal"));
 
         sb.ToString().ShouldBe("y.map(Decimal::from)");
+    }
+
+    /// <summary>Issue #1533: a <c>.trim()</c> member op always produces a borrowed <c>&amp;str</c>.</summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_true_for_a_trim_member_op()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("name", new TypeRef("String"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("name"), "trim");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1533: a smart enum's <c>String</c>-typed associated-data accessor
+    /// (<c>currency.symbol</c>) returns a borrowed <c>&amp;'static str</c>.
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_true_for_a_smart_enum_String_datum_access()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("currency", new TypeRef("Currency"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("currency"), "symbol");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1533 (Task 4 audit gap, found on this PR's own review): a STORED <c>String</c> field on
+    /// another value object also returns a borrowed <c>&amp;str</c> from its accessor
+    /// (<c>RustEmitter.ValueObjects.WriteAccessor</c> deliberately avoids cloning on every field read) —
+    /// not just a smart-enum's associated data. Confirmed against a real <c>cargo check</c> E0308 before
+    /// this fix (a nested value's plain String field read into a derived member).
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_true_for_a_stored_String_field_on_another_value()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("label", new TypeRef("Label"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("label"), "text");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1533 guard: a DERIVED <c>String</c> member on another value object is NOT borrowed — its
+    /// own accessor (<c>RustEmitter.ValueObjects.WriteDerived</c>) always returns an owned
+    /// <c>String</c>, unlike a stored field's <c>&amp;str</c> accessor. Distinguishes the two via
+    /// <see cref="MemberAnalysis.IsDerived"/> rather than treating every <c>String</c>-typed member the
+    /// same.
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_false_for_a_derived_String_member_on_another_value()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("label", new TypeRef("Label"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("label"), "shout");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1533 guard: a smart enum's <c>Int</c>-typed associated datum (<c>currency.decimals</c>) is
+    /// unaffected — the predicate only recognizes a <c>String</c>-typed associated member as borrowed.
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_false_for_a_smart_enum_Int_datum_access()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("currency", new TypeRef("Currency"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("currency"), "decimals");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeFalse();
     }
 }

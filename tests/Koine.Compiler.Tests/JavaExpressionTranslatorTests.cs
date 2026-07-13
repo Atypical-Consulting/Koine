@@ -13,6 +13,10 @@ namespace Koine.Compiler.Tests;
 /// </summary>
 public class JavaExpressionTranslatorTests
 {
+    private const string NoToolchainNotice =
+        "No usable JDK 17+ toolchain (javac >= 17) available; javac not run. " +
+        "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.";
+
     // A model index over an empty model — primitives (String/Int/Decimal/Bool/Instant) classify without
     // any declaration, which is all the type-directed operator lowering needs.
     private static readonly ModelIndex Index = new(new KoineModel(Array.Empty<ContextNode>()));
@@ -155,12 +159,13 @@ public class JavaExpressionTranslatorTests
     /// construction, and that manual dance collapses to a plain push/pop.
     /// </para>
     /// <para>
-    /// <b>Asserted on the emitted shape, not via <c>javac</c>.</b> Java — alone among the targets — forbids
-    /// a lambda body from redeclaring a local of the enclosing scope, so nested same-name <c>let</c>s
-    /// lower to a <c>var n</c> that javac rejects outright ("variable n is already defined") no matter
-    /// which binding the trailing <c>n</c> resolves to. That needs the Java emitter to alpha-rename the
-    /// inner binding, a distinct lowering defect tracked separately; it is pre-existing (the buggy emit
-    /// declared the same two <c>var n</c>s) and orthogonal to this local-tracking fix.
+    /// <b>Now asserted through a real <c>javac</c>, like the other four targets.</b> At the time this test
+    /// was written Java — alone among the targets — forbade a lambda body from redeclaring a local of the
+    /// enclosing scope, so this exact nested same-name <c>let</c> lowered to a <c>var n</c> that javac
+    /// rejected outright ("variable n is already defined") no matter which binding the trailing <c>n</c>
+    /// resolved to; a distinct, pre-existing lowering defect orthogonal to this local-tracking fix, tracked
+    /// separately as #1536 and now fixed — the inner binding alpha-renames to <c>n$1</c> so both
+    /// declarations are legal Java.
     /// </para>
     /// </summary>
     [Fact]
@@ -182,8 +187,226 @@ public class JavaExpressionTranslatorTests
 
         var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
 
-        // The outer `n` must still resolve to the LOCAL `var n = 10L`, never to the member accessor.
-        money.ShouldContain("var n = 20L; return n; })).get() + n;");
+        // The outer `n` must still resolve to the LOCAL `var n = 10L`, never to the member accessor, and
+        // the inner binding now alpha-renames to `n$1` so both `var`s are legal Java (#1536).
+        money.ShouldContain("var n$1 = 20L; return n$1; })).get() + n;");
         money.ShouldNotContain("+ this.n()");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1536 — a nested same-name `let` (or one colliding with a command parameter) must alpha-rename
+    // the inner binding so the emitted Java compiles: a lambda body may not redeclare a local of the
+    // enclosing method (JLS §6.4), so two `var n` declarations are a hard javac error, not a shadow.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A <c>let</c> whose name collides with a COMMAND PARAMETER hits the same javac redeclaration rule
+    /// as the nested-<c>let</c> case, from a different collision source (#1536's second edge case): the
+    /// parameter and the lambda-local share the method's declaration scope.
+    /// </summary>
+    [Fact]
+    public void LetCollidingWithACommandParameter_AlphaRenamesTheLetBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Order identified by OrderId {
+                total: Int
+                command adjust(n: Int) {
+                  requires (let n = n + 1 in n) > 0 "n must stay positive"
+                  total -> total + n
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java")).Contents;
+
+        // The `let n = …` shadowing the `n` parameter must alpha-rename to `n$1`; its own value
+        // expression (n + 1) still refers to the PARAMETER `n`, and its body echoes the renamed local.
+        order.ShouldContain("var n$1 = n + 1L; return n$1; })).get() > 0L");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// A LAMBDA PARAMETER (a collection-op selector, e.g. <c>.any(n =&gt; …)</c>) is a local exactly like a
+    /// <c>let</c> binding or a command parameter — so it must alpha-rename when it collides with an
+    /// already-open outer local too, not only when a <c>let</c> collides with another <c>let</c>.
+    /// </summary>
+    [Fact]
+    public void LambdaParameterCollidingWithAnOuterLet_AlphaRenamesTheLambdaParameter()
+    {
+        const string src =
+            """
+            context Shop {
+              value Basket {
+                items: List<Int>
+                threshold: Int
+                hasAboveThreshold: Bool = let n = threshold in items.any(n => n > 0) && n > 0
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var basket = result.Files.Single(f => f.RelativePath.EndsWith("Basket.java")).Contents;
+
+        // The lambda parameter `n` shadowing the outer `let n = threshold` must alpha-rename to `n$1`;
+        // the trailing `n > 0` outside the lambda still refers to the OUTER let-bound `n`.
+        basket.ShouldContain(".anyMatch(n$1 -> n$1 > 0L)");
+        basket.ShouldContain(") && n > 0L");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Java's local-variable scope begins at its OWN initializer (JLS §6.3), so a <c>let</c> binding whose
+    /// VALUE expression itself contains an unrelated nested <c>let</c> of the same name collides too — even
+    /// though, in Koine's own scoping, the inner binding's scope never touches the outer one (it's fully
+    /// confined to its own body, entirely inside the outer's value position).
+    /// </summary>
+    [Fact]
+    public void LetWhoseOwnValueContainsANestedSameNameLet_AlphaRenamesTheInnerBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                base: Int
+                calc: Int = let n = (let n = 10 in n) in base + n
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
+
+        // The inner `let n = 10` — nested inside the OUTER `n`'s own value expression — must alpha-rename
+        // to `n$1`; the outer `n` keeps its plain spelling.
+        money.ShouldContain("var n$1 = 10L; return n$1;");
+        money.ShouldContain("var n = ((java.util.function.Supplier<Long>)(() -> { var n$1 = 10L; return n$1; })).get();");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// A collision is a RENDERED-identifier collision, not a raw-Koine-name one: Koine identifiers are
+    /// case-sensitive (<c>n</c> and <c>N</c> are distinct locals — <see cref="LocalScopeStackTests.NamesAreMatchedOrdinally"/>),
+    /// but <see cref="JavaNaming.Member"/> folds a leading-uppercase name to the same camelCase spelling as
+    /// its lowercase counterpart, so a nested <c>let N = …</c> under an outer <c>let n = …</c> renders the
+    /// SAME Java identifier unless the collision check keys off the RENDERED name.
+    /// </summary>
+    [Fact]
+    public void LetCollidingOnlyAfterJavaCasing_AlphaRenamesTheInnerBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                base: Int
+                calc: Int = base + (let n = 10 in (let N = 20 in N) + n)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
+
+        // `N` renders to the same Java identifier `n` as the outer `let n = 10`, so it must alpha-rename
+        // to `n$1` even though `n` and `N` are DIFFERENT Koine locals.
+        money.ShouldContain("var n$1 = 20L; return n$1; })).get() + n;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// A value object's COMPACT CONSTRUCTOR implicitly parameterizes over its own stored components (a
+    /// record's components are bare parameters inside <c>public Money { ... }</c>), so an invariant's
+    /// <c>let</c> binding that collides with a component name must alpha-rename exactly like it would
+    /// against a command parameter — a collision source the initial fix missed (only command/factory
+    /// parameters were reserved, not a value object's own record components).
+    /// </summary>
+    [Fact]
+    public void LetCollidingWithAValueObjectsOwnComponent_AlphaRenamesTheLetBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                amount: Int
+                invariant (let amount = 5 in amount) > 0 "must be positive"
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
+
+        money.ShouldContain("var amount$1 = 5L; return amount$1;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// An entity's DEFAULTED-MEMBER initializer translates inside the validating constructor
+    /// (<c>NameMode.Parameter</c>, so it reads the constructor's own "id"/required-member parameters
+    /// bare) — a <c>let</c> binding that collides with one of those parameters must alpha-rename, the
+    /// same collision source as the value-object compact constructor, missed by the initial fix.
+    /// </summary>
+    [Fact]
+    public void LetCollidingWithAnEntityConstructorParameter_AlphaRenamesTheLetBinding()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Order identified by OrderId {
+                total: Int
+                fee: Int = let total = 5 in total + 1
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java")).Contents;
+
+        order.ShouldContain("var total$1 = 5L; return total$1 + 1L;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 }
