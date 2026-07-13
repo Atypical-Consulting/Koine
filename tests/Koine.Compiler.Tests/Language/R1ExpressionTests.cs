@@ -546,6 +546,27 @@ public class R1ExpressionTests
         diag.Message.ShouldContain("unary operator '-' cannot be applied to 'Money'");
     }
 
+    [Fact]
+    public void Negate_applied_to_a_nested_value_object_mismatch_is_reported_once()
+    {
+        // #1525: `-(w + m)` — the inner `w + m` is the real defect (KOI0219, "cannot add value
+        // objects"). Without suppression the outer unary ALSO independently flags the inner
+        // expression's best-guess type (Weight) as a non-numeric unary operand (KOI0222) — an echo
+        // of the same defect, not a second one.
+        const string src =
+            "context Shop {\n" +
+            "  value Weight { kg: Decimal }\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value V {\n" +
+            "    w: Weight\n" +
+            "    m: Money\n" +
+            "    bad: Decimal = -(w + m)\n" +
+            "  }\n" +
+            "}\n";
+        var diag = Diagnose(src).ShouldHaveSingleItem();
+        diag.Code.ShouldBe(DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
     [Theory]
     [InlineData("value V { a: Bool\n notA: Bool = !a }")]
     [InlineData("value V { a: Bool?\n notA: Bool = !a }")]
