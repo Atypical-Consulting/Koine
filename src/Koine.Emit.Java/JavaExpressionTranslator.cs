@@ -184,9 +184,15 @@ internal sealed class JavaExpressionTranslator
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
-                // The left is optional (Optional<T>); `l ?? r` -> `l.orElse(r)` yields the non-optional T.
+                // The left is optional (Optional<T>). `l ?? r` -> `l.orElse(r)` yields the non-optional T
+                // when `r` is a bare value, but `Optional<T>.orElse(T)` requires a non-Optional argument —
+                // when `r` is ITSELF Optional-typed (e.g. another `T?` factory parameter), the result must
+                // stay Optional-shaped via `l.or(() -> r)` instead, matching TypeResolver.VisitCoalesce's
+                // own `right.IsOptional` propagation (#1520). Mirrors the Rust translator's
+                // `.or_else`/`.unwrap_or_else` split.
                 WriteAtom(co.Left, sb);
-                sb.Append(".orElse(");
+                bool rightIsOptional = InferType(co.Right)?.IsOptional == true;
+                sb.Append(rightIsOptional ? ".or(() -> " : ".orElse(");
                 WriteTopLevel(co.Right, sb);
                 sb.Append(')');
                 break;
