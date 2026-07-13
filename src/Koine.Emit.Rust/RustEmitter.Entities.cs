@@ -230,14 +230,27 @@ public sealed partial class RustEmitter
         // 2. State transitions.
         foreach (Transition t in cmd.Body.OfType<Transition>())
         {
+            Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
+
             // Own the RHS so a non-Copy place (another field) or a String accessor/literal is moved
             // by value into the field rather than borrowed from `&mut self`.
             var value = RustExpressionTranslator.StripOuterParens(
-                translator.TranslateOwned(t.Value, TransitionEnum(entity, t, emit.Index)));
+                translator.TranslateOwned(t.Value, TransitionEnum(field, emit.Index)));
+
+            // Widen an Int-inferred RHS toward a Decimal-declared field, mirroring the smart
+            // constructor's default path (CoercedDefaultValue) and BuildFactoryCtorArgs (#1511) — Rust
+            // has no implicit numeric widening, so `amount -> 5` on a `Decimal` field would otherwise
+            // emit an uncoerced `5` (E0308). Post-wraps the already-rendered, opaque `value` string
+            // rather than threading a directive through the translator, so it applies uniformly
+            // regardless of the RHS's shape (literal, place, or a compound arithmetic expression).
+            if (field is not null)
+            {
+                value = CoerceNumericBody(UnderlyingType(field.Type), translator.InferType(t.Value), value);
+            }
 
             // Assigning a non-optional value into an `Option<T>` field (e.g. `started_at <- now`) wraps
-            // it in `Some(...)`; an already-optional RHS flows through unchanged.
-            Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
+            // it in `Some(...)`; an already-optional RHS flows through unchanged. Composes with the
+            // widening above as `Some(Decimal::from(...))` — widen inside, wrap outside.
             if (field is { Type.IsOptional: true } && !translator.IsOptional(t.Value))
             {
                 value = $"Some({value})";
@@ -259,10 +272,18 @@ public sealed partial class RustEmitter
             WriteEmitStatement(body, emit, emitClause, translator, typeMapper, eventsField);
         }
 
-        // 4. Result (or unit).
+        // 4. Result (or unit). Widened toward the command's declared return type the same way a
+        // transition widens toward its field's declared type (#1511) — an Int-inferred `result`
+        // expression against a `: Decimal` return type would otherwise emit an uncoerced `Ok(5)` (E0308).
         if (cmd.Body.OfType<ResultClause>().FirstOrDefault() is { } result)
         {
-            body.Append(Indent).Append(Indent).Append("Ok(").Append(translator.TranslateOwned(result.Value)).Append(")\n");
+            var resultValue = RustExpressionTranslator.StripOuterParens(translator.TranslateOwned(result.Value));
+            if (cmd.ReturnType is { } returnDecl)
+            {
+                resultValue = CoerceNumericBody(UnderlyingType(returnDecl), translator.InferType(result.Value), resultValue);
+            }
+
+            body.Append(Indent).Append(Indent).Append("Ok(").Append(resultValue).Append(")\n");
         }
         else
         {
@@ -367,7 +388,14 @@ public sealed partial class RustEmitter
             }
 
             var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-            return translator.TranslateOwned(value, expectedEnum);
+            var owned = translator.TranslateOwned(value, expectedEnum);
+
+            // Widen an Int-inferred argument toward a Decimal-declared payload field (#1511) — the
+            // event-payload dual of the transition/result fixes above; an unwidened arg emits an
+            // uncoerced literal/place against `Ev::new`'s `Decimal` parameter (E0308). Post-wraps the
+            // already-rendered, opaque `owned` string (mirroring the transition/result fixes and
+            // BuildFactoryCtorArgs below) so it applies uniformly regardless of the argument's shape.
+            return CoerceNumericBody(UnderlyingType(m.Type), translator.InferType(value), owned);
         });
 
         return $"DomainEvent::{RustNaming.ToPascalCase(emitClause.EventName)}"
@@ -590,11 +618,8 @@ public sealed partial class RustEmitter
     }
 
     /// <summary>The enum type expected on the RHS of a transition (so a bare enum member qualifies).</summary>
-    private static string? TransitionEnum(EntityDecl entity, Transition t, ModelIndex index)
-    {
-        Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
-        return field is not null && index.Classify(field.Type.Name) == TypeKind.Enum ? field.Type.Name : null;
-    }
+    private static string? TransitionEnum(Member? field, ModelIndex index) =>
+        field is not null && index.Classify(field.Type.Name) == TypeKind.Enum ? field.Type.Name : null;
 
     // ----------------------------------------------------------------------
     // Identity newtype

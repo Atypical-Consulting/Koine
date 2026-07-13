@@ -3835,4 +3835,126 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1511: a command transition assigning an <c>Int</c>-inferred value into a <c>Decimal</c>
+    /// field must compile — the transition-value call site forgot to consult the shared numeric-widening
+    /// coercion, so this used to fail a real <c>cargo check</c> with E0308.
+    /// </summary>
+    [Fact]
+    public void Command_transition_of_an_Int_literal_into_a_Decimal_field_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump() {
+                  amount -> 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1511 Task 3 audit: the sibling <c>emit</c> event-payload path shares the identical
+    /// missing-coercion gap as the transition — an <c>Int</c> argument for a <c>Decimal</c>-declared
+    /// event field must compile.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_an_Int_literal_into_a_Decimal_field_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump() {
+                  emit Bumped(amount: 5)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1511 Task 3 audit: the sibling command <c>result</c> path shares the identical
+    /// missing-coercion gap — an <c>Int</c> result value against a <c>: Decimal</c> declared return type
+    /// must compile.
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_an_Int_literal_into_a_Decimal_return_type_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command computeBonus(): Decimal {
+                  result 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1511 code-review finding: an earlier version of this fix only widened a bare
+    /// literal/identifier RHS — a compound (binary arithmetic) Int-inferred value assigned toward a
+    /// Decimal-declared target still failed a real <c>cargo check</c> with E0308, at all three call sites
+    /// this issue touches (a transition's field, a command's <c>result</c>, and an <c>emit</c> payload
+    /// argument).
+    /// </summary>
+    [Fact]
+    public void Binary_Int_expression_into_a_Decimal_target_compiles_at_every_value_writing_call_site()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump(qty: Int, delta: Int): Decimal {
+                  amount -> qty + delta
+                  emit Bumped(amount: qty + delta)
+                  result qty + delta
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

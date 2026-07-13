@@ -1168,12 +1168,20 @@ internal sealed class RustExpressionTranslator
     public TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
 
     /// <summary>
-    /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position: a non-Copy
-    /// place (a field/local such as the entity <c>id</c>, or a <c>.field()</c> accessor result) is cloned
-    /// so the value is moved out by value rather than borrowed from <c>&amp;self</c>. A bare
-    /// conditional/let/guard (no arithmetic operator at all) routes through <see cref="WriteOwnedOperand"/>
-    /// instead, so a leaf place a branch would otherwise move out of <c>&amp;self</c> is cloned too
-    /// (#1282) — the non-compound cases below are unchanged.
+    /// Translates an expression to an owned value for a <c>return</c>/<c>Ok(...)</c> position, or a
+    /// command transition's assignment RHS: a non-Copy place (a field/local such as the entity
+    /// <c>id</c>, or a <c>.field()</c> accessor result) is cloned so the value is moved out by value
+    /// rather than borrowed from <c>&amp;self</c>. A bare conditional/let/guard (no arithmetic operator
+    /// at all) routes through <see cref="WriteOwnedOperand"/> instead, so a leaf place a branch would
+    /// otherwise move out of <c>&amp;self</c> is cloned too (#1282) — the non-compound cases below are
+    /// unchanged. Numeric widening toward a target's declared type (#1511) is deliberately NOT threaded
+    /// through here — a directive parameter only ever reaches <see cref="Write"/>'s
+    /// <c>IdentifierExpr</c>/<c>LiteralExpr</c> leaf cases (and, recursively, its
+    /// <c>ConditionalExpr</c>/<c>GuardExpr</c>/<c>LetExpr</c> cases), silently dropping it for a
+    /// <c>BinaryExpr</c>/<c>UnaryExpr</c>/<c>MemberAccessExpr</c>/<c>CallExpr</c>/<c>CoalesceExpr</c> RHS.
+    /// Callers instead post-wrap this method's already-rendered, opaque string result with
+    /// <c>RustEmitter.CoerceNumericBody</c> (mirroring <c>BuildFactoryCtorArgs</c>/<c>WriteDerived</c>),
+    /// which works uniformly regardless of the expression's shape.
     /// </summary>
     public string TranslateOwned(Expr expr, string? expectedEnum = null)
     {
