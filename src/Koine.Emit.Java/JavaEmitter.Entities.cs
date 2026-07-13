@@ -521,7 +521,16 @@ public sealed partial class JavaEmitter
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
                 var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-                args.Add(translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum));
+                var translated = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
+
+                // Wrap in Optional.of(...) only when the initializing expression isn't already
+                // Optional-typed — the validator legally allows an Optional-typed expression (e.g. a
+                // `T?` factory parameter) to initialize an optional-declared required member, and
+                // unconditionally wrapping it would double-wrap into Optional<Optional<T>>, a real javac
+                // "incompatible types" error.
+                args.Add(m.Type.IsOptional && translator.InferType(value)?.IsOptional != true
+                    ? $"java.util.Optional.of({translated})"
+                    : translated);
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {

@@ -312,6 +312,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity
 const Koine.Compiler.Diagnostics.DiagnosticCodes.NumericNarrowingConversion = "KOI0217" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.QuantityTypeMismatch = "KOI0218" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnaryOperandTypeMismatch = "KOI0222" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectMulDivMismatch = "KOI0221" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectScalarArithmetic = "KOI0215" -> string!
@@ -333,6 +334,7 @@ static Koine.Compiler.Ast.MemberAnalysis.IdentityParameters(Koine.Compiler.Ast.E
 static Koine.Compiler.Ast.ModelCoverage.Compute(Koine.Compiler.Ast.KoineModel! model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! emitted, string! target) -> Koine.Compiler.Ast.CoverageReport!
 static Koine.Compiler.Ast.ModelCoverage.RenderText(Koine.Compiler.Ast.CoverageReport! report) -> string!
 static Koine.Compiler.Ast.ModelCoverage.ToJson(Koine.Compiler.Ast.CoverageReport! report) -> string!
+static Koine.Compiler.Ast.TypeResolver.IsBool(Koine.Compiler.Ast.TypeRef? t) -> bool
 static Koine.Compiler.Emit.ExprDescriber.Describe(Koine.Compiler.Ast.Expr! e) -> string!
 static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
 static Koine.Compiler.Services.KoineCompilation.Reconcile(Koine.Compiler.Services.KoineCompilation? previous, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!

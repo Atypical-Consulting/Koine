@@ -490,6 +490,83 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// Issue #1479 — <c>BuildFactoryCtorArgs</c>'s <c>required</c> loop's explicit-init branch never
+    /// <c>Optional.of(...)</c>-wraps a value for a member whose declared type is optional but has no
+    /// member-level default (e.g. <c>total: Decimal?</c>), even though that identical member shape is
+    /// already handled correctly by this same loop's <c>unset</c> branch three lines below
+    /// (<c>m.Type.IsOptional</c> → <c>"java.util.Optional.empty()"</c>). The constructor signature
+    /// correctly declares the parameter <c>Optional&lt;BigDecimal&gt;</c> (an optional-declared,
+    /// default-less member still needs <c>Optional&lt;T&gt;</c> since it can be legitimately unset), but
+    /// the explicit-init branch passed the bare, un-wrapped value — a real <c>javac</c> "incompatible
+    /// types" error. Mirrors the Rust fix for the identical bug shape (#1452/PR #1464).
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_is_optional_of_wrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5.0\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): the optional-declared required member's explicit init must
+        // be Optional.of(...)-wrapped to match the constructor's Optional<BigDecimal> parameter, not
+        // passed through as the bare, un-wrapped value.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.util.Optional.of(new java.math.BigDecimal(\"5.0\")))");
+        product.ShouldNotContain("new Product(id, new java.math.BigDecimal(\"5.0\"))");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Code-review follow-up shape to #1479 itself (mirroring the Rust precedent, #1452's own follow-up):
+    /// the validator legally allows a <c>required</c>-bucket optional-declared member to be explicitly
+    /// initialized from an already-<c>Optional</c>-typed source expression (e.g. a same-shaped
+    /// <c>T?</c> factory parameter, <c>total -&gt; rate</c>). A naive
+    /// <c>m.Type.IsOptional ? Optional.of(value) : value</c> wrap would unconditionally wrap that value,
+    /// producing <c>Optional.of(rate)</c> against the constructor's <c>Optional&lt;BigDecimal&gt;</c>
+    /// parameter where <c>rate</c> is itself <c>Optional&lt;BigDecimal&gt;</c> — a real <c>javac</c>
+    /// "incompatible types" error (<c>Optional&lt;Optional&lt;BigDecimal&gt;&gt;</c>).
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_required_member_from_an_already_optional_source_does_not_double_wrap()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(rate: Decimal?) {\n" +
+            "      total -> rate\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): an already-Optional-typed source value must be passed
+        // through as-is, never re-wrapped in another Optional.of(...).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldNotContain("Optional.of(rate");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must
