@@ -190,3 +190,5 @@ export function installExplorerSyncRendering(): void {
     }
   };
 }
+
+// scratch: verifying the #1535 gate against a live front-end-only PR (no functional change).
