@@ -557,14 +557,17 @@ internal sealed class TypeScriptExpressionTranslator
     /// operand, that narrowing does not cross a nested closure boundary — a guarded optional Int used
     /// inside a <c>.map</c>/<c>.sum</c> lambda still type-checks as <c>number | undefined</c> at the
     /// point it's rendered (#1537). A bare <c>Decimal.fromInt(...)</c> of that value, or a method call
-    /// on it as the receiver, would then be a <c>tsc</c> TS2345/TS18048. The LEFT operand stays the
-    /// receiver regardless of which side maps, so operand order is preserved for the non-commutative
-    /// <c>subtract</c>/<c>divide</c>.
+    /// on it as the receiver, would then be a <c>tsc</c> TS2345/TS18048. Reuses the shared
+    /// <see cref="BranchReconciliation.Classify"/> decision (once per side, sides swapped) rather than
+    /// re-deriving the optionality rule inline — the same "widen vs. map-widen" question
+    /// <see cref="WriteReconciledBranch"/> answers for a conditional's branches. The LEFT operand stays
+    /// the receiver regardless of which side maps, so operand order is preserved for the
+    /// non-commutative <c>subtract</c>/<c>divide</c>.
     /// </summary>
     private void WriteDecimalArithmetic(Expr leftExpr, TypeRef? left, Expr rightExpr, TypeRef? right, string method, StringBuilder sb)
     {
-        var leftOptionalInt = left is { IsOptional: true, Name: not "Decimal" };
-        var rightOptionalInt = right is { IsOptional: true, Name: not "Decimal" };
+        var leftOptionalInt = BranchReconciliation.Classify(left, right).NeedsOptionalWiden;
+        var rightOptionalInt = BranchReconciliation.Classify(right, left).NeedsOptionalWiden;
 
         if (leftOptionalInt)
         {
