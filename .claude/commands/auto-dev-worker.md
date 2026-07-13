@@ -13,8 +13,11 @@ autonomously, no confirmations:
 2. Invoke `merge-pr` with args "<the PR number>". THIS IS MANDATORY — your job is NOT done at "ready".
    Drive the PR all the way to MERGED: merge-pr waits for CI, clears blockers (red/flaky checks,
    conflicts with main, unresolved reviews), squash-merges, files follow-ups, tears down the worktree.
-   Don't go idle while a merge is still achievable — if CI is mid-run, keep polling `gh pr checks <PR>`
-   and merge the instant it's green. Only stop for a genuine hard blocker.
+   Don't go idle while a merge is still achievable — if CI is mid-run, keep re-checking per `merge-pr`
+   SKILL.md Step 3 (the check-runs API on the head SHA — NOT `gh pr checks`, which #1530 can make
+   misreport) and merge once nothing failed, nothing is pending, and the PR is `CLEAN`. A `skipped`
+   `build-and-test` on a front-end-only PR is legitimate (#1486) — don't wait on it as if it were
+   still running. Only stop for a genuine hard blocker.
 
 OFF-SCOPE PROTOCOL: if you hit a problem NOT part of #$1 — an unrelated/flaky CI failure, a pre-existing
 bug, a design smell, missing/broken tests, tech debt — do NOT fix it inline (scope-creep) and do NOT

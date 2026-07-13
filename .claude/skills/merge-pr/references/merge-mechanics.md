@@ -60,12 +60,27 @@ path — Step 7 removes it.
 
 ## 3. Waiting on CI
 
-`--watch` blocks until every check concludes; its exit code is 0 only if all passed:
+The authority is the **check-runs on the PR's head SHA**, not `gh pr checks` — #1530 means the latter
+can print a phantom `skipped` check-run alongside the real one for the same job, so its verdict can't be
+trusted directly:
 
 ```bash
-gh pr checks "$PR" --watch            # blocks; exit 0 = all green, non-zero = at least one failed
-gh pr checks "$PR"                    # the table (re-read anytime): NAME / STATE / pass-fail / link
+SHA=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+# --slurp piped to a separate jq (gh's --jq can't combine with --slurp) flattens every page's
+# {total_count, check_runs:[...]} into one list — safe even if check-runs ever exceed a page.
+runs=$(gh api "repos/{owner}/{repo}/commits/$SHA/check-runs" --paginate --slurp \
+         | jq '[.[].check_runs[] | {name, state: (.conclusion // .status)}]')
+
+failed=$(printf '%s' "$runs"  | jq '[.[] | select(.state=="failure" or .state=="cancelled" or .state=="timed_out" or .state=="action_required")]')
+pending=$(printf '%s' "$runs" | jq '[.[] | select(.state=="queued" or .state=="in_progress")]')
 ```
+
+Merge is permitted (CI-wise) when `failed` is empty **and** `pending` is empty **and** the PR is not a
+draft — not when one named job (e.g. `build-and-test`) reports `success`. A `skipped` check-run is
+neither `failed` nor `pending`, so it's simply not evidence of anything; treating it as a blanket "CI
+didn't run" hangs forever on a front-end-only PR (#1486's `ci.yml` path filter legitimately skips
+`build-and-test` there — see `SKILL.md` Step 3 for the full three-way breakdown of why a check reads
+`skipped`, #1481 vs #1530 vs #1486).
 
 Inspect failures via the rollup (gives the log URL to read):
 
@@ -74,11 +89,12 @@ gh pr view "$PR" --json statusCheckRollup \
   --jq '.statusCheckRollup[] | select(.conclusion=="FAILURE") | {name, detailsUrl}'
 ```
 
-- **"no checks reported"** error → the PR has no CI; treat CI as satisfied and let `mergeStateStatus`
-  (§4) be the only gate.
-- **Long pipelines** → `--watch` is fine (a real wait, not a `sleep`). If you'd rather not hold the turn
-  open, poll instead: read the rollup, and if anything is `IN_PROGRESS`/`QUEUED`, come back later
-  (e.g. via `ScheduleWakeup`) rather than busy-looping.
+- **`runs` is empty** (no check-runs at all) → the PR has no CI; treat CI as satisfied and let
+  `mergeStateStatus` (§4) be the only gate.
+- **Long pipelines** → re-poll the check-runs recipe rather than busy-looping. If you'd rather not hold
+  the turn open, come back later (e.g. via `ScheduleWakeup`).
+- `gh pr checks "$PR" --watch` is still useful as a **human-facing** progress view in a terminal, but
+  don't wire its exit code or printed verdict into the gate — re-derive from the check-runs recipe above.
 
 The repo's CI gates (so you can reproduce a red check locally) are the profile's *CI gates* — its build,
 test, and format/lint **verify** commands, plus any prerequisite the profile flags (a workload, a

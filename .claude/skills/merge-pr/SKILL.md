@@ -114,23 +114,54 @@ See `references/merge-mechanics.md` §8.
 
 ## Step 3 — Wait for CI
 
-Let the checks finish before judging — a half-run pipeline tells you nothing:
+Let the checks finish before judging — a half-run pipeline tells you nothing. The **authority** is the
+check-runs on the PR's head SHA, not `gh pr checks` — #1530 means `gh pr checks` can print a *phantom*
+`skipped` check-run alongside the real one, so don't act on its verdict directly:
 
 ```bash
-gh pr checks "$PR" --watch        # blocks until every check concludes; exit 0 = all green
+SHA=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+# --slurp piped to a separate jq (gh's --jq can't combine with --slurp) flattens every page's
+# {total_count, check_runs:[...]} into one list — safe even if check-runs ever exceed a page.
+runs=$(gh api "repos/{owner}/{repo}/commits/$SHA/check-runs" --paginate --slurp \
+         | jq '[.[].check_runs[] | {name, state: (.conclusion // .status)}]')
+
+failed=$(printf '%s' "$runs"  | jq '[.[] | select(.state=="failure" or .state=="cancelled" or .state=="timed_out" or .state=="action_required")]')
+pending=$(printf '%s' "$runs" | jq '[.[] | select(.state=="queued" or .state=="in_progress")]')
 ```
 
-- **No checks reported** (`gh` errors "no checks") → no CI; move on, let Step 4's merge-state be the gate.
-- **All green** → Step 4 to confirm mergeability (green CI ≠ mergeable; `main` may have moved).
-- **A check failed** → read which and why before reacting; the failure feeds Step 4's correction:
+While `pending` is non-empty, wait (re-poll, or come back later via `ScheduleWakeup` rather than
+busy-looping) — then judge:
+
+- **`runs` is empty** (no check-runs at all) → the PR has no CI; treat CI as satisfied and let Step 4's
+  merge-state be the gate.
+- `failed` non-empty → read which and why before reacting; the failure feeds Step 4's correction (below).
+- `failed` empty → Step 4 to confirm mergeability (nothing-failed ≠ mergeable; `main` may have moved).
+
+**A `skipped` check-run is not evidence of anything** — it's neither `failed` nor `pending`, so the
+recipe above already treats it as a non-event. That's deliberate: `skipped` on `build-and-test` now has
+three different causes, and only the gate above tells them apart correctly:
+
+| Why a check reads `skipped` | Safe to merge? | What actually guards it |
+|---|---|---|
+| **#1481** — a draft PR flipped to ready and its checks never re-ran | **No** — genuinely untested | The PR being a **draft** — `ready_for_review` (added by #1481) re-triggers real runs, so a non-draft PR always has real check-runs for the jobs that were going to run (Step 1 already assumes ready) |
+| **#1530** (open) — a phantom `skipped` check-run posted alongside a real one for the same job | Yes — the phantom is noise | The *real* check-run for that job also exists and reports its own conclusion |
+| **#1486** — `ci.yml`'s path filter correctly skips `build-and-test` on a front-end-only PR (`tooling/koine-studio/**` / `tooling/koine-ui/**` only) | Yes — by design, there's nothing for the .NET job to test | Nothing — this is the legitimate case a naive gate hangs on |
+
+So never hard-code "wait for `build-and-test == success`" — that hangs forever on the #1486 case and
+reintroduces the same bug the moment another job grows a path filter. Gate on the shape instead:
+nothing failed, nothing pending, PR not a draft.
+
+`gh pr checks "$PR" --watch` is still fine as a **human-facing convenience** for watching progress in a
+terminal, but per #1530 don't treat its printed verdict as authoritative — re-derive from the check-runs
+recipe above before acting:
 
 ```bash
-gh pr checks "$PR"                                                   # the table: which check, pass/fail
+gh pr checks "$PR"                                                   # human-readable table only
 gh pr view "$PR" --json statusCheckRollup \
   --jq '.statusCheckRollup[] | select(.conclusion=="FAILURE") | {name,detailsUrl}'   # failures + log links
 ```
 
-`--watch` is the simplest correct wait. For a very long pipeline you may prefer to poll periodically — reference §3.
+For a very long pipeline, poll the check-runs recipe periodically rather than busy-looping — reference §3.
 
 ## Step 4 — Apply corrections (the loop)
 
@@ -149,7 +180,7 @@ gh pr view "$PR" --json mergeStateStatus,mergeable,reviewDecision \
 | `DRAFT` | PR is a draft | `gh pr ready "$PR"` (per Step 1's assumption), re-poll. |
 | `BEHIND` | base advanced; branch behind `main` | **Sync with `main`** (below), push, re-wait CI. |
 | `DIRTY` | merge conflicts with the base | **Sync with `main`** and resolve conflicts (below). |
-| `UNSTABLE` | mergeable, but a check is pending/failing | Pending → wait (Step 3). Failing → **fix the red check** (below). |
+| `UNSTABLE` | mergeable, but a check is pending/failing | Pending → wait (Step 3). Failing → **fix the red check** (below). A lone `skipped` check-run does **not** produce `UNSTABLE` — Step 3's recipe already treats `skipped` as a non-event, so landing here means something is genuinely pending or failing. |
 | `BLOCKED` | a branch-protection gate is unmet | Usually `reviewDecision == CHANGES_REQUESTED` → **address review** (below). If it's *required approvals* you can't self-give, that's a genuine blocker — surface it. |
 
 **Fix a red CI check.** Reproduce locally in the branch's worktree, fix it for real, commit + push. Run
