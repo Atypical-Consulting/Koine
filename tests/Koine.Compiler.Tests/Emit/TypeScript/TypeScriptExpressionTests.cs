@@ -619,4 +619,84 @@ public class TypeScriptExpressionTests
             $"Decimal {op} Int member must type-check under tsc --strict:\n"
             + string.Join("\n", check.Errors));
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1537 Task 2 — an OPTIONAL Int operand opposite a Decimal. The literal `qty: Int?  total:
+    // Decimal? = qty + rate` from the issue is not valid Koine on its own (the validator requires a
+    // guard/`??` before an optional participates in arithmetic — KOI0402), so these use the nearest
+    // guarded shape the validator accepts: `if qty.isPresent then qty + rate else rate`.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The guarded shape used directly as a member's value. TypeScript's OWN control-flow narrowing
+    /// of the emitted <c>this.qty !== undefined ? … : …</c> guard already makes this safe without any
+    /// widening help, so this passes even pre-fix — it pins the correct <c>Decimal | undefined</c>
+    /// result shape as a regression guard, not a red-bar repro (see the next test for that).
+    /// </summary>
+    [Fact]
+    public void DecimalPlusGuardedOptionalIntMember_TypeChecks()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:  Decimal
+                qty:   Int?
+                total: Decimal? = if qty.isPresent then qty + rate else rate
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldContain("get total(): Decimal | undefined");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a guarded optional Int member plus Decimal must type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The real red-bar repro: the guarded optional Int is consumed inside a NESTED closure
+    /// (a <c>distinctBy</c> selector lambda). TypeScript's control-flow narrowing of the outer
+    /// <c>this.qty !== undefined</c> guard does not cross that closure boundary, so <c>this.qty</c>
+    /// still type-checks as <c>number | undefined</c> at the point the arithmetic renders it — a bare
+    /// <c>Decimal.fromInt(this.qty)</c> is a real <c>tsc</c> TS2345 here (confirmed pre-fix), unlike
+    /// the member-level guard above. The fix must map the WHOLE method call over the optional rather
+    /// than widen in place. <c>distinctBy</c> is chosen (over <c>sum</c>/<c>max</c>) because its
+    /// <c>structuralEquals</c>-based lowering accepts the selector's value opaquely, so this isolates
+    /// the arithmetic-widening defect from the unrelated selector-type-cast gap in <c>sum</c>/<c>max</c>
+    /// (filed as a follow-up, not part of this issue's scope).
+    /// </summary>
+    [Fact]
+    public void DecimalPlusGuardedOptionalIntMember_InsideNestedClosure_MapsOverTheOptional()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:        Decimal
+                qty:         Int?
+                rates:       List<Decimal>
+                allDistinct: Bool = if qty.isPresent then rates.distinctBy(r => qty + r) else true
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldNotContain("Decimal.fromInt(this.qty).add(r))");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a guarded optional Int member used inside a nested closure must still type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
 }

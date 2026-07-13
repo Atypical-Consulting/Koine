@@ -542,11 +542,54 @@ internal sealed class TypeScriptExpressionTranslator
             return false;
         }
 
-        WriteDecimalOperand(bin.Left, left, sb);
-        sb.Append('.').Append(method).Append('(');
-        WriteDecimalOperand(bin.Right, right, sb);
-        sb.Append(')');
+        WriteDecimalArithmetic(bin.Left, left, bin.Right, right, method, sb);
         return true;
+    }
+
+    /// <summary>
+    /// Writes true Decimal arithmetic (<c>add</c>/<c>subtract</c>/<c>multiply</c>/<c>divide</c>),
+    /// widening whichever side isn't already <c>Decimal</c> via <see cref="WriteDecimalOperand"/>.
+    /// When that widened side is itself an OPTIONAL Int, the WHOLE method call maps over the
+    /// optional instead of widening in place: Koine's <c>isPresent</c>/<c>??</c> narrowing updates
+    /// only the semantic validator's own tracking, never the emitter's inferred <see cref="TypeRef"/>
+    /// (mirroring the Rust #1343 / PHP #787 finding), and even where TypeScript's OWN control-flow
+    /// narrowing of a guard (<c>this.qty !== undefined ? … : …</c>) would otherwise cover a bare
+    /// operand, that narrowing does not cross a nested closure boundary — a guarded optional Int used
+    /// inside a <c>.map</c>/<c>.sum</c> lambda still type-checks as <c>number | undefined</c> at the
+    /// point it's rendered (#1537). A bare <c>Decimal.fromInt(...)</c> of that value, or a method call
+    /// on it as the receiver, would then be a <c>tsc</c> TS2345/TS18048. The LEFT operand stays the
+    /// receiver regardless of which side maps, so operand order is preserved for the non-commutative
+    /// <c>subtract</c>/<c>divide</c>.
+    /// </summary>
+    private void WriteDecimalArithmetic(Expr leftExpr, TypeRef? left, Expr rightExpr, TypeRef? right, string method, StringBuilder sb)
+    {
+        var leftOptionalInt = left is { IsOptional: true, Name: not "Decimal" };
+        var rightOptionalInt = right is { IsOptional: true, Name: not "Decimal" };
+
+        if (leftOptionalInt)
+        {
+            sb.Append("((__v: ").Append(_typeMapper.Map(left!)).Append(") => (__v === undefined ? undefined : Decimal.fromInt(__v).").Append(method).Append('(');
+            WriteDecimalOperand(rightExpr, right, sb);
+            sb.Append(")))(");
+            Write(leftExpr, sb);
+            sb.Append(')');
+            return;
+        }
+
+        if (rightOptionalInt)
+        {
+            sb.Append("((__v: ").Append(_typeMapper.Map(right!)).Append(") => (__v === undefined ? undefined : ");
+            WriteDecimalOperand(leftExpr, left, sb);
+            sb.Append('.').Append(method).Append("(Decimal.fromInt(__v))))(");
+            Write(rightExpr, sb);
+            sb.Append(')');
+            return;
+        }
+
+        WriteDecimalOperand(leftExpr, left, sb);
+        sb.Append('.').Append(method).Append('(');
+        WriteDecimalOperand(rightExpr, right, sb);
+        sb.Append(')');
     }
 
     /// <summary>
