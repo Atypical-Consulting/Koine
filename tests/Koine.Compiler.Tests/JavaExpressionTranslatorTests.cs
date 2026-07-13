@@ -155,12 +155,13 @@ public class JavaExpressionTranslatorTests
     /// construction, and that manual dance collapses to a plain push/pop.
     /// </para>
     /// <para>
-    /// <b>Asserted on the emitted shape, not via <c>javac</c>.</b> Java — alone among the targets — forbids
-    /// a lambda body from redeclaring a local of the enclosing scope, so nested same-name <c>let</c>s
-    /// lower to a <c>var n</c> that javac rejects outright ("variable n is already defined") no matter
-    /// which binding the trailing <c>n</c> resolves to. That needs the Java emitter to alpha-rename the
-    /// inner binding, a distinct lowering defect tracked separately; it is pre-existing (the buggy emit
-    /// declared the same two <c>var n</c>s) and orthogonal to this local-tracking fix.
+    /// <b>Now asserted through a real <c>javac</c>, like the other four targets.</b> At the time this test
+    /// was written Java — alone among the targets — forbade a lambda body from redeclaring a local of the
+    /// enclosing scope, so this exact nested same-name <c>let</c> lowered to a <c>var n</c> that javac
+    /// rejected outright ("variable n is already defined") no matter which binding the trailing <c>n</c>
+    /// resolved to; a distinct, pre-existing lowering defect orthogonal to this local-tracking fix, tracked
+    /// separately as #1536 and now fixed — the inner binding alpha-renames to <c>n$1</c> so both
+    /// declarations are legal Java.
     /// </para>
     /// </summary>
     [Fact]
