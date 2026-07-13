@@ -174,10 +174,44 @@ jobs:
       # since all four toolchains are installed above, no RequireOrSkip-based conformance test may
       # report Skipped in CI, so a toolchain quietly dropping off the runner reddens the build instead
       # of passing silently.
+      #
+      # The `--blame-hang-*` flags are hang DIAGNOSTICS (issue #1486), not a behavior change. Twice in
+      # one day this job ran out its full 30-minute `timeout-minutes` budget and was killed with no
+      # signal at all — and in both traces the same single assembly was the culprit: the other three
+      # (Koine.Compiler.PublicApiConsumer, Koine.Wasm.Tests, Koine.Mcp.Tests) each printed `Passed!`
+      # within a minute, while Koine.Compiler.Tests never printed a pass/fail line and the runner's
+      # orphan-process sweep killed it still running. A job cancelled by the workflow timeout leaves
+      # nothing behind to debug, so the next occurrence must capture evidence instead.
+      #
+      # VSTest's blame collector fires when no test-completion event arrives within the timeout: it
+      # dumps the hung test host (managed + native stacks) and writes a Sequence.xml naming the test
+      # that was in flight. The whole suite runs in ~3 minutes, so 15m per test is a vast margin that no
+      # healthy test can trip — and it fires ~10 minutes shy of the job's 30-minute ceiling, leaving
+      # room to write the dump and upload it (the plan's 20m would leave ~6, too tight for a full dump).
+      # On a healthy run this is a no-op beyond the collector's per-test bookkeeping. Deliberately NOT
+      # paired with a `timeout-minutes` bump: the ceiling is what surfaces the bug (issue #1486's
+      # "Alternatives considered"), so it stays put — this just makes the hang diagnosable when it hits.
       - name: Test
         env:
           KOINE_REQUIRE_CONFORMANCE: 1
-        run: dotnet test Koine.slnx -c Release --no-build
+        run: >-
+          dotnet test Koine.slnx -c Release --no-build
+          --results-directory "${{ github.workspace }}/TestResults"
+          --blame-hang --blame-hang-timeout 15m --blame-hang-dump-type full
+
+      # The hang dump + Sequence.xml are worthless if they die with the runner. Publish them on any
+      # failure of the job (a hang now fails the Test step rather than silently eating the whole
+      # 30-minute budget), so the next recurrence is diagnosed from an artifact instead of a third
+      # live incident. `if-no-files-found: ignore` keeps an ordinary red test — which writes no dump —
+      # from adding a spurious "no artifact" annotation on top of the real failure.
+      - name: Upload test hang diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/TestResults
+          if-no-files-found: ignore
+          retention-days: 14
 
       # End-to-end guard: the demo regenerates C# from .koi and compiles it.
       # A demo build failure is a CI failure (it proves the emitter still works).
