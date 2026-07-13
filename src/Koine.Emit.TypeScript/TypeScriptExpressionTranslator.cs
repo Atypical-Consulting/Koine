@@ -481,7 +481,6 @@ internal sealed class TypeScriptExpressionTranslator
         TypeScope scope = EffectiveScope();
         TypeRef? left = _resolver.Infer(bin.Left, scope);
         TypeRef? right = _resolver.Infer(bin.Right, scope);
-        var leftDecimal = left?.Name == "Decimal";
         var leftValue = _resolver.IsValueLike(left);
         var rightValue = _resolver.IsValueLike(right);
 
@@ -504,11 +503,6 @@ internal sealed class TypeScriptExpressionTranslator
             return true;
         }
 
-        if (!leftDecimal && !leftValue)
-        {
-            return false;
-        }
-
         var method = bin.Op switch
         {
             BinaryOp.Add => "add",
@@ -517,22 +511,62 @@ internal sealed class TypeScriptExpressionTranslator
             _ => "multiply"
         };
 
-        Write(bin.Left, sb);
+        // A Koine value object (Money, etc.) exposes its own scalar multiply/divide taking a plain
+        // `number`, so its scalar argument renders bare rather than through the Decimal-widening path
+        // below — the value object, not the runtime `Decimal`, owns that method's signature.
+        if (leftValue)
+        {
+            Write(bin.Left, sb);
+            sb.Append('.').Append(method).Append('(');
+            if (bin.Op is BinaryOp.Mul or BinaryOp.Div)
+            {
+                WriteScalarArgument(bin.Right, sb);
+            }
+            else
+            {
+                Write(bin.Right, sb);
+            }
+            sb.Append(')');
+            return true;
+        }
+
+        // True Decimal arithmetic — neither operand is a Koine value object, but at least one is
+        // `Decimal`. The runtime's `Decimal` methods take another `Decimal`, so whichever side ISN'T
+        // already Decimal (an Int literal, member, or any other non-optional-Int expression) is
+        // widened via `Decimal.fromInt(...)` — driven off the inferred `TypeRef`, not `is LiteralExpr`,
+        // so a member/local operand widens exactly like a literal (#1537). The LEFT operand is always
+        // the receiver so operand order is preserved for the non-commutative `subtract`/`divide`
+        // (`1 - rate` widens the LEFT into the receiver, not the right).
+        if (left?.Name != "Decimal" && right?.Name != "Decimal")
+        {
+            return false;
+        }
+
+        WriteDecimalOperand(bin.Left, left, sb);
         sb.Append('.').Append(method).Append('(');
-        // A value-object scalar multiply/divide (Money * quantity, fee / 2) takes a plain `number`,
-        // so a Decimal literal scalar (e.g. 0.9) renders as a bare number, not a `new Decimal(...)`.
-        // Decimal * Decimal/Int or Decimal / Decimal/Int (true decimal arithmetic) passes the operand
-        // through unchanged.
-        if (bin.Op is BinaryOp.Mul or BinaryOp.Div && leftValue)
-        {
-            WriteScalarArgument(bin.Right, sb);
-        }
-        else
-        {
-            Write(bin.Right, sb);
-        }
+        WriteDecimalOperand(bin.Right, right, sb);
         sb.Append(')');
         return true;
+    }
+
+    /// <summary>
+    /// Writes one operand of true Decimal arithmetic (<c>add</c>/<c>subtract</c>/<c>multiply</c>/
+    /// <c>divide</c>): a <c>Decimal</c>-typed operand renders as-is, while any other (non-optional
+    /// numeric) operand is widened via <c>Decimal.fromInt(...)</c> — the runtime's canonical
+    /// literal/Int-to-Decimal construction, the same one <see cref="WriteReconciledBranch"/> uses to
+    /// reconcile a conditional's numeric branch against a Decimal sibling.
+    /// </summary>
+    private void WriteDecimalOperand(Expr expr, TypeRef? type, StringBuilder sb)
+    {
+        if (type?.Name == "Decimal")
+        {
+            Write(expr, sb);
+            return;
+        }
+
+        sb.Append("Decimal.fromInt(");
+        Write(expr, sb);
+        sb.Append(')');
     }
 
     /// <summary>

@@ -489,4 +489,134 @@ public class TypeScriptExpressionTests
             "a lambda parameter shadowing an outer let must not leak its element type into the outer binding:\n"
             + string.Join("\n", check.Errors));
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1537 — Decimal arithmetic against a non-Decimal Int operand must widen the Int side to
+    // Decimal at the call site: the runtime's `add`/`subtract` are declared `(other: Decimal)`, so a
+    // bare `number` argument is a `tsc --strict` TS2345.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The issue's own minimal repro: an Int LITERAL opposite a Decimal member in `+`. Must widen via
+    /// the runtime's literal-to-Decimal construction (<c>Decimal.fromInt(...)</c>), not emit the bare
+    /// literal `this.rate.add(1)` `tsc --strict` rejects.
+    /// </summary>
+    [Fact]
+    public void DecimalPlusIntLiteral_WidensTheLiteralToDecimal()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:  Decimal
+                total: Decimal = rate + 1
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldContain("this.rate.add(Decimal.fromInt(1))");
+        order.ShouldNotContain(".add(1)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a Decimal member plus an Int literal must type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The literal on the LEFT (`1 + rate`) must widen identically — the Decimal side is not
+    /// necessarily the receiver-in-source-position, but the emitted receiver must still be a Decimal.
+    /// </summary>
+    [Fact]
+    public void IntLiteralPlusDecimal_WidensTheLiteralToDecimal()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:  Decimal
+                total: Decimal = 1 + rate
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldContain("Decimal.fromInt(1).add(this.rate)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "an Int literal plus a Decimal member must type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// An Int-typed MEMBER (not a literal) opposite a Decimal — the fix must be driven off the
+    /// inferred <c>TypeRef</c>, not <c>expr is LiteralExpr</c>, so a member reference widens too.
+    /// </summary>
+    [Fact]
+    public void DecimalPlusIntMember_WidensTheMemberToDecimal()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:  Decimal
+                qty:   Int
+                total: Decimal = rate + qty
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldContain("this.rate.add(Decimal.fromInt(this.qty))");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a Decimal member plus an Int member must type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>Sibling shapes for `-`, `*`, `/` — the same missing coercion applies to all four ops.</summary>
+    [Theory]
+    [InlineData("-", "subtract")]
+    [InlineData("*", "multiply")]
+    [InlineData("/", "divide")]
+    public void DecimalArithmeticAgainstIntMember_WidensForEveryOperator(string op, string method)
+    {
+        string src =
+            $$"""
+            context Shop {
+              value Order {
+                rate:  Decimal
+                qty:   Int
+                total: Decimal = rate {{op}} qty
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldContain($"this.rate.{method}(Decimal.fromInt(this.qty))");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            $"Decimal {op} Int member must type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
 }
