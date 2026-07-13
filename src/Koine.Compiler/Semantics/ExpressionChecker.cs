@@ -806,7 +806,7 @@ internal sealed class ExpressionChecker
         // A user-declared member named after a built-in member-op (count/length/…) shadows
         // the op: resolve it as an ordinary field access — no string/collection-op diagnostic
         // (#605). Mirrors the plain-field branch below and TypeResolver.VisitMemberAccess.
-        if (target is not null && _resolver.IsUserType(target)
+        if (target is not null && HasKnownMemberSet(target)
             && _index.TryGetMemberType(target.Qualifier ?? _resolver.Context, target.Name, op, out _))
         {
             return;
@@ -842,18 +842,29 @@ internal sealed class ExpressionChecker
             {
                 Report(DiagnosticCodes.UnknownCollectionOperation, $"unknown collection operation '{op}'", ma);
             }
-            else if (_resolver.IsUserType(target) && !_index.TryGetMemberType(target.Qualifier ?? _resolver.Context, target.Name, op, out _))
+            else if (HasKnownMemberSet(target) && !_index.TryGetMemberType(target.Qualifier ?? _resolver.Context, target.Name, op, out _))
             {
                 Report(DiagnosticCodes.UnknownMember,
                     $"unknown member '{op}' on type '{target.Name}'{Suggestions.For(op, _index.MemberNames(target.Name))}", ma);
             }
-            else if (_index.Classify(target.Name) == TypeKind.Primitive)
-            // A primitive (Int/Decimal/Bool/Instant) has no accessible members.
+            else if (_index.Classify(target.Name) is TypeKind.Primitive or TypeKind.Range)
+            // A primitive (Int/Decimal/Bool/Instant) or a Range has no accessible members.
             {
                 Report(DiagnosticCodes.UnknownMember, $"unknown member '{op}' on type '{target.Name}'", ma);
             }
         }
     }
+
+    /// <summary>
+    /// A receiver whose member set the model can enumerate, so an access naming something outside it is
+    /// definitively an unknown member rather than something we simply can't check: a value/entity (its
+    /// declared members) or an enum (its associated-data signature — empty for a bare-name enum, so every
+    /// member access on one is unknown). All three resolve through the same <see cref="ModelIndex"/>
+    /// surface <see cref="TypeResolver.Infer"/> uses, so the checker and the resolver agree on what a
+    /// member access means (#1498). Classifies once — this runs per member access.
+    /// </summary>
+    private bool HasKnownMemberSet(TypeRef t) =>
+        _index.Classify(t.Name) is TypeKind.Value or TypeKind.Entity or TypeKind.Enum;
 
     /// <summary>List/Set/Map — types that expose count/isEmpty/isNotEmpty.</summary>
     private bool IsCollection(TypeRef t) =>

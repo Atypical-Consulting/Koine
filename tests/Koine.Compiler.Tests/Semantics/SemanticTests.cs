@@ -153,4 +153,100 @@ public class SemanticTests
         var diags = Validate(src);
         diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownEnumMemberForType && d.Message.Contains("'Y'"));
     }
+
+    /// <summary>
+    /// Issue #1498 (Gap A): a bogus member access on an ENUM-typed receiver — as opposed to the
+    /// qualified <c>EnumType.Member</c> form, which <c>CheckMember</c> already validates — must be
+    /// rejected like any other unknown member. It is the only known way a real <c>.koi</c> model can
+    /// carry a member access whose type genuinely does not resolve, which is what lets the Rust
+    /// emitter's <c>EffectiveScope</c> shadow-fallthrough (Gap B) manifest.
+    /// </summary>
+    [Fact]
+    public void Unknown_member_on_an_enum_typed_receiver_is_reported()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Status { Active, Inactive }
+
+              value Widget {
+                status: Status
+                hasIt: Bool = status.bogusMember == 1
+              }
+            }
+            """;
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownMember && d.Message.Contains("bogusMember"));
+    }
+
+    /// <summary>
+    /// Issue #1498's companion guard: the new Enum-receiver check must not fire on a LEGITIMATE
+    /// smart-enum associated-data access. <c>symbol</c> is a real parameter of <c>Currency</c>'s
+    /// signature, so it resolves through <c>ModelIndex.MemberTypeOf</c> and raises nothing.
+    /// </summary>
+    [Fact]
+    public void Smart_enum_associated_data_access_is_not_reported()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+                USD("$", 2)
+              }
+
+              value Price {
+                currency: Currency
+                label: String = currency.symbol
+              }
+            }
+            """;
+        Validate(src).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #1498, the other receiver kind the same gap left unvalidated: a <c>Range</c> has no members
+    /// at all, so — like a primitive — every member access on one names something it does not have.
+    /// </summary>
+    [Fact]
+    public void Unknown_member_on_a_range_receiver_is_reported()
+    {
+        const string src =
+            """
+            context C {
+              value V {
+                r: Range<Int>
+                b: Bool = r.bogus
+              }
+            }
+            """;
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownMember && d.Message.Contains("'Range'"));
+    }
+
+    /// <summary>
+    /// Issue #1498's #605 corollary: a declared member named after a built-in member-op SHADOWS the op
+    /// (resolve it as an ordinary field access, no collection-op diagnostic) — a rule that until now
+    /// applied only to value/entity receivers, so a smart enum whose associated data happened to be
+    /// called <c>count</c> was UNUSABLE: reading it raised
+    /// <c>KOI0207: collection operation 'count' cannot be applied to 'E'</c>. Extending the gate to enums
+    /// makes the checker agree with <c>TypeResolver.VisitMemberAccess</c>, which already resolved any
+    /// declared member ahead of the built-in ops.
+    /// </summary>
+    [Fact]
+    public void Smart_enum_datum_named_after_a_builtin_op_shadows_the_op()
+    {
+        const string src =
+            """
+            context C {
+              enum E(count: Int) {
+                A(1)
+                B(2)
+              }
+              value V {
+                e: E
+                n: Int = e.count
+              }
+            }
+            """;
+        Validate(src).ShouldBeEmpty();
+    }
 }

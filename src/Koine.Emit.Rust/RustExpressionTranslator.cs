@@ -161,15 +161,37 @@ internal sealed class RustExpressionTranslator
     /// </summary>
     public TypeRef? DeclaredMemberType(Expr expr) => _resolver.Infer(expr, _scope);
 
+    /// <summary>
+    /// The base member scope with the local-shadow stack folded over it — what an identifier actually
+    /// means at this point in the translation.
+    /// <para>
+    /// A local whose current top-of-stack type is UNRESOLVED still SHADOWS a same-named member, so it is
+    /// bound to <see cref="ErrorType"/> rather than left unfolded (#1498). Skipping it instead let the
+    /// name fall through to <see cref="_scope"/>, where a member that merely happens to share the name
+    /// answered in its place — and the caller could not tell the difference between "this name is a
+    /// member of type T" and "this name is a local I know nothing about". <c>WriteBinary</c> then
+    /// manufactured a <c>Decimal::from(...)</c> coercion around a local, driven entirely by an unrelated
+    /// member's <c>Int</c>. Binding the name to <see cref="ErrorType"/> makes <see cref="TypeResolver.Infer"/>
+    /// answer <see langword="null"/> (unresolved) for it, so no coercion is invented from a coincidence.
+    /// </para>
+    /// <para>
+    /// This is NOT the same question as #1374's, which <see cref="WriteIdentifier"/> still answers with
+    /// the shadowed member's declared type: given that a <c>Decimal</c> widen is ALREADY owed (a caller
+    /// established it from a declared type), is the value <c>Option</c>-shaped, so the widen must map
+    /// inside it? There the member's optionality is the best evidence available and guessing
+    /// "non-optional" emits uncompilable Rust. Here the question is whether to widen AT ALL, and the
+    /// member's type is no evidence whatsoever. The two rules must stay separate — collapsing them
+    /// reintroduces one bug or the other.
+    /// </para>
+    /// </summary>
     private TypeScope EffectiveScope()
     {
         TypeScope scope = _scope;
         foreach (KeyValuePair<string, Stack<TypeRef?>> kv in _localStacks)
         {
-            if (kv.Value.Peek() is { } type)
-            {
-                scope = scope.WithRef(kv.Key, type, _index);
-            }
+            scope = kv.Value.Peek() is { } type
+                ? scope.WithRef(kv.Key, type, _index)
+                : scope.With(kv.Key, ErrorType.Instance);
         }
 
         return scope;
@@ -828,14 +850,22 @@ internal sealed class RustExpressionTranslator
             // collection-lambda parameter whose element type didn't resolve) has an unknown optionality.
             // Defaulting that to `null` makes EmitCoerced read it as non-optional and wrap it in a bare
             // `Decimal::from(...)` — invalid Rust (E0277) if it is really an `Option`. When such a local
-            // SHADOWS a member, fall back to the resolver: EffectiveScope only overlays locals with a
-            // known type, so an untyped one falls through to the shadowed member's declared type — the
-            // best available evidence, and exactly what this branch resolved before #1367 replaced a
-            // caller-threaded `ownType` with the precise `_localStacks` lookup (#1374). Gated on the
-            // Decimal coercion EmitCoerced actually consults, mirroring the member branch below, so the
-            // common case pays no resolver walk.
+            // SHADOWS a member, fall back to the shadowed member's DECLARED type — the best available
+            // evidence for the one question EmitCoerced is asking here (a Decimal widen is already owed:
+            // is the value Option-shaped, so it must map inside the Option?), and exactly what this
+            // branch resolved before #1367 replaced a caller-threaded `ownType` with the precise
+            // `_localStacks` lookup (#1374).
+            //
+            // Asked of DeclaredMemberType (the base member scope) rather than InferType (EffectiveScope),
+            // because EffectiveScope now MASKS an unresolved shadow instead of letting it fall through to
+            // the member — it must, or a same-named member's type silently decides whether an unrelated
+            // local gets coerced at all (#1498). That masking is right for "should this widen?" and wrong
+            // for "how should an already-owed widen be shaped?", so this call site names the scope it
+            // actually wants instead of depending on the other's fold. Gated on the Decimal coercion
+            // EmitCoerced actually consults, mirroring the member branch below, so the common case pays
+            // no resolver walk.
             TypeRef? ownType = localStack.Peek()
-                ?? (coerceTo?.Name == "Decimal" ? InferType(new IdentifierExpr(name)) : null);
+                ?? (coerceTo?.Name == "Decimal" ? DeclaredMemberType(new IdentifierExpr(name)) : null);
             EmitCoerced(sb, coerceTo, ownType, () => sb.Append(RustNaming.Field(name)));
             return;
         }

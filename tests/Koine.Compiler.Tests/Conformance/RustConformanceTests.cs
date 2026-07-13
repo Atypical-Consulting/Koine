@@ -3957,4 +3957,48 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1498: reading a smart enum's associated data (<c>currency.decimals</c>) is a documented,
+    /// accepted language feature, but <c>ModelIndex.MemberTypeOf</c> had no <c>EnumDecl</c> case — the
+    /// access resolved to <c>ErrorType</c>, so every emitter had to render it without knowing its type.
+    /// With the index taught about <c>EnumDecl.Signature</c> it resolves to its declared type and the
+    /// numeric path emits compiling Rust.
+    /// <para>
+    /// The <b>String</b>-typed associated-data case (<c>label: String = currency.symbol</c>) is
+    /// deliberately NOT asserted here: it emits <c>self.currency.symbol().clone()</c>, and since the
+    /// generated accessor returns a borrowed <c>&amp;'static str</c>, the clone stays a <c>&amp;str</c>
+    /// where a <c>String</c> is expected (a real E0308). That is an independent, PRE-EXISTING Rust
+    /// rendering bug — <c>RustEmitter.ValueObjects</c>'s derived-member writer decides "this body is a
+    /// borrowed <c>&amp;str</c>" by testing whether the emitted body ends with <c>.trim()</c>, a
+    /// syntactic heuristic no enum accessor matches — and its output is byte-identical before and after
+    /// this issue's change (the clone is gated on the member's DECLARED type, never on the body's
+    /// inferred one). Tracked separately as #1533.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Smart_enum_associated_data_access_resolves_and_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+                USD("$", 2)
+              }
+              value Price {
+                currency: Currency
+                scale: Int = currency.decimals
+                doubled: Int = currency.decimals * 2
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
