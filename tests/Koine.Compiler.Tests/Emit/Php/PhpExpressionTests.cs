@@ -856,4 +856,97 @@ public class PhpExpressionTests
         source.ShouldNotContain("count($this->inner)");
         source.ShouldNotContain("trim($this->inner)");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1497 — local-binding shadow tracking (the PHP half of the #1370 PopLocal-eviction bug class).
+    // ---------------------------------------------------------------------------------------------
+
+    private const string NoPhpNotice =
+        "no PHP toolchain (php + phpstan) on PATH — set KOINE_PHP/KOINE_PHPSTAN to type-check the emitted PHP";
+
+    /// <summary>
+    /// A <c>let</c> that shadows a same-named MEMBER, with a second <c>let</c> shadowing it again:
+    /// popping the inner binding must restore the OUTER LOCAL, not evict it.
+    /// <para>
+    /// The old flat <c>_locals</c>/<c>_localTypes</c> pair could only evict, so after the inner
+    /// <c>let n = 20</c> popped, <c>n</c> stopped being a local at all — and the trailing <c>+ n</c>
+    /// silently re-bound to the MEMBER <c>n</c>, emitting <c>$this->n</c>. Typing the member as
+    /// <c>String</c> makes the mis-binding loud: the resulting <c>int + string</c> is an error
+    /// <c>phpstan --level max</c> rejects (and a PHP 8 <c>TypeError</c> at runtime).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void NestedLetShadowingAMember_RestoresTheOuterLocal_NotTheMember()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                n:    String
+                base: Int
+                calc: Int = base + (let n = 10 in (let n = 20 in n) + n)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php")).Contents;
+
+        // The outer `n` must still resolve to the LOCAL closure parameter, never to the member.
+        money.ShouldContain("(fn($n) => ((fn($n) => $n)(20) + $n))(10)");
+        money.ShouldNotContain("+ $this->n)");
+
+        TestSupport.PhpCheck check = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoPhpNotice);
+        check.Ok.ShouldBeTrue(
+            "a let shadowing a same-named member must not leak the member into the outer binding's scope:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The narrower lambda-parameter TYPE-leak variant, in BOTH of PHP's guarded lambda renderers —
+    /// <c>WriteReduceLambda</c> (the <c>array_reduce</c>-based all/any/none) and <c>RenderArrayMap</c>
+    /// (the <c>array_map</c>-based sum/min/max/distinctBy).
+    /// <para>
+    /// Each kept the outer NAME bound via a name-only <c>wasPresent</c> guard but let the lambda
+    /// parameter's <c>TypeRef</c> overwrite the outer binding's, so the outer <c>x</c> — a
+    /// <c>Decimal</c> — was re-typed to the <c>Int</c> element for the rest of its scope. Its equality
+    /// then rendered as <c>===</c> (PHP IDENTITY comparison, which on two distinct Decimal objects is
+    /// always false) instead of the value-equality <c>->equals(...)</c>. That one compiles and passes
+    /// phpstan while being silently wrong at runtime, so it is pinned on the emitted shape.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void LambdaParameterShadowingAnOuterLet_RestoresTheOuterBindingsType_InBothLambdaRenderers()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                qtys:      List<Int>
+                rate:      Decimal
+                viaReduce: Bool = let x = rate in qtys.any(x => x > 0) && x == rate
+                viaMap:    Bool = let x = rate in qtys.sum(x => x) > 0 && x == rate
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.php")).Contents;
+
+        // Once each lambda closes, `x` is a Decimal again — so it compares by VALUE, not identity.
+        order.ShouldContain("array_reduce($this->qtys, fn($carry, $x) => $carry || ($x > 0), false) && $x->equals($this->rate)");
+        order.ShouldContain("array_sum(array_map(fn($x) => $x, $this->qtys)) > 0) && $x->equals($this->rate)");
+        order.ShouldNotContain("$x === $this->rate");
+
+        TestSupport.PhpCheck check = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoPhpNotice);
+        check.Ok.ShouldBeTrue(
+            "a lambda parameter shadowing an outer let must not leak its element type into the outer binding:\n"
+            + string.Join("\n", check.Errors));
+    }
 }

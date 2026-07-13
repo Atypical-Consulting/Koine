@@ -210,4 +210,57 @@ public class KotlinExpressionTests
         translator.Translate(new BinaryExpr(BinaryOp.Mul, Id("unitPrice"), Id("quantity")))
             .ShouldBe("unitPrice.times(quantity)");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1497 — local-binding shadow tracking (the Kotlin half of the #1370 PopLocal-eviction bug class).
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A <c>let</c> that shadows a same-named MEMBER, with a second <c>let</c> shadowing it again:
+    /// popping the inner binding must restore the OUTER LOCAL, not evict it.
+    /// <para>
+    /// The old flat <c>_locals</c>/<c>_localTypes</c> pair could only evict, so after the inner
+    /// <c>let n = 20</c> popped, <c>n</c> stopped being a local at all — and the trailing <c>+ n</c>
+    /// silently re-bound to the MEMBER, emitting <c>this.n</c>. Typing the member as <c>String</c> makes
+    /// the mis-binding loud rather than merely wrong (it would otherwise have read the member instead of
+    /// the binding's <c>10</c>): Kotlin has no <c>Long.plus(String)</c>, so <c>kotlinc</c> rejects it.
+    /// </para>
+    /// <para>
+    /// Unlike Java — which forbids a lambda body from redeclaring an enclosing local, and so cannot emit
+    /// nested same-name <c>let</c>s at all without alpha-renaming — Kotlin permits shadowing inside a
+    /// <c>run { }</c> block, so the corrected lowering is compilable and this test asserts it end-to-end
+    /// through the real compiler.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void NestedLetShadowingAMember_RestoresTheOuterLocal_NotTheMember()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                n:    String
+                base: Int
+                calc: Int = base + (let n = 10 in (let n = 20 in n) + n)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt")).Contents;
+
+        // The outer `n` must still resolve to the LOCAL `val n = 10L`, never to the member.
+        money.ShouldContain("run { val n = 10L; run { val n = 20L; n } + n }");
+        money.ShouldNotContain("+ this.n }");
+
+        TestSupport.KotlinCheck check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(
+            check.ToolchainAvailable,
+            "no kotlinc on PATH — set KOINE_KOTLINC to compile the emitted Kotlin");
+        check.Ok.ShouldBeTrue(
+            "a let shadowing a same-named member must not leak the member into the outer binding's scope:\n"
+            + string.Join("\n", check.Errors));
+    }
 }
