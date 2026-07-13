@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   extractEventFlow,
@@ -8,6 +11,8 @@ import {
   type EventRow,
 } from '@/model/modelTables';
 import type { DiagramEdge, DiagramGraph, DiagramNode, SourceSpan } from '@/lsp/lsp';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -369,6 +374,15 @@ describe('mergeGraphsForView', () => {
       edges: [{ from: 'A', to: 'B', label: null, cardinality: '*' }],
     };
     expect(mergeGraphsForView([g]).edges[0].cardinality).toBe('*');
+  });
+});
+
+describe('source hygiene', () => {
+  test('modelTables.ts contains no literal NUL bytes (issue #1384)', () => {
+    // A NUL byte makes git treat the whole file as binary, breaking `git diff`/`git show` for
+    // line-by-line review — the dedup `sig` in mergeGraphsForView once smuggled two of them in.
+    const source = readFileSync(join(__dirname, 'modelTables.ts'));
+    expect(source.includes(0)).toBe(false);
   });
 });
 
