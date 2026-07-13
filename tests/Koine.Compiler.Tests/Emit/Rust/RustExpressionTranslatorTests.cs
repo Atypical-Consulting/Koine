@@ -24,6 +24,34 @@ public class RustExpressionTranslatorTests
     }
 
     /// <summary>
+    /// Like <see cref="NewTranslator"/>, but the backing model also declares a smart enum
+    /// <c>Currency(symbol: String, decimals: Int)</c> and a value <c>Label { text: String }</c>, so
+    /// <see cref="RustExpressionTranslator.ProducesBorrowedStr"/> tests can exercise a real
+    /// enum-associated-data resolution instead of an empty index.
+    /// </summary>
+    private static RustExpressionTranslator NewTranslatorWithEnum(IReadOnlyList<Member> members)
+    {
+        const string src =
+            """
+            context C {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+              }
+              value Label { text: String }
+              value V { x: Int }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        ModelIndex index = new SemanticModel(result.Model!).Index;
+        return new RustExpressionTranslator(
+            index,
+            members: members,
+            enumMemberToType: new Dictionary<string, string>(),
+            enumVariants: new Dictionary<(string, string), IReadOnlyDictionary<string, string>>(),
+            typeMapper: new RustTypeMapper(index));
+    }
+
+    /// <summary>
     /// <see cref="RustExpressionTranslator.Write"/>'s own <c>IdentifierExpr</c> case calls
     /// <c>WriteIdentifier(id.Name, sb, null, coerceTo)</c> with no <c>ownType</c> argument — exactly the
     /// shape reproduced here. An optional <c>Int</c> local coerced toward <c>Decimal</c> must map inside
@@ -228,5 +256,62 @@ public class RustExpressionTranslatorTests
         translator.WriteIdentifier("y", sb, null, new TypeRef("Decimal"));
 
         sb.ToString().ShouldBe("y.map(Decimal::from)");
+    }
+
+    /// <summary>Issue #1533: a <c>.trim()</c> member op always produces a borrowed <c>&amp;str</c>.</summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_true_for_a_trim_member_op()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("name", new TypeRef("String"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("name"), "trim");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1533: a smart enum's <c>String</c>-typed associated-data accessor
+    /// (<c>currency.symbol</c>) returns a borrowed <c>&amp;'static str</c>.
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_true_for_a_smart_enum_String_datum_access()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("currency", new TypeRef("Currency"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("currency"), "symbol");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1533 guard: a plain value object's <c>String</c> field read (its accessor already returns
+    /// an owned <c>String</c>) must NOT be classified as borrowed — only the enum-accessor shape is.
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_false_for_a_plain_String_field_read()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("label", new TypeRef("Label"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("label"), "text");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1533 guard: a smart enum's <c>Int</c>-typed associated datum (<c>currency.decimals</c>) is
+    /// unaffected — the predicate only recognizes a <c>String</c>-typed associated member as borrowed.
+    /// </summary>
+    [Fact]
+    public void ProducesBorrowedStr_is_false_for_a_smart_enum_Int_datum_access()
+    {
+        RustExpressionTranslator translator = NewTranslatorWithEnum(
+            [new Member("currency", new TypeRef("Currency"), null)]);
+
+        var expr = new MemberAccessExpr(new IdentifierExpr("currency"), "decimals");
+
+        translator.ProducesBorrowedStr(expr).ShouldBeFalse();
     }
 }

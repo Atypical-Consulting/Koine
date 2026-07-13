@@ -1190,6 +1190,43 @@ internal sealed class RustExpressionTranslator
         sb.Append(".to_string()");
     }
 
+    /// <summary>
+    /// True when <paramref name="expr"/>'s emitted Rust evaluates to a BORROWED <c>&amp;str</c> rather
+    /// than an owned <c>String</c> — decided from the resolved AST/type, not by inspecting the rendered
+    /// text (#1533; replaces a <c>body.EndsWith(".trim()")</c> heuristic that only recognized one of the
+    /// two borrowed shapes). Two independent sources render borrowed:
+    /// <list type="bullet">
+    /// <item>a <c>.trim()</c> string member op (<c>str::trim</c> borrows its receiver);</item>
+    /// <item>a smart enum's <c>String</c>-typed associated-data accessor (<c>fn symbol(&amp;self) -&gt;
+    /// &amp;'static str</c>, deliberately <c>const</c>-shaped) — a <see cref="MemberAccessExpr"/> whose
+    /// receiver resolves to a <see cref="TypeKind.Enum"/> and whose member resolves through
+    /// <see cref="ModelIndex.TryGetMemberType(string,string,out TypeRef)"/> to a non-optional
+    /// <c>String</c>.</item>
+    /// </list>
+    /// A caller that needs an owned value from such a body must append <c>.to_string()</c>, not
+    /// <c>.clone()</c> — cloning a <c>&amp;str</c> is still a <c>&amp;str</c>. A plain field/derived-member
+    /// read (any other <see cref="MemberAccessExpr"/>) already returns an owned <c>String</c> from its
+    /// accessor, so it is NOT borrowed.
+    /// </summary>
+    internal bool ProducesBorrowedStr(Expr expr)
+    {
+        if (expr is not MemberAccessExpr ma)
+        {
+            return false;
+        }
+
+        if (ma.MemberName == "trim")
+        {
+            return true;
+        }
+
+        TypeRef? receiverType = _resolver.Infer(ma.Target, EffectiveScope());
+        return receiverType is not null
+            && _index.Classify(receiverType.Name) == TypeKind.Enum
+            && _index.TryGetMemberType(receiverType.Name, ma.MemberName, out TypeRef memberType)
+            && memberType is { Name: "String", IsOptional: false };
+    }
+
     /// <summary>True when an expression's inferred type is optional — used to decide <c>Some(...)</c> wrapping.</summary>
     public bool IsOptional(Expr expr) => _resolver.Infer(expr, EffectiveScope())?.IsOptional == true;
 
