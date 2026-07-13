@@ -778,6 +778,73 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// #1520: a coalesce (<c>??</c>) whose right operand is ITSELF <c>Optional</c>-typed (here, another
+    /// <c>Decimal?</c> factory parameter) must lower to <c>Optional&lt;T&gt;.or(() -&gt; ...)</c>, which
+    /// keeps the result <c>Optional</c>-shaped — not the bare-value <c>Optional&lt;T&gt;.orElse(T)</c>,
+    /// which requires a non-<c>Optional</c> argument and is a real <c>javac</c> "incompatible types"
+    /// error when handed an <c>Optional&lt;T&gt;</c>. Matches <see cref="TypeResolver.VisitCoalesce"/>'s
+    /// own <c>right.IsOptional</c> propagation, which already allows this shape.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_an_optional_typed_fallback_operand_stays_optional_shaped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): pins the exact defect — an Optional-typed fallback must
+        // route through `.or(() -> ...)`, never the bare-value `.orElse(...)`.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a.or(() -> b)");
+        product.ShouldNotContain("a.orElse(b)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard: a coalesce whose right operand is NOT optional-typed (the common,
+    /// already-correct case) must keep emitting the bare-value <c>.orElse(...)</c>, unaffected by #1520's
+    /// fix.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_a_non_optional_fallback_operand_still_unwraps_via_orElse()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Decimal) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a.orElse(b)");
+        product.ShouldNotContain("a.or(() -> b)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must
