@@ -522,23 +522,7 @@ public sealed partial class JavaEmitter
             {
                 var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var translated = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
-
-                // Numerically coerce against the member's underlying (non-optional) declared type before
-                // the Optional.of(...) wrap below — mirroring the Rust emitter's CoerceNumericBody-then-
-                // Some(...) ordering (#1491/#1519): an Int-typed initializing expression against a
-                // Decimal-declared member must widen to BigDecimal first, or an optional-declared member
-                // would otherwise emit Optional.of(5L) against an Optional<BigDecimal> parameter.
-                var valueType = translator.InferType(value);
-                translated = CoerceNumericBody(UnderlyingType(m.Type), valueType, translated);
-
-                // Wrap in Optional.of(...) only when the initializing expression isn't already
-                // Optional-typed — the validator legally allows an Optional-typed expression (e.g. a
-                // `T?` factory parameter) to initialize an optional-declared required member, and
-                // unconditionally wrapping it would double-wrap into Optional<Optional<T>>, a real javac
-                // "incompatible types" error.
-                args.Add(m.Type.IsOptional && valueType?.IsOptional != true
-                    ? $"java.util.Optional.of({translated})"
-                    : translated);
+                args.Add(ReconcileFactoryCtorArg(translator.InferType(value), m.Type, translated));
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
@@ -568,41 +552,26 @@ public sealed partial class JavaEmitter
     }
 
     /// <summary>
-    /// Applies <see cref="NumericCoercionWrap"/> to <paramref name="body"/>'s already-translated Java
-    /// expression string when the value's inferred type numerically mismatches <paramref name="declared"/>,
-    /// or returns it unchanged when no coercion is needed. Mirrors the Rust emitter's
-    /// <c>CoerceNumericBody</c> (#1491) — the shared dispatch point <see cref="BuildFactoryCtorArgs"/>
-    /// calls before deciding whether to also <c>Optional.of(...)</c>-wrap the result.
+    /// Reconciles an explicit-init factory ctor argument's already-translated Java expression against the
+    /// member's <paramref name="declared"/> type, reusing the same shared <see cref="BranchReconciliation"/>
+    /// decision (#1368) every code emitter's ternary-branch reconciliation already applies (#1344) rather
+    /// than a hand-rolled, narrower duplicate (#1519) — composed exactly as <c>WriteReconciledBranch</c>
+    /// does: widen inside, wrap outside. <c>NeedsWiden</c> widens a non-optional <c>Int</c> value to
+    /// <c>BigDecimal</c>; <c>NeedsOptionalWiden</c> does the same when the value is itself
+    /// <c>Optional</c>-typed, via <c>.map(BigDecimal::valueOf)</c> instead (an already-<c>Optional</c>-shaped
+    /// value can't be widened with a bare call); <c>NeedsSomeWrap</c> lifts a non-optional value into
+    /// <c>Optional.of(...)</c> against an optional-declared member (#1479). <c>NeedsWiden</c> and
+    /// <c>NeedsOptionalWiden</c> are mutually exclusive and <c>NeedsOptionalWiden</c> never composes with
+    /// <c>NeedsSomeWrap</c> (see <see cref="BranchReconciliation"/>'s own remarks), so applying all three in
+    /// sequence is safe.
     /// </summary>
-    private static string CoerceNumericBody(TypeRef declared, TypeRef? valueType, string body) =>
-        NumericCoercionWrap(declared, valueType) is { } wrap ? $"{wrap}({body})" : body;
-
-    /// <summary>
-    /// The Java widening call to wrap a factory ctor argument's translated value in when its inferred
-    /// numeric type differs from the member's <paramref name="declared"/> (already-underlying) type, or
-    /// <c>null</c> when none is needed. Reuses <c>java.math.BigDecimal.valueOf</c> — the same widening
-    /// idiom <see cref="JavaExpressionTranslator.WriteBigDecimalOperand"/> already applies for binary
-    /// operands and <c>WriteReconciledBranch</c> for ternary branches (#1344) — rather than inventing a
-    /// new string template. <c>Decimal</c>-into-<c>Int</c> narrowing is not handled: the semantic
-    /// validator (KOI0217) already rejects that direction, so <c>Int</c>/<c>Decimal</c> is the only
-    /// mismatch this call site can ever see.
-    /// </summary>
-    private static string? NumericCoercionWrap(TypeRef declared, TypeRef? valueType) =>
-        valueType is not null && !declared.IsOptional && !valueType.IsOptional
-        && TypeResolver.IsNumeric(declared) && TypeResolver.IsNumeric(valueType)
-        && declared.Name != valueType.Name && declared.Name == "Decimal"
-            ? "java.math.BigDecimal.valueOf"
-            : null;
-
-    /// <summary>
-    /// The non-optional view of a possibly-optional-declared type — gate the numeric-coercion check on
-    /// this, never on the member's raw <c>Type</c> directly, or an optional-declared member's explicit
-    /// init would fall through <see cref="NumericCoercionWrap"/>'s <c>declared.IsOptional</c> guard and
-    /// silently skip a real Int-into-Decimal mismatch (mirrors the Rust emitter's own
-    /// <c>UnderlyingType</c>, #1319/#1324).
-    /// </summary>
-    private static TypeRef UnderlyingType(TypeRef declared) =>
-        declared.IsOptional ? declared with { IsOptional = false } : declared;
+    private static string ReconcileFactoryCtorArg(TypeRef? valueType, TypeRef declared, string body)
+    {
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        var widened = needs.NeedsWiden ? $"java.math.BigDecimal.valueOf({body})" : body;
+        var mapped = needs.NeedsOptionalWiden ? $"{widened}.map(java.math.BigDecimal::valueOf)" : widened;
+        return needs.NeedsSomeWrap ? $"java.util.Optional.of({mapped})" : mapped;
+    }
 
     /// <summary>Writes identity-based <c>equals</c>/<c>hashCode</c> keyed on the id field (an entity is its identity).</summary>
     private static void WriteIdentityEquality(StringBuilder sb, string name)

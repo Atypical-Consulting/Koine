@@ -740,6 +740,44 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// Code-review follow-up to #1519 itself: an ALREADY-<c>Optional</c>-typed initializing expression
+    /// (e.g. an <c>Int?</c> factory parameter) that is ALSO numerically mismatched against an
+    /// optional-declared <c>Decimal?</c> member needs a <c>.map(...)</c>-based coercion — a bare
+    /// <c>BigDecimal.valueOf(...)</c> wrap around an <c>Optional&lt;Long&gt;</c> value does not compile.
+    /// This is the exact edge case the issue's own spec flagged (mirroring the Rust translator's
+    /// <c>OptionBodyNumericCoercionMap</c>) and the initial fix missed; caught by code review before ready.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_decimal_member_from_an_already_optional_int_source_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(discount: Int?) {\n" +
+            "      total -> discount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): the already-Optional<Long> value must be mapped to
+        // Optional<BigDecimal> via .map(...), never bare-wrapped (which would double-wrap into
+        // Optional<Optional<...>>) nor left as Optional<Long> (a real javac "incompatible types" error).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, discount.map(java.math.BigDecimal::valueOf))");
+        product.ShouldNotContain("new Product(id, discount)");
+        product.ShouldNotContain("Optional.of(discount");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must
