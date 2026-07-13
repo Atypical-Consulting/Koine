@@ -3835,4 +3835,32 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1511: a command transition assigning an <c>Int</c>-inferred value into a <c>Decimal</c>
+    /// field must compile — the transition-value call site forgot to consult the shared numeric-widening
+    /// coercion, so this used to fail a real <c>cargo check</c> with E0308.
+    /// </summary>
+    [Fact]
+    public void Command_transition_of_an_Int_literal_into_a_Decimal_field_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump() {
+                  amount -> 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
