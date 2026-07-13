@@ -110,6 +110,8 @@ public sealed class TypeResolver
 
     public static bool IsNumeric(TypeRef? t) => t is not null && t.Name is "Int" or "Decimal";
 
+    public static bool IsBool(TypeRef? t) => t is not null && t.Name == "Bool";
+
     public bool IsValueLike(TypeRef? t) =>
         t is not null && _index.Classify(t.Name) is TypeKind.Value or TypeKind.IdValueObject;
 
@@ -176,8 +178,21 @@ public sealed class TypeResolver
                 : ErrorType.Instance;
         }
 
-        protected override KoineType VisitUnary(UnaryExpr n) =>
-            n.Op == UnaryOp.Not ? Bool : Visit(n.Operand);
+        // `Not` resolves to `Bool` only when the operand actually IS Bool/Bool?; `Negate` echoes the
+        // operand's own (numeric) type. Either way, a MISMATCHED operand collapses to `ErrorType`
+        // rather than propagating the operand's real type: ExpressionChecker.CheckUnaryOperandType
+        // already reports the mismatch, and a non-null inferred type here would make every OTHER
+        // declared-vs-inferred check downstream (member initializers, transitions, factory fields,
+        // command results, event payloads) independently notice the "mismatch" too and pile on a
+        // second, misleading diagnostic (e.g. "provide a fallback with '??'" for a `!aStringField`
+        // that was never about optionality) for the very same expression.
+        protected override KoineType VisitUnary(UnaryExpr n)
+        {
+            KoineType operand = Visit(n.Operand);
+            return n.Op == UnaryOp.Not
+                ? IsBoolType(operand) ? Bool : ErrorType.Instance
+                : IsNumericType(operand) ? operand : ErrorType.Instance;
+        }
 
         protected override KoineType VisitMatch(MatchExpr n) => Bool;
 
@@ -185,6 +200,9 @@ public sealed class TypeResolver
 
         /// <summary>True when <paramref name="t"/> resolves to a numeric primitive (<c>Int</c>/<c>Decimal</c>).</summary>
         private static bool IsNumericType(KoineType t) => t.Name is "Int" or "Decimal";
+
+        /// <summary>True when <paramref name="t"/> resolves to the <c>Bool</c> primitive.</summary>
+        private static bool IsBoolType(KoineType t) => t.Name == "Bool";
 
         /// <summary>
         /// The common (wider) numeric type of two numeric operands — <c>Decimal</c> dominates <c>Int</c>.

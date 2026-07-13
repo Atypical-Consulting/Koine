@@ -85,6 +85,7 @@ public static class DiagnosticCodes
     public const string ValueObjectTypeMismatch = "KOI0219";
     public const string EntityOperandArithmetic = "KOI0220";
     public const string ValueObjectMulDivMismatch = "KOI0221";
+    public const string UnaryOperandTypeMismatch = "KOI0222";
 
     // ---- Determinism / value rules (KOI0300–0399) -------------------------
     public const string NowAsStoredDefault = "KOI0301";
@@ -285,6 +286,7 @@ public static class DiagnosticCodes
             [ValueObjectTypeMismatch] = D(ValueObjectTypeMismatch, "A binary '+' or '-' combines two value-like operands (a quantity and a plain value object, or two plain value objects) of different declared types; a value object's '+'/'-' only ever accepts another instance of its OWN declared type — no target can emit an operator for mismatched operand types.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [EntityOperandArithmetic] = D(EntityOperandArithmetic, "A binary '+', '-', '*', or '/' has an entity- (or aggregate-)typed operand; entities never have a generated arithmetic operator, regardless of what the other operand is (another entity of the same or a different type, a value object, or a scalar) — no target can lower it.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
             [ValueObjectMulDivMismatch] = D(ValueObjectMulDivMismatch, "A binary '*' or '/' combines two value-like operands (two quantities, a quantity and a plain value object, or two plain value objects); no target ever generates a '*'/'/' operator between two value-like operands, even of the SAME declared type.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
+            [UnaryOperandTypeMismatch] = D(UnaryOperandTypeMismatch, "A unary '!' operand is not Bool, or a unary '-' operand is not Int/Decimal (optionally-wrapped in either case); no target has an operator for the actual operand type.", DiagnosticCategory.Expressions, DiagnosticSeverity.Error),
 
             // ---- Determinism / value rules -----------------------------------
             [NowAsStoredDefault] = D(NowAsStoredDefault, "'now' cannot be used as a stored (constructor) default.", DiagnosticCategory.Determinism, DiagnosticSeverity.Error),
