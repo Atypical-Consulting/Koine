@@ -595,6 +595,62 @@ public class R9ValueObjectTests
     }
 
     // ======================================================================
+    // #1525 — a nested value-object mismatch must be reported exactly ONCE, not once per check that
+    // independently notices something looks wrong about an expression wrapping the already-flagged
+    // sub-expression. TypeResolver.VisitBinary resolves a mismatched `w + m` to a non-error "best
+    // guess" type (the left operand's own type) rather than ErrorType — so an unrelated OUTER check
+    // sees a normal-looking value-object type and piles on a second, redundant diagnostic.
+    // ======================================================================
+
+    [Fact]
+    public void Nested_value_object_mismatch_under_outer_scalar_arithmetic_is_reported_once()
+    {
+        // `(w + m) + 5`: the inner `w + m` is the real defect (KOI0219). Without suppression the
+        // outer `+ 5` also independently flags the inner expression's best-guess type (Weight) as a
+        // scalar-arithmetic mismatch (KOI0215) — an echo of the same defect, not a second one.
+        const string src = """
+            context Shop {
+              value Weight { kg: Decimal }
+              value Money { amount: Decimal }
+              value V {
+                w: Weight
+                m: Money
+                bad: Decimal = (w + m) + 5
+              }
+            }
+            """;
+        var diag = Diagnose(src).ShouldHaveSingleItem();
+        diag.Code.ShouldBe(DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    [Fact]
+    public void Two_independent_nested_value_object_mismatches_are_both_reported()
+    {
+        // `(w + m) + (x + y)`: TWO genuinely independent defects (Weight/Money and X/Y) — suppression
+        // must not collapse these to one, but the OUTER `+` combining the two already-invalid
+        // sub-expressions (whose best-guess types are themselves mismatched, e.g. Weight vs X) must
+        // not additionally echo a third diagnostic on top of the two real ones.
+        const string src = """
+            context Shop {
+              value Weight { kg: Decimal }
+              value Money { amount: Decimal }
+              value X { n: Decimal }
+              value Y { n: Decimal }
+              value V {
+                w: Weight
+                m: Money
+                x: X
+                y: Y
+                bad: Decimal = (w + m) + (x + y)
+              }
+            }
+            """;
+        IReadOnlyList<Diagnostic> diags = Diagnose(src);
+        diags.Count.ShouldBe(2);
+        diags.ShouldAllBe(d => d.Code == DiagnosticCodes.ValueObjectTypeMismatch);
+    }
+
+    // ======================================================================
     // #1291 — the */÷ sibling gap #1284's own code-review pass found but left out of its own scope: a
     // binary '*'/'/' where BOTH operands are value-like (two value objects, or two quantities) must
     // also be rejected — mirroring #1266/#1284's +/- coverage. Unlike +/-, there is NO same-type

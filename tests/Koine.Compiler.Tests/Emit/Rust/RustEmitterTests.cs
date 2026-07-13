@@ -1901,4 +1901,145 @@ public class RustEmitterTests
 
         rust.ShouldContain("Ok(Decimal::from(qty + delta))");
     }
+
+    /// <summary>
+    /// Issue #1523: a command's <c>result</c> expression never <c>Some(...)</c>-wraps toward an
+    /// optional-declared return type — even when combined with #1511's numeric widening. Composes as
+    /// <c>Some(Decimal::from(...))</c>, matching the transition loop's existing widen-inside/wrap-outside
+    /// order.
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_an_Int_literal_into_an_optional_Decimal_return_type_is_wrapped()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command computeBonus(): Decimal? {
+                  result 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Ok(Some(Decimal::from(5)))");
+    }
+
+    /// <summary>
+    /// Issue #1523: an exactly-matching (non-numeric) <c>result</c> value must also <c>Some(...)</c>-wrap
+    /// toward an optional-declared return type — isolating the optionality gap alone, with no numeric
+    /// coercion involved.
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_a_matching_Decimal_into_an_optional_Decimal_return_type_is_wrapped()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command reprice(newAmount: Decimal): Decimal? {
+                  result newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Ok(Some(new_amount))");
+    }
+
+    /// <summary>
+    /// Issue #1523 zero-change regression guard: a <c>result</c> value that is already optional (e.g. an
+    /// <c>Option</c>-typed parameter) must render unchanged — no double-wrap.
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_an_already_optional_value_is_not_double_wrapped()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command reprice(newAmount: Decimal?): Decimal? {
+                  result newAmount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Ok(new_amount)");
+        rust.ShouldNotContain("Ok(Some(new_amount))");
+    }
+
+    /// <summary>
+    /// Issue #1523: an <c>emit</c> payload argument never <c>Some(...)</c>-wraps toward an
+    /// optional-declared event member — the payload dual of the result-clause gap above.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_an_Int_literal_into_an_optional_Decimal_field_is_wrapped()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal?
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump() {
+                  emit Bumped(amount: 5)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Bumped::new(Some(Decimal::from(5)))");
+    }
+
+    /// <summary>
+    /// Issue #1523 zero-change regression guard: an <c>emit</c> payload argument that is already optional
+    /// (e.g. an <c>Option</c>-typed parameter) must render unchanged — no double-wrap.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_an_already_optional_value_is_not_double_wrapped()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal?
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump(amount: Decimal?) {
+                  emit Bumped(amount: amount)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Bumped::new(amount)");
+        rust.ShouldNotContain("Bumped::new(Some(amount))");
+    }
 }

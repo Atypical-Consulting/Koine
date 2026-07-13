@@ -585,4 +585,44 @@ public class TypeScriptConformanceTests
         run.Stdout.ShouldContain("\"negative\":-3");
         run.Stdout.ShouldContain("\"fractional\":7");
     }
+
+    /// <summary>
+    /// Issue #1537 acceptance: Decimal arithmetic against a non-Decimal Int operand — an Int LITERAL,
+    /// an Int MEMBER, on either side of the operator, across all four of <c>+ - * /</c>, and a guarded
+    /// OPTIONAL Int member — must all widen to <c>Decimal</c> at the call site and type-check under
+    /// <c>tsc --strict</c>. Before the fix, <c>rate + 1</c> emitted the bare literal
+    /// <c>this.rate.add(1)</c> against the runtime's strict <c>add(other: Decimal)</c> — a TS2345 on
+    /// the single most ordinary Decimal-arithmetic shape in the language, needing no shadowing, no
+    /// <c>let</c>, no lambda.
+    /// </summary>
+    [Fact]
+    public void Decimal_arithmetic_against_int_operands_typechecks_under_strict()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:       Decimal
+                qty:        Int
+                discount:   Int?
+                literalPlus:    Decimal = rate + 1
+                literalOnLeft:  Decimal = 1 + rate
+                memberPlus:     Decimal = rate + qty
+                memberMinus:    Decimal = rate - qty
+                memberTimes:    Decimal = rate * qty
+                memberDivided:  Decimal = rate / qty
+                withOptional:   Decimal? = if discount.isPresent then rate - discount else rate
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "Decimal arithmetic against Int literals/members/an optional member should type-check under --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
 }
