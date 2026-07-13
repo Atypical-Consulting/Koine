@@ -510,4 +510,46 @@ public class R1ExpressionTests
         var source = string.Join("\n", result.Files.Select(f => f.Contents));
         source.ShouldNotContain("DateTimeOffset.UtcNow");
     }
+
+    // ---- unary operand-type validation (#1501) -----------------------------
+
+    [Fact]
+    public void Not_applied_to_a_string_is_reported()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Person {\n" +
+            "    nickname: String?\n" +
+            "    hasNoNickname: Bool = !nickname\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldContain(d => d.Message.Contains("unary operator '!' cannot be applied to 'String'"));
+    }
+
+    [Fact]
+    public void Negate_applied_to_a_value_object_is_reported()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money { amount: Decimal }\n" +
+            "  value V {\n" +
+            "    m: Money\n" +
+            "    negated: Money = -m\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldContain(d => d.Message.Contains("unary operator '-' cannot be applied to 'Money'"));
+    }
+
+    [Theory]
+    [InlineData("value V { a: Bool\n notA: Bool = !a }")]
+    [InlineData("value V { a: Bool?\n notA: Bool = !a }")]
+    [InlineData("value V { a: Int\n negA: Int = -a }")]
+    [InlineData("value V { a: Int?\n negA: Int? = -a }")]
+    [InlineData("value V { a: Decimal\n negA: Decimal = -a }")]
+    [InlineData("value V { a: Decimal?\n negA: Decimal? = -a }")]
+    public void Unary_on_a_valid_operand_type_is_not_reported(string member)
+    {
+        var src = $"context C {{\n  {member}\n}}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
 }
