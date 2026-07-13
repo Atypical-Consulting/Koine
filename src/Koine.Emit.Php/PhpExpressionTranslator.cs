@@ -104,15 +104,7 @@ internal sealed class PhpExpressionTranslator
     public void PopLocal(string name) => _locals.PopLocal(name);
 
     private TypeScope EffectiveScope()
-    {
-        TypeScope scope = _scope;
-        foreach (KeyValuePair<string, TypeRef> kv in _locals.ActiveBindings)
-        {
-            scope = scope.WithRef(kv.Key, kv.Value, _index);
-        }
-
-        return scope;
-    }
+        => _locals.Overlay(_scope, _index);
 
     /// <summary>Translates an expression to a PHP expression string (members render as <c>$this-&gt;x</c>).</summary>
     public string Translate(Expr expr, string? expectedEnum = null) => Translate(expr, NameMode.Property, expectedEnum);

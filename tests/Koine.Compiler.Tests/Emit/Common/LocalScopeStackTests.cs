@@ -1,4 +1,5 @@
 using Koine.Compiler.Ast;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
 
@@ -161,5 +162,48 @@ public class LocalScopeStackTests
 
         stack.IsLocal("N").ShouldBeFalse();
         stack.TypeOf("N").ShouldBeNull();
+    }
+
+    /// <summary>
+    /// <see cref="LocalScopeStack.Overlay"/> is every translator's <c>EffectiveScope()</c>: the member
+    /// scope with the active locals layered on top, so a local SHADOWS a same-named member for type
+    /// resolution — and un-shadows it, at the member's own type, once it pops.
+    /// </summary>
+    [Fact]
+    public void Overlay_ShadowsASameNamedMember_AndUnshadowsItOnPop()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                n:    String
+                base: Int
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        ModelIndex index = new SemanticModel(result.Model!).Index;
+        var money = result.Model!.Contexts
+            .SelectMany(c => c.AllTypeDecls())
+            .OfType<ValueObjectDecl>()
+            .First(v => v.Name == "Money");
+
+        TypeScope members = TypeScope.FromMembers(money.Members, index);
+        var resolver = new TypeResolver(index, "Shop");
+        var stack = new LocalScopeStack();
+
+        // With nothing bound, `n` is the String MEMBER.
+        resolver.Infer(new IdentifierExpr("n"), stack.Overlay(members, index))!.Name.ShouldBe("String");
+
+        // A local `n` shadows it...
+        stack.PushLocal("n", Type("Int"));
+        resolver.Infer(new IdentifierExpr("n"), stack.Overlay(members, index))!.Name.ShouldBe("Int");
+
+        // ...and popping it hands the member back.
+        stack.PopLocal("n");
+        resolver.Infer(new IdentifierExpr("n"), stack.Overlay(members, index))!.Name.ShouldBe("String");
     }
 }

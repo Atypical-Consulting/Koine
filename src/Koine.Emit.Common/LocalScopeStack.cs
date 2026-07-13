@@ -61,6 +61,14 @@ internal sealed class LocalScopeStack
     /// Unbinds <paramref name="name"/>'s INNERMOST binding, restoring whatever it shadowed — or absence,
     /// if it shadowed nothing. Popping a name that isn't bound is a no-op (translators unwind
     /// defensively).
+    /// <para>
+    /// <b>Pops exactly one level.</b> Callers must pop as many times as they pushed. In particular the
+    /// "pop the command parameters so a same-named one cannot shadow the member a guard must read" idiom
+    /// (each emitter's <c>BuildStateMachineConditions</c>) assumes the popped name is bound exactly once
+    /// — true on the command path, which pushes only the command's own parameters. Do not reach for it
+    /// from a path that has pushed a name twice (the factory path pushes <c>id</c> alongside the factory
+    /// parameters): a single pop would leave the outer binding live rather than exposing the member.
+    /// </para>
     /// </summary>
     public void PopLocal(string name)
     {
@@ -90,9 +98,34 @@ internal sealed class LocalScopeStack
         _stacks.TryGetValue(name, out Stack<TypeRef?>? stack) && stack.Count > 0 ? stack.Peek() : null;
 
     /// <summary>
-    /// The currently-bound names at their innermost known type — the overlay a translator layers onto its
-    /// member <c>TypeScope</c>. Names whose innermost binding has no known type are omitted (there is no
-    /// type to overlay), NOT reported at an outer binding's type.
+    /// Layers the currently-bound names, at their innermost known type, over <paramref name="memberScope"/>
+    /// — the effective scope a translator resolves an expression in, where a local shadows a same-named
+    /// member. Names whose innermost binding has no known type are skipped (there is no type to overlay),
+    /// NOT reported at an outer binding's type.
+    /// <para>
+    /// This is every translator's <c>EffectiveScope()</c>, which each one wrote out identically and calls
+    /// on essentially every <c>Infer</c> — so it lives here, iterating the stacks directly rather than
+    /// through an allocating <c>IEnumerable</c> on that hot path.
+    /// </para>
+    /// </summary>
+    public TypeScope Overlay(TypeScope memberScope, ModelIndex index)
+    {
+        TypeScope scope = memberScope;
+        foreach (KeyValuePair<string, Stack<TypeRef?>> kv in _stacks)
+        {
+            if (kv.Value.Count > 0 && kv.Value.Peek() is { } type)
+            {
+                scope = scope.WithRef(kv.Key, type, index);
+            }
+        }
+
+        return scope;
+    }
+
+    /// <summary>
+    /// The currently-bound names at their innermost known type. Exposed for tests and for a caller that
+    /// needs the bindings themselves rather than a <see cref="TypeScope"/> overlay (<see cref="Overlay"/>
+    /// is the hot path).
     /// </summary>
     public IEnumerable<KeyValuePair<string, TypeRef>> ActiveBindings
     {

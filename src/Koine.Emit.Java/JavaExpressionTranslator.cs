@@ -118,15 +118,7 @@ internal sealed class JavaExpressionTranslator
 
     /// <summary>The member scope extended with any known local (parameter/binding) types.</summary>
     private TypeScope EffectiveScope()
-    {
-        TypeScope scope = _scope;
-        foreach (KeyValuePair<string, TypeRef> kv in _locals.ActiveBindings)
-        {
-            scope = scope.WithRef(kv.Key, kv.Value, _index);
-        }
-
-        return scope;
-    }
+        => _locals.Overlay(_scope, _index);
 
     /// <summary>The semantic type an expression infers to in this type's scope (locals included).</summary>
     public TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
