@@ -38,23 +38,35 @@ namespace Koine.Compiler;
 /// </summary>
 internal sealed class LocalScopeStack
 {
-    private readonly Dictionary<string, Stack<TypeRef?>> _stacks = new(StringComparer.Ordinal);
+    /// <summary>
+    /// One binding on a name's shadow stack: its <see cref="TypeRef"/> (see <see cref="PushLocal"/>) and,
+    /// optionally, the identifier it RENDERS as in the target source — distinct from the Koine name a
+    /// caller looks it up by when a target's lowering must alpha-rename a colliding binding (Java; #1536).
+    /// A binding with no rendered name (every target but Java, today) reports its own Koine name from
+    /// <see cref="RenderedNameOf"/>.
+    /// </summary>
+    private readonly record struct Binding(TypeRef? Type, string? RenderedName);
+
+    private readonly Dictionary<string, Stack<Binding>> _stacks = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Binds <paramref name="name"/> as a local at <paramref name="type"/>, STACKING on top of any
     /// binding that name already has rather than replacing it, so the matching <see cref="PopLocal"/>
     /// can restore it. Pass no <paramref name="type"/> when the binding's type doesn't resolve (see the
-    /// class remarks) — the name still shadows, it just contributes no type overlay.
+    /// class remarks) — the name still shadows, it just contributes no type overlay. Pass
+    /// <paramref name="renderedName"/> when the target must spell this binding differently from
+    /// <paramref name="name"/> in the emitted source (see <see cref="RenderedNameOf"/>); omit it to have
+    /// <see cref="RenderedNameOf"/> fall back to <paramref name="name"/> itself.
     /// </summary>
-    public void PushLocal(string name, TypeRef? type = null)
+    public void PushLocal(string name, TypeRef? type = null, string? renderedName = null)
     {
-        if (!_stacks.TryGetValue(name, out Stack<TypeRef?>? stack))
+        if (!_stacks.TryGetValue(name, out Stack<Binding>? stack))
         {
-            stack = new Stack<TypeRef?>();
+            stack = new Stack<Binding>();
             _stacks[name] = stack;
         }
 
-        stack.Push(type);
+        stack.Push(new Binding(type, renderedName));
     }
 
     /// <summary>
@@ -72,7 +84,7 @@ internal sealed class LocalScopeStack
     /// </summary>
     public void PopLocal(string name)
     {
-        if (!_stacks.TryGetValue(name, out Stack<TypeRef?>? stack) || stack.Count == 0)
+        if (!_stacks.TryGetValue(name, out Stack<Binding>? stack) || stack.Count == 0)
         {
             return;
         }
@@ -95,7 +107,38 @@ internal sealed class LocalScopeStack
     /// <see langword="null"/> when it isn't bound OR its innermost binding carries no known type.
     /// </summary>
     public TypeRef? TypeOf(string name) =>
-        _stacks.TryGetValue(name, out Stack<TypeRef?>? stack) && stack.Count > 0 ? stack.Peek() : null;
+        _stacks.TryGetValue(name, out Stack<Binding>? stack) && stack.Count > 0 ? stack.Peek().Type : null;
+
+    /// <summary>
+    /// The innermost binding's rendered identifier for <paramref name="name"/> — the string a target
+    /// should emit for a reference to this local — or <paramref name="name"/> itself when it isn't bound,
+    /// or its innermost binding was pushed with no <c>renderedName</c> (see <see cref="PushLocal"/>).
+    /// </summary>
+    public string RenderedNameOf(string name) =>
+        _stacks.TryGetValue(name, out Stack<Binding>? stack) && stack.Count > 0
+            && stack.Peek().RenderedName is { } rendered
+            ? rendered
+            : name;
+
+    /// <summary>
+    /// True when <paramref name="renderedName"/> is the innermost rendered identifier of SOME currently
+    /// active binding (any name, not just <paramref name="renderedName"/>'s own Koine name). A target that
+    /// alpha-renames a colliding binding (Java; #1536) needs this to pick a fresh identifier that collides
+    /// with none of the OTHER locals — including a shadowed OUTER binding of the very name it is
+    /// renaming — that are still lexically enclosing at the point of the new binding.
+    /// </summary>
+    public bool IsRenderedNameInUse(string renderedName)
+    {
+        foreach (Stack<Binding> stack in _stacks.Values)
+        {
+            if (stack.Count > 0 && stack.Peek().RenderedName == renderedName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Layers the currently-bound names, at their innermost known type, over <paramref name="memberScope"/>
@@ -111,9 +154,9 @@ internal sealed class LocalScopeStack
     public TypeScope Overlay(TypeScope memberScope, ModelIndex index)
     {
         TypeScope scope = memberScope;
-        foreach (KeyValuePair<string, Stack<TypeRef?>> kv in _stacks)
+        foreach (KeyValuePair<string, Stack<Binding>> kv in _stacks)
         {
-            if (kv.Value.Count > 0 && kv.Value.Peek() is { } type)
+            if (kv.Value.Count > 0 && kv.Value.Peek().Type is { } type)
             {
                 scope = scope.WithRef(kv.Key, type, index);
             }
@@ -131,9 +174,9 @@ internal sealed class LocalScopeStack
     {
         get
         {
-            foreach (KeyValuePair<string, Stack<TypeRef?>> kv in _stacks)
+            foreach (KeyValuePair<string, Stack<Binding>> kv in _stacks)
             {
-                if (kv.Value.Count > 0 && kv.Value.Peek() is { } type)
+                if (kv.Value.Count > 0 && kv.Value.Peek().Type is { } type)
                 {
                     yield return new KeyValuePair<string, TypeRef>(kv.Key, type);
                 }
