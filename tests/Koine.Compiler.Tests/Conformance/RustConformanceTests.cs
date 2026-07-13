@@ -3957,4 +3957,40 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1498: reading a smart enum's associated data (<c>currency.symbol</c>) is a documented,
+    /// accepted language feature, but <c>ModelIndex.MemberTypeOf</c> had no <c>EnumDecl</c> case — so it
+    /// resolved to <c>ErrorType</c>. An unresolved type reads as "not a String" to
+    /// <c>WriteOwnedLeaf</c>, which then clones the access instead of calling <c>.to_string()</c> on it:
+    /// <c>self.currency.symbol().clone()</c> stays a <c>&amp;'static str</c> where the accessor's
+    /// declared <c>String</c> return type is expected — a real <c>cargo check</c> E0308. Teaching the
+    /// index about <c>EnumDecl.Signature</c> resolves the access to its declared <c>String</c> and the
+    /// already-correct <c>.to_string()</c> branch takes over.
+    /// </summary>
+    [Fact]
+    public void Smart_enum_associated_data_access_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              enum Currency(symbol: String, decimals: Int) {
+                EUR("€", 2)
+                USD("$", 2)
+              }
+              value Price {
+                currency: Currency
+                label: String = currency.symbol
+                scale: Int = currency.decimals
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
