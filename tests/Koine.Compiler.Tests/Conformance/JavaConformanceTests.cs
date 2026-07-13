@@ -567,6 +567,78 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// Issue #1480 — <c>BuildFactoryCtorArgs</c>'s <c>required</c> loop's auto-bound branch never
+    /// <c>Optional.of(...)</c>-wraps a same-named factory parameter for a member whose declared type is
+    /// optional but has no member-level default (e.g. <c>total: Decimal?</c>), when the auto-bound
+    /// parameter itself is declared non-optional (e.g. <c>total: Decimal</c>). The constructor signature
+    /// correctly declares the parameter <c>Optional&lt;BigDecimal&gt;</c>, but the auto-bound branch
+    /// passed the bare, un-wrapped field — a real <c>javac</c> "incompatible types" error. Mirrors the
+    /// Rust fix for the identical bug shape (#1467/PR #1476) and this issue's own companion explicit-init
+    /// fix (#1479/PR #1518).
+    /// </summary>
+    [Fact]
+    public void Factory_autobound_parameter_binding_to_an_optional_declared_required_member_is_optional_of_wrapped()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(total: Decimal) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): the auto-bound non-optional parameter must be
+        // Optional.of(...)-wrapped to match the constructor's Optional<BigDecimal> parameter, not passed
+        // through as the bare, un-wrapped field.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.util.Optional.of(total))");
+        product.ShouldNotContain("new Product(id, total)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Same-optionality regression guard: an auto-bound parameter that is itself declared optional (e.g.
+    /// <c>create make(total: Decimal?)</c>) binding to an optional-declared required member of the same
+    /// shape must be passed through unwrapped — it is already <c>Optional&lt;BigDecimal&gt;</c>-typed, so
+    /// wrapping it again would double-wrap into <c>Optional&lt;Optional&lt;BigDecimal&gt;&gt;</c>, a real
+    /// <c>javac</c> "incompatible types" error.
+    /// </summary>
+    [Fact]
+    public void Factory_autobound_optional_parameter_binding_to_an_optional_declared_required_member_does_not_double_wrap()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(total: Decimal?) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): an already-Optional-typed auto-bound parameter must be
+        // passed through as-is, never re-wrapped in another Optional.of(...).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, total)");
+        product.ShouldNotContain("Optional.of(total)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must
