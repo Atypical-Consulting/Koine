@@ -283,6 +283,14 @@ public sealed partial class RustEmitter
                 resultValue = CoerceNumericBody(UnderlyingType(returnDecl), translator.InferType(result.Value), resultValue);
             }
 
+            // Some(...)-wrap a non-optional result value toward an optional-declared return type,
+            // mirroring the transition loop's identical gate above (#1523) — composes with the widening
+            // just above as Some(Decimal::from(...)), widen inside, wrap outside.
+            if (cmd.ReturnType is { IsOptional: true } && !translator.IsOptional(result.Value))
+            {
+                resultValue = $"Some({resultValue})";
+            }
+
             body.Append(Indent).Append(Indent).Append("Ok(").Append(resultValue).Append(")\n");
         }
         else
@@ -395,7 +403,17 @@ public sealed partial class RustEmitter
             // uncoerced literal/place against `Ev::new`'s `Decimal` parameter (E0308). Post-wraps the
             // already-rendered, opaque `owned` string (mirroring the transition/result fixes and
             // BuildFactoryCtorArgs below) so it applies uniformly regardless of the argument's shape.
-            return CoerceNumericBody(UnderlyingType(m.Type), translator.InferType(value), owned);
+            owned = CoerceNumericBody(UnderlyingType(m.Type), translator.InferType(value), owned);
+
+            // Some(...)-wrap a non-optional argument toward an optional-declared payload field (#1523),
+            // mirroring the transition/result fixes above — composes with the widening just above as
+            // Some(Decimal::from(...)), widen inside, wrap outside.
+            if (m.Type.IsOptional && !translator.IsOptional(value))
+            {
+                owned = $"Some({owned})";
+            }
+
+            return owned;
         });
 
         return $"DomainEvent::{RustNaming.ToPascalCase(emitClause.EventName)}"
