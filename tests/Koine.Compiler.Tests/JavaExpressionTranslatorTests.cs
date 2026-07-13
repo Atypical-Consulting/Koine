@@ -1,4 +1,5 @@
 using Koine.Compiler.Ast;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
 
@@ -131,5 +132,58 @@ public class JavaExpressionTranslatorTests
         var java = NewTranslator().Translate(expr, JavaExpressionTranslator.NameMode.Parameter);
 
         java.ShouldBe("amount.add(java.math.BigDecimal.valueOf(quantity))");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1497 — local-binding shadow tracking (the Java half of the #1370 PopLocal-eviction bug class).
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A <c>let</c> that shadows a same-named MEMBER, with a second <c>let</c> shadowing it again:
+    /// popping the inner binding must restore the OUTER LOCAL, not evict it.
+    /// <para>
+    /// The old flat <c>_locals</c>/<c>_localTypes</c> pair could only evict, so after the inner
+    /// <c>let n = 20</c> popped, <c>n</c> stopped being a local at all — and the trailing <c>+ n</c>
+    /// silently re-bound to the MEMBER, emitting the accessor call <c>this.n()</c>: the getter returned
+    /// <c>base + 20 + this.n</c> instead of <c>base + 20 + 10</c>.
+    /// </para>
+    /// <para>
+    /// Java's <c>WriteLambdaBody</c> had already hand-rolled a save/restore of both
+    /// <c>wasPresent</c> and <c>hadType</c>, so its lambda path was mostly right — but it never applied
+    /// the same care to <c>WriteLet</c>, and it still leaked when a name was bound with NO known type
+    /// (neither restore branch fires). The shared <see cref="LocalScopeStack"/> makes both correct by
+    /// construction, and that manual dance collapses to a plain push/pop.
+    /// </para>
+    /// <para>
+    /// <b>Asserted on the emitted shape, not via <c>javac</c>.</b> Java — alone among the targets — forbids
+    /// a lambda body from redeclaring a local of the enclosing scope, so nested same-name <c>let</c>s
+    /// lower to a <c>var n</c> that javac rejects outright ("variable n is already defined") no matter
+    /// which binding the trailing <c>n</c> resolves to. That needs the Java emitter to alpha-rename the
+    /// inner binding, a distinct lowering defect tracked separately; it is pre-existing (the buggy emit
+    /// declared the same two <c>var n</c>s) and orthogonal to this local-tracking fix.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void NestedLetShadowingAMember_RestoresTheOuterLocal_NotTheMember()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                n:    String
+                base: Int
+                calc: Int = base + (let n = 10 in (let n = 20 in n) + n)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java")).Contents;
+
+        // The outer `n` must still resolve to the LOCAL `var n = 10L`, never to the member accessor.
+        money.ShouldContain("var n = 20L; return n; })).get() + n;");
+        money.ShouldNotContain("+ this.n()");
     }
 }

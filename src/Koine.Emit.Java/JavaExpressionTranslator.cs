@@ -61,8 +61,9 @@ internal sealed class JavaExpressionTranslator
     private readonly string _memberReceiver;
     private readonly bool _membersAsAccessors;
 
-    private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
+    // Per-name shadow stack: pushing a name that's already bound stacks the new binding on top rather
+    // than evicting the outer one, so popping it back off restores whatever was there before (#1497).
+    private readonly LocalScopeStack _locals = new();
 
     private NameMode _mode = NameMode.Parameter;
     private string? _expectedEnum;
@@ -110,27 +111,16 @@ internal sealed class JavaExpressionTranslator
         new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>Registers a local (a lambda / command parameter, or a <c>let</c> binding) for the body about to be translated.</summary>
-    public void PushLocal(string name, TypeRef? type = null)
-    {
-        _locals.Add(name);
-        if (type is not null)
-        {
-            _localTypes[name] = type;
-        }
-    }
+    public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
 
-    /// <summary>Removes a previously-registered local.</summary>
-    public void PopLocal(string name)
-    {
-        _locals.Remove(name);
-        _localTypes.Remove(name);
-    }
+    /// <summary>Removes a previously-registered local, restoring whatever binding it shadowed.</summary>
+    public void PopLocal(string name) => _locals.PopLocal(name);
 
     /// <summary>The member scope extended with any known local (parameter/binding) types.</summary>
     private TypeScope EffectiveScope()
     {
         TypeScope scope = _scope;
-        foreach (KeyValuePair<string, TypeRef> kv in _localTypes)
+        foreach (KeyValuePair<string, TypeRef> kv in _locals.ActiveBindings)
         {
             scope = scope.WithRef(kv.Key, kv.Value, _index);
         }
@@ -526,7 +516,7 @@ internal sealed class JavaExpressionTranslator
     private void WriteIdentifier(string name, StringBuilder sb, string? enumHint)
     {
         // (1) A local (lambda / command / factory parameter, or a `let` binding): verbatim camelCase.
-        if (_locals.Contains(name))
+        if (_locals.IsLocal(name))
         {
             sb.Append(JavaNaming.Member(name));
             return;
@@ -592,7 +582,7 @@ internal sealed class JavaExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus.CANCELLED`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.Contains(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(JavaNaming.Type(qualifier.Name)).Append('.').Append(JavaNaming.EscapeIdentifier(ma.MemberName));
             return;
@@ -773,21 +763,16 @@ internal sealed class JavaExpressionTranslator
             return;
         }
 
+        // Unconditional push/pop: the shadow stack restores whatever the parameter shadowed — presence
+        // AND type — so the old manual `wasPresent`/`hadType` save-and-restore is unnecessary. (It also
+        // had a hole: a name bound with NO known type hit neither restore branch, so the parameter's
+        // element type leaked into the outer binding — #1497.)
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
-        var wasPresent = _locals.Contains(lambda.Parameter);
-        var hadType = _localTypes.TryGetValue(lambda.Parameter, out TypeRef? priorType);
         PushLocal(lambda.Parameter, element);
 
         WriteTopLevel(lambda.Body, sb);
 
-        if (!wasPresent)
-        {
-            PopLocal(lambda.Parameter);
-        }
-        else if (hadType)
-        {
-            _localTypes[lambda.Parameter] = priorType!;
-        }
+        PopLocal(lambda.Parameter);
     }
 
     /// <summary>The inferred type a collection call's lambda selector produces (for choosing the sum fold shape).</summary>
