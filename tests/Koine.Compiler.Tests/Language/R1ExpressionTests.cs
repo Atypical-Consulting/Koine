@@ -516,6 +516,10 @@ public class R1ExpressionTests
     [Fact]
     public void Not_applied_to_a_string_is_reported()
     {
+        // The declared type (Bool) is non-optional while the mismatched operand (String?) is —
+        // asserting a SINGLE diagnostic guards against VisitUnary propagating the operand's raw
+        // (optional) type on a mismatch, which would additionally, and misleadingly, trip
+        // OptionalAssignedToNonOptional ("provide a fallback with '??'") for the same expression.
         const string src =
             "context Shop {\n" +
             "  value Person {\n" +
@@ -523,7 +527,8 @@ public class R1ExpressionTests
             "    hasNoNickname: Bool = !nickname\n" +
             "  }\n" +
             "}\n";
-        Diagnose(src).ShouldContain(d => d.Message.Contains("unary operator '!' cannot be applied to 'String'"));
+        var diag = Diagnose(src).ShouldHaveSingleItem();
+        diag.Message.ShouldContain("unary operator '!' cannot be applied to 'String'");
     }
 
     [Fact]
@@ -537,7 +542,8 @@ public class R1ExpressionTests
             "    negated: Money = -m\n" +
             "  }\n" +
             "}\n";
-        Diagnose(src).ShouldContain(d => d.Message.Contains("unary operator '-' cannot be applied to 'Money'"));
+        var diag = Diagnose(src).ShouldHaveSingleItem();
+        diag.Message.ShouldContain("unary operator '-' cannot be applied to 'Money'");
     }
 
     [Theory]

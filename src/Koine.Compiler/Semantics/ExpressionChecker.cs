@@ -247,7 +247,7 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        var ok = u.Op == UnaryOp.Not ? operand.Name == "Bool" : TypeResolver.IsNumeric(operand);
+        var ok = u.Op == UnaryOp.Not ? TypeResolver.IsBool(operand) : TypeResolver.IsNumeric(operand);
         if (!ok)
         {
             var symbol = u.Op == UnaryOp.Not ? "!" : "-";
