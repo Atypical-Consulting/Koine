@@ -626,4 +626,59 @@ public class PythonExpressionTests
         source.ShouldNotContain("len(self.inner)");
         source.ShouldNotContain("self.inner.strip()");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1497 — local-binding shadow tracking (the Python half of the #1370 PopLocal-eviction bug class).
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A <c>let</c> that shadows a same-named MEMBER, with a second <c>let</c> shadowing it again:
+    /// popping the inner binding must restore the OUTER LOCAL, not evict it.
+    /// <para>
+    /// The old flat <c>_locals</c>/<c>_localTypes</c> pair could only evict, so after the inner
+    /// <c>let n = 20</c> popped, <c>n</c> stopped being a local at all — and the trailing <c>+ n</c>
+    /// silently re-bound to the MEMBER <c>n</c>, emitting <c>self.n</c>. That is wrong at runtime (it
+    /// reads the member instead of the binding's <c>10</c>); typing the member as <c>String</c> makes it
+    /// loud, since the resulting <c>int + str</c> is an error <c>mypy --strict</c> rejects.
+    /// </para>
+    /// <para>
+    /// Python's own comprehension guard (<c>RenderComprehension</c>) had the narrower TYPE-leak variant
+    /// of this bug, but it has no observable effect on emitted Python — Python renders arithmetic and
+    /// comparison with NATIVE operators (unlike TypeScript's <c>.add</c>/<c>.equals</c> lowering), and a
+    /// <c>ConditionalExpr</c> snapshots its scope before rendering the condition, so a leaked element
+    /// type cannot reach a type-keyed rendering. The shared <see cref="LocalScopeStack"/> makes it
+    /// correct by construction regardless; <c>LocalScopeStackTests</c> pins those semantics directly.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void NestedLetShadowingAMember_RestoresTheOuterLocal_NotTheMember()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                n:    String
+                base: Int
+                calc: Int = base + (let n = 10 in (let n = 20 in n) + n)
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("money.py")).Contents;
+
+        // The outer `n` must still resolve to the LOCAL lambda parameter, never to the member.
+        money.ShouldContain("(lambda n: ((lambda n: n)(20) + n))(10)");
+        money.ShouldNotContain("+ self.n)");
+
+        TestSupport.PythonCheck check = TestSupport.TypeCheckPython(result.Files);
+        TestSupport.RequireOrSkip(
+            check.ToolchainAvailable,
+            "no Python toolchain (python3 + mypy) on PATH — set KOINE_PYTHON/KOINE_MYPY to type-check the emitted Python");
+        check.Ok.ShouldBeTrue(
+            "a let shadowing a same-named member must not leak the member into the outer binding's scope:\n"
+            + string.Join("\n", check.Errors));
+    }
 }
