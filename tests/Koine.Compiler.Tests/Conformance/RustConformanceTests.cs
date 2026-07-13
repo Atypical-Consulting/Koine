@@ -3922,4 +3922,39 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1511 code-review finding: an earlier version of this fix only widened a bare
+    /// literal/identifier RHS — a compound (binary arithmetic) Int-inferred value assigned toward a
+    /// Decimal-declared target still failed a real <c>cargo check</c> with E0308, at all three call sites
+    /// this issue touches (a transition's field, a command's <c>result</c>, and an <c>emit</c> payload
+    /// argument).
+    /// </summary>
+    [Fact]
+    public void Binary_Int_expression_into_a_Decimal_target_compiles_at_every_value_writing_call_site()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump(qty: Int, delta: Int): Decimal {
+                  amount -> qty + delta
+                  emit Bumped(amount: qty + delta)
+                  result qty + delta
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

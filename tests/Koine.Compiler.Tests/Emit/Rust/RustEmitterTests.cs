@@ -1585,10 +1585,12 @@ public class RustEmitterTests
     }
 
     /// <summary>
-    /// Issue #1511: a command transition's RHS threads no <c>coerceTo</c> derived from the target field's
-    /// declared type, so an <c>Int</c> literal assigned into a <c>Decimal</c> field emits a bare, uncoerced
-    /// Rust integer literal — a real <c>cargo check</c> <c>E0308</c>. The fix must widen it the same way
-    /// the smart-constructor default path and <c>BuildFactoryCtorArgs</c> already do.
+    /// Issue #1511: a command transition's RHS never post-wraps toward the target field's declared type,
+    /// so an <c>Int</c> literal assigned into a <c>Decimal</c> field emits a bare, uncoerced Rust integer
+    /// literal — a real <c>cargo check</c> <c>E0308</c>. The fix widens it via the same
+    /// <c>CoerceNumericBody</c> string post-wrap the smart-constructor default path and
+    /// <c>BuildFactoryCtorArgs</c> already use (so the rendering is byte-identical to theirs — no
+    /// <c>i64</c> suffix, unlike the sibling-operand coercion in <c>WriteBinary</c>).
     /// </summary>
     [Fact]
     public void Command_transition_of_an_Int_literal_into_a_Decimal_field_is_coerced()
@@ -1609,7 +1611,7 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("self.amount = Decimal::from(5i64);");
+        rust.ShouldContain("self.amount = Decimal::from(5);");
         rust.ShouldNotContain("self.amount = 5;");
     }
 
@@ -1638,7 +1640,64 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("self.tax_rate = Some(Decimal::from(5i64));");
+        rust.ShouldContain("self.tax_rate = Some(Decimal::from(5));");
+    }
+
+    /// <summary>
+    /// Issue #1511 code-review finding: the fix must widen ANY Int-inferred RHS shape toward a
+    /// Decimal-declared field, not just a bare literal/identifier — a compound arithmetic expression
+    /// (both operands <c>Int</c>) reproduced the identical <c>cargo check</c> E0308 under an earlier,
+    /// leaf-only-widening version of this fix.
+    /// </summary>
+    [Fact]
+    public void Command_transition_of_a_binary_Int_expression_into_a_Decimal_field_is_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump(qty: Int, delta: Int) {
+                  amount -> qty + delta
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.amount = Decimal::from(qty + delta);");
+    }
+
+    /// <summary>
+    /// Issue #1511 code-review finding: the same "any RHS shape" requirement for a nested value object's
+    /// accessor call — an earlier, leaf-only-widening version of this fix left this shape uncoerced too.
+    /// </summary>
+    [Fact]
+    public void Command_transition_of_a_member_access_Int_expression_into_a_Decimal_field_is_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              value Crate {
+                units: Int
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump(crt: Crate) {
+                  amount -> crt.units
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("self.amount = Decimal::from(crt.units());");
     }
 
     /// <summary>
@@ -1727,7 +1786,7 @@ public class RustEmitterTests
 
     /// <summary>
     /// Issue #1511 Task 3 audit: an <c>emit</c> event payload argument has the identical missing-coercion
-    /// gap as a command transition — <c>BuildEmitExpression</c> threaded no <c>coerceTo</c> at all, so an
+    /// gap as a command transition — <c>BuildEmitExpression</c> applied no post-wrap at all, so an
     /// <c>Int</c> literal passed for a <c>Decimal</c>-declared event field emitted a bare, uncoerced
     /// literal against the event's generated constructor (a real <c>cargo check</c> E0308).
     /// </summary>
@@ -1743,7 +1802,6 @@ public class RustEmitterTests
               entity Product identified by ProductId {
                 amount: Decimal
                 command bump() {
-                  amount -> amount
                   emit Bumped(amount: 5)
                 }
               }
@@ -1754,7 +1812,40 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("Bumped::new(Decimal::from(5i64))");
+        rust.ShouldContain("Bumped::new(Decimal::from(5))");
+    }
+
+    /// <summary>
+    /// Issue #1511 code-review finding: the emit-payload fix must widen ANY Int-inferred argument shape,
+    /// not just a bare literal — a binary arithmetic argument reproduced the identical E0308 under an
+    /// earlier, leaf-only-widening version of this fix.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_a_binary_Int_expression_into_a_Decimal_field_is_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump(qty: Int, delta: Int) {
+                  emit Bumped(amount: qty + delta)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        // BuildEmitExpression doesn't strip a compound argument's outer parens (matching
+        // BuildFactoryCtorArgs' own, pre-existing convention for constructor arguments) — redundant but
+        // valid Rust.
+        rust.ShouldContain("Bumped::new(Decimal::from((qty + delta)))");
     }
 
     /// <summary>
@@ -1781,6 +1872,33 @@ public class RustEmitterTests
 
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
-        rust.ShouldContain("Ok(Decimal::from(5i64))");
+        rust.ShouldContain("Ok(Decimal::from(5))");
+    }
+
+    /// <summary>
+    /// Issue #1511 code-review finding: the result-clause fix must widen ANY Int-inferred value shape,
+    /// not just a bare literal — a binary arithmetic result reproduced the identical E0308 under an
+    /// earlier, leaf-only-widening version of this fix.
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_a_binary_Int_expression_into_a_Decimal_return_type_is_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command computeBonus(qty: Int, delta: Int): Decimal {
+                  result qty + delta
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Ok(Decimal::from(qty + delta))");
     }
 }
