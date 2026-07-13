@@ -56,8 +56,9 @@ internal sealed class PhpExpressionTranslator
     private readonly IReadOnlyDictionary<string, Member> _membersByName;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
 
-    private readonly HashSet<string> _locals = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
+    // Per-name shadow stack: pushing a name that's already bound stacks the new binding on top rather
+    // than evicting the outer one, so popping it back off restores whatever was there before (#1497).
+    private readonly LocalScopeStack _locals = new();
 
     // The enum type the whole expression is expected to produce; qualifies a bare shared
     // enum member where a comparison hint does not reach.
@@ -98,25 +99,14 @@ internal sealed class PhpExpressionTranslator
         _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
-    public void PushLocal(string name, TypeRef? type = null)
-    {
-        _locals.Add(name);
-        if (type is not null)
-        {
-            _localTypes[name] = type;
-        }
-    }
+    public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
 
-    public void PopLocal(string name)
-    {
-        _locals.Remove(name);
-        _localTypes.Remove(name);
-    }
+    public void PopLocal(string name) => _locals.PopLocal(name);
 
     private TypeScope EffectiveScope()
     {
         TypeScope scope = _scope;
-        foreach (KeyValuePair<string, TypeRef> kv in _localTypes)
+        foreach (KeyValuePair<string, TypeRef> kv in _locals.ActiveBindings)
         {
             scope = scope.WithRef(kv.Key, kv.Value, _index);
         }
@@ -912,7 +902,7 @@ internal sealed class PhpExpressionTranslator
     private void WriteIdentifier(string name, StringBuilder sb, string? enumHint = null)
     {
         // (1) Local (lambda/command/factory parameter, let binding): $camelCase.
-        if (_locals.Contains(name))
+        if (_locals.IsLocal(name))
         {
             sb.Append('$').Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(name)));
             return;
@@ -1033,7 +1023,7 @@ internal sealed class PhpExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus::Cancelled` -> `OrderStatus::CANCELLED`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.Contains(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(PhpNaming.ClassName(qualifier.Name)).Append("::")
               .Append(PhpNaming.ConstName(ma.MemberName));
@@ -1205,7 +1195,10 @@ internal sealed class PhpExpressionTranslator
             return;
         }
 
-        var wasPresent = _locals.Contains(lambda.Parameter);
+        // Unconditional push/pop: the shadow stack restores whatever the parameter shadowed — an outer
+        // `let`/parameter of the same name keeps BOTH its presence and its own type once the lambda
+        // closes. The old name-only `wasPresent` guard preserved the name but left the parameter's
+        // element type overwriting the outer binding's (#1497).
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
         PushLocal(lambda.Parameter, element);
 
@@ -1216,10 +1209,7 @@ internal sealed class PhpExpressionTranslator
         Write(lambda.Body, body);
         sb.Append(body);
 
-        if (!wasPresent)
-        {
-            PopLocal(lambda.Parameter);
-        }
+        PopLocal(lambda.Parameter);
 
         sb.Append(", ").Append(seed);
     }
@@ -1348,7 +1338,9 @@ internal sealed class PhpExpressionTranslator
             return "null /* expected lambda */";
         }
 
-        var wasPresent = _locals.Contains(lambda.Parameter);
+        // Unconditional push/pop — see WriteReduceLambda: the shadow stack restores both the outer
+        // binding's presence AND its type, so the name-only `wasPresent` guard (which leaked the
+        // element type into the outer binding) is no longer needed (#1497).
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
         PushLocal(lambda.Parameter, element);
 
@@ -1356,10 +1348,7 @@ internal sealed class PhpExpressionTranslator
         var body = new StringBuilder();
         Write(lambda.Body, body);
 
-        if (!wasPresent)
-        {
-            PopLocal(lambda.Parameter);
-        }
+        PopLocal(lambda.Parameter);
 
         return $"array_map(fn(${param}) => {body}, {target})";
     }
