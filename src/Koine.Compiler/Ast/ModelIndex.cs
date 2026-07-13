@@ -414,7 +414,11 @@ public sealed class ModelIndex
         return false;
     }
 
-    /// <summary>Finds a member's declared type on a value/entity/event declaration (entity <c>id</c> -&gt; its ID type).</summary>
+    /// <summary>
+    /// Finds a member's declared type on a value/entity/event/enum declaration (entity <c>id</c> -&gt; its
+    /// ID type; smart enum -&gt; its associated-data parameter, e.g. <c>symbol</c> on
+    /// <c>enum Currency(symbol: String, decimals: Int)</c>).
+    /// </summary>
     private static bool MemberTypeOf(TypeDecl decl, string memberName, out TypeRef type)
     {
         type = null!;
@@ -438,6 +442,20 @@ public sealed class ModelIndex
                 }
                 members = e.Members;
                 break;
+            case EnumDecl en:
+                // A smart enum's associated data reads like any other member (`currency.symbol`), so its
+                // signature IS its member set. A bare-name enum has an empty signature and so resolves
+                // nothing — which is exactly what makes every member access on one an unknown member.
+                foreach (Param p in en.Signature)
+                {
+                    if (string.Equals(p.Name, memberName, StringComparison.Ordinal))
+                    {
+                        type = p.Type;
+                        return true;
+                    }
+                }
+
+                return false;
             default:
                 return false;
         }
@@ -672,12 +690,16 @@ public sealed class ModelIndex
             .Concat(_idTypeNames)
             .Distinct(StringComparer.Ordinal);
 
-    /// <summary>The declared member names of a value/entity type (for suggestions).</summary>
+    /// <summary>
+    /// The declared member names of a value/entity/enum type (for suggestions) — for a smart enum, its
+    /// associated-data parameters, the same set <see cref="MemberTypeOf"/> resolves against.
+    /// </summary>
     public IEnumerable<string> MemberNames(string typeName) => _byName.TryGetValue(typeName, out TypeDecl? decl)
         ? decl switch
         {
             ValueObjectDecl v => v.Members.Select(m => m.Name),
             EntityDecl e => e.Members.Select(m => m.Name),
+            EnumDecl en => en.Signature.Select(p => p.Name),
             _ => Enumerable.Empty<string>()
         }
         : Enumerable.Empty<string>();
