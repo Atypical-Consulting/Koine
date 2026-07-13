@@ -523,12 +523,20 @@ public sealed partial class JavaEmitter
                 var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var translated = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
 
+                // Numerically coerce against the member's underlying (non-optional) declared type before
+                // the Optional.of(...) wrap below — mirroring the Rust emitter's CoerceNumericBody-then-
+                // Some(...) ordering (#1491/#1519): an Int-typed initializing expression against a
+                // Decimal-declared member must widen to BigDecimal first, or an optional-declared member
+                // would otherwise emit Optional.of(5L) against an Optional<BigDecimal> parameter.
+                var valueType = translator.InferType(value);
+                translated = CoerceNumericBody(UnderlyingType(m.Type), valueType, translated);
+
                 // Wrap in Optional.of(...) only when the initializing expression isn't already
                 // Optional-typed — the validator legally allows an Optional-typed expression (e.g. a
                 // `T?` factory parameter) to initialize an optional-declared required member, and
                 // unconditionally wrapping it would double-wrap into Optional<Optional<T>>, a real javac
                 // "incompatible types" error.
-                args.Add(m.Type.IsOptional && translator.InferType(value)?.IsOptional != true
+                args.Add(m.Type.IsOptional && valueType?.IsOptional != true
                     ? $"java.util.Optional.of({translated})"
                     : translated);
             }
@@ -558,6 +566,43 @@ public sealed partial class JavaEmitter
 
         return args;
     }
+
+    /// <summary>
+    /// Applies <see cref="NumericCoercionWrap"/> to <paramref name="body"/>'s already-translated Java
+    /// expression string when the value's inferred type numerically mismatches <paramref name="declared"/>,
+    /// or returns it unchanged when no coercion is needed. Mirrors the Rust emitter's
+    /// <c>CoerceNumericBody</c> (#1491) — the shared dispatch point <see cref="BuildFactoryCtorArgs"/>
+    /// calls before deciding whether to also <c>Optional.of(...)</c>-wrap the result.
+    /// </summary>
+    private static string CoerceNumericBody(TypeRef declared, TypeRef? valueType, string body) =>
+        NumericCoercionWrap(declared, valueType) is { } wrap ? $"{wrap}({body})" : body;
+
+    /// <summary>
+    /// The Java widening call to wrap a factory ctor argument's translated value in when its inferred
+    /// numeric type differs from the member's <paramref name="declared"/> (already-underlying) type, or
+    /// <c>null</c> when none is needed. Reuses <c>java.math.BigDecimal.valueOf</c> — the same widening
+    /// idiom <see cref="JavaExpressionTranslator.WriteBigDecimalOperand"/> already applies for binary
+    /// operands and <c>WriteReconciledBranch</c> for ternary branches (#1344) — rather than inventing a
+    /// new string template. <c>Decimal</c>-into-<c>Int</c> narrowing is not handled: the semantic
+    /// validator (KOI0217) already rejects that direction, so <c>Int</c>/<c>Decimal</c> is the only
+    /// mismatch this call site can ever see.
+    /// </summary>
+    private static string? NumericCoercionWrap(TypeRef declared, TypeRef? valueType) =>
+        valueType is not null && !declared.IsOptional && !valueType.IsOptional
+        && TypeResolver.IsNumeric(declared) && TypeResolver.IsNumeric(valueType)
+        && declared.Name != valueType.Name && declared.Name == "Decimal"
+            ? "java.math.BigDecimal.valueOf"
+            : null;
+
+    /// <summary>
+    /// The non-optional view of a possibly-optional-declared type — gate the numeric-coercion check on
+    /// this, never on the member's raw <c>Type</c> directly, or an optional-declared member's explicit
+    /// init would fall through <see cref="NumericCoercionWrap"/>'s <c>declared.IsOptional</c> guard and
+    /// silently skip a real Int-into-Decimal mismatch (mirrors the Rust emitter's own
+    /// <c>UnderlyingType</c>, #1319/#1324).
+    /// </summary>
+    private static TypeRef UnderlyingType(TypeRef declared) =>
+        declared.IsOptional ? declared with { IsOptional = false } : declared;
 
     /// <summary>Writes identity-based <c>equals</c>/<c>hashCode</c> keyed on the id field (an entity is its identity).</summary>
     private static void WriteIdentityEquality(StringBuilder sb, string name)
