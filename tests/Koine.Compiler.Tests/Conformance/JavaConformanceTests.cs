@@ -639,6 +639,145 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// Issue #1519 — <c>BuildFactoryCtorArgs</c>'s <c>required</c> loop's explicit-init branch never
+    /// numerically coerced the translated value against the member's declared type — unlike the Rust
+    /// emitter's own <c>BuildFactoryCtorArgs</c>, which applies <c>CoerceNumericBody</c> before passing
+    /// the value on (#1491). A factory that explicitly initializes a <c>Decimal</c> member from an
+    /// <c>Int</c> literal emitted a bare Java <c>long</c> where a <c>BigDecimal</c> is required — a real
+    /// <c>javac</c> "incompatible types" error.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_an_int_literal_is_bigdecimal_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): the Int-typed initializer must be widened to BigDecimal to
+        // match the constructor's BigDecimal parameter, not passed through as a bare `long` literal.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.math.BigDecimal.valueOf(5L))");
+        product.ShouldNotContain("new Product(id, 5L)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1519 composed with #1479: an <c>Int</c> literal explicit-initializing an optional-declared
+    /// <c>Decimal?</c> member must be widened to <c>BigDecimal</c> BEFORE the <c>Optional.of(...)</c> wrap
+    /// — mirroring the Rust emitter's <c>CoerceNumericBody</c>-then-<c>Some(...)</c> ordering — so the
+    /// coercion composes correctly rather than emitting <c>Optional.of(5L)</c> against an
+    /// <c>Optional&lt;BigDecimal&gt;</c> parameter.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_decimal_member_from_an_int_literal_widens_inside_the_optional_wrap()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): widen inside, wrap outside.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.util.Optional.of(java.math.BigDecimal.valueOf(5L)))");
+        product.ShouldNotContain("Optional.of(5L)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard: a <c>Decimal</c>-typed value explicit-initializing a
+    /// <c>Decimal</c>-declared member must be unaffected by #1519's coercion — no extra
+    /// <c>BigDecimal.valueOf(...)</c> wrap added around an already-<c>BigDecimal</c> value.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_decimal_literal_is_unaffected()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5.0\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, new java.math.BigDecimal(\"5.0\"))");
+        product.ShouldNotContain("BigDecimal.valueOf(new java.math.BigDecimal");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Code-review follow-up to #1519 itself: an ALREADY-<c>Optional</c>-typed initializing expression
+    /// (e.g. an <c>Int?</c> factory parameter) that is ALSO numerically mismatched against an
+    /// optional-declared <c>Decimal?</c> member needs a <c>.map(...)</c>-based coercion — a bare
+    /// <c>BigDecimal.valueOf(...)</c> wrap around an <c>Optional&lt;Long&gt;</c> value does not compile.
+    /// This is the exact edge case the issue's own spec flagged (mirroring the Rust translator's
+    /// <c>OptionBodyNumericCoercionMap</c>) and the initial fix missed; caught by code review before ready.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_decimal_member_from_an_already_optional_int_source_is_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(discount: Int?) {\n" +
+            "      total -> discount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): the already-Optional<Long> value must be mapped to
+        // Optional<BigDecimal> via .map(...), never bare-wrapped (which would double-wrap into
+        // Optional<Optional<...>>) nor left as Optional<Long> (a real javac "incompatible types" error).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, discount.map(java.math.BigDecimal::valueOf))");
+        product.ShouldNotContain("new Product(id, discount)");
+        product.ShouldNotContain("Optional.of(discount");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must

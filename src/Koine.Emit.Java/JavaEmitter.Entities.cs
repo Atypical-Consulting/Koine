@@ -522,15 +522,7 @@ public sealed partial class JavaEmitter
             {
                 var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var translated = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
-
-                // Wrap in Optional.of(...) only when the initializing expression isn't already
-                // Optional-typed — the validator legally allows an Optional-typed expression (e.g. a
-                // `T?` factory parameter) to initialize an optional-declared required member, and
-                // unconditionally wrapping it would double-wrap into Optional<Optional<T>>, a real javac
-                // "incompatible types" error.
-                args.Add(m.Type.IsOptional && translator.InferType(value)?.IsOptional != true
-                    ? $"java.util.Optional.of({translated})"
-                    : translated);
+                args.Add(ReconcileFactoryCtorArg(translator.InferType(value), m.Type, translated));
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
@@ -557,6 +549,28 @@ public sealed partial class JavaEmitter
         }
 
         return args;
+    }
+
+    /// <summary>
+    /// Reconciles an explicit-init factory ctor argument's already-translated Java expression against the
+    /// member's <paramref name="declared"/> type, reusing the same shared <see cref="BranchReconciliation"/>
+    /// decision (#1368) every code emitter's ternary-branch reconciliation already applies (#1344) rather
+    /// than a hand-rolled, narrower duplicate (#1519) — composed exactly as <c>WriteReconciledBranch</c>
+    /// does: widen inside, wrap outside. <c>NeedsWiden</c> widens a non-optional <c>Int</c> value to
+    /// <c>BigDecimal</c>; <c>NeedsOptionalWiden</c> does the same when the value is itself
+    /// <c>Optional</c>-typed, via <c>.map(BigDecimal::valueOf)</c> instead (an already-<c>Optional</c>-shaped
+    /// value can't be widened with a bare call); <c>NeedsSomeWrap</c> lifts a non-optional value into
+    /// <c>Optional.of(...)</c> against an optional-declared member (#1479). <c>NeedsWiden</c> and
+    /// <c>NeedsOptionalWiden</c> are mutually exclusive and <c>NeedsOptionalWiden</c> never composes with
+    /// <c>NeedsSomeWrap</c> (see <see cref="BranchReconciliation"/>'s own remarks), so applying all three in
+    /// sequence is safe.
+    /// </summary>
+    private static string ReconcileFactoryCtorArg(TypeRef? valueType, TypeRef declared, string body)
+    {
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        var widened = needs.NeedsWiden ? $"java.math.BigDecimal.valueOf({body})" : body;
+        var mapped = needs.NeedsOptionalWiden ? $"{widened}.map(java.math.BigDecimal::valueOf)" : widened;
+        return needs.NeedsSomeWrap ? $"java.util.Optional.of({mapped})" : mapped;
     }
 
     /// <summary>Writes identity-based <c>equals</c>/<c>hashCode</c> keyed on the id field (an entity is its identity).</summary>
