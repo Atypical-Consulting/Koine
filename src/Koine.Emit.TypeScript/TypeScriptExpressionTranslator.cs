@@ -302,14 +302,30 @@ internal sealed class TypeScriptExpressionTranslator
 
         if (needs.NeedsOptionalWiden)
         {
-            sb.Append("((__v: ").Append(_typeMapper.Map(branchType!))
-              .Append(") => (__v === undefined ? undefined : Decimal.fromInt(__v)))(");
-            Write(branch, sb);
-            sb.Append(')');
+            WriteOptionalMap(branch, branchType!, mapped => mapped.Append("Decimal.fromInt(__v)"), sb);
             return;
         }
 
         Write(branch, sb);
+    }
+
+    /// <summary>
+    /// Writes <c>((__v: &lt;type&gt;) =&gt; (__v === undefined ? undefined : &lt;body&gt;))(&lt;sourceExpr&gt;)</c> —
+    /// the shared shell every optional-Int-widening rendering uses to map a present value while passing
+    /// <c>undefined</c> through untouched (a JS <c>number | undefined</c> has no <c>Option.map</c>).
+    /// <paramref name="writeBody"/> renders whatever consumes the mapped, now-non-optional <c>__v</c>
+    /// (a bare <c>Decimal.fromInt(__v)</c> for a reconciled conditional branch; a whole
+    /// <c>Decimal.fromInt(__v).add(...)</c>/<c>....add(Decimal.fromInt(__v))</c> method call for Decimal
+    /// arithmetic, since a possibly-undefined value cannot itself become a method receiver or a strict
+    /// <c>Decimal</c> argument).
+    /// </summary>
+    private void WriteOptionalMap(Expr sourceExpr, TypeRef type, Action<StringBuilder> writeBody, StringBuilder sb)
+    {
+        sb.Append("((__v: ").Append(_typeMapper.Map(type)).Append(") => (__v === undefined ? undefined : ");
+        writeBody(sb);
+        sb.Append("))(");
+        Write(sourceExpr, sb);
+        sb.Append(')');
     }
 
     private void WriteBinary(BinaryExpr bin, StringBuilder sb, bool parenthesize)
@@ -481,7 +497,6 @@ internal sealed class TypeScriptExpressionTranslator
         TypeScope scope = EffectiveScope();
         TypeRef? left = _resolver.Infer(bin.Left, scope);
         TypeRef? right = _resolver.Infer(bin.Right, scope);
-        var leftDecimal = left?.Name == "Decimal";
         var leftValue = _resolver.IsValueLike(left);
         var rightValue = _resolver.IsValueLike(right);
 
@@ -504,11 +519,6 @@ internal sealed class TypeScriptExpressionTranslator
             return true;
         }
 
-        if (!leftDecimal && !leftValue)
-        {
-            return false;
-        }
-
         var method = bin.Op switch
         {
             BinaryOp.Add => "add",
@@ -517,23 +527,119 @@ internal sealed class TypeScriptExpressionTranslator
             _ => "multiply"
         };
 
-        Write(bin.Left, sb);
-        sb.Append('.').Append(method).Append('(');
-        // A value-object scalar multiply/divide (Money * quantity, fee / 2) takes a plain `number`,
-        // so a Decimal literal scalar (e.g. 0.9) renders as a bare number, not a `new Decimal(...)`.
-        // Decimal * Decimal/Int or Decimal / Decimal/Int (true decimal arithmetic) passes the operand
-        // through unchanged.
-        if (bin.Op is BinaryOp.Mul or BinaryOp.Div && leftValue)
+        // A Koine value object (Money, etc.) exposes its own scalar multiply/divide taking a plain
+        // `number`, so its scalar argument renders bare rather than through the Decimal-widening path
+        // below — the value object, not the runtime `Decimal`, owns that method's signature.
+        if (leftValue)
         {
-            WriteScalarArgument(bin.Right, sb);
+            Write(bin.Left, sb);
+            sb.Append('.').Append(method).Append('(');
+            if (bin.Op is BinaryOp.Mul or BinaryOp.Div)
+            {
+                WriteScalarArgument(bin.Right, sb);
+            }
+            else
+            {
+                Write(bin.Right, sb);
+            }
+            sb.Append(')');
+            return true;
         }
-        else
+
+        // True Decimal arithmetic — neither operand is a Koine value object, but at least one is
+        // `Decimal`. The runtime's `Decimal` methods take another `Decimal`, so whichever side ISN'T
+        // already Decimal (an Int literal, member, or any other non-optional-Int expression) is
+        // widened via `Decimal.fromInt(...)` — driven off the inferred `TypeRef`, not `is LiteralExpr`,
+        // so a member/local operand widens exactly like a literal (#1537). The LEFT operand is always
+        // the receiver so operand order is preserved for the non-commutative `subtract`/`divide`
+        // (`1 - rate` widens the LEFT into the receiver, not the right).
+        if (left?.Name != "Decimal" && right?.Name != "Decimal")
         {
-            Write(bin.Right, sb);
+            return false;
         }
-        sb.Append(')');
+
+        WriteDecimalArithmetic(bin.Left, left, bin.Right, right, method, sb);
         return true;
     }
+
+    /// <summary>
+    /// Writes true Decimal arithmetic (<c>add</c>/<c>subtract</c>/<c>multiply</c>/<c>divide</c>),
+    /// widening whichever side isn't already <c>Decimal</c> via <see cref="WriteDecimalOperand"/>.
+    /// When that widened side is itself an OPTIONAL Int, the WHOLE method call maps over the
+    /// optional instead of widening in place: Koine's <c>isPresent</c>/<c>??</c> narrowing updates
+    /// only the semantic validator's own tracking, never the emitter's inferred <see cref="TypeRef"/>
+    /// (mirroring the Rust #1343 / PHP #787 finding), and even where TypeScript's OWN control-flow
+    /// narrowing of a guard (<c>this.qty !== undefined ? … : …</c>) would otherwise cover a bare
+    /// operand, that narrowing does not cross a nested closure boundary — a guarded optional Int used
+    /// inside a <c>.map</c>/<c>.sum</c> lambda still type-checks as <c>number | undefined</c> at the
+    /// point it's rendered (#1537). A bare <c>Decimal.fromInt(...)</c> of that value, or a method call
+    /// on it as the receiver, would then be a <c>tsc</c> TS2345/TS18048. Reuses the shared
+    /// <see cref="BranchReconciliation.Classify"/> decision (once per side, sides swapped) rather than
+    /// re-deriving the optionality rule inline — the same "widen vs. map-widen" question
+    /// <see cref="WriteReconciledBranch"/> answers for a conditional's branches. The LEFT operand stays
+    /// the receiver regardless of which side maps, so operand order is preserved for the
+    /// non-commutative <c>subtract</c>/<c>divide</c>.
+    /// </summary>
+    private void WriteDecimalArithmetic(Expr leftExpr, TypeRef? left, Expr rightExpr, TypeRef? right, string method, StringBuilder sb)
+    {
+        var leftOptionalInt = BranchReconciliation.Classify(left, right).NeedsOptionalWiden;
+        var rightOptionalInt = BranchReconciliation.Classify(right, left).NeedsOptionalWiden;
+
+        if (leftOptionalInt)
+        {
+            WriteOptionalMap(leftExpr, left!, mapped =>
+            {
+                mapped.Append("Decimal.fromInt(__v).").Append(method).Append('(');
+                WriteDecimalOperand(rightExpr, right, mapped);
+                mapped.Append(')');
+            }, sb);
+            return;
+        }
+
+        if (rightOptionalInt)
+        {
+            WriteOptionalMap(rightExpr, right!, mapped =>
+            {
+                WriteDecimalOperand(leftExpr, left, mapped);
+                mapped.Append('.').Append(method).Append("(Decimal.fromInt(__v))");
+            }, sb);
+            return;
+        }
+
+        WriteDecimalOperand(leftExpr, left, sb);
+        sb.Append('.').Append(method).Append('(');
+        WriteDecimalOperand(rightExpr, right, sb);
+        sb.Append(')');
+    }
+
+    /// <summary>
+    /// Writes one operand of true Decimal arithmetic (<c>add</c>/<c>subtract</c>/<c>multiply</c>/
+    /// <c>divide</c>): a <c>Decimal</c>-typed operand renders as-is, while a non-optional <c>Int</c>
+    /// operand is widened via <c>Decimal.fromInt(...)</c> — the runtime's canonical literal/Int-to-
+    /// Decimal construction, the same one <see cref="WriteReconciledBranch"/> uses to reconcile a
+    /// conditional's numeric branch against a Decimal sibling. Reuses
+    /// <see cref="BranchReconciliation.Classify"/>'s <c>NeedsWiden</c> dimension rather than
+    /// re-deriving "does this need <c>Decimal.fromInt</c>" inline, so the plain and optional widen
+    /// decisions (see <see cref="WriteDecimalArithmetic"/>) stay driven by the one shared classifier.
+    /// The optional-Int case never reaches here (<see cref="WriteDecimalArithmetic"/> intercepts it via
+    /// <c>NeedsOptionalWiden</c> first), so <c>NeedsWiden</c>'s non-optional requirement is always
+    /// already satisfied by the caller.
+    /// </summary>
+    private void WriteDecimalOperand(Expr expr, TypeRef? type, StringBuilder sb)
+    {
+        if (!BranchReconciliation.Classify(type, DecimalType).NeedsWiden)
+        {
+            Write(expr, sb);
+            return;
+        }
+
+        sb.Append("Decimal.fromInt(");
+        Write(expr, sb);
+        sb.Append(')');
+    }
+
+    /// <summary>The synthetic sibling <see cref="BranchReconciliation.Classify"/> compares an operand against when the OTHER side is already known to be <c>Decimal</c> (a plain name/optionality-agnostic marker; <c>Classify</c> only reads <c>sibling.Name</c>).</summary>
+    private static readonly TypeRef DecimalType = new("Decimal");
 
     /// <summary>
     /// Writes the scalar argument of a value-object scalar multiply. A numeric literal renders bare
