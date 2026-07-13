@@ -3863,4 +3863,63 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1511 Task 3 audit: the sibling <c>emit</c> event-payload path shares the identical
+    /// missing-coercion gap as the transition — an <c>Int</c> argument for a <c>Decimal</c>-declared
+    /// event field must compile.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_an_Int_literal_into_a_Decimal_field_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump() {
+                  emit Bumped(amount: 5)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1511 Task 3 audit: the sibling command <c>result</c> path shares the identical
+    /// missing-coercion gap — an <c>Int</c> result value against a <c>: Decimal</c> declared return type
+    /// must compile.
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_an_Int_literal_into_a_Decimal_return_type_compiles()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command computeBonus(): Decimal {
+                  result 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

@@ -1699,7 +1699,8 @@ public class RustEmitterTests
 
     /// <summary>
     /// Issue #1511 edge case: a <c>String</c> field must not acquire a numeric coercion — the shared
-    /// helper is gated on <c>TypeResolver.IsNumeric</c>, so a non-numeric target renders unchanged.
+    /// <c>NumericCoerceTo</c> gate only fires on a <c>Decimal</c>-declared target, so a non-numeric one
+    /// renders unchanged.
     /// </summary>
     [Fact]
     public void Command_transition_of_a_String_field_is_not_numerically_coerced()
@@ -1722,5 +1723,64 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain("self.label = new_label.to_string();");
+    }
+
+    /// <summary>
+    /// Issue #1511 Task 3 audit: an <c>emit</c> event payload argument has the identical missing-coercion
+    /// gap as a command transition — <c>BuildEmitExpression</c> threaded no <c>coerceTo</c> at all, so an
+    /// <c>Int</c> literal passed for a <c>Decimal</c>-declared event field emitted a bare, uncoerced
+    /// literal against the event's generated constructor (a real <c>cargo check</c> E0308).
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_of_an_Int_literal_into_a_Decimal_field_is_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              event Bumped {
+                amount: Decimal
+              }
+              entity Product identified by ProductId {
+                amount: Decimal
+                command bump() {
+                  amount -> amount
+                  emit Bumped(amount: 5)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Bumped::new(Decimal::from(5i64))");
+    }
+
+    /// <summary>
+    /// Issue #1511 Task 3 audit: a command's <c>result</c> expression has the identical missing-coercion
+    /// gap — an <c>Int</c> literal result against a <c>: Decimal</c> declared return type emitted a bare
+    /// <c>Ok(5)</c> (a real <c>cargo check</c> E0308 against <c>Result&lt;Decimal, DomainError&gt;</c>).
+    /// </summary>
+    [Fact]
+    public void Command_result_expression_of_an_Int_literal_into_a_Decimal_return_type_is_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                command computeBonus(): Decimal {
+                  result 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        rust.ShouldContain("Ok(Decimal::from(5i64))");
     }
 }

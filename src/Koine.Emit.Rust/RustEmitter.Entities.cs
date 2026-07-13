@@ -235,18 +235,8 @@ public sealed partial class RustEmitter
             // Widen an Int-inferred RHS toward a Decimal-declared field, mirroring the smart
             // constructor's default path (CoercedDefaultValue) and BuildFactoryCtorArgs (#1511) — Rust
             // has no implicit numeric widening, so `amount -> 5` on a `Decimal` field would otherwise
-            // emit an uncoerced `5` (E0308). Gated on an actual Int-vs-Decimal mismatch (never on the
-            // field's own optionality) so an already-matching RHS renders byte-identical.
-            TypeRef? coerceTo = null;
-            if (field is not null)
-            {
-                TypeRef fieldUnderlying = UnderlyingType(field.Type);
-                TypeRef? valueUnderlying = translator.InferType(t.Value) is { } vt ? UnderlyingType(vt) : null;
-                if (fieldUnderlying is { Name: "Decimal" } && valueUnderlying is { Name: "Int" })
-                {
-                    coerceTo = fieldUnderlying;
-                }
-            }
+            // emit an uncoerced `5` (E0308).
+            TypeRef? coerceTo = field is not null ? NumericCoerceTo(field.Type, translator.InferType(t.Value)) : null;
 
             // Own the RHS so a non-Copy place (another field) or a String accessor/literal is moved
             // by value into the field rather than borrowed from `&mut self`.
@@ -277,10 +267,16 @@ public sealed partial class RustEmitter
             WriteEmitStatement(body, emit, emitClause, translator, typeMapper, eventsField);
         }
 
-        // 4. Result (or unit).
+        // 4. Result (or unit). Widened toward the command's declared return type the same way a
+        // transition widens toward its field's declared type (#1511) — an Int-inferred `result`
+        // expression against a `: Decimal` return type would otherwise emit an uncoerced `Ok(5)` (E0308).
         if (cmd.Body.OfType<ResultClause>().FirstOrDefault() is { } result)
         {
-            body.Append(Indent).Append(Indent).Append("Ok(").Append(translator.TranslateOwned(result.Value)).Append(")\n");
+            TypeRef? resultCoerceTo = cmd.ReturnType is { } returnDecl
+                ? NumericCoerceTo(returnDecl, translator.InferType(result.Value))
+                : null;
+            body.Append(Indent).Append(Indent).Append("Ok(")
+                .Append(translator.TranslateOwned(result.Value, coerceTo: resultCoerceTo)).Append(")\n");
         }
         else
         {
@@ -343,6 +339,26 @@ public sealed partial class RustEmitter
         entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
+    /// <summary>
+    /// The <see cref="RustExpressionTranslator.TranslateOwned"/> <c>coerceTo</c> directive for a value
+    /// being written into <paramref name="declaredType"/>: its underlying (non-optional) view when
+    /// <paramref name="valueType"/> is a genuine <c>Int</c>-vs-<c>Decimal</c> mismatch, or <see langword="null"/>
+    /// when they already agree — so a matching value renders byte-identical. Rust has no implicit numeric
+    /// widening, so an unwidened <c>Int</c> value assigned toward a <c>Decimal</c> place is a real <c>cargo
+    /// check</c> E0308. Shared by every value-writing call site that assigns toward a KNOWN declared type
+    /// (a command transition's field, a command's <c>result</c> expression, an <c>emit</c> payload
+    /// argument, #1511) — <see cref="BuildFactoryCtorArgs"/> already applies the equivalent
+    /// <see cref="CoerceNumericBody"/> form independently and is left as-is.
+    /// </summary>
+    private static TypeRef? NumericCoerceTo(TypeRef declaredType, TypeRef? valueType)
+    {
+        TypeRef declaredUnderlying = UnderlyingType(declaredType);
+        TypeRef? valueUnderlying = valueType is { } vt ? UnderlyingType(vt) : null;
+        return declaredUnderlying is { Name: "Decimal" } && valueUnderlying is { Name: "Int" }
+            ? declaredUnderlying
+            : null;
+    }
+
     /// <summary>Lowers an <c>emit</c> clause in a command to <c>self.&lt;events&gt;.push(&lt;event&gt;);</c>.</summary>
     private void WriteEmitStatement(
         StringBuilder body, RustEmitContext emit, EmitClause emitClause,
@@ -385,7 +401,12 @@ public sealed partial class RustEmitter
             }
 
             var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-            return translator.TranslateOwned(value, expectedEnum);
+
+            // Widen an Int-inferred argument toward a Decimal-declared payload field (#1511) — the
+            // event-payload dual of the transition/result fixes above; an unwidened arg emits an
+            // uncoerced literal/place against `Ev::new`'s `Decimal` parameter (E0308).
+            TypeRef? coerceTo = NumericCoerceTo(m.Type, translator.InferType(value));
+            return translator.TranslateOwned(value, expectedEnum, coerceTo);
         });
 
         return $"DomainEvent::{RustNaming.ToPascalCase(emitClause.EventName)}"
