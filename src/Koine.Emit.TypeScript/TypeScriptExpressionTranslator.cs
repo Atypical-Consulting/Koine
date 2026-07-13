@@ -311,17 +311,20 @@ internal sealed class TypeScriptExpressionTranslator
 
     /// <summary>
     /// Writes <c>((__v: &lt;type&gt;) =&gt; (__v === undefined ? undefined : &lt;body&gt;))(&lt;sourceExpr&gt;)</c> —
-    /// the shared shell every optional-Int-widening rendering uses to map a present value while passing
-    /// <c>undefined</c> through untouched (a JS <c>number | undefined</c> has no <c>Option.map</c>).
-    /// <paramref name="writeBody"/> renders whatever consumes the mapped, now-non-optional <c>__v</c>
-    /// (a bare <c>Decimal.fromInt(__v)</c> for a reconciled conditional branch; a whole
+    /// the shared shell every optional-widening rendering uses to map a present value while passing
+    /// <c>undefined</c> through untouched (a JS <c>T | undefined</c> has no <c>Option.map</c>).
+    /// <paramref name="writeBody"/> renders whatever consumes the mapped, now-non-optional bound
+    /// variable (a bare <c>Decimal.fromInt(__v)</c> for a reconciled conditional branch; a whole
     /// <c>Decimal.fromInt(__v).add(...)</c>/<c>....add(Decimal.fromInt(__v))</c> method call for Decimal
     /// arithmetic, since a possibly-undefined value cannot itself become a method receiver or a strict
-    /// <c>Decimal</c> argument).
+    /// <c>Decimal</c> argument). <paramref name="varName"/> defaults to <c>__v</c> and only needs
+    /// overriding when two of these shells NEST (both operands of a Decimal arithmetic op are
+    /// simultaneously optional) — the inner shell's parameter would otherwise shadow the outer's.
     /// </summary>
-    private void WriteOptionalMap(Expr sourceExpr, TypeRef type, Action<StringBuilder> writeBody, StringBuilder sb)
+    private void WriteOptionalMap(Expr sourceExpr, TypeRef type, Action<StringBuilder> writeBody, StringBuilder sb, string varName = "__v")
     {
-        sb.Append("((__v: ").Append(_typeMapper.Map(type)).Append(") => (__v === undefined ? undefined : ");
+        sb.Append("((").Append(varName).Append(": ").Append(_typeMapper.Map(type)).Append(") => (")
+          .Append(varName).Append(" === undefined ? undefined : ");
         writeBody(sb);
         sb.Append("))(");
         Write(sourceExpr, sb);
@@ -565,43 +568,69 @@ internal sealed class TypeScriptExpressionTranslator
     /// <summary>
     /// Writes true Decimal arithmetic (<c>add</c>/<c>subtract</c>/<c>multiply</c>/<c>divide</c>),
     /// widening whichever side isn't already <c>Decimal</c> via <see cref="WriteDecimalOperand"/>.
-    /// When that widened side is itself an OPTIONAL Int, the WHOLE method call maps over the
-    /// optional instead of widening in place: Koine's <c>isPresent</c>/<c>??</c> narrowing updates
-    /// only the semantic validator's own tracking, never the emitter's inferred <see cref="TypeRef"/>
-    /// (mirroring the Rust #1343 / PHP #787 finding), and even where TypeScript's OWN control-flow
-    /// narrowing of a guard (<c>this.qty !== undefined ? … : …</c>) would otherwise cover a bare
-    /// operand, that narrowing does not cross a nested closure boundary — a guarded optional Int used
-    /// inside a <c>.map</c>/<c>.sum</c> lambda still type-checks as <c>number | undefined</c> at the
-    /// point it's rendered (#1537). A bare <c>Decimal.fromInt(...)</c> of that value, or a method call
-    /// on it as the receiver, would then be a <c>tsc</c> TS2345/TS18048. Reuses the shared
-    /// <see cref="BranchReconciliation.Classify"/> decision (once per side, sides swapped) rather than
-    /// re-deriving the optionality rule inline — the same "widen vs. map-widen" question
-    /// <see cref="WriteReconciledBranch"/> answers for a conditional's branches. The LEFT operand stays
-    /// the receiver regardless of which side maps, so operand order is preserved for the
-    /// non-commutative <c>subtract</c>/<c>divide</c>.
+    /// When a side is itself an OPTIONAL Int or an OPTIONAL Decimal, the WHOLE method call maps over
+    /// that side's optionality instead of rendering it in place: Koine's <c>isPresent</c>/<c>??</c>
+    /// narrowing updates only the semantic validator's own tracking, never the emitter's inferred
+    /// <see cref="TypeRef"/> (mirroring the Rust #1343 / PHP #787 finding), and even where TypeScript's
+    /// OWN control-flow narrowing of a guard (<c>this.qty !== undefined ? … : …</c>) would otherwise
+    /// cover a bare operand, that narrowing does not cross a nested closure boundary — a guarded
+    /// optional operand used inside a <c>.map</c>/<c>.sum</c>/<c>.distinctBy</c> lambda still
+    /// type-checks as <c>T | undefined</c> at the point it's rendered (#1537 for optional Int, #1557
+    /// for optional Decimal). A bare <c>Decimal.fromInt(...)</c> of that value, a method call on it as
+    /// the receiver, or passing it as a strict <c>Decimal</c> argument would then be a <c>tsc</c>
+    /// TS2345/TS2532. The optional-Int case reuses the shared <see cref="BranchReconciliation.Classify"/>
+    /// decision (once per side, sides swapped); the optional-Decimal case is checked locally
+    /// (<c>Classify</c>'s dimensions are Int-widen-specific, not a generic "is this optional" check —
+    /// see <see cref="BranchReconciliation"/>'s own remarks). The LEFT operand stays the receiver
+    /// regardless of which side(s) map, so operand order is preserved for the non-commutative
+    /// <c>subtract</c>/<c>divide</c>. When BOTH sides are simultaneously optional (e.g. a guarded
+    /// <c>Decimal?</c> opposite a guarded <c>Int?</c>), the two map shells NEST — the inner one uses a
+    /// distinct bound-variable name so it doesn't shadow the outer's.
     /// </summary>
     private void WriteDecimalArithmetic(Expr leftExpr, TypeRef? left, Expr rightExpr, TypeRef? right, string method, StringBuilder sb)
     {
         var leftOptionalInt = BranchReconciliation.Classify(left, right).NeedsOptionalWiden;
         var rightOptionalInt = BranchReconciliation.Classify(right, left).NeedsOptionalWiden;
+        var leftOptionalDecimal = left is { Name: "Decimal", IsOptional: true };
+        var rightOptionalDecimal = right is { Name: "Decimal", IsOptional: true };
+        var leftNeedsMap = leftOptionalInt || leftOptionalDecimal;
+        var rightNeedsMap = rightOptionalInt || rightOptionalDecimal;
 
-        if (leftOptionalInt)
+        if (leftNeedsMap && rightNeedsMap)
+        {
+            WriteOptionalMap(leftExpr, left!, mappedLeft =>
+            {
+                WriteOptionalMap(rightExpr, right!, mappedRight =>
+                {
+                    mappedRight.Append(leftOptionalInt ? "Decimal.fromInt(__vL)" : "__vL");
+                    mappedRight.Append('.').Append(method).Append('(');
+                    mappedRight.Append(rightOptionalInt ? "Decimal.fromInt(__vR)" : "__vR");
+                    mappedRight.Append(')');
+                }, mappedLeft, "__vR");
+            }, sb, "__vL");
+            return;
+        }
+
+        if (leftNeedsMap)
         {
             WriteOptionalMap(leftExpr, left!, mapped =>
             {
-                mapped.Append("Decimal.fromInt(__v).").Append(method).Append('(');
+                mapped.Append(leftOptionalInt ? "Decimal.fromInt(__v)" : "__v");
+                mapped.Append('.').Append(method).Append('(');
                 WriteDecimalOperand(rightExpr, right, mapped);
                 mapped.Append(')');
             }, sb);
             return;
         }
 
-        if (rightOptionalInt)
+        if (rightNeedsMap)
         {
             WriteOptionalMap(rightExpr, right!, mapped =>
             {
                 WriteDecimalOperand(leftExpr, left, mapped);
-                mapped.Append('.').Append(method).Append("(Decimal.fromInt(__v))");
+                mapped.Append('.').Append(method).Append('(');
+                mapped.Append(rightOptionalInt ? "Decimal.fromInt(__v)" : "__v");
+                mapped.Append(')');
             }, sb);
             return;
         }
@@ -621,9 +650,9 @@ internal sealed class TypeScriptExpressionTranslator
     /// <see cref="BranchReconciliation.Classify"/>'s <c>NeedsWiden</c> dimension rather than
     /// re-deriving "does this need <c>Decimal.fromInt</c>" inline, so the plain and optional widen
     /// decisions (see <see cref="WriteDecimalArithmetic"/>) stay driven by the one shared classifier.
-    /// The optional-Int case never reaches here (<see cref="WriteDecimalArithmetic"/> intercepts it via
-    /// <c>NeedsOptionalWiden</c> first), so <c>NeedsWiden</c>'s non-optional requirement is always
-    /// already satisfied by the caller.
+    /// Neither the optional-Int nor the optional-Decimal case reaches here
+    /// (<see cref="WriteDecimalArithmetic"/> intercepts both via its own map-widen check first), so
+    /// <c>NeedsWiden</c>'s non-optional requirement is always already satisfied by the caller.
     /// </summary>
     private void WriteDecimalOperand(Expr expr, TypeRef? type, StringBuilder sb)
     {

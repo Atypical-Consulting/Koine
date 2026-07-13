@@ -727,4 +727,115 @@ public class TypeScriptExpressionTests
         result.Diagnostics.ShouldContain(d =>
             d.Message == "sum requires a non-optional selector; guard with isPresent or use '??' before folding");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1557 — an OPTIONAL Decimal operand opposite a Decimal, the sibling bug class to #1537's
+    // OPTIONAL Int case above. Same guarded shapes: KOI0402 requires a guard/`??` before an optional
+    // participates in arithmetic.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The guarded shape used directly as a member's value. TypeScript's OWN control-flow narrowing
+    /// of the emitted <c>this.discount !== undefined ? … : …</c> guard already makes this safe without
+    /// any widening help, so this passes even pre-fix — it pins the correct <c>Decimal | undefined</c>
+    /// result shape as a regression guard, not a red-bar repro (see the next test for that).
+    /// </summary>
+    [Fact]
+    public void DecimalPlusGuardedOptionalDecimalMember_TypeChecks()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:     Decimal
+                discount: Decimal?
+                total:    Decimal? = if discount.isPresent then discount + rate else rate
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldContain("get total(): Decimal | undefined");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a guarded optional Decimal member plus Decimal must type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The real red-bar repro (this issue's exact model): the guarded optional Decimal is consumed
+    /// inside a NESTED closure (a <c>distinctBy</c> selector lambda). TypeScript's control-flow
+    /// narrowing of the outer <c>this.discount !== undefined</c> guard does not cross that closure
+    /// boundary, so <c>this.discount</c> still type-checks as <c>Decimal | undefined</c> at the point
+    /// the arithmetic renders it — <c>this.discount.add(r)</c> bare is a real <c>tsc</c> TS2532 here
+    /// (confirmed pre-fix), unlike the member-level guard above. The fix must map the WHOLE method
+    /// call over the optional rather than render the receiver bare.
+    /// </summary>
+    [Fact]
+    public void DecimalPlusGuardedOptionalDecimalMember_InsideNestedClosure_MapsOverTheOptional()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:        Decimal
+                discount:    Decimal?
+                rates:       List<Decimal>
+                allDistinct: Bool = if discount.isPresent then rates.distinctBy(r => discount + r) else true
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.ts")).Contents;
+        order.ShouldNotContain("this.discount.add(r))");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "a guarded optional Decimal member used inside a nested closure must still type-check under tsc --strict:\n"
+            + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// BOTH operands guarded-optional simultaneously (one <c>Decimal?</c>, one <c>Int?</c>), consumed
+    /// inside a nested closure — the double-optional edge case the spec calls out. Each operand needs
+    /// its own map-widen, nested so the inner map can still see the outer's unwrapped value. The
+    /// selector adds the two guarded optionals directly (rather than chaining a third operand off
+    /// their sum) because <c>TypeResolver.Infer</c> does not see the checker's own narrowing — chaining
+    /// a further operand onto an already-optional-typed sub-expression trips the checker's
+    /// arithmetic-null-safety guard independently of this emitter fix (a pre-existing semantic-checker
+    /// gap, filed separately; not part of this issue's TS-emitter-only scope).
+    /// </summary>
+    [Fact]
+    public void DecimalPlusGuardedOptionalDecimalAndOptionalInt_BothInsideNestedClosure_MapsOverBoth()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                discount:    Decimal?
+                qty:         Int?
+                rates:       List<Decimal>
+                allDistinct: Bool = if discount.isPresent && qty.isPresent then rates.distinctBy(r => discount + qty) else true
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoTscNotice);
+        check.Ok.ShouldBeTrue(
+            "guarded optional Decimal and optional Int operands used together inside a nested closure "
+            + "must still type-check under tsc --strict:\n" + string.Join("\n", check.Errors));
+    }
 }
