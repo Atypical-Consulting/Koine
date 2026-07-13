@@ -271,3 +271,4 @@ public sealed class SemanticModel
         return Symbols.StrongSymbol(name);
     }
 }
+
