@@ -1,3 +1,5 @@
+![Koine banner](.github/banner.png)
+
 <p align="center">
   <!-- The Koine brand mark: a lowercase kappa (κ) inscribed in the ports-and-adapters hexagon.
        GitHub ignores @media inside a referenced SVG, so <picture> flips the variant by theme:
