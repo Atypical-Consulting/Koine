@@ -57,6 +57,7 @@
 - [Try it in the browser](#try-it-in-the-browser)
 - [A taste of the language](#a-taste-of-the-language)
 - [Quick start (CLI)](#quick-start-cli)
+- [Usage](#usage)
 - [The language](#the-language)
 - [Architecture](#architecture)
 - [Koine as a platform](#koine-as-a-platform)
@@ -393,6 +394,42 @@ are the real entry points. `MediatR`/`FluentValidation`/`Mapperly` are C#-emitte
 leak into the target-agnostic model.
 
 </details>
+
+<div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
+
+## Usage
+
+The typical workflow: write a domain model in a `.koi` file, then compile it with the `koine` CLI
+(see [Quick start (CLI)](#quick-start-cli) above for every install option and flag):
+
+```bash
+dotnet tool install --global Koine.Cli
+
+# Compile a model to idiomatic C#
+koine build ./Models/billing.koi --target csharp --out ./generated
+```
+
+The output in `./generated` is self-contained, idiomatic code you commit like any other generated
+asset — nothing to reference at runtime, and `koine coverage` proves nothing declared in the model
+was silently dropped from the emit.
+
+You can also drive the compiler from your own C# code instead of the CLI — `Koine.Compiler` ships as
+a NuGet package with a frozen, contract-gated public API (see [Koine as a platform](#koine-as-a-platform)
+below for writing analyzers and custom emitters against the same API):
+
+```csharp
+using Koine.Compiler;          // BuiltInEmitterProviders
+using Koine.Compiler.Emit;     // EmitterRegistry, EmitterOptions, EmittedFile
+using Koine.Compiler.Services; // KoineCompiler
+
+var registry = new EmitterRegistry(BuiltInEmitterProviders.All);
+registry.TryCreate("csharp", EmitterOptions.Empty, out var emitter);
+
+var result = new KoineCompiler().Compile(source, emitter);   // string source or IReadOnlyList<SourceFile>
+if (result.Success)
+    foreach (EmittedFile file in result.Files)
+        Console.WriteLine($"{file.RelativePath}\n{file.Contents}");
+```
 
 <div align="right"><sub><a href="#table-of-contents">↑ Back to top</a></sub></div>
 
