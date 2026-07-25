@@ -75,11 +75,25 @@ jobs:
       # and apt's transfer timeout doesn't catch a slowly-trickling connection (one such
       # stall burned ~50 min before being cancelled). Only a cold cache hits apt; the
       # timeout config below makes that one fetch fail fast instead of hanging.
-      - name: Cap apt acquire timeouts (cold-cache safety net)
+      #
+      # `apt-get update` is the other half of the cold-cache safety net. The runner image
+      # ships a pre-baked apt index that goes stale as Ubuntu supersedes package versions,
+      # and cache-apt-pkgs-action does not refresh it. When the index still points at a
+      # version the mirror has already rotated out, the download 404s — and the action
+      # reports SUCCESS anyway, so the job continues with the libraries missing and only
+      # fails much later at `cargo build`, as an unrelated-looking pkg-config error:
+      #
+      #   E: Failed to fetch …/libgstreamer-plugins-good1.0-0_1.24.2-1ubuntu1.4_amd64.deb  404
+      #   → error: failed to run custom build command for `gobject-sys v0.18.0`
+      #     Package 'gobject-2.0', required by 'virtual:world', not found
+      #
+      # (gstreamer arrives as a transitive dependency of libwebkit2gtk-4.1-dev.)
+      - name: Cap apt acquire timeouts and refresh the index (cold-cache safety net)
         if: runner.os == 'Linux'
         run: |
           printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-koine-timeouts >/dev/null
+          sudo apt-get update
 
       - name: Install Linux system dependencies (Tauri v2)
         if: runner.os == 'Linux'
