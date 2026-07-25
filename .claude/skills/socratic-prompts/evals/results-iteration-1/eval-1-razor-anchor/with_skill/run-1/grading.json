@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "Three Socratic prompts in theory \u2192 framework \u2192 application form",
+      "passed": true,
+      "evidence": "Three labeled prompts each with a theory question, named frameworks, and 'Now apply this to ... SignupForm.razor'."
+    },
+    {
+      "text": "Application references concrete specifics from the real component",
+      "passed": true,
+      "evidence": "Quotes div-as-form, div-as-title, placeholder-only inputs, div-as-button, HasError single flag, <div class=err>Error</div>."
+    },
+    {
+      "text": "Names real accessibility frameworks/standards",
+      "passed": true,
+      "evidence": "Cites WCAG SC 1.3.1/4.1.2/3.3.2/2.1.1/2.4.7, first rule of ARIA, accessible-name computation, Nielsen heuristics 1 & 9."
+    },
+    {
+      "text": "Theory question targets a quality bar",
+      "passed": true,
+      "evidence": "e.g. 'What makes a sign-up form's markup genuinely accessible ... beyond looking correct on screen?'"
+    },
+    {
+      "text": "Output is prompts, not a rewritten component",
+      "passed": true,
+      "evidence": "Deliverable is three prompts + skeleton + offer to read CSS; no rewritten .razor."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  }
+}

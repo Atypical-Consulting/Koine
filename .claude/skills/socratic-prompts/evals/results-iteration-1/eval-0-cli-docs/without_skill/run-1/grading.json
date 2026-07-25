@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Produces exactly four Socratic prompts, one per documentation facet",
+      "passed": true,
+      "evidence": "Four prompts: getting-started, troubleshooting, command reference, README intro."
+    },
+    {
+      "text": "Each prompt contains theory + framework + application moves",
+      "passed": true,
+      "evidence": "Each uses explicit THEORY / FRAMEWORK / APPLICATION / CRITIQUE labels."
+    },
+    {
+      "text": "Names a real documentation framework/principle",
+      "passed": true,
+      "evidence": "Names 'time-to-first-success' as a principle; however mostly instructs the model to 'list the 4-6 properties' itself rather than naming established frameworks (no Di\u00e1taxis / inverted pyramid / Nielsen by name)."
+    },
+    {
+      "text": "Theory questions target effectiveness, not 'what is'",
+      "passed": true,
+      "evidence": "e.g. asks for the single 'it works!' moment and what separates excellent from mediocre."
+    },
+    {
+      "text": "Output is prompts, not actual documentation prose",
+      "passed": true,
+      "evidence": "Deliverable is four prompt code-blocks; no docs written."
+    },
+    {
+      "text": "Ends with a reusable skeleton",
+      "passed": false,
+      "evidence": "Ends with a 'How to get the most out of these' tips section \u2014 no reusable theory\u2192framework\u2192application skeleton the user can re-apply."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 1,
+    "total": 6,
+    "pass_rate": 0.83
+  }
+}

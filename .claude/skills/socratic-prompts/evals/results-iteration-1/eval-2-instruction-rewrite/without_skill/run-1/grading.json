@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "Returns a Socratic prompt, not an actual cold email",
+      "passed": true,
+      "evidence": "Deliverable is a 5-stage prompt; no email drafted."
+    },
+    {
+      "text": "Has theory + framework + application pointing back at the product",
+      "passed": true,
+      "evidence": "Stages: theory, framework, gather, write, critique \u2014 points at the user's B2B SaaS product."
+    },
+    {
+      "text": "Names at least one real copywriting framework",
+      "passed": false,
+      "evidence": "Names no established framework \u2014 asks the model to 'list the 4-6 underlying forces' and derive them itself; AIDA/PAS/BAB/JTBD never appear."
+    },
+    {
+      "text": "Leaves a bracketed placeholder rather than inventing details",
+      "passed": false,
+      "evidence": "Contains no literal bracketed placeholder; instead instructs the downstream model (step 3) to flag assumptions. It avoids inventing fakes but never leaves a fill-in slot."
+    },
+    {
+      "text": "Reads as a question-driven prompt, not an instruction with a '?'",
+      "passed": true,
+      "evidence": "Mixed: contains real questions but is predominantly an imperative 5-stage mega-prompt ('List\u2026', 'Convert\u2026', 'Now write\u2026')."
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 2,
+    "total": 5,
+    "pass_rate": 0.6
+  }
+}

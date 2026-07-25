@@ -1,0 +1,40 @@
+{
+  "expectations": [
+    {
+      "text": "Produces exactly four Socratic prompts, one per documentation facet",
+      "passed": true,
+      "evidence": "Four labeled prompts: README intro, getting-started, troubleshooting, command reference \u2014 distinct facets, not rephrasings."
+    },
+    {
+      "text": "Each prompt contains theory + framework + application moves",
+      "passed": true,
+      "evidence": "Every prompt opens with a 'what makes X effective' question, names frameworks, then 'Now apply this to lumen...'."
+    },
+    {
+      "text": "Names a real documentation framework/principle",
+      "passed": true,
+      "evidence": "Names inverted pyramid, jobs-to-be-done, Di\u00e1taxis, time-to-first-success, Nielsen's error heuristics, POSIX/docopt synopsis."
+    },
+    {
+      "text": "Theory questions target effectiveness, not 'what is'",
+      "passed": true,
+      "evidence": "e.g. 'What makes an open-source README intro earn a brew install in the first fifteen seconds?'"
+    },
+    {
+      "text": "Output is prompts, not actual documentation prose",
+      "passed": true,
+      "evidence": "Deliverable is four copy-pasteable prompt blockquotes plus a skeleton; no lumen docs written."
+    },
+    {
+      "text": "Ends with a reusable skeleton",
+      "passed": true,
+      "evidence": "Closes with 'Reuse this skeleton to generate more: What makes an effective [type of doc]? \u2192 ...'."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "eval_id": 2,
+  "eval_name": "instruction-rewrite",
+  "prompt": "Turn this instruction into a Socratic prompt that makes the AI reason first instead of spitting out slop: \"Write a cold outreach email for my B2B SaaS product.\"",
+  "assertions": [
+    "Returns a Socratic-style prompt, not an actual cold outreach email",
+    "The rewritten prompt contains a theory question (what makes cold outreach effective/get replies), a framework question naming real copywriting frameworks, and an application question pointing back at the B2B SaaS product",
+    "Names at least one real, relevant framework (e.g. AIDA, problem-agitate-solve, before/after/bridge, jobs-to-be-done)",
+    "Leaves a bracketed placeholder for product/buyer specifics that the original instruction didn't provide, rather than inventing fake details",
+    "The result is recognizably a question-driven prompt rather than an imperative instruction with a question mark appended"
+  ]
+}
