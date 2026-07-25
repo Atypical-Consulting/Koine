@@ -75,7 +75,7 @@ worktree/branch is already gone, skip Step 7.
 
 ## Step 1 — Preconditions & resolve the PR
 
-**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](_shared/preconditions.md)
+**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](../_shared/preconditions.md)
 to load the repo profile, verify authentication, and prepare the commit identity shorthand.
 
 Throughout this skill, **`git <commit-identity>`** stands for the author line from the profile's
