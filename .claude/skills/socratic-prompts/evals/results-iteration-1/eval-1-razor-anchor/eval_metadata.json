@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "razor-anchoring",
+  "prompt": "Attached is a Blazor component (SignupForm.razor) I wrote. Help me write 3 Socratic prompts I can use to get an AI to seriously improve its UX and accessibility — but I want them grounded in THIS actual component, not generic advice.",
+  "assertions": [
+    "Produces three Socratic prompts following the theory -> framework -> application structure",
+    "The application questions reference concrete specifics from the attached SignupForm.razor (e.g. the placeholder-only inputs, the <div> used as a button, the generic 'Error' message, or the password/confirm fields) rather than generic [placeholders]",
+    "Names real accessibility/UX frameworks or standards (e.g. WCAG 2.1, ARIA labels, keyboard operability, Nielsen's heuristics)",
+    "Each prompt's theory question targets a quality bar (what makes a form accessible/usable) rather than asking 'what is accessibility'",
+    "The output is prompts to drive an AI, not a rewritten version of the component"
+  ]
+}

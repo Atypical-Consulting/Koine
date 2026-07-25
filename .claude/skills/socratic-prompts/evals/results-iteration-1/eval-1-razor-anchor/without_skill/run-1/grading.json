@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "Three Socratic prompts in theory \u2192 framework \u2192 application form",
+      "passed": true,
+      "evidence": "Three prompts each with a reason-from-principles step, a criteria step, and an apply/rewrite step."
+    },
+    {
+      "text": "Application references concrete specifics from the real component",
+      "passed": true,
+      "evidence": "Embeds the full component and quotes class=btn, placeholder=repeat password, HasError, Submit; anchoring was demanded by the prompt itself, so both arms do it."
+    },
+    {
+      "text": "Names real accessibility frameworks/standards",
+      "passed": true,
+      "evidence": "Discusses accessible role/name, keyboard operability, tab/focus order, autocomplete tokens, EditForm \u2014 but cites no WCAG SC numbers (less precise than with-skill)."
+    },
+    {
+      "text": "Theory question targets a quality bar",
+      "passed": true,
+      "evidence": "Asks what a browser/AT does with a real form/button that it doesn't with divs."
+    },
+    {
+      "text": "Output is prompts, not a rewritten component",
+      "passed": true,
+      "evidence": "Deliverable is three prompts + usage tips; the rewrite is instructed of the downstream AI, not performed."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  }
+}

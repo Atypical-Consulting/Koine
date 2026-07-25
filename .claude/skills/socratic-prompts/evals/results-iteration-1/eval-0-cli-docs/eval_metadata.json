@@ -1,0 +1,13 @@
+{
+  "eval_id": 0,
+  "eval_name": "cli-docs-batch",
+  "prompt": "I'm writing the docs for my open-source CLI tool (it's a little log-parsing utility called `lumen`). Give me 4 Socratic prompts I can paste into an AI to get genuinely sharp help on the docs — I'm thinking the getting-started page, the error/troubleshooting section, the command reference, and the README intro. I keep getting generic mush when I just ask it to 'write the docs'.",
+  "assertions": [
+    "Produces exactly four Socratic prompts, each covering a different documentation facet (getting-started, errors/troubleshooting, command reference, README)",
+    "Each prompt contains all three moves: a theory question about what makes that doc effective, a framework question naming real principles, and an application question grounding it in lumen",
+    "At least one prompt names a concrete real documentation framework or principle (e.g. Diataxis, progressive disclosure, the inverted pyramid, 'show don't tell')",
+    "The theory questions ask what makes the output effective/good/clear rather than merely 'what is' the artifact",
+    "The output is a set of prompts/questions, not actual finished documentation prose for lumen",
+    "Ends with a reusable pattern/skeleton the user can apply to other doc pages"
+  ]
+}
