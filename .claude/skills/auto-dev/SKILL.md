@@ -123,7 +123,7 @@ reconstructs the fleet rather than double-dispatching.
 
 ## Step 1 — Preconditions & profile
 
-**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](_shared/preconditions.md)
+**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](../_shared/preconditions.md)
 to load the repo profile, verify authentication, and prepare the commit identity shorthand.
 
 Auto-dev reads every repo-specific fact from the profile (the effort/priority **labels** for ordering,

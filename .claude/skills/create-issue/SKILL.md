@@ -57,7 +57,7 @@ Create a task per item and complete in order. For a batch of ideas, run steps 2-
 
 ## Step 1 — Preconditions
 
-**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](_shared/preconditions.md)
+**Follow the shared preconditions reference** at [`../_shared/preconditions.md`](../_shared/preconditions.md)
 to load the repo profile, verify authentication, and prepare the commit identity shorthand.
 
 Then, read the profile's **`Labels`**, **`Issue templates`**, and **`Architecture grain`** sections
