@@ -13,7 +13,7 @@ gates, conflict hot-spots, architecture grain. Read it directly from the committ
 cat .claude/skills/repo-profile.md
 ```
 
-Only if that file is **missing** (or the user asks to refresh it), run **`get-repo-profile`** to
+Only if that file is **missing** (or the user asks to refresh it), run **`ai-migration-kit:get-repo-profile`** to
 generate it first, then read it. If you genuinely can't obtain it, say so in the report rather than
 inventing repo specifics.
 

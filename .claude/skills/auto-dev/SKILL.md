@@ -2,8 +2,8 @@
 name: auto-dev
 description: >-
   Autonomously burn down a GitHub issue backlog with a FLEET of N parallel sub-agents — each takes one
-  issue through its whole lifecycle (`implement-issue` → `merge-pr` → report) then picks up the next, so
-  N issues are always in flight. The orchestrator ABOVE `implement-issue`/`merge-pr`/`create-issue`:
+  issue through its whole lifecycle (`ai-migration-kit:implement-issue` → `ai-migration-kit:merge-pr` → report) then picks up the next, so
+  N issues are always in flight. The orchestrator ABOVE `ai-migration-kit:implement-issue`/`ai-migration-kit:merge-pr`/`ai-migration-kit:create-issue`:
   surveys open issues, orders them (small effort first, then medium), assigns each worker a NON-overlapping
   code area to avoid conflicts, keeps exactly N running (retires a worker the moment its PR merges and
   dispatches a replacement), has workers file off-scope finds as fresh issues, and verifies real merge
@@ -11,18 +11,34 @@ description: >-
   work through MANY issues hands-off with parallelism — "implement issues small first then medium with 3
   agents", "keep N agents continuously implementing and merging issues", "burn down the backlog", "run the
   auto-dev loop", "spin up a fleet of agents to clear open issues", "auto-implement and merge everything
-  that's ready" — and any loose phrasing pairing `implement-issue` with `merge-pr` across a queue rather
+  that's ready" — and any loose phrasing pairing `ai-migration-kit:implement-issue` with `ai-migration-kit:merge-pr` across a queue rather
   than one issue. Composes with the `loop` skill for the heartbeat. Does NOT apply to building ONE issue
-  (`implement-issue`), landing ONE PR (`merge-pr`), or filing ONE issue (`create-issue`).
+  (`ai-migration-kit:implement-issue`), landing ONE PR (`ai-migration-kit:merge-pr`), or filing ONE issue (`ai-migration-kit:create-issue`).
 ---
 
 # auto-dev — a continuous fleet that implements and merges issues
 
+> **The three lifecycle skills come from a plugin, not from this repo.**
+> `create-issue`, `implement-issue`, `merge-pr` and `get-repo-profile` used to live in
+> `.claude/skills/`; they are now the canonical copies in `phmatray/ai-migration-kit` and are
+> installed here as a plugin, so their real names carry the `ai-migration-kit:` prefix. Every
+> reference below is written in full deliberately — a worker that cannot resolve a skill name
+> stalls mid-flight, and this fleet merges to `main` unattended.
+>
+> ```
+> /plugin marketplace add phmatray/ai-migration-kit
+> /plugin install ai-migration-kit@ai-migration-kit-marketplace
+> ```
+>
+> This repo still owns `.claude/skills/repo-profile.md` — the profile those skills read for
+> everything Koine-specific — and `_shared/`, which this skill uses directly.
+> The ASCII diagram below drops the prefix for alignment only.
+
 ## What this does
 
-`implement-issue` makes one planned issue into a ready PR; `merge-pr` lands one PR. **auto-dev
-supervises them at scale**: N background workers each own one issue end-to-end (`implement-issue <N>` →
-`merge-pr <PR>`); the moment a worker's PR merges it's retired and a fresh worker is dispatched onto the
+`ai-migration-kit:implement-issue` makes one planned issue into a ready PR; `ai-migration-kit:merge-pr` lands one PR. **auto-dev
+supervises them at scale**: N background workers each own one issue end-to-end (`ai-migration-kit:implement-issue <N>` →
+`ai-migration-kit:merge-pr <PR>`); the moment a worker's PR merges it's retired and a fresh worker is dispatched onto the
 next queued issue — so N issues stay in flight without you babysitting.
 
 The value is the orchestration a naive "run them in a loop" lacks:
@@ -30,7 +46,7 @@ The value is the orchestration a naive "run them in a loop" lacks:
 - **Conflict avoidance** — each concurrent worker gets an issue in a *different* code area, so branches rarely collide.
 - **Ordering** — small self-contained issues first (fast wins, fewer conflicts), then medium. L/XL and manual-QA excluded by default.
 - **Mandatory merge** — workers love to stop at "PR ready" (half a job). auto-dev verifies the *real* merge state from GitHub on every signal and re-drives any worker that stalled.
-- **Off-scope capture** — a worker that trips over an unrelated bug files it via `create-issue` instead of fixing it inline (scope-creep) or dropping it. The backlog stays truthful.
+- **Off-scope capture** — a worker that trips over an unrelated bug files it via `ai-migration-kit:create-issue` instead of fixing it inline (scope-creep) or dropping it. The backlog stays truthful.
 - **Lifecycle hygiene** — finished agents are shut down; a state file survives restarts so the fleet is resumable.
 
 ## Autonomy contract
@@ -44,7 +60,7 @@ The user starts this and walks away — they watch a backlog drain, they don't a
 
 Never fake progress: a checkbox, a "ready" flip, or a merge claims work is *done* — back each with
 evidence, as the child skills require. The **squash-merge is the only irreversible act** — it happens
-only through `merge-pr` on a green, mergeable PR, never via an `--admin` override here.
+only through `ai-migration-kit:merge-pr` on a green, mergeable PR, never via an `--admin` override here.
 
 ## Inputs
 
@@ -109,7 +125,7 @@ output is a huge log that will blow your context. Rely on the report + GitHub gr
 
 Track these as todos. Steps 4–6 are the long-running supervision loop.
 
-1. **Preconditions & profile** — `gh` works; load the repo profile via `get-repo-profile`.
+1. **Preconditions & profile** — `gh` works; load the repo profile via `ai-migration-kit:get-repo-profile`.
 2. **Build the work queue** — survey open issues, filter to eligible, order small→medium, persist a state file.
 3. **Dispatch the first N workers** — area-isolated, using the worker-prompt contract.
 4. **Supervise (loop)** — on every report / idle notification: reconcile against GitHub, re-drive any merge stalled at "ready", end merged workers, refill slots from the queue; **re-survey the backlog (Step 2) every ~5 merges**.
@@ -144,7 +160,7 @@ SKIP   #N  ...                                            ← no plan, or manual
 
 What the buckets encode: **Effort** from the profile's `effort: S/M/L/XL` labels (S before M; L/XL
 held); **plan** present (`🛠️ Implementation plan` / a task-list — no plan ⇒ SKIP, or seed one via
-`create-issue` if the user insists); **manual-QA** dropped (a headless agent can't "visually QA…").
+`ai-migration-kit:create-issue` if the user insists); **manual-QA** dropped (a headless agent can't "visually QA…").
 The **one judgment left to you is area-tagging** the QUEUE rows (infer from title/labels: `compiler`,
 `php`, `website`, `studio-frontend`, `tests`, `ci/build`) — enough to tell "these two would fight."
 
@@ -189,9 +205,9 @@ claude -p "/auto-dev-worker <N>" --model <tier> --strict-mcp-config   # <tier> f
 ```
 
 (As a background sub-agent instead, pass the command file's body as the prompt and set its model
-parameter to the same tier.) The command expands to the full contract: `implement-issue <N>` in its
-**own** worktree → **mandatory** `merge-pr` driven to MERGED (never idle at "ready") → off-scope
-protocol (`create-issue`, don't fix inline) → one structured FINAL report line back:
+parameter to the same tier.) The command expands to the full contract: `ai-migration-kit:implement-issue <N>` in its
+**own** worktree → **mandatory** `ai-migration-kit:merge-pr` driven to MERGED (never idle at "ready") → off-scope
+protocol (`ai-migration-kit:create-issue`, don't fix inline) → one structured FINAL report line back:
 
 ```
 ISSUE: <N> | PR: <number|none> | STATUS: MERGED|BLOCKED|FAILED | DETAIL: … | FILED: … | WORKTREE: …
@@ -199,7 +215,7 @@ ISSUE: <N> | PR: <number|none> | STATUS: MERGED|BLOCKED|FAILED | DETAIL: … | F
 
 Why those clauses earn their place (don't trim them from the command): *own worktree* — parallel
 workers sharing a checkout corrupt each other; *mandatory merge / don't idle at ready* — the #1 failure
-is stopping at "ready", so the explicit "drive to MERGED, keep re-checking against `merge-pr`'s
+is stopping at "ready", so the explicit "drive to MERGED, keep re-checking against `ai-migration-kit:merge-pr`'s
 check-runs gate" closes that gap; *off-scope protocol* — keeps the backlog truthful instead of
 scope-creeping the PR; *structured report* — your reconciliation needs a terse parseable signal, not
 prose.
@@ -212,18 +228,18 @@ You're woken by a worker's report, an **idle notification**, or your heartbeat. 
 merged) rather than re-typing the gh queries each tick. Then, per slot:
 
 - **Reported MERGED** (GitHub agrees) → **end the agent** (send a shutdown request) and **refill the slot**: pick the next queued issue whose area isn't currently held, dispatch a fresh worker (Step 3). Keeps the fleet at N.
-- **Idle, but PR is READY and unmerged** → it stalled at "ready." Message it to run `merge-pr <PR>` now and not idle until merged. `mergeable=UNKNOWN` is usually a transient recompute after `main` moved — its `merge-pr` will sync and resolve; nudge a main-sync if it persists. If a worker idles at "ready" **twice**, take over: once the PR clears `merge-pr` SKILL.md Step 3's gate (nothing failed, nothing pending, not draft, `mergeStateStatus == CLEAN` — read via the check-runs API, not `gh pr checks`, which #1530 can misreport), land it (`gh pr merge <PR> --squash --delete-branch`) and shut the worker down.
+- **Idle, but PR is READY and unmerged** → it stalled at "ready." Message it to run `ai-migration-kit:merge-pr <PR>` now and not idle until merged. `mergeable=UNKNOWN` is usually a transient recompute after `main` moved — its `ai-migration-kit:merge-pr` will sync and resolve; nudge a main-sync if it persists. If a worker idles at "ready" **twice**, take over: once the PR clears `ai-migration-kit:merge-pr` SKILL.md Step 3's gate (nothing failed, nothing pending, not draft, `mergeStateStatus == CLEAN` — read via the check-runs API, not `gh pr checks`, which #1530 can misreport), land it (`gh pr merge <PR> --squash --delete-branch`) and shut the worker down.
 - **Idle with a draft PR / no PR yet** → still implementing; leave it. If long with no progress, send a one-line status ping (don't read its transcript).
 - **Reported BLOCKED/FAILED** → first **tier-escalate if it was on a lower model**: if the failure looks like the model wasn't strong enough (rather than a genuine hard blocker — un-mergeable conflict, missing approval, no plan), re-dispatch the *same* issue **once** on the top model. If already on top, or it fails again → record it, surface it, end the agent, refill the slot (don't let one blocked issue stall the fleet). This escalation is what makes cheap-by-default tiering safe.
 
 After any change, update the state file (in flight, completed, filed, queue).
 
 **Merge sequencing for same-area PRs.** If two workers' PRs touch the same area, let them land one at a
-time — the second's `merge-pr` will sync the freshly-moved `main` and resolve. Don't block; just expect
+time — the second's `ai-migration-kit:merge-pr` will sync the freshly-moved `main` and resolve. Don't block; just expect
 a transient conflict and re-nudge if needed.
 
 **Re-survey the backlog every ~5 merges — the queue is NOT static.** Every PR you land tends to spawn
-more issues: `merge-pr` files deferred work as follow-ups and workers file off-scope discoveries. So
+more issues: `ai-migration-kit:merge-pr` files deferred work as follow-ups and workers file off-scope discoveries. So
 the open-issue set *grows as you drain it*, and newcomers are often small and in areas your current
 workers don't hold — exactly what breaks a same-area logjam. Re-run the Step 2 survey roughly every 5
 merges (or sooner if refills cluster into one area or the queue looks empty), fold newcomers in (small-
@@ -269,7 +285,7 @@ that frees. Hold the line at N unless told otherwise.
 ## Gotchas (hard-won)
 
 - **"Ready" is not "merged."** Throughput is gated on actually *landing* PRs; the #1 stall is idling at ready. Verify merge state from GitHub on every signal; re-drive or take over.
-- **Never gate merge-readiness on `build-and-test == success`, or on `gh pr checks`.** `merge-pr`
+- **Never gate merge-readiness on `build-and-test == success`, or on `gh pr checks`.** `ai-migration-kit:merge-pr`
   SKILL.md Step 3 is the one source of truth: nothing failed, nothing pending, PR not a draft,
   `mergeStateStatus == CLEAN`, read from the check-runs API on the head SHA. A front-end-only PR
   (`tooling/koine-studio/**` / `tooling/koine-ui/**` only) *correctly* shows `build-and-test: skipped`
@@ -282,4 +298,4 @@ that frees. Hold the line at N unless told otherwise.
 - **`mergeable=UNKNOWN` is normal right after `main` moves** — GitHub recomputes; it resolves to CLEAN once the branch syncs. Not a blocker.
 - **End finished agents** once their PR merges; the fresh replacement starts clean.
 - **File, don't fix, off-scope work** — a filed follow-up keeps both the diff and the issue's scope clean.
-- **Plans drive eligibility, effort labels drive ordering** — no plan → not eligible (seed one with `create-issue` if the user insists); manual-QA → skip with a noted reason.
+- **Plans drive eligibility, effort labels drive ordering** — no plan → not eligible (seed one with `ai-migration-kit:create-issue` if the user insists); manual-QA → skip with a noted reason.
