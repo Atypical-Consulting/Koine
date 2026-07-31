@@ -480,10 +480,10 @@ describe('root picker for new-file rows (#1132)', () => {
     expect(fileState?.targetRoot).toBe(rootB);
   });
 
-  test('the select is disabled once the review is terminal, same rule as the accept checkbox', () => {
+  test('the select is disabled once the review is terminal, same rule as the accept checkbox', async () => {
     const store = storeWithRoots([rootA, rootB]);
     const { container } = mount(store);
-    act(() => {
+    await act(() => {
       store.getState().beginChangeSetApply(2);
       store.getState().resolveChangeSetApply({ failed: [] });
     });
