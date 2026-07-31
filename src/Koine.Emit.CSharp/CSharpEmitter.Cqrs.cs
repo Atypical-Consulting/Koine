@@ -98,6 +98,11 @@ public sealed partial class CSharpEmitter
         IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(context, rm.SourceType, index);
         var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src", context: context, options: _options);
 
+        // The source type (and thus a direct field's own declaration) may live in a DIFFERENT bounded
+        // context than this read model (R12.3 cross-context projection) — resolve its owning context
+        // once so a direct field's bare type can be qualified against ITS OWN home (#1702, mirrors #1638).
+        var sourceContext = index.ResolveOwner(rm.SourceType, context).Owner ?? context;
+
         var fields = new List<(string CsType, string Prop, string Rhs)>();
         foreach (ReadModelField f in rm.Fields)
         {
@@ -105,15 +110,12 @@ public sealed partial class CSharpEmitter
             string csType, rhs;
             if (f.Projection is null)
             {
-                // Direct field: type and value come from the like-named source member. The source
-                // type (and thus this member's own declaration) may live in a DIFFERENT bounded
-                // context than this read model (R12.3 cross-context projection) — a bare field type
-                // must be qualified against the SOURCE's own owning context, not left to resolve
-                // bare in the read model's context, where a same-named but differently-kinded
-                // sibling type declared locally would otherwise win over a same-named `using`
-                // (#1702, mirrors #1638).
+                // Direct field: type and value come from the like-named source member. Left bare, a
+                // same-named but differently-kinded sibling type declared locally in this read model's
+                // own context would win over a same-named `using` — so qualify against the source's
+                // own owning context instead of relying on `context` here.
                 csType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t)
-                    ? typeMapper.Map(QualifyAgainstSource(t, index, index.ResolveOwner(rm.SourceType, context).Owner ?? context, context))
+                    ? typeMapper.Map(QualifyAgainstSource(t, index, sourceContext, context))
                     : "object";
                 rhs = $"src.{prop}";
             }
