@@ -12,6 +12,7 @@ import type {
   Graph as MxGraph,
   Cell as MxCell,
   ConnectionHandler,
+  PanningHandler,
   SelectionHandler,
   TooltipHandler,
 } from '@maxgraph/core';
@@ -1083,9 +1084,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   // nothing is freehand-movable, so drag anywhere pans (ignoreCell=true). A plain click/tap still registers
   // in every mode (panning needs an actual drag).
   graph.setPanning(true);
-  const panning = graph.getPlugin('PanningHandler') as unknown as
-    | { useLeftButtonForPanning?: boolean; ignoreCell?: boolean }
-    | undefined;
+  const panning = graph.getPlugin<PanningHandler>('PanningHandler');
   if (panning) {
     panning.useLeftButtonForPanning = true;
     panning.ignoreCell = !freehand;
@@ -1824,7 +1823,7 @@ export async function renderEventFlowGraph(
   // movable: let a drag that starts on a card MOVE it while a drag on empty space pans (the read-only chrome
   // would otherwise pan over a card and the card could never be dragged).
   const chrome = mountChrome(mx, handle, root, true, EVENT_FLOW_ZOOM_KEY);
-  const panning = handle.graph.getPlugin('PanningHandler') as unknown as { ignoreCell?: boolean } | undefined;
+  const panning = handle.graph.getPlugin<PanningHandler>('PanningHandler');
   if (panning) panning.ignoreCell = false;
 
   const dispose = (): void => {
