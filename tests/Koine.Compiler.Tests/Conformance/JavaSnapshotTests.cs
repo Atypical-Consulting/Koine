@@ -1,3 +1,4 @@
+using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests.Conformance;
@@ -256,6 +257,41 @@ public class JavaSnapshotTests
     public void Java_acl_fixture_compiles()
     {
         var result = new KoineCompiler().Compile(JavaAclTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 5) — the full wiring slice under <c>--layers infrastructure</c>: the
+    /// reviewed snapshot locks the in-memory repository (its finders included), the outbox dispatcher, the
+    /// subscriber delivery seam, and the shared infrastructure runtime types.
+    /// </summary>
+    [Fact]
+    public Task Java_infrastructure_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(
+            JavaInfrastructureTests.Fixture,
+            new JavaEmitterProvider().Create(EmitterOptions.Empty with { Layers = "domain,infrastructure" }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The infrastructure layer is the one Phase-2 slice with real implementation bodies — generics,
+    /// <c>@Override</c>s that must actually match the contract, a method reference, and stream pipelines —
+    /// so <c>javac</c> is doing genuine work here, not just parsing.
+    /// </summary>
+    [Fact]
+    public void Java_infrastructure_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(
+            JavaInfrastructureTests.Fixture,
+            new JavaEmitterProvider().Create(EmitterOptions.Empty with { Layers = "domain,infrastructure" }));
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileJava(result.Files);

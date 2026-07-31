@@ -33,10 +33,12 @@ public sealed partial class JavaEmitter : IEmitter
     public string TargetName => "java";
 
     /// <summary>
-    /// Encodes the Java options that change emitted bytes (the base package and the sorted package remap
-    /// pairs) so toggling either busts <see cref="Services.KoineCompiler"/>'s emit cache. Without this
-    /// override the default (type-name-only) discriminator would let two emits of the same source under
-    /// different <see cref="JavaEmitterOptions"/> collide.
+    /// Encodes every Java option that changes emitted bytes (the base package, the sorted package remap
+    /// pairs, and the selected layers) so toggling any of them busts
+    /// <see cref="Services.KoineCompiler"/>'s emit cache. Without this override the default
+    /// (type-name-only) discriminator would let two emits of the same source under different
+    /// <see cref="JavaEmitterOptions"/> collide — including a domain-only emit shadowing an
+    /// <c>--layers infrastructure</c> one.
     /// </summary>
     public string CacheDiscriminator
     {
@@ -47,7 +49,15 @@ public sealed partial class JavaEmitter : IEmitter
                 _options.PackageMap
                     .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                     .Select(kv => kv.Key + "=" + kv.Value));
-            return string.Join("|", GetType().FullName, "base=" + _options.BasePackage, "packages=" + map);
+            var layers = _options.Layers is null
+                ? ""
+                : string.Join(",", _options.Layers.Select(l => l.ToString()).OrderBy(s => s, StringComparer.Ordinal));
+            return string.Join(
+                "|",
+                GetType().FullName,
+                "base=" + _options.BasePackage,
+                "layers=" + layers,
+                "packages=" + map);
         }
     }
 
@@ -112,6 +122,13 @@ public sealed partial class JavaEmitter : IEmitter
                 files.Add(EmitPolicy(emit, ctx.Name, policy));
             }
 
+            // Integration-event subscriptions (R14.3) live on ContextNode.Subscribes: each emits a
+            // `Handle<Event>` delivery seam into THIS (the subscribing) context — JavaEmitter.Integration.cs.
+            foreach (SubscribeDecl sub in ctx.Subscribes)
+            {
+                files.Add(EmitIntegrationEventHandler(emit, ctx.Name, sub));
+            }
+
             EmitContextExtras(emit, files, ctx);
         }
 
@@ -119,6 +136,13 @@ public sealed partial class JavaEmitter : IEmitter
         // mapping block, emitted into the DOWNSTREAM context (JavaEmitter.Acl.cs). Model-wide rather
         // than per-context, since the relations live on the context map.
         EmitAclTranslators(emit, model, files);
+
+        // The opt-in Infrastructure layer (issue #241): concrete in-memory repositories and the
+        // transactional outbox. Off by default, so the domain output above is byte-identical without it.
+        if (_options.EmitsInfrastructure)
+        {
+            EmitInfrastructure(emit, model, files);
+        }
 
         return files;
     }
