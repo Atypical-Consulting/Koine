@@ -10,8 +10,10 @@ namespace Koine.Compiler.Tests;
 /// expressions. <c>Symbol</c> renders actual Koine source syntax — the lexer defines <c>AND</c> as
 /// <c>&amp;&amp;</c> and <c>OR</c> as <c>||</c> (<c>Grammar/KoineLexer.g4</c>), so <c>Or</c>/<c>And</c>
 /// render as <c>||</c>/<c>&amp;&amp;</c>, not the English words <c>Lowerer.SourceOp</c> used to emit —
-/// that was a latent drift from the actual grammar, never exercised by any existing snapshot (no test
-/// covers a compound unmessaged Or/And invariant), so unifying on it changes no observed output.
+/// that was a latent drift from the actual grammar. It was user-visible — it feeds the synthesized
+/// rule message of an unmessaged invariant — and went uncaught only because no .koi in templates/ or
+/// tests/ had an unmessaged &amp;&amp; / || invariant. <c>SynthesizedRuleMessageTests</c> closes that
+/// hole; this class pins the table itself.
 /// </summary>
 public class BinaryOpExtensionsTests
 {
