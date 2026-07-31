@@ -1159,7 +1159,7 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
     const target = saved ?? getDefaultCanvasZoom();
     try {
       graph.zoomTo(target / 100, false);
-      (graph as unknown as { center?: (h?: boolean, v?: boolean) => void }).center?.(true, true);
+      graph.center(true, true);
     } catch {
       /* container not measurable yet — ignore; the readout still syncs to the real scale below */
     }
