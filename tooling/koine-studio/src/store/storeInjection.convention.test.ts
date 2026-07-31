@@ -23,7 +23,6 @@ const ALLOWLIST = [
   'src/ai/aiPanel.ts',
   'src/diagrams/diagramContract.ts',
   'src/main.ts',
-  'src/settings/settingsPage.tsx',
   'src/settings/theme.ts',
   'src/shell/canvasWrite.tsx',
   'src/shell/explorer.tsx',

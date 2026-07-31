@@ -1291,6 +1291,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // selection + source readers stay here as thunks (they peek into the live CodeMirror view).
   const panelHost = createPanelHost({
     prefsCallbacks,
+    store: appStore,
     settingsCategory: () => appStore.getState().settingsCategory ?? undefined,
     showSettings: (category) => controller.showSettings(category),
     closeSettings: () => appStore.getState().closeSettings(),
