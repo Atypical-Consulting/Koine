@@ -175,6 +175,9 @@ internal sealed class JavaExpressionTranslator
     /// <summary>The semantic type an expression infers to in this type's scope (locals included).</summary>
     public TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
 
+    /// <summary>The bounded context this translator resolves identifiers within (null = global/legacy mode).</summary>
+    public string? Context => _resolver.Context;
+
     /// <summary>Translates an expression to a Java expression string (no redundant outer parentheses).</summary>
     public string Translate(Expr expr, NameMode mode = NameMode.Parameter, string? expectedEnum = null)
     {
@@ -543,7 +546,8 @@ internal sealed class JavaExpressionTranslator
     }
 
     /// <summary>True when a type classifies as a Koine value object (so its arithmetic lowers to a method call).</summary>
-    private bool IsValueObject(TypeRef? type) => type is not null && _index.Classify(type.Name) == TypeKind.Value;
+    private bool IsValueObject(TypeRef? type) =>
+        type is not null && _index.Classify(type.Qualifier ?? _resolver.Context, type.Name) == TypeKind.Value;
 
     /// <summary>Renders one operand of a plain-infix binary, dropping the redundant parentheses precedence/associativity does not require.</summary>
     private void WriteBinaryChild(Expr expr, BinaryOp parentOp, bool rightOperand, StringBuilder sb)
@@ -735,7 +739,8 @@ internal sealed class JavaExpressionTranslator
                 return;
             default:
                 // A field/derived-member access on another value: call its accessor.
-                if (targetType is not null && _index.Classify(targetType.Name) is TypeKind.Value or TypeKind.Entity)
+                if (targetType is not null
+                    && _index.Classify(targetType.Qualifier ?? _resolver.Context, targetType.Name) is TypeKind.Value or TypeKind.Entity)
                 {
                     sb.Append(t).Append('.').Append(JavaNaming.Member(ma.MemberName)).Append("()");
                     return;
@@ -807,7 +812,7 @@ internal sealed class JavaExpressionTranslator
     private void WriteSum(CallExpr call, string target, StringBuilder sb)
     {
         TypeRef? selector = InferSelectorType(call);
-        if (selector is not null && _index.Classify(selector.Name) == TypeKind.Value)
+        if (selector is not null && _index.Classify(selector.Qualifier ?? _resolver.Context, selector.Name) == TypeKind.Value)
         {
             // Value objects have no additive operator in Java; fold with the demand-generated `plus` method
             // (emitted on the record by the value-object slice). A seedless reduce yields Optional, so an

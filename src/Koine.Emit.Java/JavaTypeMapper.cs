@@ -92,7 +92,7 @@ internal sealed class JavaTypeMapper
     public string QualifyTypeName(TypeRef type)
     {
         var pascal = JavaNaming.Type(type.Name);
-        if (_context is null || _packageFor is null || !IsQualifiable(type.Name)
+        if (_context is null || _packageFor is null || !IsQualifiable(type)
             || OwnerContextOf(type.Name, type.Qualifier) is not { } owner)
         {
             return pascal;
@@ -121,7 +121,7 @@ internal sealed class JavaTypeMapper
     /// worth qualifying). Branded ID types are excluded: a foreign id is re-materialized locally by the
     /// emitter's unowned-id pass, never package-qualified.
     /// </summary>
-    private bool IsQualifiable(string koineName) => _index.Classify(koineName) is
+    private bool IsQualifiable(TypeRef type) => _index.Classify(type.Qualifier ?? _context, type.Name) is
         TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
         or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
 
@@ -155,5 +155,5 @@ internal sealed class JavaTypeMapper
     public static bool IsCollection(TypeRef type) => IsList(type) || IsSet(type) || IsMap(type);
 
     /// <summary>True when the member's type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier ?? _context, type.Name) == TypeKind.Enum;
 }
