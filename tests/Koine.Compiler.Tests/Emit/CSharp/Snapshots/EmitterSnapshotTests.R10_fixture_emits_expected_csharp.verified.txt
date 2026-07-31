@@ -279,6 +279,7 @@ public static class SalesSpecifications
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -293,6 +294,18 @@ public sealed class InventoryId : ValueObject
 
     public static InventoryId New()
         => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out InventoryId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -366,6 +379,7 @@ public sealed class Order : ValueObject
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -380,6 +394,18 @@ public sealed class OrderId : ValueObject
 
     public static OrderId New()
         => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out OrderId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

@@ -154,6 +154,7 @@ public sealed class Money : ValueObject
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Billing;
@@ -168,6 +169,18 @@ public sealed class InvoiceId : ValueObject
 
     public static InvoiceId New()
         => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out InvoiceId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -329,6 +342,7 @@ public sealed class Quote
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -343,6 +357,18 @@ public sealed class QuoteId : ValueObject
 
     public static QuoteId New()
         => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out QuoteId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

@@ -350,6 +350,7 @@ public interface IOrderService
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -365,6 +366,18 @@ public sealed class CustomerId : ValueObject
     public static CustomerId New()
         => new(Guid.NewGuid());
 
+    public static bool TryParse(string? value, [NotNullWhen(true)] out CustomerId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Value;
@@ -377,6 +390,7 @@ public sealed class CustomerId : ValueObject
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -391,6 +405,18 @@ public sealed class OrderId : ValueObject
 
     public static OrderId New()
         => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out OrderId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -434,6 +460,7 @@ public sealed class OrderLine : ValueObject
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -448,6 +475,18 @@ public sealed class ProductId : ValueObject
 
     public static ProductId New()
         => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out ProductId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
