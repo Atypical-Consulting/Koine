@@ -495,6 +495,17 @@ public sealed partial class CSharpEmitter : IEmitter
         sb.Append(Indent).Append(Indent).Append("return result is not null;\n");
         sb.Append(Indent).Append("}\n\n");
 
+        // A TryParse satisfying ASP.NET Core Minimal APIs' TryParse binding convention (issue #1656,
+        // mirroring #1649's identity-value-object fix): this is a sealed class, not a compiler-sealed
+        // `enum`, so it can declare this static member, letting a query/route-bound enum criterion bind
+        // from a string instead of falling back to (and crashing the whole host on) inferred-body
+        // binding. Case-insensitive, matching ASP.NET Core's own native enum-binding convention.
+        sb.Append(Indent).Append("public static bool TryParse(string? value, out ").Append(name).Append(" result)\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("result = All.FirstOrDefault(e => string.Equals(e.Name, value, StringComparison.OrdinalIgnoreCase))!;\n");
+        sb.Append(Indent).Append(Indent).Append("return result is not null;\n");
+        sb.Append(Indent).Append("}\n\n");
+
         // Exhaustive Match/Switch: one delegate per member, dispatched on the ordinal.
         // Adding a member becomes a compile error at every call site — the closed-set
         // safety a C# `enum` cannot give.

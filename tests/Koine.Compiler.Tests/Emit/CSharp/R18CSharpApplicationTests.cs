@@ -968,6 +968,75 @@ public class R18CSharpApplicationTests
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
+    // ------------------------------------------------------------------
+    // Issue #1656: an enum-typed query criterion (OrdersByStatus.Status: OrderStatus) binds correctly
+    // instead of crashing the whole host on the first request. Unlike OrderById, OrdersByStatus is a
+    // LIST query with no derivable store query, so its handler always throws NotImplementedException
+    // by design (see Task_4's List_query_without_a_derivable_store_query_throws_not_implemented) —
+    // reaching that throw (instead of the endpoint-metadata InvalidOperationException this issue
+    // reports) IS the proof the enum criterion bound successfully.
+    // ------------------------------------------------------------------
+
+    /// <summary><see cref="RunSalesApiWithQueries"/>'s counterpart over the full <see cref="Fixture"/>
+    /// (both <c>OrderById</c> and the enum-criterion <c>OrdersByStatus</c>).</summary>
+    private static TestSupport.ApiHostHarness RunSalesApiWithAllQueries(CSharpEmitterOptions options) =>
+        TestSupport.RunApi(
+            Emit(options, Fixture)
+                .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source)),
+            SalesApiHostDriver);
+
+    [Fact]
+    public async Task Api_layer_enum_query_criterion_does_not_poison_the_whole_route_table()
+    {
+        using var harness = RunSalesApiWithAllQueries(ApiOn);
+
+        // The bug: building endpoint metadata for the OrdersByStatus route throws for the WHOLE
+        // CompositeEndpointDataSource on the first request to ANY route — so an unrelated,
+        // already-working endpoint failing here would mean the enum query is still poisoning the host.
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 5m, currency = "EUR" } },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Api_layer_enum_query_criterion_binds_from_the_query_string_instead_of_crashing()
+    {
+        using var harness = RunSalesApiWithAllQueries(ApiOn);
+
+        // NotImplementedException (the handler's by-design stub for a non-derivable list query) proves
+        // the request reached the handler — i.e. [AsParameters] bound `status` successfully. The
+        // pre-fix crash surfaces as InvalidOperationException ("Body was inferred...") instead.
+        var thrown = await Should.ThrowAsync<Exception>(() =>
+            harness.Client.GetAsync("/orders-by-status?status=Placed", TestContext.Current.CancellationToken));
+
+        thrown.ShouldNotBeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Api_layer_enum_query_criterion_rejects_an_unrecognized_value_with_a_clean_400()
+    {
+        using var harness = RunSalesApiWithAllQueries(ApiOn);
+
+        var response = await harness.Client.GetAsync(
+            "/orders-by-status?status=Bogus", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Api_layer_enum_query_criterion_binds_case_insensitively()
+    {
+        using var harness = RunSalesApiWithAllQueries(ApiOn);
+
+        var thrown = await Should.ThrowAsync<Exception>(() =>
+            harness.Client.GetAsync("/orders-by-status?status=placed", TestContext.Current.CancellationToken));
+
+        thrown.ShouldNotBeOfType<InvalidOperationException>();
+    }
+
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {
