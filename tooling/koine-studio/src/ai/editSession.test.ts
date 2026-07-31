@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { createEditSession, newFileKey } from './editSession';
+import { createEditSession, newFileKey, newFileKeyInRoot, parseNewFileKey } from './editSession';
 
 describe('createEditSession', () => {
   test('list() returns the initial relPaths in insertion order', () => {
@@ -196,5 +196,55 @@ describe('multi-root keying (#472): opaque keys + display relPaths', () => {
     expect(session.staged()).toEqual([
       { key: 'new:nested/extra.koi', relPath: 'nested/extra.koi', body: 'context Extra {}', isNew: true },
     ]);
+  });
+});
+
+describe('root-qualified new-file keys (#1132): new-in: prefix', () => {
+  test('newFileKeyInRoot() mints new-in:<encoded root>:<relPath>', () => {
+    expect(newFileKeyInRoot('opfs:ws/a', 'nested/x.koi')).toBe(
+      `new-in:${encodeURIComponent('opfs:ws/a')}:nested/x.koi`,
+    );
+  });
+
+  test('parseNewFileKey() resolves a new: key to { relPath, root: null }', () => {
+    expect(parseNewFileKey(newFileKey('nested/extra.koi'))).toEqual({
+      relPath: 'nested/extra.koi',
+      root: null,
+    });
+  });
+
+  test('parseNewFileKey() resolves a new-in: key to { relPath, root: <decoded root> }', () => {
+    expect(parseNewFileKey(newFileKeyInRoot('opfs:ws/a', 'nested/x.koi'))).toEqual({
+      relPath: 'nested/x.koi',
+      root: 'opfs:ws/a',
+    });
+  });
+
+  test('parseNewFileKey() returns null for a plain/legacy key that is neither prefix', () => {
+    expect(parseNewFileKey('order.koi')).toBeNull(); // bare relPath
+    expect(parseNewFileKey('mem://a/model.koi')).toBeNull(); // legacy buffer uri
+  });
+
+  test('a root token containing ":" and "/" survives an encode/decode round trip', () => {
+    const key = newFileKeyInRoot('opfs:ws/a/b', 'nested/x.koi');
+    expect(parseNewFileKey(key)).toEqual({ relPath: 'nested/x.koi', root: 'opfs:ws/a/b' });
+  });
+
+  test('relPathOf()/stage() resolve the real relPath through a new-in: key', () => {
+    const session = createEditSession({});
+    const key = newFileKeyInRoot('rootA', 'nested/x.koi');
+
+    session.stage(key, 'context Extra {}');
+
+    expect(session.relPathOf(key)).toBe('nested/x.koi');
+    expect(session.read(key)).toBe('context Extra {}');
+    expect(session.isNew(key)).toBe(true);
+  });
+
+  test('stage() still rejects an unsafe or non-.koi relPath reached via a new-in: key', () => {
+    const session = createEditSession({});
+    expect(() => session.stage(newFileKeyInRoot('rootA', '/etc/passwd.koi'), 'x')).toThrow(); // absolute
+    expect(() => session.stage(newFileKeyInRoot('rootA', '../escape.koi'), 'x')).toThrow(); // parent traversal
+    expect(() => session.stage(newFileKeyInRoot('rootA', 'notes.txt'), 'x')).toThrow(); // non-.koi
   });
 });

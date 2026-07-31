@@ -14,6 +14,10 @@
 /** Prefix of the synthetic key minted for a file that does not exist in the workspace yet. */
 export const NEW_FILE_KEY_PREFIX = 'new:';
 
+/** Prefix of the synthetic key minted for a file that does not exist in the workspace yet AND
+ *  carries which multi-root workspace root it should be created under (#1132). */
+export const NEW_FILE_IN_ROOT_KEY_PREFIX = 'new-in:';
+
 /**
  * Mint the session key for a brand-new file (one with no buffer uri yet): `new:<relPath>`. The
  * session resolves such a key's relPath by stripping the prefix, so the safety/extension guards in
@@ -23,10 +27,44 @@ export function newFileKey(relPath: string): string {
   return `${NEW_FILE_KEY_PREFIX}${relPath}`;
 }
 
+/**
+ * Mint the session key for a brand-new file that must be created under a specific workspace root of
+ * a multi-root workspace: `new-in:<encoded root>:<relPath>` (#1132). The root is
+ * `encodeURIComponent`-escaped so it cannot itself contain a literal `:` — that guarantees the FIRST
+ * `:` following the root segment is the one separating it from `relPath`, which is what
+ * {@link parseNewFileKey} relies on to split the two back apart deterministically.
+ */
+export function newFileKeyInRoot(root: string, relPath: string): string {
+  return `${NEW_FILE_IN_ROOT_KEY_PREFIX}${encodeURIComponent(root)}:${relPath}`;
+}
+
+/**
+ * Parse a synthetic new-file key minted by {@link newFileKey} or {@link newFileKeyInRoot} back into
+ * its parts. Returns `{ relPath, root: null }` for a plain `new:` key, `{ relPath, root }` (root
+ * decoded) for a `new-in:` key, or `null` for anything else (a legacy/opaque key such as a bare
+ * relPath or a buffer uri) — those are not new-file keys at all and callers should not try to derive
+ * a relPath from their prefix.
+ */
+export function parseNewFileKey(key: string): { relPath: string; root: string | null } | null {
+  if (key.startsWith(NEW_FILE_IN_ROOT_KEY_PREFIX)) {
+    const rest = key.slice(NEW_FILE_IN_ROOT_KEY_PREFIX.length);
+    // The root segment is encodeURIComponent-escaped, so it cannot contain a literal ':' — the
+    // first ':' in `rest` is therefore guaranteed to be the root/relPath separator.
+    const separator = rest.indexOf(':');
+    if (separator === -1) return null; // malformed: no root/relPath separator
+    return { relPath: rest.slice(separator + 1), root: decodeURIComponent(rest.slice(0, separator)) };
+  }
+  if (key.startsWith(NEW_FILE_KEY_PREFIX)) {
+    return { relPath: key.slice(NEW_FILE_KEY_PREFIX.length), root: null };
+  }
+  return null;
+}
+
 /** One staged full-file edit. `key` is the file's opaque session identity (buffer uri, or a
- *  {@link newFileKey} for a brand-new file); `relPath` is its display/validation label and is NOT
- *  unique across the roots of a multi-root workspace. `isNew` distinguishes a brand-new file from a
- *  revision of an existing workspace file (a key that was NOT among the session's `initial` keys). */
+ *  {@link newFileKey}/{@link newFileKeyInRoot} for a brand-new file); `relPath` is its
+ *  display/validation label and is NOT unique across the roots of a multi-root workspace. `isNew`
+ *  distinguishes a brand-new file from a revision of an existing workspace file (a key that was NOT
+ *  among the session's `initial` keys). */
 export interface StagedEdit {
   key: string;
   relPath: string;
@@ -47,8 +85,9 @@ export interface EditSession {
   isNew(key: string): boolean;
   /**
    * The display/validation relPath for `key`: the `display` entry, else the key itself (with a
-   * {@link NEW_FILE_KEY_PREFIX} stripped). The edit-tool dispatch builds its model-facing path index
-   * from this, and the hosts label the staged-workspace validation envelope with it (#472).
+   * {@link NEW_FILE_KEY_PREFIX}/{@link NEW_FILE_IN_ROOT_KEY_PREFIX} stripped, per
+   * {@link parseNewFileKey}). The edit-tool dispatch builds its model-facing path index from this,
+   * and the hosts label the staged-workspace validation envelope with it (#472).
    */
   relPathOf(key: string): string;
   /** One entry per key staged this session, in stage order, each flagged new vs modified. */
@@ -85,8 +124,9 @@ export function assertSafeRelPath(relPath: string): void {
 /**
  * Create an edit-staging area over a snapshot of the current workspace files (`initial`, keyed by the
  * opaque session `key`). `display` maps each key to its workspace-relative path for labels and safety
- * validation; a key without an entry resolves to itself (after stripping a {@link NEW_FILE_KEY_PREFIX}),
- * which is exactly today's single-root behavior where key === relPath. Staged edits live only in this
+ * validation; a key without an entry resolves to itself (after stripping a
+ * {@link NEW_FILE_KEY_PREFIX}/{@link NEW_FILE_IN_ROOT_KEY_PREFIX}, per {@link parseNewFileKey}), which
+ * is exactly today's single-root behavior where key === relPath. Staged edits live only in this
  * session until applied; nothing here mutates `initial`.
  */
 export function createEditSession(
@@ -99,12 +139,13 @@ export function createEditSession(
   const stagedMap = new Map<string, string>();
   let changeVersion = 0;
 
-  /** The display/validation relPath for `key`: the `display` entry, else the key itself (a new-file
-   *  key contributes the relPath it was minted from). */
+  /** The display/validation relPath for `key`: the `display` entry, else the key itself (a
+   *  {@link newFileKey}/{@link newFileKeyInRoot} key contributes the relPath it was minted from, via
+   *  {@link parseNewFileKey}). */
   const resolveRelPath = (key: string): string => {
     const shown = display[key];
     if (shown !== undefined) return shown;
-    return key.startsWith(NEW_FILE_KEY_PREFIX) ? key.slice(NEW_FILE_KEY_PREFIX.length) : key;
+    return parseNewFileKey(key)?.relPath ?? key;
   };
 
   return {
