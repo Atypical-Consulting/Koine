@@ -97,6 +97,42 @@ describe('createEditSession', () => {
     expect(session.isNew('order.koi')).toBe(false); // an existing file
     expect(session.isNew('billing.koi')).toBe(true); // not in the initial snapshot
   });
+
+  test('version() starts at 0 and bumps on stage() — new key and re-staged key alike', () => {
+    const session = createEditSession({ 'order.koi': 'context Order {}' });
+    expect(session.version()).toBe(0);
+
+    session.stage('order.koi', 'context Order { entity Line }');
+    expect(session.version()).toBe(1);
+
+    session.stage('billing.koi', 'context Billing {}');
+    expect(session.version()).toBe(2);
+
+    session.stage('billing.koi', 'context Billing { value Money }'); // re-stage the same key
+    expect(session.version()).toBe(3);
+  });
+
+  test('version() bumps on clear()', () => {
+    const session = createEditSession({ 'order.koi': 'context Order {}' });
+    session.stage('order.koi', 'context Order { entity Line }');
+    const beforeClear = session.version();
+
+    session.clear();
+
+    expect(session.version()).toBe(beforeClear + 1);
+  });
+
+  test('version() is unchanged after a stage() rejected by the safety/extension guards', () => {
+    const session = createEditSession({ 'order.koi': 'context Order {}' });
+    const before = session.version();
+
+    expect(() => session.stage('/etc/passwd', 'x')).toThrow();
+    expect(() => session.stage('../secret.koi', 'x')).toThrow();
+    expect(() => session.stage('README.md', '# hi')).toThrow();
+    expect(() => session.stage('', 'x')).toThrow();
+
+    expect(session.version()).toBe(before);
+  });
 });
 
 describe('multi-root keying (#472): opaque keys + display relPaths', () => {
