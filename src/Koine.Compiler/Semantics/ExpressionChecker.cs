@@ -1203,7 +1203,7 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, field);
 
-        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? EffectiveType(value, scope);
         if (type is null)
         {
             return;
@@ -1231,7 +1231,7 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, field);
 
-        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? EffectiveType(value, scope);
         if (type is null)
         {
             return;
@@ -1254,7 +1254,7 @@ internal sealed class ExpressionChecker
     {
         Check(body, scope, returnType);
 
-        TypeRef? type = ResolveEnumOperand(body, returnType, scope) ?? _resolver.Infer(body, scope);
+        TypeRef? type = ResolveEnumOperand(body, returnType, scope) ?? EffectiveType(body, scope);
         if (type is null)
         {
             return;
@@ -1277,7 +1277,7 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, returnType);
 
-        TypeRef? type = ResolveEnumOperand(value, returnType, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, returnType, scope) ?? EffectiveType(value, scope);
         if (type is null)
         {
             return;
@@ -1300,7 +1300,7 @@ internal sealed class ExpressionChecker
     {
         Check(value, scope, field);
 
-        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? _resolver.Infer(value, scope);
+        TypeRef? type = ResolveEnumOperand(value, field, scope) ?? EffectiveType(value, scope);
         if (type is null)
         {
             return;
