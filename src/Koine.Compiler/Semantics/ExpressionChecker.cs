@@ -682,8 +682,8 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        TypeRef? left = _resolver.Infer(b.Left, scope);
-        TypeRef? right = _resolver.Infer(b.Right, scope);
+        TypeRef? left = EffectiveType(b.Left, scope);
+        TypeRef? right = EffectiveType(b.Right, scope);
         var leftIsNewViolation = IsUnguardedOptional(b.Left, left, scope) && !IsAlreadyInvalid(b.Left);
         var rightIsNewViolation = IsUnguardedOptional(b.Right, right, scope) && !IsAlreadyInvalid(b.Right);
         if (leftIsNewViolation || rightIsNewViolation)
@@ -868,6 +868,64 @@ internal sealed class ExpressionChecker
                 break;
         }
     }
+
+    /// <summary>
+    /// The optionality-aware type of <paramref name="expr"/>, for callers that judge whether a value
+    /// can be null (field-assignment, aggregate-selector, and arithmetic-null-safety checks): identical
+    /// to <see cref="TypeResolver.Infer"/>, except for the self-contained idiom
+    /// <c>if x.isPresent then x else &lt;non-optional&gt;</c> (and its <c>isNone</c> mirror) — guard and
+    /// narrowed read in the SAME expression, no intervening <see cref="LambdaExpr"/> boundary — which
+    /// resolves to the guarded branch's narrowed (non-optional) type instead of the raw declared-type
+    /// answer (#1564). This mirrors how <c>??</c>'s inference already narrows on the fallback's
+    /// optionality. Narrowing stays checker-only and does not feed back into
+    /// <see cref="TypeResolver.Infer"/> itself, so #1556's cross-closure case — where the guard and the
+    /// optional read live in different lambda scopes — is unaffected: the guarded branch there is a
+    /// <see cref="CallExpr"/>, not the bare identifier/member the guard names, so
+    /// <see cref="IsGuardedRead"/> does not match it.
+    /// </summary>
+    public TypeRef? EffectiveType(Expr expr, TypeScope scope)
+    {
+        if (expr is ConditionalExpr { Condition: var cond, Then: var then, Else: var @else })
+        {
+            if (IsGuardedRead(then, cond, positive: true) && _resolver.Infer(@else, scope) is not { IsOptional: true })
+            {
+                return _resolver.Infer(then, scope) is { } t ? t with { IsOptional = false } : null;
+            }
+
+            if (IsGuardedRead(@else, cond, positive: false) && _resolver.Infer(then, scope) is not { IsOptional: true })
+            {
+                return _resolver.Infer(@else, scope) is { } t ? t with { IsOptional = false } : null;
+            }
+        }
+
+        return _resolver.Infer(expr, scope);
+    }
+
+    /// <summary>
+    /// True when <paramref name="branch"/> is exactly the identifier/member-access chain proven present
+    /// (or absent, when <paramref name="positive"/> is <c>false</c>) by <paramref name="cond"/> — an
+    /// <c>isPresent</c>/<c>isNone</c> guard, or its <c>&amp;&amp;</c>/<c>||</c>/<c>!</c> combination,
+    /// mirroring the same combinators <see cref="CollectPresent"/> recognizes.
+    /// </summary>
+    private static bool IsGuardedRead(Expr branch, Expr cond, bool positive) => cond switch
+    {
+        MemberAccessExpr { MemberName: "isPresent" } ma when positive => SameTarget(branch, ma.Target),
+        MemberAccessExpr { MemberName: "isNone" } ma when !positive => SameTarget(branch, ma.Target),
+        UnaryExpr { Op: UnaryOp.Not } u => IsGuardedRead(branch, u.Operand, !positive),
+        BinaryExpr { Op: BinaryOp.And } b when positive =>
+            IsGuardedRead(branch, b.Left, true) || IsGuardedRead(branch, b.Right, true),
+        BinaryExpr { Op: BinaryOp.Or } b when !positive =>
+            IsGuardedRead(branch, b.Left, false) || IsGuardedRead(branch, b.Right, false),
+        _ => false
+    };
+
+    /// <summary>Structural equality (by name, ignoring source spans) for an identifier or member-access chain.</summary>
+    private static bool SameTarget(Expr a, Expr b) => (a, b) switch
+    {
+        (IdentifierExpr x, IdentifierExpr y) => x.Name == y.Name,
+        (MemberAccessExpr x, MemberAccessExpr y) => x.MemberName == y.MemberName && SameTarget(x.Target, y.Target),
+        _ => false
+    };
 
     private void CheckMember(MemberAccessExpr ma, TypeScope scope)
     {
@@ -1074,19 +1132,20 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        TypeRef? selector = _resolver.Infer(lambda.Body, inner);
+        TypeRef? selector = EffectiveType(lambda.Body, inner);
         if (selector is null)
         {
             return;
         }
 
-        // Guard-narrowing (`if x.isPresent then …`) is validator-only bookkeeping (see
-        // IsUnguardedOptional) that never feeds back into TypeResolver, so a selector built from a
-        // guard-narrowed optional operand still infers as optional here — exactly the case where an
+        // Guard-narrowing (`if x.isPresent then …`) is validator-only bookkeeping that never feeds back
+        // into TypeResolver, so EffectiveType only recognizes it when the guard and the narrowed read
+        // live in the SAME expression (#1564) — a selector built from a guard narrowed in an OUTER,
+        // different lambda scope still infers as optional here (#1556), exactly the case where an
         // emitter (e.g. TypeScript, whose own closure-scoped narrowing can't see the guard either)
-        // would otherwise have to render a fold over a possibly-absent element. Reject it uniformly
-        // instead of letting the shape reach any emitter; a selector resolved with '??' first is
-        // already non-optional by the time it gets here, so it's unaffected.
+        // would otherwise have to render a fold over a possibly-absent element. Reject that case
+        // uniformly instead of letting the shape reach any emitter; a selector resolved with '??' first
+        // is already non-optional by the time it gets here, so it's unaffected either way.
         if (selector.IsOptional)
         {
             Report(DiagnosticCodes.AggregateSelectorOptional,
