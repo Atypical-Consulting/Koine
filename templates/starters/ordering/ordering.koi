@@ -20,6 +20,21 @@ context Ordering {
         Placed  -> Shipped
         Placed  -> Cancelled
       }
+
+      command place {
+        requires status == Draft   "only a draft order can be placed"
+        status -> Placed
+      }
+
+      command ship {
+        requires status == Placed  "only a placed order can be shipped"
+        status -> Shipped
+      }
+
+      command cancel {
+        requires status == Placed  "only a placed order can be cancelled"
+        status -> Cancelled
+      }
     }
   }
 }

@@ -14,7 +14,8 @@
     "value objects with computed fields",
     "entities with identity",
     "state machines (states block)",
-    "state transitions"
+    "state transitions",
+    "commands with transition guards"
   ],
   "icon": "📦"
 }

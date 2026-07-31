@@ -121,21 +121,21 @@
                       "name": "Draft",
                       "type": null,
                       "value": "Placed",
-                      "via": null
+                      "via": "place"
                     },
                     {
                       "kind": "transition",
                       "name": "Placed",
                       "type": null,
                       "value": "Shipped",
-                      "via": null
+                      "via": "ship"
                     },
                     {
                       "kind": "transition",
                       "name": "Placed",
                       "type": null,
                       "value": "Cancelled",
-                      "via": null
+                      "via": "cancel"
                     }
                   ],
                   "children": [],
@@ -148,21 +148,21 @@
                   "name": "Draft",
                   "type": null,
                   "value": "Placed",
-                  "via": null
+                  "via": "place"
                 },
                 {
                   "kind": "transition",
                   "name": "Placed",
                   "type": null,
                   "value": "Shipped",
-                  "via": null
+                  "via": "ship"
                 },
                 {
                   "kind": "transition",
                   "name": "Placed",
                   "type": null,
                   "value": "Cancelled",
-                  "via": null
+                  "via": "cancel"
                 }
               ]
             }

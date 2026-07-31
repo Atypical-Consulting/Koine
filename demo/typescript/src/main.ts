@@ -4,22 +4,13 @@
 // smart enum) from templates/starters/ordering and asserts VALUES — never emitted formatting or
 // whitespace — so this demo never churns when the emitter's output shape changes. A clean run (every
 // assertion holds) exits 0; any failed assertion calls `process.exit(1)` so a red run is unmissable.
-//
-// KNOWN GAP (see ../README.md "What this demo does NOT prove"): templates/starters/ordering's
-// `states status { ... }` block has no paired `command` declarations, so — per the documented Koine
-// semantics ("the block by itself emits nothing; its effect appears wherever a command assigns that
-// field") — the emitted `Order` has no transition method and no runtime guard. This demo therefore
-// constructs immutable Order snapshots at each lifecycle value instead of driving a mutator, and does
-// NOT assert that an illegal transition (e.g. Draft -> Shipped) is rejected, because nothing in the
-// emitted code rejects it. This is a property of the *template* (every other Koine template that uses
-// `states` pairs it with commands), not a TypeScript-emitter bug — see the README for the full note.
 
 import { Order } from '../generated/Ordering/Order.js';
 import { OrderLine } from '../generated/Ordering/value-objects/OrderLine.js';
 import { OrderIdNew } from '../generated/Ordering/value-objects/OrderId.js';
 import { ProductId } from '../generated/Ordering/value-objects/ProductId.js';
 import { OrderStatus, OrderStatusMatch } from '../generated/Ordering/enums/OrderStatus.js';
-import { Decimal } from '../generated/runtime.js';
+import { Decimal, DomainInvariantViolationError } from '../generated/runtime.js';
 
 // Minimal ambient declaration so this driver type-checks with plain `tsc --strict` and no
 // `@types/node` install (this demo deliberately has zero npm dependencies — see run.sh). Node
@@ -71,8 +62,7 @@ const differentOrder = new Order(OrderIdNew(), [line1, line2]);
 assert(!draftOrder.equals(differentOrder), 'two Order instances with different ids must not be equal');
 
 // --- OrderStatus: the Draft -> Placed -> Shipped lifecycle values are all constructible and
-// distinguishable (see the KNOWN GAP note above the imports: this does not exercise a runtime
-// transition guard, because templates/starters/ordering emits none). ---
+// distinguishable. ---
 const placedOrder = new Order(orderId, [line1, line2], OrderStatus.Placed);
 const shippedOrder = new Order(orderId, [line1, line2], OrderStatus.Shipped);
 
@@ -87,6 +77,23 @@ const matched = OrderStatusMatch(shippedOrder.status, {
   cancelled: () => 'unexpected-cancelled',
 });
 assert(matched === 'shipped', `OrderStatusMatch should route a Shipped order to its 'shipped' case, got '${matched}'`);
+
+// --- State machine: a legal Draft -> Placed -> Shipped walk through the generated mutators, and an
+// illegal Draft -> Shipped transition rejected by the generated runtime guard. ---
+const walkedOrder = new Order(OrderIdNew(), [line1, line2]);
+walkedOrder.place();
+assert(walkedOrder.status.name === 'Placed', `place() should transition Draft -> Placed, got '${walkedOrder.status.name}'`);
+walkedOrder.ship();
+assert(walkedOrder.status.name === 'Shipped', `ship() should transition Placed -> Shipped, got '${walkedOrder.status.name}'`);
+
+const illegalOrder = new Order(OrderIdNew(), [line1, line2]);
+let illegalTransitionRejected = false;
+try {
+  illegalOrder.ship();
+} catch (error) {
+  illegalTransitionRejected = error instanceof DomainInvariantViolationError;
+}
+assert(illegalTransitionRejected, 'ship() on a Draft order should throw DomainInvariantViolationError (Draft -> Shipped is not a legal transition)');
 
 if (failures > 0) {
   console.error(`${failures} assertion(s) failed.`);

@@ -5,16 +5,6 @@
 //! formatting or whitespace -- so this demo never churns when the emitter's output shape changes.
 //! A clean run (every assertion holds) exits `0`; any failed assertion calls
 //! `std::process::exit(1)` so a red run is unmissable.
-//!
-//! KNOWN GAPS (see reference/README.md and ../README.md "What this demo does NOT prove"):
-//!
-//! 1. `templates/starters/ordering`'s `states status { ... }` block has no paired `command`
-//!    declarations, so -- per the documented Koine semantics ("the block by itself emits nothing;
-//!    its effect appears wherever a command assigns that field") -- the emitted `Order` has no
-//!    transition method and no runtime guard. This demo therefore does not assert that an illegal
-//!    transition (e.g. Draft -> Shipped) is rejected, because nothing in the emitted code rejects
-//!    it. This is a property of the *template*, not a Rust-emitter bug -- identical to the
-//!    TypeScript, Python, and PHP demos of this same template.
 
 use koine_domain::koine_runtime::Decimal;
 use koine_domain::ordering::{Order, OrderId, OrderLine, OrderStatus, ProductId};
@@ -150,6 +140,32 @@ fn main() {
     check(
         matched == "shipped",
         &format!("OrderStatus::match_ should route Shipped to its 'shipped' case, got '{matched}'"),
+    );
+
+    // --- State machine: a legal Draft -> Placed -> Shipped walk through the generated mutators,
+    // and an illegal Draft -> Shipped transition rejected by the generated runtime guard. Rust
+    // commands return `Result`, not panic, so the illegal transition is asserted via `.is_err()`
+    // rather than an unwind. ---
+    let walk_id = OrderId::new("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+    let mut walked_order = Order::new(walk_id, vec![line1.clone(), line2.clone()], None)
+        .expect("walked_order declares no invariants, so construction cannot fail");
+    walked_order.place().expect("place() should succeed on a fresh Draft order");
+    check(
+        walked_order.status() == OrderStatus::Placed,
+        &format!("place() should transition Draft -> Placed, got {:?}", walked_order.status()),
+    );
+    walked_order.ship().expect("ship() should succeed on a Placed order");
+    check(
+        walked_order.status() == OrderStatus::Shipped,
+        &format!("ship() should transition Placed -> Shipped, got {:?}", walked_order.status()),
+    );
+
+    let illegal_id = OrderId::new("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    let mut illegal_order = Order::new(illegal_id, vec![line1.clone(), line2.clone()], None)
+        .expect("illegal_order declares no invariants, so construction cannot fail");
+    check(
+        illegal_order.ship().is_err(),
+        "ship() on a Draft order should return Err (Draft -> Shipped is not a legal transition)",
     );
 
     if failures > 0 {
