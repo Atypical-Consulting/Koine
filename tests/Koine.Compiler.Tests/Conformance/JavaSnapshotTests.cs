@@ -201,4 +201,35 @@ public class JavaSnapshotTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 3) — an entity <c>states</c> machine: the reviewed snapshot locks the
+    /// reachability guard preceding each governed transition (a multi-source target, a <c>when</c>-guarded
+    /// rule, and the single-source guard suppressed because a <c>requires</c> already states it).
+    /// </summary>
+    [Fact]
+    public Task Java_state_machine_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaBehaviorsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The reachability guards must be real Java: a <c>when</c> guard is a translated boolean expression
+    /// spliced into an <c>if</c>, which is exactly the kind of shape a string assertion can accept and
+    /// <c>javac</c> reject (an unboxed <c>Optional</c>, a missing paren, a non-boolean operand).
+    /// </summary>
+    [Fact]
+    public void Java_state_machine_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaBehaviorsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
