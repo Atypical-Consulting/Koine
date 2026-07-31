@@ -158,7 +158,9 @@ function makeKnownCatalogSources(): LauncherSources {
  * Applies/restores `document.documentElement.dataset.theme` around a story (the app's real theme
  * mechanism, `src/settings/theme.ts`) so a story can force the light or dark `--koi-*` token set
  * (koine-ui/src/tokens.css: `html[data-theme='light']` overrides every token; dark is the `:root`
- * default). Sets the dataset attribute in a `useEffect` (before paint) and restores whatever value was
+ * default). Sets the dataset attribute in a `useEffect` (just after the story's first paint — every
+ * `play` below `waitFor`s well past that point, so the theme is always applied before any assertion
+ * runs) and restores whatever value was
  * there before on cleanup — never a bare delete — so this can't leak across stories sharing a page
  * session regardless of mount/unmount order.
  */
@@ -214,8 +216,12 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** The empty-query curated default set ("Top hits" + "Recent", 3 `.lx-item` rows drawn from the known
- *  catalog fixture — 2 symbols + 1 commit) on the app's dark theme. Applies `withTheme('dark')`
+/** The empty-query curated default set ("Top hits" + "Recent") on the app's dark theme — per
+ *  `defaults.ts`, up to `TOP_HITS_LIMIT` (4) symbol-cat entries plus up to `RECENT_LIMIT` (4) commits
+ *  (or files, with no git history), so the known catalog fixture (5 symbol entries, 1 commit) renders
+ *  5 `.lx-item` rows (4 symbols + 1 commit) — not asserted on an exact count here since that's
+ *  incidental to what this story guards; see {@link Results} for the exact-count DDD-chip assertions.
+ *  Applies `withTheme('dark')`
  *  explicitly (rather than relying on it being the unstyled default) so this story can't inherit a
  *  leaked `dataset.theme` from an earlier story in the same browser session, and for symmetry with
  *  {@link EmptyLight}. The `play` waits for the async catalog join (`buildCatalog` awaiting
@@ -326,8 +332,10 @@ export const CommandMode: Story = {
 };
 
 /** The same bare-`>` Commands-mode switch as {@link CommandMode}, forced to the light theme
- *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
- *  for the `.lx-modepill` on the light `--koi-*` token set. */
+ *  (`withTheme('light')`) on the matching `light` background. Note `.lx-modepill-label`'s own
+ *  color-contrast stays excluded by the file-level `meta.parameters.a11y` gate (#1677) like every
+ *  other story here — this still exercises the rest of the light-theme render (layout, other text)
+ *  under Chromium axe. */
 export const CommandModeLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
@@ -364,8 +372,11 @@ export const SymbolMode: Story = {
 };
 
 /** The same `@Or` Symbols-mode switch as {@link SymbolMode}, forced to the light theme
- *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
- *  for the `.lx-modepill` on the light `--koi-*` token set. */
+ *  (`withTheme('light')`) on the matching `light` background. Note `.lx-modepill-label`'s own
+ *  color-contrast stays excluded by the file-level `meta.parameters.a11y` gate (#1677) like every
+ *  other story here — this still exercises the rest of the light-theme render (layout, other text,
+ *  and the matched `Order` row's own contrast outside the excluded `.lx-kind`/`.lx-sub`) under
+ *  Chromium axe. */
 export const SymbolModeLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
@@ -407,7 +418,8 @@ export const EventMode: Story = {
 
 /** The same bare-`#` Events-mode switch as {@link EventMode}, forced to the light theme
  *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
- *  for the `.lx-modepill` and `.lx-group-label` on the light `--koi-*` token set. */
+ *  genuinely covers `.lx-group-label` here (unexcluded); `.lx-modepill-label`'s own contrast stays
+ *  excluded by the file-level `meta.parameters.a11y` gate (#1677) like every other story here. */
 export const EventModeLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
@@ -447,8 +459,10 @@ export const PreviewPopulated: Story = {
 };
 
 /** The same auto-populated preview pane as {@link PreviewPopulated}, forced to the light theme
- *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
- *  for `.lx-preview` (including its `.pv-head .lx-kind` chip) on the light `--koi-*` token set. */
+ *  (`withTheme('light')`) on the matching `light` background. Note the preview's own `.pv-head
+ *  .lx-kind` chip shares the same excluded selector as the result rows' chips (`meta.parameters.a11y`
+ *  gate, #1672) — this still exercises the rest of `.lx-preview`'s light-theme render under Chromium
+ *  axe. */
 export const PreviewPopulatedLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
