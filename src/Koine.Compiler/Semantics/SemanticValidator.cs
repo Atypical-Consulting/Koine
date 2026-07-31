@@ -702,7 +702,7 @@ public sealed class SemanticValidator
                 CqrsValidator.ValidateReadModel(rm, index, resolver, enumMembers, diagnostics);
                 break;
             case QueryDecl q:
-                CqrsValidator.ValidateQuery(q, index, diagnostics);
+                CqrsValidator.ValidateQuery(q, index, resolver, diagnostics);
                 break;
         }
     }
@@ -796,10 +796,12 @@ public sealed class SemanticValidator
             if (m.Initializer is not null)
             {
                 // A constant default for an enum-typed field must name a member of
-                // THAT enum (not just any enum in the model).
+                // THAT enum (not just any enum in the model). Resolved against the member's
+                // own declaring context (#1711) so a same-named, differently-kinded type
+                // declared elsewhere can't shadow it via the flat lookup.
                 if (m.Initializer is IdentifierExpr enumDefault
-                    && index.Classify(m.Type.Name) == TypeKind.Enum
-                    && index.TryGetDecl(m.Type.Name, out TypeDecl decl)
+                    && index.Classify(resolver.Context, m.Type.Name) == TypeKind.Enum
+                    && index.TryGetDecl(resolver.Context, m.Type.Name, out TypeDecl decl)
                     && decl is EnumDecl en)
                 {
                     if (!en.MemberNames.Contains(enumDefault.Name))

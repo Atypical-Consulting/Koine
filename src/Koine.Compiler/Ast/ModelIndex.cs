@@ -682,6 +682,23 @@ public sealed class ModelIndex
 
     public bool TryGetDecl(string typeName, out TypeDecl decl) => _byName.TryGetValue(typeName, out decl!);
 
+    /// <summary>
+    /// Resolves a type's declaration with <paramref name="context"/>-aware resolution (R13.2),
+    /// mirroring <see cref="Classify(string?, string)"/>: the named type is resolved in that
+    /// context's scope first (local, then an unambiguous import), falling back to the global,
+    /// flat lookup — so a same-named type declared in another context can't be returned instead
+    /// (#1711).
+    /// </summary>
+    public bool TryGetDecl(string? context, string typeName, out TypeDecl decl)
+    {
+        if (context is not null && TryGetDeclIn(context, typeName, out decl))
+        {
+            return true;
+        }
+
+        return TryGetDecl(typeName, out decl);
+    }
+
     /// <summary>All names a type reference could legally resolve to (for suggestions).</summary>
     public IEnumerable<string> CandidateTypeNames =>
         _byName.Keys

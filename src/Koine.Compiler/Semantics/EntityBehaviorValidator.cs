@@ -103,7 +103,7 @@ internal static class EntityBehaviorValidator
                         else
                         {
                             checker.CheckTransitionValue(tr.Value, target.Type, tr.Field, scope);
-                            CheckTransitionReachable(entity, tr, target, index, diagnostics);
+                            CheckTransitionReachable(entity, tr, target, index, resolver, diagnostics);
                         }
                         break;
 
@@ -525,8 +525,21 @@ internal static class EntityBehaviorValidator
     /// When the transitioned field has a state machine and the value is a literal
     /// state of that enum, flags a target that NO rule can reach (always-illegal).
     /// </summary>
+    /// <remarks>
+    /// The <c>index.Classify(resolver.Context, ...)</c> call below is context-threaded per #1711, but
+    /// this specific site cannot be pinned end-to-end: the guard also calls
+    /// <see cref="ModelIndex.EnumsDeclaring"/>, which is populated by walking
+    /// <see cref="ModelIndex.AllTypes"/> — the SAME flat, last-write-wins <c>_byName</c> map
+    /// <c>Classify</c>'s single-arg overload used to read from. Any model that collides the bound
+    /// field's enum by name (to trigger the ORIGINAL bug this fix closes) necessarily also evicts that
+    /// enum from <c>AllTypes()</c>, so <c>EnumsDeclaring</c> stays blind to it regardless of this fix
+    /// (#1632, explicitly out of this issue's scope — see #1644 for the same fusion in
+    /// <c>ConcreteEnumType</c>'s consumers). Verified empirically: the collision repro that proves the
+    /// sibling <see cref="ValidateStates"/> fix (whose guard does NOT consult <c>EnumsDeclaring</c>)
+    /// still returns early here every time, with or without this fix.
+    /// </remarks>
     private static void CheckTransitionReachable(
-        EntityDecl entity, Transition tr, Member target, ModelIndex index, List<Diagnostic> diagnostics)
+        EntityDecl entity, Transition tr, Member target, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         StatesDecl? states = null;
         foreach (StatesDecl s in entity.States)
@@ -548,7 +561,9 @@ internal static class EntityBehaviorValidator
             return; // dynamic target: only a runtime guard applies
         }
 
-        if (index.Classify(target.Type.Name) != TypeKind.Enum
+        // Resolved against the entity's own declaring context (#1711) so a same-named,
+        // differently-kinded type declared elsewhere can't shadow it via the flat lookup.
+        if (index.Classify(resolver.Context, target.Type.Name) != TypeKind.Enum
             || !index.EnumsDeclaring(stateRef.Name).Contains(target.Type.Name))
         {
             return; // not a literal state of the bound enum (other errors cover it)
@@ -614,7 +629,9 @@ internal static class EntityBehaviorValidator
                     $"states binds to '{states.Field}', which is not a field of '{entity.Name}'", states.Span));
                 continue;
             }
-            if (index.Classify(field.Type.Name) != TypeKind.Enum)
+            // Resolved against the entity's own declaring context (#1711) so a same-named,
+            // differently-kinded type declared elsewhere can't shadow it via the flat lookup.
+            if (index.Classify(resolver.Context, field.Type.Name) != TypeKind.Enum)
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidStatesBinding,
                     $"states field '{states.Field}' must be an enum, but is '{field.Type.Name}'", states.Span));
@@ -622,7 +639,9 @@ internal static class EntityBehaviorValidator
             }
 
             var enumName = field.Type.Name;
-            var validStates = index.TryGetDecl(enumName, out var decl) && decl is EnumDecl en
+            // Same context-aware resolution as the check above, so the enum whose members seed
+            // `validStates` is the field's OWN enum, not a same-named one shadowing it (#1711).
+            var validStates = index.TryGetDecl(resolver.Context, enumName, out var decl) && decl is EnumDecl en
                 ? new HashSet<string>(en.MemberNames, StringComparer.Ordinal)
                 : new HashSet<string>(StringComparer.Ordinal);
 

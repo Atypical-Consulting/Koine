@@ -155,6 +155,34 @@ public class SemanticTests
         diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownEnumMemberForType && d.Message.Contains("'Y'"));
     }
 
+    [Fact]
+    public void Enum_default_resolves_against_its_own_context_when_a_later_context_reuses_the_type_name()
+    {
+        // #1711 sibling: the enum-default-initializer check's `index.Classify(m.Type.Name)` /
+        // `index.TryGetDecl(m.Type.Name, ...)` were flat and context-blind. Shipping's later,
+        // differently-kinded "Status" was overwriting Freight's own enum "Status" in ModelIndex's
+        // flat lookup, misclassifying Freight.Item's default and falsely reporting a bogus diagnostic.
+        const string src = """
+            context Freight {
+              enum Status {
+                Active
+                Inactive
+              }
+              value Item {
+                state: Status = Active
+              }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+            """;
+
+        Validate(src).ShouldBeEmpty();
+    }
+
     /// <summary>
     /// Issue #1498 (Gap A): a bogus member access on an ENUM-typed receiver — as opposed to the
     /// qualified <c>EnumType.Member</c> form, which <c>CheckMember</c> already validates — must be

@@ -157,6 +157,18 @@ public class R7StateMachineTests
     }
 
     [Fact]
+    public void States_field_type_resolves_against_its_own_context_when_a_later_context_reuses_the_type_name()
+    {
+        // #1711 sibling: ValidateStates's `index.Classify(field.Type.Name)` was flat and
+        // context-blind. Other's later, differently-kinded "S" was overwriting C's own enum "S" in
+        // ModelIndex's flat lookup, falsely rejecting a genuinely valid states binding.
+        const string src =
+            "context C {\n  enum S { A, B }\n  entity E identified by EId {\n    s: S = A\n    states s { A -> B }\n  }\n}\n" +
+            "context Other {\n  value S { code: Int }\n}\n";
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.InvalidStatesBinding);
+    }
+
+    [Fact]
     public void Guard_referencing_unknown_identifier_is_reported()
     {
         const string src =
