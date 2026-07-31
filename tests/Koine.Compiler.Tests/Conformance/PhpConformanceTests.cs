@@ -872,4 +872,57 @@ public class PhpConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1587 (PHP twin of #1558's TypeScript fix): bare <c>Int / Int</c> division in an ordinary
+    /// derived member — no value object scalar method involved, just a plain binary expression — must
+    /// truncate toward zero, matching the value-object scalar-divide rule #938 already established. Before
+    /// the fix, <c>TryWriteValueBinary</c> declines (neither operand is Decimal or a Koine value object)
+    /// and the plain-numeric fallback renders a bare PHP <c>/</c>; because PHP's <c>/</c> promotes to
+    /// <c>float</c> on any inexact division and the emitted method is declared to return <c>int</c> under
+    /// <c>declare(strict_types=1)</c>, this is a hard runtime <c>TypeError</c> — worse than TypeScript's
+    /// silent fraction. A phpstan-only check cannot see this (the static return type is nominally
+    /// <c>int</c>); only executing the emitted PHP proves it. Skipped (not failed) when no <c>php</c>
+    /// interpreter is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Int_field_derived_division_truncates_toward_zero_at_runtime()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                qty:  Int
+                half: Int = qty / 2
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Shop/ValueObjects/Order.php';
+
+            $positive = new Koine\Shop\ValueObjects\Order(7);
+            if ($positive->half() !== 3) {
+                fwrite(STDERR, "positive half expected 3, got " . var_export($positive->half(), true) . "\n");
+                exit(1);
+            }
+
+            $negative = new Koine\Shop\ValueObjects\Order(-7);
+            if ($negative->half() !== -3) {
+                fwrite(STDERR, "negative half expected -3, got " . var_export($negative->half(), true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+
+        run.Ok.ShouldBeTrue(
+            "Int/Int derived-member division should truncate toward zero (7/2==3, -7/2==-3), not throw:\n"
+            + string.Join("\n", run.Errors));
+    }
 }
