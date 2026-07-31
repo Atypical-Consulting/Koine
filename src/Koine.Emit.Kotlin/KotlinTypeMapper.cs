@@ -120,7 +120,7 @@ internal sealed class KotlinTypeMapper
     /// worth qualifying). Branded ID types are excluded: a foreign id is re-materialized locally by the
     /// emitter's unowned-id pass, never package-qualified.
     /// </summary>
-    private bool IsQualifiable(string koineName) => _index.Classify(koineName) is
+    private bool IsQualifiable(string koineName) => _index.Classify(_context, koineName) is
         TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
         or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
 
@@ -144,5 +144,5 @@ internal sealed class KotlinTypeMapper
     public static bool IsCollection(TypeRef type) => IsList(type) || IsSet(type) || IsMap(type);
 
     /// <summary>True when the member's type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier ?? _context, type.Name) == TypeKind.Enum;
 }

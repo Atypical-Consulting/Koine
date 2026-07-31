@@ -125,7 +125,7 @@ public sealed partial class KotlinEmitter
         if (m.Initializer is not null)
         {
             sb.Append(" = ").Append(translator.Translate(
-                m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index)));
+                m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context)));
         }
 
         sb.Append(",\n");
@@ -269,7 +269,7 @@ public sealed partial class KotlinEmitter
         StringBuilder sb, KotlinEmitContext emit, Member m, KotlinTypeMapper typeMapper, KotlinExpressionTranslator translator)
     {
         WriteKdoc(sb, m.Doc, Indent);
-        var body = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index));
+        var body = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context));
         sb.Append(Indent).Append("val ").Append(KotlinNaming.ToMemberName(m.Name)).Append(": ")
           .Append(typeMapper.Map(m.Type)).Append(" get() = ").Append(body).Append('\n');
     }
@@ -599,6 +599,6 @@ public sealed partial class KotlinEmitter
     };
 
     /// <summary>The enum type expected for a member's value (so a bare enum member reference qualifies), or null.</summary>
-    private static string? EnumExpected(Member m, ModelIndex index) =>
-        index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+    private static string? EnumExpected(Member m, ModelIndex index, string? context) =>
+        index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 }

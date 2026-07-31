@@ -95,6 +95,9 @@ internal sealed class KotlinExpressionTranslator
     /// <summary>The semantic type an expression infers to in this type's scope (locals included).</summary>
     public TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
 
+    /// <summary>The bounded context this translator resolves identifiers within (null = global/legacy mode).</summary>
+    internal string? Context => _resolver.Context;
+
     /// <summary>Translates an expression to a Kotlin expression string (no redundant outer parentheses).</summary>
     public string Translate(Expr expr, NameMode mode = NameMode.Parameter, string? expectedEnum = null)
     {
@@ -449,7 +452,8 @@ internal sealed class KotlinExpressionTranslator
     }
 
     /// <summary>True when a type classifies as a Koine value object (so its arithmetic lowers to a method call).</summary>
-    private bool IsValueObject(TypeRef? type) => type is not null && _index.Classify(type.Name) == TypeKind.Value;
+    private bool IsValueObject(TypeRef? type) =>
+        type is not null && _index.Classify(type.Qualifier ?? _resolver.Context, type.Name) == TypeKind.Value;
 
     /// <summary>Renders one operand of a plain-infix binary, dropping the redundant parentheses precedence/associativity does not require.</summary>
     private void WriteBinaryChild(Expr expr, BinaryOp parentOp, bool rightOperand, StringBuilder sb)
@@ -553,8 +557,9 @@ internal sealed class KotlinExpressionTranslator
             return;
         }
 
-        // (5) A bare enum *type* reference (the qualifier of `OrderStatus.Draft`).
-        if (_index.Classify(name) == TypeKind.Enum)
+        // (5) A bare enum *type* reference (the qualifier of `OrderStatus.Draft`). Context-first (R13.2): a
+        // same-named enum in another context must not shadow this one's own declaration (#1625).
+        if (_index.Classify(_resolver.Context, name) == TypeKind.Enum)
         {
             sb.Append(KotlinNaming.ToTypeName(name));
             return;
@@ -566,9 +571,10 @@ internal sealed class KotlinExpressionTranslator
 
     private void WriteMemberAccess(MemberAccessExpr ma, StringBuilder sb)
     {
-        // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus.Cancelled`.
+        // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus.Cancelled`. Context-first
+        // (R13.2): a same-named enum in another context must not shadow this one's own declaration (#1625).
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(KotlinNaming.ToTypeName(qualifier.Name)).Append('.').Append(KotlinNaming.EscapeIdentifier(ma.MemberName));
             return;
@@ -702,7 +708,7 @@ internal sealed class KotlinExpressionTranslator
     private void WriteSum(CallExpr call, string target, StringBuilder sb)
     {
         TypeRef? selector = InferSelectorType(call);
-        if (selector is not null && _index.Classify(selector.Name) == TypeKind.Value)
+        if (selector is not null && _index.Classify(selector.Qualifier ?? _resolver.Context, selector.Name) == TypeKind.Value)
         {
             sb.Append(target).Append(".map { ").Append(LambdaParam(call)).Append(" -> ");
             WriteLambdaBody(call, sb);
