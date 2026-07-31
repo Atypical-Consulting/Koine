@@ -247,7 +247,7 @@ public sealed partial class TypeScriptEmitter
     /// </summary>
     private IEnumerable<(string Symbol, string Module)> FinderParamImports(TsEmitContext emit, string contextName, string folder, TypeRef paramType, TypeScriptTypeMapper typeMapper)
     {
-        var mapped = typeMapper.Map(paramType);
+        var mapped = typeMapper.Map(paramType, contextName);
         foreach (Match m in IdentifierRegex.Matches(mapped))
         {
             var symbol = m.Value;

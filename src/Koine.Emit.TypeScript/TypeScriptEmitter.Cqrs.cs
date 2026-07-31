@@ -35,6 +35,7 @@ public sealed partial class TypeScriptEmitter
     private EmittedFile EmitApplicationService(TsEmitContext emit, ServiceDecl svc, string ns, TypeScriptTypeMapper typeMapper)
     {
         var iface = "I" + TypeScriptNaming.ToPascalCase(svc.Name);
+        var context = ContextOf(ns);
         var sb = new StringBuilder();
         WriteDoc(sb, svc.Doc ?? $"Application-service boundary for the {svc.Name} use cases.", "");
         sb.Append("export interface ").Append(iface).Append(" {\n");
@@ -49,9 +50,9 @@ public sealed partial class TypeScriptEmitter
 
             first = false;
             WriteDoc(sb, uc.Doc, Indent);
-            var ret = uc.ReturnType is null ? "Promise<void>" : $"Promise<{typeMapper.Map(uc.ReturnType)}>";
+            var ret = uc.ReturnType is null ? "Promise<void>" : $"Promise<{typeMapper.Map(uc.ReturnType, context)}>";
             var paramList = string.Join(", ", uc.Parameters.Select(p =>
-                $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type)}"));
+                $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type, context)}"));
             sb.Append(Indent).Append(TypeScriptNaming.ToCamelCase(uc.Name))
               .Append('(').Append(paramList).Append("): ").Append(ret).Append(";\n");
         }
@@ -97,12 +98,12 @@ public sealed partial class TypeScriptEmitter
             if (f.Projection is null)
             {
                 // Direct field: type and value come from the like-named source member.
-                tsType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t) ? typeMapper.Map(t) : "unknown";
+                tsType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t) ? typeMapper.Map(t, context) : "unknown";
                 rhs = "src." + prop;
             }
             else
             {
-                tsType = typeMapper.Map(f.Type!);
+                tsType = typeMapper.Map(f.Type!, context);
                 var expectedEnum = index.Classify(f.Type!.Qualifier ?? context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, TypeScriptExpressionTranslator.NameMode.Property, expectedEnum);
             }
@@ -177,7 +178,8 @@ public sealed partial class TypeScriptEmitter
     private EmittedFile EmitQuery(TsEmitContext emit, QueryDecl q, string ns, TypeScriptTypeMapper typeMapper)
     {
         var name = TypeScriptNaming.ToPascalCase(q.Name);
-        var resultType = typeMapper.Map(q.ResultType);
+        var context = ContextOf(ns);
+        var resultType = typeMapper.Map(q.ResultType, context);
 
         var sb = new StringBuilder();
         WriteDoc(sb, q.Doc ?? $"Query returning {resultType}.", "");
@@ -185,7 +187,7 @@ public sealed partial class TypeScriptEmitter
         foreach (Param p in q.Criteria)
         {
             sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(p.Name)).Append(": ")
-              .Append(typeMapper.Map(p.Type)).Append(";\n");
+              .Append(typeMapper.Map(p.Type, context)).Append(";\n");
         }
         sb.Append("}\n");
 

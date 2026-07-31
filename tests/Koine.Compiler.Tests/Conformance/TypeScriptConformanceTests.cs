@@ -844,4 +844,55 @@ public class TypeScriptConformanceTests
             "a same-named enum in a sibling context must not misclassify Billing.Status's own "
             + "qualified reference:\n" + string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1638: <c>TypeScriptTypeMapper</c> is constructed ONCE per compile and reused across every
+    /// context, so it carries no ambient context of its own — only the <c>TypeRef.Qualifier</c>, which
+    /// the parser leaves <c>null</c> for the common, BARE (unqualified) same-context reference. Unlike
+    /// the qualified-reference case pinned above (<c>Status.Open</c>, which already carries a non-null
+    /// <c>Qualifier</c>), a plain field declaration such as <c>status: Status</c> has NO qualifier at
+    /// all, so <c>MapBase</c>/<c>IsEnum</c>'s <c>_index.Classify(type.Qualifier, type.Name)</c> degrades
+    /// straight to the flat, context-blind, last-write-wins <c>Classify(typeName)</c> fallback. Here
+    /// <c>Billing</c> (declared FIRST) owns an ENUM named <c>Status</c>; a differently-KINDED sibling
+    /// <c>Status</c> (a VALUE OBJECT) is declared in <c>Shipping</c> AFTER it, so the flat index's
+    /// last-write-wins registration resolves bare <c>Classify("Status")</c> to Shipping's value object,
+    /// not Billing's own enum. Before the fix, <c>Invoice.status</c> — a member of <c>Billing</c>
+    /// referencing <c>Billing</c>'s OWN enum by its bare name — is misclassified as non-enum, so the
+    /// emitted field type is the bare <c>Status</c> (the enum's exported <c>const</c> OBJECT, not a
+    /// type) instead of the correct <c>StatusMember</c> interface: a genuine <c>tsc --strict</c> error
+    /// ("'Status' refers to a value, but is being used as a type here"), not merely a stylistic
+    /// mismatch. This is the exact gap the qualified-reference test above does NOT exercise, since a
+    /// qualified reference already carries a non-null <c>Qualifier</c>.
+    /// </summary>
+    [Fact]
+    public void Bare_unqualified_member_field_resolves_the_correct_context_for_a_same_named_sibling_type()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status {
+                Open
+                Closed
+              }
+              value Invoice {
+                status: Status
+              }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "a bare, unqualified reference to Billing's OWN enum Status must not misclassify against "
+            + "Shipping's differently-kinded, same-named sibling Status:\n" + string.Join("\n", check.Errors));
+    }
 }
