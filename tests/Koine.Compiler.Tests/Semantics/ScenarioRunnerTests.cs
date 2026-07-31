@@ -443,4 +443,118 @@ public class ScenarioRunnerTests
         precondition.Outcome.ShouldBe(CheckOutcome.Failed);
         result.Ok.ShouldBeFalse();
     }
+
+    [Fact]
+    public void Requires_lambda_sum_selector_passes_when_the_total_is_within_budget()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkBudget",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(3)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_sum_selector_fails_when_the_total_exceeds_the_budget()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkBudget",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(6), QtyLine(7)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Requires_lambda_min_selector_passes_when_the_smallest_line_meets_the_floor()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkMinimum",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(1), QtyLine(4)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_min_selector_fails_when_the_smallest_line_is_below_the_floor()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkMinimum",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(0), QtyLine(4)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Requires_lambda_max_selector_passes_when_the_largest_line_is_within_the_ceiling()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkCeiling",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(3), QtyLine(9)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_max_selector_fails_when_the_largest_line_exceeds_the_ceiling()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkCeiling",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(3), QtyLine(11)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
 }
