@@ -116,7 +116,7 @@ public sealed partial class PythonEmitter
               .Append("(self) -> ").Append(typeMapper.Map(m.Type)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append('\n');
+              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');
         }
 
         // Commands: mutating instance methods (guards -> transitions -> re-check -> emit -> return).

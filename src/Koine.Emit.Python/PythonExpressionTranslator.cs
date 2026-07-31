@@ -89,6 +89,13 @@ internal sealed class PythonExpressionTranslator
         _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
+    /// <summary>
+    /// The declaring context this translator resolves types against (R13.2) — the same context
+    /// source callers thread into an <c>expectedEnum</c> hint so a same-named enum in another
+    /// context can't be misclassified.
+    /// </summary>
+    public string? Context => _resolver.Context;
+
     public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
 
     public void PopLocal(string name) => _locals.PopLocal(name);
@@ -173,7 +180,13 @@ internal sealed class PythonExpressionTranslator
     private string? EnumTypeName(Expr expr)
     {
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
-        return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
+        if (type is null)
+        {
+            return null;
+        }
+
+        string? context = type.Qualifier ?? _resolver.Context;
+        return _index.Classify(context, type.Name) == TypeKind.Enum ? type.Name : null;
     }
 
     private void Write(Expr expr, StringBuilder sb)
@@ -476,7 +489,7 @@ internal sealed class PythonExpressionTranslator
         }
 
         // (5) An enum *type* reference (the qualifier of `OrderStatus.Draft`): the PascalCase class.
-        if (_index.Classify(name) == TypeKind.Enum)
+        if (_index.Classify(_resolver.Context, name) == TypeKind.Enum)
         {
             sb.Append(PythonNaming.ToPascalCase(name));
             return;
@@ -490,7 +503,7 @@ internal sealed class PythonExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus.CANCELLED`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(PythonNaming.ToPascalCase(qualifier.Name)).Append('.')
               .Append(PythonNaming.ToUpperSnake(ma.MemberName));
