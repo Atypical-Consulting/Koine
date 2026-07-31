@@ -344,19 +344,27 @@ public sealed partial class CSharpEmitter
 
         sb.Append("\n{\n");
         sb.Append(Indent).Append("private readonly IUnitOfWork _unitOfWork;\n");
+
+        // Under --app-dispatch-events the handler takes one extra dependency, and which one depends
+        // on where the commit happens: a plain handler commits itself and so dispatches inline, while
+        // a MediatR handler defers the commit to TransactionBehavior and merely parks its events.
+        var (extraType, extraName) = _options.ApplicationMediatr
+            ? ("IDomainEventAccumulator", "accumulator")
+            : ("IDomainEventDispatcher", "dispatcher");
         if (dispatchEvents)
         {
-            sb.Append(Indent).Append("private readonly IDomainEventDispatcher _dispatcher;\n");
+            sb.Append(Indent).Append("private readonly ").Append(extraType).Append(" _").Append(extraName).Append(";\n");
         }
 
         sb.Append('\n');
         if (dispatchEvents)
         {
             // Two dependencies outgrow the expression-bodied constructor the single-dependency shape uses.
-            sb.Append(Indent).Append("public ").Append(handlerType).Append("(IUnitOfWork unitOfWork, IDomainEventDispatcher dispatcher)\n");
+            sb.Append(Indent).Append("public ").Append(handlerType)
+              .Append("(IUnitOfWork unitOfWork, ").Append(extraType).Append(' ').Append(extraName).Append(")\n");
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("_unitOfWork = unitOfWork;\n");
-            sb.Append(Indent).Append(Indent).Append("_dispatcher = dispatcher;\n");
+            sb.Append(Indent).Append(Indent).Append('_').Append(extraName).Append(" = ").Append(extraName).Append(";\n");
             sb.Append(Indent).Append("}\n\n");
         }
         else
@@ -367,22 +375,31 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>
-    /// True when this handler dispatches its aggregate's domain events inline, after its own commit
-    /// (W1, issue #1721). Requires the option, a root that actually records events (otherwise the
-    /// aggregate has no <c>DomainEvents</c> member and the loop would not compile), and the plain
-    /// handler shape — in MediatR mode the commit is deferred to <c>TransactionBehavior</c>, so the
-    /// dispatch happens there instead.
+    /// True when this handler takes on the domain-event hand-off (W1, issue #1721). Requires the
+    /// option and a root that actually records events — otherwise the aggregate has no
+    /// <c>DomainEvents</c> member and the emitted code would not compile. What the handler then does
+    /// depends on the mode: a plain handler dispatches inline after its own commit; a MediatR handler
+    /// parks the events in the accumulator for <c>TransactionBehavior</c> to drain post-commit.
     /// </summary>
     private bool DispatchesInHandler(EntityDecl root) =>
-        _options.DispatchEvents && !_options.ApplicationMediatr && EmitsEvents(root);
+        _options.DispatchEvents && EmitsEvents(root);
 
     /// <summary>
-    /// Writes the post-commit dispatch loop: every event the aggregate recorded is dispatched in
-    /// recording order, then the list is cleared. The clear runs only after the loop completes, so a
-    /// mid-dispatch throw leaves the events visible for a retry rather than silently dropping them.
+    /// Writes the handler's domain-event hand-off. In plain mode this is the post-commit dispatch
+    /// loop — events are dispatched in recording order and the list is cleared only after the loop
+    /// completes, so a mid-dispatch throw leaves them visible for a retry rather than silently
+    /// dropping them. In MediatR mode the commit has not happened yet, so the handler instead hands
+    /// the events to the scoped accumulator (which now owns them) and clears the aggregate.
     /// </summary>
     private void WriteDispatchEvents(StringBuilder sb)
     {
+        if (_options.ApplicationMediatr)
+        {
+            sb.Append(Indent).Append(Indent).Append("_accumulator.AddRange(aggregate.DomainEvents);\n");
+            sb.Append(Indent).Append(Indent).Append("aggregate.ClearDomainEvents();\n");
+            return;
+        }
+
         sb.Append(Indent).Append(Indent).Append("foreach (var domainEvent in aggregate.DomainEvents)\n");
         sb.Append(Indent).Append(Indent).Append("{\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("await _dispatcher.DispatchAsync(domainEvent, ").Append(CtArg()).Append(");\n");
@@ -758,13 +775,45 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append("where TRequest : notnull\n{\n");
         if (hasUnitOfWork)
         {
-            sb.Append(Indent).Append("private readonly IUnitOfWork _unitOfWork;\n\n");
-            sb.Append(Indent).Append("public TransactionBehavior(IUnitOfWork unitOfWork)\n");
-            sb.Append(Indent).Append(Indent).Append("=> _unitOfWork = unitOfWork;\n\n");
+            // Under --app-dispatch-events (W1, #1721) this behavior is also where the domain events
+            // the handlers parked get dispatched — after the commit, never before, so an event can
+            // never announce a transaction that then rolled back.
+            var dispatches = _options.DispatchEvents;
+            sb.Append(Indent).Append("private readonly IUnitOfWork _unitOfWork;\n");
+            if (dispatches)
+            {
+                sb.Append(Indent).Append("private readonly IDomainEventAccumulator _accumulator;\n");
+                sb.Append(Indent).Append("private readonly IDomainEventDispatcher _dispatcher;\n");
+            }
+
+            sb.Append('\n');
+            if (dispatches)
+            {
+                sb.Append(Indent).Append("public TransactionBehavior(IUnitOfWork unitOfWork, IDomainEventAccumulator accumulator, IDomainEventDispatcher dispatcher)\n");
+                sb.Append(Indent).Append("{\n");
+                sb.Append(Indent).Append(Indent).Append("_unitOfWork = unitOfWork;\n");
+                sb.Append(Indent).Append(Indent).Append("_accumulator = accumulator;\n");
+                sb.Append(Indent).Append(Indent).Append("_dispatcher = dispatcher;\n");
+                sb.Append(Indent).Append("}\n\n");
+            }
+            else
+            {
+                sb.Append(Indent).Append("public TransactionBehavior(IUnitOfWork unitOfWork)\n");
+                sb.Append(Indent).Append(Indent).Append("=> _unitOfWork = unitOfWork;\n\n");
+            }
+
             sb.Append(Indent).Append("public async Task<TResponse> Handle(TRequest request, MediatR.RequestHandlerDelegate<TResponse> next, CancellationToken cancellationToken)\n");
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("var response = await next();\n");
             sb.Append(Indent).Append(Indent).Append("await _unitOfWork.SaveChangesAsync(cancellationToken);\n");
+            if (dispatches)
+            {
+                sb.Append(Indent).Append(Indent).Append("foreach (var domainEvent in _accumulator.Drain())\n");
+                sb.Append(Indent).Append(Indent).Append("{\n");
+                sb.Append(Indent).Append(Indent).Append(Indent).Append("await _dispatcher.DispatchAsync(domainEvent, cancellationToken);\n");
+                sb.Append(Indent).Append(Indent).Append("}\n\n");
+            }
+
             sb.Append(Indent).Append(Indent).Append("return response;\n");
             sb.Append(Indent).Append("}\n");
         }

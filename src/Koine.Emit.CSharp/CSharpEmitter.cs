@@ -212,6 +212,15 @@ public sealed partial class CSharpEmitter : IEmitter
             if (_options.EmitApplication && _options.DispatchEvents)
             {
                 files.Add(EmitDomainEventDispatcherInterface(emit));
+
+                // MediatR mode defers the commit to TransactionBehavior, which never sees an
+                // aggregate — so the handler parks its events in a scoped accumulator the behavior
+                // drains post-commit. Plain handlers dispatch inline and need no accumulator.
+                if (_options.ApplicationMediatr)
+                {
+                    files.Add(EmitDomainEventAccumulatorInterface(emit));
+                    files.Add(EmitDomainEventAccumulator(emit));
+                }
             }
         }
 

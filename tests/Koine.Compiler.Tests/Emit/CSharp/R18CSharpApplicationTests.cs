@@ -524,6 +524,63 @@ public class R18CSharpApplicationTests
         clear.ShouldBeLessThan(ret);
     }
 
+    /// <summary>The Application layer on in MediatR mode with post-commit dispatch requested.</summary>
+    internal static CSharpEmitterOptions MediatrDispatchOn =>
+        AppOn with { ApplicationMediatr = true, DispatchEvents = true };
+
+    [Fact]
+    public void Dispatch_events_mediatr_emits_the_accumulator_and_its_scoped_default()
+    {
+        var files = Emit(MediatrDispatchOn);
+
+        var contract = File(files, "IDomainEventAccumulator.cs").Contents;
+        contract.ShouldContain("public interface IDomainEventAccumulator");
+        contract.ShouldContain("void AddRange(IReadOnlyList<IDomainEvent> domainEvents);");
+        contract.ShouldContain("IReadOnlyList<IDomainEvent> Drain();");
+
+        // A leading slash keeps the suffix match off IDomainEventAccumulator.cs.
+        var impl = File(files, "/DomainEventAccumulator.cs").Contents;
+        impl.ShouldContain("public sealed class DomainEventAccumulator : IDomainEventAccumulator");
+        impl.ShouldContain("var drained = _domainEvents.ToArray();");
+    }
+
+    [Fact]
+    public void Dispatch_events_mediatr_accumulates_in_the_handler_without_dispatching()
+    {
+        // In MediatR mode the commit is deferred to TransactionBehavior, so the handler has no
+        // post-commit moment — it hands the events off and lets the behavior dispatch them.
+        var handler = File(Emit(MediatrDispatchOn), "OrderPlaceHandler.cs").Contents;
+
+        handler.ShouldContain("public OrderPlaceHandler(IUnitOfWork unitOfWork, IDomainEventAccumulator accumulator)");
+        handler.ShouldContain("_accumulator.AddRange(aggregate.DomainEvents);");
+        handler.ShouldContain("aggregate.ClearDomainEvents();");
+        handler.ShouldNotContain("DispatchAsync");
+    }
+
+    [Fact]
+    public void Dispatch_events_mediatr_drains_and_dispatches_after_the_commit()
+    {
+        var behavior = File(Emit(MediatrDispatchOn), "TransactionBehavior.cs").Contents;
+
+        behavior.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork, IDomainEventAccumulator accumulator, IDomainEventDispatcher dispatcher)");
+        var commit = IndexOfOrFail(behavior, "await _unitOfWork.SaveChangesAsync(cancellationToken);");
+        var drain = IndexOfOrFail(behavior, "foreach (var domainEvent in _accumulator.Drain())");
+        var dispatch = IndexOfOrFail(behavior, "await _dispatcher.DispatchAsync(domainEvent, cancellationToken);");
+        var ret = IndexOfOrFail(behavior, "return response;");
+        commit.ShouldBeLessThan(drain);
+        drain.ShouldBeLessThan(dispatch);
+        dispatch.ShouldBeLessThan(ret);
+    }
+
+    [Fact]
+    public void Dispatch_events_off_leaves_the_mediatr_transaction_behavior_byte_identical()
+    {
+        var off = File(Emit(AppOn with { ApplicationMediatr = true }), "TransactionBehavior.cs").Contents;
+        off.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork)");
+        off.ShouldNotContain("IDomainEventAccumulator");
+        off.ShouldNotContain("DispatchAsync");
+    }
+
     // ------------------------------------------------------------------
     // W4 — --app-mapping mapperly: emit a Riok.Mapperly source-generated
     // projection instead of the hand-rolled To<RM>() mapper. plain (the
