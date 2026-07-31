@@ -39,6 +39,14 @@ export interface ChatStreamingTurn {
   /** The streamed text so far. Reset when a tool call starts — that text was a "thinking" preamble. */
   readonly text: string;
   readonly toolCalls: readonly ChatToolCall[];
+  /**
+   * A stable per-turn id (#1286), assigned by `startChatTurn` from the slice's monotonic
+   * `nextTurnId` counter and copied onto the committed {@link ChatMessage} by `commitChatTurn`. Lets
+   * tool-card identity (Transcript.tsx) be derived from this value instead of `messages.length` — a
+   * position that's only a correct stand-in for "this turn's future index" because of an unenforced
+   * append-ordering convention.
+   */
+  readonly turnId: number;
 }
 
 export type ChangeSetPhase =
@@ -201,6 +209,9 @@ export function createChatSlice(
   // Strictly increasing across this store's lifetime, even across discard — a stale async apply
   // resolving against a NEWER set can be detected by comparing ids.
   let nextChangeSetId = 1;
+  // Strictly increasing across this store's lifetime (#1286) — mirrors `nextChangeSetId`. Gives
+  // each turn a stable identity independent of `messages.length` at commit time.
+  let nextTurnId = 1;
 
   const setChangeSet = (changeSet: ChatChangeSetState | null): void => {
     set({ chat: { ...get().chat, changeSet } });
@@ -234,13 +245,15 @@ export function createChatSlice(
     commitChatTurn: (msg) => {
       const chat = get().chat;
       const toolCalls = chat.turn?.toolCalls ?? [];
-      const committed: ChatMessage = toolCalls.length ? { ...msg, toolCalls } : msg;
+      const committed: ChatMessage = toolCalls.length
+        ? { ...msg, toolCalls, turnId: chat.turn?.turnId }
+        : msg;
       set({ chat: { ...chat, messages: [...chat.messages, committed], turn: null } });
     },
     startChatTurn: () => {
       const chat = get().chat;
       if (chat.status === 'streaming') return;
-      set({ chat: { ...chat, status: 'streaming', turn: { text: '', toolCalls: [] } } });
+      set({ chat: { ...chat, status: 'streaming', turn: { text: '', toolCalls: [], turnId: nextTurnId++ } } });
     },
     finishChatTurn: () => {
       set({ chat: { ...get().chat, status: 'idle', turn: null } });
@@ -271,7 +284,7 @@ export function createChatSlice(
         durationMs: null,
       };
       // Clear the streamed preamble alongside opening the card (see the interface doc).
-      set({ chat: { ...chat, turn: { text: '', toolCalls: [...chat.turn.toolCalls, opened] } } });
+      set({ chat: { ...chat, turn: { ...chat.turn, text: '', toolCalls: [...chat.turn.toolCalls, opened] } } });
     },
     completeToolCall: ({ id, state, summary, result, durationMs }) => {
       const chat = get().chat;

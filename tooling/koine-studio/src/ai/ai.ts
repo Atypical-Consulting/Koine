@@ -58,6 +58,14 @@ export interface ChatMessage {
    * unclamped and must not enter the persisted blob). Absent/empty ⇒ no cards for this message.
    */
   toolCalls?: readonly ChatToolCall[];
+  /**
+   * The committing turn's {@link ChatStreamingTurn.turnId} (#1286), carried alongside `toolCalls` so
+   * a settled card's identity (Transcript.tsx) can be derived from this stable id rather than the
+   * message's position in `messages` — a convention that's only correct because of an unenforced
+   * append ordering. Assistant-only in practice; never set on a user message. Transcript-only,
+   * stripped the same way as `toolCalls` (never sent to a provider, never persisted by `saveChat`).
+   */
+  turnId?: number;
 }
 
 /** Most tool round-trips the agentic loop will run before forcing a final text answer. */
