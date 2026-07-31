@@ -41,7 +41,7 @@
 import type { McpEndpoint } from "@/host/types";
 import type { Settings } from "@/settings/persistence";
 import { loadSettings } from "@/settings/persistence";
-import { row, panel, toggle, select, metricInput } from "@/settings/prefsControls";
+import { row, panel, toggle, select, metricInput, textInput } from "@/settings/prefsControls";
 import { wireCopyButton } from "@/shell/copyFeedback";
 import { createJsonView } from "@/editor/editor";
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
@@ -97,17 +97,16 @@ export function buildMcpSection(
     mcpWebHint.hidden = true;
 
     // Endpoint URL (read-only) + Copy mcp.json — the quick path for a URL client.
-    const mcpUrlInput = document.createElement("input");
-    mcpUrlInput.type = "text";
-    mcpUrlInput.className = "koi-text";
-    mcpUrlInput.readOnly = true;
-    mcpUrlInput.spellcheck = false;
-    mcpUrlInput.placeholder = "starting…";
-    // This input is appended directly (not via row(), which assigns id/name elsewhere), so give it a
-    // stable id/name (Chrome form-field id/name check; the aria-label stays the accessible name).
-    mcpUrlInput.id = "koi-mcp-url";
-    mcpUrlInput.name = "koi-mcp-url";
-    mcpUrlInput.setAttribute("aria-label", "Koine MCP endpoint URL");
+    // This input is appended directly (not via row(), which assigns id/name elsewhere), so it gets a
+    // stable id/name (Chrome form-field id/name check; the aria-label stays the accessible name) via
+    // textInput's `id` option.
+    const mcpUrlInput = textInput({
+        readOnly: true,
+        spellcheck: false,
+        placeholder: "starting…",
+        id: "koi-mcp-url",
+        ariaLabel: "Koine MCP endpoint URL",
+    });
 
     const mcpCopyBtn = document.createElement("button");
     mcpCopyBtn.type = "button";

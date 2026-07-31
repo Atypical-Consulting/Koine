@@ -200,6 +200,41 @@ export function stringListInput(
     return { el, set };
 }
 
+export interface TextInputOptions {
+    type?: "text" | "password"; // default "text"
+    id?: string; // sets id AND name together (mirrors row()'s own id/name convention)
+    placeholder?: string;
+    autocomplete?: "off";
+    spellcheck?: boolean; // only touched when explicitly passed; native default (true) otherwise
+    readOnly?: boolean;
+    list?: string; // wires <input list="..."> to a sibling <datalist id="...">
+    ariaLabel?: string;
+    onChange?(value: string): void; // wired to 'change'; call sites do their own trim/fallback logic
+}
+
+// A "koi-text" text input, generalizing the six hand-rolled inputs across the settings sections
+// (displayNameInput, fontFamilyInput, aiBaseUrlInput, aiKeyInput, aiModelInput, mcpUrlInput).
+export function textInput(options: TextInputOptions = {}): HTMLInputElement {
+    const input = document.createElement("input");
+    input.type = options.type ?? "text";
+    input.className = "koi-text";
+    if (options.id) {
+        input.id = options.id;
+        input.name = options.id;
+    }
+    if (options.placeholder !== undefined) input.placeholder = options.placeholder;
+    if (options.autocomplete) input.autocomplete = options.autocomplete;
+    if (options.spellcheck !== undefined) input.spellcheck = options.spellcheck;
+    if (options.readOnly !== undefined) input.readOnly = options.readOnly;
+    if (options.list) input.setAttribute("list", options.list);
+    if (options.ariaLabel) input.setAttribute("aria-label", options.ariaLabel);
+    if (options.onChange) {
+        const onChange = options.onChange;
+        input.addEventListener("change", () => onChange(input.value));
+    }
+    return input;
+}
+
 // A labelled settings row: a title (+ optional description) on the left, the control on the right.
 // `content` is what fills the control cell (usually `control` itself, but a scoped row passes a
 // wrapper holding the value control + its User/Workspace toggle); `control` is the labelable target

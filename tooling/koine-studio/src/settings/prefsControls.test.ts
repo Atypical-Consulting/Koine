@@ -3,7 +3,7 @@
 // These are DOM builders only — no Settings/persistence wiring — so each test drives a control in
 // isolation via the callbacks it takes as parameters, matching how prefs.ts calls them today.
 import { describe, it, expect, vi } from "vitest";
-import { row, panel, toggle, metricInput } from "@/settings/prefsControls";
+import { row, panel, toggle, metricInput, textInput } from "@/settings/prefsControls";
 
 describe("prefsControls: row()", () => {
     it("gives a labelable control a koi-set-<slug> id and pairs it with <label for>", () => {
@@ -86,6 +86,42 @@ describe("prefsControls: toggle()", () => {
         t.el.click(); // a disabled <button> dispatches no click event
         expect(onChange).not.toHaveBeenCalled();
         expect(t.el.getAttribute("aria-checked")).toBe("false");
+    });
+});
+
+describe("prefsControls: textInput()", () => {
+    it("builds a koi-text input and fires onChange with the value on 'change'", () => {
+        const onChange = vi.fn();
+        const input = textInput({ placeholder: "You", onChange });
+        expect(input.className).toBe("koi-text");
+        expect(input.placeholder).toBe("You");
+        input.value = "Ada";
+        input.dispatchEvent(new Event("change"));
+        expect(onChange).toHaveBeenCalledWith("Ada");
+    });
+
+    it("defaults to type=text and respects type/autocomplete/spellcheck/list when passed", () => {
+        const plain = textInput({});
+        const bareInput = document.createElement("input");
+        expect(plain.type).toBe("text");
+        expect(plain.spellcheck).toBe(bareInput.spellcheck); // untouched when omitted
+
+        const configured = textInput({
+            type: "password",
+            autocomplete: "off",
+            spellcheck: false,
+            list: "koi-ai-base-presets",
+        });
+        expect(configured.type).toBe("password");
+        expect(configured.autocomplete).toBe("off");
+        expect(configured.spellcheck).toBe(false);
+        expect(configured.getAttribute("list")).toBe("koi-ai-base-presets");
+    });
+
+    it("sets id and name together when id is passed (mcpUrlInput's koi-mcp-url case)", () => {
+        const input = textInput({ id: "koi-mcp-url" });
+        expect(input.id).toBe("koi-mcp-url");
+        expect(input.getAttribute("name")).toBe("koi-mcp-url");
     });
 });
 
