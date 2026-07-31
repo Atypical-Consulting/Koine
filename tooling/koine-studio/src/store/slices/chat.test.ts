@@ -172,7 +172,7 @@ describe('streaming turn', () => {
     const s = createAppStore();
     expect(s.getState().chat.turn).toBeNull();
     s.getState().startChatTurn();
-    expect(s.getState().chat.turn).toEqual({ text: '', toolCalls: [] });
+    expect(s.getState().chat.turn).toEqual({ text: '', toolCalls: [], turnId: expect.any(Number) });
   });
 
   test('startChatTurn while streaming does not reset the accumulated turn', () => {
@@ -180,7 +180,7 @@ describe('streaming turn', () => {
     s.getState().startChatTurn();
     s.getState().appendStreamingText('partial');
     s.getState().startChatTurn(); // no-op: must not clobber the live turn
-    expect(s.getState().chat.turn).toEqual({ text: 'partial', toolCalls: [] });
+    expect(s.getState().chat.turn).toEqual({ text: 'partial', toolCalls: [], turnId: expect.any(Number) });
   });
 
   test('appendStreamingText accumulates deltas in order', () => {
@@ -222,6 +222,7 @@ describe('streaming turn', () => {
           durationMs: null,
         },
       ],
+      turnId: expect.any(Number),
     });
   });
 
@@ -329,7 +330,9 @@ describe('commitChatTurn (#1133)', () => {
     // cards, nor the cards without the message — the two changes land in the same store transition.
     expect(fn).toHaveBeenCalledTimes(1);
     const chat = fn.mock.calls[0][0];
-    expect(chat.messages).toEqual([{ role: 'assistant', content: 'done', toolCalls: [toolCall(1)] }]);
+    expect(chat.messages).toEqual([
+      { role: 'assistant', content: 'done', toolCalls: [toolCall(1)], turnId: expect.any(Number) },
+    ]);
     expect(chat.turn).toBeNull();
   });
 
@@ -356,7 +359,7 @@ describe('commitChatTurn (#1133)', () => {
 
     expect(s.getState().chat.messages).toEqual([
       user('earlier question'),
-      { role: 'assistant', content: 'earlier reply', toolCalls: [toolCall(1)] },
+      { role: 'assistant', content: 'earlier reply', toolCalls: [toolCall(1)], turnId: expect.any(Number) },
     ]);
   });
 
@@ -370,6 +373,38 @@ describe('commitChatTurn (#1133)', () => {
     // appendChatMessage + clearStreamingTurn pair.
     s.getState().hydrateChat('elsewhere', []);
     expect(s.getState().chat.workspaceKey).not.toBe('elsewhere');
+  });
+});
+
+// turnId (#1286): a stable per-turn id, independent of `messages.length`, so tool-card identity
+// (Transcript.tsx) can't silently break if a future change reorders/inserts around send()'s
+// user-message append — see the issue for the full fragility this replaces.
+describe('turnId (#1286): a stable per-turn id independent of message-array position', () => {
+  test('startChatTurn seeds turn.turnId as a number that increases on each successive turn (start → finish/abort → start again)', () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    const first = s.getState().chat.turn!.turnId;
+    expect(typeof first).toBe('number');
+    s.getState().finishChatTurn();
+
+    s.getState().startChatTurn();
+    const second = s.getState().chat.turn!.turnId;
+    expect(second).toBeGreaterThan(first);
+    s.getState().abortChatTurn({ rollbackUserTurn: false });
+
+    s.getState().startChatTurn();
+    const third = s.getState().chat.turn!.turnId;
+    expect(third).toBeGreaterThan(second);
+  });
+
+  test("commitChatTurn copies the live turn's turnId onto the committed message", () => {
+    const s = createAppStore();
+    s.getState().startChatTurn();
+    const turnId = s.getState().chat.turn!.turnId;
+    s.getState().startToolCall({ id: 1, name: 'koine_compile', args: '{}' });
+    s.getState().completeToolCall({ id: 1, state: 'ok', summary: 'ok', result: 'compiled', durationMs: 10 });
+    s.getState().commitChatTurn({ role: 'assistant', content: 'done' });
+    expect(s.getState().chat.messages[0].turnId).toBe(turnId);
   });
 });
 

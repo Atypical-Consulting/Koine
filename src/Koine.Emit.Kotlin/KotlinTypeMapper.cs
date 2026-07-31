@@ -74,23 +74,26 @@ internal sealed class KotlinTypeMapper
         ModelIndex.MapTypeName => $"Map<{MapArg(type.Element)}, {MapArg(type.Value)}>",
         ModelIndex.RangeTypeName => $"koine.runtime.Range<{MapArg(type.Element)}>",
         // value / entity / aggregate / enum / generated-ID / unknown types map to their Kotlin type name,
-        // package-qualified when owned by a different context than the one being emitted.
-        _ => QualifyTypeName(type.Name),
+        // package-qualified when owned by a different context than the one being emitted — honoring any
+        // explicit `Context.T` qualifier the reference carries (#1124).
+        _ => QualifyTypeName(type),
     };
 
     /// <summary>
-    /// The Kotlin type name for a declared Koine type, package-qualified as
+    /// The Kotlin type name for a member's declared type, package-qualified as
     /// <c>&lt;ownerPackage&gt;.&lt;Type&gt;</c> when the type is owned by a <em>different</em> bounded
     /// context than the one being emitted (so cross-context references resolve in the flat per-context
-    /// package layout). Bare PascalCase otherwise — in the legacy context-agnostic mode, for a same-context
-    /// (local) type, and for branded ID types, which are re-materialized locally by the emitter's unowned-id
-    /// pass rather than qualified.
+    /// package layout), threading the reference's explicit <see cref="TypeRef.Qualifier"/> (a
+    /// <c>Context.T</c> the modeller wrote) into owner resolution so a qualified multi-owner reference
+    /// qualifies to the named owner rather than the ordinal default (#1124). Bare PascalCase otherwise —
+    /// in the legacy context-agnostic mode, for a same-context (local) type, and for branded ID types,
+    /// which are re-materialized locally by the emitter's unowned-id pass rather than qualified.
     /// </summary>
-    public string QualifyTypeName(string koineName)
+    public string QualifyTypeName(TypeRef type)
     {
-        var pascal = KotlinNaming.ToTypeName(koineName);
-        if (_context is null || _packageFor is null || !IsQualifiable(koineName)
-            || OwnerContextOf(koineName) is not { } owner)
+        var pascal = KotlinNaming.ToTypeName(type.Name);
+        if (_context is null || _packageFor is null || !IsQualifiable(type)
+            || OwnerContextOf(type.Name, type.Qualifier) is not { } owner)
         {
             return pascal;
         }
@@ -101,26 +104,31 @@ internal sealed class KotlinTypeMapper
             : ownerPackage + "." + pascal;
     }
 
-    /// <summary>The single bounded context whose package emits a type, or null when unknown/ambiguous.</summary>
-    private string? OwnerContextOf(string koineName)
-    {
-        // A shared-kernel type is physically emitted into one canonical owner's package (e.g. the
-        // pizzeria's `Currency`, jointly owned by Menu and Ordering, lands in Menu's package).
-        if (_index.IsSharedKernelType(koineName) && _index.KernelOwnerOfType(koineName) is { } kernelOwner)
-        {
-            return kernelOwner;
-        }
+    /// <summary>
+    /// The Kotlin type name for a declared Koine type named with no explicit qualifier (event / enum /
+    /// read-model call sites). Delegates to <see cref="QualifyTypeName(TypeRef)"/> with a <c>null</c>
+    /// qualifier via a synthetic <see cref="TypeRef"/>.
+    /// </summary>
+    public string QualifyTypeName(string koineName) => QualifyTypeName(new TypeRef(koineName));
 
-        IReadOnlyList<string> declaring = _index.DeclaringContextsOf(koineName);
-        return declaring.Count == 1 ? declaring[0] : null;
-    }
+    /// <summary>
+    /// The single bounded context whose package emits a type, via the shared, deterministic
+    /// <see cref="ModelIndex.ResolveOwner(string, string?, string)"/> policy (issue #1091) — so a
+    /// <b>multi-owner</b> type referenced from a third context resolves to a canonical owner
+    /// (<c>&lt;ownerPackage&gt;.T</c>) rather than degrading to a bare, unresolvable name. Shared-kernel
+    /// homing, unique-owner resolution, and the #437 same-package bind are all handled by that one policy.
+    /// An explicit <paramref name="qualifier"/> (the reference's <c>Context.T</c>) pins the owner when set
+    /// (#1124). Null only in the legacy context-agnostic mode.
+    /// </summary>
+    private string? OwnerContextOf(string koineName, string? qualifier) =>
+        _context is { } ctx ? _index.ResolveOwner(koineName, qualifier, ctx).Owner : null;
 
     /// <summary>
     /// True for the named declared kinds that emit a Kotlin type into a context package (so a foreign one is
     /// worth qualifying). Branded ID types are excluded: a foreign id is re-materialized locally by the
     /// emitter's unowned-id pass, never package-qualified.
     /// </summary>
-    private bool IsQualifiable(string koineName) => _index.Classify(_context, koineName) is
+    private bool IsQualifiable(TypeRef type) => _index.Classify(type.Qualifier ?? _context, type.Name) is
         TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
         or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
 

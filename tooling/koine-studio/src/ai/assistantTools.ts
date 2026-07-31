@@ -341,7 +341,9 @@ export function formatWriteFile(relPath: string, isNew: boolean): string {
  * disambiguated as `relPath@1`, `relPath@2`, … in `session.list()` order — deterministic (list order
  * is snapshot order then stage order) and reversible through `keyFor`. A suffix candidate that
  * collides with a REAL relPath (a file literally named `model.koi@1`) is skipped, so every display
- * names exactly one key. Rebuilt per dispatch so newly-staged files are immediately addressable.
+ * names exactly one key. Cached per session state (issue #1135) — recomputed only when
+ * `session.version()` moves (a `stage()`/`clear()` mutation), so newly-staged files are still
+ * immediately addressable without paying a rebuild on every dispatch that didn't mutate the session.
  */
 export interface DisplayIndex {
   /** display path → session key. */
@@ -352,8 +354,23 @@ export interface DisplayIndex {
   ambiguous: Map<string, string[]>;
 }
 
-/** Build the {@link DisplayIndex} over the session's current keys. */
+// One cache entry per EditSession, keyed by its `version()` at the time the index was built. A
+// session is minted fresh per turn and never survives a workspace switch (see editSession.ts), so
+// the WeakMap keying isolates — and eventually GCs — a superseded turn's entry without a global cache.
+const displayIndexCache = new WeakMap<EditSession, { version: number; index: DisplayIndex }>();
+
+/** Build the {@link DisplayIndex} over the session's current keys, cached until the next mutation. */
 export function buildDisplayIndex(session: EditSession): DisplayIndex {
+  const cached = displayIndexCache.get(session);
+  if (cached && cached.version === session.version()) {
+    return cached.index;
+  }
+  const index = computeDisplayIndex(session);
+  displayIndexCache.set(session, { version: session.version(), index });
+  return index;
+}
+
+function computeDisplayIndex(session: EditSession): DisplayIndex {
   const keys = session.list();
   const rels = keys.map((k) => session.relPathOf(k));
   const counts = new Map<string, number>();
