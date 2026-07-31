@@ -574,7 +574,7 @@ internal sealed class CSharpExpressionTranslator
                 break;
 
             case UnaryExpr un:
-                sb.Append(un.Op == UnaryOp.Not ? "!" : "-");
+                sb.Append(un.Op.Symbol());
                 // Parenthesize unless the operand is a bare identifier/literal or a
                 // node that already self-parenthesizes. This keeps `!a` simple while
                 // making `!lines.isEmpty` -> `!(Lines.Count == 0)` (not `!Lines.Count == 0`)

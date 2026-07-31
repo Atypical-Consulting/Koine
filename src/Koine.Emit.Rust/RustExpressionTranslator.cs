@@ -262,7 +262,7 @@ internal sealed class RustExpressionTranslator
     /// </summary>
     private void WriteUnary(UnaryExpr un, StringBuilder sb)
     {
-        var op = un.Op == UnaryOp.Not ? '!' : '-';
+        var op = un.Op.Symbol();
 
         if (IsOptional(un.Operand))
         {
