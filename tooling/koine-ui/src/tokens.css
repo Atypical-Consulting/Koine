@@ -147,11 +147,10 @@
   /* accent-tinted-background TEXT (issue #1677): the same-hue "accent text on a color-mix(--koi-accent
      16%, transparent) tint of itself" pattern shows up well beyond the launcher's `.lx-modepill`/
      `.lx-mchip.on` (this issue's two elements) — docs ADR badges, source-control avatar chips, the
-     model-rail hover state, and several koine-ui components (.deck-sub.on,
-     .koi-events-view-btn[aria-pressed], .rail-axis[aria-selected], .lstrip-btn[aria-pressed],
-     .koi-palette-item[aria-selected]) all pair `color: var(--koi-accent)` with the identical
-     background shape. Rather than a launcher-scoped token, this is broadly reusable — equal to
-     --koi-accent in dark theme (already ~5.3:1 there, clean per the issue) and darkened in light theme
+     model-rail scoped-context hover state, and several koine-ui components (.deck-sub.on,
+     .koi-events-view-btn[aria-pressed], .rail-axis[aria-selected]) all pair `color: var(--koi-accent)`
+     with the identical background shape. Rather than a launcher-scoped token, this is broadly reusable —
+     equal to --koi-accent in dark theme (already ~5.3:1 there, clean per the issue) and darkened in light theme
      below, where raw --koi-accent measures only ~3.1–3.17:1 (sub-AA). Only wired up on
      `.lx-modepill`/`.lx-mchip.on` by this issue; the other sites are follow-up candidates. */
   --koi-accent-text: #5aa9ff;

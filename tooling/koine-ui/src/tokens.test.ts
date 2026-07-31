@@ -243,11 +243,11 @@ describe('launcher .lx-sub contrast (issue #1672)', () => {
 // there is no separate "worst case" background to test (unlike --koi-hl-match/--koi-ddd-*-ink above).
 // The audit for this issue (grepping `color: var(--koi-accent)` paired with a `color-mix(in srgb,
 // var(--koi-accent) ...)` background in the same/adjacent rule) found this exact pattern repeated well
-// beyond the launcher (docs ADR-badge, source-control avatar chip, model-rail hover, and several
-// koine-ui components: .deck-sub.on, .koi-events-view-btn[aria-pressed], .rail-axis[aria-selected],
-// .lstrip-btn[aria-pressed], .koi-palette-item[aria-selected]) — so the fix introduces a broadly
-// reusable `--koi-accent-text` token rather than a launcher-scoped one, though this issue only wires it
-// up on `.lx-modepill`/`.lx-mchip.on`; the rest are noted as follow-up candidates.
+// beyond the launcher (docs ADR-badge, source-control avatar chip, model-rail scoped-context hover, and
+// several koine-ui components: .deck-sub.on, .koi-events-view-btn[aria-pressed],
+// .rail-axis[aria-selected]) — so the fix introduces a broadly reusable `--koi-accent-text` token rather
+// than a launcher-scoped one, though this issue only wires it up on `.lx-modepill`/`.lx-mchip.on`; the
+// rest are noted as follow-up candidates.
 describe('launcher .lx-modepill / .lx-mchip.on contrast (issue #1677)', () => {
   for (const [themeName, selector] of [
     ['dark', ':root'],
