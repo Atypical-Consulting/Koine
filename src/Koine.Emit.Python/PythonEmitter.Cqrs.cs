@@ -48,13 +48,13 @@ public sealed partial class PythonEmitter
             {
                 // Direct field: type and value come from the like-named source member.
                 pyType = emit.Index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t)
-                    ? typeMapper.Map(t)
+                    ? typeMapper.Map(t, context)
                     : "object";
                 rhs = "src." + attr;
             }
             else
             {
-                pyType = typeMapper.Map(f.Type!);
+                pyType = typeMapper.Map(f.Type!, context);
                 var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, PythonExpressionTranslator.NameMode.Property, expectedEnum);
             }
@@ -117,7 +117,8 @@ public sealed partial class PythonEmitter
     {
         var name = PythonNaming.ToPascalCase(q.Name);
         var handlerName = name + "Handler";
-        var resultType = typeMapper.Map(q.ResultType);
+        var context = ContextOf(ns);
+        var resultType = typeMapper.Map(q.ResultType, context);
 
         var sb = new StringBuilder();
         sb.Append("@dataclass(frozen=True)\n");
@@ -131,7 +132,7 @@ public sealed partial class PythonEmitter
         foreach (Param p in q.Criteria)
         {
             sb.Append(Indent).Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name)))
-              .Append(": ").Append(typeMapper.Map(p.Type)).Append('\n');
+              .Append(": ").Append(typeMapper.Map(p.Type, context)).Append('\n');
         }
 
         // The handler seam: a Protocol specializing the generic QueryHandler. Including `Protocol` in

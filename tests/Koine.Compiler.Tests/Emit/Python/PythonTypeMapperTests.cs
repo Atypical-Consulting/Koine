@@ -38,21 +38,21 @@ public class PythonTypeMapperTests
     public void Primitive_types_map_correctly(string koineName, string expected)
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        mapper.Map(new TypeRef(koineName)).ShouldBe(expected);
+        mapper.Map(new TypeRef(koineName), context: null).ShouldBe(expected);
     }
 
     [Fact]
     public void Decimal_maps_to_Decimal()
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        mapper.Map(new TypeRef("Decimal")).ShouldBe("Decimal");
+        mapper.Map(new TypeRef("Decimal"), context: null).ShouldBe("Decimal");
     }
 
     [Fact]
     public void Instant_maps_to_datetime()
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        mapper.Map(new TypeRef("Instant")).ShouldBe("datetime");
+        mapper.Map(new TypeRef("Instant"), context: null).ShouldBe("datetime");
     }
 
     // =========================================================================
@@ -64,7 +64,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Int"));
-        mapper.Map(t).ShouldBe("tuple[int, ...]");
+        mapper.Map(t, context: null).ShouldBe("tuple[int, ...]");
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.SetTypeName, Element: new TypeRef("String"));
-        mapper.Map(t).ShouldBe("frozenset[str]");
+        mapper.Map(t, context: null).ShouldBe("frozenset[str]");
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.MapTypeName, Element: new TypeRef("String"), Value: new TypeRef("Int"));
-        mapper.Map(t).ShouldBe("Mapping[str, int]");
+        mapper.Map(t, context: null).ShouldBe("Mapping[str, int]");
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.RangeTypeName, Element: new TypeRef("Int"));
-        mapper.Map(t).ShouldBe("Range[int]");
+        mapper.Map(t, context: null).ShouldBe("Range[int]");
     }
 
     // =========================================================================
@@ -100,7 +100,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef("Int", IsOptional: true);
-        mapper.Map(t).ShouldBe("int | None");
+        mapper.Map(t, context: null).ShouldBe("int | None");
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Int"), IsOptional: true);
-        mapper.Map(t).ShouldBe("tuple[int, ...] | None");
+        mapper.Map(t, context: null).ShouldBe("tuple[int, ...] | None");
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef("String", IsOptional: true);
-        mapper.Map(t).ShouldBe("str | None");
+        mapper.Map(t, context: null).ShouldBe("str | None");
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef("Decimal", IsOptional: true);
-        mapper.Map(t).ShouldBe("Decimal | None");
+        mapper.Map(t, context: null).ShouldBe("Decimal | None");
     }
 
     // =========================================================================
@@ -136,7 +136,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
         var t = new TypeRef(ModelIndex.ListTypeName); // no element arg
-        mapper.Map(t).ShouldBe("tuple[object, ...]");
+        mapper.Map(t, context: null).ShouldBe("tuple[object, ...]");
     }
 
     // =========================================================================
@@ -148,7 +148,7 @@ public class PythonTypeMapperTests
     {
         var mapper = new PythonTypeMapper(IndexWithEnum());
         var t = new TypeRef("Status");
-        mapper.Map(t).ShouldBe("Status");
+        mapper.Map(t, context: null).ShouldBe("Status");
     }
 
     // =========================================================================
@@ -159,7 +159,7 @@ public class PythonTypeMapperTests
     public void Unknown_type_maps_to_PascalCase()
     {
         var mapper = new PythonTypeMapper(EmptyIndex());
-        mapper.Map(new TypeRef("SomeType")).ShouldBe("SomeType");
+        mapper.Map(new TypeRef("SomeType"), context: null).ShouldBe("SomeType");
     }
 
     // =========================================================================
@@ -191,7 +191,79 @@ public class PythonTypeMapperTests
     public void IsEnum_returns_true_for_enum_type()
     {
         var mapper = new PythonTypeMapper(IndexWithEnum());
-        mapper.IsEnum(new TypeRef("Status")).ShouldBeTrue();
-        mapper.IsEnum(new TypeRef("Int")).ShouldBeFalse();
+        mapper.IsEnum(new TypeRef("Status"), context: null).ShouldBeTrue();
+        mapper.IsEnum(new TypeRef("Int"), context: null).ShouldBeFalse();
+    }
+
+    // =========================================================================
+    // Issue #1638: context-aware Classify for a bare (unqualified) reference
+    // =========================================================================
+
+    /// <summary>
+    /// Builds a <see cref="ModelIndex"/> from two contexts that each declare a type named
+    /// <c>Status</c> of a DIFFERENT kind: <c>Billing</c> (declared first) owns an ENUM, and
+    /// <c>Shipping</c> (declared after) owns a differently-kinded VALUE OBJECT. The flat/global
+    /// <c>_byName</c> index is last-write-wins, so a context-BLIND lookup of the bare name
+    /// <c>"Status"</c> resolves to Shipping's value object, not Billing's own enum.
+    /// </summary>
+    private static ModelIndex IndexWithSameNamedEnumAndValueAcrossContexts()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status {
+                Open
+                Closed
+              }
+              value Invoice {
+                status: Status
+              }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return new SemanticModel(result.Model!).Index;
+    }
+
+    /// <summary>
+    /// Issue #1638: <c>PythonTypeMapper</c> is constructed ONCE per compile and reused across every
+    /// context, so it carries no ambient context of its own — only the <c>TypeRef.Qualifier</c>,
+    /// which the parser leaves <c>null</c> for the common, BARE (unqualified) same-context
+    /// reference. Before the fix, <c>IsEnum</c>'s <c>_index.Classify(type.Qualifier, type.Name)</c>
+    /// degraded straight to the flat, context-blind, last-write-wins <c>Classify(typeName)</c>
+    /// fallback for a bare reference — so a bare <c>Status</c> resolved against Billing's OWN
+    /// context still misclassified as Shipping's later-declared, differently-kinded value object.
+    /// <para>
+    /// Passing the declaring context explicitly (the fix) makes <c>IsEnum</c> resolve Billing's
+    /// bare <c>Status</c> reference against Billing's own scope first, correctly classifying it as
+    /// an enum. Unlike the TypeScript mapper — whose enum/non-enum branches emit different strings
+    /// (a bare <c>Status</c> vs. a <c>StatusMember</c> interface), so the misclassification is
+    /// visible in the compiled TypeScript output — Python's <c>MapBase</c> enum/non-enum branches
+    /// both return the identical <c>PythonNaming.ToPascalCase(type.Name)</c> string (the enum class
+    /// IS the type in Python; see <c>MapBase</c>'s comment), so <c>Map</c>'s emitted type annotation
+    /// never observably regresses for this construct. <c>IsEnum</c> is therefore the layer where
+    /// this fix is actually observable for Python — this test exercises it directly.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void IsEnum_resolves_bare_reference_against_declaring_context_not_flat_last_writer()
+    {
+        var index = IndexWithSameNamedEnumAndValueAcrossContexts();
+        var mapper = new PythonTypeMapper(index);
+        var bareStatus = new TypeRef("Status"); // no Qualifier — a bare, unqualified reference.
+
+        // Resolved against Billing (where Invoice.status is actually declared): Billing's own
+        // Status is an enum.
+        mapper.IsEnum(bareStatus, context: "Billing").ShouldBeTrue();
+
+        // With no context at all (today's un-fixable fallback case), the flat last-write-wins index
+        // still resolves to Shipping's value object — unchanged, not a regression.
+        mapper.IsEnum(bareStatus, context: null).ShouldBeFalse();
     }
 }

@@ -100,7 +100,7 @@ public sealed partial class PythonEmitter
         var isList = finder.ResultType.Name == ModelIndex.ListTypeName;
         var method = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(finder.Name));
         var paramList = string.Join(", ", finder.Parameters.Select(p =>
-            $"{PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type)}"));
+            $"{PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type, contextName)}"));
         if (paramList.Length > 0)
         {
             paramList = ", " + paramList;
@@ -134,7 +134,7 @@ public sealed partial class PythonEmitter
         // Import each user-declared type the finder's parameters mention (value object / enum / ID).
         foreach (Param p in finder.Parameters)
         {
-            foreach (System.Text.RegularExpressions.Match m in IdentifierRegex.Matches(typeMapper.Map(p.Type)))
+            foreach (System.Text.RegularExpressions.Match m in IdentifierRegex.Matches(typeMapper.Map(p.Type, contextName)))
             {
                 if (ResolvePyModule(emit, contextName, m.Value) is { } module)
                 {
