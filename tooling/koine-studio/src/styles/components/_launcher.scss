@@ -71,7 +71,9 @@
   padding: 0 6px 0 10px;
   border-radius: var(--koi-radius-sm);
   background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
-  color: var(--koi-accent);
+  /* --koi-accent-text (issue #1677), not --koi-accent: raw accent text on this same-hue 16% tint
+     fails WCAG AA in light theme (~3.1:1) — see tokens.css. */
+  color: var(--koi-accent-text);
   font-size: 12.5px;
   font-weight: 600;
 }
@@ -771,7 +773,9 @@
 
 .lx-mchip.on {
   background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
-  color: var(--koi-accent);
+  /* --koi-accent-text (issue #1677), not --koi-accent: raw accent text on this same-hue 16% tint
+     fails WCAG AA in light theme (~3.17:1) — see tokens.css. */
+  color: var(--koi-accent-text);
 }
 
 .lx-mchip b {

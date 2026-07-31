@@ -144,6 +144,17 @@
      sub-AA (3.71:1) on the launcher row surface. */
   --koi-hl-match: #5aa9ff;
 
+  /* accent-tinted-background TEXT (issue #1677): the same-hue "accent text on a color-mix(--koi-accent
+     16%, transparent) tint of itself" pattern shows up well beyond the launcher's `.lx-modepill`/
+     `.lx-mchip.on` (this issue's two elements) — docs ADR badges, source-control avatar chips, the
+     model-rail scoped-context hover state, and several koine-ui components (.deck-sub.on,
+     .koi-events-view-btn[aria-pressed], .rail-axis[aria-selected]) all pair `color: var(--koi-accent)`
+     with the identical background shape. Rather than a launcher-scoped token, this is broadly reusable —
+     equal to --koi-accent in dark theme (already ~5.3:1 there, clean per the issue) and darkened in light theme
+     below, where raw --koi-accent measures only ~3.1–3.17:1 (sub-AA). Only wired up on
+     `.lx-modepill`/`.lx-mchip.on` by this issue; the other sites are follow-up candidates. */
+  --koi-accent-text: #5aa9ff;
+
   /* launcher `.lx-kind` chip TEXT (issue #1672): the `--koi-ddd-*` identity hues (concept-colors.
      generated.css) are deliberately dark-only across both themes (ADR 0004 — the maxGraph canvas
      paints the literal dark hex into SVG, var() can't resolve there), so a chip's own text can't just
@@ -226,6 +237,13 @@ html[data-theme='light'] {
      ~6.2:1 on the resting --koi-paper-2 and ~5.2:1 on the worst-case selected-row tint
      (color-mix(--koi-accent 15%, transparent) composited over --koi-paper-2). */
   --koi-hl-match: #175ab0;
+
+  /* accent-tinted-background TEXT, light theme (issue #1677): raw --koi-accent (#2f7fe0) on
+     color-mix(in srgb, var(--koi-accent) 16%, transparent) over --koi-paper-2 measures ~3.1–3.17:1 —
+     under WCAG AA (this is the exact pairing the issue's axe run flagged on `.lx-modepill`/
+     `.lx-mchip.on`). This darkened blue clears ~5.16:1 there — see the :root block above for why dark
+     theme needs no change and the full list of other same-shape consumers this token is meant to cover. */
+  --koi-accent-text: #175ab0;
 
   /* launcher `.lx-kind` chip TEXT, light theme (issue #1672): the dark-only `--koi-ddd-*` identity hue
      rendered directly as text on this near-white surface measures ~1.2–2.4:1 for every kind. Each value
