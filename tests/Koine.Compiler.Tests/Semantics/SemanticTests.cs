@@ -356,4 +356,37 @@ public class SemanticTests
         fallbackBranch.ShouldNotBeNull();
         fallbackBranch!.Name.ShouldBe("Status");
     }
+
+    /// <summary>
+    /// Issue #1655: <c>CheckAggregateSelector</c>'s <c>sum</c>/<c>min</c>/<c>max</c> selector-kind checks
+    /// called the context-blind 1-arg <c>ModelIndex.Classify(string)</c> overload directly, instead of the
+    /// context-aware overload/<see cref="TypeResolver.IsValueLike"/> the way #1634/#1641 already fixed for
+    /// <c>CheckMember</c>. R13.2 lets Shop and Billing each legally declare their own <c>Status</c> type —
+    /// uniqueness is enforced per-context, not globally — so <c>ModelIndex</c>'s by-name registry is
+    /// last-write-wins across the whole model: whichever context is indexed last wins the context-blind
+    /// classify for every other context's same-named reference too. A context-blind check answered
+    /// Billing's later-declared <c>enum Status</c> even for a <c>sum(p =&gt; p)</c> fold over Shop's own,
+    /// genuinely-a-value-object <c>Status</c>, wrongly rejecting a valid model with <c>KOI0212</c>.
+    /// </summary>
+    [Fact]
+    public void Sum_fold_over_a_value_object_resolves_against_its_own_context_despite_a_same_named_type_elsewhere()
+    {
+        const string src =
+            """
+            context Shop {
+              value Status {
+                factor: Int
+              }
+              value Ticket {
+                prices: List<Status>
+                total:  Status = prices.sum(p => p)
+              }
+            }
+
+            context Billing {
+              enum Status { Open Closed }
+            }
+            """;
+        Validate(src).ShouldBeEmpty();
+    }
 }
