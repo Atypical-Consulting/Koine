@@ -11,7 +11,15 @@
 // unchanged in order or content, just relocated to a named function in prefs.ts (see its own comment).
 //
 // This module must not import prefs.ts (no import cycles).
-import type { Settings } from "@/settings/persistence";
+import {
+    loadKeybindingOverrides,
+    saveKeybindingOverride,
+    clearKeybindingOverrides,
+    parseKeybindingOverrides,
+    type Settings,
+} from "@/settings/persistence";
+import type { BindingId } from "@/editor/keybindings";
+import { createEditableJsonView } from "@/editor/editor";
 import {
     row,
     panel,
@@ -50,6 +58,11 @@ export interface AdvancedSectionDeps {
     /** Run on a CONFIRMED (second-click) Reset — the entire cross-section reset sequence, owned by the
      *  assembler since it reaches into every other section. */
     onReset(): void;
+
+    /** Fired after a successful Apply on the raw keybindings.json editor (#434) — mirrors
+     *  KeyboardSectionDeps.onKeybindingsChanged (live-applies the editor keymap). The assembler's hook
+     *  additionally repaints the Keyboard panel's rows, a cross-section concern this module can't own. */
+    onKeybindingsChanged?(): void;
 }
 
 export function buildAdvancedSection(
@@ -151,6 +164,73 @@ export function buildAdvancedSection(
         deps.onReset();
     });
 
+    // --- Raw keybindings.json editor (#434) ------------------------------------
+    // A power-user escape hatch, collapsed by default: hand-edit the keybinding overrides blob as JSON
+    // instead of recording one chord at a time in the Keyboard panel. Both surfaces read/write the same
+    // koine.studio.keybindings override store, so they round-trip. No JSON schema here (a sparse
+    // {id: chord} map has none) — parseKeybindingOverrides IS the validation contract, reusing
+    // loadKeybindingOverrides' own guard (known BindingId, string value) but reporting a violation
+    // instead of silently dropping it, since the user typed it deliberately.
+
+    const kbdJsonDetails = document.createElement("details");
+    kbdJsonDetails.className = "koi-kbdjson-details";
+    const kbdJsonSummary = document.createElement("summary");
+    kbdJsonSummary.className = "koi-kbdjson-summary";
+    kbdJsonSummary.textContent = "Edit keybindings.json";
+    kbdJsonDetails.appendChild(kbdJsonSummary);
+
+    const kbdJsonHost = document.createElement("div");
+    kbdJsonHost.className = "koi-kbdjson-editor";
+    kbdJsonHost.tabIndex = 0;
+    const kbdJsonView = createEditableJsonView(kbdJsonHost, "Keybinding overrides JSON");
+
+    const kbdJsonError = document.createElement("p");
+    kbdJsonError.className = "koi-kbdjson-error";
+    kbdJsonError.setAttribute("role", "alert");
+    kbdJsonError.hidden = true;
+
+    // Repaint the editor from the CURRENTLY PERSISTED overrides, pretty-printed — called on populate()
+    // (every panel open/reopen) and by Revert (discard unsaved edits).
+    function refreshKbdJson(): void {
+        kbdJsonView.setValue(JSON.stringify(loadKeybindingOverrides(), null, 2));
+        kbdJsonError.hidden = true;
+        kbdJsonError.textContent = "";
+    }
+
+    const kbdJsonApplyBtn = actionButton(
+        "Apply",
+        () => {
+            const result = parseKeybindingOverrides(kbdJsonView.getValue());
+            if (!result.ok) {
+                kbdJsonError.hidden = false;
+                kbdJsonError.textContent = result.error;
+                return;
+            }
+            // A full REPLACE, not a merge: clear first so a key the user removed from the JSON loses its
+            // override too, then re-apply exactly the entries the edited blob names. An empty `{}` is
+            // just this same sequence with zero entries to re-apply — equivalent to Reset all.
+            clearKeybindingOverrides();
+            for (const [id, key] of Object.entries(result.value)) {
+                saveKeybindingOverride(id as BindingId, key);
+            }
+            refreshKbdJson();
+            deps.onKeybindingsChanged?.();
+        },
+        { className: "koi-set-action koi-kbdjson-apply" },
+    );
+    const kbdJsonRevertBtn = actionButton("Revert", refreshKbdJson, {
+        className: "koi-set-action koi-kbdjson-revert",
+    });
+
+    const kbdJsonActions = document.createElement("div");
+    kbdJsonActions.className = "koi-kbdjson-actions";
+    kbdJsonActions.append(kbdJsonApplyBtn, kbdJsonRevertBtn);
+
+    const kbdJsonBody = document.createElement("div");
+    kbdJsonBody.className = "koi-kbdjson-body";
+    kbdJsonBody.append(kbdJsonHost, kbdJsonError, kbdJsonActions);
+    kbdJsonDetails.appendChild(kbdJsonBody);
+
     const advancedPanel = panel(
         "advanced",
         wsRootRow,
@@ -161,19 +241,23 @@ export function buildAdvancedSection(
             "Restore every setting — including the assistant — to its default.",
             resetBtn,
         ),
+        kbdJsonDetails,
     );
 
-    // populate(s) covers ONLY the shell-args chip list — the trace row's value comes from
+    // populate(s) covers the shell-args chip list AND reseeds the raw JSON editor from the current
+    // overrides (so a reopen never shows a stale/unsaved edit) — the trace row's value comes from
     // deps.scopeKit.syncAll(s), called separately by the assembler (same pattern as Editor's word-wrap/
     // format-on-save rows): do not have this touch traceSelect directly.
     function populate(s: Settings): void {
         shellArgsControl.set(s.terminalShellArgs);
+        refreshKbdJson();
     }
 
-    // Clear the pending disarm timer — called by the assembler's own destroy() so a torn-down pane never
-    // fires a stray disarmReset() after the fact.
+    // Clear the pending disarm timer and destroy the JSON CodeMirror view — called by the assembler's own
+    // destroy() so a torn-down pane never fires a stray disarmReset() or leaks the editor after the fact.
     function destroy(): void {
         clearTimeout(disarmTimer);
+        kbdJsonView.destroy();
     }
 
     return { panel: advancedPanel, populate, refreshWsRootValue, disarmReset, destroy };
