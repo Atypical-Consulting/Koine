@@ -328,6 +328,14 @@ internal sealed class PhpExpressionTranslator
             sb.Append(" . ");
             WriteStringConcatOperand(bin.Right, sb);
         }
+        else if (IsIntDivision(bin))
+        {
+            sb.Append("intdiv(");
+            WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
+            sb.Append(", ");
+            WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
+            sb.Append(')');
+        }
         else
         {
             WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
@@ -377,6 +385,22 @@ internal sealed class PhpExpressionTranslator
         return (IsStringConcatOperand(left) || IsStringConcatOperand(right))
             && IsStringableOperand(left) && IsStringableOperand(right);
     }
+
+    /// <summary>
+    /// True when <paramref name="bin"/> is a plain <c>/</c> whose own inferred type is non-optional
+    /// <c>Int</c> — bare Int/Int division reached via the plain-numeric fallback (neither operand is
+    /// Decimal or a Koine value object, so <see cref="TryWriteValueBinary"/> already declined). PHP's
+    /// native <c>/</c> promotes to <c>float</c> on any inexact division, but a Koine <c>Int</c> must stay
+    /// whole — and because the emitted member is declared to return <c>int</c> under
+    /// <c>declare(strict_types=1)</c>, a bare <c>/</c> here is a hard runtime <c>TypeError</c>, not merely
+    /// a silently wrong value. <c>intdiv()</c> is PHP's native truncating-integer-division primitive
+    /// (truncates toward zero, operates on integers directly so it can't lose precision the way an
+    /// intermediate-float <c>(int)</c> cast could near <c>PHP_INT_MAX</c>), matching the value-object
+    /// scalar-divide rule already established (#938) and mirroring TypeScript's <c>Math.trunc</c> fix for
+    /// the same defect class (#1558).
+    /// </summary>
+    private bool IsIntDivision(BinaryExpr bin)
+        => bin.Op == BinaryOp.Div && InferType(bin) is { Name: "Int", IsOptional: false };
 
     /// <summary>
     /// Writes one operand of a PHP string concatenation (<c>.</c>).
