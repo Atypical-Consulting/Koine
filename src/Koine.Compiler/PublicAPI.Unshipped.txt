@@ -361,6 +361,7 @@ Koine.Compiler.Ast.ModelIndex.OwnerResolution.WasAmbiguous.get -> bool
 Koine.Compiler.Ast.ModelIndex.OwnerResolution.WasAmbiguous.init -> void
 Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution
 Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string? qualifier, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution
+Koine.Compiler.Ast.ModelIndex.Classify(string? context, string! typeName) -> Koine.Compiler.Ast.TypeKind
 Koine.Compiler.Ast.AclMapping.Deconstruct(out string! UpstreamContext, out string! UpstreamType, out string! LocalContext, out string! LocalType) -> void
 Koine.Compiler.Ast.AclMapping.Equals(Koine.Compiler.Ast.AclMapping? other) -> bool
 Koine.Compiler.Ast.AggregateDecl.Deconstruct(out string! Name, out string! RootName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>! Types, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>! Specs, out bool IsVersioned, out Koine.Compiler.Ast.RepositoryDecl? Repository) -> void
