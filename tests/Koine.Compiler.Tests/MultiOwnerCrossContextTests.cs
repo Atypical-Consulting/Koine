@@ -24,6 +24,10 @@ public class MultiOwnerCrossContextTests
         "No usable JDK 17+ toolchain (javac >= 17) available; the multi-owner sources were not compiled. " +
         "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.";
 
+    private const string KotlinNoToolchainNotice =
+        "No usable Kotlin toolchain (kotlinc) available; the multi-owner sources were not compiled. " +
+        "Install Kotlin — CI runs this for real.";
+
     /// <summary>Three contexts: <c>Money</c> owned by both Alpha and Beta, referenced from Gamma (imported from Alpha).</summary>
     private const string MultiOwnerFixture = """
         context Alpha {
@@ -186,6 +190,20 @@ public class MultiOwnerCrossContextTests
 
         var check = TestSupport.CompileJava(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, JavaNoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Kotlin_multi_owner_cross_context_sources_compile()
+    {
+        var result = new KoineCompiler().Compile(MultiOwnerFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The whole point of #1091 (and its #1130 Kotlin migration): the qualified reference must
+        // actually resolve — a string assertion alone would miss an unresolvable
+        // `koine.generated.alpha.Money`, so compile the sources for real.
+        var check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, KotlinNoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 }
