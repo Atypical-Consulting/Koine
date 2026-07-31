@@ -46,6 +46,28 @@
     --jq '[.check_runs[] | select(.name=="build-and-test") | (.conclusion // .status)]'
   ```
   `ai-migration-kit:merge-pr`, `auto-dev` and the `auto-dev-worker` command already gate this way.
+- **A ready-flip can produce no fresh run at all — third variant (#1616).** #1481 root-caused the
+  original "draft-flip never re-triggers" bug and fixed it by adding `ready_for_review` to every
+  draft-gated workflow's trigger `types:`; #1530 documented the *inverse* case, a stale `skipped` run
+  masking a real one that DID fire. #1616 found a **third** variant: calling `gh pr ready <PR>` with no
+  subsequent push sometimes produces **no** second `build-and-test`/`changes` run for that head SHA at
+  all — not even a masked one — so the check-runs API (the #1530 rule above) correctly resolves to
+  `skipped` because that's genuinely the only check-run that exists. `mergeStateStatus` still reads
+  `CLEAN` throughout (`build-and-test` isn't a required status check), so nothing on the PR's own
+  merge-readiness surface flags the gap. Root cause is believed to be GitHub-side webhook
+  coalescing/deduplication for near-simultaneous events on one head SHA — opaque from this repo's
+  workflow YAML, and #1616's own reproduction attempts (two, including the tightest push→ready timing
+  achievable from a script) both got a fresh real run instead of the gap, confirming it's a
+  low-probability timing race rather than something reliably forceable — so this is a defensive
+  consumer-side rule, not a fix to `ci.yml`/`koine-studio.yml` itself.
+  **Corrective rule:** after `gh pr ready`, if the check-runs-API-resolved status (above) for
+  `build-and-test` is `skipped` AND the PR's changed files are **not** exclusively under
+  `tooling/koine-studio/`/`tooling/koine-ui/` (the same front-end-only test the `changes` job itself
+  applies — a genuine front-end-only `skipped` is legitimate per #1486/#1535), do **not** treat the PR as
+  mergeable yet. Force a corrective push — the routine sync-with-`main` step is enough even if already
+  up to date (an empty commit also works) — then re-resolve status via the check-runs API and wait for a
+  real run before merging. `ai-migration-kit:merge-pr` and `auto-dev-worker` should apply this rule
+  immediately after the ready-flip, before their CI-wait loop.
 
 ## Integration style
 - **Merge mode:** squash

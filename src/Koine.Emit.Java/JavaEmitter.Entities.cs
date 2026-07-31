@@ -191,7 +191,7 @@ public sealed partial class JavaEmitter
 
         foreach (Member m in defaulted)
         {
-            var value = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
+            var value = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context));
             sb.Append(Indent).Append(Indent).Append("this.").Append(JavaNaming.Member(m.Name)).Append(" = ")
               .Append(value).Append(";\n");
         }
@@ -297,7 +297,7 @@ public sealed partial class JavaEmitter
         StringBuilder sb, JavaEmitContext emit, Member m, JavaTypeMapper typeMapper, JavaExpressionTranslator translator)
     {
         WriteJavadoc(sb, m.Doc, Indent);
-        var body = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index));
+        var body = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context));
         sb.Append(Indent).Append("public ").Append(typeMapper.Map(m.Type)).Append(' ')
           .Append(JavaNaming.Member(m.Name)).Append("() {\n");
         sb.Append(Indent).Append(Indent).Append("return ").Append(body).Append(";\n");
@@ -384,7 +384,10 @@ public sealed partial class JavaEmitter
     private void WriteTransition(StringBuilder sb, JavaEmitContext emit, EntityDecl entity, Transition t, JavaExpressionTranslator translator)
     {
         Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
-        var expectedEnum = field is not null && emit.Index.Classify(field.Type.Name) == TypeKind.Enum ? field.Type.Name : null;
+        var expectedEnum = field is not null
+            && emit.Index.Classify(field.Type.Qualifier ?? translator.Context, field.Type.Name) == TypeKind.Enum
+                ? field.Type.Name
+                : null;
         var value = translator.Translate(t.Value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
 
         if (field is { Type.IsOptional: true } && translator.InferType(t.Value)?.IsOptional != true)
@@ -434,7 +437,7 @@ public sealed partial class JavaEmitter
                 return JavaTypeDefault(m.Type);
             }
 
-            var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+            var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
             return translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
         });
 
@@ -537,7 +540,7 @@ public sealed partial class JavaEmitter
         {
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var translated = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
                 args.Add(ReconcileFactoryCtorArg(InferCtorArgValueType(translator, value), m.Type, translated));
             }
@@ -743,8 +746,8 @@ public sealed partial class JavaEmitter
     }
 
     /// <summary>The enum type expected for a member's value (so a bare enum member reference qualifies), or null.</summary>
-    private static string? EnumExpected(Member m, ModelIndex index) =>
-        index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+    private static string? EnumExpected(Member m, ModelIndex index, string? context) =>
+        index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 
     /// <summary>A benign Java default for a type (an unset optional/collection or a validator-warned required field).</summary>
     private static string JavaTypeDefault(TypeRef type)

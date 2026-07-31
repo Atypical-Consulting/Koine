@@ -144,6 +144,17 @@ public class R5CommandTests
     }
 
     [Fact]
+    public void Guarded_conditional_resolves_narrowed_for_transition_value()
+    {
+        // #1614: CheckTransitionValue must route through EffectiveType like the field-default
+        // check #1564 already fixed, so a same-expression isPresent guard narrows the value.
+        const string src =
+            "context C {\n  entity E identified by EId {\n    qty: Int?\n    resolved: Int\n" +
+            "    command resolve { resolved -> if qty.isPresent then qty else 0 }\n  }\n}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Requires_referencing_unknown_identifier_is_reported()
     {
         const string src =

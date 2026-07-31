@@ -266,4 +266,20 @@ public class CommandReturnTests
             """;
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.CommandResultMismatch);
     }
+
+    [Fact]
+    public void Guarded_conditional_resolves_narrowed_for_command_result()
+    {
+        // #1614: CheckCommandResult must route through EffectiveType like the field-default
+        // check #1564 already fixed, so a same-expression isPresent guard narrows the value.
+        const string src = """
+            context C {
+              entity E identified by EId {
+                qty: Int?
+                command go(): Int { result if qty.isPresent then qty else 0 }
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+    }
 }
