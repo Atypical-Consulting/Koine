@@ -127,7 +127,9 @@ public sealed partial class JavaEmitter
             sb.Append(Indent).Append("}\n");
         }
 
-        foreach (var (op, storeMethod) in new[] { ("add", "add"), ("update", "update") })
+        // `add`/`update` take the aggregate and forward to the like-named store method, so one loop
+        // covers both; `remove` differs (it takes the identity) and is written out below.
+        foreach (var op in new[] { "add", "update" })
         {
             if (!ops.Contains(op))
             {
@@ -138,7 +140,7 @@ public sealed partial class JavaEmitter
             WriteOverride(sb);
             sb.Append(Indent).Append("public void ").Append(op).Append('(').Append(rootName)
               .Append(" aggregate) {\n");
-            sb.Append(Indent).Append(Indent).Append("this.store.").Append(storeMethod).Append("(aggregate);\n");
+            sb.Append(Indent).Append(Indent).Append("this.store.").Append(op).Append("(aggregate);\n");
             sb.Append(Indent).Append("}\n");
         }
 

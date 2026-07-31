@@ -42,7 +42,7 @@ public sealed partial class JavaEmitter
         }
 
         List<JavaStateSource>? conditions = BuildStateMachineConditions(
-            entity, tr, field.Type, field.Type.Name, translator, typeMapper, emit.Index, cmd.Parameters);
+            entity, tr, field.Type, translator, typeMapper, emit.Index, cmd.Parameters);
         if (conditions is null || (conditions.Count == 1 && requiresConds.Contains(conditions[0].Positive)))
         {
             return;
@@ -62,12 +62,12 @@ public sealed partial class JavaEmitter
     /// </para>
     /// </summary>
     private static List<JavaStateSource>? BuildStateMachineConditions(
-        EntityDecl entity, Transition tr, TypeRef fieldType, string enumType, JavaExpressionTranslator translator,
+        EntityDecl entity, Transition tr, TypeRef fieldType, JavaExpressionTranslator translator,
         JavaTypeMapper typeMapper, ModelIndex index, IReadOnlyList<Param> commandParams)
     {
         StatesDecl? states = entity.States.FirstOrDefault(s => s.Field == tr.Field);
         if (states is null || tr.Value is not IdentifierExpr stateRef
-            || !index.EnumsDeclaring(stateRef.Name).Contains(enumType))
+            || !index.EnumsDeclaring(stateRef.Name).Contains(fieldType.Name))
         {
             return null; // no state machine, or a dynamic (non-literal) target
         }

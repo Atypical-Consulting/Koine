@@ -336,11 +336,15 @@ public sealed partial class JavaEmitter
         // The preconditions in their POSITIVE rendered form, used to suppress a state-machine
         // reachability guard that would merely restate one of them (the C#/Python emitters do the same).
         // The translator parenthesizes a top-level comparison, so strip a balanced outer pair to compare
-        // against the bare form BuildStateMachineConditions builds.
-        var requiresConds = new HashSet<string>(
-            requires.Select(r => StripOuterParens(
-                translator.Translate(r.Condition, JavaExpressionTranslator.NameMode.Property))),
-            StringComparer.Ordinal);
+        // against the bare form BuildStateMachineConditions builds. Only an entity that declares a
+        // `states` block can produce such a guard at all, so an entity without one skips the extra
+        // re-translation of every precondition entirely.
+        var requiresConds = entity.States.Count == 0
+            ? (ISet<string>)new HashSet<string>(StringComparer.Ordinal)
+            : new HashSet<string>(
+                requires.Select(r => StripOuterParens(
+                    translator.Translate(r.Condition, JavaExpressionTranslator.NameMode.Property))),
+                StringComparer.Ordinal);
 
         // 2. State transitions, each preceded by its state-machine reachability guard (R7) when the
         //    field is governed by a `states` block and the target is a literal state.
