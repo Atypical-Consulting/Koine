@@ -48,6 +48,20 @@ public sealed partial class PythonEmitter
         var context = ContextOf(ns);
         var translator = new PythonExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
+        // Per-symbol import hint for Assemble (issue #1712, mirroring #1701's read-model fix and
+        // EmitValueObject's own fix): a field's own cross-type import must resolve against ITS
+        // declared type's context — the field's explicit `Context.Type` qualifier when present, else
+        // this entity's own context — not unconditionally this entity's own context.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Member m in fields)
+        {
+            CollectImportHints(m.Type, context, symbolContext);
+        }
+        foreach (Member m in derived)
+        {
+            CollectImportHints(m.Type, context, symbolContext);
+        }
+
         var sb = new StringBuilder();
         sb.Append("@dataclass(eq=False)\n");
         sb.Append("class ").Append(name).Append(":\n");
@@ -162,7 +176,7 @@ public sealed partial class PythonEmitter
         var folder = isRoot ? KindFolder.Root : KindFolder.Entities;
         return new EmittedFile(
             PathFor(ns, folder, entity.Name),
-            Assemble(emit, ns, sb.ToString(), name),
+            Assemble(emit, ns, sb.ToString(), name, symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(folder));
     }
 

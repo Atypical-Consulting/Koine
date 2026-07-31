@@ -1413,4 +1413,146 @@ public class PhpConformanceTests
         summary.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
         summary.ShouldNotContain("use Koine\\Billing\\ValueObjects\\Status;");
     }
+
+    /// <summary>
+    /// Issue #1712 — the sibling gap the previous test's own comment flags as out-of-scope there: a
+    /// value object's/entity's OWN field import ignores an EXPLICIT cross-context qualifier
+    /// (R13.2's <c>Context.Type</c> syntax). <c>EmitValueObject</c>/<c>WriteConstructor</c> never
+    /// built a <c>symbolContext</c> hint at all (unlike #1701's now-fixed read-model path), so
+    /// <c>Assemble</c>/<c>CollectUses</c> always fell back to the declaring VO's own context. Here
+    /// <c>Ordering.Item</c>'s <c>status</c> field is declared <c>Shipping.Status</c> — an EXPLICIT
+    /// qualifier to a THIRD context — while <c>Ordering</c> separately declares its own, unrelated
+    /// <c>Status</c> enum (the type <c>Item</c>'s own context would resolve to without a hint).
+    /// Before the fix, <c>Item.php</c> imported <c>Ordering</c>'s own <c>Status</c> instead of the
+    /// field's actually-declared <c>Shipping.Status</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_own_field_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value Item {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath == "src/Ordering/ValueObjects/Item.php").Contents;
+        item.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        item.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+    }
+
+    /// <summary>
+    /// The runtime twin of <see cref="Value_object_own_field_import_honors_an_explicit_qualifier_over_the_owning_context"/>:
+    /// non-observable via <c>phpstan</c>/<c>php -l</c> alone (PHP's enum/non-enum <c>Map</c> branches
+    /// render the identical class-name string regardless of which context resolves), but a REAL bug —
+    /// the wrong import means the promoted constructor parameter ends up type-hinted against
+    /// <c>Ordering</c>'s own <c>Status</c> while the value actually passed is a
+    /// <c>Shipping\Enums\Status</c> case, a hard runtime <c>TypeError</c> under
+    /// <c>declare(strict_types=1)</c>. Only executing the emitted PHP proves it; skipped (not failed)
+    /// when no <c>php</c> interpreter is present locally, CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Value_object_own_field_binds_the_qualified_type_at_runtime()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value Item {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Shipping/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/ValueObjects/Item.php';
+
+            $item = new Koine\Ordering\ValueObjects\Item(Koine\Shipping\Enums\Status::ACTIVE);
+            if ($item->status !== Koine\Shipping\Enums\Status::ACTIVE) {
+                fwrite(STDERR, "expected Shipping's own Status::ACTIVE, got " . var_export($item->status, true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "Item's own 'status' field must bind Shipping's own Status enum (not Ordering's wrongly "
+            + "imported, differently-cased same-named sibling enum) at runtime:\n" + string.Join("\n", run.Errors));
+    }
+
+    /// <summary>
+    /// The entity-emission counterpart of
+    /// <see cref="Value_object_own_field_import_honors_an_explicit_qualifier_over_the_owning_context"/>
+    /// (issue #1712): <c>EmitEntityClass</c> shares the exact same qualifier-blind
+    /// <c>Assemble</c>/<c>CollectUses</c> gap as <c>EmitValueObject</c> did.
+    /// </summary>
+    [Fact]
+    public void Entity_own_field_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: Shipping.Status
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.php", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        order.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+    }
 }

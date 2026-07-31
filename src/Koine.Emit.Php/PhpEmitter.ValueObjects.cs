@@ -54,6 +54,22 @@ public sealed partial class PhpEmitter
         // to the interface type (PHP forbids narrowing it to the concrete class on an implementer).
         bool isSummable = needs?.IsSummable ?? false;
 
+        // Per-symbol import hint for Assemble/CollectUses (issue #1712, mirroring #1701's read-model
+        // fix): a field's own `use` import must resolve against ITS declared type's context — the
+        // field's explicit `Context.Type` qualifier when present, else this VO's own context — not
+        // unconditionally this VO's own context. Without a hint here, CollectUses falls back to this
+        // VO's own context, so a same-named-but-unrelated local/other-context type can silently
+        // shadow the field's actually-declared, explicitly-qualified type.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Member m in fields)
+        {
+            CollectImportHints(m.Type, contextName, symbolContext);
+        }
+        foreach (Member m in derived)
+        {
+            CollectImportHints(m.Type, contextName, symbolContext);
+        }
+
         var sb = new StringBuilder();
 
         WriteDoc(sb, vo.Doc, "");
@@ -140,7 +156,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.ValueObjects, vo.Name),
-            Assemble(contextName, KindFolder.ValueObjects, sb.ToString(), name),
+            Assemble(contextName, KindFolder.ValueObjects, sb.ToString(), name,
+                symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.ValueObjects));
     }
 
