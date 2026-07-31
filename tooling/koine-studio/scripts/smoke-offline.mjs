@@ -10,18 +10,17 @@
 // in production — the same shape of gap #357 already closed once for the worker boot itself.
 //
 // What this script does, against the built `dist/` (mirrors scripts/smoke-boot.mjs's static server):
-//   1. load Studio's editor route ONLINE and wait for the compiler worker to boot + compile once
-//      (same signal scripts/smoke-boot.mjs uses — proves the app itself still works);
+//   1. load Studio's editor route ONLINE, on a SINGLE fresh visit, and wait for the compiler worker to
+//      boot + compile once (same signal scripts/smoke-boot.mjs uses — proves the app itself still
+//      works);
 //   2. confirm the service worker reached `active` and is controlling the page;
 //   3. force the idle-scheduled `precache` message (serviceWorkerUpdate.ts's `scheduleCompilerPrecache`,
 //      normally scheduled via `requestIdleCallback`) to fire immediately — a determinism aid, not a
 //      change to what's exercised — then wait for the real Cache Storage to actually hold the loader,
 //      the manifest, and the framework assets;
-//   4. confirm the app shell (index.html) is cached too, then reload ONCE MORE while still online — a
-//      repeat visit, needed because the shell's entry JS/CSS chunks are only cache-first-handled once
-//      the SW already controls the requesting page (issue #1685, filed from this test's first real
-//      run — see the inline comment at that reload for the full story) — and confirm the entry chunk(s)
-//      are now cached too;
+//   4. confirm the app shell (index.html) AND its real entry JS/CSS chunk(s) are cached after this one
+//      visit (issue #1685 — precacheShell now precaches every build-time shell asset at `install`, not
+//      just index.html, so a second warm-up visit is no longer needed to populate the shell cache);
 //   5. flip the browser context OFFLINE (`page.context().setOffline(true)`) and reload;
 //   6. assert the IDE still boots and a `.koi` still compiles — same verdict as step 1 — with the
 //      network cut, i.e. served entirely from the Cache Storage the SW populated in steps 1-4.
@@ -236,24 +235,9 @@ async function main() {
     }
     console.log('✓ app shell cached');
 
-    // A SECOND online visit, before going offline (issue #1685): `precacheShell` only precaches the
-    // base document + index.html at `install` — the entry JS/CSS chunks index.html references are
-    // cached on demand by the fetch handler instead, which only works once the SW already CONTROLS the
-    // requesting page. On the very first-ever navigation the browser's HTML parser fetches those entry
-    // chunks before the page's own JS has run far enough to even register the SW, so they're never
-    // intercepted on that first load — only a repeat visit (this SW already active and controlling from
-    // byte one) gets them cached. This reload is that repeat visit; #1685 tracks closing the gap so a
-    // single visit suffices.
-    responseCounter.count = 0;
-    console.log('▸ reloading once more online (repeat-visit warm-up — issue #1685)…');
-    await page.reload({ waitUntil: 'load', timeout: 30_000 });
-    const repeatVisitVerdict = await waitForBootVerdict(page, BOOT_TIMEOUT_MS, responseCounter);
-    if (!repeatVisitVerdict.ok) {
-      fail(`repeat-visit warm-up: ${repeatVisitVerdict.message}`, JSON.stringify(repeatVisitVerdict.timeline, null, 2));
-      return;
-    }
-    console.log(`✓ repeat-visit warm-up: ${repeatVisitVerdict.message}`);
-
+    // The app shell's real entry JS/CSS chunk(s) — not just index.html — must be cached after this
+    // SINGLE online visit (issue #1685): `precacheShell` now precaches every build-time shell asset at
+    // `install`, so a second warm-up visit is no longer needed to populate them.
     const shellEntryChunksCached = await page.evaluate(async (b) => {
       const names = await caches.keys();
       const shellName = names.find((n) => n.startsWith('koine-studio-shell-'));
@@ -263,10 +247,10 @@ async function main() {
       return keys.some((u) => u.startsWith(`${new URL(u).origin}${b}assets/`));
     }, base);
     if (!shellEntryChunksCached) {
-      fail('the app shell entry JS/CSS chunk(s) were never cached, even after a repeat visit.');
+      fail('the app shell entry JS/CSS chunk(s) were never cached after a single visit.');
       return;
     }
-    console.log('✓ app shell entry chunk(s) cached');
+    console.log('✓ app shell entry chunk(s) cached after a single visit');
 
     // --- go offline and reload: everything from here must be served from the Cache Storage above ---
     responseCounter.count = 0;
