@@ -36,7 +36,7 @@ public sealed class ExprDescriber : ExprVisitor<string>
 
     protected override string VisitCoalesce(CoalesceExpr n) => $"{Visit(n.Left)} ?? {Visit(n.Right)}";
 
-    protected override string VisitUnary(UnaryExpr n) => (n.Op == UnaryOp.Not ? "!" : "-") + Visit(n.Operand);
+    protected override string VisitUnary(UnaryExpr n) => n.Op.Symbol() + Visit(n.Operand);
 
     protected override string VisitBinary(BinaryExpr n) => $"{Visit(n.Left)} {n.Op.Symbol()} {Visit(n.Right)}";
 
