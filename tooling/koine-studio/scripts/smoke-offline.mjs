@@ -177,11 +177,16 @@ async function main() {
     }
     console.log(`✓ online warm-up: ${onlineVerdict.message}`);
 
-    const swActive = await page.evaluate(async () => {
+    // Bounded, unlike a bare `await navigator.serviceWorker.ready`: if the SW never reaches "active"
+    // (the exact regression this asserts against), that promise never settles, and this must fail fast
+    // with the diagnostic below rather than hang for the rest of the job's timeout.
+    const swActive = await page.evaluate(async (timeoutMs) => {
       if (!('serviceWorker' in navigator)) return false;
-      const reg = await navigator.serviceWorker.ready;
+      const timedOut = new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs));
+      const reg = await Promise.race([navigator.serviceWorker.ready, timedOut]);
+      if (!reg) return false;
       return Boolean(reg.active) && Boolean(navigator.serviceWorker.controller);
-    });
+    }, BOOT_TIMEOUT_MS);
     if (!swActive) {
       fail('the service worker never reached "active" / never took control of the page.');
       return;
