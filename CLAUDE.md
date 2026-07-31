@@ -66,6 +66,23 @@ derive the next semantic version and changelog entry — see
 > slow cold build ever needs more headroom) so a deadlock fails loud instead of hanging silently — use
 > them, or when invoking `dotnet build`/`dotnet test` directly from a worktree, pass `-nodereuse:false`
 > yourself (and set `MSBUILDDISABLENODEREUSE=1`) rather than relying on the bare command.
+>
+> **VBCSCompiler (investigated, no change needed — issue #1565):** the Roslyn C#/VB compiler server
+> shares the same toolset-derived-pipe-name sharing surface as the MSBuild nodes above — but it is a
+> *separate* process from the MSBuild node pool, with its own lifecycle, and `MSBUILDDISABLENODEREUSE`/
+> `-nodereuse:false` do **not** disable it. It was investigated on its own merits rather than assumed
+> safe by association: unlike MSBuild's node-reuse deadlock (a proven reuse-probe handshake timeout
+> race — [dotnet/msbuild#13334](https://github.com/dotnet/msbuild/issues/13334)), VBCSCompiler's server
+> handles every client connection on its own independent task with no reuse-probe/handshake race to
+> wedge, no issue tracker precedent for a cross-worktree deadlock turned up, and live observation on
+> this repo's own machine under real concurrent-fleet load showed healthy sharing (active CPU use, never
+> stuck at 0%). So `UseSharedCompilation` is intentionally left at its default (enabled) — disabling it
+> would cost real compile latency for a risk that isn't demonstrated. If a shared VBCSCompiler is ever
+> suspected of being wedged, `dotnet build-server shutdown` (add `--vbcscompiler` to scope it) is the
+> low-risk recovery step — note that `build.sh`'s timeout/`kill_tree` safety net only reaches the
+> *client-side* process tree of a hung invocation, not this detached background server, so a wedge there
+> (never observed) wouldn't self-clear the way a killed MSBuild node invocation does. Full research
+> trail: [issue #1565](https://github.com/Atypical-Consulting/Koine/issues/1565).
 
 ```bash
 ./scripts/build/build.sh    # dotnet build && dotnet test, node-reuse off + a hard timeout (build.ps1 / build.cmd are equivalents, sans the timeout)
