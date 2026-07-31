@@ -852,6 +852,122 @@ public class R18CSharpApplicationTests
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
+    // ------------------------------------------------------------------
+    // Issue #1649: the GetById query endpoint's [AsParameters] OrderId binding now works
+    // (EmitIdValueObject emits TryParse), so Fixture's readmodel/query — which CommandsOnlyFixture
+    // above exists solely to sidestep — can be runtime-verified for real.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="Fixture"/> minus its <c>OrdersByStatus</c> list query: that query's criterion is an
+    /// enum (<c>status: OrderStatus</c>), which has the same "no TryParse" binding gap #1649 fixed for
+    /// typed IDs, but for a genuinely different reason — a C# <c>enum</c> cannot declare a static
+    /// <c>TryParse</c> member the way a hand-emitted identity value object can. Since ASP.NET Core
+    /// builds endpoint metadata for the WHOLE route table on the first request, that query's crash
+    /// would poison every route here too and mask the fix this file exists to verify. Filed as #1656,
+    /// out of scope for #1649; this fixture sidesteps it so <c>OrderById</c> can still be
+    /// runtime-verified for real.
+    /// </summary>
+    internal const string QueryableFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Shipped }
+
+          value Money {
+            amount:   Decimal
+            currency: String
+            invariant amount >= 0   "amount cannot be negative"
+          }
+
+          aggregate Order root Order {
+            repository {
+              operations: getById, add, update
+            }
+
+            event OrderPlaced {
+              orderId: OrderId
+              total:   Money
+            }
+
+            entity Order identified by OrderId {
+              customer: CustomerId
+              total:    Money
+              status:   OrderStatus = Draft
+
+              invariant total.amount >= 0   "order total cannot be negative"
+
+              states status {
+                Draft  -> Placed, Shipped
+                Placed -> Shipped
+                Shipped
+              }
+
+              command place {
+                requires status == Draft   "order must be a draft to place"
+                status -> Placed
+                emit OrderPlaced(orderId: id, total: total)
+              }
+
+              create open(customer: CustomerId, total: Money) {
+                requires total.amount >= 0   "an order total cannot be negative"
+                emit OrderPlaced(orderId: id, total: total)
+              }
+            }
+          }
+
+          readmodel OrderSummary from Order {
+            id
+            customer
+            status
+          }
+
+          query OrderById(id: OrderId): OrderSummary
+        }
+        """;
+
+    /// <summary>
+    /// <see cref="RunSalesApi"/>'s query-enabled counterpart: boots <see cref="TestSupport.RunApi"/>
+    /// over <see cref="QueryableFixture"/> (readmodel and <c>OrderById</c> query included), wiring the
+    /// same Task 1 fake repository/unit-of-work double.
+    /// </summary>
+    private static TestSupport.ApiHostHarness RunSalesApiWithQueries(CSharpEmitterOptions options) =>
+        TestSupport.RunApi(
+            Emit(options, QueryableFixture)
+                .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source)),
+            SalesApiHostDriver);
+
+    [Fact]
+    public async Task Api_layer_query_endpoint_returns_a_real_200_for_an_existing_order()
+    {
+        using var harness = RunSalesApiWithQueries(ApiOn);
+
+        var openResponse = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 15m, currency = "GBP" } },
+            TestContext.Current.CancellationToken);
+        var opened = await openResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        openResponse.StatusCode.ShouldBe(HttpStatusCode.OK, opened);
+        var orderId = JsonDocument.Parse(opened).RootElement.GetProperty("id").GetProperty("value").GetGuid();
+
+        var response = await harness.Client.GetAsync(
+            $"/order-by-id?id={orderId}", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        body.ShouldContain(orderId.ToString());
+        body.ShouldContain("Draft");
+    }
+
+    [Fact]
+    public async Task Api_layer_query_endpoint_returns_a_real_404_for_a_missing_order()
+    {
+        using var harness = RunSalesApiWithQueries(ApiOn with { NotFound = CSharpNotFound.Nullable });
+
+        var response = await harness.Client.GetAsync(
+            $"/order-by-id?id={Guid.NewGuid()}", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {
