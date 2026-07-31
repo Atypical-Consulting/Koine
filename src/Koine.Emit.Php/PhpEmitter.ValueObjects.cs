@@ -33,6 +33,7 @@ public sealed partial class PhpEmitter
             emit.Index,
             vo.Members,
             emit.EnumMemberToType,
+            context: contextName,
             regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         // Classifies a field's type for `equals()`: a value object / id value object compares

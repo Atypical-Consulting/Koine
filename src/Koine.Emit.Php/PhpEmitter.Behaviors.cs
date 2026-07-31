@@ -160,7 +160,7 @@ public sealed partial class PhpEmitter
         foreach (Transition tr in transitions)
         {
             var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft)
-                && index.Classify(ft.Name) == TypeKind.Enum ? ft.Name : null;
+                && index.Classify(ft.Qualifier ?? translator.Context, ft.Name) == TypeKind.Enum ? ft.Name : null;
             var value = translator.Translate(tr.Value, PhpExpressionTranslator.NameMode.Property, expectedEnum);
             var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(tr.Field));
             sb.Append(Indent).Append(Indent).Append("$this->").Append(prop).Append(" = ").Append(value).Append(";\n");
@@ -304,7 +304,7 @@ public sealed partial class PhpEmitter
             var param = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                var expectedEnum = index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 // A factory is a STATIC method — Property mode would render an entity-member
                 // reference as `$this->member` ("Cannot use $this in a static method"). Use
                 // Parameter mode so a bare member renders as `$member` (the factory's params and
@@ -476,7 +476,7 @@ public sealed partial class PhpEmitter
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
             {
-                var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
+                var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
                 return translator.Translate(argByField[f.Name], mode, expectedEnum);
             });
 
@@ -509,7 +509,7 @@ public sealed partial class PhpEmitter
         var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         var fields = members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
-        var translator = new PhpExpressionTranslator(emit.Index, members, emit.EnumMemberToType, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
+        var translator = new PhpExpressionTranslator(emit.Index, members, emit.EnumMemberToType, context: contextName, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         WriteDoc(sb, doc, "");

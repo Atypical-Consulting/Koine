@@ -99,6 +99,10 @@ internal sealed class PhpExpressionTranslator
         _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
+    /// <summary>The bounded context this translator resolves unqualified types against (R13.2), for
+    /// callers that hold the translator but not its resolver.</summary>
+    internal string? Context => _resolver.Context;
+
     public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
 
     public void PopLocal(string name) => _locals.PopLocal(name);
@@ -187,7 +191,13 @@ internal sealed class PhpExpressionTranslator
     private string? EnumTypeName(Expr expr)
     {
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
-        return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
+        if (type is null)
+        {
+            return null;
+        }
+
+        string? context = type.Qualifier ?? _resolver.Context;
+        return _index.Classify(context, type.Name) == TypeKind.Enum ? type.Name : null;
     }
 
     private void Write(Expr expr, StringBuilder sb)
@@ -825,7 +835,7 @@ internal sealed class PhpExpressionTranslator
             return false;
         }
 
-        return _index.Classify(t.Name) == TypeKind.Value;
+        return _index.Classify(t.Qualifier ?? _resolver.Context, t.Name) == TypeKind.Value;
     }
 
     /// <summary>
@@ -838,7 +848,7 @@ internal sealed class PhpExpressionTranslator
     /// operators — equality/comparison stay on the strict non-optional predicate (#813).
     /// </summary>
     private bool IsArithmeticValueObjectOperand(TypeRef? t) =>
-        t is not null && _index.Classify(t.Name) == TypeKind.Value;
+        t is not null && _index.Classify(t.Qualifier ?? _resolver.Context, t.Name) == TypeKind.Value;
 
     /// <summary>The comparison operator to place after <c>compareTo(...)</c>, oriented to the receiver.</summary>
     private static string CompareOperator(BinaryOp op, bool receiverIsLeft)
@@ -990,7 +1000,7 @@ internal sealed class PhpExpressionTranslator
         }
 
         // (5) An enum *type* reference (the qualifier of `OrderStatus.Draft`): the PascalCase class.
-        if (_index.Classify(name) == TypeKind.Enum)
+        if (_index.Classify(_resolver.Context, name) == TypeKind.Enum)
         {
             sb.Append(PhpNaming.ClassName(name));
             return;
@@ -1046,7 +1056,7 @@ internal sealed class PhpExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus::Cancelled` -> `OrderStatus::CANCELLED`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(PhpNaming.ClassName(qualifier.Name)).Append("::")
               .Append(PhpNaming.ConstName(ma.MemberName));

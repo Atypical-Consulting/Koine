@@ -976,4 +976,78 @@ public class PhpConformanceTests
             "Guard-narrowed Int?/Int division should truncate toward zero (7/2==3, -7/2==-3), not throw:\n"
             + string.Join("\n", run.Errors));
     }
+
+    /// <summary>
+    /// Issue #1620: <c>ModelIndex.Classify</c> is context-blind — its flat, last-write-wins
+    /// <c>_byName</c> index can answer for the WRONG context's same-named declaration (R13.2 legally
+    /// lets two contexts each declare their own <c>Status</c>). Here <c>Shipping</c>'s <c>value Status</c>
+    /// is registered after <c>Billing</c>'s <c>enum Status</c>, so a context-blind
+    /// <c>Classify("Status")</c> answers <c>Value</c> for <c>Billing.Invoice</c>'s own <c>status</c>/
+    /// <c>archivedStatus</c> members, and <see cref="PhpExpressionTranslator"/>'s
+    /// <c>IsArithmeticValueObject</c>/<c>IsArithmeticValueObjectOperand</c> checks (which decide whether
+    /// <c>==</c> between two Status-typed members routes to a value object's structural
+    /// <c>-&gt;equals()</c> or PHP's <c>===</c>) wrongly pick the value-object path for an enum. Before
+    /// the fix this emits <c>$this-&gt;status-&gt;equals($this-&gt;archivedStatus)</c> — a call to
+    /// <c>equals()</c>, a method a PHP backed enum does not have — a runtime fatal <c>phpstan</c>/
+    /// <c>php -l</c> alone cannot see (the emitted code is syntactically valid PHP); only executing it
+    /// proves the bug.
+    /// <para>
+    /// Deliberately compares two MEMBERS (not a bare enum literal like <c>status == Open</c>): a bare
+    /// enum-member reference resolves via <see cref="Koine.Compiler.Ast.ModelIndex.EnumsDeclaring"/>,
+    /// which itself walks <see cref="Koine.Compiler.Ast.ModelIndex.AllTypes"/> — the SAME flat,
+    /// last-write-wins <c>_byName</c> map, so a same-named-type collision silently drops the
+    /// LOSING context's enum from that index entirely. That gap (and the sibling one in
+    /// <see cref="Koine.Compiler.Ast.TypeResolver.IsValueLike"/>/<c>IsUserType</c>, used by this same
+    /// value object's <c>equals()</c> method) is a separate, deeper context-blindness in the shared
+    /// <c>Ast/</c> layer — out of scope for this issue's PHP-emitter-only call-site migration — so this
+    /// fixture avoids it to isolate exactly the 13 call sites this issue migrates.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Same_named_type_across_two_contexts_resolves_the_correct_context_for_an_equality_comparison()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status { Open Closed }
+              value Invoice {
+                status: Status
+                archivedStatus: Status
+                sameStatus: Bool = status == archivedStatus
+              }
+            }
+            context Shipping {
+              value Status { code: Int }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Billing/Enums/Status.php';
+            require __DIR__ . '/src/Billing/ValueObjects/Invoice.php';
+
+            $same = new Koine\Billing\ValueObjects\Invoice(Koine\Billing\Enums\Status::OPEN, Koine\Billing\Enums\Status::OPEN);
+            if ($same->sameStatus() !== true) {
+                fwrite(STDERR, "expected sameStatus() true for two Status::OPEN, got " . var_export($same->sameStatus(), true) . "\n");
+                exit(1);
+            }
+
+            $different = new Koine\Billing\ValueObjects\Invoice(Koine\Billing\Enums\Status::OPEN, Koine\Billing\Enums\Status::CLOSED);
+            if ($different->sameStatus() !== false) {
+                fwrite(STDERR, "expected sameStatus() false for Status::OPEN vs Status::CLOSED, got " . var_export($different->sameStatus(), true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+
+        run.Ok.ShouldBeTrue(
+            "A same-named Status in another context must not make Billing.Invoice's own Status "
+            + "misclassify as a value object (a fatal call to the undefined Status::equals()):\n"
+            + string.Join("\n", run.Errors));
+    }
 }
