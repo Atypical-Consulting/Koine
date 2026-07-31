@@ -336,6 +336,17 @@ public class R10ServicesTests
     }
 
     [Fact]
+    public void Guarded_conditional_resolves_narrowed_for_operation_return()
+    {
+        // #1614: CheckOperationReturn must route through EffectiveType like the field-default
+        // check #1564 already fixed, so a same-expression isPresent guard narrows the value.
+        const string src =
+            "context C { value Item { qty: Int? }  service Pricing {\n" +
+            "  operation resolve(item: Item): Int = if item.qty.isPresent then item.qty else 0\n} }";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Duplicate_operation_is_reported()
     {
         const string src = "context C { service S { operation f(a: Int): Int = a  operation f(b: Int): Int = b } }";

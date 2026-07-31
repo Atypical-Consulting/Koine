@@ -159,6 +159,17 @@ public class R6EventTests
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EmitPayloadMismatch);
     }
 
+    [Fact]
+    public void Guarded_conditional_resolves_narrowed_for_emit_arg()
+    {
+        // #1614: CheckEmitArg must route through EffectiveType like the field-default check
+        // #1564 already fixed, so a same-expression isPresent guard narrows the value.
+        const string src =
+            "context C {\n  event Happened { resolved: Int }\n  entity E identified by EId {\n    qty: Int?\n" +
+            "    command go { emit Happened(resolved: if qty.isPresent then qty else 0) }\n  }\n}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
     // ---- regressions found by the R6 review --------------------------------
 
     [Fact]
