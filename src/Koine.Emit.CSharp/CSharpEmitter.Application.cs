@@ -178,9 +178,12 @@ public sealed partial class CSharpEmitter
 
         files.Add(EmitRequestRecord(emit, ns, requestType, fields, effectiveResult));
 
+        var dispatches = DispatchesInHandler(root);
+
         var sb = new StringBuilder();
         WriteHandlerHeader(sb, handlerType, requestType, effectiveResult,
-            cmd.Doc ?? $"Handles {requestType} by invoking {root.Name}.{method} and committing the unit of work.");
+            cmd.Doc ?? $"Handles {requestType} by invoking {root.Name}.{method} and committing the unit of work.",
+            dispatches);
 
         sb.Append(Indent).Append(HandlerSignature(requestType, effectiveResult)).Append('\n');
         sb.Append(Indent).Append("{\n");
@@ -208,18 +211,33 @@ public sealed partial class CSharpEmitter
         {
             sb.Append(Indent).Append(Indent).Append("var result = aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
+            if (dispatches)
+            {
+                WriteDispatchEvents(sb);
+            }
+
             sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("result")).Append(";\n");
         }
         else if (returnsValue)
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
+            if (dispatches)
+            {
+                WriteDispatchEvents(sb);
+            }
+
             sb.Append(Indent).Append(Indent).Append("return ").Append(Ok(successExpr)).Append(";\n");
         }
         else
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
+            if (dispatches)
+            {
+                WriteDispatchEvents(sb);
+            }
+
             WriteVoidReturn(sb);
         }
 
@@ -255,9 +273,12 @@ public sealed partial class CSharpEmitter
 
         files.Add(EmitRequestRecord(emit, ns, requestType, fields, root.Name));
 
+        var dispatches = DispatchesInHandler(root);
+
         var sb = new StringBuilder();
         WriteHandlerHeader(sb, handlerType, requestType, root.Name,
-            factory.Doc ?? $"Handles {requestType} by creating a {root.Name} via {root.Name}.{method} and committing the unit of work.");
+            factory.Doc ?? $"Handles {requestType} by creating a {root.Name} via {root.Name}.{method} and committing the unit of work.",
+            dispatches);
 
         sb.Append(Indent).Append(HandlerSignature(requestType, root.Name)).Append('\n');
         sb.Append(Indent).Append("{\n");
@@ -266,6 +287,11 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append(Indent).Append("await _unitOfWork.").Append(plural)
           .Append(".AddAsync(aggregate, ").Append(CtArg()).Append(");\n");
         WriteCommit(sb);
+        if (dispatches)
+        {
+            WriteDispatchEvents(sb);
+        }
+
         sb.Append(Indent).Append(Indent).Append("return aggregate;\n");
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
@@ -307,7 +333,7 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>Writes the handler class declaration line + the injected unit of work + constructor.</summary>
-    private void WriteHandlerHeader(StringBuilder sb, string handlerType, string requestType, string? plainResult, string doc)
+    private void WriteHandlerHeader(StringBuilder sb, string handlerType, string requestType, string? plainResult, string doc, bool dispatchEvents = false)
     {
         WriteXmlDoc(sb, doc, "");
         sb.Append("public sealed class ").Append(handlerType);
@@ -317,9 +343,51 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append("\n{\n");
-        sb.Append(Indent).Append("private readonly IUnitOfWork _unitOfWork;\n\n");
-        sb.Append(Indent).Append("public ").Append(handlerType).Append("(IUnitOfWork unitOfWork)\n");
-        sb.Append(Indent).Append(Indent).Append("=> _unitOfWork = unitOfWork;\n\n");
+        sb.Append(Indent).Append("private readonly IUnitOfWork _unitOfWork;\n");
+        if (dispatchEvents)
+        {
+            sb.Append(Indent).Append("private readonly IDomainEventDispatcher _dispatcher;\n");
+        }
+
+        sb.Append('\n');
+        if (dispatchEvents)
+        {
+            // Two dependencies outgrow the expression-bodied constructor the single-dependency shape uses.
+            sb.Append(Indent).Append("public ").Append(handlerType).Append("(IUnitOfWork unitOfWork, IDomainEventDispatcher dispatcher)\n");
+            sb.Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append("_unitOfWork = unitOfWork;\n");
+            sb.Append(Indent).Append(Indent).Append("_dispatcher = dispatcher;\n");
+            sb.Append(Indent).Append("}\n\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append("public ").Append(handlerType).Append("(IUnitOfWork unitOfWork)\n");
+            sb.Append(Indent).Append(Indent).Append("=> _unitOfWork = unitOfWork;\n\n");
+        }
+    }
+
+    /// <summary>
+    /// True when this handler dispatches its aggregate's domain events inline, after its own commit
+    /// (W1, issue #1721). Requires the option, a root that actually records events (otherwise the
+    /// aggregate has no <c>DomainEvents</c> member and the loop would not compile), and the plain
+    /// handler shape — in MediatR mode the commit is deferred to <c>TransactionBehavior</c>, so the
+    /// dispatch happens there instead.
+    /// </summary>
+    private bool DispatchesInHandler(EntityDecl root) =>
+        _options.DispatchEvents && !_options.ApplicationMediatr && EmitsEvents(root);
+
+    /// <summary>
+    /// Writes the post-commit dispatch loop: every event the aggregate recorded is dispatched in
+    /// recording order, then the list is cleared. The clear runs only after the loop completes, so a
+    /// mid-dispatch throw leaves the events visible for a retry rather than silently dropping them.
+    /// </summary>
+    private void WriteDispatchEvents(StringBuilder sb)
+    {
+        sb.Append(Indent).Append(Indent).Append("foreach (var domainEvent in aggregate.DomainEvents)\n");
+        sb.Append(Indent).Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("await _dispatcher.DispatchAsync(domainEvent, ").Append(CtArg()).Append(");\n");
+        sb.Append(Indent).Append(Indent).Append("}\n\n");
+        sb.Append(Indent).Append(Indent).Append("aggregate.ClearDomainEvents();\n");
     }
 
     /// <summary>The handler method signature: plain <c>HandleAsync</c> or MediatR <c>Handle</c>.</summary>

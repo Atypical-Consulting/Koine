@@ -443,6 +443,87 @@ public class R18CSharpApplicationTests
         contract.ShouldContain("namespace Koine.Runtime");
     }
 
+    /// <summary>The index of <paramref name="needle"/> in <paramref name="haystack"/>, asserted present.</summary>
+    private static int IndexOfOrFail(string haystack, string needle)
+    {
+        var at = haystack.IndexOf(needle, StringComparison.Ordinal);
+        at.ShouldBeGreaterThanOrEqualTo(0, $"expected to find: {needle}");
+        return at;
+    }
+
+    [Fact]
+    public void Dispatch_events_injects_the_dispatcher_into_a_command_handler()
+    {
+        var handler = File(Emit(AppOn with { DispatchEvents = true }), "OrderPlaceHandler.cs").Contents;
+
+        handler.ShouldContain("private readonly IDomainEventDispatcher _dispatcher;");
+        handler.ShouldContain("public OrderPlaceHandler(IUnitOfWork unitOfWork, IDomainEventDispatcher dispatcher)");
+        handler.ShouldContain("_dispatcher = dispatcher;");
+    }
+
+    [Fact]
+    public void Dispatch_events_loops_after_the_commit_then_clears_in_a_command_handler()
+    {
+        var handler = File(Emit(AppOn with { DispatchEvents = true }), "OrderPlaceHandler.cs").Contents;
+
+        handler.ShouldContain("foreach (var domainEvent in aggregate.DomainEvents)");
+        handler.ShouldContain("await _dispatcher.DispatchAsync(domainEvent, ct);");
+        handler.ShouldContain("aggregate.ClearDomainEvents();");
+
+        // Post-commit is the whole point: an event dispatched BEFORE the commit could announce a
+        // transaction that then rolled back. And the list is cleared only after the loop completes,
+        // so a mid-dispatch throw leaves the events visible for a retry rather than dropping them.
+        var commit = IndexOfOrFail(handler, "await _unitOfWork.SaveChangesAsync(ct);");
+        var loop = IndexOfOrFail(handler, "foreach (var domainEvent in aggregate.DomainEvents)");
+        var clear = IndexOfOrFail(handler, "aggregate.ClearDomainEvents();");
+        commit.ShouldBeLessThan(loop);
+        loop.ShouldBeLessThan(clear);
+    }
+
+    [Fact]
+    public void Dispatch_events_loops_after_the_commit_in_a_factory_handler()
+    {
+        var handler = File(Emit(AppOn with { DispatchEvents = true }), "OrderOpenHandler.cs").Contents;
+
+        handler.ShouldContain("public OrderOpenHandler(IUnitOfWork unitOfWork, IDomainEventDispatcher dispatcher)");
+        var commit = IndexOfOrFail(handler, "await _unitOfWork.SaveChangesAsync(ct);");
+        var loop = IndexOfOrFail(handler, "foreach (var domainEvent in aggregate.DomainEvents)");
+        var clear = IndexOfOrFail(handler, "aggregate.ClearDomainEvents();");
+        var ret = IndexOfOrFail(handler, "return aggregate;");
+        commit.ShouldBeLessThan(loop);
+        loop.ShouldBeLessThan(clear);
+        clear.ShouldBeLessThan(ret);
+    }
+
+    [Fact]
+    public void Dispatch_events_emits_no_loop_for_a_root_that_records_no_events()
+    {
+        // DerivedReadModelFixture's Order has neither an emitting command nor an emitting factory, so
+        // it carries no DomainEvents member — emitting the loop there would not compile.
+        var files = Emit(AppOn with { DispatchEvents = true }, DerivedReadModelFixture);
+
+        var handler = File(files, "OrderOpenHandler.cs").Contents;
+        handler.ShouldNotContain("DomainEvents");
+        handler.ShouldNotContain("_dispatcher");
+        files.ShouldNotContain(f => f.RelativePath.EndsWith("IDomainEventDispatcher.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Dispatch_events_sits_between_the_commit_and_the_return_under_read_model_results()
+    {
+        // The handler returns a projection, but must still dispatch and clear off the AGGREGATE —
+        // so the loop belongs after the commit and before the `return`, in every result branch.
+        var handler = File(
+            Emit(AppOn with { DispatchEvents = true, HandlerResult = CSharpHandlerResult.ReadModel }),
+            "OrderPlaceHandler.cs").Contents;
+
+        var commit = IndexOfOrFail(handler, "await _unitOfWork.SaveChangesAsync(ct);");
+        var clear = IndexOfOrFail(handler, "aggregate.ClearDomainEvents();");
+        var ret = IndexOfOrFail(handler, "return aggregate.ToOrderSummary();");
+        commit.ShouldBeLessThan(clear);
+        clear.ShouldBeLessThan(ret);
+    }
+
     // ------------------------------------------------------------------
     // W4 — --app-mapping mapperly: emit a Riok.Mapperly source-generated
     // projection instead of the hand-rolled To<RM>() mapper. plain (the
