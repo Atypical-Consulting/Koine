@@ -739,6 +739,13 @@
   margin-top: 0;
 }
 
+/* Each scope's rows wrap in a role="group" container for a11y (#1421); the generic
+   .koi-set-row:last-child rule strips the bottom border off the panel's true final row (Reset all)
+   only — restore it here so a scope's own last row doesn't also lose its separator. */
+.koi-kbd-scope-group .koi-kbd-row:last-child {
+  border-bottom: 1px solid var(--koi-line);
+}
+
 .koi-kbd-control {
   display: flex;
   flex-wrap: wrap;
