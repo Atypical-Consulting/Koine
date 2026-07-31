@@ -390,6 +390,105 @@ public class KotlinConformanceTests
     }
 
     /// <summary>
+    /// #1615: a coalesce (<c>??</c>) whose two operands are nullable but of DIFFERENT numeric types
+    /// (<c>Int?</c> vs <c>Decimal?</c>) must reconcile that mismatch before emitting Kotlin's elvis
+    /// <c>?:</c> — unreconciled, Kotlin infers the two arms' nearest common supertype (<c>Number? &amp;
+    /// Comparable&lt;*&gt;?</c>, not <c>BigDecimal?</c>), a real <c>kotlinc</c> "initializer type mismatch"
+    /// error. The narrower <c>Int?</c> left operand must null-safe-map-widen
+    /// (<c>?.let { java.math.BigDecimal.valueOf(it) }</c>) before the elvis, mirroring #1548's Java
+    /// <c>Optional.or</c>/<c>.orElse</c> fix but via Kotlin's own <c>?.let</c> idiom (elvis has no
+    /// <c>Optional</c>-style receiver-fixed-generic constraint, so no <c>.or</c>-vs-<c>.orElse</c> split is
+    /// needed).
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_between_nullable_operands()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Int?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no kotlinc required): the narrower Int? operand is null-safe-map-widened before
+        // the elvis, so both sides agree on BigDecimal?.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a?.let { java.math.BigDecimal.valueOf(it) } ?: b");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1615's symmetric operand order: the LEFT operand is already the wider <c>Decimal?</c> (no widen
+    /// needed), while the narrower <c>Int?</c> RIGHT operand must null-safe-map-widen before it's written
+    /// after the elvis, since the elvis result must still agree in type with the reconciled left side.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_symmetric_operand_order()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Int?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a ?: b?.let { java.math.BigDecimal.valueOf(it) }");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard: a coalesce whose two operands are ALREADY the same nullable numeric
+    /// type (the common, already-correct case) must keep emitting a bare elvis with no widening wrap,
+    /// unaffected by #1615's reconciliation fix.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_same_typed_nullable_operands_emits_unchanged()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a ?: b");
+        product.ShouldNotContain("?.let {");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a genuine
     /// <c>kotlinc</c> check. We take a well-formed emit and corrupt one file with a deliberate syntax error;
     /// the compile must FAIL.
