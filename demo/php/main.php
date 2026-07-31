@@ -13,17 +13,6 @@ declare(strict_types=1);
  * No Composer autoloading is used: the emitted classes are required directly, in dependency order,
  * the same way the Conformance/PhpConformanceTests harness exercises them (it writes files to a
  * temp directory and analyses them as-is, with no autoloader).
- *
- * KNOWN GAP (see ../README.md "What this demo does NOT prove"):
- *
- * 1. templates/starters/ordering's `states status { ... }` block has no paired `command`
- *    declarations, so -- per the documented Koine semantics ("the block by itself emits nothing;
- *    its effect appears wherever a command assigns that field") -- the emitted `Order` has no
- *    transition method and no runtime guard. This demo therefore constructs immutable Order
- *    snapshots at each lifecycle value instead of driving a mutator, and does NOT assert that an
- *    illegal transition (e.g. Draft -> Shipped) is rejected, because nothing in the emitted code
- *    rejects it. This is a property of the *template*, not a PHP-emitter bug -- identical to the
- *    TypeScript, Python, and Rust demos of this same template.
  */
 
 require_once __DIR__ . '/generated/KoineRuntime.php';
@@ -94,8 +83,7 @@ $differentOrder = new Order(OrderId::generate(), [$line1, $line2]);
 $check(!$draftOrder->equals($differentOrder), 'two Order instances with different ids must not be equal');
 
 // --- OrderStatus: the Draft -> Placed -> Shipped lifecycle values are all constructible and
-// distinguishable (see KNOWN GAP 1 above: this does not exercise a runtime transition guard,
-// because templates/starters/ordering emits none). ---
+// distinguishable. ---
 $placedOrder = new Order($orderId, [$line1, $line2], OrderStatus::PLACED);
 $shippedOrder = new Order($orderId, [$line1, $line2], OrderStatus::SHIPPED);
 
@@ -123,6 +111,26 @@ $matched = $matchedRaw;
 $check(
     $matched === 'shipped',
     "OrderStatus::match_ should route a Shipped order to its 'shipped' case, got '{$matched}'",
+);
+
+// --- State machine: a legal Draft -> Placed -> Shipped walk through the generated mutators, and an
+// illegal Draft -> Shipped transition rejected by the generated runtime guard. ---
+$walkedOrder = new Order(OrderId::generate(), [$line1, $line2]);
+$walkedOrder->place();
+$check($walkedOrder->status === OrderStatus::PLACED, "place() should transition Draft -> Placed, got '{$walkedOrder->status->name}'");
+$walkedOrder->ship();
+$check($walkedOrder->status === OrderStatus::SHIPPED, "ship() should transition Placed -> Shipped, got '{$walkedOrder->status->name}'");
+
+$illegalOrder = new Order(OrderId::generate(), [$line1, $line2]);
+$illegalTransitionRejected = false;
+try {
+    $illegalOrder->ship();
+} catch (\Koine\Runtime\DomainInvariantViolationException $e) {
+    $illegalTransitionRejected = true;
+}
+$check(
+    $illegalTransitionRejected,
+    'ship() on a Draft order should throw DomainInvariantViolationException (Draft -> Shipped is not a legal transition)',
 );
 
 if ($failures > 0) {

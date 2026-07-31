@@ -156,6 +156,30 @@ impl Order {
     pub fn lines(&self) -> &Vec<OrderLine> { &self.lines }
 
     pub fn status(&self) -> OrderStatus { self.status }
+
+    pub fn place(&mut self) -> Result<(), DomainError> {
+        if !(self.status == OrderStatus::Draft) {
+            return Err(DomainError::InvariantViolation { type_name: "Order", rule: "only a draft order can be placed" });
+        }
+        self.status = OrderStatus::Placed;
+        Ok(())
+    }
+
+    pub fn ship(&mut self) -> Result<(), DomainError> {
+        if !(self.status == OrderStatus::Placed) {
+            return Err(DomainError::InvariantViolation { type_name: "Order", rule: "only a placed order can be shipped" });
+        }
+        self.status = OrderStatus::Shipped;
+        Ok(())
+    }
+
+    pub fn cancel(&mut self) -> Result<(), DomainError> {
+        if !(self.status == OrderStatus::Placed) {
+            return Err(DomainError::InvariantViolation { type_name: "Order", rule: "only a placed order can be cancelled" });
+        }
+        self.status = OrderStatus::Cancelled;
+        Ok(())
+    }
 }
 
 /// Persistence-ignorant repository contract for the `Order` aggregate root.

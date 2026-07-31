@@ -30,4 +30,28 @@ class Order
     {
         return $this->id->equals($other->id);
     }
+
+    public function place(): void
+    {
+        if ($this->status !== OrderStatus::DRAFT) {
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'only a draft order can be placed');
+        }
+        $this->status = OrderStatus::PLACED;
+    }
+
+    public function ship(): void
+    {
+        if ($this->status !== OrderStatus::PLACED) {
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'only a placed order can be shipped');
+        }
+        $this->status = OrderStatus::SHIPPED;
+    }
+
+    public function cancel(): void
+    {
+        if ($this->status !== OrderStatus::PLACED) {
+            throw new \Koine\Runtime\DomainInvariantViolationException("Order", 'only a placed order can be cancelled');
+        }
+        $this->status = OrderStatus::CANCELLED;
+    }
 }

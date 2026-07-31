@@ -4,15 +4,6 @@ Constructs the generated `Order` aggregate (with `OrderLine` value objects and a
 smart enum) from templates/starters/ordering and asserts VALUES -- never emitted formatting or
 whitespace -- so this demo never churns when the emitter's output shape changes. A clean run (every
 assertion holds) exits 0; any failed assertion calls `sys.exit(1)` so a red run is unmissable.
-
-KNOWN GAP (see ../README.md "What this demo does NOT prove"): templates/starters/ordering's
-`states status { ... }` block has no paired `command` declarations, so -- per the documented Koine
-semantics ("the block by itself emits nothing; its effect appears wherever a command assigns that
-field") -- the emitted `Order` has no transition method and no runtime guard. This demo therefore
-constructs immutable Order snapshots at each lifecycle value instead of driving a mutator, and does
-NOT assert that an illegal transition (e.g. Draft -> Shipped) is rejected, because nothing in the
-emitted code rejects it. This is a property of the *template* (every other Koine template that uses
-`states` pairs it with commands), not a Python-emitter bug -- see the README for the full note.
 """
 
 from __future__ import annotations
@@ -21,6 +12,7 @@ import sys
 import uuid
 from decimal import Decimal
 
+from koine_runtime import DomainInvariantViolationError
 from ordering.enums.order_status import OrderStatus
 from ordering.order import Order
 from ordering.value_objects.order_id import OrderId
@@ -77,8 +69,7 @@ different_order = Order(OrderId.new(), (line1, line2))
 check(draft_order != different_order, "two Order instances with different ids must not be equal")
 
 # --- OrderStatus: the Draft -> Placed -> Shipped lifecycle values are all constructible and
-# distinguishable (see the KNOWN GAP note above the imports: this does not exercise a runtime
-# transition guard, because templates/starters/ordering emits none). ---
+# distinguishable. ---
 placed_order = Order(order_id, (line1, line2), OrderStatus.PLACED)
 shipped_order = Order(order_id, (line1, line2), OrderStatus.SHIPPED)
 
@@ -98,6 +89,25 @@ matched = shipped_order.status.match(
 check(
     matched == "shipped",
     f"OrderStatus.match should route a Shipped order to its 'shipped' case, got '{matched}'",
+)
+
+# --- State machine: a legal Draft -> Placed -> Shipped walk through the generated mutators, and an
+# illegal Draft -> Shipped transition rejected by the generated runtime guard. ---
+walked_order = Order(OrderId.new(), (line1, line2))
+walked_order.place()
+check(walked_order.status is OrderStatus.PLACED, f"place() should transition Draft -> Placed, got '{walked_order.status.name}'")
+walked_order.ship()
+check(walked_order.status is OrderStatus.SHIPPED, f"ship() should transition Placed -> Shipped, got '{walked_order.status.name}'")
+
+illegal_order = Order(OrderId.new(), (line1, line2))
+illegal_transition_rejected = False
+try:
+    illegal_order.ship()
+except DomainInvariantViolationError:
+    illegal_transition_rejected = True
+check(
+    illegal_transition_rejected,
+    "ship() on a Draft order should raise DomainInvariantViolationError (Draft -> Shipped is not a legal transition)",
 )
 
 if failures:

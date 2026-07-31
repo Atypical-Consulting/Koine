@@ -24,7 +24,11 @@ part of its own `dotnet build`), [`demo/typescript`](../typescript), [`demo/pyth
      the same id but different `lines` are equal, and two orders with different ids are not;
    - the `Draft`/`Placed`/`Shipped`/`Cancelled` `OrderStatus` enum variants are all constructible,
      mutually distinguishable, round-trip through `OrderStatus::from_name`/`from_value`, and route
-     correctly through the generated `OrderStatus::match_()` exhaustive dispatch.
+     correctly through the generated `OrderStatus::match_()` exhaustive dispatch;
+   - the generated `place()`/`ship()` mutators drive a legal `Draft -> Placed -> Shipped` walk
+     (each returning `Ok(())`), and calling `ship()` directly on a fresh `Draft` order (an illegal
+     `Draft -> Shipped` transition) returns `Err`, proving the `states status { ... }` block's
+     runtime guard actually rejects illegal transitions.
 
    The driver asserts **values**, never emitted formatting/whitespace, so this demo never churns
    when the emitter's output shape changes — only when its *behavior* does.
@@ -56,34 +60,6 @@ toolchain that silently goes missing in CI reddens the build instead of hiding a
 `cargo run` fetches `rust_decimal` and `regex` (the two dependencies `koine_runtime` needs) from
 crates.io if they aren't already cached locally; CI has network access, so this is not a hidden
 requirement there.
-
-## What this demo does NOT prove
-
-### 1. No runtime state-transition guard
-
-`templates/starters/ordering`'s `states status { Draft -> Placed; Placed -> Shipped; Placed ->
-Cancelled }` block has **no paired `command` declarations**. Per Koine's documented semantics (see
-[§11.6](../../website/src/content/docs/reference/commands-events-state.md)), *"the block by itself
-emits nothing — it is a constraint. Its effect appears wherever a command assigns that field"* — the
-runtime transition guard is only generated on a `command`'s assignment of the governed field.
-Because this starter template declares no commands, the emitted `Order` has no generated mutator
-and no illegal-transition guard to exercise.
-
-This is a property of **the template**, not a Rust-emitter bug — every other Koine template that
-uses a `states` block (`pizzeria`, `library`, `saas-subscription`, `ticketing`) pairs it with
-commands, and the same gap applies identically to the C#, TypeScript, Python, and PHP output for
-this same template. A human may want to file a follow-up issue to enrich
-`templates/starters/ordering.koi` with real `place`/`ship`/`cancel` commands (making its
-`template.json` "state transitions" teaching claim literally exercised by a generated guard), which
-would let this demo — and its TypeScript/Python/PHP siblings — assert a genuine illegal-transition
-rejection.
-
-> This section previously also listed a Rust-specific parity gap: `Order::new` rendered no trailing
-> `status` parameter at all, unlike the C#/TypeScript/Python/PHP emitters. That gap is fixed (#1380)
-> — `Order::new`'s generated signature now takes a trailing `status: Option<OrderStatus>` that
-> defaults to `Draft` when omitted, matching the other four emitters' shape, and this driver now
-> constructs a `Placed` `Order` directly (see `src/main.rs`) the same way its TypeScript/Python/PHP
-> siblings do.
 
 ## Layout
 
