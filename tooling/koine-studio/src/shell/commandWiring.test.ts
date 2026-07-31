@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCommandWiring, PALETTE_COMMAND_ID, type CommandWiringDeps } from '@/shell/commandWiring';
 import { saveKeybindingOverride, clearKeybindingOverrides } from '@/settings/persistence';
+import { prettyChord } from '@/shared/platform';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 import { createLauncher, type LauncherHandle } from '@/launcher/createLauncher';
 import type { LauncherSources } from '@/launcher/buildCatalog';
@@ -356,6 +357,27 @@ describe('commandWiring', () => {
       wiring.dispose();
       window.dispatchEvent(key({ key: 'n', ctrlKey: true }));
       expect(deps.requestNewModel).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('palette-hint keycap (#1421)', () => {
+    it('renders the live-resolved commandPalette chord, not a hardcoded default', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+
+      const kbd = document.querySelector('.palette-hint > [aria-hidden="true"]');
+      expect(kbd?.textContent).toBe(prettyChord('Mod-k'));
+    });
+
+    it('refreshPaletteHint() re-renders it after a Settings → Keyboard rebind', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+
+      saveKeybindingOverride('commandPalette', 'Mod-j');
+      wiring.refreshPaletteHint();
+
+      const kbd = document.querySelector('.palette-hint > [aria-hidden="true"]');
+      expect(kbd?.textContent).toBe(prettyChord('Mod-j'));
     });
   });
 

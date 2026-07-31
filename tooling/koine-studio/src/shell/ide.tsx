@@ -1245,9 +1245,11 @@ export function init(hooks: IdeHooks = {}): () => void {
     // User/Workspace scope toggle and routes scoped commits to the workspace override store.
     workspaceKey: () => wsKey(),
     // Live-apply a keybinding remap from Settings → Keyboard: reconfigure the editor's keymap
-    // compartment in place.
+    // compartment in place, and (#1421) refresh the toolbar's ⌘K keycap so a commandPalette rebind
+    // doesn't leave it showing the stale default.
     onKeybindingsChanged: () => {
       editor.reconfigureKeybindings();
+      commandWiring.refreshPaletteHint();
     },
   };
 

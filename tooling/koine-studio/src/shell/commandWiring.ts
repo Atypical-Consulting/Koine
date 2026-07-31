@@ -13,7 +13,7 @@ import { domById } from '@/shared/domById';
 import { layoutCommands, type LayoutActions } from '@/shell/layoutCommands';
 import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
-import { formatChord } from '@/shared/platform';
+import { formatChord, prettyChord } from '@/shared/platform';
 import { resolveKeybindings } from '@/settings/persistence';
 import { resolveGlobalKeybindings, globalChordFromEvent } from '@/editor/keybindings';
 import { toggleTheme } from '@/settings/theme';
@@ -117,6 +117,9 @@ export interface CommandWiring {
   run(id: string): void;
   /** Release the global keyboard-shortcut listener. */
   dispose(): void;
+  /** Re-render the toolbar's ⌘K keycap from the live-resolved command-palette chord — call after a
+   *  Settings → Keyboard rebind (#1421) so the decoration doesn't keep showing the stale default. */
+  refreshPaletteHint(): void;
 }
 
 // The id of the palette-toggle command (#758). Registered so global chords — and, in #432, the editor
@@ -366,22 +369,25 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // --- toolbar buttons unique to this phase ---------------------------------
   // The command bar (chrome v2, #923): a full command field (search glyph + placeholder + keycap) that
   // opens the palette. Its markup is static in index.html, so we DON'T wipe its children — we only fill
-  // the keycap with the platform chord (⌘K / Ctrl+K) and wire the click. The button's accessible name
-  // stays "Open command palette" (aria-label); the visible keycap is aria-hidden decorative chrome, so
-  // this can't break WCAG 2.5.3 (Label in Name).
+  // the keycap with the LIVE resolved chord (defaults to ⌘K / Ctrl+K, but tracks a Settings → Keyboard
+  // rebind of commandPalette, #1421 — matching the resolve-live approach onKeydown below already uses
+  // for the chord match itself) and wire the click. The button's accessible name stays "Open command
+  // palette" (aria-label); the visible keycap is aria-hidden decorative chrome, so this can't break
+  // WCAG 2.5.3 (Label in Name).
   const cmdBar = document.querySelector('.palette-hint');
-  if (cmdBar) {
-    const kbd = cmdBar.querySelector('[data-role="cmd-kbd"]');
-    if (kbd) kbd.textContent = formatChord('mod+K');
-    else {
-      // Fallback for a bare hint (e.g. a minimal test fixture with no keycap span): render the chord.
-      const chord = document.createElement('span');
-      chord.setAttribute('aria-hidden', 'true');
-      chord.textContent = formatChord('mod+K');
-      cmdBar.appendChild(chord);
-    }
-    cmdBar.addEventListener('click', () => registry.run(PALETTE_COMMAND_ID));
+  let paletteHintKbd = cmdBar?.querySelector('[data-role="cmd-kbd"]') ?? null;
+  if (cmdBar && !paletteHintKbd) {
+    // Fallback for a bare hint (e.g. a minimal test fixture with no keycap span): render the chord.
+    const chord = document.createElement('span');
+    chord.setAttribute('aria-hidden', 'true');
+    cmdBar.appendChild(chord);
+    paletteHintKbd = chord;
   }
+  function refreshPaletteHint(): void {
+    if (paletteHintKbd) paletteHintKbd.textContent = prettyChord(resolveKeybindings().commandPalette);
+  }
+  refreshPaletteHint();
+  cmdBar?.addEventListener('click', () => registry.run(PALETTE_COMMAND_ID));
   // Each toolbar button dispatches its command by id (#758) so it can never drift from the palette entry
   // or re-derive the action — the registry's run() owns the effect (and its enablement guard). Save-to-disk,
   // Check and the theme toggle left the bar in chrome v2 (#923); they remain reachable via the palette /
@@ -473,5 +479,6 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     dispose() {
       window.removeEventListener('keydown', onKeydown);
     },
+    refreshPaletteHint,
   };
 }
