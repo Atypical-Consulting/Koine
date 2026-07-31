@@ -62,6 +62,24 @@ public sealed partial class PythonEmitter
             CollectImportHints(m.Type, context, symbolContext);
         }
 
+        // Commands'/factories' own parameters need the same hint (issue #1716, the third call site
+        // of the #1701/#1712 gap): a parameter's explicit `Context.Type` qualifier must win over this
+        // entity's own context, the same as a field's.
+        foreach (CommandDecl cmd in entity.Commands)
+        {
+            foreach (Param p in cmd.Parameters)
+            {
+                CollectImportHints(p.Type, context, symbolContext);
+            }
+        }
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            foreach (Param p in factory.Parameters)
+            {
+                CollectImportHints(p.Type, context, symbolContext);
+            }
+        }
+
         var sb = new StringBuilder();
         sb.Append("@dataclass(eq=False)\n");
         sb.Append("class ").Append(name).Append(":\n");

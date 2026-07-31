@@ -88,6 +88,24 @@ public sealed partial class PhpEmitter
             CollectImportHints(m.Type, contextName, symbolContext);
         }
 
+        // Commands'/factories' own parameters need the same hint (issue #1716, the third call site
+        // of the #1701/#1712 gap): a parameter's explicit `Context.Type` qualifier must win over this
+        // entity's own context, the same as a field's.
+        foreach (CommandDecl cmd in entity.Commands)
+        {
+            foreach (Param p in cmd.Parameters)
+            {
+                CollectImportHints(p.Type, contextName, symbolContext);
+            }
+        }
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            foreach (Param p in factory.Parameters)
+            {
+                CollectImportHints(p.Type, contextName, symbolContext);
+            }
+        }
+
         var sb = new StringBuilder();
 
         WriteDoc(sb, entity.Doc, "");
