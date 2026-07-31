@@ -20,7 +20,7 @@ import {
 } from '@/shell/workspaceController';
 import { createAppStore } from '@/store/index';
 import { pathToFileUri } from '@/shell/ideUtils';
-import { newFileKey } from '@/ai/editSession';
+import { newFileKey, newFileKeyInRoot } from '@/ai/editSession';
 import { getLastSession, setLastSession, getRecentFolders, pushRecentFolder, removeRecentFolder } from '@/settings/persistence';
 import type { FsEntry, GitLogEntry, GitNumstatEntry, GitStatus, KoiFile, McpEndpoint, Platform, SourceDoc } from '@/host/types';
 import type { TextEdit, WorkspaceEdit } from '@/lsp/lsp';
@@ -1523,6 +1523,54 @@ describe('createWorkspaceController — applyFileEdit by key (#472 Task 3)', () 
     // An unknown uri (no such buffer) is null too.
     await expect(ws.applyFileEdit(uriOf('missing.koi'), 'x\n')).resolves.toBeNull();
     expect(platform.files.has('missing.koi')).toBe(false);
+  });
+
+  // #1132 Task 3: a `new-in:<root>:<relPath>` key names its OWN destination root (minted by the AI
+  // panel once it has inferred/chosen one) — applyFileEdit must create under THAT root, validated
+  // against the live root list, rather than always falling back to roots[0].
+  test('a new-in: key creates the file under the NAMED root, not roots[0]', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    platform.seed(ROOT_B, 'b.koi', 'context B {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+    await ws.addRoot(ROOT_B);
+
+    const result = await ws.applyFileEdit(newFileKeyInRoot(ROOT_B, 'flows/fresh.koi'), 'context Fresh {}\n');
+
+    // Created under ROOT_B (the NAMED root) — not roots[0] (ROOT_A, the primary) — and registered as a
+    // real buffer carrying the proper relPath/rootToken, opened on the LSP.
+    const freshUri = uriUnder(ROOT_B, 'flows/fresh.koi');
+    expect(result).toBe(freshUri);
+    expect(platform.roots.get(ROOT_B)!.get('flows/fresh.koi')).toBe('context Fresh {}\n');
+    expect(platform.roots.get(ROOT_A)!.has('flows/fresh.koi')).toBe(false);
+    const buf = ws.buffers.get(freshUri)!;
+    expect(buf.relPath).toBe('flows/fresh.koi');
+    expect(buf.rootToken).toBe(ROOT_B);
+    expect(buf.dirty).toBe(false);
+    expect(lsp.openDoc).toHaveBeenCalledWith(freshUri, 'context Fresh {}\n');
+  });
+
+  // #1132: a `new-in:` key naming a root that is no longer part of the live workspace (removed since
+  // the model proposed it) must fail HONESTLY — never silently fall back to the primary root, which
+  // would create the file somewhere the model/user never chose.
+  test('a new-in: key naming a root NOT in the live workspace resolves to null (no silent fallback)', async () => {
+    const platform = new FakePlatform();
+    platform.seed(ROOT_A, 'a.koi', 'context A {}\n');
+    const trace: string[] = [];
+    const lsp = makeLsp(trace);
+    const editor = makeEditor(trace);
+    const ws = createWorkspaceController(makeDeps(platform, lsp, editor));
+    await ws.openFolderPath(ROOT_A, { recent: false });
+
+    const writesBefore = platform.writes.length;
+    await expect(ws.applyFileEdit(newFileKeyInRoot('mem://not-a-live-root', 'x.koi'), 'x\n')).resolves.toBeNull();
+
+    expect(platform.writes.length).toBe(writesBefore);
+    expect(platform.roots.get(ROOT_A)!.has('x.koi')).toBe(false);
   });
 });
 
