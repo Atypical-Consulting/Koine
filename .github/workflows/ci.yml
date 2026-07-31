@@ -20,6 +20,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Guards against #1384-style regressions: a NUL byte anywhere in a tracked, non-binary text file
+  # makes Git treat the WHOLE file as binary, collapsing `git diff`/`git show`/`git log -p` to
+  # "Binary files … differ" and silently defeating line-by-line review (PR #1341 had to work around
+  # it with `git diff -a`). Deliberately its own top-level job, NOT a step inside build-and-test: the
+  # file #1384 fixed (tooling/koine-studio/src/model/modelTables.ts) lives inside the very path the
+  # `changes` gate below skips build-and-test for, so nesting this check there would silently reopen
+  # the exact gap it exists to close. It needs no build, so — unlike build-and-test — it also isn't
+  # gated behind the draft-PR skip; the check is cheap enough to just always run. See issue #1527.
+  nul-byte-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Check tracked files for literal NUL bytes
+        run: scripts/ci/check-no-nul-bytes.sh
+
   # Does this PR need the .NET job at all? `build-and-test` is the long pole gating every merge, and on
   # a high-merge-volume day most PRs are front-end-only (Studio / koine-ui TypeScript) — each paying a
   # full .NET build + ~2900-test run + conformance + demo + wasm smoke for a compiler that cannot have
