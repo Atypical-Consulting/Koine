@@ -598,6 +598,14 @@ public class R18CSharpApplicationTests
         assembly.ShouldNotBeNull(string.Join("\n", errors));
     }
 
+    /// <summary>Compile-checks the nullable not-found policy's endpoint mapping (issue #1148).</summary>
+    [Fact]
+    public void Api_layer_nullable_not_found_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn with { NotFound = CSharpNotFound.Nullable }));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {
@@ -993,6 +1001,15 @@ public class R18CSharpApplicationTests
         endpoints.ShouldContain("return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound();");
     }
 
+    /// <summary>Compile-checks the <c>Result&lt;T&gt;</c> not-found policy's endpoint mapping — the
+    /// exact surface #1041 introduced (issue #1148).</summary>
+    [Fact]
+    public void Api_layer_result_not_found_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn with { NotFound = CSharpNotFound.Result }));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
     [Fact]
     public void Api_layer_result_maps_only_the_result_returning_endpoints()
     {
@@ -1163,5 +1180,14 @@ public class R18CSharpApplicationTests
         endpoints.ShouldContain("var result = await handler.HandleAsync(request, ct);");
         endpoints.ShouldContain("return Results.Ok(result);");
         endpoints.ShouldNotContain("return Results.Ok();");
+    }
+
+    /// <summary>Compile-checks the <c>readModel</c> handler-result endpoint mapping — the #1041
+    /// surface (issue #1148).</summary>
+    [Fact]
+    public void Api_layer_read_model_handler_result_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn with { HandlerResult = CSharpHandlerResult.ReadModel }));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
     }
 }
