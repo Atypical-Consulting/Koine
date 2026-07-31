@@ -36,6 +36,7 @@ const closeSettings = vi.fn();
 function makeDeps(): PanelHostDeps {
   return {
     prefsCallbacks: {} as PanelHostDeps['prefsCallbacks'],
+    store: {} as PanelHostDeps['store'],
     settingsCategory: () => undefined,
     showSettings,
     closeSettings,

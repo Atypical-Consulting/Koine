@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the module-level collaborators the boot ladder reaches (store subscription, emit targets, the
-// one-shot start-intent, the hash/persistence helpers) so each branch is driven deterministically.
-const { storeSubUnsub, takeStartIntentMock, peekStartIntentMock, getLastWorkspaceMock } = vi.hoisted(() => ({
-  storeSubUnsub: vi.fn(),
+// Mock the module-level collaborators the boot ladder reaches (emit targets, the one-shot start-intent,
+// the hash/persistence helpers) so each branch is driven deterministically. The store is NOT mocked here
+// (issue #1351): it's an injected `LifecycleBootDeps.store` now, so each test builds its own fake/real one.
+const { takeStartIntentMock, peekStartIntentMock, getLastWorkspaceMock } = vi.hoisted(() => ({
   takeStartIntentMock: vi.fn(),
   peekStartIntentMock: vi.fn(),
   getLastWorkspaceMock: vi.fn(),
 }));
-vi.mock('@/store/index', () => ({ appStore: { subscribe: vi.fn(() => storeSubUnsub) } }));
 vi.mock('@/shared/emitTargets', () => ({ setEmitTargets: vi.fn() }));
 vi.mock('@/shell/bootIntent', () => ({ takeStartIntent: takeStartIntentMock, peekStartIntent: peekStartIntentMock }));
 vi.mock('@/export/share', () => ({ clearModelHash: vi.fn(), readModelFromHash: vi.fn() }));
@@ -17,20 +16,25 @@ vi.mock('@/settings/persistence', () => ({ getLastWorkspace: getLastWorkspaceMoc
 import { createLifecycleBoot, type LifecycleBootDeps } from '@/shell/lifecycleBoot';
 import { createWorkspaceOpLock } from '@/shell/workspaceOpLock';
 import { clearModelHash } from '@/export/share';
-import { appStore } from '@/store/index';
+import { appStore, createAppStore, type AppStore } from '@/store/index';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
-// The store is mocked, so drive the subscription callback lifecycleBoot registered directly.
-function routeCallback(): (s: { route: string }, prev: { route: string }) => void {
-  const sub = vi.mocked((appStore as unknown as { subscribe: ReturnType<typeof vi.fn> }).subscribe);
+// makeDeps()'s default store is a bare subscribe/unsubscribe fake (lifecycleBoot never reads state off
+// it directly, only subscribes), so each test drives the registered listener directly — decoupled from
+// real zustand equality semantics. `routeCallback` reads it back off the deps it was handed.
+function routeCallback(deps: LifecycleBootDeps): (s: { route: string }, prev: { route: string }) => void {
+  const sub = vi.mocked((deps.store as unknown as { subscribe: ReturnType<typeof vi.fn> }).subscribe);
   return sub.mock.calls[sub.mock.calls.length - 1][0];
 }
 
 function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
   const order: string[] = [];
   const d = (name: string) => vi.fn(() => void order.push(name));
+  const storeUnsub = vi.fn();
+  const storeSubscribe = vi.fn(() => storeUnsub);
   return {
+    store: { subscribe: storeSubscribe } as unknown as AppStore,
     lsp: {
       onServerRestart: vi.fn(),
       start: vi.fn(() => Promise.resolve()),
@@ -80,8 +84,8 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
       explorer: d('explorer'),
       workspaceOpBusy: d('workspaceOpBusy'),
     },
-    // expose the order array for the teardown test
-    ...({ _order: order } as object),
+    // expose the order array + the store's unsub spy for the teardown test
+    ...({ _order: order, _storeUnsub: storeUnsub } as object),
     ...over,
   } as LifecycleBootDeps;
 }
@@ -219,7 +223,7 @@ describe('lifecycleBoot', () => {
       await flush(); // let the (intent-less) boot ladder settle first
 
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
 
       expect(deps.confirmReplaceWork).toHaveBeenCalled();
@@ -233,7 +237,7 @@ describe('lifecycleBoot', () => {
       await flush();
 
       takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/proj' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
 
       expect(deps.confirmReplaceWork).toHaveBeenCalled();
@@ -263,7 +267,7 @@ describe('lifecycleBoot', () => {
 
       // 1st guarded return-visit intent: the clone's own open-recent (user accepts the confirm).
       takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/cloned' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
       expect(confirmReplaceWork).toHaveBeenCalledTimes(1);
       expect(deps.openRecentFolder).toHaveBeenNthCalledWith(1, '/cloned');
@@ -272,7 +276,7 @@ describe('lifecycleBoot', () => {
       // "Open anyway" seeds a first model and queues a SECOND open-recent intent for the same path —
       // a second Home→editor transition, guarded exactly like the first.
       takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/cloned' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
 
       // The guard fires AGAIN — reproducing the "double prompt" — but legitimately: nothing was ever
@@ -294,7 +298,7 @@ describe('lifecycleBoot', () => {
 
       // Simulate the boot transition firing the listener synchronously, BEFORE the boot notification has
       // drained (no `await flush()` yet) — i.e. still inside the same task, exactly as Set.forEach does.
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       expect(takeStartIntentMock).not.toHaveBeenCalled(); // the subscription stood down during boot
       expect(deps.openExample).not.toHaveBeenCalled();
 
@@ -468,7 +472,7 @@ describe('lifecycleBoot', () => {
       await flush(); // the boot ladder is now awaiting the still-pending importSharedWorkspace call
 
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
       // The import is still in flight: the Home "New model" pick must not run concurrently.
       expect(deps.newModelUnlocked).not.toHaveBeenCalled();
@@ -490,7 +494,7 @@ describe('lifecycleBoot', () => {
       await flush(); // the intent-less restore ladder is now awaiting the still-pending openFolderPath call
 
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
       // The restore is still in flight: the Home "New model" pick must not run concurrently.
       expect(deps.newModelUnlocked).not.toHaveBeenCalled();
@@ -515,11 +519,11 @@ describe('lifecycleBoot', () => {
       );
 
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush(); // the first pick is in flight, awaiting deps.newModelUnlocked()
 
       takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/proj' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
       // The first pick hasn't settled: the second pick must not run concurrently.
       expect(deps.openRecentFolder).not.toHaveBeenCalled();
@@ -573,7 +577,7 @@ describe('lifecycleBoot', () => {
 
       // The user goes Home and picks "New model": it takes the lock first and runs to completion.
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
       expect(deps.newModelUnlocked).toHaveBeenCalledOnce();
 
@@ -594,7 +598,7 @@ describe('lifecycleBoot', () => {
       await flush();
 
       takeStartIntentMock.mockReturnValue({ kind: 'new' });
-      routeCallback()({ route: 'editor' }, { route: 'home' });
+      routeCallback(deps)({ route: 'editor' }, { route: 'home' });
       await flush();
       expect(deps.newModelUnlocked).toHaveBeenCalledOnce();
 
@@ -624,6 +628,7 @@ describe('lifecycleBoot', () => {
   it('teardown disposes every controller in the preserved order, then the route-intent sub', () => {
     const deps = makeDeps();
     const order = (deps as unknown as { _order: string[] })._order;
+    const storeUnsub = (deps as unknown as { _storeUnsub: ReturnType<typeof vi.fn> })._storeUnsub;
     const boot = createLifecycleBoot(deps);
     boot.teardown();
     expect(order).toEqual([
@@ -631,6 +636,22 @@ describe('lifecycleBoot', () => {
       'canvasWrite', 'panels', 'reviewStoreSub', 'workspaceSeams', 'theme', 'autoSave', 'exportMenuDismiss', 'editorKeys',
       'statusBar', 'explorer', 'workspaceOpBusy',
     ]);
-    expect(storeSubUnsub).toHaveBeenCalledOnce(); // unsubRouteIntent fired between autoSave and exportMenuDismiss
+    expect(storeUnsub).toHaveBeenCalledOnce(); // unsubRouteIntent fired between autoSave and exportMenuDismiss
+  });
+
+  it('subscribes to route changes on the injected store, not the global appStore singleton (#1351)', async () => {
+    const store = createAppStore();
+    const deps = makeDeps({ store });
+    createLifecycleBoot(deps);
+    await flush(); // let the (intent-less) cold-boot ladder settle first
+
+    takeStartIntentMock.mockReturnValue({ kind: 'new' });
+    store.getState().navigate('editor');
+    await flush();
+
+    // The subscription was registered on the injected store, not the global singleton…
+    expect(deps.newModelUnlocked).toHaveBeenCalled();
+    // …and the global singleton must be left untouched.
+    expect(appStore.getState().route).toBe('home');
   });
 });

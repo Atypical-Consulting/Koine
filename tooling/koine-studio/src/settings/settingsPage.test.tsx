@@ -27,6 +27,7 @@ vi.mock('@/settings/theme', async (orig) => ({
 }));
 
 import { createSettingsPage, type SettingsPageHandle } from './settingsPage';
+import { appStore, createAppStore, type AppStore } from '@/store/index';
 
 const MODE_KEY = 'koine.studio.settingsEditorMode';
 const SCOPE_KEY = 'koine.studio.settingsJsonScope';
@@ -73,6 +74,9 @@ describe('createSettingsPage', () => {
   let header: HTMLElement;
   let body: HTMLElement;
   let handle: SettingsPageHandle | undefined;
+  // A fresh store per test (issue #1351): the page must read/write whatever store it is handed, not the
+  // global singleton — the "not the global" test below asserts against a KNOWN store instance.
+  let store: AppStore;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -91,6 +95,7 @@ describe('createSettingsPage', () => {
     main.append(header, body);
     document.body.append(main);
     localStorage.clear();
+    store = createAppStore();
   });
 
   afterEach(() => {
@@ -100,7 +105,7 @@ describe('createSettingsPage', () => {
   });
 
   it('renders a Visual/JSON segmented toggle (radiogroup) and starts in Visual', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     const group = header.querySelector('[role="radiogroup"]');
     expect(group).not.toBeNull();
     expect(group?.getAttribute('aria-label')).toBeTruthy();
@@ -114,10 +119,19 @@ describe('createSettingsPage', () => {
     expect(body.textContent).toContain('Appearance');
   });
 
+  it('a settings-mode write lands in the injected store, not the global appStore singleton (#1351)', () => {
+    handle = createSettingsPage({ header, body }, cb, store);
+    jsonRadio(header).click();
+    // The page was handed `store`, not the global singleton — the write must land there…
+    expect(store.getState().settingsEditorMode).toBe('json');
+    // …and the global singleton must be left untouched.
+    expect(appStore.getState().settingsEditorMode).toBe('visual');
+  });
+
   it('arrow keys move the representation toggle (focus follows selection) and switch the body', () => {
     // The toggle is a single-select radiogroup, so an arrow both moves focus AND activates. This pins the
     // keyboard behavior across the swap from the bespoke radiogroup to the shared segmented() control.
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     const press = (el: HTMLElement, key: string): void => {
       el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
     };
@@ -135,7 +149,7 @@ describe('createSettingsPage', () => {
   });
 
   it('switching to JSON serializes current settings without the secret', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     // Read the editor's actual document (the seed) — robust vs. happy-dom's partial line rendering.
     const view = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!;
@@ -147,7 +161,7 @@ describe('createSettingsPage', () => {
   });
 
   it('a valid JSON edit debounces into saveSettings (with the secret re-injected) and live-applies', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "fontSize": 15 }');
     // Not yet — the apply is debounced (~350ms).
@@ -162,7 +176,7 @@ describe('createSettingsPage', () => {
   });
 
   it('a JSON theme edit applies the theme live via setTheme (cb.onChange does not cover theme)', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "theme": "light" }');
     vi.advanceTimersByTime(500);
@@ -172,7 +186,7 @@ describe('createSettingsPage', () => {
   });
 
   it('a pending (debounced) valid JSON edit is flushed, not dropped, on a JSON→Visual swap', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "theme": "light" }');
     // Swap back to Visual INSIDE the debounce window: the document is valid (no diagnostics were shown),
@@ -184,7 +198,7 @@ describe('createSettingsPage', () => {
   });
 
   it('destroy() (the Esc/✕ close path) flushes a pending valid JSON edit', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "fontSize": 15 }');
     handle.destroy();
@@ -195,7 +209,7 @@ describe('createSettingsPage', () => {
   });
 
   it('an INVALID pending draft is still abandoned (never persisted) on a JSON→Visual swap', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "theme": ');
     visualRadio(header).click();
@@ -205,7 +219,7 @@ describe('createSettingsPage', () => {
 
   it('refresh() re-seeds the JSON editor when settings changed from another surface', () => {
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     const read = (): string =>
       EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
     expect(read()).toContain(`"fontSize": ${DEFAULT_SETTINGS.fontSize}`);
@@ -219,7 +233,7 @@ describe('createSettingsPage', () => {
   });
 
   it('an invalid JSON edit shows a diagnostic and never persists', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "theme": ');
     vi.advanceTimersByTime(500);
@@ -229,7 +243,7 @@ describe('createSettingsPage', () => {
   });
 
   it('an invalid JSON edit marks the editor aria-invalid then a valid edit clears it', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     // Invalid document → the field carries the persistent invalid/error relationship.
     typeJson(body, '{ "theme": ');
@@ -245,7 +259,7 @@ describe('createSettingsPage', () => {
   });
 
   it('aria-errormessage resolves to the diagnostics strip (a real element by id)', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "theme": ');
     vi.advanceTimersByTime(500);
@@ -259,7 +273,7 @@ describe('createSettingsPage', () => {
   });
 
   it('an out-of-range value is rejected (schema invalid) and not persisted', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     typeJson(body, '{ "fontSize": 999 }');
     vi.advanceTimersByTime(500);
@@ -268,7 +282,7 @@ describe('createSettingsPage', () => {
   });
 
   it('JSON→Visual re-mounts the Visual pane from persisted settings', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     expect(jsonEditor(body)).not.toBeNull();
     visualRadio(header).click();
@@ -283,7 +297,7 @@ describe('createSettingsPage', () => {
     // A category deep-link (the About command) targets a Visual tab; JSON has no tabs, so the page must
     // switch to Visual rather than silently drop the category and keep showing the JSON editor.
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     expect(jsonEditor(body)).not.toBeNull(); // started on JSON
 
     handle.refresh('about');
@@ -298,7 +312,7 @@ describe('createSettingsPage', () => {
 
   it('restores the last-used representation from localStorage', () => {
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     expect(jsonRadio(header).getAttribute('aria-checked')).toBe('true');
     expect(body.querySelector('.cm-editor')).not.toBeNull();
   });
@@ -314,7 +328,7 @@ describe('createSettingsPage', () => {
     });
     try {
       expect(() => {
-        handle = createSettingsPage({ header, body }, cb);
+        handle = createSettingsPage({ header, body }, cb, store);
       }).not.toThrow();
       // Fell back to Visual: the two-pane form paints and the Visual radio is checked.
       expect(visualRadio(header).getAttribute('aria-checked')).toBe('true');
@@ -325,7 +339,7 @@ describe('createSettingsPage', () => {
   });
 
   it('destroy tears down the active pane and clears the header', () => {
-    const h = createSettingsPage({ header, body }, cb);
+    const h = createSettingsPage({ header, body }, cb, store);
     expect(header.querySelector('[role="radiogroup"]')).not.toBeNull();
     h.destroy();
     expect(header.querySelector('[role="radiogroup"]')).toBeNull();
@@ -350,7 +364,7 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     enabledMcp();
     const c = desktopCb();
-    handle = createSettingsPage({ header, body }, c);
+    handle = createSettingsPage({ header, body }, c, store);
     // No Visual pane is mounted in JSON mode, yet the on-show concern must still revive the sidecar.
     expect(c.mcpEndpoint).toHaveBeenCalled();
   });
@@ -359,7 +373,7 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     enabledMcp();
     const c = { ...desktopCb(), mcpHostable: false };
-    handle = createSettingsPage({ header, body }, c);
+    handle = createSettingsPage({ header, body }, c, store);
     expect(c.mcpEndpoint).not.toHaveBeenCalled();
   });
 
@@ -367,7 +381,7 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     // mcpEnabled stays false (DEFAULT_SETTINGS).
     const c = desktopCb();
-    handle = createSettingsPage({ header, body }, c);
+    handle = createSettingsPage({ header, body }, c, store);
     expect(c.mcpEndpoint).not.toHaveBeenCalled();
   });
 
@@ -375,7 +389,7 @@ describe('createSettingsPage', () => {
     // Default mode is Visual.
     enabledMcp();
     const c = desktopCb();
-    handle = createSettingsPage({ header, body }, c);
+    handle = createSettingsPage({ header, body }, c, store);
     expect(c.mcpEndpoint).toHaveBeenCalledTimes(1);
   });
 
@@ -385,7 +399,7 @@ describe('createSettingsPage', () => {
     // than spawning a second one. The Studio-side guarantee under test is "one mcpEndpoint call per build".
     enabledMcp();
     const c = desktopCb();
-    handle = createSettingsPage({ header, body }, c);
+    handle = createSettingsPage({ header, body }, c, store);
     expect(c.mcpEndpoint).toHaveBeenCalledTimes(1); // initial Visual show
     jsonRadio(header).click(); // flip to JSON
     expect(c.mcpEndpoint).toHaveBeenCalledTimes(2);
@@ -397,7 +411,7 @@ describe('createSettingsPage', () => {
     localStorage.setItem(MODE_KEY, 'json');
     enabledMcp();
     const c = desktopCb();
-    handle = createSettingsPage({ header, body }, c);
+    handle = createSettingsPage({ header, body }, c, store);
     c.mcpEndpoint.mockClear();
     handle.refresh(); // the host calls this on every re-open of Settings
     expect(c.mcpEndpoint).toHaveBeenCalled();
@@ -406,7 +420,7 @@ describe('createSettingsPage', () => {
   it('has no a11y violations', async () => {
     // axe schedules its async ruleset on real setTimeout, so it never resolves under fake timers.
     vi.useRealTimers();
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     expect(await axe(document.body)).toHaveNoViolations();
   });
 
@@ -421,25 +435,25 @@ describe('createSettingsPage', () => {
     (scopeGroup(root)?.querySelector(`[data-value="${v}"]`) as HTMLButtonElement | null) ?? null;
 
   it('scope toggle is absent in Visual mode (default)', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     expect(scopeGroup(header)).toBeNull();
   });
 
   it('scope toggle appears when starting in JSON mode', () => {
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     expect(scopeGroup(header)).not.toBeNull();
   });
 
   it('scope toggle appears after switching from Visual to JSON', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     jsonRadio(header).click();
     expect(scopeGroup(header)).not.toBeNull();
   });
 
   it('scope toggle is removed when switching back to Visual', () => {
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     expect(scopeGroup(header)).not.toBeNull();
     visualRadio(header).click();
     expect(scopeGroup(header)).toBeNull();
@@ -447,7 +461,7 @@ describe('createSettingsPage', () => {
 
   it('destroy() removes the scope toggle from the header', () => {
     localStorage.setItem(MODE_KEY, 'json');
-    const h = createSettingsPage({ header, body }, cb);
+    const h = createSettingsPage({ header, body }, cb, store);
     expect(scopeGroup(header)).not.toBeNull();
     h.destroy();
     expect(scopeGroup(header)).toBeNull();
@@ -456,7 +470,7 @@ describe('createSettingsPage', () => {
   it('without a workspace: Workspace pill is disabled/aria-disabled, scope forced to user, note shown', () => {
     // cb has no workspaceKey → wsKey() returns null
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
 
     const group = scopeGroup(header)!;
     expect(group).not.toBeNull();
@@ -476,7 +490,7 @@ describe('createSettingsPage', () => {
   it('with a workspace open: pills are enabled, no empty-state note', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
 
     const group = scopeGroup(header)!;
     expect(group.getAttribute('aria-disabled')).toBe('false');
@@ -489,7 +503,7 @@ describe('createSettingsPage', () => {
   it('clicking Workspace (workspace open) flips aria-checked and persists the scope', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
 
     scopeBtn(header, 'workspace')!.click();
 
@@ -500,7 +514,7 @@ describe('createSettingsPage', () => {
   it('ArrowRight on User radio moves to Workspace and persists scope', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => 'ws-key' };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
 
     scopeBtn(header, 'user')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
 
@@ -516,7 +530,7 @@ describe('createSettingsPage', () => {
     let wsk: string | null = null;
     const cbMutable = { onChange: vi.fn(), workspaceKey: () => wsk };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbMutable);
+    handle = createSettingsPage({ header, body }, cbMutable, store);
 
     // No workspace open: User is active regardless of the persisted scope.
     expect(scopeBtn(header, 'user')!.getAttribute('aria-checked')).toBe('true');
@@ -542,7 +556,7 @@ describe('createSettingsPage', () => {
   it('a valid Workspace doc sets the wsOverrides blob and calls onChange with user-level settings', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
     // Switch to Workspace scope.
     scopeBtn(header, 'workspace')!.click();
     cbWs.onChange.mockClear();
@@ -569,7 +583,7 @@ describe('createSettingsPage', () => {
     // Pre-seed a workspace override in localStorage.
     localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
     scopeBtn(header, 'workspace')!.click();
 
     // Type an empty workspace doc — clears all scoped overrides.
@@ -587,7 +601,7 @@ describe('createSettingsPage', () => {
   it('an invalid Workspace doc renders diagnostics and persists nothing to the blob', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
     scopeBtn(header, 'workspace')!.click();
     cbWs.onChange.mockClear();
 
@@ -609,7 +623,7 @@ describe('createSettingsPage', () => {
     // Pre-seed an override so the workspace doc is non-empty.
     localStorage.setItem(WS_OVERRIDES_KEY, JSON.stringify({ previewTarget: 'typescript' }));
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
     // Currently User scope — editor shows the grouped user settings.json.
     const userText = EditorView.findFromDOM(body.querySelector('.cm-editor') as HTMLElement)!.state.doc.toString();
     expect(userText).toContain('appearance'); // the grouped user doc has top-level group names
@@ -634,7 +648,7 @@ describe('createSettingsPage', () => {
   it('a valid Workspace doc does not call setTheme (theme is not a scoped key)', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
     scopeBtn(header, 'workspace')!.click();
     setTheme.mockClear();
 
@@ -652,7 +666,7 @@ describe('createSettingsPage', () => {
   it('partial removal of a Workspace key reverts that key to the User value while others stay overridden', () => {
     const cbWs = { onChange: vi.fn(), workspaceKey: (): string | null => WS_KEY };
     localStorage.setItem(MODE_KEY, 'json');
-    handle = createSettingsPage({ header, body }, cbWs);
+    handle = createSettingsPage({ header, body }, cbWs, store);
 
     // Step 1: switch to Workspace scope and apply two overrides.
     scopeBtn(header, 'workspace')!.click();
@@ -695,6 +709,7 @@ describe('createSettingsPage — header close control (#746)', () => {
   let header: HTMLElement;
   let body: HTMLElement;
   let handle: SettingsPageHandle | undefined;
+  let store: AppStore;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -705,6 +720,7 @@ describe('createSettingsPage — header close control (#746)', () => {
     main.append(header, body);
     document.body.append(main);
     localStorage.clear();
+    store = createAppStore();
   });
 
   afterEach(() => {
@@ -714,21 +730,21 @@ describe('createSettingsPage — header close control (#746)', () => {
   });
 
   it('renders a button with aria-label="Close settings" in the header', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     const btn = header.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]');
     expect(btn).not.toBeNull();
   });
 
   it('clicking the close button invokes the onClose callback', () => {
     const onClose = vi.fn();
-    handle = createSettingsPage({ header, body }, cb, onClose);
+    handle = createSettingsPage({ header, body }, cb, store, onClose);
     const btn = header.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!;
     btn.click();
     expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('close button is present but clicking is a no-op when no onClose is provided', () => {
-    handle = createSettingsPage({ header, body }, cb);
+    handle = createSettingsPage({ header, body }, cb, store);
     const btn = header.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!;
     // Should not throw when clicked without an onClose.
     expect(() => btn.click()).not.toThrow();

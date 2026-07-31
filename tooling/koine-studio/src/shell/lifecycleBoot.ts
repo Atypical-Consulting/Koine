@@ -5,7 +5,7 @@
 // keeps its exact branches; it just moves out of init() and reaches the workspace / host / controllers
 // through the injected `deps`. Constructing it IS booting — init() news it up last and returns its
 // teardown, so init() is now a thin composition root.
-import { appStore } from '@/store/index';
+import type { AppStore } from '@/store/index';
 import { setEmitTargets } from '@/shared/emitTargets';
 import { peekStartIntent, takeStartIntent, type StartIntent } from '@/shell/bootIntent';
 import { clearModelHash, readModelFromHash } from '@/export/share';
@@ -27,6 +27,9 @@ const DEFAULT_WS_TOKEN = '(default)';
 // just-opened template to the blank default.)
 
 export interface LifecycleBootDeps {
+  /** The app store, injected (issue #1351) so the route-intent subscription below reaches whatever
+   *  store it is handed, not the global singleton — the composition root passes `appStore`. */
+  store: AppStore;
   lsp: {
     onServerRestart(cb: () => void): void;
     start(): Promise<void>;
@@ -328,7 +331,7 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
   queueMicrotask(() => {
     booting = false;
   });
-  const unsubRouteIntent = appStore.subscribe((s, prev) => {
+  const unsubRouteIntent = deps.store.subscribe((s, prev) => {
     if (booting) return;
     if (s.route === 'editor' && prev.route !== 'editor') {
       const intent = takeStartIntent();
