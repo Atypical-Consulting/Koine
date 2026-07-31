@@ -136,6 +136,32 @@ function pwaManifestPlugin(): Plugin {
   };
 }
 
+// Emit a manifest of every content-hashed asset the build produces (`dist/assets/**`), so the service
+// worker (public/koine-studio-sw.js) can precache ALL of them at `install` — not just the ones
+// index.html references. This closes the offline-after-a-single-visit gap for #1685: Studio's boot
+// sequence eagerly `import()`s several assets not listed in index.html (the compiler Web Worker script,
+// CodeMirror language/theme chunks) — those are dynamically requested by the page itself the instant
+// the entry script runs, which on a brand-new install races ahead of this service worker's own
+// install→activate→claim lifecycle, so they're fetched over the network directly (bypassing the SW,
+// uncached) rather than through its cache-first fetch handler. Precaching the full asset list at
+// `install` (a fetch made by the SW itself, unaffected by client-control timing) is the only way to
+// guarantee they're all available before the SW ever needs to intercept a request for them.
+function shellManifestPlugin(): Plugin {
+  return {
+    name: "koine-shell-manifest",
+    generateBundle(_options, bundle) {
+      const fileNames = Object.values(bundle)
+        .map((chunkOrAsset) => chunkOrAsset.fileName)
+        .filter((fileName) => fileName.startsWith("assets/"));
+      this.emitFile({
+        type: "asset",
+        fileName: "koine-studio-shell-manifest.json",
+        source: JSON.stringify(fileNames),
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 //
 // Two modes:
@@ -145,7 +171,7 @@ function pwaManifestPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   const web = mode === "web";
   return {
-    plugins: [templateManifestPlugin(), pwaManifestPlugin(), koineWasmDevPlugin()],
+    plugins: [templateManifestPlugin(), pwaManifestPlugin(), shellManifestPlugin(), koineWasmDevPlugin()],
 
     // Alias React's runtime to Preact's compat layer so the `zustand` React hook (`useStore`) and
     // any React-shaped deps resolve to Preact. Vanilla Zustand (`zustand/vanilla`) needs none of this;

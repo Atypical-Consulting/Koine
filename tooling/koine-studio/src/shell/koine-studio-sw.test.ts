@@ -20,6 +20,8 @@ import {
   frameworkBaseOf,
   cacheNameFor,
   parseBootManifest,
+  shellManifestUrl,
+  shellAssetManifestUrls,
   existingCacheName,
   cacheFirst,
   handleAssetRequest,
@@ -156,6 +158,32 @@ describe('koine-studio-sw — pure helpers', () => {
     const { generation, assetUrls } = parseBootManifest(raw, FW);
     expect(generation).toBe('sha256-zzz');
     expect(assetUrls).toContain(`${FW}A.wasm`);
+  });
+
+  it('shellManifestUrl is base-aware', () => {
+    expect(shellManifestUrl('/Koine/studio/')).toBe('/Koine/studio/koine-studio-shell-manifest.json');
+    expect(shellManifestUrl('/')).toBe('/koine-studio-shell-manifest.json');
+  });
+
+  it('shellAssetManifestUrls resolves the manifest\'s relative file names to absolute scoped URLs', async () => {
+    const deps = {
+      fetch: async (url: string) =>
+        url === '/Koine/studio/koine-studio-shell-manifest.json'
+          ? new Response(JSON.stringify(['assets/index-ABC.js', 'assets/index-DEF.css']), { status: 200 })
+          : new Response('', { status: 404 }),
+    };
+
+    const urls = await shellAssetManifestUrls('/Koine/studio/', deps);
+
+    expect(urls).toEqual(['/Koine/studio/assets/index-ABC.js', '/Koine/studio/assets/index-DEF.css']);
+  });
+
+  it('shellAssetManifestUrls tolerates a missing manifest (e.g. vite dev, no bundle) without throwing', async () => {
+    const notFound = { fetch: async () => new Response('', { status: 404 }) };
+    expect(await shellAssetManifestUrls('/studio/', notFound)).toEqual([]);
+
+    const offline = { fetch: async () => { throw new Error('offline'); } };
+    expect(await shellAssetManifestUrls('/studio/', offline)).toEqual([]);
   });
 });
 
@@ -313,6 +341,44 @@ describe('koine-studio-sw — shell precache + cache-first', () => {
   it('precacheShell warms the base-aware shell asset list into the shell cache', async () => {
     const caches = new FakeCaches();
     const deps = { caches, fetch: async () => new Response('asset', { status: 200 }) };
+
+    await precacheShell('/studio/', deps);
+
+    const cache = await caches.open(shellCacheName());
+    expect(await cache.match('/studio/')).toBeDefined();
+    expect(await cache.match('/studio/index.html')).toBeDefined();
+  });
+
+  it('precacheShell also caches every build-time shell asset (JS/CSS/worker/fonts) — issue #1685', async () => {
+    const caches = new FakeCaches();
+    const deps = {
+      caches,
+      fetch: async (url: string) =>
+        String(url).endsWith('/studio/koine-studio-shell-manifest.json')
+          ? new Response(
+              JSON.stringify(['assets/index-ABC.js', 'assets/index-DEF.css', 'assets/koine.worker-XYZ.js']),
+              { status: 200 },
+            )
+          : new Response('asset', { status: 200 }),
+    };
+
+    await precacheShell('/studio/', deps);
+
+    const cache = await caches.open(shellCacheName());
+    expect(await cache.match('/studio/assets/index-ABC.js')).toBeDefined();
+    expect(await cache.match('/studio/assets/index-DEF.css')).toBeDefined();
+    expect(await cache.match('/studio/assets/koine.worker-XYZ.js')).toBeDefined();
+  });
+
+  it('precacheShell still caches the base shell URLs when the asset manifest is unavailable (e.g. vite dev)', async () => {
+    const caches = new FakeCaches();
+    const deps = {
+      caches,
+      fetch: async (url: string) =>
+        String(url).endsWith('/studio/koine-studio-shell-manifest.json')
+          ? new Response('', { status: 404 })
+          : new Response('asset', { status: 200 }),
+    };
 
     await precacheShell('/studio/', deps);
 
