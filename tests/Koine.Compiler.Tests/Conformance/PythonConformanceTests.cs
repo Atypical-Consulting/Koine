@@ -1094,6 +1094,149 @@ public class PythonConformanceTests
         syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
     }
 
+    /// <summary>
+    /// Issue #1712 — the sibling gap the previous test's own comment flags as out-of-scope there: a
+    /// value object's/entity's OWN field import ignores an EXPLICIT cross-context qualifier
+    /// (R13.2's <c>Context.Type</c> syntax). <c>EmitValueObject</c> never built a
+    /// <c>symbolContext</c> hint at all (unlike #1701's now-fixed read-model path), so
+    /// <c>Assemble</c> always fell back to the declaring VO's own context. Here <c>Ordering.Item</c>'s
+    /// <c>status</c> field is declared <c>Shipping.Status</c> — an EXPLICIT qualifier to a THIRD
+    /// context — while <c>Ordering</c> separately declares its own, unrelated <c>Status</c> enum (the
+    /// type <c>Item</c>'s own context would resolve to without a hint). Before the fix, <c>item.py</c>
+    /// imported <c>Ordering</c>'s own <c>Status</c> instead of the field's actually-declared
+    /// <c>Shipping.Status</c>.
+    /// </summary>
+    [Fact]
+    public void Value_object_own_field_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value Item {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = FileText(result.Files, "ordering/value_objects/item.py");
+        item.ShouldContain("from shipping.enums.status import Status");
+        item.ShouldNotContain("from ordering.enums.status import Status");
+    }
+
+    /// <summary>
+    /// The mypy twin of <see cref="Value_object_own_field_import_honors_an_explicit_qualifier_over_the_owning_context"/>:
+    /// proves the bug at the TYPE level rather than just the emitted-text level. A synthetic downstream
+    /// consumer (not emitted by Koine — authored here, mirroring how a real caller would use the
+    /// generated module) takes a parameter explicitly typed <c>Shipping</c>'s own <c>Status</c> and
+    /// passes it <c>Item(...).status</c>. Before the fix, <c>item.py</c>'s <c>status</c> field resolved
+    /// against <c>Ordering</c>'s own (differently-cased, same-named) <c>Status</c> class — a REAL
+    /// nominal-type mismatch under <c>mypy --strict</c>, even though both classes render as the bare
+    /// name <c>Status</c> in source. Skipped (not failed) when no <c>mypy</c> toolchain is present
+    /// locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Value_object_own_field_import_qualification_typechecks_at_mypy_strict()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value Item {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string consumer = """
+            from shipping.enums.status import Status
+            from ordering.value_objects.item import Item
+
+
+            def take_shipping_status(status: Status) -> None:
+                pass
+
+
+            take_shipping_status(Item(Status.ACTIVE).status)
+            """;
+        var files = result.Files.Append(new EmittedFile("consumer.py", consumer)).ToList();
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "Item's own 'status' field must bind Shipping's own Status enum (not Ordering's wrongly "
+            + "imported, differently-cased same-named sibling enum) so a downstream consumer "
+            + "type-checks:\n" + string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// The entity-emission counterpart of
+    /// <see cref="Value_object_own_field_import_honors_an_explicit_qualifier_over_the_owning_context"/>
+    /// (issue #1712): <c>EmitEntity</c> shares the exact same qualifier-blind <c>Assemble</c> gap as
+    /// <c>EmitValueObject</c> did.
+    /// </summary>
+    [Fact]
+    public void Entity_own_field_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: Shipping.Status
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = FileText(result.Files, "ordering/order.py");
+        order.ShouldContain("from shipping.enums.status import Status");
+        order.ShouldNotContain("from ordering.enums.status import Status");
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

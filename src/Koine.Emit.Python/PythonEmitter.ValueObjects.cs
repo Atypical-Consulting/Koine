@@ -46,6 +46,22 @@ public sealed partial class PythonEmitter
 
         var translator = new PythonExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
+        // Per-symbol import hint for Assemble (issue #1712, mirroring #1701's read-model fix): a
+        // field's own cross-type import must resolve against ITS declared type's context — the
+        // field's explicit `Context.Type` qualifier when present, else this VO's own context — not
+        // unconditionally this VO's own context. Without a hint here, Assemble falls back to this
+        // VO's own context, so a same-named-but-unrelated type elsewhere can silently shadow the
+        // field's actually-declared, explicitly-qualified type.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Member m in fields)
+        {
+            CollectImportHints(m.Type, ContextOf(ns), symbolContext);
+        }
+        foreach (Member m in derived)
+        {
+            CollectImportHints(m.Type, ContextOf(ns), symbolContext);
+        }
+
         var sb = new StringBuilder();
         sb.Append(hasMapField ? "@dataclass(frozen=True, eq=False)\n" : "@dataclass(frozen=True)\n");
         sb.Append("class ").Append(name).Append(":\n");
@@ -155,7 +171,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.ValueObjects, vo.Name),
-            Assemble(emit, ns, sb.ToString(), name),
+            Assemble(emit, ns, sb.ToString(), name, symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.ValueObjects));
     }
 
