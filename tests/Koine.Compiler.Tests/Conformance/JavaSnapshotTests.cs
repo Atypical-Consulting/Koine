@@ -135,4 +135,39 @@ public class JavaSnapshotTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 1) — the application/CQRS layer: a <c>service</c> with use cases, a
+    /// <c>readmodel</c> with direct and derived fields (so the projection has real behavior), and a
+    /// <c>query</c>. The snapshot is the review of the emitted application interface, the read-model
+    /// record + its static <c>from</c> projection, and the query record + its <c>QueryHandler</c> seam.
+    /// Shares <see cref="JavaCqrsTests.Fixture"/> so the string assertions there and this reviewed
+    /// snapshot can never drift apart.
+    /// </summary>
+    [Fact]
+    public Task Java_cqrs_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaCqrsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The CQRS emit must be real Java: the record + static projection, the
+    /// <c>CompletableFuture</c>-returning service boundary, and the <c>QueryHandler</c> specialization all
+    /// have to type-check against a real <c>javac --release 17</c> — a string/snapshot assertion alone
+    /// cannot see, say, a generic argument left as an unboxable primitive.
+    /// </summary>
+    [Fact]
+    public void Java_cqrs_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaCqrsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }

@@ -58,6 +58,14 @@ internal sealed class JavaTypeMapper
         type.IsOptional ? $"java.util.Optional<{MapBase(type, boxed: true)}>" : MapBase(type, boxed: false);
 
     /// <summary>
+    /// The Java type string for a type sitting in a <b>generic argument</b> position (a type parameter of
+    /// <c>QueryHandler&lt;Q, R&gt;</c>, a <c>CompletableFuture&lt;T&gt;</c> payload, …). Identical to
+    /// <see cref="Map"/> except that a primitive is boxed (<c>long</c> → <c>Long</c>), since Java generics
+    /// cannot hold a primitive.
+    /// </summary>
+    public string MapBoxed(TypeRef type) => MapArg(type);
+
+    /// <summary>
     /// The Java rendering of a type ignoring its optionality. <paramref name="boxed"/> selects the
     /// reference form of a primitive (<c>Long</c>/<c>Boolean</c> vs <c>long</c>/<c>boolean</c>), required
     /// wherever the type sits in a generic / <c>Optional</c> position.

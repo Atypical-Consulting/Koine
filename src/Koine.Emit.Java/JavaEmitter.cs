@@ -73,6 +73,14 @@ public sealed partial class JavaEmitter : IEmitter
             new(JavaRuntime.RangeFileName, JavaRuntime.RangeSource + "\n"),
         };
 
+        // The generic QueryHandler<Q, R> seam each emitted `<Query>Handler` specializes — gated on the
+        // model actually declaring a query, so a query-free model's output stays byte-identical to
+        // Phase 1's (unlike DomainException/Range, which any field type can demand).
+        if (HasQueries(model))
+        {
+            files.Add(new EmittedFile(JavaRuntime.QueryHandlerFileName, JavaRuntime.QueryHandlerSource + "\n"));
+        }
+
         // Phase 1 tactical core — value objects, generated IDs, smart enums, entities, aggregates,
         // events, and repositories — is emitted one public type per file by the split partials
         // (JavaEmitter.ValueObjects.cs, .Enums.cs, .Entities.cs, .Aggregates.cs, .Events.cs),
@@ -84,6 +92,17 @@ public sealed partial class JavaEmitter : IEmitter
             foreach (TypeDecl type in ctx.Types)
             {
                 EmitType(emit, files, ctx.Name, type);
+            }
+
+            // A `service` lives on ContextNode.Services (not in Types), so iterate it separately: each
+            // emits ONE interface carrying its pure domain operations and its application use cases
+            // (Phase 2, JavaEmitter.Cqrs.cs).
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                if (EmitService(emit, ctx.Name, svc) is { } service)
+                {
+                    files.Add(service);
+                }
             }
 
             EmitContextExtras(emit, files, ctx);
@@ -123,7 +142,16 @@ public sealed partial class JavaEmitter : IEmitter
             case IntegrationEventDecl iev:
                 files.Add(EmitEvent(emit, context, iev.Name, iev.Doc, iev.Members));
                 break;
-            // ReadModelDecl / QueryDecl are the Phase-2 application/CQRS layer — deliberately skipped here.
+            // The Phase-2 application/CQRS layer (JavaEmitter.Cqrs.cs): a read model emits a record + its
+            // static projection; a query emits its criteria record AND a named `<Q>Handler` seam (two
+            // public types, so two files under Java's one-public-type-per-file rule).
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, context, rm));
+                break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, context, q));
+                files.Add(EmitQueryHandler(emit, context, q));
+                break;
             default:
                 break;
         }
