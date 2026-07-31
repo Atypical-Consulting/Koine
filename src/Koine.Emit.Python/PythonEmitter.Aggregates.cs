@@ -191,7 +191,7 @@ public sealed partial class PythonEmitter
                     translator.PushLocal(p.Name, p.Type);
                 }
 
-                var expectedEnum = emit.Index.Classify(op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
+                var expectedEnum = emit.Index.Classify(op.ReturnType.Qualifier ?? translator.Context, op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
                 var body = translator.Translate(op.Body, expectedEnum);
                 foreach (Param p in op.Parameters)
                 {
