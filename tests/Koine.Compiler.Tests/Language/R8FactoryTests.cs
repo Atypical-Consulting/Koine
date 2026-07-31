@@ -190,6 +190,19 @@ public class R8FactoryTests
     }
 
     [Fact]
+    public void Guarded_conditional_resolves_narrowed_for_initialization_value()
+    {
+        // #1614: CheckInitializationValue must route through EffectiveType like the field-default
+        // check #1564 already fixed, so a same-expression isPresent guard narrows the value.
+        // A factory only scopes its own parameters (no entity members), so the optional value
+        // being narrowed is a factory parameter here.
+        const string src =
+            "context C {\n  entity E identified by EId {\n    resolved: Int\n" +
+            "    create make(qty: Int?) { resolved -> if qty.isPresent then qty else 0 }\n  }\n}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Duplicate_initialization_is_reported()
     {
         var src = Head + "    create make(v: Int) { n -> v  n -> v }\n  }\n}\n";
