@@ -291,25 +291,18 @@ export function copyButton(
     return { el, cancelReset };
 }
 
-// A labelled settings row: a title (+ optional description) on the left, the control on the right.
-// `content` is what fills the control cell (usually `control` itself, but a scoped row passes a
-// wrapper holding the value control + its User/Workspace toggle); `control` is the labelable target
-// the <label for> binds to (defaults to `content`).
-export function row(
+// The "koi-set-text" label block: a title (+ optional description), plus — when given a labelable
+// form control (input/select/textarea) — a real <label for> bound to it with a stable derived id
+// (fixes the "form field should have an id/name" + "no label associated" DevTools notices). Without a
+// labelable control (a role=switch toggle, a segmented group, or no control at all — output.ts's
+// full-width heading), the title stays a plain <span>. Shared by row() and output.ts's custom heading.
+export function labelBlock(
     title: string,
     description: string,
-    content: HTMLElement,
-    control: HTMLElement = content,
+    control?: HTMLElement,
 ): HTMLElement {
-    const r = document.createElement("div");
-    r.className = "koi-set-row";
     const text = document.createElement("div");
     text.className = "koi-set-text";
-    // Associate the label with a labelable form control (input/select/textarea): give it a stable id
-    // derived from the title and emit a real <label for>, so the field has an accessible name + id
-    // (fixes the "form field should have an id/name" + "no label associated" DevTools notices). Non-form
-    // controls (the role=switch toggle, segmented groups, accent swatches) carry their own aria-label,
-    // so they keep a plain <span>.
     const labelable =
         control instanceof HTMLInputElement ||
         control instanceof HTMLSelectElement ||
@@ -334,6 +327,22 @@ export function row(
         desc.textContent = description;
         text.appendChild(desc);
     }
+    return text;
+}
+
+// A labelled settings row: a title (+ optional description) on the left, the control on the right.
+// `content` is what fills the control cell (usually `control` itself, but a scoped row passes a
+// wrapper holding the value control + its User/Workspace toggle); `control` is the labelable target
+// the <label for> binds to (defaults to `content`).
+export function row(
+    title: string,
+    description: string,
+    content: HTMLElement,
+    control: HTMLElement = content,
+): HTMLElement {
+    const r = document.createElement("div");
+    r.className = "koi-set-row";
+    const text = labelBlock(title, description, control);
     const ctrl = document.createElement("div");
     ctrl.className = "koi-set-control";
     ctrl.appendChild(content);

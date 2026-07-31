@@ -11,6 +11,7 @@ import {
     textInput,
     actionButton,
     copyButton,
+    labelBlock,
 } from "@/settings/prefsControls";
 
 describe("prefsControls: row()", () => {
@@ -48,6 +49,26 @@ describe("prefsControls: row()", () => {
         const label = r.querySelector(".koi-set-label")!;
         expect(label.tagName).toBe("SPAN");
         expect(label.textContent).toBe("Word wrap");
+    });
+});
+
+describe("prefsControls: labelBlock()", () => {
+    it("produces the koi-set-text/koi-set-label/koi-set-desc structure row() builds internally, as a plain <span> label when no labelable control is given (output.ts's full-width heading case)", () => {
+        const el = labelBlock(
+            "Output language",
+            "The language the Generated preview emits.",
+        );
+        expect(el.className).toBe("koi-set-text");
+        const label = el.querySelector(".koi-set-label")!;
+        expect(label.tagName).toBe("SPAN");
+        expect(label.textContent).toBe("Output language");
+        const desc = el.querySelector(".koi-set-desc")!;
+        expect(desc.textContent).toBe("The language the Generated preview emits.");
+    });
+
+    it("omits .koi-set-desc when description is blank", () => {
+        const el = labelBlock("Title", "");
+        expect(el.querySelector(".koi-set-desc")).toBeNull();
     });
 });
 

@@ -12,7 +12,7 @@
 //
 // This module must not import prefs.ts (no import cycles).
 import type { Settings } from "@/settings/persistence";
-import { langPicker, panel } from "@/settings/prefsControls";
+import { langPicker, panel, labelBlock } from "@/settings/prefsControls";
 import type { ScopeKit } from "@/settings/prefsSections/scopeKit";
 import type { PrefsSection } from "@/settings/prefsSections/types";
 
@@ -38,17 +38,12 @@ export function buildOutputSection(deps: OutputSectionDeps): PrefsSection {
     const outputLang = langPicker((target) => outputScope.scopedCommit(target));
 
     // Output lays the picker out full-width under its own heading (not a narrow label/control row) so
-    // the four language cards have room to breathe and the caption can say what actually changes.
-    const outputText = document.createElement("div");
-    outputText.className = "koi-set-text";
-    const outputLabel = document.createElement("span");
-    outputLabel.className = "koi-set-label";
-    outputLabel.textContent = "Output language";
-    const outputDesc = document.createElement("span");
-    outputDesc.className = "koi-set-desc";
-    outputDesc.textContent =
-        "The language the Generated preview emits. Your .koi source stays the same — switch any time.";
-    outputText.append(outputLabel, outputDesc);
+    // the four language cards have room to breathe and the caption can say what actually changes — but
+    // shares row()'s own koi-set-text/koi-set-label/koi-set-desc construction via labelBlock().
+    const outputText = labelBlock(
+        "Output language",
+        "The language the Generated preview emits. Your .koi source stays the same — switch any time.",
+    );
 
     // The heading row carries the caption on the left and the User/Workspace scope toggle on the right.
     const outputHead = document.createElement("div");
