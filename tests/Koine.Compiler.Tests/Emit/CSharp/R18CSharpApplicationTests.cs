@@ -815,6 +815,43 @@ public class R18CSharpApplicationTests
         placeResponse.StatusCode.ShouldBe(HttpStatusCode.OK, placed);
     }
 
+    /// <summary>
+    /// Issue #1591 Task 4: a real HTTP 404 for a missing aggregate. The plan's own sketch drives this
+    /// through the <c>GetById</c> query endpoint, but that endpoint crashes the whole host at runtime
+    /// (a real emitter bug found while implementing Task 3, filed as #1649) — <c>OrderPlaceHandler</c>
+    /// hits the exact same "aggregate not found" path internally (it looks the order up before placing
+    /// it), and its endpoint carries the identical <c>NotFound</c> HTTP mapping
+    /// (<c>result is null ? Results.NotFound() : Results.Ok(result)</c> under <c>Nullable</c>,
+    /// <c>result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound()</c> under <c>Result</c>), so
+    /// POSTing <c>/order/place</c> for an id nothing was ever opened under proves the same
+    /// HTTP-visible behavior — a real 404 over the wire — without the query endpoint's crash.
+    /// </summary>
+    [Fact]
+    public async Task Api_layer_nullable_not_found_returns_a_real_404_for_a_missing_aggregate()
+    {
+        using var harness = RunSalesApi(ApiOn with { NotFound = CSharpNotFound.Nullable });
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/place",
+            new { id = new { value = Guid.NewGuid() } },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Api_layer_result_not_found_returns_a_real_404_for_a_missing_aggregate()
+    {
+        using var harness = RunSalesApi(ApiOn with { NotFound = CSharpNotFound.Result });
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/place",
+            new { id = new { value = Guid.NewGuid() } },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {
