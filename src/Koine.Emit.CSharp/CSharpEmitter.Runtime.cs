@@ -64,6 +64,25 @@ public sealed partial class CSharpEmitter
     /// nullable reference or a caught exception. A lightweight <c>readonly struct</c> — no allocation, no
     /// third-party dependency.
     /// </summary>
+    /// <summary>
+    /// Emits the <c>IDomainEventDispatcher</c> contract the Application layer's handlers inject under
+    /// <c>--app-dispatch-events</c> (W1, issue #1721). Koine emits the <i>contract</i> only — the
+    /// consumer supplies the implementation (an in-process mediator, an outbox relay, a SignalR
+    /// broadcaster), exactly as it does for <c>IUnitOfWork</c>. This is the seam a SignalR broadcast
+    /// rides (issue #1039).
+    /// </summary>
+    private EmittedFile EmitDomainEventDispatcherInterface(EmitContext emit)
+    {
+        var sb = new StringBuilder();
+        sb.Append("/// <summary>Dispatches a domain event an aggregate recorded, after the transaction commits.</summary>\n");
+        sb.Append("public interface IDomainEventDispatcher\n");
+        sb.Append("{\n");
+        sb.Append(Indent).Append("Task DispatchAsync(IDomainEvent domainEvent, CancellationToken ct = default);\n");
+        sb.Append("}\n");
+        return new EmittedFile($"{FolderFor(RuntimeNamespace)}/IDomainEventDispatcher.cs",
+            Assemble(emit, RuntimeNamespace, sb.ToString(), usesLinq: false));
+    }
+
     private EmittedFile EmitResult(EmitContext emit)
     {
         var sb = new StringBuilder();

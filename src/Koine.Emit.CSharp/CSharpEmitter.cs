@@ -204,6 +204,15 @@ public sealed partial class CSharpEmitter : IEmitter
         if (HasEvents(model))
         {
             files.Add(EmitDomainEventInterface(emit));
+
+            // The dispatcher contract is referenced only by the Application-layer handlers under
+            // --app-dispatch-events (W1, #1721), and only makes sense where domain events exist at
+            // all — so emit it exactly when both hold, keeping every other configuration
+            // byte-identical. Same gating shape as Result<T> below.
+            if (_options.EmitApplication && _options.DispatchEvents)
+            {
+                files.Add(EmitDomainEventDispatcherInterface(emit));
+            }
         }
 
         if (HasIntegrationEvents(model))

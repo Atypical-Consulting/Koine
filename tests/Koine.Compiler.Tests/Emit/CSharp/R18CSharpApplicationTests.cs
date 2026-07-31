@@ -412,6 +412,38 @@ public class R18CSharpApplicationTests
     }
 
     // ------------------------------------------------------------------
+    // W1 — --app-dispatch-events: dispatch each recorded domain event AFTER
+    // the transaction commits, then clear the aggregate's list. Off by
+    // default (byte-identical); the seam a SignalR broadcast rides (#1039).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Dispatch_events_off_emits_no_dispatcher_contract()
+    {
+        var files = Emit(AppOn);
+        files.ShouldNotContain(f => f.RelativePath.EndsWith("IDomainEventDispatcher.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Dispatch_events_default_off_is_byte_identical_to_app_on()
+    {
+        // The new option's default value must not perturb the Application-layer output.
+        var explicitOff = Emit(AppOn with { DispatchEvents = false });
+        TestSupport.Render(explicitOff).ShouldBe(TestSupport.Render(Emit(AppOn)));
+    }
+
+    [Fact]
+    public void Dispatch_events_emits_the_domain_event_dispatcher_contract()
+    {
+        var contract = File(Emit(AppOn with { DispatchEvents = true }), "IDomainEventDispatcher.cs").Contents;
+
+        // A contract only — the consumer supplies the implementation, exactly as with IUnitOfWork.
+        contract.ShouldContain("public interface IDomainEventDispatcher");
+        contract.ShouldContain("Task DispatchAsync(IDomainEvent domainEvent, CancellationToken ct = default);");
+        contract.ShouldContain("namespace Koine.Runtime");
+    }
+
+    // ------------------------------------------------------------------
     // W4 — --app-mapping mapperly: emit a Riok.Mapperly source-generated
     // projection instead of the hand-rolled To<RM>() mapper. plain (the
     // default) is unchanged / byte-identical.

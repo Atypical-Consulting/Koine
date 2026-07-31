@@ -154,6 +154,13 @@ internal enum RegexMode
 /// allocation-free <c>[GeneratedRegex]</c> partial-method form (issue #795). The same
 /// <see cref="RegexMatchTimeoutMs"/> flows into both, so match semantics are identical — only the
 /// evaluation strategy differs.</para>
+/// <para><see cref="DispatchEvents"/> (W1, issue #1721) makes the Application layer's handlers
+/// dispatch each domain event an aggregate recorded — <c>DomainEvents</c>, already emitted on every
+/// event-emitting entity — <b>after</b> the transaction commits, then call <c>ClearDomainEvents()</c>.
+/// Post-commit is the point: an event that escaped before the commit could announce a transaction
+/// that then rolled back. Koine emits the <c>IDomainEventDispatcher</c> <i>contract</i> only; the
+/// consumer supplies the implementation, exactly as with <c>IUnitOfWork</c>. Default <c>false</c>
+/// keeps the emitted output byte-identical. This is the seam a SignalR broadcast rides (issue #1039).</para>
 /// </remarks>
 internal sealed record CSharpEmitterOptions(
     IReadOnlyDictionary<string, string> NamespaceMap,
@@ -166,7 +173,8 @@ internal sealed record CSharpEmitterOptions(
     int RegexMatchTimeoutMs = 1000,
     RegexMode RegexMode = RegexMode.Inline,
     CSharpHandlerResult HandlerResult = CSharpHandlerResult.Void,
-    CSharpNotFound NotFound = CSharpNotFound.Throw)
+    CSharpNotFound NotFound = CSharpNotFound.Throw,
+    bool DispatchEvents = false)
 {
     public static readonly CSharpEmitterOptions Empty =
         new(new Dictionary<string, string>(StringComparer.Ordinal));
