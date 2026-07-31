@@ -59,7 +59,7 @@ internal sealed class PhpTypeMapper
                 return "array";
             default:
                 // Model-declared enum → the PascalCase class name (PHP backed enum).
-                if (_index.Classify(type.Name) == TypeKind.Enum)
+                if (_index.Classify(type.Qualifier, type.Name) == TypeKind.Enum)
                 {
                     return PhpNaming.ClassName(type.Name);
                 }
@@ -132,5 +132,5 @@ internal sealed class PhpTypeMapper
     public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
 
     /// <summary>True when the type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier, type.Name) == TypeKind.Enum;
 }
