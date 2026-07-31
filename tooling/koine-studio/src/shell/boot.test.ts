@@ -31,7 +31,9 @@ const { fakePlatform } = vi.hoisted(() => ({
     gitClone: vi.fn(async (): Promise<string> => {
       throw new Error('gitClone not configured for this test');
     }),
-    createFile: vi.fn(async (): Promise<string> => 'token'),
+    createFile: vi.fn<(folderToken: string, relPath: string, contents?: string) => Promise<string>>(
+      async () => 'token',
+    ),
     // Backing the best-effort .gitignore ensure on "Open anyway" (#1063): readTextFile rejects by
     // default (no .gitignore yet, the common case) and writeTextFile is a no-op spy so tests can
     // assert what content it was called with.
@@ -323,16 +325,17 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
 
     // "Open anyway" seeds a first model in the cloned folder, then reopens it via the same flow.
     expect(fakePlatform.createFile).toHaveBeenCalledWith('/repos/my-clone', 'model.koi', 'context NewModel {}\n');
-    await Promise.resolve(); // createFile
-    await Promise.resolve(); // ensureGitignored: readTextFile
-    await Promise.resolve(); // ensureGitignored: writeTextFile (no existing .gitignore → created)
+    await Promise.resolve(); // createFile('model.koi')
+    await Promise.resolve(); // ensureGitignored: createFile('.gitignore') (none existed → created outright)
     await Promise.resolve(); // ensureGitignored resolves
     await Promise.resolve(); // go() → navigate('editor') again (ideStarted already true — init() not re-called)
     expect(appStore.getState().route).toBe('editor');
 
-    // The seeded file is also gitignored so `git status` stays quiet in the cloned repo (#1063).
-    expect(fakePlatform.readTextFile).toHaveBeenCalledWith('/repos/my-clone/.gitignore');
-    expect(fakePlatform.writeTextFile).toHaveBeenCalledWith('/repos/my-clone/.gitignore', 'model.koi\n');
+    // The seeded file is also gitignored so `git status` stays quiet in the cloned repo (#1063). No
+    // .gitignore existed, so the create-first path never needed to read or overwrite one.
+    expect(fakePlatform.createFile).toHaveBeenCalledWith('/repos/my-clone', '.gitignore', 'model.koi\n');
+    expect(fakePlatform.readTextFile).not.toHaveBeenCalled();
+    expect(fakePlatform.writeTextFile).not.toHaveBeenCalled();
 
     // The retry succeeds this time: the IDE reports success, clearing the one-shot tracking.
     hooks!.onOpenRecentSucceeded!('/repos/my-clone');
@@ -351,6 +354,10 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
       fakePlatform.canUseGit = true;
       fakePlatform.pickFolder.mockResolvedValue('/parent');
       fakePlatform.gitClone.mockResolvedValue('/repos/my-clone');
+      fakePlatform.createFile.mockImplementation(async (_folder: string, relPath: string) => {
+        if (relPath === '.gitignore') throw new Error('already exists: /repos/my-clone/.gitignore');
+        return 'token';
+      });
       fakePlatform.readTextFile.mockResolvedValue(`node_modules/\n${pattern}\n`);
 
       let hooks: IdeHooks | undefined;
@@ -371,7 +378,8 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
       hooks!.onOpenRecentFailed!('/repos/my-clone', 'empty');
       confirmButton('Open anyway')!.click();
       await Promise.resolve(); // koiConfirm resolves → cb.onOpenEmptyAnyway(path)
-      await Promise.resolve(); // createFile
+      await Promise.resolve(); // createFile('model.koi')
+      await Promise.resolve(); // ensureGitignored: createFile('.gitignore') rejects (already exists)
       await Promise.resolve(); // ensureGitignored: readTextFile
       await Promise.resolve(); // ensureGitignored resolves (already covered — no write)
       await Promise.resolve(); // go() → navigate('editor') again
@@ -380,6 +388,44 @@ describe('bootStudio — a single routed view (no IDE→Home flash)', () => {
       expect(fakePlatform.writeTextFile).not.toHaveBeenCalled();
     },
   );
+
+  it('"Open anyway" appends to an existing .gitignore that does not yet cover the seed (#1063)', async () => {
+    fakePlatform.canUseGit = true;
+    fakePlatform.pickFolder.mockResolvedValue('/parent');
+    fakePlatform.gitClone.mockResolvedValue('/repos/my-clone');
+    fakePlatform.createFile.mockImplementation(async (_folder: string, relPath: string) => {
+      if (relPath === '.gitignore') throw new Error('already exists: /repos/my-clone/.gitignore');
+      return 'token';
+    });
+    fakePlatform.readTextFile.mockResolvedValue('node_modules/\n');
+
+    let hooks: IdeHooks | undefined;
+    ideInit.mockImplementationOnce((h) => {
+      hooks = h;
+      return () => {};
+    });
+
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    dispose = bootStudio(root);
+
+    submitClone(root, 'https://github.com/user/repo.git');
+    await Promise.resolve(); // pickFolder
+    await Promise.resolve(); // gitClone
+    await Promise.resolve(); // pushRecentFolder + go() → navigate('editor') captures hooks
+
+    hooks!.onOpenRecentFailed!('/repos/my-clone', 'empty');
+    confirmButton('Open anyway')!.click();
+    await Promise.resolve(); // koiConfirm resolves → cb.onOpenEmptyAnyway(path)
+    await Promise.resolve(); // createFile('model.koi')
+    await Promise.resolve(); // ensureGitignored: createFile('.gitignore') rejects (already exists)
+    await Promise.resolve(); // ensureGitignored: readTextFile
+    await Promise.resolve(); // ensureGitignored: writeTextFile (not yet covered → appended)
+    await Promise.resolve(); // ensureGitignored resolves
+    await Promise.resolve(); // go() → navigate('editor') again
+
+    expect(fakePlatform.writeTextFile).toHaveBeenCalledWith('/repos/my-clone/.gitignore', 'node_modules/\nmodel.koi\n');
+  });
 
   it('an unrelated open-recent outcome does not clear a different, still-pending clone (#1017 race)', async () => {
     fakePlatform.canUseGit = true;

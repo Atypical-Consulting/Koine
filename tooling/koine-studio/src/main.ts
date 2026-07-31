@@ -313,16 +313,27 @@ function gitignoreLineCovers(pattern: string, relPath: string): boolean {
 }
 
 // Keep the model seeded by "Open anyway" (#1017) from showing up as untracked noise in `git status`:
-// best-effort append `relPath` to the cloned folder's .gitignore, creating one if it doesn't exist yet,
-// unless an existing entry already covers it. Never blocks the caller — like the seed-failure handling
-// in onOpenEmptyAnyway above, every failure here is logged and swallowed rather than propagated (#1063).
+// best-effort ensure `relPath` is covered by the cloned folder's .gitignore. Tries the CREATE path
+// first — createFile rejects "already exists" for a live file on both hosts, never silently
+// overwriting one — so the common case (no .gitignore yet) needs no read at all. Only when a
+// .gitignore already exists does this fall back to read-then-append, and it only ever WRITES after a
+// successful read: a transient/permission read failure degrades to "skip, log it" rather than
+// clobbering content it never actually saw. Every failure is logged and swallowed — like the
+// seed-failure handling in onOpenEmptyAnyway above, this never blocks the caller (#1063).
 async function ensureGitignored(folderPath: string, relPath: string): Promise<void> {
   const platform = getPlatform();
-  let existing = '';
+  try {
+    await platform.createFile(folderPath, '.gitignore', `${relPath}\n`);
+    return; // no .gitignore existed yet — created with just this entry
+  } catch {
+    // most likely "already exists" — fall through to read-then-append
+  }
+  let existing: string;
   try {
     existing = await platform.readTextFile(`${folderPath}/.gitignore`);
-  } catch {
-    existing = ''; // no .gitignore yet (or unreadable) — treated the same: start fresh
+  } catch (e) {
+    console.error('reading the existing .gitignore for the seeded model failed:', e);
+    return; // can't safely append without knowing the current content
   }
   const alreadyCovered = existing
     .split('\n')
