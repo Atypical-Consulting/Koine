@@ -467,6 +467,22 @@ describe('Assistant conversation persistence', () => {
     ]);
   });
 
+  test('saveChat strips turnId (#1286): transcript-only per-turn metadata never enters the stored blob', () => {
+    const msgs: ChatMessage[] = [
+      { role: 'user', content: 'compile this' },
+      { role: 'assistant', content: 'done', turnId: 7 },
+    ];
+    saveChat('scratch', msgs);
+    const raw = localStorage.getItem('koine.studio.chat.scratch') ?? '';
+    expect(raw).not.toContain('turnId');
+    // loadChat round-trips it as a plain message (the well-formed-entry filter tolerates the
+    // field's absence — it never required it in the first place).
+    expect(loadChat('scratch')).toEqual([
+      { role: 'user', content: 'compile this' },
+      { role: 'assistant', content: 'done' },
+    ]);
+  });
+
   test('uses a distinct namespace, leaving settings/scratch/secrets untouched', async () => {
     await clearApiKey();
     await saveApiKey('sk-must-not-leak');
