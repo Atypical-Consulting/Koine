@@ -1,5 +1,9 @@
-import { describe, expect, test, vi } from 'vitest';
-import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { createRovingTabIndex, handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
+
+afterEach(() => {
+  document.body.innerHTML = '';
+});
 
 // A fake, DOM-free nav over a plain array — exactly the "give me the ordered visible items" seam the
 // three Studio tree panels adapt onto. `focusIndex` records the move and updates the active index so a
@@ -223,5 +227,155 @@ describe('handleTreeKeydown', () => {
     expect(h.expandArg).toEqual([]);
     expect(h.collapseArg).toEqual([]);
     expect(h.activateArg).toEqual([]);
+  });
+});
+
+// The DOM-facing half of the roving-tabindex glue (#1365): seeding the lone tab stop and resolving an
+// event/the current focus to its treeitem — previously hand-rolled, near-identically, in both
+// `DomainNavigator.tsx` and `generatedFileTree.ts`. `isVisible` and `nestedButtonSelector` are the two
+// real differences between those call sites (a collapse-aware visible/all split; nested `<button>`s that
+// must leave the tab order) — both are opt-in so a caller that needs neither (like domainNavigator's own
+// "no collapse" trees) pays for neither.
+describe('createRovingTabIndex', () => {
+  function buildTree(spec: Array<{ nestedButton?: boolean; hidden?: boolean }>): {
+    tree: HTMLElement;
+    items: HTMLElement[];
+  } {
+    const tree = document.createElement('ul');
+    tree.setAttribute('role', 'tree');
+    const items = spec.map((s) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'treeitem');
+      if (s.hidden) li.dataset.hidden = 'true';
+      if (s.nestedButton) {
+        const btn = document.createElement('button');
+        btn.textContent = 'more';
+        li.appendChild(btn);
+      }
+      tree.appendChild(li);
+      return li;
+    });
+    document.body.appendChild(tree);
+    return { tree, items };
+  }
+
+  const hiddenFilter = (el: HTMLElement) => el.dataset.hidden !== 'true';
+
+  describe('setRovingItem', () => {
+    test('seeds the first treeitem as the tab stop when no active item is given', () => {
+      const { tree, items } = buildTree([{}, {}, {}]);
+      createRovingTabIndex(tree).setRovingItem(null);
+      expect(items.map((i) => i.tabIndex)).toEqual([0, -1, -1]);
+    });
+
+    test('seeds the given active item as the tab stop and clears every other item', () => {
+      const { tree, items } = buildTree([{}, {}, {}]);
+      createRovingTabIndex(tree).setRovingItem(items[1]);
+      expect(items.map((i) => i.tabIndex)).toEqual([-1, 0, -1]);
+    });
+
+    test('falls back to the first item when the given active item is not in the tree', () => {
+      const { tree, items } = buildTree([{}, {}, {}]);
+      const stray = document.createElement('li');
+      createRovingTabIndex(tree).setRovingItem(stray);
+      expect(items.map((i) => i.tabIndex)).toEqual([0, -1, -1]);
+    });
+
+    test('with an isVisible filter, a filtered-out item is never made the tab stop even when passed as active', () => {
+      const { tree, items } = buildTree([{}, { hidden: true }, {}]);
+      createRovingTabIndex(tree, { isVisible: hiddenFilter }).setRovingItem(items[1]);
+      expect(items.map((i) => i.tabIndex)).toEqual([0, -1, -1]);
+    });
+
+    test('with an isVisible filter, seeding falls back to the first VISIBLE item, skipping a filtered-out first item', () => {
+      const { tree, items } = buildTree([{ hidden: true }, {}, {}]);
+      createRovingTabIndex(tree, { isVisible: hiddenFilter }).setRovingItem(null);
+      expect(items.map((i) => i.tabIndex)).toEqual([-1, 0, -1]);
+    });
+
+    test('with a nestedButtonSelector, matching nested controls are pulled out of the tab order before seeding', () => {
+      const { tree, items } = buildTree([{ nestedButton: true }, {}]);
+      const btn = items[0].querySelector<HTMLElement>('button')!;
+      btn.tabIndex = 0;
+      createRovingTabIndex(tree, { nestedButtonSelector: 'button' }).setRovingItem(null);
+      expect(btn.tabIndex).toBe(-1);
+      expect(items.map((i) => i.tabIndex)).toEqual([0, -1]);
+    });
+
+    test('without a nestedButtonSelector, nested controls are left untouched', () => {
+      const { tree, items } = buildTree([{ nestedButton: true }, {}]);
+      const btn = items[0].querySelector<HTMLElement>('button')!;
+      btn.tabIndex = 0;
+      createRovingTabIndex(tree).setRovingItem(null);
+      expect(btn.tabIndex).toBe(0);
+    });
+  });
+
+  describe('focusItem', () => {
+    test('moves the tab stop to the item and focuses it', () => {
+      const { tree, items } = buildTree([{}, {}]);
+      createRovingTabIndex(tree).focusItem(items[1]);
+      expect(items.map((i) => i.tabIndex)).toEqual([-1, 0]);
+      expect(document.activeElement).toBe(items[1]);
+    });
+  });
+
+  describe('currentTreeItem', () => {
+    test('resolves to the closest treeitem ancestor of the event target', () => {
+      const { tree, items } = buildTree([{}, {}]);
+      const child = document.createElement('span');
+      items[0].appendChild(child);
+      const helper = createRovingTabIndex(tree);
+      const ev = new MouseEvent('click');
+      Object.defineProperty(ev, 'target', { value: child });
+      expect(helper.currentTreeItem(ev)).toBe(items[0]);
+    });
+
+    test('falls back to the currently-focused element when the event target has no treeitem ancestor', () => {
+      const { tree, items } = buildTree([{}, {}]);
+      const outside = document.createElement('div');
+      document.body.appendChild(outside);
+      items[1].tabIndex = 0;
+      items[1].focus();
+      const helper = createRovingTabIndex(tree);
+      const ev = new MouseEvent('click');
+      Object.defineProperty(ev, 'target', { value: outside });
+      expect(helper.currentTreeItem(ev)).toBe(items[1]);
+    });
+
+    test('resolves via the target\'s parentElement when the target is a non-Element node (e.g. a text node)', () => {
+      const { tree, items } = buildTree([{}, {}]);
+      const textNode = document.createTextNode('label');
+      items[0].appendChild(textNode);
+      const helper = createRovingTabIndex(tree);
+      const ev = new MouseEvent('click');
+      Object.defineProperty(ev, 'target', { value: textNode });
+      expect(helper.currentTreeItem(ev)).toBe(items[0]);
+    });
+
+    test('returns null when nothing matches (no treeitem ancestor, nothing focused)', () => {
+      const { tree } = buildTree([{}, {}]);
+      const outside = document.createElement('div');
+      document.body.appendChild(outside);
+      const helper = createRovingTabIndex(tree);
+      const ev = new MouseEvent('click');
+      Object.defineProperty(ev, 'target', { value: outside });
+      expect(helper.currentTreeItem(ev)).toBeNull();
+    });
+  });
+
+  describe('visibleTreeItems', () => {
+    test('returns every treeitem in DOM order when no isVisible filter is given', () => {
+      const { tree, items } = buildTree([{}, {}, {}]);
+      expect(createRovingTabIndex(tree).visibleTreeItems()).toEqual(items);
+    });
+
+    test('returns only the items the isVisible filter admits, in DOM order', () => {
+      const { tree, items } = buildTree([{}, { hidden: true }, {}]);
+      expect(createRovingTabIndex(tree, { isVisible: hiddenFilter }).visibleTreeItems()).toEqual([
+        items[0],
+        items[2],
+      ]);
+    });
   });
 });

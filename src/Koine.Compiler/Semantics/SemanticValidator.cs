@@ -830,7 +830,7 @@ public sealed class SemanticValidator
                     }
 
                     // An optional value can't initialize a non-optional field without a fallback.
-                    TypeRef? initType = resolver.Infer(m.Initializer, scope);
+                    TypeRef? initType = checker.EffectiveType(m.Initializer, scope);
                     if (initType is { IsOptional: true } && !m.Type.IsOptional)
                     {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.OptionalAssignedToNonOptional,

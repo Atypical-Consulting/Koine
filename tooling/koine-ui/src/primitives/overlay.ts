@@ -242,12 +242,27 @@ export function createConfirmDialog(): ConfirmDialog {
   okBtn.type = 'button';
   footer.append(cancelBtn, okBtn);
 
+  // Overlapping ask() calls queue FIFO instead of the second pre-empting the first: the dialog is a
+  // shared singleton (only one can show at a time), so a call made while one is already pending waits
+  // its turn rather than silently settling the pending one as cancelled with no signal to its caller.
   let resolve: ((ok: boolean) => void) | null = null;
+  const queue: Array<{ req: ConfirmRequest; resolve: (ok: boolean) => void }> = [];
   const settle = (ok: boolean): void => {
     const r = resolve;
     resolve = null;
     r?.(ok);
   };
+
+  function show(req: ConfirmRequest, res: (ok: boolean) => void): void {
+    resolve = res;
+    if (titleEl) titleEl.textContent = req.title;
+    msgEl.textContent = req.message;
+    cancelBtn.textContent = req.cancelLabel ?? 'Cancel';
+    okBtn.textContent = req.confirmLabel;
+    okBtn.className = req.danger ? 'koi-confirm-btn koi-confirm-btn-danger' : 'koi-confirm-btn';
+    modal.open();
+    cancelBtn.focus(); // safe default: createModal focuses ✕; we prefer Cancel here
+  }
 
   cancelBtn.addEventListener('click', () => {
     settle(false);
@@ -257,21 +272,23 @@ export function createConfirmDialog(): ConfirmDialog {
     settle(true);
     modal.close();
   });
-  // Esc / backdrop / ✕ all route through close → resolve false (if still pending).
-  modal.onClose(() => settle(false));
+  // Esc / backdrop / ✕ all route through close → resolve false (if still pending), then hand the
+  // now-free dialog to the next queued request, if any — so an abandoned request never leaves one
+  // stuck waiting forever behind it.
+  modal.onClose(() => {
+    settle(false);
+    const next = queue.shift();
+    if (next) show(next.req, next.resolve);
+  });
 
   return {
     ask(req) {
-      settle(false); // defensively settle any stale promise before reusing the dialog
-      if (titleEl) titleEl.textContent = req.title;
-      msgEl.textContent = req.message;
-      cancelBtn.textContent = req.cancelLabel ?? 'Cancel';
-      okBtn.textContent = req.confirmLabel;
-      okBtn.className = req.danger ? 'koi-confirm-btn koi-confirm-btn-danger' : 'koi-confirm-btn';
       return new Promise<boolean>((res) => {
-        resolve = res;
-        modal.open();
-        cancelBtn.focus(); // safe default: createModal focuses ✕; we prefer Cancel here
+        if (resolve !== null) {
+          queue.push({ req, resolve: res });
+        } else {
+          show(req, res);
+        }
       });
     },
   };
