@@ -789,4 +789,59 @@ public class TypeScriptConformanceTests
             "a guarded optional Decimal and a guarded optional Int, each consumed inside a nested "
             + "closure, should type-check under --strict:\n" + string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1622: <c>ModelIndex.Classify(string)</c> is context-blind — its flat, last-write-wins
+    /// <c>_byName</c> index resolves a same-named enum declared in a DIFFERENT context (R13.2 legally
+    /// allows this), so a qualified enum-member reference (<c>Status.Open</c>) can be classified
+    /// against the WRONG context's <c>Status</c> declaration depending on <c>ModelIndex</c>
+    /// registration order relative to the sibling context's same-named enum. This pins the case where
+    /// the referencing context (<c>Billing</c>) is declared AFTER its same-named sibling
+    /// (<c>Shipping</c>) — the order under which <c>Billing</c>'s own reference to its own
+    /// <c>Status.Open</c> must still resolve correctly post-migration, guarding the context-aware
+    /// <c>Classify(context, typeName)</c> call sites against regressing.
+    /// <para>
+    /// NOTE: the REVERSE declaration order (the referencing context declared FIRST) currently fails
+    /// semantic validation outright with KOI0106 ("unknown enum member") — a separate, deeper,
+    /// out-of-scope bug: <c>Semantics/ExpressionChecker.CheckMember</c>'s own qualified-enum-reference
+    /// gate (<c>ModelIndex.IsEnumType</c>/<c>EnumsDeclaring</c>) shares the same flat, context-blind
+    /// <c>_byName</c>/<c>_enumMembersByName</c> index, so it rejects a legally-valid same-named-enum
+    /// model before the TypeScript emitter's own call sites (migrated here) are ever reached. Filed
+    /// separately as it's outside #1622's emitter-only scope and affects every emit target, not just
+    /// TypeScript.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Same_named_enum_across_two_contexts_resolves_the_correct_context_for_a_qualified_reference()
+    {
+        const string src =
+            """
+            context Shipping {
+              enum Status {
+                Pending
+                Delivered
+              }
+            }
+
+            context Billing {
+              enum Status {
+                Open
+                Closed
+              }
+              value Invoice {
+                status: Status
+                isOpen: Bool = status == Status.Open
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "a same-named enum in a sibling context must not misclassify Billing.Status's own "
+            + "qualified reference:\n" + string.Join("\n", check.Errors));
+    }
 }
