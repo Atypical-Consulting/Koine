@@ -15,8 +15,9 @@
 //
 // The counts shown here reuse `countsByContext` (the one tally source shared with the Model outline), so
 // the two navigators can never disagree on a context's size. Roving-tabindex keyboard routing consumes the
-// SHARED `handleTreeKeydown` router (shell/rovingTreeNav.ts, #1105 / #484 item a) — this file keeps only
-// the thin DOM glue (item source + focus primitive + the panel-specific ContextMenu affordance).
+// SHARED `handleTreeKeydown` router and `createRovingTabIndex` seed/resolve helper (shell/rovingTreeNav.ts,
+// #1105 / #484 item a / #1365) — this file keeps only the item source (via a ref helper) and the
+// panel-specific ContextMenu affordance.
 import { render } from 'preact';
 import type { ComponentChildren, VNode } from 'preact';
 import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
