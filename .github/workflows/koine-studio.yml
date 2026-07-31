@@ -86,9 +86,19 @@ jobs:
       # job's own 20-minute `timeout-minutes` above finally killed it. Bound this specific step so a
       # repeat fails in ~5 minutes instead of silently burning the whole job budget — root cause
       # (why `npm ci` itself stalled) is tracked separately, this is just the fast-fail backstop.
+      #
+      # Diagnostic capture (issue #1670): that hang produced zero output before being killed, giving no
+      # way to tell how far `npm ci` even got — stuck immediately, or deep into package resolution.
+      # `--loglevel http` prints one line per registry cache check/fetch as each completes (the default
+      # `notice` level stays silent unless something fails), so a repeat hang's last printed line at
+      # least narrows "got this far into dependency resolution, then nothing" versus never progressing
+      # past setup. Locally this workspace's ~1170 packages turn a normal ~20s `npm ci` from ~30 log
+      # lines into ~1000 — real but bounded added volume on every healthy run, accepted per the issue's
+      # plan as the cost of the extra signal (`verbose`/`silly` would be an order of magnitude noisier
+      # still, for no corresponding gain here).
       - name: Install npm dependencies (workspace root)
         timeout-minutes: 5
-        run: npm ci
+        run: npm ci --loglevel http
 
       # Lint gate (#978): the flat-config ESLint gate over both frontend packages mechanically enforces
       # the frontend safety conventions (void-prefixed promises, domById, escape-before-innerHTML, and
