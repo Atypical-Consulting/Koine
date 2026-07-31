@@ -8,7 +8,13 @@
 // one vertex per node, the empty state, and the superseded-render guard. Styling, bounded-context
 // containers, layout, edges, interaction, and persistence land in later tasks.
 import type { DiagramRenderer } from '@/diagrams/diagrams';
-import type { Graph as MxGraph, Cell as MxCell, TooltipHandler } from '@maxgraph/core';
+import type {
+  Graph as MxGraph,
+  Cell as MxCell,
+  ConnectionHandler,
+  SelectionHandler,
+  TooltipHandler,
+} from '@maxgraph/core';
 import type { Diagram, DiagramEdge, DiagramGraph, DiagramMember, DiagramNode, DocsFile } from '@/lsp/lsp';
 import { mergeGraphsForView, type EventFlowEdge, type EventFlowNode } from '@/model/modelTables';
 // Concept Colors (ADR 0004): the single-source palette. The canvas shape fill/stroke needs literal hex
@@ -530,15 +536,13 @@ export function buildCanvas(
   if (freehand) {
     graph.setConnectable(true); // hover a node → drag to another to draw a relationship (→ addField)
     graph.setAllowDanglingEdges(false); // a connection must land on a node; no edges to empty space
-    const conn = graph.getPlugin('ConnectionHandler') as unknown as { setCreateTarget?: (v: boolean) => void } | undefined;
+    const conn = graph.getPlugin<ConnectionHandler>('ConnectionHandler');
     conn?.setCreateTarget?.(false); // never auto-create a target node; only connect existing nodes
     // Drag feedback: maxGraph's default move preview is a dashed rectangle drawn in `previewColor`
     // (default 'black') and only kicks in past `maxLivePreview` (default 0) — so on the dark canvas a
     // drag showed NOTHING. Raise maxLivePreview so the REAL node (themed HTML label and all) moves live
     // under the cursor, and give the fallback dashed outline a visible accent stroke just in case.
-    const selection = graph.getPlugin('SelectionHandler') as unknown as
-      | { maxLivePreview?: number; previewColor?: string }
-      | undefined;
+    const selection = graph.getPlugin<SelectionHandler>('SelectionHandler');
     if (selection) {
       selection.maxLivePreview = 1024; // live-move the actual cell(s); our graphs are far smaller than this
       selection.previewColor = '#5aa9f0'; // visible accent (matches --koi-accent) for the dashed fallback
@@ -689,10 +693,8 @@ export function buildCanvas(
   // Drag from one node to another → bubble DIAGRAM_CONNECT_EVENT (ide.tsx turns it into an addField on the
   // source whose type is the target). The temporary edge maxGraph inserts is removed — the real edge comes
   // back via the .koi round-trip + re-render. Only meaningful while connectable (editing).
-  const connHandler = graph.getPlugin('ConnectionHandler') as unknown as
-    | { addListener?: (name: string, fn: (s: unknown, e: { getProperty(n: string): unknown }) => void) => void }
-    | undefined;
-  connHandler?.addListener?.(mx.InternalEvent.CONNECT, (_sender, evt) => {
+  const connHandler = graph.getPlugin<ConnectionHandler>('ConnectionHandler');
+  connHandler?.addListener(mx.InternalEvent.CONNECT, (_sender: unknown, evt: { getProperty(n: string): unknown }) => {
     const edge = evt.getProperty('cell') as MxCell | null;
     const source = nodeValue(edge?.getTerminal(true));
     const target = nodeValue(edge?.getTerminal(false)) ?? nodeValue(evt.getProperty('terminal') as MxCell | null);
