@@ -539,7 +539,7 @@ public sealed partial class JavaEmitter
             {
                 var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var translated = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
-                args.Add(ReconcileFactoryCtorArg(translator.InferType(value), m.Type, translated));
+                args.Add(ReconcileFactoryCtorArg(InferCtorArgValueType(translator, value), m.Type, translated));
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
@@ -566,6 +566,37 @@ public sealed partial class JavaEmitter
         }
 
         return args;
+    }
+
+    /// <summary>
+    /// The type <see cref="ReconcileFactoryCtorArg"/> should reconcile <paramref name="value"/>'s already-
+    /// translated body against. For most expressions this is just <c>translator.InferType(value)</c> — but
+    /// a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic, shared
+    /// across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened against the
+    /// right operand — unlike <c>VisitConditional</c>'s <c>WiderNumeric</c>, it never reconciles a
+    /// <c>Int</c>/<c>Decimal</c> mismatch between the two sides (out of scope here to change — #1548 is a
+    /// Java-lowering-only fix). <see cref="JavaExpressionTranslator"/>'s own <c>WriteCoalesce</c> (#1548)
+    /// already widens the narrower operand's RENDERED text to match the wider one, so reconciling the outer
+    /// ctor-arg wrap against that same naive (unwidened) type would double-widen an already-widened value —
+    /// a real <c>javac</c> "no suitable method found for valueOf(BigDecimal)" error. This mirrors
+    /// <c>VisitConditional</c>'s own numeric widening locally, scoped to this one caller, without touching
+    /// the shared resolver.
+    /// </summary>
+    private static TypeRef? InferCtorArgValueType(JavaExpressionTranslator translator, Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return translator.InferType(value);
+        }
+
+        TypeRef? leftType = translator.InferType(co.Left);
+        TypeRef? rightType = translator.InferType(co.Right);
+
+        // Matches WriteCoalesce's own or-vs-orElse choice: the coalesce stays Optional-shaped only when the
+        // right (fallback) operand is itself Optional-typed.
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
     }
 
     /// <summary>
