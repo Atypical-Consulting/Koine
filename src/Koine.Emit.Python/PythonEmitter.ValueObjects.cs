@@ -52,14 +52,15 @@ public sealed partial class PythonEmitter
         // unconditionally this VO's own context. Without a hint here, Assemble falls back to this
         // VO's own context, so a same-named-but-unrelated type elsewhere can silently shadow the
         // field's actually-declared, explicitly-qualified type.
+        var voContext = ContextOf(ns);
         var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (Member m in fields)
         {
-            CollectImportHints(m.Type, ContextOf(ns), symbolContext);
+            CollectImportHints(m.Type, voContext, symbolContext);
         }
         foreach (Member m in derived)
         {
-            CollectImportHints(m.Type, ContextOf(ns), symbolContext);
+            CollectImportHints(m.Type, voContext, symbolContext);
         }
 
         var sb = new StringBuilder();
