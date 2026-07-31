@@ -134,7 +134,6 @@ export function createJsonView(parent: HTMLElement): ConfigView {
 export interface EditableJsonView {
   getValue(): string;
   setValue(text: string): void;
-  el: HTMLElement;
   destroy(): void;
 }
 
@@ -166,7 +165,6 @@ export function createEditableJsonView(parent: HTMLElement, ariaLabel: string): 
     setValue(text) {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
     },
-    el: view.dom,
     destroy: () => view.destroy(),
   };
 }

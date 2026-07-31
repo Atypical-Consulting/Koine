@@ -181,7 +181,9 @@ export function buildAdvancedSection(
 
     const kbdJsonHost = document.createElement("div");
     kbdJsonHost.className = "koi-kbdjson-editor";
-    kbdJsonHost.tabIndex = 0;
+    // No tabIndex on the host: unlike the read-only .koi-mcp-snippet (whose CM content is NOT in the tab
+    // order, hence its own tabIndex=0 trick), this view is editable — cm-content is contenteditable and
+    // already tabbable, so a wrapper tabIndex would just add a spurious extra stop before it.
     const kbdJsonView = createEditableJsonView(kbdJsonHost, "Keybinding overrides JSON");
 
     const kbdJsonError = document.createElement("p");
