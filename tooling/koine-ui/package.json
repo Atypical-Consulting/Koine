@@ -21,6 +21,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./contrast": {
+      "types": "./dist/contrast.d.ts",
+      "import": "./dist/contrast.js"
+    },
     "./styles.css": "./dist/styles.css"
   },
   "scripts": {

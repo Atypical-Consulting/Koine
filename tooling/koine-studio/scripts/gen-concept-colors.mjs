@@ -12,6 +12,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+// A plain Node script (no Vite/DOM), so this imports the side-effect-free './contrast' subpath
+// rather than the main '@atypical/koine-ui' barrel — that barrel runs a top-level
+// `document.addEventListener` (primitives/overlay.ts) at import time, which throws under Node.
+import { contrastOnWhite } from '@atypical/koine-ui/contrast';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const studioRoot = path.resolve(scriptDir, '..');
@@ -19,21 +23,6 @@ const repoRoot = path.resolve(studioRoot, '..', '..');
 const sourcePath = path.join(repoRoot, 'design', 'concept-colors.json');
 
 const HEX = /^#[0-9a-f]{6}$/;
-
-/** WCAG relative luminance of a #rrggbb color. */
-function luminance(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const chan = (c) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * chan((n >> 16) & 255) + 0.7152 * chan((n >> 8) & 255) + 0.0722 * chan(n & 255);
-}
-
-/** Contrast ratio of a color against pure white (#ffffff). */
-function contrastOnWhite(hex) {
-  return 1.05 / (luminance(hex) + 0.05);
-}
 
 const { concepts } = JSON.parse(readFileSync(sourcePath, 'utf8'));
 if (!Array.isArray(concepts) || concepts.length === 0) {

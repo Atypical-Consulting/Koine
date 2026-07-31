@@ -15,6 +15,11 @@ import './styles.css';
 
 export const KOINE_UI_VERSION = '0.1.0';
 
+// --- WCAG 2.1 contrast math (issue #1267) ----------------------------------------------------
+// The single source of truth for relative-luminance/contrast-ratio math, replacing hand-rolled
+// copies in koine-studio's gen-concept-colors.mjs and conceptColors.test.ts.
+export { hexToRgb, relativeLuminance, contrastRatio, contrastOnWhite } from './contrast';
+
 // --- Framework-free DOM/utility primitives (issue #905, Task 3) -----------------------------
 // Moved verbatim from koine-studio/src/shared/*; no Preact dependency.
 export * from './primitives/el';

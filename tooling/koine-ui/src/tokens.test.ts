@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { hexToRgb, contrastRatio } from './contrast';
 
 // Guards the --koi-* design-token relocation (issue #905, Task 2): tokens.css is now the single
 // source of truth for the runtime CSS custom properties Koine Studio (and any other consumer) reads
@@ -57,29 +58,6 @@ describe('tokens.css', () => {
 // measures ~3.71:1 — under the WCAG 2.1 AA floor (4.5:1) for normal text (SC 1.4.3). This computes
 // the real relative-luminance contrast ratio off the token hex values (no DOM/Chromium needed) so a
 // future edit to either token can't silently regress below AA again.
-function hexToRgb(hex: string): [number, number, number] {
-  const clean = hex.trim().replace('#', '');
-  const r = parseInt(clean.slice(0, 2), 16);
-  const g = parseInt(clean.slice(2, 4), 16);
-  const b = parseInt(clean.slice(4, 6), 16);
-  return [r, g, b];
-}
-
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  const [rl, gl, bl] = [r, g, b].map((c) => {
-    const srgb = c / 255;
-    return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
-  });
-  return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
-}
-
-function contrastRatio(hex1: string, hex2: string): number {
-  const l1 = relativeLuminance(hexToRgb(hex1));
-  const l2 = relativeLuminance(hexToRgb(hex2));
-  const [lighter, darker] = l1 >= l2 ? [l1, l2] : [l2, l1];
-  return (lighter + 0.05) / (darker + 0.05);
-}
-
 function extractThemeBlock(css: string, selector: string): string {
   const start = css.indexOf(`${selector} {`);
   expect(start, `${selector} block in tokens.css`).toBeGreaterThanOrEqual(0);
