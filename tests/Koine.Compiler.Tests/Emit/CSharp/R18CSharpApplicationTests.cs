@@ -606,6 +606,30 @@ public class R18CSharpApplicationTests
         assembly.ShouldNotBeNull(string.Join("\n", errors));
     }
 
+    // ------------------------------------------------------------------
+    // Issue #1591 — runtime-verify the api layer's endpoints over real HTTP,
+    // not just that they Roslyn-compile. Task 1: a fake IOrderRepository/
+    // IUnitOfWork test double compiled alongside the emitted model, proving
+    // its shape matches the generated repository interface before any HTTP
+    // wiring exists.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Fake_order_repository_satisfies_the_emitted_repository_interface_shape()
+    {
+        var files = Emit(ApiOn)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .ToList();
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+
+        var repositoryType = assembly.GetTypes().Single(t => t.Name == "IOrderRepository");
+        var fakeType = assembly.GetTypes().Single(t => t.Name == "FakeOrderRepository");
+        var fake = Activator.CreateInstance(fakeType);
+
+        repositoryType.IsInstanceOfType(fake).ShouldBeTrue();
+    }
+
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {
