@@ -35,11 +35,12 @@ public sealed partial class PythonEmitter
         var name = PythonNaming.ToPascalCase(@enum.Name);
         IReadOnlyList<Param> sig = @enum.Signature;
         var hasData = @enum.HasAssociatedData;
+        var context = ContextOf(ns);
 
         // Associated-data args are literal expressions; reuse the translator so string escaping and
         // the Decimal-safe rendering match the rest of the emitted code. No members are in scope —
         // an enum's data values are constants.
-        var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
+        var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         // The per-member callable parameters / dispatch arms (snake_case, keyword-escaped).
         var arms = @enum.Members.Select(m => PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name))).ToList();
@@ -61,7 +62,7 @@ public sealed partial class PythonEmitter
             foreach (Param p in sig)
             {
                 sb.Append(Indent).Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name)))
-                  .Append(": ").Append(typeMapper.Map(p.Type)).Append('\n');
+                  .Append(": ").Append(typeMapper.Map(p.Type, context)).Append('\n');
             }
         }
 
@@ -93,7 +94,7 @@ public sealed partial class PythonEmitter
         {
             var initParams = new List<string> { "ordinal: int" };
             initParams.AddRange(sig.Select(p =>
-                PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name)) + ": " + typeMapper.Map(p.Type)));
+                PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name)) + ": " + typeMapper.Map(p.Type, context)));
 
             sb.Append('\n');
             sb.Append(Indent).Append("def __init__(self, ").Append(string.Join(", ", initParams)).Append(") -> None:\n");

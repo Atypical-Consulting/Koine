@@ -340,6 +340,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
 
         var rootName = TypeScriptNaming.ToPascalCase(root.Name);
         var idType = TypeScriptNaming.ToPascalCase(root.IdentityName);
+        var context = ContextOf(ns);
         IReadOnlyList<string> ops = agg.Repository?.Operations ?? DefaultRepositoryOps;
         IReadOnlyList<FinderDecl> finders = agg.Repository?.Finders ?? Array.Empty<FinderDecl>();
         var iface = $"I{rootName}Repository";
@@ -381,7 +382,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
             var isList = finder.ResultType.Name == ModelIndex.ListTypeName;
             var ret = isList ? $"Promise<readonly {rootName}[]>" : $"Promise<{rootName} | undefined>";
             var paramList = string.Join(", ", finder.Parameters.Select(p =>
-                $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type)}"));
+                $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type, context)}"));
             sb.Append(Indent).Append(TypeScriptNaming.ToCamelCase(finder.Name)).Append('(')
               .Append(paramList).Append("): ").Append(ret).Append(";\n");
         }
@@ -400,6 +401,7 @@ public sealed partial class TypeScriptEmitter : IEmitter
     private EmittedFile EmitEnum(TsEmitContext emit, EnumDecl @enum, string ns, TypeScriptTypeMapper typeMapper)
     {
         var name = TypeScriptNaming.ToPascalCase(@enum.Name);
+        var context = ContextOf(ns);
         IReadOnlyList<Param> sig = @enum.Signature;
         var hasData = @enum.HasAssociatedData;
         var sb = new StringBuilder();
@@ -422,12 +424,12 @@ public sealed partial class TypeScriptEmitter : IEmitter
         foreach (Param p in sig)
         {
             sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(p.Name)).Append(": ")
-              .Append(typeMapper.Map(p.Type)).Append(";\n");
+              .Append(typeMapper.Map(p.Type, context)).Append(";\n");
         }
         sb.Append("}\n\n");
 
         // The const object: one frozen member per declaration, plus the helpers.
-        var translator = new TypeScriptExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
+        var translator = new TypeScriptExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
         sb.Append("export const ").Append(name).Append(" = {\n");
         for (var i = 0; i < @enum.Members.Count; i++)
         {

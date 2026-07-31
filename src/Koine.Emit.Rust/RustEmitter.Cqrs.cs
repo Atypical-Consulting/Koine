@@ -95,6 +95,17 @@ public sealed partial class RustEmitter
             byName.TryAdd(m.Name, m);
         }
 
+        // A DIRECT field's type is declared on the SOURCE type, which may live in a different bounded
+        // context than this read model (R12.3 cross-context projection). Classifying/mapping it against
+        // THIS read model's own context would resolve a bare reference against a same-named-but-
+        // differently-kinded sibling type declared locally here instead of the source's own declaration
+        // — so direct fields pass the SOURCE's own owning context as `typeMapper`'s `referencingContext`
+        // override (#1638). This does NOT change which module the mapped type qualifies INTO (still
+        // `typeMapper`'s own `context` — the file actually being written) — only which context a bare
+        // reference resolves AGAINST. A derived field's own declared type (`f.Type`, below) IS this read
+        // model's own, so it keeps the default (no override).
+        var sourceContext = emit.Index.ResolveOwner(rm.SourceType, context).Owner ?? context;
+
         // A derived field projects an expression over the borrowed `src`, every member through its accessor.
         var translator = new RustExpressionTranslator(
             emit.Index, sourceMembers, emit.EnumMemberToType, emit.EnumVariants, typeMapper, context,
@@ -105,22 +116,25 @@ public sealed partial class RustEmitter
         {
             string rhs;
             TypeRef fieldType;
+            string? fieldReferencingContext;
             if (f.Projection is null)
             {
                 // Direct: copy the like-named source member through its accessor, owned for storage.
                 fieldType = byName.TryGetValue(f.Name, out Member? sm) ? sm.Type : new TypeRef("String");
-                rhs = OwnAccess("src." + RustNaming.Field(f.Name) + "()", fieldType, typeMapper);
+                fieldReferencingContext = sourceContext;
+                rhs = OwnAccess("src." + RustNaming.Field(f.Name) + "()", fieldType, typeMapper, fieldReferencingContext);
             }
             else
             {
                 fieldType = f.Type!;
-                var expectedEnum = emit.Index.Classify(fieldType.Name) == TypeKind.Enum ? fieldType.Name : null;
+                fieldReferencingContext = null;
+                var expectedEnum = emit.Index.Classify(context, fieldType.Name) == TypeKind.Enum ? fieldType.Name : null;
                 var rendered = RustExpressionTranslator.StripOuterParens(translator.Translate(f.Projection, expectedEnum));
                 var bodyType = translator.InferType(f.Projection);
                 rhs = OwnDerived(rendered, fieldType, bodyType, typeMapper);
             }
 
-            fields.Add((RustNaming.Field(f.Name), typeMapper.Map(fieldType), rhs));
+            fields.Add((RustNaming.Field(f.Name), typeMapper.Map(fieldType, fieldReferencingContext), rhs));
         }
 
         WriteDoc(body, rm.Doc, string.Empty);
@@ -148,9 +162,14 @@ public sealed partial class RustEmitter
         body.Append("}\n");
     }
 
-    /// <summary>Owns a direct accessor result: a String via <c>to_string</c>, another non-Copy value via <c>clone</c>, a Copy value verbatim.</summary>
-    private static string OwnAccess(string access, TypeRef type, RustTypeMapper typeMapper) =>
-        typeMapper.IsCopy(type) ? access
+    /// <summary>
+    /// Owns a direct accessor result: a String via <c>to_string</c>, another non-Copy value via
+    /// <c>clone</c>, a Copy value verbatim. <paramref name="referencingContext"/> overrides
+    /// <paramref name="typeMapper"/>'s resolution frame for a bare <paramref name="type"/> declared in a
+    /// different context than the mapper's own — see <see cref="RustTypeMapper.Map"/>'s doc (#1638).
+    /// </summary>
+    private static string OwnAccess(string access, TypeRef type, RustTypeMapper typeMapper, string? referencingContext = null) =>
+        typeMapper.IsCopy(type, referencingContext) ? access
         : type is { Name: "String", IsOptional: false } ? access + ".to_string()"
         : access + ".clone()";
 

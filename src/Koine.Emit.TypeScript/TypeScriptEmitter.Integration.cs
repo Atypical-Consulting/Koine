@@ -32,6 +32,7 @@ public sealed partial class TypeScriptEmitter
     private EmittedFile EmitIntegrationEvent(TsEmitContext emit, IntegrationEventDecl ev, string ns, TypeScriptTypeMapper typeMapper)
     {
         var name = TypeScriptNaming.ToPascalCase(ev.Name);
+        var context = ContextOf(ns);
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorMembers = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
@@ -43,13 +44,13 @@ public sealed partial class TypeScriptEmitter
         {
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ")
-              .Append(typeMapper.Map(m.Type)).Append(";\n");
+              .Append(typeMapper.Map(m.Type, context)).Append(";\n");
         }
         sb.Append(Indent).Append("readonly occurredOn").Append(FieldBang).Append(": Instant;\n\n");
 
         var ordered = OrderCtorParams(ctorMembers).ToList();
         sb.Append(Indent).Append("constructor(");
-        sb.Append(string.Join(", ", ordered.Select(m => $"{TypeScriptNaming.ToCamelCase(m.Name)}: {typeMapper.Map(m.Type)}")));
+        sb.Append(string.Join(", ", ordered.Select(m => $"{TypeScriptNaming.ToCamelCase(m.Name)}: {typeMapper.Map(m.Type, context)}")));
         sb.Append(ordered.Count > 0 ? ", " : "").Append("occurredOn: Instant = Instant.now()) {\n");
         if (RefOnly)
         {

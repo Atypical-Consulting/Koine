@@ -100,7 +100,7 @@ public sealed partial class PhpEmitter
             var ret = isList ? "array" : "?" + rootName;
             var method = PhpNaming.EscapeIdentifier(PhpNaming.MethodName(finder.Name));
             var paramParts = finder.Parameters.Select(p =>
-                typeMapper.Map(p.Type) + " $" + PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)));
+                typeMapper.Map(p.Type, contextName) + " $" + PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)));
             var paramList = string.Join(", ", paramParts);
 
             // PHPDoc the list-shaped return (`@return list<Root>`) so the bare `array` hint carries its
@@ -108,7 +108,7 @@ public sealed partial class PhpEmitter
             var finderDocParams = finder.Parameters
                 .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)), p.Type))
                 .ToList();
-            WriteMethodDoc(sb, Indent, typeMapper, finderDocParams, finder.ResultType, null);
+            WriteMethodDoc(sb, Indent, typeMapper, finderDocParams, finder.ResultType, null, contextName);
 
             sb.Append(Indent).Append("public function ").Append(method)
               .Append("(").Append(paramList).Append("): ").Append(ret).Append(";\n");

@@ -151,9 +151,9 @@ public sealed partial class TypeScriptEmitter
             WriteDoc(sb, op.Doc, Indent);
 
             var method = TypeScriptNaming.ToCamelCase(op.Name);
-            var ret = typeMapper.Map(op.ReturnType);
+            var ret = typeMapper.Map(op.ReturnType, context);
             var paramList = string.Join(", ", op.Parameters.Select(p =>
-                $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type)}"));
+                $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type, context)}"));
 
             if (op.Body is null)
             {

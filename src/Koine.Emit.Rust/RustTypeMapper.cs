@@ -43,13 +43,25 @@ internal sealed class RustTypeMapper
     }
 
     /// <summary>The Rust type string for a member's declared type (wrapping optionals in <c>Option</c>).</summary>
-    public string Map(TypeRef type)
+    /// <param name="type">The member's declared type.</param>
+    /// <param name="referencingContext">
+    /// The bounded context <paramref name="type"/> was declared bare (unqualified) IN — normally the
+    /// same context this mapper was constructed for, so left <c>null</c> (meaning "use the mapper's own
+    /// <c>_context</c>"). Pass an override only when mapping a type declared in a DIFFERENT context than
+    /// the one this mapper is emitting into — e.g. a read model's DIRECT field, whose type is declared on
+    /// the (possibly foreign) source type, not the read model's own context (#1638) — so a bare reference
+    /// resolves against ITS OWN declaring context's sibling instead of a same-named type declared locally
+    /// in the context actually being emitted. This does NOT change which module the type qualifies INTO
+    /// when foreign — that comparison always stays against the mapper's own <c>_context</c> (the file
+    /// actually being written), so the two concerns (resolution frame vs. emitting module) stay distinct.
+    /// </param>
+    public string Map(TypeRef type, string? referencingContext = null)
     {
-        var baseType = MapBase(type);
+        var baseType = MapBase(type, referencingContext);
         return type.IsOptional ? $"Option<{baseType}>" : baseType;
     }
 
-    private string MapBase(TypeRef type)
+    private string MapBase(TypeRef type, string? referencingContext = null)
     {
         switch (type.Name)
         {
@@ -75,7 +87,7 @@ internal sealed class RustTypeMapper
                 // value / entity / aggregate / enum / ID / unknown types map to their Rust type name,
                 // qualified to their owning context's module when referenced from a different context —
                 // honoring any explicit `Context.T` qualifier the reference carries (#1124).
-                return QualifyTypeName(type);
+                return QualifyTypeName(type, referencingContext);
         }
     }
 
@@ -84,13 +96,15 @@ internal sealed class RustTypeMapper
     /// <see cref="TypeRef.Qualifier"/> (a <c>Context.T</c> the modeller wrote) into owner resolution so a
     /// qualified multi-owner reference qualifies to the named owner rather than the ordinal default (#1124).
     /// </summary>
-    public string QualifyTypeName(TypeRef type) => QualifyTypeNameCore(type.Name, type.Qualifier);
+    public string QualifyTypeName(TypeRef type, string? referencingContext = null) =>
+        QualifyTypeNameCore(type.Name, type.Qualifier, referencingContext);
 
     /// <summary>
     /// The Rust type name for a declared Koine type named with no explicit qualifier (event / enum /
     /// read-model call sites). Delegates to <see cref="QualifyTypeNameCore"/> with a <c>null</c> qualifier.
     /// </summary>
-    public string QualifyTypeName(string koineName) => QualifyTypeNameCore(koineName, qualifier: null);
+    public string QualifyTypeName(string koineName, string? referencingContext = null) =>
+        QualifyTypeNameCore(koineName, qualifier: null, referencingContext);
 
     /// <summary>
     /// The Rust type name for a declared Koine type, qualified as
@@ -98,11 +112,15 @@ internal sealed class RustTypeMapper
     /// bounded context than the one being emitted (so cross-context references resolve in the flat
     /// per-context module layout). Bare PascalCase otherwise — including in the legacy context-agnostic
     /// mode and for branded ID newtypes, which are re-materialized locally rather than qualified.
+    /// <paramref name="referencingContext"/> overrides the resolution frame passed to
+    /// <see cref="ModelIndex.ResolveOwner(string, string?, string)"/> (see <see cref="Map"/>'s doc) — the
+    /// "same module?" comparison below always stays against the mapper's own <c>_context</c> regardless.
     /// </summary>
-    private string QualifyTypeNameCore(string koineName, string? qualifier)
+    private string QualifyTypeNameCore(string koineName, string? qualifier, string? referencingContext = null)
     {
         var pascal = RustNaming.ToPascalCase(koineName);
-        if (_context is null || !IsQualifiable(koineName) || OwnerContextOf(koineName, qualifier) is not { } owner)
+        if (_context is null || !IsQualifiable(koineName, referencingContext)
+            || OwnerContextOf(koineName, qualifier, referencingContext) is not { } owner)
         {
             return pascal;
         }
@@ -148,17 +166,18 @@ internal sealed class RustTypeMapper
     /// <paramref name="qualifier"/> (the reference's <c>Context.T</c>) pins the owner when set (#1124).
     /// Null only in the legacy context-agnostic mode.
     /// </summary>
-    private string? OwnerContextOf(string koineName, string? qualifier = null) =>
-        _context is { } ctx ? _index.ResolveOwner(koineName, qualifier, ctx).Owner : null;
+    private string? OwnerContextOf(string koineName, string? qualifier = null, string? referencingContext = null) =>
+        (referencingContext ?? _context) is { } ctx ? _index.ResolveOwner(koineName, qualifier, ctx).Owner : null;
 
     /// <summary>
     /// True for the named declared kinds that emit a Rust type into a context module (so a foreign one
     /// is worth qualifying). Branded ID newtypes are excluded: a foreign id is re-materialized locally
     /// by <c>OrderedUnownedIds</c>, never module-qualified.
     /// </summary>
-    private bool IsQualifiable(string koineName) => _index.Classify(koineName) is
-        TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
-        or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
+    private bool IsQualifiable(string koineName, string? referencingContext = null) =>
+        _index.Classify(referencingContext ?? _context, koineName) is
+            TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
+            or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
 
     /// <summary>The Rust module name a context's types emit into (snake_case, with any configured remap).</summary>
     private string ModuleNameOf(string context) => _options.RemapModule(RustNaming.ToSnakeCase(context));
@@ -175,16 +194,22 @@ internal sealed class RustTypeMapper
     /// <summary>True when the member's type is a Koine <c>Map&lt;K,V&gt;</c>.</summary>
     public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
 
-    /// <summary>True when the member's type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+    /// <summary>
+    /// True when the member's type classifies as a Koine smart enum. <paramref name="referencingContext"/>
+    /// overrides the resolution frame for a bare (unqualified) <paramref name="type"/> declared in a
+    /// DIFFERENT context than this mapper's own — see <see cref="Map"/>'s doc (#1638).
+    /// </summary>
+    public bool IsEnum(TypeRef type, string? referencingContext = null) =>
+        _index.Classify(type.Qualifier ?? referencingContext ?? _context, type.Name) == TypeKind.Enum;
 
     /// <summary>
     /// True when a value of this type is <c>Copy</c> in the emitted Rust (so accessors and arguments
     /// can pass it by value): the scalar primitives, <c>Instant</c> (SystemTime), <c>Decimal</c>, and
     /// data-free smart enums. Anything that owns a heap allocation (<c>String</c>, collections) or may
-    /// transitively (other value/entity types) is NOT <c>Copy</c>.
+    /// transitively (other value/entity types) is NOT <c>Copy</c>. <paramref name="referencingContext"/>
+    /// overrides the resolution frame the same way <see cref="IsEnum"/>'s does (#1638).
     /// </summary>
-    public bool IsCopy(TypeRef type)
+    public bool IsCopy(TypeRef type, string? referencingContext = null)
     {
         // Optionality is irrelevant to this classification: `Option<T>` is `Copy` exactly when `T` is, so
         // the check is on the UNDERLYING type throughout. A bare `self`-field read of a Copy member
@@ -201,6 +226,6 @@ internal sealed class RustTypeMapper
         // via accessor methods, never as payload), so every enum value is `Copy`. Everything else
         // (`String`, collections, other value/entity types) classifies `false` here regardless of
         // optionality — no separate optional guard needed.
-        return _index.Classify(type.Name) == TypeKind.Enum;
+        return _index.Classify(type.Qualifier ?? referencingContext ?? _context, type.Name) == TypeKind.Enum;
     }
 }

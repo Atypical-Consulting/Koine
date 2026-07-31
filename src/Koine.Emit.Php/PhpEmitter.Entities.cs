@@ -87,9 +87,9 @@ public sealed partial class PhpEmitter
 
         foreach (Member m in fields)
         {
-            WritePropertyDoc(sb, m.Doc, typeMapper.DocType(m.Type), Indent);
+            WritePropertyDoc(sb, m.Doc, typeMapper.DocType(m.Type, contextName), Indent);
             var propName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            var typeName = typeMapper.Map(m.Type);
+            var typeName = typeMapper.Map(m.Type, contextName);
             sb.Append(Indent).Append("public ").Append(typeName).Append(" $").Append(propName).Append(";\n");
         }
 
@@ -102,9 +102,9 @@ public sealed partial class PhpEmitter
         foreach (Member m in derived)
         {
             sb.Append('\n');
-            WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, m.Type, m.Doc);
+            WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, m.Type, m.Doc, contextName);
             var methodName = PhpNaming.MethodName(m.Name);
-            var returnType = typeMapper.Map(m.Type);
+            var returnType = typeMapper.Map(m.Type, contextName);
             sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("return ")
@@ -177,7 +177,7 @@ public sealed partial class PhpEmitter
         var docParams = ordered
             .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
             .ToList();
-        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null, translator.Context);
 
         sb.Append(Indent).Append("public function __construct(\n");
 
@@ -194,7 +194,7 @@ public sealed partial class PhpEmitter
         {
             Member m = ordered[i];
             var paramName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            var typeName = typeMapper.Map(m.Type);
+            var typeName = typeMapper.Map(m.Type, translator.Context);
             sb.Append(Indent).Append(Indent).Append(typeName).Append(" $").Append(paramName);
 
             // Default value for constant-initializer fields. A Decimal default is folded first

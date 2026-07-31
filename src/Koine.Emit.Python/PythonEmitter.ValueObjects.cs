@@ -66,7 +66,7 @@ public sealed partial class PythonEmitter
         {
             WriteDoc(sb, m.Doc, Indent);
             var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
-            sb.Append(Indent).Append(field).Append(": ").Append(typeMapper.Map(m.Type));
+            sb.Append(Indent).Append(field).Append(": ").Append(typeMapper.Map(m.Type, translator.Context));
             if (DefaultExpr(m, translator, emit.Index) is { } def)
             {
                 sb.Append(" = ").Append(def);
@@ -91,7 +91,7 @@ public sealed partial class PythonEmitter
             sb.Append('\n');
             sb.Append(Indent).Append("@property\n");
             sb.Append(Indent).Append("def ").Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name)))
-              .Append("(self) -> ").Append(typeMapper.Map(m.Type)).Append(":\n");
+              .Append("(self) -> ").Append(typeMapper.Map(m.Type, translator.Context)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
               .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');

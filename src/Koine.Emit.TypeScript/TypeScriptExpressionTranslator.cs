@@ -343,7 +343,7 @@ internal sealed class TypeScriptExpressionTranslator
     /// </summary>
     private void WriteOptionalMap(Expr sourceExpr, TypeRef type, Action<StringBuilder> writeBody, StringBuilder sb, string varName = "__v")
     {
-        sb.Append("((").Append(varName).Append(": ").Append(_typeMapper.Map(type)).Append(") => (")
+        sb.Append("((").Append(varName).Append(": ").Append(_typeMapper.Map(type, _resolver.Context)).Append(") => (")
           .Append(varName).Append(" === undefined ? undefined : ");
         writeBody(sb);
         sb.Append("))(");
@@ -983,7 +983,7 @@ internal sealed class TypeScriptExpressionTranslator
             var rule = $"cannot sum an empty collection of {voName} (no zero value)";
             var bind = "__sum" + _sumCounter++;
             sb.Append('(').Append(target).Append(".map(").Append(RenderLambda(call))
-              .Append(") as readonly ").Append(_typeMapper.Map(selectorType)).Append("[]).length === 0\n")
+              .Append(") as readonly ").Append(_typeMapper.Map(selectorType, _resolver.Context)).Append("[]).length === 0\n")
               .Append("        ? (() => { throw new DomainInvariantViolationError('")
               .Append(voName).Append("', '").Append(rule.Replace("'", "\\'")).Append("'); })()\n")
               .Append("        : ").Append(target).Append(".map(").Append(RenderLambda(call))
@@ -1052,7 +1052,7 @@ internal sealed class TypeScriptExpressionTranslator
             var cmp = isMin ? "<= 0" : ">= 0";
             var bind = "__mm" + _sumCounter++;
             sb.Append('(').Append(target).Append(".map(").Append(RenderLambda(call))
-              .Append(") as readonly ").Append(_typeMapper.Map(selectorType)).Append("[]).length === 0\n")
+              .Append(") as readonly ").Append(_typeMapper.Map(selectorType, _resolver.Context)).Append("[]).length === 0\n")
               .Append("        ? (() => { throw new DomainInvariantViolationError('")
               .Append(voName).Append("', '").Append(rule.Replace("'", "\\'")).Append("'); })()\n")
               .Append("        : ").Append(target).Append(".map(").Append(RenderLambda(call))
@@ -1071,7 +1071,7 @@ internal sealed class TypeScriptExpressionTranslator
             var fn = isMin ? "Math.min" : "Math.max";
             var rule = $"cannot take {op} of an empty collection (no value)";
             var ownerName = selectorType?.Name ?? "number";
-            var elem = selectorType is null ? "number" : _typeMapper.Map(selectorType);
+            var elem = selectorType is null ? "number" : _typeMapper.Map(selectorType, _resolver.Context);
             var bind = "__mm" + _sumCounter++;
             sb.Append('(').Append(target).Append(".map(").Append(RenderLambda(call))
               .Append(") as readonly ").Append(elem).Append("[]).length === 0\n")

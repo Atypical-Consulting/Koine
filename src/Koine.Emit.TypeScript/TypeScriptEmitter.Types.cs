@@ -20,10 +20,11 @@ public sealed partial class TypeScriptEmitter
     private EmittedFile EmitValueObject(TsEmitContext emit, ValueObjectDecl vo, string ns, TypeScriptTypeMapper typeMapper)
     {
         var name = TypeScriptNaming.ToPascalCase(vo.Name);
+        var context = ContextOf(ns);
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorMembers = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
-        var translator = new TypeScriptExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
+        var translator = new TypeScriptExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         WriteDoc(sb, vo.Doc, "");
@@ -34,11 +35,11 @@ public sealed partial class TypeScriptEmitter
         {
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ")
-              .Append(typeMapper.Map(m.Type)).Append(";\n");
+              .Append(typeMapper.Map(m.Type, context)).Append(";\n");
         }
         sb.Append('\n');
 
-        WriteConstructor(sb, name, ctorMembers, vo.Invariants, translator, typeMapper);
+        WriteConstructor(sb, name, ctorMembers, vo.Invariants, translator, typeMapper, context);
 
         // Derived members as getters.
         foreach (Member m in derived)
@@ -46,7 +47,7 @@ public sealed partial class TypeScriptEmitter
             sb.Append('\n');
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append("get ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append("(): ")
-              .Append(typeMapper.Map(m.Type)).Append(" {\n");
+              .Append(typeMapper.Map(m.Type, context)).Append(" {\n");
             if (RefOnly)
             {
                 sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
@@ -114,11 +115,12 @@ public sealed partial class TypeScriptEmitter
 
     private void WriteConstructor(
         StringBuilder sb, string typeName, IReadOnlyList<Member> ctorMembers,
-        IReadOnlyList<Invariant> invariants, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper)
+        IReadOnlyList<Invariant> invariants, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper,
+        string? context)
     {
         var ordered = OrderCtorParams(ctorMembers).ToList();
         sb.Append(Indent).Append("constructor(");
-        sb.Append(string.Join(", ", ordered.Select(m => FormatParam(m, typeMapper, translator))));
+        sb.Append(string.Join(", ", ordered.Select(m => FormatParam(m, typeMapper, translator, context))));
         sb.Append(") {\n");
         sb.Append(Indent).Append(Indent).Append("super();\n");
 
@@ -180,10 +182,10 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append(Indent).Append("this.").Append(field).Append(" = ").Append(field).Append(";\n");
     }
 
-    private string FormatParam(Member m, TypeScriptTypeMapper typeMapper, TypeScriptExpressionTranslator translator)
+    private string FormatParam(Member m, TypeScriptTypeMapper typeMapper, TypeScriptExpressionTranslator translator, string? context)
     {
         var param = TypeScriptNaming.ToCamelCase(m.Name);
-        var type = typeMapper.Map(m.Type);
+        var type = typeMapper.Map(m.Type, context);
 
         // A defaulted member keeps its default; an enum default is a member-object value.
         if (m.Initializer is not null)
@@ -372,9 +374,10 @@ public sealed partial class TypeScriptEmitter
     {
         var name = TypeScriptNaming.ToPascalCase(entity.Name);
         var idName = TypeScriptNaming.ToPascalCase(entity.IdentityName);
+        var context = ContextOf(ns);
         var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
         var scopeMembers = entity.Members.Append(new Member("id", new TypeRef(entity.IdentityName), null)).ToList();
-        var translator = new TypeScriptExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
+        var translator = new TypeScriptExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var ctorMembers = entity.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = entity.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
@@ -390,7 +393,7 @@ public sealed partial class TypeScriptEmitter
         {
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append(mutated.Contains(m.Name) ? "" : "readonly ")
-              .Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ").Append(typeMapper.Map(m.Type)).Append(";\n");
+              .Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ").Append(typeMapper.Map(m.Type, context)).Append(";\n");
         }
         sb.Append('\n');
 
@@ -400,7 +403,7 @@ public sealed partial class TypeScriptEmitter
         sb.Append(Indent).Append(access).Append("constructor(id: ").Append(idName);
         foreach (Member m in ordered)
         {
-            sb.Append(", ").Append(FormatParam(m, typeMapper, translator));
+            sb.Append(", ").Append(FormatParam(m, typeMapper, translator, context));
         }
         sb.Append(") {\n");
         if (RefOnly)
@@ -444,7 +447,7 @@ public sealed partial class TypeScriptEmitter
             sb.Append('\n');
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append("get ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append("(): ")
-              .Append(typeMapper.Map(m.Type)).Append(" {\n");
+              .Append(typeMapper.Map(m.Type, context)).Append(" {\n");
             if (RefOnly)
             {
                 sb.Append(Indent).Append(Indent).Append(RefStubStatement).Append('\n');
@@ -483,13 +486,13 @@ public sealed partial class TypeScriptEmitter
         // Commands.
         foreach (CommandDecl cmd in entity.Commands)
         {
-            WriteCommand(sb, entity, cmd, translator, typeMapper, emit.Index);
+            WriteCommand(sb, entity, cmd, translator, typeMapper, emit.Index, context);
         }
 
         // Factories.
         foreach (FactoryDecl factory in entity.Factories)
         {
-            WriteFactory(sb, entity, name, idName, factory, ctorMembers, translator, typeMapper, emit.Index);
+            WriteFactory(sb, entity, name, idName, factory, ctorMembers, translator, typeMapper, emit.Index, context);
         }
 
         // Identity equality.
@@ -512,13 +515,13 @@ public sealed partial class TypeScriptEmitter
             Kind: KindForFolder(isRoot ? KindFolder.Root : KindFolder.Entities));
     }
 
-    private void WriteCommand(StringBuilder sb, EntityDecl entity, CommandDecl cmd, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper, ModelIndex index)
+    private void WriteCommand(StringBuilder sb, EntityDecl entity, CommandDecl cmd, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper, ModelIndex index, string? context)
     {
         var name = TypeScriptNaming.ToCamelCase(cmd.Name);
         var entityName = TypeScriptNaming.ToPascalCase(entity.Name);
         var paramList = string.Join(", ", cmd.Parameters.Select(p =>
-            $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type)}"));
-        var returnType = cmd.ReturnType is { } rt ? typeMapper.Map(rt) : "void";
+            $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type, context)}"));
+        var returnType = cmd.ReturnType is { } rt ? typeMapper.Map(rt, context) : "void";
 
         sb.Append('\n');
         WriteDoc(sb, cmd.Doc, Indent);
@@ -599,11 +602,12 @@ public sealed partial class TypeScriptEmitter
     }
 
     private void WriteFactory(StringBuilder sb, EntityDecl entity, string name, string idName, FactoryDecl factory,
-        IReadOnlyList<Member> ctorMembers, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper, ModelIndex index)
+        IReadOnlyList<Member> ctorMembers, TypeScriptExpressionTranslator translator, TypeScriptTypeMapper typeMapper, ModelIndex index,
+        string? context)
     {
         var methodName = TypeScriptNaming.ToCamelCase(factory.Name);
         var paramList = string.Join(", ", factory.Parameters.Select(p =>
-            $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type)}"));
+            $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type, context)}"));
 
         sb.Append('\n');
         WriteDoc(sb, factory.Doc, Indent);
@@ -787,6 +791,7 @@ public sealed partial class TypeScriptEmitter
     private EmittedFile EmitEvent(TsEmitContext emit, EventDecl ev, string ns, TypeScriptTypeMapper typeMapper)
     {
         var name = TypeScriptNaming.ToPascalCase(ev.Name);
+        var context = ContextOf(ns);
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorMembers = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
@@ -798,13 +803,13 @@ public sealed partial class TypeScriptEmitter
         {
             WriteDoc(sb, m.Doc, Indent);
             sb.Append(Indent).Append("readonly ").Append(TypeScriptNaming.ToCamelCase(m.Name)).Append(FieldBang).Append(": ")
-              .Append(typeMapper.Map(m.Type)).Append(";\n");
+              .Append(typeMapper.Map(m.Type, context)).Append(";\n");
         }
         sb.Append(Indent).Append("readonly occurredOn").Append(FieldBang).Append(": Instant;\n\n");
 
         var ordered = OrderCtorParams(ctorMembers).ToList();
         sb.Append(Indent).Append("constructor(");
-        sb.Append(string.Join(", ", ordered.Select(m => $"{TypeScriptNaming.ToCamelCase(m.Name)}: {typeMapper.Map(m.Type)}")));
+        sb.Append(string.Join(", ", ordered.Select(m => $"{TypeScriptNaming.ToCamelCase(m.Name)}: {typeMapper.Map(m.Type, context)}")));
         sb.Append(ordered.Count > 0 ? ", " : "").Append("occurredOn: Instant = Instant.now()) {\n");
         if (RefOnly)
         {

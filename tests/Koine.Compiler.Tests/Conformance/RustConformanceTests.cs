@@ -4073,6 +4073,112 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1638: <c>RustTypeMapper.IsCopy</c>/<c>IsEnum</c>/<c>IsQualifiable</c> already carry an
+    /// ambient <c>_context</c> field (threaded in from every construction site) but ignored it, calling
+    /// the flat, context-BLIND <c>ModelIndex.Classify(string)</c> overload instead of the context-aware
+    /// <c>Classify(context, string)</c> one. <c>Billing.Status</c> (a plain <c>String</c>-backed value
+    /// object — never <c>Copy</c>) is declared FIRST; <c>Shipping.Status</c> (a data-free enum — always
+    /// <c>Copy</c>) is declared SECOND, so it is the one left standing in <c>ModelIndex</c>'s
+    /// last-write-wins flat index. Emitting <c>Billing.Invoice.status</c>'s accessor with a
+    /// <c>RustTypeMapper</c> constructed for context <c>"Billing"</c> must classify <c>Status</c> against
+    /// <c>Billing</c>'s OWN local declaration (a value object) — not Shipping's, which the blind
+    /// <c>Classify</c> call resolves to instead.
+    /// <para>
+    /// The bug is observable, not cosmetic: <see cref="RustEmitter"/>'s <c>WriteAccessor</c> takes
+    /// <c>IsCopy</c> at face value and, when it wrongly says "yes", emits
+    /// <c>pub fn status(&amp;self) -&gt; Status { self.status }</c> — moving a non-<c>Copy</c>,
+    /// <c>String</c>-backed value object out of <c>&amp;self</c>, a real <c>rustc</c> E0507 ("cannot move
+    /// out of ... which is behind a shared reference"). The correct, context-aware classification instead
+    /// takes the borrowing branch: <c>pub fn status(&amp;self) -&gt; &amp;Status { &amp;self.status }</c>.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Same_named_type_of_a_different_kind_in_a_later_context_does_not_corrupt_an_earlier_context_s_accessor()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+              value Invoice {
+                status: Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Pending
+                Delivered
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1638 code-review finding: a read model's DIRECT field (<c>EmitReadModel</c>,
+    /// <c>RustEmitter.Cqrs.cs</c>) copies a like-named member straight off the SOURCE type — which, per
+    /// R12.3, may live in a DIFFERENT bounded context than the read model itself (here the read model is
+    /// declared in <c>Billing</c>, projecting <c>Ordering.Order</c> via an explicit import). The very first
+    /// draft of this issue's fix passed the read model's OWN context (<c>Billing</c>) as the classification
+    /// fallback for the source field's bare (unqualified) type — but that field is declared ON <c>Order</c>,
+    /// i.e. WITHIN <c>Ordering</c>'s own model, so its correct resolution frame is <c>Ordering</c>, not the
+    /// projecting read model's context. <c>Billing</c> independently declaring its own, differently-kinded
+    /// <c>Status</c> (a value object, vs. <c>Ordering.Status</c>'s data-free enum) makes the misclassification
+    /// observable: the read model's <c>status</c> field would be typed/qualified as <c>Billing</c>'s own
+    /// <c>Status</c> struct (a same-module bare name, since the read model's own file IS Billing's module)
+    /// while the accessor assigns an <c>Ordering::Status</c> value — a real <c>rustc</c> E0308 ("mismatched
+    /// types"). The fix threads the SOURCE type's own resolved owning context (via
+    /// <c>ModelIndex.ResolveOwner</c>) as <c>RustTypeMapper</c>'s <c>referencingContext</c> override for
+    /// direct fields only — a derived field's own declared type stays resolved against the read model's own
+    /// context, since that type IS declared there.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_from_a_foreign_context_resolves_against_the_source_s_own_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Order }
+
+              readmodel OrderSummary from Order {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Pending
+                Shipped
+                Delivered
+              }
+
+              entity Order identified by OrderId {
+                status: Status = Pending
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1533 edge case: an OPTIONAL-declared <c>String?</c> derived member whose body is a smart
     /// enum's <c>String</c> associated-data accessor must be owned (<c>.to_string()</c>) BEFORE
     /// <c>SomeWrapIfNeeded</c> wraps it in <c>Some(...)</c> — mirrors #1332's ordering for the sibling
