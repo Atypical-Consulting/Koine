@@ -594,9 +594,9 @@ internal sealed class RustExpressionTranslator
             TypeRef? thenType = _resolver.Infer(cond.Then, scope);
             TypeRef? elseType = _resolver.Infer(cond.Else, scope);
             sb.Append("if ").Append(StripOuterParens(condBuf.ToString())).Append(" { ");
-            WriteReconciledBranch(cond.Then, thenType, cond.Else, elseType, sb);
+            WriteReconciledBranch(cond.Then, thenType, elseType, sb);
             sb.Append(" } else { ");
-            WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
+            WriteReconciledBranch(cond.Else, elseType, thenType, sb);
             sb.Append(" }");
             return;
         }
@@ -654,7 +654,7 @@ internal sealed class RustExpressionTranslator
     /// (#1345). The DECISION — which of the three dimensions apply — is the shared, cross-target
     /// <see cref="BranchReconciliation.Classify"/> (#1368); only the Rust RENDERING below is local.
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
+    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, TypeRef? siblingType, StringBuilder sb)
     {
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 

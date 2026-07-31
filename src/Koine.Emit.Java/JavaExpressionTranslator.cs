@@ -233,9 +233,9 @@ internal sealed class JavaExpressionTranslator
                 sb.Append('(');
                 WriteTopLevel(cond.Condition, sb);
                 sb.Append(" ? ");
-                WriteReconciledBranch(cond.Then, thenType, cond.Else, elseType, sb);
+                WriteReconciledBranch(cond.Then, thenType, elseType, sb);
                 sb.Append(" : ");
-                WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
+                WriteReconciledBranch(cond.Else, elseType, thenType, sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
@@ -295,7 +295,7 @@ internal sealed class JavaExpressionTranslator
     /// once by the caller and passed in rather than re-inferred here — <c>Then</c>/<c>Else</c> would
     /// otherwise each be walked twice per conditional (#1369).
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
+    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, TypeRef? siblingType, StringBuilder sb)
     {
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 

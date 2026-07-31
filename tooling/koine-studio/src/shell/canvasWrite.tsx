@@ -6,7 +6,7 @@
 // inspector controller / dialogs through the injected `deps`. Pure structural lift — every closure keeps
 // its exact logic.
 import { render } from 'preact';
-import { appStore } from '@/store/index';
+import type { AppStore } from '@/store/index';
 import { openInspectorSheet } from '@/shell/inspectorSheet';
 import { createNarrowCrossHandler, isNarrowViewport } from '@/shared/breakpoint';
 import { domById } from '@/shared/domById';
@@ -116,6 +116,8 @@ const ADD_DEFAULT_NAME: Record<AddNodeKind, string> = {
 };
 
 export interface CanvasWriteDeps {
+  /** The app store, injected (issue #1351) — the composition root passes the singleton. */
+  store: AppStore;
   editor: { getDoc(): string; setDoc(doc: string): void };
   workspace: Pick<WorkspaceController, 'activeUri' | 'applyWorkspaceEdit'>;
   lsp: Pick<KoineLsp, 'applyModelEdit' | 'rename'>;
@@ -327,12 +329,12 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
   }
 
   async function applyDiagramAddType(detail?: { kind: AddNodeKind }): Promise<void> {
-    let scope = appStore.getState().activeContext;
+    let scope = deps.store.getState().activeContext;
     if (isAllContexts(scope)) {
       // "All contexts" has no unambiguous home — except when the model has exactly one context, which is
       // then the only possible target (the palette enables its buttons to match). 2+ contexts still need
       // a deliberate pick.
-      const all = appStore.getState().contexts;
+      const all = deps.store.getState().contexts;
       if (all.length !== 1) {
         setStatus('Pick a bounded context (top-left) before adding a type', 'error');
         return;
@@ -378,7 +380,7 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
   async function selectFromDiagram(detail: DiagramNodeNavigateDetail): Promise<void> {
     const index = await controller.ensureModelIndex().catch(() => null);
     const qualifiedName = index ? resolveInspectableQn(index, detail.qualifiedName) : detail.qualifiedName;
-    if (qualifiedName) appStore.getState().setSelection({ qualifiedName, context: qualifiedName.split('.')[0] });
+    if (qualifiedName) deps.store.getState().setSelection({ qualifiedName, context: qualifiedName.split('.')[0] });
     await navigateToDiagramNode(detail);
   }
 
@@ -450,7 +452,7 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
     // zone (including 'props') so the tablist's aria-selected + roving tabIndex reflect the active tab. For
     // 'props' we additionally raise the sheet OVER the current zone; the data-mobile-zone MIRROR keeps the
     // underlying real zone visible for 'props'.
-    appStore.getState().setMobileZone(zone);
+    deps.store.getState().setMobileZone(zone);
     if (zone === 'props') openInspectorSheet('half');
     else if (zone === 'diagram') {
       controller.selectCenter('visual');
@@ -459,22 +461,22 @@ export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {
       requestAnimationFrame(() => document.dispatchEvent(new Event(DIAGRAM_REFIT_EVENT)));
     } else if (zone === 'code') controller.selectCenter('technical');
   }
-  render(<MobileZoneBar store={appStore} onSelect={selectMobileZone} />, domById('mobile-zone-bar-host'));
+  render(<MobileZoneBar store={deps.store} onSelect={selectMobileZone} />, domById('mobile-zone-bar-host'));
   // Mirror the active zone onto #split[data-mobile-zone]. 'props' is the exception: the inspector is a
   // bottom-sheet OVERLAY, so selecting it must KEEP the underlying real zone visible — we only mirror REAL
   // zones, leaving the attribute on the last real zone beneath the sheet.
   function mirrorMobileZone(zone: MobileZone): void {
     if (zone !== 'props') splitEl.dataset.mobileZone = zone;
   }
-  mirrorMobileZone(appStore.getState().mobileZone);
+  mirrorMobileZone(deps.store.getState().mobileZone);
   // Mirror only when mobileZone actually changes — the listener fires on every store write, so guard on
   // prevState to avoid rewriting the attribute on unrelated updates.
-  const unsubMobileZone = appStore.subscribe((s, prev) => {
+  const unsubMobileZone = deps.store.subscribe((s, prev) => {
     if (s.mobileZone !== prev.mobileZone) mirrorMobileZone(s.mobileZone);
   });
   // On a narrow (phone) first paint, land on the default mobile zone's surface so the bottom bar's active
   // tab and the visible #center surface agree from the start.
-  if (isNarrowViewport()) selectMobileZone(appStore.getState().mobileZone);
+  if (isNarrowViewport()) selectMobileZone(deps.store.getState().mobileZone);
 
   return {
     addReviewComment,

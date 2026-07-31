@@ -109,7 +109,7 @@ same walk-and-regex characterization-guard shape as the `Platform`-port seam gua
 one pins an exact allowlist rather than requiring zero offenders. Growing or shrinking that allowlist
 is a deliberate, reviewed edit to the test, not an incidental one.
 
-Beyond the composition root and the `useAppStore` binding, the allowlist currently has **12 entries**
+Beyond the composition root and the `useAppStore` binding, the allowlist currently has **8 entries**
 (`storeInjection.convention.test.ts`'s `ALLOWLIST` array is the source of truth — read it there rather
 than trusting this paragraph to stay in sync). They fall into three groups:
 
@@ -119,13 +119,20 @@ than trusting this paragraph to stay in sync). They fall into three groups:
   `src/shell/explorer.tsx`, `src/shell/ExplorerPanel.tsx` take the store as a parameter/prop and fall
   back to the singleton (e.g. `props.store ?? appStore`) only when the caller doesn't supply one — they
   already support injection, so converting them further is lower priority than a hardcoded read.
-- **Un-converted holdouts** — hardcoded ambient reads (`appStore.getState()`/`.subscribe()`) with no
-  injection point at all, the same shape `src/shell/editorSession.tsx` was in before this issue
-  converted it: `src/settings/settingsPage.tsx`, `src/settings/theme.ts`, `src/shell/lifecycleBoot.ts`,
-  `src/shell/canvasWrite.tsx`, `src/shell/layout.ts`, `src/diagrams/diagramContract.ts`. Converting
-  these six is **opportunistic** future work — alongside the `ide.tsx` decomposition and issue #480 —
-  not a big-bang sweep done as part of this issue; the lasting value delivered here is the guard test
-  plus finishing the one holdout (`editorSession.tsx`) this issue was actually scoped to fix.
+- **Deliberate exceptions**: `src/settings/theme.ts`, `src/diagrams/diagramContract.ts` are flat
+  modules of directly-exported getter/setter functions with no factory/`deps` seam, called from a
+  scattered fan-out across independent composition roots (`main.ts`'s pre-workspace Home route AND
+  `ide.tsx`'s controller graph), a rendering engine, and settings/command-palette call sites (issue
+  #1351 re-verified this at implementation time). Forcing every caller to construct/thread a controller
+  would be disproportionate churn for a handful of getters/setters with no meaningful behavior to
+  isolate in tests, so these two stay on the allowlist as a reasoned exception, not deferred debt.
+
+Issue #760 originally converted `src/shell/editorSession.tsx`, the one holdout it was scoped against,
+and documented six more genuine holdouts discovered by re-grepping at implementation time; issue #1351
+(this issue's opportunistic follow-up tail) converted the four that were already factory/`deps`-shaped
+— `src/settings/settingsPage.tsx`, `src/shell/lifecycleBoot.ts`, `src/shell/canvasWrite.tsx`,
+`src/shell/layout.ts` — following the exact `EditorSessionDeps` pattern, and left `theme.ts`/
+`diagramContract.ts` as the deliberate exception above.
 
 Separately, dozens of files import *types* (`AppState`, `AppStore`) or the `createAppStore` factory
 from `@/store`/`@/store/index` without touching the singleton — 32 non-test files, as counted at the
