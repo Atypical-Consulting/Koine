@@ -4034,6 +4034,45 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1560: <c>ModelIndex.Classify</c> is context-blind — its flat, last-write-wins
+    /// <c>_byName</c> index can resolve a same-named enum declared in a DIFFERENT context (R13.2
+    /// legally allows this), so a smart-enum associated-data read can misclassify and emit the wrong
+    /// owned-vs-borrowed shape for <c>Billing.Status</c> depending on registration order relative to
+    /// <c>Shipping.Status</c>.
+    /// </summary>
+    [Fact]
+    public void Same_named_enum_across_two_contexts_resolves_the_correct_context_for_a_derived_member()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status(label: String) {
+                Open("Open")
+                Closed("Closed")
+              }
+              value Invoice {
+                status: Status
+                statusLabel: String = status.label
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Pending
+                Delivered
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1533 edge case: an OPTIONAL-declared <c>String?</c> derived member whose body is a smart
     /// enum's <c>String</c> associated-data accessor must be owned (<c>.to_string()</c>) BEFORE
     /// <c>SomeWrapIfNeeded</c> wraps it in <c>Some(...)</c> — mirrors #1332's ordering for the sibling
