@@ -5,8 +5,9 @@
    tofu. Vendored as a static asset rather than an npm package — no `@fontsource`-style package
    for the Nerd Fonts symbols-only build exists (checked npm at implementation time). Source:
    https://github.com/ryanoasis/nerd-fonts v3.4.0, NerdFontsSymbolsOnly release, SymbolsNerdFontMono
-   variant — SIL Open Font License 1.1 (see ../../assets/fonts/SymbolsNerdFontMono-LICENSE.txt),
-   which permits bundling and redistribution. */
+   variant — patched fonts are SIL Open Font License 1.1 (the project's combined LICENSE, vendored
+   verbatim at ../../assets/fonts/SymbolsNerdFontMono-LICENSE.txt, covers both that and the MIT
+   license for the project's own scripts), which permits bundling and redistribution. */
 @font-face {
   font-family: 'Symbols Nerd Font Mono';
   src: url('../../assets/fonts/SymbolsNerdFontMono-Regular.woff2') format('woff2');
