@@ -156,7 +156,7 @@ internal sealed class RustTypeMapper
     /// is worth qualifying). Branded ID newtypes are excluded: a foreign id is re-materialized locally
     /// by <c>OrderedUnownedIds</c>, never module-qualified.
     /// </summary>
-    private bool IsQualifiable(string koineName) => _index.Classify(koineName) is
+    private bool IsQualifiable(string koineName) => _index.Classify(_context, koineName) is
         TypeKind.Value or TypeKind.Entity or TypeKind.Aggregate or TypeKind.Enum
         or TypeKind.Event or TypeKind.IntegrationEvent or TypeKind.ReadModel or TypeKind.Query;
 
@@ -176,7 +176,7 @@ internal sealed class RustTypeMapper
     public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
 
     /// <summary>True when the member's type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier ?? _context, type.Name) == TypeKind.Enum;
 
     /// <summary>
     /// True when a value of this type is <c>Copy</c> in the emitted Rust (so accessors and arguments
@@ -201,6 +201,6 @@ internal sealed class RustTypeMapper
         // via accessor methods, never as payload), so every enum value is `Copy`. Everything else
         // (`String`, collections, other value/entity types) classifies `false` here regardless of
         // optionality — no separate optional guard needed.
-        return _index.Classify(type.Name) == TypeKind.Enum;
+        return _index.Classify(type.Qualifier ?? _context, type.Name) == TypeKind.Enum;
     }
 }

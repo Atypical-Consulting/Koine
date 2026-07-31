@@ -4073,6 +4073,56 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1638: <c>RustTypeMapper.IsCopy</c>/<c>IsEnum</c>/<c>IsQualifiable</c> already carry an
+    /// ambient <c>_context</c> field (threaded in from every construction site) but ignored it, calling
+    /// the flat, context-BLIND <c>ModelIndex.Classify(string)</c> overload instead of the context-aware
+    /// <c>Classify(context, string)</c> one. <c>Billing.Status</c> (a plain <c>String</c>-backed value
+    /// object — never <c>Copy</c>) is declared FIRST; <c>Shipping.Status</c> (a data-free enum — always
+    /// <c>Copy</c>) is declared SECOND, so it is the one left standing in <c>ModelIndex</c>'s
+    /// last-write-wins flat index. Emitting <c>Billing.Invoice.status</c>'s accessor with a
+    /// <c>RustTypeMapper</c> constructed for context <c>"Billing"</c> must classify <c>Status</c> against
+    /// <c>Billing</c>'s OWN local declaration (a value object) — not Shipping's, which the blind
+    /// <c>Classify</c> call resolves to instead.
+    /// <para>
+    /// The bug is observable, not cosmetic: <see cref="RustEmitter"/>'s <c>WriteAccessor</c> takes
+    /// <c>IsCopy</c> at face value and, when it wrongly says "yes", emits
+    /// <c>pub fn status(&amp;self) -&gt; Status { self.status }</c> — moving a non-<c>Copy</c>,
+    /// <c>String</c>-backed value object out of <c>&amp;self</c>, a real <c>rustc</c> E0507 ("cannot move
+    /// out of ... which is behind a shared reference"). The correct, context-aware classification instead
+    /// takes the borrowing branch: <c>pub fn status(&amp;self) -&gt; &amp;Status { &amp;self.status }</c>.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Same_named_type_of_a_different_kind_in_a_later_context_does_not_corrupt_an_earlier_context_s_accessor()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+              value Invoice {
+                status: Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Pending
+                Delivered
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1533 edge case: an OPTIONAL-declared <c>String?</c> derived member whose body is a smart
     /// enum's <c>String</c> associated-data accessor must be owned (<c>.to_string()</c>) BEFORE
     /// <c>SomeWrapIfNeeded</c> wraps it in <c>Some(...)</c> — mirrors #1332's ordering for the sibling
