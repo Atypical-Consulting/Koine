@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Koine.Cli;
 using Koine.Cli.Commands;
 using Koine.Compiler.Emit;
@@ -667,6 +669,150 @@ public class R18CSharpApplicationTests
         var response = await harness.Client.GetAsync("/does-not-exist", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #1591 — Task 3/4: real HTTP round-trips over the emitted
+    // Sales api layer, wiring the Task 1 fake into the Task 2 harness via
+    // the emitted AddSalesApplication()/MapSalesEndpoints() extensions.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="Fixture"/> minus its <c>service</c>/<c>readmodel</c>/<c>query</c> blocks: only the
+    /// <c>Order</c> aggregate, its repository, and the <c>place</c> command / <c>open</c> factory. Used
+    /// for the HTTP round-trip facts below instead of <see cref="Fixture"/> itself because the emitted
+    /// <c>GET /order-by-id</c> query endpoint's <c>[AsParameters] OrderById query</c> binding crashes
+    /// ASP.NET Core's endpoint-metadata inference at the FIRST request to ANY route on the host (not
+    /// just that one) — <c>OrderId</c> has no <c>TryParse</c>, so a GET-illegal inferred-body binding is
+    /// the only source Minimal APIs can fall back to for a non-primitive, non-route, non-header
+    /// property. That is a real emitter gap (filed as #1649), out of scope for this test-only harness;
+    /// this fixture sidesteps it so the command/factory endpoints can still be runtime-verified for real.
+    /// </summary>
+    internal const string CommandsOnlyFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Shipped }
+
+          value Money {
+            amount:   Decimal
+            currency: String
+            invariant amount >= 0   "amount cannot be negative"
+          }
+
+          aggregate Order root Order {
+            repository {
+              operations: getById, add, update
+            }
+
+            event OrderPlaced {
+              orderId: OrderId
+              total:   Money
+            }
+
+            entity Order identified by OrderId {
+              customer: CustomerId
+              total:    Money
+              status:   OrderStatus = Draft
+
+              invariant total.amount >= 0   "order total cannot be negative"
+
+              states status {
+                Draft  -> Placed, Shipped
+                Placed -> Shipped
+                Shipped
+              }
+
+              command place {
+                requires status == Draft   "order must be a draft to place"
+                status -> Placed
+                emit OrderPlaced(orderId: id, total: total)
+              }
+
+              create open(customer: CustomerId, total: Money) {
+                requires total.amount >= 0   "an order total cannot be negative"
+                emit OrderPlaced(orderId: id, total: total)
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Boots <see cref="TestSupport.RunApi"/> over <see cref="CommandsOnlyFixture"/> emitted with
+    /// <paramref name="options"/>, wiring the emitted <c>AddSalesApplication()</c> DI extension, the
+    /// Task 1 <c>FakeOrderRepository</c>/<c>FakeUnitOfWork</c> double (registered as the sole
+    /// <c>IUnitOfWork</c>), and the emitted <c>MapSalesEndpoints()</c> — a real, in-process ASP.NET
+    /// Core host for the Sales context's endpoints.
+    /// </summary>
+    private static TestSupport.ApiHostHarness RunSalesApi(CSharpEmitterOptions options) =>
+        TestSupport.RunApi(
+            Emit(options, CommandsOnlyFixture)
+                .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source)),
+            SalesApiHostDriver);
+
+    private const string SalesApiHostDriver = """
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Hosting;
+        using Microsoft.AspNetCore.TestHost;
+        using Microsoft.Extensions.DependencyInjection;
+        using Microsoft.Extensions.Hosting;
+
+        namespace Sales;
+
+        public static class ApiHostDriver
+        {
+            public static WebApplication Build()
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.WebHost.UseTestServer();
+                builder.Services.AddSalesApplication();
+
+                var repository = new FakeOrderRepository();
+                builder.Services.AddSingleton<IUnitOfWork>(new FakeUnitOfWork(repository));
+
+                var app = builder.Build();
+                app.MapSalesEndpoints();
+                app.Start();
+                return app;
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task Api_layer_factory_endpoint_returns_a_real_200_with_the_created_order()
+    {
+        using var harness = RunSalesApi(ApiOn);
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 42.50m, currency = "USD" } },
+            TestContext.Current.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        body.ShouldContain("42.5");
+        body.ShouldContain("USD");
+    }
+
+    [Fact]
+    public async Task Api_layer_command_endpoint_returns_a_real_200()
+    {
+        using var harness = RunSalesApi(ApiOn);
+
+        var openResponse = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 10m, currency = "EUR" } },
+            TestContext.Current.CancellationToken);
+        var opened = await openResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        openResponse.StatusCode.ShouldBe(HttpStatusCode.OK, opened);
+        var orderId = JsonDocument.Parse(opened).RootElement.GetProperty("id").GetProperty("value").GetGuid();
+
+        var placeResponse = await harness.Client.PostAsJsonAsync(
+            "/order/place",
+            new { id = new { value = orderId } },
+            TestContext.Current.CancellationToken);
+
+        var placed = await placeResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        placeResponse.StatusCode.ShouldBe(HttpStatusCode.OK, placed);
     }
 
     [Fact]
