@@ -151,14 +151,18 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
-    // retired across the arc: #991 (domain navigator) + #992 (Properties/docs panels); file also decomposed by #985
-    // (the sub-modules it's being split into — src/shell/inspector/** — inherit the SAME exemption while
-    // they still carry the moved-verbatim imperative DOM building; each shrinks/drops out as it converts).
+    // src/shell/inspectorController.tsx itself was fully converted to JSX by #992 (Properties/docs
+    // panels) and no longer has an innerHTML/insertAdjacentHTML site, so it's dropped from this glob
+    // (#1386). What remains — src/shell/inspector/**, the #985 decomposition's sub-modules — is exempt
+    // for an unrelated, still-open reason: contextMapPanel.tsx (maxGraph-rendered context-map tooltips
+    // and table HTML) and surfaceLoaders.tsx (imperative status/result markup), plus the shared
+    // docMessage() helper in shared.ts they both call, still build DOM imperatively; each shrinks/drops
+    // out of this list as it converts.
     //
-    // These six inspector modules were already migrated onto createLifecycleGuard() (#1352), so the
-    // disposed/Seq selectors must still apply here even while the (unrelated, still-open) innerHTML
-    // exemption stands — hence excluding only the innerHTML pair rather than turning the whole rule off.
-    files: ['src/shell/inspectorController.tsx', 'src/shell/inspector/**'],
+    // These modules were already migrated onto createLifecycleGuard() (#1352), so the disposed/Seq
+    // selectors must still apply here even while the innerHTML exemption stands — hence excluding only
+    // the innerHTML pair rather than turning the whole rule off.
+    files: ['src/shell/inspector/**'],
     rules: {
       'no-restricted-syntax': ['error', ...selectorsExcept(INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR)],
     },
