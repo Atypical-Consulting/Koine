@@ -671,6 +671,49 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #1604: a bare postfix <c>when</c> guard (<c>GuardExpr</c>, not the <c>if/then/else</c>
+    /// <c>ConditionalExpr</c> form #1597 exercises above) must narrow the same way — before the fix,
+    /// <c>TypeScriptExpressionTranslator</c>'s <c>GuardExpr</c> case rendered only the body, dropping
+    /// the guard condition entirely, so the emitted getter kept the field's full <c>T | undefined</c>
+    /// type with no narrowing check at all: a real <c>tsc --strict</c> TS2532 on ANY operator over the
+    /// guard-narrowed optional operand, not specific to division.
+    /// </summary>
+    [Fact]
+    public void Postfix_when_guarded_optional_int_division_narrows_and_truncates_toward_zero_at_runtime()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                qty:  Int?
+                half: Int? = qty / 2 when qty.isPresent
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(
+            "Postfix when-guarded optional Int arithmetic should type-check under --strict:\n" + string.Join("\n", check.Errors));
+
+        const string driver = """
+            import { Order } from './Shop/value-objects/Order.js';
+
+            const present = new Order(7).half;
+            const absent = new Order(undefined).half;
+            console.log(present, String(absent));
+            """;
+
+        TestSupport.NodeRun run = TestSupport.RunTypeScript(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoToolchainNotice);
+
+        run.Ok.ShouldBeTrue("Postfix when-guarded optional Int/Int derived-member division should evaluate under node:\n" + string.Join("\n", run.Errors));
+        run.Stdout.Trim().ShouldBe("3 undefined");
+    }
+
+    /// <summary>
     /// Issue #1537 acceptance: Decimal arithmetic against a non-Decimal Int operand — an Int LITERAL,
     /// an Int MEMBER, on either side of the operator, across all four of <c>+ - * /</c>, and a guarded
     /// OPTIONAL Int member — must all widen to <c>Decimal</c> at the call site and type-check under
