@@ -55,7 +55,7 @@ public sealed partial class TypeScriptEmitter
             else
             {
                 sb.Append(Indent).Append(Indent).Append("return ")
-                  .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append(";\n");
+                  .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, context))).Append(";\n");
             }
 
             sb.Append(Indent).Append("}\n");
@@ -66,7 +66,7 @@ public sealed partial class TypeScriptEmitter
         // mirroring the C# emitter's demand-driven operator generation.
         if (vo.IsQuantity)
         {
-            WriteQuantityOps(sb, name, ctorMembers, emit.Index);
+            WriteQuantityOps(sb, name, ctorMembers, emit.Index, context);
         }
         else
         {
@@ -307,10 +307,10 @@ public sealed partial class TypeScriptEmitter
     }
 
     /// <summary>A quantity's unit-checked <c>add</c>/<c>subtract</c> and scalar <c>multiply</c>/<c>divide</c>.</summary>
-    private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers, ModelIndex index)
+    private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers, ModelIndex index, string? context)
     {
         Member? amount = ctorMembers.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
-        Member? unit = ctorMembers.FirstOrDefault(m => index.Classify(m.Type.Qualifier, m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
+        Member? unit = ctorMembers.FirstOrDefault(m => index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
         if (amount is null || unit is null)
         {
             return;
@@ -454,7 +454,7 @@ public sealed partial class TypeScriptEmitter
             }
             else
             {
-                sb.Append(Indent).Append(Indent).Append("return ").Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append(";\n");
+                sb.Append(Indent).Append(Indent).Append("return ").Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, context))).Append(";\n");
             }
 
             sb.Append(Indent).Append("}\n");
@@ -551,7 +551,7 @@ public sealed partial class TypeScriptEmitter
 
         foreach (Transition tr in transitions)
         {
-            var expectedEnum = entity.Members.FirstOrDefault(m => m.Name == tr.Field) is { } fm && index.Classify(fm.Type.Qualifier, fm.Type.Name) == TypeKind.Enum
+            var expectedEnum = entity.Members.FirstOrDefault(m => m.Name == tr.Field) is { } fm && index.Classify(fm.Type.Qualifier ?? context, fm.Type.Name) == TypeKind.Enum
                 ? fm.Type.Name : null;
             sb.Append(Indent).Append(Indent).Append("this.").Append(TypeScriptNaming.ToCamelCase(tr.Field))
               .Append(" = ").Append(translator.Translate(tr.Value, expectedEnum)).Append(";\n");
@@ -567,7 +567,7 @@ public sealed partial class TypeScriptEmitter
         // Domain events are recorded while parameters are still in scope (their payloads may
         // reference parameters), but rendered AFTER the post-mutation invariant re-check so an
         // invalid state throws before any event is recorded — mirroring the C# emitter's order.
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.", resultExpr)).ToList();
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.", context, resultExpr)).ToList();
         bool hoistResult = emitStatements.Any(s => s.Hoisted);
 
         foreach (Param p in cmd.Parameters)
@@ -663,7 +663,7 @@ public sealed partial class TypeScriptEmitter
         {
             if (inits.TryGetValue(m.Name, out Expr? value))
             {
-                args.Add(translator.Translate(value, EnumExpected(m, index)));
+                args.Add(translator.Translate(value, EnumExpected(m, index, context)));
             }
             else if (factoryParams.Contains(m.Name))
             {
@@ -687,7 +687,7 @@ public sealed partial class TypeScriptEmitter
         // those locals leave scope) record onto the freshly-constructed instance.
         var emits = factory.Body.OfType<EmitClause>().ToList();
         // Factories have no `result` clause, so there is nothing to hoist — take the text only.
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.").Text).ToList();
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.", context).Text).ToList();
 
         translator.PopLocal("id");
         foreach (Param p in factory.Parameters)
@@ -842,8 +842,8 @@ public sealed partial class TypeScriptEmitter
             entity.Commands.SelectMany(c => c.Body).OfType<Transition>().Select(t => t.Field),
             StringComparer.Ordinal);
 
-    private static string? EnumExpected(Member m, ModelIndex index) =>
-        index.Classify(m.Type.Qualifier, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+    private static string? EnumExpected(Member m, ModelIndex index, string? context) =>
+        index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 
     /// <summary>True when any command or factory of the entity records a domain event.</summary>
     private static bool EmitsEvents(EntityDecl entity) =>
@@ -861,7 +861,7 @@ public sealed partial class TypeScriptEmitter
     /// </summary>
     private (string Text, bool Hoisted) BuildEmitStatement(
         EmitClause emit, TypeScriptExpressionTranslator translator, ModelIndex index,
-        string targetPrefix, string? hoistedResultExpr = null)
+        string targetPrefix, string? context, string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
@@ -880,7 +880,7 @@ public sealed partial class TypeScriptEmitter
                 return "undefined as never"; // validator guarantees presence; defensive
             }
 
-            var rendered = translator.Translate(value, EnumExpected(f, index));
+            var rendered = translator.Translate(value, EnumExpected(f, index, context));
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
             if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
