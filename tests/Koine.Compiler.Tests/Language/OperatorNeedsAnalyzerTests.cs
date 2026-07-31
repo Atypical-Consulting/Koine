@@ -225,6 +225,73 @@ public class OperatorNeedsAnalyzerTests
     }
 
     /// <summary>
+    /// Regression for #1642 (closing out #1633): <c>ComputeOperatorNeeds</c> used to build a single
+    /// context-blind <see cref="TypeResolver"/> (<c>new TypeResolver(index)</c>) shared across every
+    /// scan site, so a value object's own scalar-multiply/divide/binary-arithmetic needs could be
+    /// silently dropped when another context declares a same-named type of a different kind (R13.2
+    /// lets that happen legally). Here <c>Shop</c>'s own <c>value Status</c> collides with a same-named
+    /// <c>enum Status</c> declared in a LATER context (<c>Billing</c>) — since <see cref="ModelIndex"/>'s
+    /// context-blind by-name registry is last-write-wins, <c>Billing</c>'s enum overwrites <c>Shop</c>'s
+    /// value object in the global slot, so a context-blind classify of "Status" answers <c>Enum</c> even
+    /// though <c>Shop</c>'s own <c>Status</c> is genuinely a value object. A context-aware resolver
+    /// (one built per <c>ctx.Name</c>, per #1642's fix) must still recognize <c>Shop</c>'s own
+    /// <c>Status</c> as value-like and record its multiply/divide/binary-arithmetic needs — exactly as
+    /// it would in a collision-free model.
+    ///
+    /// <para><b>Summable is deliberately not exercised by this collision.</b> The fix routes
+    /// <c>ValueObjectSumWalker</c> through the same per-context <see cref="TypeResolver.IsValueLike(TypeRef?)"/>
+    /// re-derivation as the other two walkers, so it is equally collision-safe by construction — but a
+    /// live <c>sum(...)</c> repro can't be exercised through a real <c>.koi</c> compile here:
+    /// <c>Semantics/ExpressionChecker.CheckAggregateSelector</c> independently calls the same
+    /// context-blind <c>ModelIndex.Classify(string)</c> overload to gate whether a <c>sum</c> selector is
+    /// "a value object" at all, so THIS SAME collision gets rejected at validation time (KOI0212) before
+    /// <see cref="OperatorNeedsAnalyzer"/> ever sees it. That gap is a separate, pre-existing bug in a file
+    /// explicitly out of this issue's scope (filed as a follow-up).</para>
+    /// </summary>
+    [Fact]
+    public void A_same_named_type_in_a_later_context_does_not_suppress_a_value_objects_operator_needs()
+    {
+        const string source = """
+            context Shop {
+              value Status {
+                factor: Int
+              }
+              value Ticket {
+                price:    Status
+                a:        Status
+                b:        Status
+                scaled:   Status = price * 2
+                divided:  Status = price / 4
+                combined: Status = a + b
+                diff:     Status = a - b
+              }
+            }
+
+            context Billing {
+              enum Status { Open Closed }
+            }
+            """;
+
+        CompileResult result = new KoineCompiler().Compile(source, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        KoineModel model = result.Model!;
+        ModelIndex index = new SemanticModel(model).Index;
+
+        // The collision is real: a context-blind classify of "Status" resolves to Billing's enum
+        // (last-write-wins), NOT Shop's own value object.
+        index.Classify("Status").ShouldBe(TypeKind.Enum);
+        index.Classify("Shop", "Status").ShouldBe(TypeKind.Value);
+
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+
+        needs["Status"].MultiplyFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+        needs["Status"].DivideFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+        needs["Status"].BinaryOps.ShouldBe(new[] { BinaryOp.Add, BinaryOp.Sub }, ignoreOrder: true);
+    }
+
+    /// <summary>
     /// <see cref="OperatorNeedsAnalyzer.BuildOperatorNeeds"/> is cached per (model, index) so that the
     /// four public projections and <see cref="OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds"/> share
     /// one site enumeration across separate calls, not just within one (#836) — a repeat call with the
