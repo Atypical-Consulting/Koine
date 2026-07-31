@@ -262,6 +262,69 @@ public class R2OptionalityTests
     }
 
     [Fact]
+    public void Guarded_conditional_resolves_narrowed_for_field_default()
+    {
+        // #1564: `qty` is only read inside the branch its own `isPresent` guard proves present, in the
+        // SAME expression, with a non-optional fallback on the other branch — no path where the stored
+        // value can actually be absent, so this must not be flagged as still-optional.
+        const string src =
+            "context C {\n" +
+            "  value Item {\n" +
+            "    qty:      Int?\n" +
+            "    resolved: Int = if qty.isPresent then qty else 0\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Guarded_conditional_isNone_mirror_resolves_narrowed()
+    {
+        // The `isNone` mirror of the same idiom: guard on absence, present branch is the `else`.
+        const string src =
+            "context C {\n" +
+            "  value Item {\n" +
+            "    qty:      Int?\n" +
+            "    resolved: Int = if qty.isNone then 0 else qty\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Guarded_conditional_on_a_different_field_stays_optional()
+    {
+        // The guard proves `qty` present, not `price` — reading a DIFFERENT optional field in the
+        // `then` branch must not be narrowed just because some guard is present in the condition.
+        const string src =
+            "context C {\n" +
+            "  value Item {\n" +
+            "    qty:      Int?\n" +
+            "    price:    Int?\n" +
+            "    resolved: Int = if qty.isPresent then price else 0\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value assigned to non-optional field 'resolved'"));
+    }
+
+    [Fact]
+    public void Guarded_conditional_resolves_narrowed_for_aggregate_selector_in_same_scope()
+    {
+        // #1564's aggregate-selector shape: the guard and the narrowed read are in the SAME lambda
+        // scope (unlike #1556's cross-closure repro below), via a member access (`i.qty`) rather than
+        // a bare identifier.
+        const string src =
+            "context C {\n" +
+            "  value Item { qty: Int? }\n" +
+            "  value V {\n" +
+            "    items: List<Item>\n" +
+            "    total: Int? = items.sum(i => if i.qty.isPresent then i.qty else 0)\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Map_missing_value_type_is_reported()
     {
         Diagnose("context C {\n  value V {\n    m: Map<String>\n  }\n}\n").ShouldContain(d => d.Message.Contains("'Map' requires two type arguments"));
