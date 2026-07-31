@@ -198,6 +198,7 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
         lastClonedPath = path;
         void getPlatform()
           .createFile(path, 'model.koi', BLANK)
+          .then(() => ensureGitignored(path, 'model.koi'))
           .then(() => go({ kind: 'open-recent', path }))
           .catch((e: unknown) => {
             console.error('seeding a first model in the cloned folder failed:', e);
@@ -298,6 +299,43 @@ export function bootStudio(homeRoot: HTMLElement | null = document.getElementByI
     disposeInstall?.();
     disposeSwUpdate?.();
   };
+}
+
+// Does an existing .gitignore LINE already cover `relPath`? Handles an exact entry and a simple
+// wildcard glob (e.g. `*.koi`) — the cases #1063 calls out — not full gitignore glob syntax, which
+// would be overkill for keeping a single seeded file quiet. An unanchored pattern (no `/`) matches
+// the basename at any depth, same as git itself; an anchored one matches the full relative path.
+function gitignoreLineCovers(pattern: string, relPath: string): boolean {
+  const base = relPath.split('/').pop() ?? relPath;
+  const target = pattern.includes('/') ? relPath : base;
+  const re = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+  return re.test(target);
+}
+
+// Keep the model seeded by "Open anyway" (#1017) from showing up as untracked noise in `git status`:
+// best-effort append `relPath` to the cloned folder's .gitignore, creating one if it doesn't exist yet,
+// unless an existing entry already covers it. Never blocks the caller — like the seed-failure handling
+// in onOpenEmptyAnyway above, every failure here is logged and swallowed rather than propagated (#1063).
+async function ensureGitignored(folderPath: string, relPath: string): Promise<void> {
+  const platform = getPlatform();
+  let existing = '';
+  try {
+    existing = await platform.readTextFile(`${folderPath}/.gitignore`);
+  } catch {
+    existing = ''; // no .gitignore yet (or unreadable) — treated the same: start fresh
+  }
+  const alreadyCovered = existing
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .some((pattern) => gitignoreLineCovers(pattern, relPath));
+  if (alreadyCovered) return;
+  const next = existing.length === 0 || existing.endsWith('\n') ? `${existing}${relPath}\n` : `${existing}\n${relPath}\n`;
+  try {
+    await platform.writeTextFile(`${folderPath}/.gitignore`, next);
+  } catch (e) {
+    console.error('updating .gitignore for the seeded model failed:', e);
+  }
 }
 
 window.addEventListener('DOMContentLoaded', () => bootStudio());
