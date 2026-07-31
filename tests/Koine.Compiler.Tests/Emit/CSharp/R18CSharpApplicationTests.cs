@@ -524,6 +524,30 @@ public class R18CSharpApplicationTests
         clear.ShouldBeLessThan(ret);
     }
 
+
+    /// <summary>
+    /// The dispatch machinery must be gated on whether the context actually <i>records</i> events, not
+    /// on the option alone. The runtime contracts (<c>IDomainEventDispatcher</c>,
+    /// <c>IDomainEventAccumulator</c>) are emitted only for a model that has events — so a model with
+    /// none, built with the option on, must not emit a <c>TransactionBehavior</c> or a DI registration
+    /// referencing types that were never generated. Caught during review of #1721.
+    /// </summary>
+    [Fact]
+    public void Dispatch_events_on_a_model_that_records_no_events_still_compiles()
+    {
+        var files = Emit(MediatrDispatchOn, DerivedReadModelFixture);
+
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+
+        var behavior = File(files, "TransactionBehavior.cs").Contents;
+        behavior.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork)");
+        behavior.ShouldNotContain("IDomainEventAccumulator");
+
+        var di = File(files, "SalesApplicationServiceCollectionExtensions.cs").Contents;
+        di.ShouldNotContain("IDomainEventAccumulator");
+    }
+
     /// <summary>The Application layer on in MediatR mode with post-commit dispatch requested.</summary>
     internal static CSharpEmitterOptions MediatrDispatchOn =>
         AppOn with { ApplicationMediatr = true, DispatchEvents = true };

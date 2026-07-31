@@ -87,18 +87,25 @@ public sealed partial class CSharpEmitter
             EmitApplicationServiceImpl(emit, files, registrations, ns, svc, typeMapper);
         }
 
+        // Whether anything in THIS context actually records domain events. The dispatch machinery —
+        // the accumulator field/registration and the behavior's drain loop — must be gated on this,
+        // not on the option alone: the runtime contracts are only emitted for a model that has
+        // events, so referencing them from a context with none would not compile (#1721).
+        var dispatchesEvents = _options.DispatchEvents
+            && aggregates.Any(a => EmitsEvents(a.RootEntity()!));
+
         // MediatR pipeline behaviors (validation + transaction), emitted once per context when the
         // MediatR sub-mode is on and there is at least one request handler to wrap.
         var hasRequestHandlers = registrations.Any(r => r.Kind is "handler");
         if (_options.ApplicationMediatr && hasRequestHandlers)
         {
             files.Add(EmitValidationBehavior(emit, ns));
-            files.Add(EmitTransactionBehavior(emit, ns, aggregates.Count > 0));
+            files.Add(EmitTransactionBehavior(emit, ns, aggregates.Count > 0, dispatchesEvents));
         }
 
         if (registrations.Count > 0)
         {
-            files.Add(EmitDiExtension(emit, ns, registrations));
+            files.Add(EmitDiExtension(emit, ns, registrations, dispatchesEvents));
         }
     }
 
@@ -211,33 +218,21 @@ public sealed partial class CSharpEmitter
         {
             sb.Append(Indent).Append(Indent).Append("var result = aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            if (dispatches)
-            {
-                WriteDispatchEvents(sb);
-            }
-
+            WriteDispatchEvents(sb, dispatches);
             sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("result")).Append(";\n");
         }
         else if (returnsValue)
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            if (dispatches)
-            {
-                WriteDispatchEvents(sb);
-            }
-
+            WriteDispatchEvents(sb, dispatches);
             sb.Append(Indent).Append(Indent).Append("return ").Append(Ok(successExpr)).Append(";\n");
         }
         else
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
             WriteCommit(sb);
-            if (dispatches)
-            {
-                WriteDispatchEvents(sb);
-            }
-
+            WriteDispatchEvents(sb, dispatches);
             WriteVoidReturn(sb);
         }
 
@@ -287,11 +282,7 @@ public sealed partial class CSharpEmitter
         sb.Append(Indent).Append(Indent).Append("await _unitOfWork.").Append(plural)
           .Append(".AddAsync(aggregate, ").Append(CtArg()).Append(");\n");
         WriteCommit(sb);
-        if (dispatches)
-        {
-            WriteDispatchEvents(sb);
-        }
-
+        WriteDispatchEvents(sb, dispatches);
         sb.Append(Indent).Append(Indent).Append("return aggregate;\n");
         sb.Append(Indent).Append("}\n");
         sb.Append("}\n");
@@ -385,25 +376,33 @@ public sealed partial class CSharpEmitter
         _options.DispatchEvents && EmitsEvents(root);
 
     /// <summary>
-    /// Writes the handler's domain-event hand-off. In plain mode this is the post-commit dispatch
-    /// loop — events are dispatched in recording order and the list is cleared only after the loop
-    /// completes, so a mid-dispatch throw leaves them visible for a retry rather than silently
-    /// dropping them. In MediatR mode the commit has not happened yet, so the handler instead hands
-    /// the events to the scoped accumulator (which now owns them) and clears the aggregate.
+    /// Writes the handler's domain-event hand-off, or nothing when this handler does not dispatch —
+    /// self-guarding like <see cref="WriteCommit"/>, so the call sites stay one line. In plain mode
+    /// this is the post-commit dispatch loop: events go out in recording order and the list is
+    /// cleared only after the loop completes, so a mid-dispatch throw leaves them visible for a retry
+    /// rather than silently dropping them. In MediatR mode the commit has not happened yet, so the
+    /// handler instead hands the events to the scoped accumulator (which now owns them) before
+    /// clearing the aggregate.
     /// </summary>
-    private void WriteDispatchEvents(StringBuilder sb)
+    private void WriteDispatchEvents(StringBuilder sb, bool dispatches)
     {
-        if (_options.ApplicationMediatr)
+        if (!dispatches)
         {
-            sb.Append(Indent).Append(Indent).Append("_accumulator.AddRange(aggregate.DomainEvents);\n");
-            sb.Append(Indent).Append(Indent).Append("aggregate.ClearDomainEvents();\n");
             return;
         }
 
-        sb.Append(Indent).Append(Indent).Append("foreach (var domainEvent in aggregate.DomainEvents)\n");
-        sb.Append(Indent).Append(Indent).Append("{\n");
-        sb.Append(Indent).Append(Indent).Append(Indent).Append("await _dispatcher.DispatchAsync(domainEvent, ").Append(CtArg()).Append(");\n");
-        sb.Append(Indent).Append(Indent).Append("}\n\n");
+        if (_options.ApplicationMediatr)
+        {
+            sb.Append(Indent).Append(Indent).Append("_accumulator.AddRange(aggregate.DomainEvents);\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append("foreach (var domainEvent in aggregate.DomainEvents)\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("await _dispatcher.DispatchAsync(domainEvent, ").Append(CtArg()).Append(");\n");
+            sb.Append(Indent).Append(Indent).Append("}\n\n");
+        }
+
         sb.Append(Indent).Append(Indent).Append("aggregate.ClearDomainEvents();\n");
     }
 
@@ -767,20 +766,21 @@ public sealed partial class CSharpEmitter
             Assemble(emit, ns, sb.ToString(), usesLinq: false));
     }
 
-    private EmittedFile EmitTransactionBehavior(EmitContext emit, string ns, bool hasUnitOfWork)
+    private EmittedFile EmitTransactionBehavior(EmitContext emit, string ns, bool hasUnitOfWork, bool dispatchesEvents)
     {
+        // Under --app-dispatch-events (W1, #1721) this behavior is also where the domain events the
+        // handlers parked get dispatched — after the commit, never before, so an event can never
+        // announce a transaction that then rolled back. Needs a unit of work to commit through.
+        var dispatches = dispatchesEvents && hasUnitOfWork;
+
         var sb = new StringBuilder();
-        sb.Append(_options.DispatchEvents && hasUnitOfWork
+        sb.Append(dispatches
             ? "/// <summary>MediatR pipeline behavior: commits the unit of work after a successful handler, then dispatches the domain events the handlers recorded.</summary>\n"
             : "/// <summary>MediatR pipeline behavior: commits the unit of work after a successful handler.</summary>\n");
         sb.Append("public sealed class TransactionBehavior<TRequest, TResponse> : MediatR.IPipelineBehavior<TRequest, TResponse>\n");
         sb.Append(Indent).Append("where TRequest : notnull\n{\n");
         if (hasUnitOfWork)
         {
-            // Under --app-dispatch-events (W1, #1721) this behavior is also where the domain events
-            // the handlers parked get dispatched — after the commit, never before, so an event can
-            // never announce a transaction that then rolled back.
-            var dispatches = _options.DispatchEvents;
             sb.Append(Indent).Append("private readonly IUnitOfWork _unitOfWork;\n");
             if (dispatches)
             {
@@ -834,12 +834,12 @@ public sealed partial class CSharpEmitter
     // DI registration
     // ----------------------------------------------------------------------
 
-    private EmittedFile EmitDiExtension(EmitContext emit, string ns, IReadOnlyList<AppRegistration> registrations)
+    private EmittedFile EmitDiExtension(EmitContext emit, string ns, IReadOnlyList<AppRegistration> registrations, bool dispatchesEvents)
     {
         var method = "Add" + ns + "Application";
         var sb = new StringBuilder();
         var doc = $"Registers the {ns} application handlers, validators and query handlers.";
-        if (_options.DispatchEvents)
+        if (dispatchesEvents)
         {
             // Say it in the generated code, not just the docs: the one dependency this extension does
             // NOT register is the one the consumer must supply.
@@ -887,7 +887,7 @@ public sealed partial class CSharpEmitter
             // TransactionBehavior drains it, and a concurrent request cannot see those events.
             // IDomainEventDispatcher is deliberately NOT registered — Koine emits that contract but
             // never an implementation, so the consumer supplies (and registers) its own.
-            if (_options.DispatchEvents)
+            if (dispatchesEvents)
             {
                 sb.Append(Indent).Append(Indent).Append("services.AddScoped<IDomainEventAccumulator, DomainEventAccumulator>();\n");
             }
