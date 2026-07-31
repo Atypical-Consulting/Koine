@@ -177,6 +177,21 @@ export default defineConfig({
       },
       test: {
         name: 'storybook',
+        // On windows-latest, whichever story files land in Vitest browser mode's initial startup
+        // burst (Chromium context creation + Vite transform/import + axe-core injection, all
+        // contending at once) pay a shared cold-start tax that isn't tied to any one story's content:
+        // CI logs across three occurrences (#1693) show the tax lands on a DIFFERENT 2-3 files each
+        // time depending purely on dispatch order — e.g. SourceControlPanel/settingsPage in two runs,
+        // then settingsPage/LauncherPanel/SourceControlPanel in a third — while every other file in
+        // the same run finishes in under ~3s once past that initial burst. The tax also scales with
+        // how many files land in the burst (~20s observed for 2 concurrent, ~35s for 3), consistent
+        // with genuine OS-level contention rather than a slow story: this file already documents
+        // Windows-specific resource contention causing the `unit` project's own testTimeout bump
+        // above, and two prior Windows-only native-crash flakes (#414, #1486). 45000ms clears the
+        // worst observed cold-start duration (34738ms) with real headroom; macOS/ubuntu never
+        // exercise this path so their tighter default stays a live regression signal there.
+        testTimeout: isWindows ? 45000 : 15000,
+        hookTimeout: isWindows ? 45000 : 15000,
         browser: {
           enabled: true,
           headless: true,
