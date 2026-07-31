@@ -1132,4 +1132,41 @@ public class JavaConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1635 (the value-object analogue of #1621's own entity-based test/fix): a <c>value</c>
+    /// object's stored member with a default <c>Initializer</c> must have that default applied, mirroring
+    /// how <c>WriteEntityConstructor</c> already applies one for entities. Before the fix,
+    /// <c>EmitValueObject</c> only ever routed a member's <c>Initializer</c> through a <c>derived</c>
+    /// member's accessor (<c>WriteDerivedAccessor</c>) — a defaulted STORED member became a bare,
+    /// always-required record component with the declared default silently dropped.
+    /// </summary>
+    [Fact]
+    public void Value_object_applies_a_stored_member_default_initializer()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status {
+                Open
+                Closed
+              }
+              value Invoice {
+                status: Status = Status.Open
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("public record Invoice(Status status) {"); // canonical constructor unchanged
+        invoice.ShouldContain("public Invoice() {");                     // secondary, no-arg (every member defaulted)
+        invoice.ShouldContain("this(Status.Open);");                     // delegates, applying the default
+
+        var r2 = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r2.ToolchainAvailable, NoToolchainNotice);
+
+        r2.Ok.ShouldBeTrue(string.Join("\n", r2.Errors));
+    }
 }
