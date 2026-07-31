@@ -119,55 +119,62 @@ export function ResultRow(props: ResultRowProps) {
     .join(' ');
 
   return (
-    <div
-      class={rowClass}
-      // Stable per-entry id so the input's `aria-activedescendant` can point AT-readers at the active
-      // option as ↑/↓ moves the selection (issue #1145 review); pairs with `role="option"` below.
-      id={`lx-opt-${entry.id}`}
-      role="option"
-      aria-selected={selected}
-      aria-disabled={disabled || undefined}
-      data-id={entry.id}
-      onMouseMove={onHover}
-      onClick={onRun}
-    >
-      {chip ? (
-        <span class="lx-kind" style={{ '--kc': `var(${chip.token})` }} title={chip.word}>
-          {chip.code}
-        </span>
-      ) : (
-        <span class="lx-glyph">
-          <svg class="lx-ic" viewBox="0 0 16 16" aria-hidden="true">
-            <GlyphPaths kind={glyphKindFor(entry)} />
-          </svg>
-        </span>
-      )}
-      <div class="lx-main">
-        <div class="lx-title">
-          {segments.map((seg, i) => (seg.match ? <mark key={i}>{seg.text}</mark> : seg.text))}
-        </div>
-        <div class="lx-sub">
-          <Sub entry={entry} />
-        </div>
-      </div>
-      <div class="lx-tail">
-        <Tail entry={entry} />
-        {/* Suppressed for a disabled action row (#1407): its only quick action is Run, which is exactly
-            what's currently gated — a popover offering an inert "Run" would be a dead end. */}
-        {selected && onOpenMenu && !disabled && (
-          <button
-            type="button"
-            class="lx-actbtn avail"
-            aria-label={`Quick actions for ${entry.title}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenMenu();
-            }}
-          >
-            Actions
-            <span class="lx-actbtn-kbd">⌘K</span>
-          </button>
+    // #1673: `role="option"` (a leaf role whose children are all presentational, so a real focusable
+    // descendant like the tail `.lx-actbtn` trips axe's `nested-interactive`) can't host the button no
+    // matter how it's wrapped — WAI-ARIA's `listbox`/`option` pair has no owned role that both (a) is a
+    // valid `listbox` child and (b) permits a focusable descendant; even a `role="group"` wrapper gets
+    // walked straight through by that check, so the button still surfaces as a disallowed listbox-owned
+    // element. `LauncherPanel.tsx`'s results list is a `role="grid"` for exactly this reason: `gridcell`
+    // (unlike `option`) has no such restriction, so the button can stay right where it visually always
+    // was — inside `.lx-tail`, next to the Tail hint. `.lx-item` is the `role="row"`; `.lx-opt` is the
+    // `role="gridcell"` `aria-activedescendant` still resolves to (`LauncherPanel.tsx`'s `lx-opt-<id>`).
+    <div class={rowClass} role="row" onMouseMove={onHover} onClick={onRun}>
+      <div
+        class="lx-opt"
+        id={`lx-opt-${entry.id}`}
+        role="gridcell"
+        aria-selected={selected}
+        aria-disabled={disabled || undefined}
+        data-id={entry.id}
+      >
+        {chip ? (
+          <span class="lx-kind" style={{ '--kc': `var(${chip.token})` }} title={chip.word}>
+            {chip.code}
+          </span>
+        ) : (
+          <span class="lx-glyph">
+            <svg class="lx-ic" viewBox="0 0 16 16" aria-hidden="true">
+              <GlyphPaths kind={glyphKindFor(entry)} />
+            </svg>
+          </span>
         )}
+        <div class="lx-main">
+          <div class="lx-title">
+            {segments.map((seg, i) => (seg.match ? <mark key={i}>{seg.text}</mark> : seg.text))}
+          </div>
+          <div class="lx-sub">
+            <Sub entry={entry} />
+          </div>
+        </div>
+        <div class="lx-tail">
+          <Tail entry={entry} />
+          {/* Suppressed for a disabled action row (#1407): its only quick action is Run, which is
+              exactly what's currently gated — a popover offering an inert "Run" would be a dead end. */}
+          {selected && onOpenMenu && !disabled && (
+            <button
+              type="button"
+              class="lx-actbtn avail"
+              aria-label={`Quick actions for ${entry.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenMenu();
+              }}
+            >
+              Actions
+              <span class="lx-actbtn-kbd">⌘K</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
