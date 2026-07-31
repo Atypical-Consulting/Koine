@@ -5,7 +5,31 @@ import reactHooks from 'eslint-plugin-react-hooks';
 // void-prefixed promises, domById-over-getElementById, escape-before-innerHTML, and the react-hooks
 // rules (the package ships Preact components) — minus the studio-specific imperative-island allow-list.
 // Type-aware rules run against tsconfig.json (include: ["src"]) via parserOptions.projectService.
+
+// ── #998: the tseslint.configs.recommendedTypeChecked ratchet ────────────────────────────────────
+// Same inverted allow-list as koine-studio's config (see its header comment for the full rationale):
+// the whole preset is on, and every rule that still has findings is listed here as 'off' with its
+// live count; each ratchet PR fixes one rule and DELETES its entry. Never re-add an entry.
+const RATCHET_PENDING = {
+  '@typescript-eslint/no-explicit-any': 'off', //                 1 finding  / 1 file
+  '@typescript-eslint/no-unused-vars': 'off', //                  1 finding  / 1 file
+  '@typescript-eslint/no-empty-object-type': 'off', //            2 findings / 1 file
+  '@typescript-eslint/no-unnecessary-type-assertion': 'off', //  15 findings / 3 files
+  '@typescript-eslint/unbound-method': 'off', //                 22 findings / 5 files
+};
+
 export default tseslint.config(
+  // The full type-checked preset, minus the still-pending rules above. Placed first so the narrow
+  // #978 gate below stays the last word on the rules it names explicitly.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: { ...RATCHET_PENDING },
+  },
   {
     files: ['src/**/*.{ts,tsx}'],
     languageOptions: {
