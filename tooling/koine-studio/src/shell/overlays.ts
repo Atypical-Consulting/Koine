@@ -7,6 +7,7 @@ import { createConfirmDialog, createPromptDialog, type ConfirmDialog, type Promp
 import { createHelpOverlay } from '@/shared/help';
 import { helpRows } from '@/shell/ideUtils';
 import { formatChord } from '@/shared/platform';
+import { resolveKeybindings } from '@/settings/persistence';
 
 export interface OverlaysDeps {
   /** Whether any open buffer is dirty — the unsaved-work check the New/replace guard branches on. */
@@ -37,7 +38,9 @@ export interface Overlays {
 }
 
 export function createOverlays(deps: OverlaysDeps): Overlays {
-  const help = createHelpOverlay(helpRows());
+  // Resolved fresh on every open (createHelpOverlay's getRows callback, #1627) so a Settings → Keyboard
+  // rebind of commandPalette/saveAll shows live in the F1 overlay without needing a reload.
+  const help = createHelpOverlay(() => helpRows(resolveKeybindings()));
   // Guards the user-initiated New command against silently discarding unsaved work.
   const confirm = createConfirmDialog();
   // Single-field text prompts (name a new construct, a field, a project) — Koine's own modal, not the browser's.

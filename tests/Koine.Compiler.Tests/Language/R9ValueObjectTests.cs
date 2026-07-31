@@ -1072,6 +1072,49 @@ public class R9ValueObjectTests
         "  }\n" +
         "}\n";
 
+    /// <summary>Shared fixture: two entities of DIFFERENT declared types (Item, Customer), combined via
+    /// <paramref name="op"/> on line 6 — closes the cross-declared-type coverage gap left after #1300
+    /// only ever exercised same-type entity/entity and entity/value-object combinations (#1312).</summary>
+    private static string DifferentTypeEntitySrc(string op = "+") =>
+        "context Shop {\n" +
+        "  aggregate CartAgg root Cart {\n" +
+        "    entity Cart identified by CartId {\n" +
+        "      item: Item\n" +
+        "      customer: Customer\n" +
+        $"      bad: Item = item {op} customer\n" +
+        "    }\n" +
+        "    entity Item identified by ItemId {\n" +
+        "      name: String\n" +
+        "    }\n" +
+        "    entity Customer identified by CustomerId {\n" +
+        "      name: String\n" +
+        "    }\n" +
+        "  }\n" +
+        "}\n";
+
+    /// <summary>Shared fixture: an aggregate-typed operand (cross-aggregate `related: Customers`, the
+    /// `or AggregateDecl` disjunct) combined with a DIFFERENT entity type (Item, not a value object as
+    /// AggregateOperandSrc uses) via <paramref name="op"/> on line 6 — closes the aggregate-vs-
+    /// different-type-entity coverage gap the issue's proposed solution also called out (#1312).</summary>
+    private static string AggregateVsDifferentTypeEntitySrc(string op = "+") =>
+        "context Sales {\n" +
+        "  aggregate Orders root Order {\n" +
+        "    entity Order identified by OrderId {\n" +
+        "      related: Customers\n" +
+        "      item:    Item\n" +
+        $"      bad:     Item = related {op} item\n" +
+        "    }\n" +
+        "    entity Item identified by ItemId {\n" +
+        "      name: String\n" +
+        "    }\n" +
+        "  }\n" +
+        "  aggregate Customers root Customer {\n" +
+        "    entity Customer identified by CustomerId {\n" +
+        "      name: String\n" +
+        "    }\n" +
+        "  }\n" +
+        "}\n";
+
     [Fact]
     public void Same_type_entity_multiplication_is_also_rejected()
     {
@@ -1219,6 +1262,58 @@ public class R9ValueObjectTests
             result.Diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
             result.Files.ShouldBeEmpty();
         }
+    }
+
+    [Fact]
+    public void Different_type_entity_addition_is_rejected()
+    {
+        // #1312: no test previously combined two entities of DIFFERENT declared types — only
+        // same-type entity/entity and entity/value-object were covered.
+        Diagnose(DifferentTypeEntitySrc("+")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Different_type_entity_subtraction_is_rejected()
+    {
+        Diagnose(DifferentTypeEntitySrc("-")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Different_type_entity_multiplication_is_rejected()
+    {
+        Diagnose(DifferentTypeEntitySrc("*")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Different_type_entity_division_is_rejected()
+    {
+        Diagnose(DifferentTypeEntitySrc("/")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_operand_vs_different_type_entity_addition_is_rejected()
+    {
+        // #1312: AggregateOperandSrc only ever paired the aggregate-typed operand with a value
+        // object — this pairs it with a different entity type instead.
+        Diagnose(AggregateVsDifferentTypeEntitySrc("+")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_operand_vs_different_type_entity_subtraction_is_rejected()
+    {
+        Diagnose(AggregateVsDifferentTypeEntitySrc("-")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_operand_vs_different_type_entity_multiplication_is_rejected()
+    {
+        Diagnose(AggregateVsDifferentTypeEntitySrc("*")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
+    }
+
+    [Fact]
+    public void Aggregate_operand_vs_different_type_entity_division_is_rejected()
+    {
+        Diagnose(AggregateVsDifferentTypeEntitySrc("/")).ShouldContain(d => d.Code == DiagnosticCodes.EntityOperandArithmetic);
     }
 
     // ======================================================================

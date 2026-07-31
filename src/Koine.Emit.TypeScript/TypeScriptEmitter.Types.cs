@@ -308,7 +308,7 @@ public sealed partial class TypeScriptEmitter
     private void WriteQuantityOps(StringBuilder sb, string name, IReadOnlyList<Member> ctorMembers, ModelIndex index)
     {
         Member? amount = ctorMembers.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
-        Member? unit = ctorMembers.FirstOrDefault(m => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
+        Member? unit = ctorMembers.FirstOrDefault(m => index.Classify(m.Type.Qualifier, m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
         if (amount is null || unit is null)
         {
             return;
@@ -548,7 +548,7 @@ public sealed partial class TypeScriptEmitter
 
         foreach (Transition tr in transitions)
         {
-            var expectedEnum = entity.Members.FirstOrDefault(m => m.Name == tr.Field) is { } fm && index.Classify(fm.Type.Name) == TypeKind.Enum
+            var expectedEnum = entity.Members.FirstOrDefault(m => m.Name == tr.Field) is { } fm && index.Classify(fm.Type.Qualifier, fm.Type.Name) == TypeKind.Enum
                 ? fm.Type.Name : null;
             sb.Append(Indent).Append(Indent).Append("this.").Append(TypeScriptNaming.ToCamelCase(tr.Field))
               .Append(" = ").Append(translator.Translate(tr.Value, expectedEnum)).Append(";\n");
@@ -838,7 +838,7 @@ public sealed partial class TypeScriptEmitter
             StringComparer.Ordinal);
 
     private static string? EnumExpected(Member m, ModelIndex index) =>
-        index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+        index.Classify(m.Type.Qualifier, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 
     /// <summary>True when any command or factory of the entity records a domain event.</summary>
     private static bool EmitsEvents(EntityDecl entity) =>

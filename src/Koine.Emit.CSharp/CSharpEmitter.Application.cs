@@ -735,6 +735,16 @@ public sealed partial class CSharpEmitter
                 case "handler":
                     sb.Append(Indent).Append(Indent).Append("services.AddTransient<").Append(r.Implementation).Append(">();\n");
                     break;
+                case "query":
+                    // WriteQueryEndpoint (api layer) always injects the CONCRETE handler type — never
+                    // behind IQueryHandler<,>, unlike command/factory handlers' MediatR-mode branch — so
+                    // it must be self-registered too, or ASP.NET Core's endpoint-metadata inference can't
+                    // recognize it as a service and falls back to an illegal inferred-body GET parameter
+                    // (issue #1649). The interface mapping is kept alongside for callers that resolve via
+                    // the generic IQueryHandler<TQuery,TResult> contract directly.
+                    sb.Append(Indent).Append(Indent).Append("services.AddTransient<").Append(r.Implementation).Append(">();\n");
+                    sb.Append(Indent).Append(Indent).Append("services.AddTransient<").Append(r.Service).Append(", ").Append(r.Implementation).Append(">();\n");
+                    break;
                 default:
                     sb.Append(Indent).Append(Indent).Append("services.AddTransient<").Append(r.Service).Append(", ").Append(r.Implementation).Append(">();\n");
                     break;

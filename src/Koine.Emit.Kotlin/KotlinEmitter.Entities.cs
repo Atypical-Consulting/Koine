@@ -79,7 +79,7 @@ public sealed partial class KotlinEmitter
 
         foreach (Member m in defaulted)
         {
-            var value = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index));
+            var value = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context));
             WriteStoredProperty(sb, m, typeMapper, value, mutated.Contains(m.Name));
         }
 
@@ -194,7 +194,7 @@ public sealed partial class KotlinEmitter
         StringBuilder sb, KotlinEmitContext emit, Member m, KotlinTypeMapper typeMapper, KotlinExpressionTranslator translator)
     {
         WriteKdoc(sb, m.Doc, Indent);
-        var body = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index));
+        var body = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context));
         sb.Append(Indent).Append("val ").Append(KotlinNaming.ToMemberName(m.Name)).Append(": ")
           .Append(typeMapper.Map(m.Type)).Append(" get() = ").Append(body).Append('\n');
     }
@@ -271,7 +271,10 @@ public sealed partial class KotlinEmitter
     private void WriteTransition(StringBuilder sb, KotlinEmitContext emit, EntityDecl entity, Transition t, KotlinExpressionTranslator translator, string indent)
     {
         Member? field = entity.Members.FirstOrDefault(m => m.Name == t.Field);
-        var expectedEnum = field is not null && emit.Index.Classify(field.Type.Name) == TypeKind.Enum ? field.Type.Name : null;
+        var expectedEnum = field is not null
+            && emit.Index.Classify(field.Type.Qualifier ?? translator.Context, field.Type.Name) == TypeKind.Enum
+                ? field.Type.Name
+                : null;
         var value = translator.Translate(t.Value, KotlinExpressionTranslator.NameMode.Property, expectedEnum);
         sb.Append(indent).Append("this.").Append(KotlinNaming.ToMemberName(t.Field)).Append(" = ").Append(value).Append('\n');
     }
@@ -315,7 +318,7 @@ public sealed partial class KotlinEmitter
                 return KotlinTypeDefault(m.Type);
             }
 
-            var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+            var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
             return translator.Translate(value, KotlinExpressionTranslator.NameMode.Property, expectedEnum);
         });
 
@@ -418,7 +421,7 @@ public sealed partial class KotlinEmitter
         {
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 args.Add(translator.Translate(value, KotlinExpressionTranslator.NameMode.Property, expectedEnum));
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))

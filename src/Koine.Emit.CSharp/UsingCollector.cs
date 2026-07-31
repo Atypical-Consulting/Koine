@@ -43,6 +43,9 @@ internal sealed class UsingCollector
         new("System.Threading.Tasks", new[] { "Task" }),
         new("System.Threading", new[] { "CancellationToken" }),
         new("System.Text.RegularExpressions", new[] { "Regex" }),
+        // Identity value objects' TryParse (issue #1649) is annotated so callers can rely on
+        // the out parameter being non-null on a `true` return, matching the BCL's own TryParse shape.
+        new("System.Diagnostics.CodeAnalysis", new[] { "NotNullWhen(" }),
     };
 
     // Koine.Runtime is gated both on presence of a runtime marker AND on the file not being
@@ -92,6 +95,7 @@ internal sealed class UsingCollector
         AddIfReferenced(body, FixedNamespaces[3]); // System.Threading.Tasks
         AddIfReferenced(body, FixedNamespaces[4]); // System.Threading
         AddIfReferenced(body, FixedNamespaces[5]); // System.Text.RegularExpressions
+        AddIfReferenced(body, FixedNamespaces[6]); // System.Diagnostics.CodeAnalysis
 
         if (ns != RuntimeNamespace && ReferencesAny(body, RuntimeMarkers))
         {

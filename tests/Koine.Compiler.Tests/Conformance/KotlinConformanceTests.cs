@@ -623,6 +623,63 @@ public class KotlinConformanceTests
         skipped.Ok.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// Issue #1625 (the Kotlin analogue of #1560/PR #1612's Rust fix, and #1621's Java one):
+    /// <c>ModelIndex.Classify</c> is context-blind — its flat, last-write-wins <c>_byName</c> index can resolve a
+    /// same-named enum declared in a DIFFERENT context (R13.2 legally permits this), so a qualified enum default
+    /// value (<c>status: Status = Status.Open</c>, exercising <c>KotlinExpressionTranslator.WriteMemberAccess</c>'s
+    /// qualified-enum-member fast path) risks misclassifying its qualifier depending on registration order
+    /// relative to a same-named enum in another context.
+    /// <para>
+    /// <b>Ordering note:</b> <c>Shipping</c> is declared BEFORE <c>Billing</c> deliberately, mirroring #1621's
+    /// Java test — a separate, pre-existing bug (filed as a follow-up) makes <c>ModelIndex.AllTypes()</c>
+    /// enumerate only the flat <c>_byName</c> winner for a shared simple name, so the LOSING context's own enum
+    /// members are never indexed into <c>EnumsDeclaring</c>/<c>_enumMemberToType</c> at all — the losing
+    /// context's own qualified member reference then fails semantic validation (<c>KOI0106 unknown enum
+    /// member</c>) before any emitter runs. Declaring <c>Billing</c> second makes it the flat winner, so its own
+    /// enum members ARE indexed and the model validates — letting this test reach and pin the
+    /// Kotlin-emitter-specific call site instead.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Same_named_enum_across_two_contexts_resolves_the_correct_context_for_a_qualified_default_value()
+    {
+        const string src =
+            """
+            context Shipping {
+              enum Status {
+                Pending
+                Delivered
+              }
+            }
+
+            context Billing {
+              enum Status {
+                Open
+                Closed
+              }
+              aggregate Invoicing root Invoice {
+                repository {
+                  operations: getById, add
+                }
+                entity Invoice identified by InvoiceId {
+                  status: Status = Status.Open
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("billing/Invoice.kt", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("Status.Open");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's sources.</summary>
     private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
     {

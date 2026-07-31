@@ -739,27 +739,44 @@ internal sealed class ExpressionChecker
     /// The enum type an operand concretely denotes for disambiguation purposes: a
     /// field's enum type, a qualified <c>Enum.Member</c>, or an UNAMBIGUOUS bare
     /// member. An ambiguous bare member denotes no concrete type (returns null).
+    /// Every candidate is confirmed via the context-aware <see cref="ResolveDecl"/>
+    /// (R13.2, mirroring #1634's <see cref="CheckMember"/> fix) rather than the flat
+    /// <see cref="ModelIndex.IsEnumType"/> overload — a same-named, non-enum type
+    /// legally declared in another context can otherwise win the flat lookup and
+    /// wrongly deny that the operand is enum-typed (#1644).
     /// </summary>
-    private TypeRef? ConcreteEnumType(Expr operand, TypeScope scope)
+    /// <remarks>
+    /// <c>internal</c> rather than <c>private</c> so <c>SemanticTests</c> can call it directly
+    /// (<see cref="System.Runtime.CompilerServices.InternalsVisibleToAttribute"/> already exposes this
+    /// assembly's internals to the test project). Every diagnostic that consumes this method's return
+    /// value (<c>CheckEnumMemberResolvable</c>, <c>ResolveEnumOperand</c>) also depends on
+    /// <see cref="ModelIndex.EnumsDeclaring"/>/<see cref="ModelIndex.EnumMemberToType"/>, which are
+    /// built from the SAME flat, last-write-wins <c>_byName</c>/<c>AllTypes()</c> map this fix bypasses
+    /// — so a same-named collision that exercises this fix always also evicts the concrete enum's own
+    /// members from those two dictionaries (#1632, explicitly out of this issue's scope), making the
+    /// fix's effect unobservable through any end-to-end diagnostic today. Calling this method directly
+    /// is the only way to pin its own contract in isolation.
+    /// </remarks>
+    internal TypeRef? ConcreteEnumType(Expr operand, TypeScope scope)
     {
         if (operand is IdentifierExpr id)
         {
             if (scope.Contains(id.Name))
             {
                 TypeRef? t = _resolver.Infer(operand, scope);
-                return t is not null && _index.IsEnumType(t.Name) ? t : null;
+                return t is not null && ResolveDecl(t) is EnumDecl ? t : null;
             }
             IReadOnlyList<string> owners = _index.EnumsDeclaring(id.Name);
             return owners.Count == 1 ? new TypeRef(owners[0]) : null;
         }
 
-        if (operand is MemberAccessExpr { Target: IdentifierExpr typeId } && _index.IsEnumType(typeId.Name))
+        if (operand is MemberAccessExpr { Target: IdentifierExpr typeId } && ResolveDecl(new TypeRef(typeId.Name)) is EnumDecl)
         {
             return new TypeRef(typeId.Name);
         }
 
         TypeRef? inferred = _resolver.Infer(operand, scope);
-        return inferred is not null && _index.IsEnumType(inferred.Name) ? inferred : null;
+        return inferred is not null && ResolveDecl(inferred) is EnumDecl ? inferred : null;
     }
 
     /// <summary>True when a type supports the C# relational operators (or is unknown).</summary>
@@ -929,11 +946,15 @@ internal sealed class ExpressionChecker
 
     private void CheckMember(MemberAccessExpr ma, TypeScope scope)
     {
-        // Qualified enum reference `EnumType.Member`: validate the member, don't
-        // treat the enum type name as a field.
-        if (ma.Target is IdentifierExpr typeId && _index.IsEnumType(typeId.Name))
+        // Qualified enum reference `EnumType.Member`: validate the member, don't treat the enum
+        // type name as a field. Resolved context-first via the same ResolveDecl(...) every other
+        // lookup in this file uses (R13.2), so a same-named type legally declared in another
+        // context neither misclassifies this context's own enum nor hides its member set (the
+        // flat, global ModelIndex.EnumsDeclaring index can miss a shadowed enum's members —
+        // #1632 — but ResolveDecl's per-context lookup isn't built off that shadowed index).
+        if (ma.Target is IdentifierExpr typeId && ResolveDecl(new TypeRef(typeId.Name)) is EnumDecl enumDecl)
         {
-            if (!_index.EnumsDeclaring(ma.MemberName).Contains(typeId.Name))
+            if (!enumDecl.MemberNames.Contains(ma.MemberName))
             {
                 Report(DiagnosticCodes.UnknownEnumMemberForType,
                     $"unknown enum member '{ma.MemberName}' for type '{typeId.Name}'", ma);

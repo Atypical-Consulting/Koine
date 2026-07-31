@@ -324,8 +324,11 @@ export function Transcript({
         <Fragment key={`${workspaceKey}:m${i}`}>
           {/* Each assistant message's settled tool cards sit ABOVE its own reply bubble, exactly
               where they streamed (the imperative insertBefore contract survives the turn's
-              completion) — every such message, not just the trailing one (#1133). */}
-          {m.role === 'assistant' && m.toolCalls?.map((c) => toolCard(`${workspaceKey}:m${i}:t${c.id}`, c))}
+              completion) — every such message, not just the trailing one (#1133). Keyed by the
+              turn's stable `turnId` (#1286), not this message's array index `i` — an index that's
+              only a correct stand-in for the eventual settled position because of an unenforced
+              append-ordering convention (see the live-turn card below). */}
+          {m.role === 'assistant' && m.toolCalls?.map((c) => toolCard(`${workspaceKey}:${m.turnId}:t${c.id}`, c))}
           {m.role === 'assistant' ? (
             <AssistantBubble
               content={m.content}
@@ -344,10 +347,11 @@ export function Transcript({
       {streaming && (
         <>
           {/* Tool cards sit ABOVE the streaming bubble (the imperative insertBefore contract). Live
-              cards use `messages.length` as their index (#1133) — the index the pending assistant
-              message will occupy once committed, since the user turn is already appended by then —
-              so a card's identity never changes across the live→settled transition. */}
-          {turn.toolCalls.map((c) => toolCard(`${workspaceKey}:m${messages.length}:t${c.id}`, c))}
+              cards are keyed by the turn's own `turnId` (#1286) — stable regardless of what else
+              appends to `messages` before this turn commits — rather than `messages.length` (#1133),
+              which was only a correct stand-in for the eventual settled index because nothing else
+              was expected to append mid-turn. */}
+          {turn.toolCalls.map((c) => toolCard(`${workspaceKey}:${turn.turnId}:t${c.id}`, c))}
           {/* The live reply streams as PLAIN TEXT ('…' until the first delta); markdown renders only
               once the turn commits to `messages`. */}
           <div key="stream" class="koi-msg koi-msg-assistant">

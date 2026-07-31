@@ -50,7 +50,7 @@ internal sealed class TypeScriptTypeMapper
             default:
                 // An enum's *type* is the member-instance interface (`<Enum>Member`); the bare
                 // `<Enum>` name is the const value object, not a type.
-                if (_index.Classify(type.Name) == TypeKind.Enum)
+                if (_index.Classify(type.Qualifier, type.Name) == TypeKind.Enum)
                 {
                     return TypeScriptNaming.ToPascalCase(type.Name) + "Member";
                 }
@@ -72,5 +72,5 @@ internal sealed class TypeScriptTypeMapper
     public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
 
     /// <summary>True when the type classifies as a smart enum (rendered as a string-literal union).</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier, type.Name) == TypeKind.Enum;
 }

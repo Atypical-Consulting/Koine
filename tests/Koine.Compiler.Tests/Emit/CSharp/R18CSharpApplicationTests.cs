@@ -1,3 +1,7 @@
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Koine.Cli;
 using Koine.Cli.Commands;
 using Koine.Compiler.Emit;
@@ -604,6 +608,364 @@ public class R18CSharpApplicationTests
     {
         var (assembly, errors) = TestSupport.Compile(Emit(ApiOn with { NotFound = CSharpNotFound.Nullable }));
         assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #1591 — runtime-verify the api layer's endpoints over real HTTP,
+    // not just that they Roslyn-compile. Task 1: a fake IOrderRepository/
+    // IUnitOfWork test double compiled alongside the emitted model, proving
+    // its shape matches the generated repository interface before any HTTP
+    // wiring exists.
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Fake_order_repository_satisfies_the_emitted_repository_interface_shape()
+    {
+        var files = Emit(ApiOn)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .ToList();
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+
+        var repositoryType = assembly.GetTypes().Single(t => t.Name == "IOrderRepository");
+        var fakeType = assembly.GetTypes().Single(t => t.Name == "FakeOrderRepository");
+        var fake = Activator.CreateInstance(fakeType);
+
+        repositoryType.IsInstanceOfType(fake).ShouldBeTrue();
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #1591 — Task 2: TestSupport.RunApi boots an in-process host over
+    // a driver's ApiHostDriver.Build(), so a real HttpClient can drive the
+    // emitted endpoints. This trivial fixture proves the harness mechanics
+    // (compile, boot, real HTTP round-trip) without any emitted routes yet:
+    // an unmapped path 404s via ASP.NET Core's default routing fallthrough.
+    // ------------------------------------------------------------------
+
+    private const string TrivialApiHostDriver = """
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Hosting;
+        using Microsoft.AspNetCore.TestHost;
+        using Microsoft.Extensions.Hosting;
+
+        public static class ApiHostDriver
+        {
+            public static WebApplication Build()
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.WebHost.UseTestServer();
+                var app = builder.Build();
+                app.Start();
+                return app;
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task RunApi_boots_a_test_host_and_returns_a_working_http_client()
+    {
+        using var harness = TestSupport.RunApi(Array.Empty<EmittedFile>(), TrivialApiHostDriver);
+
+        var response = await harness.Client.GetAsync("/does-not-exist", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #1591 — Task 3/4: real HTTP round-trips over the emitted
+    // Sales api layer, wiring the Task 1 fake into the Task 2 harness via
+    // the emitted AddSalesApplication()/MapSalesEndpoints() extensions.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="Fixture"/> minus its <c>service</c>/<c>readmodel</c>/<c>query</c> blocks: only the
+    /// <c>Order</c> aggregate, its repository, and the <c>place</c> command / <c>open</c> factory. Used
+    /// for the HTTP round-trip facts below instead of <see cref="Fixture"/> itself because the emitted
+    /// <c>GET /order-by-id</c> query endpoint's <c>[AsParameters] OrderById query</c> binding crashes
+    /// ASP.NET Core's endpoint-metadata inference at the FIRST request to ANY route on the host (not
+    /// just that one) — <c>OrderId</c> has no <c>TryParse</c>, so a GET-illegal inferred-body binding is
+    /// the only source Minimal APIs can fall back to for a non-primitive, non-route, non-header
+    /// property. That is a real emitter gap (filed as #1649), out of scope for this test-only harness;
+    /// this fixture sidesteps it so the command/factory endpoints can still be runtime-verified for real.
+    /// </summary>
+    internal const string CommandsOnlyFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Shipped }
+
+          value Money {
+            amount:   Decimal
+            currency: String
+            invariant amount >= 0   "amount cannot be negative"
+          }
+
+          aggregate Order root Order {
+            repository {
+              operations: getById, add, update
+            }
+
+            event OrderPlaced {
+              orderId: OrderId
+              total:   Money
+            }
+
+            entity Order identified by OrderId {
+              customer: CustomerId
+              total:    Money
+              status:   OrderStatus = Draft
+
+              invariant total.amount >= 0   "order total cannot be negative"
+
+              states status {
+                Draft  -> Placed, Shipped
+                Placed -> Shipped
+                Shipped
+              }
+
+              command place {
+                requires status == Draft   "order must be a draft to place"
+                status -> Placed
+                emit OrderPlaced(orderId: id, total: total)
+              }
+
+              create open(customer: CustomerId, total: Money) {
+                requires total.amount >= 0   "an order total cannot be negative"
+                emit OrderPlaced(orderId: id, total: total)
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Boots <see cref="TestSupport.RunApi"/> over <see cref="CommandsOnlyFixture"/> emitted with
+    /// <paramref name="options"/>, wiring the emitted <c>AddSalesApplication()</c> DI extension, the
+    /// Task 1 <c>FakeOrderRepository</c>/<c>FakeUnitOfWork</c> double (registered as the sole
+    /// <c>IUnitOfWork</c>), and the emitted <c>MapSalesEndpoints()</c> — a real, in-process ASP.NET
+    /// Core host for the Sales context's endpoints.
+    /// </summary>
+    private static TestSupport.ApiHostHarness RunSalesApi(CSharpEmitterOptions options) =>
+        TestSupport.RunApi(
+            Emit(options, CommandsOnlyFixture)
+                .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source)),
+            SalesApiHostDriver);
+
+    private const string SalesApiHostDriver = """
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Hosting;
+        using Microsoft.AspNetCore.TestHost;
+        using Microsoft.Extensions.DependencyInjection;
+        using Microsoft.Extensions.Hosting;
+
+        namespace Sales;
+
+        public static class ApiHostDriver
+        {
+            public static WebApplication Build()
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.WebHost.UseTestServer();
+                builder.Services.AddSalesApplication();
+
+                var repository = new FakeOrderRepository();
+                builder.Services.AddSingleton<IUnitOfWork>(new FakeUnitOfWork(repository));
+
+                var app = builder.Build();
+                app.MapSalesEndpoints();
+                app.Start();
+                return app;
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task Api_layer_factory_endpoint_returns_a_real_200_with_the_created_order()
+    {
+        using var harness = RunSalesApi(ApiOn);
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 42.50m, currency = "USD" } },
+            TestContext.Current.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        body.ShouldContain("42.5");
+        body.ShouldContain("USD");
+    }
+
+    [Fact]
+    public async Task Api_layer_command_endpoint_returns_a_real_200()
+    {
+        using var harness = RunSalesApi(ApiOn);
+
+        var openResponse = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 10m, currency = "EUR" } },
+            TestContext.Current.CancellationToken);
+        var opened = await openResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        openResponse.StatusCode.ShouldBe(HttpStatusCode.OK, opened);
+        var orderId = JsonDocument.Parse(opened).RootElement.GetProperty("id").GetProperty("value").GetGuid();
+
+        var placeResponse = await harness.Client.PostAsJsonAsync(
+            "/order/place",
+            new { id = new { value = orderId } },
+            TestContext.Current.CancellationToken);
+
+        var placed = await placeResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        placeResponse.StatusCode.ShouldBe(HttpStatusCode.OK, placed);
+    }
+
+    /// <summary>
+    /// Issue #1591 Task 4: a real HTTP 404 for a missing aggregate. The plan's own sketch drives this
+    /// through the <c>GetById</c> query endpoint, but that endpoint crashes the whole host at runtime
+    /// (a real emitter bug found while implementing Task 3, filed as #1649) — <c>OrderPlaceHandler</c>
+    /// hits the exact same "aggregate not found" path internally (it looks the order up before placing
+    /// it), and its endpoint carries the identical <c>NotFound</c> HTTP mapping
+    /// (<c>result is null ? Results.NotFound() : Results.Ok(result)</c> under <c>Nullable</c>,
+    /// <c>result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound()</c> under <c>Result</c>), so
+    /// POSTing <c>/order/place</c> for an id nothing was ever opened under proves the same
+    /// HTTP-visible behavior — a real 404 over the wire — without the query endpoint's crash.
+    /// </summary>
+    [Fact]
+    public async Task Api_layer_nullable_not_found_returns_a_real_404_for_a_missing_aggregate()
+    {
+        using var harness = RunSalesApi(ApiOn with { NotFound = CSharpNotFound.Nullable });
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/place",
+            new { id = new { value = Guid.NewGuid() } },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Api_layer_result_not_found_returns_a_real_404_for_a_missing_aggregate()
+    {
+        using var harness = RunSalesApi(ApiOn with { NotFound = CSharpNotFound.Result });
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/place",
+            new { id = new { value = Guid.NewGuid() } },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #1649: the GetById query endpoint's [AsParameters] OrderId binding now works
+    // (EmitIdValueObject emits TryParse), so Fixture's readmodel/query — which CommandsOnlyFixture
+    // above exists solely to sidestep — can be runtime-verified for real.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="Fixture"/> minus its <c>OrdersByStatus</c> list query: that query's criterion is an
+    /// enum (<c>status: OrderStatus</c>), which has the same "no TryParse" binding gap #1649 fixed for
+    /// typed IDs, but for a genuinely different reason — a C# <c>enum</c> cannot declare a static
+    /// <c>TryParse</c> member the way a hand-emitted identity value object can. Since ASP.NET Core
+    /// builds endpoint metadata for the WHOLE route table on the first request, that query's crash
+    /// would poison every route here too and mask the fix this file exists to verify. Filed as #1656,
+    /// out of scope for #1649; this fixture sidesteps it so <c>OrderById</c> can still be
+    /// runtime-verified for real.
+    /// </summary>
+    internal const string QueryableFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed, Shipped }
+
+          value Money {
+            amount:   Decimal
+            currency: String
+            invariant amount >= 0   "amount cannot be negative"
+          }
+
+          aggregate Order root Order {
+            repository {
+              operations: getById, add, update
+            }
+
+            event OrderPlaced {
+              orderId: OrderId
+              total:   Money
+            }
+
+            entity Order identified by OrderId {
+              customer: CustomerId
+              total:    Money
+              status:   OrderStatus = Draft
+
+              invariant total.amount >= 0   "order total cannot be negative"
+
+              states status {
+                Draft  -> Placed, Shipped
+                Placed -> Shipped
+                Shipped
+              }
+
+              command place {
+                requires status == Draft   "order must be a draft to place"
+                status -> Placed
+                emit OrderPlaced(orderId: id, total: total)
+              }
+
+              create open(customer: CustomerId, total: Money) {
+                requires total.amount >= 0   "an order total cannot be negative"
+                emit OrderPlaced(orderId: id, total: total)
+              }
+            }
+          }
+
+          readmodel OrderSummary from Order {
+            id
+            customer
+            status
+          }
+
+          query OrderById(id: OrderId): OrderSummary
+        }
+        """;
+
+    /// <summary>
+    /// <see cref="RunSalesApi"/>'s query-enabled counterpart: boots <see cref="TestSupport.RunApi"/>
+    /// over <see cref="QueryableFixture"/> (readmodel and <c>OrderById</c> query included), wiring the
+    /// same Task 1 fake repository/unit-of-work double.
+    /// </summary>
+    private static TestSupport.ApiHostHarness RunSalesApiWithQueries(CSharpEmitterOptions options) =>
+        TestSupport.RunApi(
+            Emit(options, QueryableFixture)
+                .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source)),
+            SalesApiHostDriver);
+
+    [Fact]
+    public async Task Api_layer_query_endpoint_returns_a_real_200_for_an_existing_order()
+    {
+        using var harness = RunSalesApiWithQueries(ApiOn);
+
+        var openResponse = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 15m, currency = "GBP" } },
+            TestContext.Current.CancellationToken);
+        var opened = await openResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        openResponse.StatusCode.ShouldBe(HttpStatusCode.OK, opened);
+        var orderId = JsonDocument.Parse(opened).RootElement.GetProperty("id").GetProperty("value").GetGuid();
+
+        var response = await harness.Client.GetAsync(
+            $"/order-by-id?id={orderId}", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        body.ShouldContain(orderId.ToString());
+        body.ShouldContain("Draft");
+    }
+
+    [Fact]
+    public async Task Api_layer_query_endpoint_returns_a_real_404_for_a_missing_order()
+    {
+        using var harness = RunSalesApiWithQueries(ApiOn with { NotFound = CSharpNotFound.Nullable });
+
+        var response = await harness.Client.GetAsync(
+            $"/order-by-id?id={Guid.NewGuid()}", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]

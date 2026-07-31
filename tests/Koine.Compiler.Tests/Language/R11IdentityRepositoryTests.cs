@@ -101,6 +101,91 @@ public class R11IdentityRepositoryTests
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.NaturalIdBackingType);
     }
 
+    // ---- Identity value objects emit TryParse for ASP.NET Core query/route binding (#1649) --
+
+    [Fact]
+    public void Guid_identity_emits_TryParse_that_round_trips_a_guid_string()
+    {
+        var (asm, files) = Build(ThreeStrategies);
+        var src = FileContents(files, "Catalog/ValueObjects/OrderId.cs");
+        src.ShouldContain("public static bool TryParse(string? value, [NotNullWhen(true)] out OrderId? result)");
+
+        var orderId = asm.GetType("Catalog.OrderId")!;
+        var tryParse = orderId.GetMethod("TryParse", BindingFlags.Public | BindingFlags.Static)!;
+
+        var guid = Guid.NewGuid();
+        var okArgs = new object?[] { guid.ToString(), null };
+        ((bool)tryParse.Invoke(null, okArgs)!).ShouldBeTrue();
+        okArgs[1].ShouldNotBeNull();
+        orderId.GetProperty("Value")!.GetValue(okArgs[1]).ShouldBe(guid);
+
+        var badArgs = new object?[] { "not-a-guid", null };
+        ((bool)tryParse.Invoke(null, badArgs)!).ShouldBeFalse();
+        badArgs[1].ShouldBeNull();
+    }
+
+    [Fact]
+    public void Natural_string_identity_TryParse_rejects_blank_and_null()
+    {
+        var (asm, files) = Build(ThreeStrategies);
+        var src = FileContents(files, "Catalog/ValueObjects/Sku.cs");
+        src.ShouldContain("public static bool TryParse(string? value, [NotNullWhen(true)] out Sku? result)");
+
+        var sku = asm.GetType("Catalog.Sku")!;
+        var tryParse = sku.GetMethod("TryParse", BindingFlags.Public | BindingFlags.Static)!;
+
+        var okArgs = new object?[] { "ABC-1", null };
+        ((bool)tryParse.Invoke(null, okArgs)!).ShouldBeTrue();
+        sku.GetProperty("Value")!.GetValue(okArgs[1]).ShouldBe("ABC-1");
+
+        var blankArgs = new object?[] { "   ", null };
+        ((bool)tryParse.Invoke(null, blankArgs)!).ShouldBeFalse();
+        blankArgs[1].ShouldBeNull();
+
+        var nullArgs = new object?[] { null, null };
+        ((bool)tryParse.Invoke(null, nullArgs)!).ShouldBeFalse();
+        nullArgs[1].ShouldBeNull();
+    }
+
+    [Fact]
+    public void Sequence_identity_TryParse_parses_long()
+    {
+        var (asm, files) = Build(ThreeStrategies);
+        var src = FileContents(files, "Catalog/ValueObjects/InvoiceNo.cs");
+        src.ShouldContain("public static bool TryParse(string? value, [NotNullWhen(true)] out InvoiceNo? result)");
+
+        var inv = asm.GetType("Catalog.InvoiceNo")!;
+        var tryParse = inv.GetMethod("TryParse", BindingFlags.Public | BindingFlags.Static)!;
+
+        var okArgs = new object?[] { "42", null };
+        ((bool)tryParse.Invoke(null, okArgs)!).ShouldBeTrue();
+        inv.GetProperty("Value")!.GetValue(okArgs[1]).ShouldBe(42L);
+
+        var badArgs = new object?[] { "not-a-number", null };
+        ((bool)tryParse.Invoke(null, badArgs)!).ShouldBeFalse();
+        badArgs[1].ShouldBeNull();
+    }
+
+    [Fact]
+    public void Natural_int_identity_TryParse_parses_int()
+    {
+        const string src = "context C {\n  entity E identified by EKey as natural(Int) { n: Int }\n}\n";
+        var (asm, files) = Build(src);
+        FileContents(files, "C/ValueObjects/EKey.cs")
+            .ShouldContain("public static bool TryParse(string? value, [NotNullWhen(true)] out EKey? result)");
+
+        var eKey = asm.GetType("C.EKey")!;
+        var tryParse = eKey.GetMethod("TryParse", BindingFlags.Public | BindingFlags.Static)!;
+
+        var okArgs = new object?[] { "7", null };
+        ((bool)tryParse.Invoke(null, okArgs)!).ShouldBeTrue();
+        eKey.GetProperty("Value")!.GetValue(okArgs[1]).ShouldBe(7);
+
+        var badArgs = new object?[] { "nope", null };
+        ((bool)tryParse.Invoke(null, badArgs)!).ShouldBeFalse();
+        badArgs[1].ShouldBeNull();
+    }
+
     // ---- R11.2 / R11.3 — repository interface ------------------------------
 
     private const string OrderAggregate = """

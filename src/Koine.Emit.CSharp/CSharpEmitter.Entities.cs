@@ -280,6 +280,12 @@ public sealed partial class CSharpEmitter
                 sb.Append('\n');
             }
 
+            sb.Append(Indent).Append("public static bool TryParse(string? value, [NotNullWhen(true)] out ")
+              .Append(idName).Append("? result)\n");
+            sb.Append(Indent).Append("{\n");
+            WriteRefStubBlockBody(sb);
+            sb.Append('\n');
+
             sb.Append(Indent).Append("protected override IEnumerable<object?> GetEqualityComponents()\n");
             sb.Append(Indent).Append("{\n");
             WriteRefStubBlockBody(sb);
@@ -315,6 +321,37 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append("public static ").Append(idName).Append(" New()\n");
             sb.Append(Indent).Append(Indent).Append("=> new(Guid.NewGuid());\n\n");
         }
+
+        // Every identity strategy gets a TryParse satisfying ASP.NET Core Minimal APIs'
+        // TryParse binding convention (issue #1649), so a typed ID binds from a query-string
+        // or route value instead of falling back to (and crashing on) inferred-body binding.
+        sb.Append(Indent).Append("public static bool TryParse(string? value, [NotNullWhen(true)] out ")
+          .Append(idName).Append("? result)\n");
+        sb.Append(Indent).Append("{\n");
+        if (validates)
+        {
+            // A natural string key: TryParse re-applies the same "not blank" rule the
+            // constructor enforces, rather than calling it and catching the exception.
+            sb.Append(Indent).Append(Indent).Append("if (string.IsNullOrWhiteSpace(value))\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("result = null;\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("return false;\n");
+            sb.Append(Indent).Append(Indent).Append("}\n\n");
+            sb.Append(Indent).Append(Indent).Append("result = new(value);\n");
+            sb.Append(Indent).Append(Indent).Append("return true;\n");
+        }
+        else
+        {
+            sb.Append(Indent).Append(Indent).Append("if (").Append(backingType).Append(".TryParse(value, out var parsed))\n");
+            sb.Append(Indent).Append(Indent).Append("{\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("result = new(parsed);\n");
+            sb.Append(Indent).Append(Indent).Append(Indent).Append("return true;\n");
+            sb.Append(Indent).Append(Indent).Append("}\n\n");
+            sb.Append(Indent).Append(Indent).Append("result = null;\n");
+            sb.Append(Indent).Append(Indent).Append("return false;\n");
+        }
+
+        sb.Append(Indent).Append("}\n\n");
 
         sb.Append(Indent).Append("protected override IEnumerable<object?> GetEqualityComponents()\n");
         sb.Append(Indent).Append("{\n");

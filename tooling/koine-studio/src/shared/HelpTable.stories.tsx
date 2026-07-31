@@ -1,17 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/preact-vite';
 import { ShortcutsTable } from '@/shared/HelpTable';
 import { helpRows } from '@/shell/ideUtils';
+import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 
 // The keyboard-shortcuts table rendered into the shared createModal() body (src/shared/help.ts). Each
 // ShortcutRow's chord is split on '+' into one .koi-kbd keycap per segment; a literal 'mod' segment
 // renders as ⌘/Ctrl per platform (src/shared/platform.ts's modKey). `helpRows()` (src/shell/ideUtils.ts)
-// is the real production data, so this story doubles as a visual check of the actual shortcuts list.
+// is the real production data, so this story doubles as a visual check of the actual shortcuts list —
+// rendered with the default bindings (no Settings → Keyboard override) for a deterministic story.
 const meta = {
   title: 'Panels/ShortcutsTable',
   component: ShortcutsTable,
   parameters: { layout: 'padded' },
   args: {
-    rows: helpRows(),
+    rows: helpRows(DEFAULT_BINDINGS),
   },
 } satisfies Meta<typeof ShortcutsTable>;
 

@@ -1050,4 +1050,70 @@ public class PhpConformanceTests
             + "misclassify as a value object (a fatal call to the undefined Status::equals()):\n"
             + string.Join("\n", run.Errors));
     }
+
+    /// <summary>
+    /// Issue #1633: the sibling gap the previous test's doc comment flags as out of scope for #1620 —
+    /// <see cref="Koine.Compiler.Ast.TypeResolver.IsValueLike"/>/<c>IsUserType</c>, used by
+    /// <c>PhpEmitter.ValueObjects.cs</c>'s <c>WriteEquals</c> to decide whether a field compares via
+    /// PHP <c>===</c> or a structural <c>-&gt;equals()</c> call. #1641 made <c>IsValueLike</c>/
+    /// <c>IsUserType</c> themselves context-aware (routing through the resolver's own <c>Context</c>),
+    /// but <c>WriteEquals</c>'s supporting <c>resolver</c> was constructed with no context at all
+    /// (<c>new TypeResolver(emit.Index)</c>), so #1641 alone was a no-op for this call site:
+    /// <c>ModelIndex.Classify(null, "Status")</c> still falls through to the context-blind global
+    /// answer, and <c>Shipping</c>'s unrelated <c>value Status</c> (registered after <c>Billing</c>'s
+    /// own <c>enum Status</c>) still wins. Before the fix, calling the generated
+    /// <c>Invoice::equals()</c> itself (not just a derived member built from <c>==</c>, which
+    /// <see cref="PhpExpressionTranslator"/> already resolves correctly since #1620) fatals on a call
+    /// to the undefined <c>Status::equals()</c> — a PHP backed enum has no such method. Only executing
+    /// the emitted PHP proves this; skipped (not failed) when no <c>php</c> interpreter is present
+    /// locally, CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Same_named_type_across_two_contexts_resolves_the_correct_context_for_structural_equals()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status { Open Closed }
+              value Invoice {
+                status: Status
+                archivedStatus: Status
+              }
+            }
+            context Shipping {
+              value Status { code: Int }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Billing/Enums/Status.php';
+            require __DIR__ . '/src/Billing/ValueObjects/Invoice.php';
+
+            $a = new Koine\Billing\ValueObjects\Invoice(Koine\Billing\Enums\Status::OPEN, Koine\Billing\Enums\Status::OPEN);
+            $b = new Koine\Billing\ValueObjects\Invoice(Koine\Billing\Enums\Status::OPEN, Koine\Billing\Enums\Status::OPEN);
+            if ($a->equals($b) !== true) {
+                fwrite(STDERR, "expected equals() true for two identical Invoices, got " . var_export($a->equals($b), true) . "\n");
+                exit(1);
+            }
+
+            $c = new Koine\Billing\ValueObjects\Invoice(Koine\Billing\Enums\Status::OPEN, Koine\Billing\Enums\Status::CLOSED);
+            if ($a->equals($c) !== false) {
+                fwrite(STDERR, "expected equals() false when archivedStatus differs, got " . var_export($a->equals($c), true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+
+        run.Ok.ShouldBeTrue(
+            "A same-named Status in another context must not make Billing.Invoice's generated equals() "
+            + "misclassify its own enum-typed members as value-like (a fatal call to the undefined "
+            + "Status::equals()):\n"
+            + string.Join("\n", run.Errors));
+    }
 }
