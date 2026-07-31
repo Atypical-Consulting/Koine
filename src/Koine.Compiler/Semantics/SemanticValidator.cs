@@ -600,7 +600,7 @@ public sealed class SemanticValidator
                 ValidateMembersAndInvariants(v.Members, v.Invariants, index, resolver, enumMembers, diagnostics, SpecNames(index, v.Name));
                 if (v.IsQuantity)
                 {
-                    ValidateQuantity(v, index, diagnostics);
+                    ValidateQuantity(v, index, resolver, diagnostics);
                 }
 
                 break;
@@ -702,7 +702,7 @@ public sealed class SemanticValidator
                 CqrsValidator.ValidateReadModel(rm, index, resolver, enumMembers, diagnostics);
                 break;
             case QueryDecl q:
-                CqrsValidator.ValidateQuery(q, index, diagnostics);
+                CqrsValidator.ValidateQuery(q, index, resolver, diagnostics);
                 break;
         }
     }
@@ -796,10 +796,12 @@ public sealed class SemanticValidator
             if (m.Initializer is not null)
             {
                 // A constant default for an enum-typed field must name a member of
-                // THAT enum (not just any enum in the model).
+                // THAT enum (not just any enum in the model). Resolved against the member's
+                // own declaring context (#1711) so a same-named, differently-kinded type
+                // declared elsewhere can't shadow it via the flat lookup.
                 if (m.Initializer is IdentifierExpr enumDefault
-                    && index.Classify(m.Type.Name) == TypeKind.Enum
-                    && index.TryGetDecl(m.Type.Name, out TypeDecl decl)
+                    && index.Classify(resolver.Context, m.Type.Name) == TypeKind.Enum
+                    && index.TryGetDecl(resolver.Context, m.Type.Name, out TypeDecl decl)
                     && decl is EnumDecl en)
                 {
                     if (!en.MemberNames.Contains(enumDefault.Name))
@@ -1256,15 +1258,20 @@ public sealed class SemanticValidator
     /// amount member and exactly one enum-typed unit member, and nothing else, so the
     /// generated unit-checked arithmetic is well-defined.
     /// </summary>
-    private static void ValidateQuantity(ValueObjectDecl q, ModelIndex index, List<Diagnostic> diagnostics)
+    private static void ValidateQuantity(ValueObjectDecl q, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         var memberNames = MemberNameSet(q.Members);
 
         // The amount is a non-optional Decimal: this keeps scalar */÷ exact (an Int amount
-        // would silently integer-divide / truncate when scaled by a fraction).
+        // would silently integer-divide / truncate when scaled by a fraction). "Decimal" is a
+        // primitive builtin (R13.2 uniqueness doesn't apply to it), so this needs no context.
         bool IsAmount(Member m) => m.Type.Name == "Decimal" && !m.Type.IsOptional
             && !MemberAnalysis.IsDerived(m, memberNames);
-        bool IsUnit(Member m) => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional
+
+        // Resolved against the quantity's OWN declaring context (resolver.Context) — a same-named
+        // but differently-kinded type declared in another context (R13.2) must not shadow it via
+        // the flat, last-write-wins ModelIndex.Classify(name) overload (#1711).
+        bool IsUnit(Member m) => index.Classify(resolver.Context, m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional
             && !MemberAnalysis.IsDerived(m, memberNames);
 
         // One pass, calling the local predicates directly (no Count(delegate) closures).

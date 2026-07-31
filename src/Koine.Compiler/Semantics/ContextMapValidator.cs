@@ -76,15 +76,19 @@ internal static class ContextMapValidator
                     ? (r.Upstream, r.Downstream) : (r.Downstream, r.Upstream);
                 foreach (var t in r.SharedTypes)
                 {
-                    if (!index.DeclaresType(r.Upstream, t) && !index.DeclaresType(r.Downstream, t))
+                    var declaredByUpstream = index.DeclaresType(r.Upstream, t);
+                    if (!declaredByUpstream && !index.DeclaresType(r.Downstream, t))
                     {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownSharedKernelType,
                             $"shared-kernel type '{t}' is declared by neither '{r.Upstream}' nor '{r.Downstream}'", r.Span));
                     }
-                    else if (index.Classify(t) is TypeKind.Entity or TypeKind.Aggregate)
+                    // Resolved against whichever partner actually declares it (#1711) so a
+                    // same-named type declared elsewhere in the model can't shadow it via the
+                    // flat lookup.
+                    else if (index.Classify(declaredByUpstream ? r.Upstream : r.Downstream, t) is TypeKind.Entity or TypeKind.Aggregate)
                     {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SharedKernelNotShareable,
-                            $"shared-kernel type '{t}' is an {(index.Classify(t) == TypeKind.Entity ? "entity" : "aggregate")}; a shared kernel may contain only value objects and enums (identity-bearing types belong to one context)", r.Span));
+                            $"shared-kernel type '{t}' is an {(index.Classify(declaredByUpstream ? r.Upstream : r.Downstream, t) == TypeKind.Entity ? "entity" : "aggregate")}; a shared kernel may contain only value objects and enums (identity-bearing types belong to one context)", r.Span));
                     }
                     else if (kernelOf.TryGetValue(t, out var first) && first != kernelPair)
                     {

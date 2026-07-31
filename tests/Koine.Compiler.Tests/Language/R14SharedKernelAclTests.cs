@@ -312,6 +312,21 @@ public class R14SharedKernelAclTests
     }
 
     [Fact]
+    public void Shared_type_kind_resolves_against_its_declaring_partner_when_a_later_context_reuses_the_type_name()
+    {
+        // #1711 sibling: the shared-kernel entity/aggregate check's `index.Classify(t)` was flat and
+        // context-blind. Other's later, differently-kinded (entity) "Ref" was overwriting Sales's own
+        // value object "Ref" in ModelIndex's flat lookup, falsely rejecting a genuinely shareable value.
+        const string src = """
+            context Sales { value Ref { code: String } }
+            context Shipping { value Pack { r: Int } }
+            context Other { entity Ref identified by RefId { x: Int } }
+            contextmap { Sales <-> Shipping : shared-kernel { Ref } }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.SharedKernelNotShareable);
+    }
+
+    [Fact]
     public void A_shared_enum_emits_into_the_kernel_namespace_and_compiles()
     {
         var (asm, files) = Build("""

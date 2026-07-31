@@ -396,6 +396,26 @@ public class R12ApplicationTests
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.QueryResultNotReadModel);
     }
 
+    [Fact]
+    public void Query_result_type_resolves_against_its_own_context_when_a_later_context_reuses_the_type_name()
+    {
+        // #1711 sibling: ValidateQuery's `index.Classify(resultName)` was flat and context-blind.
+        // Other's later, differently-kinded "Summary" was overwriting Sales's own read model
+        // "Summary" in ModelIndex's flat lookup, falsely rejecting a genuinely valid query.
+        const string src = """
+            context Sales {
+              value Order { n: Int }
+              readmodel Summary from Order { n }
+              query Q(n: Int): Summary
+            }
+
+            context Other {
+              value Summary { code: Int }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.QueryResultNotReadModel);
+    }
+
     // ---- soft keywords -----------------------------------------------------
 
     [Fact]

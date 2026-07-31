@@ -94,7 +94,7 @@ internal static class CqrsValidator
     /// Validates a query (R12.4): criteria parameter types and names, and that the
     /// result is a declared read model or a <c>List</c> of one.
     /// </summary>
-    public static void ValidateQuery(QueryDecl q, ModelIndex index, List<Diagnostic> diagnostics)
+    public static void ValidateQuery(QueryDecl q, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         // Criteria become positional record properties (PascalCased), so dedup on the
         // emitted property key and reject names that collide with record members.
@@ -119,7 +119,9 @@ internal static class CqrsValidator
         var resultName = q.ResultType.Name == ModelIndex.ListTypeName
             ? q.ResultType.Element?.Name
             : q.ResultType.Name;
-        if (resultName is not null && index.Classify(resultName) != TypeKind.ReadModel)
+        // Resolved against the query's own declaring context (#1711) so a same-named,
+        // differently-kinded type declared elsewhere can't shadow it via the flat lookup.
+        if (resultName is not null && index.Classify(resolver.Context, resultName) != TypeKind.ReadModel)
         {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.QueryResultNotReadModel,
                 $"query '{q.Name}' must return a read model or 'List<readmodel>', not '{q.ResultType.Name}'",
