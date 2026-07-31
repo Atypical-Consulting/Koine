@@ -123,23 +123,33 @@ internal sealed class LocalScopeStack
     /// <summary>
     /// Layers the currently-bound names, at their innermost known type, over <paramref name="memberScope"/>
     /// — the effective scope a translator resolves an expression in, where a local shadows a same-named
-    /// member. Names whose innermost binding has no known type are skipped (there is no type to overlay),
-    /// NOT reported at an outer binding's type.
+    /// member. Names whose innermost binding has no known type are, by default, skipped (there is no type
+    /// to overlay) — NOT reported at an outer binding's type.
     /// <para>
     /// This is every translator's <c>EffectiveScope()</c>, which each one wrote out identically and calls
     /// on essentially every <c>Infer</c> — so it lives here, iterating the stacks directly rather than
     /// through an allocating <c>IEnumerable</c> on that hot path.
     /// </para>
+    /// <para>
+    /// Pass <paramref name="unresolvedType"/> to instead bind such a name to that sentinel type, so it
+    /// still SHADOWS a same-named member rather than letting the member answer for it by coincidence —
+    /// Rust's #1498 (Gap B) fix, which the other five targets have not needed. Defaults to
+    /// <see langword="null"/> (skip), preserving every existing caller's behavior unchanged.
+    /// </para>
     /// </summary>
-    public TypeScope Overlay(TypeScope memberScope, ModelIndex index)
+    public TypeScope Overlay(TypeScope memberScope, ModelIndex index, KoineType? unresolvedType = null)
     {
         TypeScope scope = memberScope;
         foreach (KeyValuePair<string, Stack<Binding>> kv in _stacks)
         {
-            if (kv.Value.Count > 0 && kv.Value.Peek().Type is { } type)
+            if (kv.Value.Count == 0)
             {
-                scope = scope.WithRef(kv.Key, type, index);
+                continue;
             }
+
+            scope = kv.Value.Peek().Type is { } type
+                ? scope.WithRef(kv.Key, type, index)
+                : unresolvedType is { } masked ? scope.With(kv.Key, masked) : scope;
         }
 
         return scope;
