@@ -549,25 +549,8 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var owned = translator.TranslateOwned(value, expectedEnum);
-                var underlyingDeclared = UnderlyingType(m.Type);
                 TypeRef? valueType = translator.InferType(value);
-
-                // Coerce against the underlying (non-optional) type, never m.Type directly — for an
-                // optional-declared member, NumericCoercionWrap short-circuits on declared.IsOptional
-                // and would otherwise silently skip a real Int-into-Decimal mismatch, emitting
-                // Some(5) against an Option<Decimal> parameter (the same gap #1437 fixed for the
-                // sibling defaultedParams loop below). CoerceNumericBody (#1491) dispatches to whichever
-                // of NumericCoercionWrap / OptionBodyNumericCoercionMap applies — see #1468 for why the
-                // latter (the `.map(...)` form) is needed when the initializing expression is itself
-                // Option-typed and numerically mismatched.
-                owned = CoerceNumericBody(underlyingDeclared, valueType, owned);
-
-                // Wrap in Some(...) only when the initializing expression isn't already Option-typed —
-                // the validator legally allows an Option-typed expression (e.g. a `T?` factory
-                // parameter) to initialize an optional-declared required member, and unconditionally
-                // wrapping it would double-wrap into Option<Option<T>>, a real cargo check E0308
-                // (the same shape #1437's follow-up fixed for the sibling defaultedParams loop).
-                args.Add(m.Type.IsOptional && !translator.IsOptional(value) ? $"Some({owned})" : owned);
+                args.Add(ReconcileFactoryCtorArg(valueType, m.Type, owned));
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
@@ -597,26 +580,14 @@ public sealed partial class RustEmitter
             {
                 var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var owned = translator.TranslateOwned(value, expectedEnum);
-                var underlyingDeclared = UnderlyingType(m.Type);
                 TypeRef? valueType = translator.InferType(value);
 
-                // Coerce against the underlying (non-optional) type, never `m.Type` directly — for an
-                // already-optional-declared member, `NumericCoercionWrap` short-circuits on
-                // `declared.IsOptional` and would otherwise silently skip a real Int-into-Decimal
-                // mismatch, emitting `Some(5)` against an `Option<Decimal>` parameter (a real `cargo
-                // check` E0308, #1437). CoerceNumericBody (#1491) dispatches to whichever of
-                // NumericCoercionWrap / OptionBodyNumericCoercionMap applies — see #1468 for why the
-                // latter (the `.map(...)` form) is needed when the initializing expression is itself
-                // Option-typed and numerically mismatched (see the sibling `required` loop above).
-                owned = CoerceNumericBody(underlyingDeclared, valueType, owned);
-
-                // Wrap in `Some(...)` only when the initializing expression isn't already
-                // Option-typed — mirroring WriteCommand's Transition-handling guard above. Reachable
-                // now that this bucket also covers already-optional-declared members (#1437): the
-                // validator legally allows an Option-typed expression (e.g. another `T?` factory
-                // parameter) to initialize one, and unconditionally wrapping it would double-wrap
-                // into `Option<Option<T>>`, a real `cargo check` E0308.
-                args.Add(translator.IsOptional(value) ? owned : $"Some({owned})");
+                // The ctor parameter is unconditionally Option<T> regardless of the member's own
+                // declared optionality (see the `m.Type with { IsOptional = true }` precedent below at
+                // `ctorParams.AddRange`), so reconcile against a forced-optional view of the declared
+                // type — otherwise NeedsSomeWrap would wrongly come back false for a plain
+                // (non-optional-declared) defaulted member.
+                args.Add(ReconcileFactoryCtorArg(valueType, m.Type with { IsOptional = true }, owned));
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
@@ -633,6 +604,37 @@ public sealed partial class RustEmitter
         }
 
         return args;
+    }
+
+    /// <summary>
+    /// Reconciles an explicit-init factory ctor argument's already-translated owned Rust expression
+    /// against the member's <paramref name="declared"/> type, reusing the same shared
+    /// <see cref="BranchReconciliation"/> decision (#1368) every code emitter's ternary-branch
+    /// reconciliation already applies (#1344, and Java's own #1519/PR #1540 <c>ReconcileFactoryCtorArg</c>)
+    /// rather than a hand-rolled, per-target duplicate (#1543). Composed exactly as
+    /// <c>WriteReconciledBranch</c>/Java's version do: widen inside, wrap outside.
+    /// <see cref="BranchReconciliation.NeedsWiden"/> widens a non-optional <c>Int</c> value to
+    /// <c>Decimal</c>; <see cref="BranchReconciliation.NeedsOptionalWiden"/> does the same when the value
+    /// is itself <c>Option</c>-typed, via <c>.map(Decimal::from)</c> instead (an already-<c>Option</c>-shaped
+    /// value can't be widened with a bare call); <see cref="BranchReconciliation.NeedsSomeWrap"/> lifts a
+    /// non-optional value into <c>Some(...)</c> against an optional-declared member.
+    ///
+    /// <para><b>One dimension <see cref="BranchReconciliation"/> deliberately doesn't model</b> (mirrors
+    /// #975's widen-only conditional-join rule): the <c>Decimal</c> → <c>Int</c> NARROWING direction, which
+    /// Rust's ctor-arg coercion also defensively supports — real, validator-unreachable-but-tested behavior
+    /// (see <c>RustConformanceTests.Factory_explicit_init_of_an_optional_declared_required_member_from_an_option_typed_narrowing_numeric_body_is_map_coerced</c>).
+    /// When neither widen dimension fires, fall back to the pre-existing, unchanged
+    /// <see cref="NumericCoercionWrap"/>/<see cref="OptionBodyNumericCoercionMap"/> pickers (via
+    /// <see cref="CoerceNumericBody"/>), against the member's underlying (non-optional) type exactly as
+    /// before this migration — preserving today's byte-identical narrowing output.</para>
+    /// </summary>
+    private static string ReconcileFactoryCtorArg(TypeRef? valueType, TypeRef declared, string body)
+    {
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        var coerced = needs.NeedsWiden ? $"Decimal::from({body})"
+            : needs.NeedsOptionalWiden ? $"{body}.map(Decimal::from)"
+            : CoerceNumericBody(UnderlyingType(declared), valueType, body);
+        return needs.NeedsSomeWrap ? $"Some({coerced})" : coerced;
     }
 
     /// <summary>The enum type expected on the RHS of a transition (so a bare enum member qualifies).</summary>
