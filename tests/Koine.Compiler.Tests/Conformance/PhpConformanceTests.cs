@@ -1282,4 +1282,70 @@ public class PhpConformanceTests
             "Projecting Item to ItemSummary must bind Ordering's own Status enum (not Billing's wrongly "
             + "imported same-named sibling value object) at runtime:\n" + string.Join("\n", run.Errors));
     }
+
+    /// <summary>
+    /// Issue #1701 Task 3 — a narrower sibling gap in the same area as the two tests above:
+    /// <c>WriteMethodDoc</c>/<c>docParams</c> (the phpstan <c>@param</c>/<c>@return</c> PHPDoc
+    /// refiner) passed the read model's own context UNIFORMLY to <c>DocType</c> for every field,
+    /// including a direct one whose source lives in a foreign context. Here <c>Billing</c>'s
+    /// <c>ItemSummary</c> directly projects <c>Ordering.Item</c>'s <c>statuses: List&lt;Status&gt;</c>
+    /// (an <c>Ordering</c>-owned enum), while <c>Billing</c> separately declares its own,
+    /// differently-kinded, same-named <c>Status</c> value object — exactly the collection-nested case
+    /// <c>DocType</c> recurses into (a non-collection field's <c>DocType</c> call is null and skipped,
+    /// per <see cref="PhpTypeMapper.DocType"/>'s doc comment).
+    /// <para>
+    /// Like the sibling same-named-sibling test above, this does NOT actually regress before the fix:
+    /// <c>PhpTypeMapper.MapBase</c>'s enum/non-enum branches render the identical
+    /// <c>PhpNaming.ClassName</c> string regardless of which context <c>Classify</c> resolves against,
+    /// so <c>list&lt;Status&gt;</c> renders correctly either way today. This test pins that CORRECT
+    /// behavior and guards it: threading the field's own resolved context through
+    /// <c>WriteMethodDoc</c>'s per-parameter overload keeps this call site consistent with every other
+    /// context-aware call site in the file (#1638) and protects it the moment <c>Map</c>/<c>DocType</c>
+    /// ever gains a visible enum/non-enum divergence (the <c>IsEnum</c> gap the sibling test's own
+    /// comment flags as the actually-observable layer, one level down in
+    /// <c>PhpTypeMapperTests.IsEnum_resolves_bare_reference_against_declaring_context_not_flat_last_writer</c>).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_collection_field_doc_type_resolves_against_the_source_s_own_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Item }
+
+              readmodel ItemSummary from Item {
+                statuses
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Pending
+                Shipped
+                Delivered
+              }
+
+              value Item {
+                statuses: List<Status>
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var summary = result.Files.Single(f => f.RelativePath == "src/Billing/ReadModels/ItemSummary.php").Contents;
+        summary.ShouldContain("@param list<Status> $statuses");
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+        r.Ok.ShouldBeTrue(
+            "ItemSummary's direct 'statuses' collection field must refine its phpstan doc tag against "
+            + "Ordering's own Status enum, not Billing's differently-kinded, same-named sibling value "
+            + "object:\n" + string.Join("\n", r.Errors));
+    }
 }

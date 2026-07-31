@@ -49,14 +49,18 @@ public sealed partial class PhpEmitter
         var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
 
         // Each field carries its PHP type-hint, camelCase property name, the projection
-        // expression (rooted at $src) used in the mapper, and its declared Koine type (for the
-        // phpstan PHPDoc refinement of a collection/Range field — null when a direct field's source
-        // member type can't be resolved, i.e. the `mixed` fallback).
-        var fields = new List<(string PhpType, string Prop, string Rhs, TypeRef? Type)>();
+        // expression (rooted at $src) used in the mapper, its declared Koine type (for the phpstan
+        // PHPDoc refinement of a collection/Range field — null when a direct field's source member
+        // type can't be resolved, i.e. the `mixed` fallback), and the context THAT type's own
+        // declaration belongs to (a direct field mirrors its source's context; a projected field's
+        // literal type belongs to this read model's own context) — so the PHPDoc refinement below
+        // resolves a foreign-context collection element the same way its native type-hint already
+        // does, instead of uniformly against this read model's own context (#1701).
+        var fields = new List<(string PhpType, string Prop, string Rhs, TypeRef? Type, string DocContext)>();
         foreach (ReadModelField f in rm.Fields)
         {
             var prop = PhpNaming.PropertyName(f.Name);
-            string phpType, rhs;
+            string phpType, rhs, docContext;
             TypeRef? fieldType;
             if (f.Projection is null)
             {
@@ -70,12 +74,14 @@ public sealed partial class PhpEmitter
                     var ownerContext = emit.Index.ResolveOwner(rm.SourceType, contextName).Owner ?? contextName;
                     phpType = typeMapper.Map(t, ownerContext);
                     fieldType = t;
+                    docContext = ownerContext;
                     CollectImportHints(t, ownerContext, symbolContext);
                 }
                 else
                 {
                     phpType = "mixed";
                     fieldType = null;
+                    docContext = contextName;
                 }
 
                 // A DERIVED (computed) source member is emitted as a getter METHOD on the source
@@ -93,11 +99,12 @@ public sealed partial class PhpEmitter
             {
                 phpType = typeMapper.Map(f.Type!, contextName);
                 fieldType = f.Type;
+                docContext = contextName;
                 var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? translator.Context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, PhpExpressionTranslator.NameMode.Property, expectedEnum);
             }
 
-            fields.Add((phpType, prop, rhs, fieldType));
+            fields.Add((phpType, prop, rhs, fieldType, docContext));
         }
 
         var sb = new StringBuilder();
@@ -112,7 +119,7 @@ public sealed partial class PhpEmitter
         // `array<K,V>` / `Range<T>`. On a promoted parameter the `@param` types property and parameter.
         var docParams = fields
             .Where(f => f.Type is not null)
-            .Select(f => (f.Prop, f.Type!))
+            .Select(f => (f.Prop, f.Type!, (string?)f.DocContext))
             .ToList();
         WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null, contextName);
 
@@ -125,7 +132,7 @@ public sealed partial class PhpEmitter
         {
             for (int i = 0; i < fields.Count; i++)
             {
-                var (phpType, prop, _, _) = fields[i];
+                var (phpType, prop, _, _, _) = fields[i];
                 bool last = i == fields.Count - 1;
                 sb.Append(Indent).Append(Indent)
                   .Append("public ").Append(phpType).Append(" $").Append(prop);
@@ -153,7 +160,7 @@ public sealed partial class PhpEmitter
         }
         else
         {
-            foreach (var (_, _, rhs, _) in fields)
+            foreach (var (_, _, rhs, _, _) in fields)
             {
                 sb.Append(Indent).Append(Indent).Append(rhs).Append(",\n");
             }
