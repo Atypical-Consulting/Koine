@@ -13,6 +13,8 @@ import {
 } from '@/shell/ideUtils';
 import type { LspDiagnostic, Range } from '@/lsp/lsp';
 import type { CheckResult, ContextMapResult } from '@/lsp/protocol';
+import { DEFAULT_BINDINGS } from '@/editor/keybindings';
+import { prettyChord } from '@/shared/platform';
 
 // ---------------------------------------------------------------------------
 // pathToFileUri / fileUriToPath — round-trip tests
@@ -403,7 +405,7 @@ describe('renderCheckMarkdown', () => {
 
 describe('helpRows', () => {
   test('returns a non-empty list of {keys, description} rows', () => {
-    const rows = helpRows();
+    const rows = helpRows(DEFAULT_BINDINGS);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(typeof row.keys).toBe('string');
@@ -413,13 +415,33 @@ describe('helpRows', () => {
     }
   });
 
-  test('includes the command-palette and shortcuts-help bindings', () => {
-    const rows = helpRows();
-    expect(rows).toContainEqual({ keys: 'mod+K', description: 'Command palette' });
+  test('includes the command-palette and shortcuts-help bindings, resolved from the defaults', () => {
+    const rows = helpRows(DEFAULT_BINDINGS);
+    expect(rows).toContainEqual({
+      keys: prettyChord(DEFAULT_BINDINGS.commandPalette),
+      description: 'Command palette',
+    });
     expect(rows).toContainEqual({ keys: 'F1', description: 'Keyboard shortcuts' });
   });
 
   test('is deterministic across calls', () => {
-    expect(helpRows()).toEqual(helpRows());
+    expect(helpRows(DEFAULT_BINDINGS)).toEqual(helpRows(DEFAULT_BINDINGS));
+  });
+
+  // #1627: commandPalette and saveAll are rebindable (Settings → Keyboard, #432) — their row must
+  // track a resolved override instead of the hardcoded default, matching #1421's fix for the
+  // toolbar's palette-hint keycap.
+  test('renders the live resolved chord for a rebound commandPalette, not the default', () => {
+    const resolved = { ...DEFAULT_BINDINGS, commandPalette: 'Mod-j' };
+    const row = helpRows(resolved).find((r) => r.description === 'Command palette');
+    expect(row?.keys).toBe(prettyChord('Mod-j'));
+    expect(row?.keys).not.toBe(prettyChord(DEFAULT_BINDINGS.commandPalette));
+  });
+
+  test('renders the live resolved chord for a rebound saveAll, not the default', () => {
+    const resolved = { ...DEFAULT_BINDINGS, saveAll: 'Mod-Shift-s' };
+    const row = helpRows(resolved).find((r) => r.description === 'Save all unsaved files');
+    expect(row?.keys).toBe(prettyChord('Mod-Shift-s'));
+    expect(row?.keys).not.toBe(prettyChord(DEFAULT_BINDINGS.saveAll));
   });
 });
