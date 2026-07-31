@@ -188,7 +188,11 @@
   background: color-mix(in srgb, var(--koi-accent) 10%, transparent);
 
   .koi-ctx-name {
-    color: var(--koi-accent);
+    // TEXT-ONLY swap (issue #1704): raw --koi-accent measures ~3.30:1 (rest) / ~3.08:1 (:hover) in the
+    // light theme against this row's real --koi-paper-2 backdrop (via #leftrail) — sub-AA.
+    // --koi-accent-text clears ≥4.5:1 at both the 10% resting and 16% hover tint in both themes (see
+    // tokens.test.ts). Background wash + rail glyph are unchanged.
+    color: var(--koi-accent-text);
     font-weight: 600;
   }
 
