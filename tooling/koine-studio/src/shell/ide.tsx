@@ -1320,6 +1320,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // now (#757). It binds the DIAGRAM_* gesture listeners on #center-visual and renders the mobile zone bar;
   // ide.tsx reaches its add-construct / annotate / review-comment entry points through the handle below.
   const canvasWrite = createCanvasWrite({
+    store: appStore,
     editor,
     workspace,
     lsp,
@@ -1388,6 +1389,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // palette actions all live in the layout controller now (#757). View-only state, persisted via
   // layoutStore — it NEVER round-trips into the .koi model.
   const layoutController = createLayoutController({
+    store: appStore,
     splitEl,
     setAxis: (axis) => controller.setAxis(axis),
     toggleRightCollapsed: () => appStore.getState().toggleRightCollapsed(),
@@ -1472,6 +1474,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // controller now (#757). Newing it up RUNS the boot ladder; init() returns its teardown — so init() is
   // now a thin composition root: construct deps → new up controllers → return the aggregate teardown.
   const lifecycleBoot = createLifecycleBoot({
+    store: appStore,
     lsp: {
       onServerRestart: (cb) => lsp.onServerRestart(cb),
       start: () => lsp.start(),

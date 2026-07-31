@@ -24,12 +24,9 @@ const ALLOWLIST = [
   'src/diagrams/diagramContract.ts',
   'src/main.ts',
   'src/settings/theme.ts',
-  'src/shell/canvasWrite.tsx',
   'src/shell/explorer.tsx',
   'src/shell/ExplorerPanel.tsx',
   'src/shell/ide.tsx',
-  'src/shell/layout.ts',
-  'src/shell/lifecycleBoot.ts',
   'src/store/hooks.ts',
 ].sort();
 

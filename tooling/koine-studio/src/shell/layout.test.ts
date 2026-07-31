@@ -14,11 +14,12 @@ const { resizerDisposers, initEdgeResizerMock } = vi.hoisted(() => {
 vi.mock('@/shell/resize', () => ({ initEdgeResizer: initEdgeResizerMock }));
 
 import { createLayoutController, type LayoutController, type LayoutControllerDeps } from '@/shell/layout';
+import { appStore, createAppStore } from '@/store/index';
 
-// layout.ts subscribes to the appStore SINGLETON now (panelSide/sideRail live in the uiChrome slice),
-// so an undisposed controller leaves a live subscription that a later test's toggle would re-fire —
+// layout.ts subscribes to its injected store (panelSide/sideRail live in the uiChrome slice), so an
+// undisposed controller leaves a live subscription that a later test's toggle would re-fire —
 // stacking extra wireRailResizers → initEdgeResizer calls and breaking the call-count assertions. Track
-// every controller and dispose them after each test so the singleton subscription never leaks across `it`s.
+// every controller and dispose them after each test so the subscription never leaks across `it`s.
 const created: LayoutController[] = [];
 function create(deps: LayoutControllerDeps): LayoutController {
   const ctrl = createLayoutController(deps);
@@ -39,6 +40,10 @@ function mountLayoutDom(): void {
 
 function makeDeps(over: Partial<LayoutControllerDeps> = {}): LayoutControllerDeps {
   return {
+    // A fresh store per controller by default (issue #1351): the controller must read/write whatever
+    // store it is handed, not the global singleton — callers that want to assert against a KNOWN store
+    // instance pass their own via overrides (see the "injected, not the global" test below).
+    store: createAppStore(),
     splitEl: document.getElementById('split') as HTMLElement,
     setAxis: vi.fn(),
     toggleRightCollapsed: vi.fn(),
@@ -109,6 +114,16 @@ describe('layout controller', () => {
     create(deps);
     expect(deps.splitEl.dataset.panelSide).toBe('right');
     expect(deps.splitEl.dataset.siderailSide).toBe('left');
+  });
+
+  it('togglePanelSide flips the injected store, not the global appStore singleton (#1351)', () => {
+    const store = createAppStore();
+    const ctrl = create(makeDeps({ store }));
+    ctrl.actions.togglePanelSide();
+    // The controller was handed `store`, not the global singleton — the write must land there…
+    expect(store.getState().panelSide).toBe('right');
+    // …and the global singleton must be left untouched.
+    expect(appStore.getState().panelSide).toBe('bottom');
   });
 
   it('toggleProperties / toggleNavigator flip the chrome-collapse store slices', () => {
