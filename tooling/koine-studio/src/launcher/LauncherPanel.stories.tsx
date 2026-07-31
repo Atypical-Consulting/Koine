@@ -183,25 +183,24 @@ const meta = {
   component: LauncherPanel,
   parameters: {
     layout: 'fullscreen',
-    // TWO real, pre-existing launcher-runtime a11y defects surfaced by bringing this panel under
-    // Chromium axe coverage for the first time (this file, #1160) — not fixture bugs, and not
+    // ONE real, pre-existing launcher-runtime a11y defect surfaced by bringing this panel under
+    // Chromium axe coverage for the first time (this file, #1160) — not a fixture bug, and not
     // fixable from a stories-only change (see the file-level "no launcher runtime changes"
-    // constraint), so they're narrowly gated here rather than left red or silently ignored. Each is
-    // filed as its own follow-up; remove its gate once that issue lands so this file's axe pass
-    // covers the element again:
-    //  - `.lx-kind` (DDD chip) / `.lx-sub` (secondary text) fail color-contrast in BOTH themes
-    //    (#1672) — excluded from the axe context by selector, so no OTHER rule is skipped for them,
-    //    and `.lx-title mark` (a sibling element, already fixed by #1263/#1161) stays fully covered —
-    //    this file's Results story (Task 2) still guards that fix going forward.
+    // constraint), so it's narrowly gated here rather than left red or silently ignored. Filed as its
+    // own follow-up; remove its gate once that issue lands so this file's axe pass covers the element
+    // again:
     //  - `.lx-modepill-label` / `.lx-mchip.on` (the active mode-switch pill/chip) fail color-contrast
-    //    in the LIGHT theme (#1677, surfaced by Task 3's prefix-mode stories) — same excluded-by-
-    //    selector treatment, for the same reason.
-    // A third defect, the selected row's tail `.lx-actbtn` tripping `nested-interactive` inside its
+    //    in the LIGHT theme (#1677, surfaced by Task 3's prefix-mode stories) — excluded from the axe
+    //    context by selector, so no OTHER rule is skipped for them.
+    // A second defect, the selected row's tail `.lx-actbtn` tripping `nested-interactive` inside its
     // `.lx-item[role="option"]`, is now FIXED (#1673: the results list is `role="grid"`/`row`/`gridcell`
-    // rather than `listbox`/`option` — see `ResultRow.tsx`) — no rule-disable needed any more, so full
-    // axe coverage (including `nested-interactive`) runs on every story below.
+    // rather than `listbox`/`option` — see `ResultRow.tsx`) — no rule-disable needed any more. A third,
+    // `.lx-kind` (DDD chip) / `.lx-sub` (secondary text) failing color-contrast in both themes, is also
+    // now FIXED (#1672: per-kind `--koi-ddd-<slug>-ink` text tokens + a scoped `--koi-muted-strong` —
+    // see `tooling/koine-ui/src/tokens.css`) — full axe coverage (including those two elements) runs on
+    // every story below.
     a11y: {
-      context: { exclude: ['.lx-kind', '.lx-sub', '.lx-modepill-label', '.lx-mchip.on'] },
+      context: { exclude: ['.lx-modepill-label', '.lx-mchip.on'] },
     },
   },
   args: {
@@ -283,8 +282,8 @@ export const Results: Story = {
  *  check for `.lx-title mark` on the light `--koi-*` token set. `<mark>` contrast (`--koi-hl-match`) is
  *  a genuine pass here in both themes (raised to a WCAG-AA-compliant value by #1263/#1161, already
  *  merged), so this story is a real regression guard for that fix rather than a known-red placeholder;
- *  `.lx-kind`/`.lx-sub` color-contrast stays excluded by the file-level `meta.parameters.a11y` gate
- *  (#1672), same as every other story in this file. */
+ *  `.lx-kind`/`.lx-sub` color-contrast is also now a genuine pass (#1672, no longer excluded by the
+ *  file-level `meta.parameters.a11y` gate), so this story guards that fix too. */
 export const ResultsLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
@@ -374,7 +373,7 @@ export const SymbolMode: Story = {
  *  (`withTheme('light')`) on the matching `light` background. Note `.lx-modepill-label`'s own
  *  color-contrast stays excluded by the file-level `meta.parameters.a11y` gate (#1677) like every
  *  other story here — this still exercises the rest of the light-theme render (layout, other text,
- *  and the matched `Order` row's own contrast outside the excluded `.lx-kind`/`.lx-sub`) under
+ *  and the matched `Order` row's own `.lx-kind`/`.lx-sub` contrast, a genuine pass since #1672) under
  *  Chromium axe. */
 export const SymbolModeLight: Story = {
   decorators: [withTheme('light')],
@@ -458,10 +457,10 @@ export const PreviewPopulated: Story = {
 };
 
 /** The same auto-populated preview pane as {@link PreviewPopulated}, forced to the light theme
- *  (`withTheme('light')`) on the matching `light` background. Note the preview's own `.pv-head
- *  .lx-kind` chip shares the same excluded selector as the result rows' chips (`meta.parameters.a11y`
- *  gate, #1672) — this still exercises the rest of `.lx-preview`'s light-theme render under Chromium
- *  axe. */
+ *  (`withTheme('light')`) on the matching `light` background. The preview's own `.pv-head .lx-kind`
+ *  chip shares the same `.lx-kind[title=...]` ink rule as the result rows' chips, so this is also a
+ *  genuine color-contrast pass (#1672) alongside the rest of `.lx-preview`'s light-theme render under
+ *  Chromium axe. */
 export const PreviewPopulatedLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
