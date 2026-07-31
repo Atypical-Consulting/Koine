@@ -514,11 +514,11 @@ describe('root reconciliation when a workspace root is removed mid-review (#1689
 
   const rootSelect = (row: Element) => row.querySelector('.koi-changeset-root') as HTMLSelectElement | null;
 
-  test('root removed, count drops to 1: targetRoot resets to null and the picker disappears', () => {
+  test('root removed, count drops to 1: targetRoot resets to null and the picker disappears', async () => {
     const store = storeWithRoots([rootA, rootB], { 'billing/invoice.koi': rootB });
     const { container } = mount(store);
 
-    act(() => {
+    await act(() => {
       store.getState().setRoots([rootA]);
     });
 
@@ -531,12 +531,12 @@ describe('root reconciliation when a workspace root is removed mid-review (#1689
     expect(rootSelect(rows[1])).toBeNull();
   });
 
-  test('root removed, a second root still present: the surviving picker shows the roots[0] fallback', () => {
+  test('root removed, a second root still present: the surviving picker shows the roots[0] fallback', async () => {
     const rootC = 'file:///workspaceC/shared';
     const store = storeWithRoots([rootA, rootB, rootC], { 'billing/invoice.koi': rootB });
     const { container } = mount(store);
 
-    act(() => {
+    await act(() => {
       store.getState().setRoots([rootA, rootC]);
     });
 
@@ -546,11 +546,11 @@ describe('root reconciliation when a workspace root is removed mid-review (#1689
     expect(rootSelect(rows[1])!.value).toBe(rootA);
   });
 
-  test('the still-present root is left untouched', () => {
+  test('the still-present root is left untouched', async () => {
     const store = storeWithRoots([rootA, rootB], { 'billing/invoice.koi': rootB });
     const { container } = mount(store);
 
-    act(() => {
+    await act(() => {
       store.getState().setRoots([rootA, rootB]);
     });
 
