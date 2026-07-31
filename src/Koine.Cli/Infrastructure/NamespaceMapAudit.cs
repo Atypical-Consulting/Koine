@@ -39,6 +39,6 @@ internal static class NamespaceMapAudit
                 $"warning: koine.config namespace-map key '{key}' for target '{target}' does not match any context in the model");
         }
 
-        return warnings ?? (IReadOnlyList<string>)Array.Empty<string>();
+        return (IReadOnlyList<string>?)warnings ?? Array.Empty<string>();
     }
 }
