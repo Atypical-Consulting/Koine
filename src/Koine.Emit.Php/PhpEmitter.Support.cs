@@ -603,10 +603,33 @@ public sealed partial class PhpEmitter
         string? doc,
         string? context)
     {
+        WriteMethodDoc(
+            sb, indent, typeMapper,
+            parameters.Select(p => (p.VarName, p.Type, (string?)null)).ToList(),
+            returnType, doc, context);
+    }
+
+    /// <summary>
+    /// Per-parameter-context overload of the single-context <c>WriteMethodDoc</c> above: a read
+    /// model's direct field mirrors its SOURCE's own declaration, which may live in a different
+    /// context than the read model itself (R12.3) or than a sibling PROJECTED field's literal type —
+    /// so one parameter's collection/generic element can need a different resolution context than
+    /// another's in the SAME doc block. A <c>null</c> per-parameter context falls back to
+    /// <paramref name="context"/>, matching the single-context overload's behavior (issue #1701).
+    /// </summary>
+    private static void WriteMethodDoc(
+        StringBuilder sb,
+        string indent,
+        PhpTypeMapper typeMapper,
+        IReadOnlyList<(string VarName, TypeRef Type, string? Context)> parameters,
+        TypeRef? returnType,
+        string? doc,
+        string? context)
+    {
         var tags = new List<string>();
-        foreach (var (varName, type) in parameters)
+        foreach (var (varName, type, paramContext) in parameters)
         {
-            if (typeMapper.DocType(type, context) is { } d)
+            if (typeMapper.DocType(type, paramContext ?? context) is { } d)
             {
                 tags.Add("@param " + d + " $" + varName);
             }
