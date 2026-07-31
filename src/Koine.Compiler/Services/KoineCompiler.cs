@@ -348,4 +348,6 @@ public sealed class KoineCompiler
 
         return DiagnosticFilter.Apply(diagnostics, filterOptions, sources);
     }
+
+    // scratch/1616-repro-ready-flip: throwaway no-op touch to reproduce the ready-flip CI gap; not merged.
 }
