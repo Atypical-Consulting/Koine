@@ -19,8 +19,9 @@ interface FakeTerminalTheme {
 interface FakeTerminal {
   cols: number;
   rows: number;
-  // xterm's live theme bag — set at construction and reassigned by applyTheme().
-  options: { theme?: FakeTerminalTheme };
+  // xterm's live theme bag — set at construction and reassigned by applyTheme(). fontFamily is
+  // construction-only (xterm has no live font setter used here), captured for the font-stack test.
+  options: { theme?: FakeTerminalTheme; fontFamily?: string };
   open: ReturnType<typeof vi.fn>;
   loadAddon: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
@@ -38,7 +39,7 @@ vi.mock('@xterm/xterm', () => {
   class Terminal implements FakeTerminal {
     cols = 80;
     rows = 24;
-    options: { theme?: FakeTerminalTheme };
+    options: { theme?: FakeTerminalTheme; fontFamily?: string };
     private dataCb?: (d: string) => void;
     // The not-yet-invoked write callbacks (real xterm calls these once a chunk is parsed); the
     // flow-control test drains them via drainWrites() to model the renderer catching up.
@@ -64,8 +65,8 @@ vi.mock('@xterm/xterm', () => {
       const batch = this.writeCallbacks.splice(0, n ?? this.writeCallbacks.length);
       for (const cb of batch) cb();
     }
-    constructor(opts?: { theme?: FakeTerminalTheme }) {
-      this.options = { theme: opts?.theme };
+    constructor(opts?: { theme?: FakeTerminalTheme; fontFamily?: string }) {
+      this.options = { theme: opts?.theme, fontFamily: opts?.fontFamily };
       termInstances.push(this);
     }
   }
@@ -205,6 +206,28 @@ describe('createTerminalPanel', () => {
     expect(parent.textContent).toContain('available in the Koine Studio desktop app');
     expect(createTerminal).not.toHaveBeenCalled();
     expect(termInstances).toHaveLength(0);
+    panel.dispose();
+  });
+
+  it('falls back to a Nerd Font for prompt icon glyphs the primary code font lacks (#1412)', () => {
+    // xterm.js paints to a canvas, so a headless unit test can't observe whether a given Nerd Font
+    // codepoint actually renders as an icon instead of tofu — that needs a manual/visual check. What
+    // IS assertable here is the font stack passed to xterm's constructor: the fallback name must be
+    // present, after the primary code font, so prompt themes (starship, oh-my-posh, …) that emit
+    // Private Use Area glyphs have somewhere to resolve them.
+    const parent = document.createElement('div');
+    const transport = makeTransport();
+    const platform = { canRunShell: true, createTerminal: () => transport } as unknown as Platform;
+
+    const panel = createTerminalPanel({ parent, platform, cwd: () => null });
+    const term = termInstances[0];
+
+    expect(term.options.fontFamily).toContain('Symbols Nerd Font Mono');
+    // The primary code font must still come first — the fallback only covers glyphs it lacks.
+    expect(term.options.fontFamily?.indexOf('JetBrains Mono Variable')).toBeLessThan(
+      term.options.fontFamily?.indexOf('Symbols Nerd Font Mono') ?? -1,
+    );
+
     panel.dispose();
   });
 

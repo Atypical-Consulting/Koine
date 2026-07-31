@@ -169,7 +169,11 @@ export function createTerminalPanel(opts: TerminalPanelOptions): TerminalPanel {
 
   const term = new Terminal({
     cursorBlink: true,
-    fontFamily: '"JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace',
+    // "Symbols Nerd Font Mono" (issue #1412, registered in styles/base/_fonts.scss) is appended
+    // after the primary code font so shell prompt themes (starship, oh-my-posh, powerlevel10k, …)
+    // that render Private Use Area icon glyphs don't fall through to tofu.
+    fontFamily:
+      '"JetBrains Mono Variable", "Symbols Nerd Font Mono", ui-monospace, "SFMono-Regular", monospace',
     fontSize: 13,
     // Theme the terminal off the app's surface tokens so it matches the bottom panel it lives in
     // (background = --koi-paper-2, foreground/cursor = --koi-fg) instead of a fixed dark scheme.
