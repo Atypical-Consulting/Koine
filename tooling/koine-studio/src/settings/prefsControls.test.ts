@@ -2,8 +2,16 @@
 // Smoke tests for the pure control factories hoisted out of mountPreferencesPane's closure (#987 task 1).
 // These are DOM builders only — no Settings/persistence wiring — so each test drives a control in
 // isolation via the callbacks it takes as parameters, matching how prefs.ts calls them today.
-import { describe, it, expect, vi } from "vitest";
-import { row, panel, toggle, metricInput, textInput, actionButton } from "@/settings/prefsControls";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+    row,
+    panel,
+    toggle,
+    metricInput,
+    textInput,
+    actionButton,
+    copyButton,
+} from "@/settings/prefsControls";
 
 describe("prefsControls: row()", () => {
     it("gives a labelable control a koi-set-<slug> id and pairs it with <label for>", () => {
@@ -145,6 +153,72 @@ describe("prefsControls: actionButton()", () => {
         expect(btn.getAttribute("aria-label")).toBe(
             "Record a new shortcut for Format document",
         );
+    });
+});
+
+describe("prefsControls: copyButton()", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    function mockClipboard(writeText: () => Promise<void>): void {
+        Object.defineProperty(navigator, "clipboard", {
+            value: { writeText: vi.fn(writeText) },
+            configurable: true,
+        });
+    }
+
+    it("copies getText()'s value, flashes 'Copied ✓', then reverts to the idle label after 1600ms", async () => {
+        mockClipboard(() => Promise.resolve());
+        const { el: btn } = copyButton("Copy", () => "hello");
+        expect(btn.className).toBe("koi-set-action");
+
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
+        expect(btn.textContent).toBe("Copied ✓");
+
+        await vi.advanceTimersByTimeAsync(1600);
+        expect(btn.textContent).toBe("Copy");
+    });
+
+    it("flips to 'Copy failed' on a rejected clipboard write", async () => {
+        mockClipboard(() => Promise.reject(new Error("denied")));
+        const { el: btn } = copyButton("Copy", () => "hello");
+
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(btn.textContent).toBe("Copy failed");
+    });
+
+    it("cancelReset disposes the pending timer without throwing", async () => {
+        mockClipboard(() => Promise.resolve());
+        const { el: btn, cancelReset } = copyButton("Copy", () => "hello");
+
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(() => cancelReset()).not.toThrow();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(btn.textContent).toBe("Copied ✓"); // the reset never fires — cancelled
+    });
+
+    it("a guard veto blocks the copy (mcpCopyBtn's empty-URL no-op case)", async () => {
+        mockClipboard(() => Promise.resolve());
+        let allow = false;
+        const { el: btn } = copyButton("Copy", () => "hello", { guard: () => allow });
+
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+        expect(btn.textContent).toBe("Copy");
+
+        allow = true;
+        btn.click();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
     });
 });
 

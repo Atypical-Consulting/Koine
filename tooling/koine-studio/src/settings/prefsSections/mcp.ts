@@ -41,8 +41,16 @@
 import type { McpEndpoint } from "@/host/types";
 import type { Settings } from "@/settings/persistence";
 import { loadSettings } from "@/settings/persistence";
-import { row, panel, toggle, select, metricInput, textInput } from "@/settings/prefsControls";
-import { wireCopyButton } from "@/shell/copyFeedback";
+import {
+    row,
+    panel,
+    toggle,
+    select,
+    metricInput,
+    textInput,
+    actionButton,
+    copyButton,
+} from "@/settings/prefsControls";
 import { createJsonView } from "@/editor/editor";
 import { mcpJsonSnippet, MCP_CLIENTS, probeMcp } from "@/mcp/mcp";
 import type { PrefsSection, SectionCtx } from "@/settings/prefsSections/types";
@@ -108,21 +116,14 @@ export function buildMcpSection(
         ariaLabel: "Koine MCP endpoint URL",
     });
 
-    const mcpCopyBtn = document.createElement("button");
-    mcpCopyBtn.type = "button";
-    mcpCopyBtn.className = "koi-set-action";
-    mcpCopyBtn.textContent = "Copy mcp.json";
-    // An empty URL (the sidecar hasn't resolved an endpoint yet) is a no-op — this guard is registered
-    // BEFORE wireCopyButton's own click listener below, so stopImmediatePropagation can veto the copy
-    // (no clipboard write, no label flash) before it runs (same-element listeners fire in registration
-    // order). Kept here rather than folded into `getText()` since #1362's shared helper always proceeds
-    // on whatever `getText()` returns (a genuinely empty string is a valid copy elsewhere), so an empty
-    // MCP endpoint URL needs its own pre-check, not a falsy-string one.
-    mcpCopyBtn.addEventListener("click", (e) => {
-        if (!mcpUrlInput.value.trim()) e.stopImmediatePropagation();
-    });
-    const cancelMcpCopyReset = wireCopyButton(mcpCopyBtn, "Copy mcp.json", () =>
-        mcpJsonSnippet(mcpUrlInput.value.trim()),
+    // An empty URL (the sidecar hasn't resolved an endpoint yet) is a no-op guard — kept as `guard`
+    // rather than folded into `getText()` since copyButton always proceeds on whatever `getText()`
+    // returns (a genuinely empty string is a valid copy elsewhere), so an empty MCP endpoint URL needs
+    // its own pre-check, not a falsy-string one.
+    const { el: mcpCopyBtn, cancelReset: cancelMcpCopyReset } = copyButton(
+        "Copy mcp.json",
+        () => mcpJsonSnippet(mcpUrlInput.value.trim()),
+        { guard: () => mcpUrlInput.value.trim() !== "" },
     );
 
     const mcpControl = document.createElement("div");
@@ -175,12 +176,9 @@ export function buildMcpSection(
     mcpSnippet.tabIndex = 0;
     const mcpSnippetView = createJsonView(mcpSnippet);
 
-    const mcpRecipeCopy = document.createElement("button");
-    mcpRecipeCopy.type = "button";
-    mcpRecipeCopy.className = "koi-set-action";
-    mcpRecipeCopy.textContent = "Copy";
-    const cancelMcpRecipeReset = wireCopyButton(mcpRecipeCopy, "Copy", () =>
-        mcpSnippetView.getText(),
+    const { el: mcpRecipeCopy, cancelReset: cancelMcpRecipeReset } = copyButton(
+        "Copy",
+        () => mcpSnippetView.getText(),
     );
 
     const mcpRecipeHead = document.createElement("div");
@@ -211,10 +209,7 @@ export function buildMcpSection(
     }
 
     // Connection test: Studio probes the endpoint as a minimal MCP client and reports the tool count.
-    const mcpTestBtn = document.createElement("button");
-    mcpTestBtn.type = "button";
-    mcpTestBtn.className = "koi-set-action";
-    mcpTestBtn.textContent = "Test connection";
+    const mcpTestBtn = actionButton("Test connection", () => void runMcpTest());
 
     const mcpStatus = document.createElement("span");
     mcpStatus.className = "koi-mcp-status";
@@ -250,7 +245,6 @@ export function buildMcpSection(
     // and a probe can't overwrite "Server off" after a disable.
     let mcpGen = 0;
 
-    mcpTestBtn.addEventListener("click", () => void runMcpTest());
     async function runMcpTest(): Promise<void> {
         if (!loadSettings().mcpEnabled) return setMcpStatus("off");
         const url = mcpUrlInput.value.trim();

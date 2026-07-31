@@ -9,6 +9,7 @@ import type { AccentName, PreviewTarget } from "@/settings/persistence";
 import { ACCENTS, ACCENT_ORDER } from "@/settings/appearance";
 import { EMIT_TARGETS } from "@/shared/emitTargets";
 import { wrapIndex } from "@/shared/wrapIndex";
+import { wireCopyButton } from "@/shell/copyFeedback";
 
 /**
  * A segmented radio group (e.g. Dark / Light): a row of role=radio buttons under a role=radiogroup, with
@@ -246,7 +247,7 @@ export interface ActionButtonOptions {
 // label-swap-on-arm) can still mutate it directly after construction.
 export function actionButton(
     label: string,
-    onClick: () => void,
+    onClick?: () => void,
     options?: ActionButtonOptions,
 ): HTMLButtonElement {
     const btn = document.createElement("button");
@@ -256,8 +257,38 @@ export function actionButton(
     if (options?.ariaLabel) btn.setAttribute("aria-label", options.ariaLabel);
     if (options?.ariaDescribedBy)
         btn.setAttribute("aria-describedby", options.ariaDescribedBy);
-    btn.addEventListener("click", onClick);
+    if (onClick) btn.addEventListener("click", onClick);
     return btn;
+}
+
+export interface CopyButtonOptions {
+    /** Veto this click BEFORE it reaches the clipboard write (no copy, no label flash) — e.g.
+     *  mcpCopyBtn's empty-URL guard. Return true to let the copy proceed. */
+    guard?(): boolean;
+}
+
+// A "koi-set-action" copy-to-clipboard button: an actionButton() wired via the shared
+// clipboard-copy-with-flash-feedback sequence (wireCopyButton, @/shell/copyFeedback, #1362) rather
+// than reimplementing that sequence a third time here — #1362 already centralized it (mcp.ts's two
+// handlers and surfaceLoaders.tsx's makeCopyButton all route through it), so this factory composes
+// with that shared primitive instead of duplicating it. Returns `cancelReset` (mirroring
+// wireCopyButton's own disposer) for a caller's teardown.
+export function copyButton(
+    label: string,
+    getText: () => string,
+    options?: CopyButtonOptions,
+): { el: HTMLButtonElement; cancelReset: () => void } {
+    const el = actionButton(label);
+    if (options?.guard) {
+        const guard = options.guard;
+        // Registered BEFORE wireCopyButton's own listener below, so stopImmediatePropagation can veto
+        // the copy (same-element listeners fire in registration order).
+        el.addEventListener("click", (e) => {
+            if (!guard()) e.stopImmediatePropagation();
+        });
+    }
+    const cancelReset = wireCopyButton(el, label, getText);
+    return { el, cancelReset };
 }
 
 // A labelled settings row: a title (+ optional description) on the left, the control on the right.
