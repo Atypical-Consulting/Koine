@@ -350,4 +350,5 @@ public sealed class KoineCompiler
     }
 
     // scratch/1616-repro-ready-flip: throwaway no-op touch to reproduce the ready-flip CI gap; not merged.
+    // second touch: tight push-then-ready-flip timing attempt.
 }
