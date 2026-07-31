@@ -722,6 +722,62 @@ public class R18CSharpApplicationTests
         log.ShouldBe(new[] { "commit", "dispatch:OrderPlaced" });
     }
 
+    [Fact]
+    public void Config_parses_application_dispatch_events()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.dispatchEvents = true\n")
+            .OptionsFor("csharp");
+        opts.ApplicationDispatchEvents.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void App_dispatch_events_flag_resolves_onto_the_plan()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppDispatchEvents = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.ApplicationDispatchEvents.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void App_dispatch_events_flag_implies_the_application_layer()
+    {
+        // Issue #618's rule: a sub-option can never be a silent no-op because the layers defaulted
+        // to domain-only.
+        var settings = new BuildSettings { Path = "x.koi", AppDispatchEvents = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+    }
+
+    [Fact]
+    public void Config_supplied_dispatch_events_applies_and_upgrades_layers_without_a_flag()
+    {
+        // Bool sub-options are flag-OR-config (the --app-mediatr precedent), not flag-overrides-config:
+        // there is no "explicitly false" to express, so a config `true` stands on its own.
+        var configPath = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"koine-{System.Guid.NewGuid():N}.toml");
+        System.IO.File.WriteAllText(configPath, "targets.csharp.application.dispatchEvents = true\n");
+        try
+        {
+            var settings = new BuildSettings { Path = "x.koi", Config = configPath };
+            settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+            plan.Options.ApplicationDispatchEvents.ShouldBeTrue();
+            plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        }
+        finally
+        {
+            System.IO.File.Delete(configPath);
+        }
+    }
+
+    [Fact]
+    public void App_dispatch_events_absent_still_maps_to_the_empty_options_bag()
+    {
+        var settings = new BuildSettings { Path = "x.koi" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.ApplicationDispatchEvents.ShouldBeFalse();
+    }
+
     // ------------------------------------------------------------------
     // W4 — --app-mapping mapperly: emit a Riok.Mapperly source-generated
     // projection instead of the hand-rolled To<RM>() mapper. plain (the

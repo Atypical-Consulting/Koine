@@ -24,7 +24,8 @@ internal sealed record TargetOptions(
     string? RegexMatchTimeoutMsText = null,
     string? RegexModeText = null,
     string? ApplicationHandlerResult = null,
-    string? ApplicationNotFound = null)
+    string? ApplicationNotFound = null,
+    bool ApplicationDispatchEvents = false)
 {
     public static readonly TargetOptions Empty =
         new(null, new Dictionary<string, string>(StringComparer.Ordinal), null, null);
@@ -259,6 +260,11 @@ internal sealed record KoineConfig(
                 // void (default) or aggregate. Validated in BuildSettings.TryResolve.
                 builder.ApplicationHandlerResult = value;
                 break;
+            case "application" when parts.Length == 4 && parts[3] == "dispatchEvents":
+                // W1 (#1721): dispatch each recorded domain event after the commit, then clear.
+                // Boolean, like application.mediatr — anything but "true" leaves it off.
+                builder.ApplicationDispatchEvents = value;
+                break;
             case "application" when parts.Length == 4 && parts[3] == "notFound":
                 // W1: how a handler treats a missing aggregate — throw (default) or nullable.
                 // Validated in BuildSettings.TryResolve.
@@ -331,6 +337,7 @@ internal sealed record KoineConfig(
         public string? ApplicationMapping;
         public string? ApplicationHandlerResult;
         public string? ApplicationNotFound;
+        public string? ApplicationDispatchEvents;
         public string? RegexMatchTimeoutMs;
         public string? RegexMode;
         public readonly Dictionary<string, string> NamespaceMap = new(StringComparer.Ordinal);
@@ -343,7 +350,8 @@ internal sealed record KoineConfig(
             RegexMatchTimeoutMs,
             RegexMode,
             ApplicationHandlerResult,
-            ApplicationNotFound);
+            ApplicationNotFound,
+            string.Equals(ApplicationDispatchEvents, "true", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
