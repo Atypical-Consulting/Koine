@@ -40,12 +40,12 @@ export default tseslint.config(
       ],
     },
   },
-  // Tests & stories legitimately stage fixture markup (innerHTML), probe optional-absence in the DOM
-  // (getElementById → null), and fire-and-forget promises.
+  // Tests & stories legitimately stage fixture markup (innerHTML) and probe optional-absence in the
+  // DOM (getElementById → null). no-floating-promises is fully enforced here too (#997) — every
+  // vitest/Storybook site now awaits or void-marks its promises, same as prod code.
   {
     files: ['src/**/*.{test,stories}.{ts,tsx}', 'src/test-setup*.ts'],
     rules: {
-      '@typescript-eslint/no-floating-promises': 'off',
       'no-restricted-properties': 'off',
       'no-restricted-syntax': 'off',
     },
