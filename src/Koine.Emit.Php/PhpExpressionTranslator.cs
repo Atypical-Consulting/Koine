@@ -990,7 +990,7 @@ internal sealed class PhpExpressionTranslator
         }
 
         // (5) An enum *type* reference (the qualifier of `OrderStatus.Draft`): the PascalCase class.
-        if (_index.Classify(name) == TypeKind.Enum)
+        if (_index.Classify(_resolver.Context, name) == TypeKind.Enum)
         {
             sb.Append(PhpNaming.ClassName(name));
             return;
@@ -1046,7 +1046,7 @@ internal sealed class PhpExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus::Cancelled` -> `OrderStatus::CANCELLED`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(PhpNaming.ClassName(qualifier.Name)).Append("::")
               .Append(PhpNaming.ConstName(ma.MemberName));

@@ -509,7 +509,7 @@ public sealed partial class PhpEmitter
         var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         var fields = members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
-        var translator = new PhpExpressionTranslator(emit.Index, members, emit.EnumMemberToType, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
+        var translator = new PhpExpressionTranslator(emit.Index, members, emit.EnumMemberToType, context: contextName, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         WriteDoc(sb, doc, "");
