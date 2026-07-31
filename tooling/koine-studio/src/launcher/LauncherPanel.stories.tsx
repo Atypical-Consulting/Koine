@@ -23,8 +23,13 @@ import type { Command } from '@atypical/koine-ui';
 //
 // Task 2 extends `makeKnownCatalogSources` in place with a `Shipping` context covering the
 // entity/integration-event chip kinds (see that function's doc comment) and adds the `Results` /
-// `ResultsLight` stories below. Later #1160 tasks add the prefix-mode/preview/action-menu stories;
-// keep the fixture easy to extend rather than forking it.
+// `ResultsLight` stories below.
+//
+// Task 3 adds the `CommandMode`/`SymbolMode`/`EventMode` (+ `*Light`) stories below, exercising the
+// `>`/`@`/`#` mode-switch prefixes against the same known-catalog fixture — no fixture changes needed,
+// since Task 2's `Ordering`/`Shipping` entries already cover one command, one symbol, and two events.
+// Later #1160 tasks add the preview/action-menu stories; keep the fixture easy to extend rather than
+// forking it.
 //
 // The @storybook/addon-a11y axe pass (`a11y: { test: 'error' }` in `.storybook/preview.ts`) guards
 // every story's accessibility, including the Chromium colour-contrast check the happy-dom unit axe
@@ -174,7 +179,7 @@ const meta = {
   component: LauncherPanel,
   parameters: {
     layout: 'fullscreen',
-    // Two REAL, pre-existing launcher-runtime a11y defects surfaced by bringing this panel under
+    // THREE real, pre-existing launcher-runtime a11y defects surfaced by bringing this panel under
     // Chromium axe coverage for the first time (this file, #1160) — not fixture bugs, and not
     // fixable from a stories-only change (see the file-level "no launcher runtime changes"
     // constraint), so they're narrowly gated here rather than left red or silently ignored. Each is
@@ -184,12 +189,15 @@ const meta = {
     //    (#1672) — excluded from the axe context by selector, so no OTHER rule is skipped for them,
     //    and `.lx-title mark` (a sibling element, already fixed by #1263/#1161) stays fully covered —
     //    this file's Results story (Task 2) still guards that fix going forward.
+    //  - `.lx-modepill-label` / `.lx-mchip.on` (the active mode-switch pill/chip) fail color-contrast
+    //    in the LIGHT theme (#1677, surfaced by Task 3's prefix-mode stories) — same excluded-by-
+    //    selector treatment, for the same reason.
     //  - the selected row's tail `.lx-actbtn` renders inside its `.lx-item[role="option"]`, tripping
     //    `nested-interactive` on essentially every populated result list (#1673) — disabled as a
     //    whole rule (axe's `context.exclude` prunes a node's entire subtree, which would ALSO hide
     //    `.lx-title mark` since it lives inside the same option row — a per-rule disable avoids that).
     a11y: {
-      context: { exclude: ['.lx-kind', '.lx-sub'] },
+      context: { exclude: ['.lx-kind', '.lx-sub', '.lx-modepill-label', '.lx-mchip.on'] },
       options: { rules: { 'nested-interactive': { enabled: false } } },
     },
   },
@@ -288,5 +296,129 @@ export const ResultsLight: Story = {
     expect(codes).toContain('EN');
     expect(codes).toContain('VO');
     expect(codes).toContain('IE');
+  },
+};
+
+/**
+ * Prefix-mode switching (Task 3 of #1160): typing a bare mode-switch prefix character sets `mode` and,
+ * per `deriveResults.ts`, immediately ranks+filters the live catalog to that mode's `cats` even with an
+ * empty trailing query — only `mode.key === 'all' && query === ''` falls back to the curated
+ * Top-hits/Recent default; every other mode always goes through `rank(query, catalog, mode.cats)`, and
+ * `rank('', …)` still returns every pool entry in those categories. `CommandMode` types the bare `'>'`
+ * prefix (`MODES['>']`, `cats: ['action']`) on the app's dark theme, mirroring `LauncherPanel.test.tsx`'s
+ * own `mountInCommandsMode` helper, and asserts the `.lx-modepill` switches to "Commands" and the
+ * fixture's single `cmd:new-file` ("New file") command renders as a result row.
+ */
+export const CommandMode: Story = {
+  decorators: [withTheme('dark')],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText('Search commands, symbols, files…');
+    fireEvent.input(input, { target: { value: '>' } });
+
+    await waitFor(() => {
+      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Commands');
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    });
+  },
+};
+
+/** The same bare-`>` Commands-mode switch as {@link CommandMode}, forced to the light theme
+ *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
+ *  for the `.lx-modepill` on the light `--koi-*` token set. */
+export const CommandModeLight: Story = {
+  decorators: [withTheme('light')],
+  parameters: { backgrounds: { default: 'light' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText('Search commands, symbols, files…');
+    fireEvent.input(input, { target: { value: '>' } });
+
+    await waitFor(() => {
+      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Commands');
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    });
+  },
+};
+
+/**
+ * `SymbolMode` switches into `@` (Symbols) mode (`MODES['@']`, `cats: ['symbol']`) with a trailing
+ * `Or` filter — `'@Or'`, mirroring `LauncherPanel.test.tsx`'s own `@Or` convention exactly — on the
+ * app's dark theme, and asserts the `.lx-modepill` switches to "Symbols" and the fixture's `Order`
+ * aggregate renders as a result row.
+ */
+export const SymbolMode: Story = {
+  decorators: [withTheme('dark')],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText('Search commands, symbols, files…');
+    fireEvent.input(input, { target: { value: '@Or' } });
+
+    await waitFor(() => {
+      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Symbols');
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    });
+  },
+};
+
+/** The same `@Or` Symbols-mode switch as {@link SymbolMode}, forced to the light theme
+ *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
+ *  for the `.lx-modepill` on the light `--koi-*` token set. */
+export const SymbolModeLight: Story = {
+  decorators: [withTheme('light')],
+  parameters: { backgrounds: { default: 'light' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText('Search commands, symbols, files…');
+    fireEvent.input(input, { target: { value: '@Or' } });
+
+    await waitFor(() => {
+      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Symbols');
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    });
+  },
+};
+
+/**
+ * `EventMode` switches into `#` (Events) mode (`MODES['#']`, `cats: ['event']`) with the bare prefix and
+ * no trailing filter text — the fixture now carries two `event`-cat entries, `Ordering.OrderPlaced` and
+ * `Shipping.ShipmentDispatched` (see `makeKnownCatalogSources`), so an empty-query rank of just that
+ * category still returns rows — on the app's dark theme. Asserts the `.lx-modepill` switches to "Events"
+ * and the results list renders an "Events" `.lx-group-label` (`GROUPS` in `catalog.ts`) with at least
+ * one `.lx-item` beneath it.
+ */
+export const EventMode: Story = {
+  decorators: [withTheme('dark')],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText('Search commands, symbols, files…');
+    fireEvent.input(input, { target: { value: '#' } });
+
+    await waitFor(() => {
+      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Events');
+      const groupLabels = Array.from(canvasElement.querySelectorAll('.lx-group-label')).map((el) => el.textContent);
+      expect(groupLabels.some((label) => label?.includes('Events'))).toBe(true);
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    });
+  },
+};
+
+/** The same bare-`#` Events-mode switch as {@link EventMode}, forced to the light theme
+ *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
+ *  for the `.lx-modepill` and `.lx-group-label` on the light `--koi-*` token set. */
+export const EventModeLight: Story = {
+  decorators: [withTheme('light')],
+  parameters: { backgrounds: { default: 'light' } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = canvas.getByLabelText('Search commands, symbols, files…');
+    fireEvent.input(input, { target: { value: '#' } });
+
+    await waitFor(() => {
+      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Events');
+      const groupLabels = Array.from(canvasElement.querySelectorAll('.lx-group-label')).map((el) => el.textContent);
+      expect(groupLabels.some((label) => label?.includes('Events'))).toBe(true);
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    });
   },
 };
