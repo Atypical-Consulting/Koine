@@ -75,7 +75,7 @@ internal sealed class PythonTypeMapper
             default:
                 // Python uses the enum class directly as a type annotation (unlike TypeScript,
                 // which indirects through a <Enum>Member interface). The class IS the type.
-                if (_index.Classify(type.Name) == TypeKind.Enum)
+                if (_index.Classify(type.Qualifier, type.Name) == TypeKind.Enum)
                 {
                     return PythonNaming.ToPascalCase(type.Name);
                 }
@@ -98,5 +98,5 @@ internal sealed class PythonTypeMapper
     public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
 
     /// <summary>True when the type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Name) == TypeKind.Enum;
+    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier, type.Name) == TypeKind.Enum;
 }

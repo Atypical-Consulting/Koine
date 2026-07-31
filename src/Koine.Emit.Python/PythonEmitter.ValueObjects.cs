@@ -94,7 +94,7 @@ public sealed partial class PythonEmitter
               .Append("(self) -> ").Append(typeMapper.Map(m.Type)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append('\n');
+              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');
         }
 
         // A quantity gets unit-checked add/sub and scalar mul/truediv dunder operators. A plain value
@@ -490,7 +490,7 @@ public sealed partial class PythonEmitter
             // Pass the field's own declared enum type as the hint so an ambiguous member name (one
             // that exists in multiple enums) resolves to the correct owner rather than the first
             // match the translator finds in the global enum-member → type map.
-            return translator.Translate(m.Initializer, NameModeForDefault(), EnumExpected(m, index));
+            return translator.Translate(m.Initializer, NameModeForDefault(), EnumExpected(m, index, translator.Context));
         }
         if (m.Type.IsOptional)
         {
@@ -503,6 +503,6 @@ public sealed partial class PythonEmitter
     private static PythonExpressionTranslator.NameMode NameModeForDefault() =>
         PythonExpressionTranslator.NameMode.Parameter;
 
-    private static string? EnumExpected(Member m, ModelIndex index) =>
-        index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+    private static string? EnumExpected(Member m, ModelIndex index, string? context) =>
+        index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 }
