@@ -68,6 +68,22 @@
   up to date (an empty commit also works) — then re-resolve status via the check-runs API and wait for a
   real run before merging. `ai-migration-kit:merge-pr` and `auto-dev-worker` should apply this rule
   immediately after the ready-flip, before their CI-wait loop.
+- **`Koine Studio` (`koine-studio.yml`) can show a duplicate run *and* an ambiguous `cancelled`
+  conclusion for reasons distinct from the `build-and-test` family above (#1665).** `koine-studio.yml`
+  already carries a `concurrency:` group (`group: ${{ github.workflow }}-${{ github.ref }}`,
+  `cancel-in-progress` true for PRs — added in #48), so it correctly cancels a run that is still
+  *in progress* when a newer one for the same PR starts. But on PR #1657 the earlier (`synchronize`,
+  still-draft) trigger had already *completed* (near-instant `skipped`, via the draft-gate) before the
+  later (`ready_for_review`) trigger even started — nothing was "in progress" to cancel, so both runs
+  show up for the same head SHA even though only the second one does real work. That second, legitimate
+  run then hit its own distinct problem: the `studio (web)` job's `npm ci` step hung for the *entire*
+  20-minute job `timeout-minutes`, resolving only as a bare `cancelled` — indistinguishable, from the
+  outside, from a masked/superseded run. **This workflow is not a required status check** (`main` has no
+  branch protection), so neither shape blocks a merge — don't wait on `Koine Studio` as if it were
+  required. If a `studio (web)`/`studio-desktop` run shows `cancelled` and you need to know why (e.g.
+  it recurs and starts to matter), check the job's own step timings via
+  `gh api repos/{owner}/{repo}/actions/jobs/<jobId> --jq '.steps[]'` before assuming it's just the
+  duplicate-run artifact — a genuine step-level hang reads identically until you look.
 
 ## Integration style
 - **Merge mode:** squash
