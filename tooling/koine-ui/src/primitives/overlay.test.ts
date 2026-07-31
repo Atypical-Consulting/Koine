@@ -188,8 +188,8 @@ describe("createConfirmDialog overlapping requests", () => {
 
   test("dismissing the shown request via Esc resolves it false and still surfaces the queued one", async () => {
     const dialog = createConfirmDialog();
-    const first = dialog.ask({ title: "First", confirmLabel: "Yes" });
-    const second = dialog.ask({ title: "Second", confirmLabel: "Yes" });
+    const first = dialog.ask({ title: "First", message: "m1", confirmLabel: "Yes" });
+    const second = dialog.ask({ title: "Second", message: "m2", confirmLabel: "Yes" });
 
     // Mirrors a caller abandoning its request without an explicit answer (e.g. navigating away):
     // the existing Esc → settle(false) path resolves it, and the queue must still drain from there
