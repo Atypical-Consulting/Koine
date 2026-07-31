@@ -514,7 +514,7 @@ describe('root reconciliation when a workspace root is removed mid-review (#1689
 
   const rootSelect = (row: Element) => row.querySelector('.koi-changeset-root') as HTMLSelectElement | null;
 
-  test('root removed, count stays multi: targetRoot resets to null and the picker falls back to roots[0]', () => {
+  test('root removed, count drops to 1: targetRoot resets to null and the picker disappears', () => {
     const store = storeWithRoots([rootA, rootB], { 'billing/invoice.koi': rootB });
     const { container } = mount(store);
 

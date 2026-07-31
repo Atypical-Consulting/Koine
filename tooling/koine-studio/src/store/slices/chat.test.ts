@@ -1004,6 +1004,13 @@ describe('reconcileChangeSetRoots (#1689)', () => {
     expect(s.getState().chat.changeSet).toBe(before);
   });
 
+  test('an empty liveRoots list (last root closed) still nulls every non-null targetRoot', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null, undefined, { 'a.koi': 'A' });
+    s.getState().reconcileChangeSetRoots([]);
+    expect(s.getState().chat.changeSet?.files[0]?.targetRoot).toBeNull();
+  });
+
   test('is a no-op while applying, applied, invalidated, or on a null change set', () => {
     const s = createAppStore();
     s.getState().reconcileChangeSetRoots(['A']); // null: must not throw
