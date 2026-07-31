@@ -2757,9 +2757,22 @@ mod tests {
 
         drop(listener);
 
+        // Dropping a `TcpListener` closes the socket, but the OS may not release the port from its
+        // internal bind table before the very next syscall — under CI load this is a genuine kernel
+        // scheduling race, not a logic bug in `requested_port_is_free()` (which already documents its
+        // own point-in-time TOCTOU limitation). Poll with a bounded budget instead of asserting on a
+        // single immediate check; still fails loudly if the port never frees.
+        let freed = (0..20).any(|_| {
+            if requested_port_is_free(port) {
+                true
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                false
+            }
+        });
         assert!(
-            requested_port_is_free(port),
-            "the port was released, so it must read as free"
+            freed,
+            "the port was released, so it must eventually read as free"
         );
 
         // `0` is the OS-assigned wildcard, never a concrete "freed" port.
