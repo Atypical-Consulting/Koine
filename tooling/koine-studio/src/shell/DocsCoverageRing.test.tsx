@@ -16,19 +16,19 @@ describe('DocsCoverageRing', () => {
     expect(arc(container).getAttribute('stroke-dasharray')).toBe(`0 ${Math.round(CIRC * 100) / 100}`);
   });
 
-  test('renders the documented fraction as a half arc for 1/2', () => {
+  test('renders the documented fraction as a half arc for 1/2', async () => {
     const store = createAppStore();
-    act(() => store.getState().setDocsCoverage({ documented: 1, total: 2 }));
+    await act(() => store.getState().setDocsCoverage({ documented: 1, total: 2 }));
     const { container } = render(<DocsCoverageRing store={store} />);
     expect(label(container)).toBe('Docs 1/2');
     const half = Math.round(CIRC * 0.5 * 100) / 100;
     expect(arc(container).getAttribute('stroke-dasharray')).toBe(`${half} ${Math.round((CIRC - half) * 100) / 100}`);
   });
 
-  test('a full glossary fills the arc and tracks store changes reactively', () => {
+  test('a full glossary fills the arc and tracks store changes reactively', async () => {
     const store = createAppStore();
     const { container } = render(<DocsCoverageRing store={store} />);
-    act(() => store.getState().setDocsCoverage({ documented: 3, total: 3 }));
+    await act(() => store.getState().setDocsCoverage({ documented: 3, total: 3 }));
     expect(label(container)).toBe('Docs 3/3');
     const full = Math.round(CIRC * 100) / 100;
     expect(arc(container).getAttribute('stroke-dasharray')).toBe(`${full} 0`);

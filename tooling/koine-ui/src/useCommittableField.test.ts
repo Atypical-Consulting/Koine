@@ -18,25 +18,25 @@ describe('useCommittableField', () => {
     expect(result.current.draft).toBe('A monetary amount.');
   });
 
-  test('openEditor enters edit mode without touching the current draft', () => {
+  test('openEditor enters edit mode without touching the current draft', async () => {
     const { result } = setup('A monetary amount.');
-    act(() => result.current.openEditor());
+    await act(() => result.current.openEditor());
     expect(result.current.editing).toBe(true);
     expect(result.current.draft).toBe('A monetary amount.');
   });
 
-  test('setDraft updates the draft while editing', () => {
+  test('setDraft updates the draft while editing', async () => {
     const { result } = setup();
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('in progress'));
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('in progress'));
     expect(result.current.draft).toBe('in progress');
   });
 
-  test('commit calls onCommit with the (untrimmed) draft, keeps the trimmed text, and exits edit mode', () => {
+  test('commit calls onCommit with the (untrimmed) draft, keeps the trimmed text, and exits edit mode', async () => {
     const { result, onCommit } = setup();
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('  padded with whitespace  '));
-    act(() => result.current.commit());
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('  padded with whitespace  '));
+    await act(() => result.current.commit());
 
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith('  padded with whitespace  '); // the caller decides how to persist
@@ -44,11 +44,11 @@ describe('useCommittableField', () => {
     expect(result.current.draft).toBe('padded with whitespace'); // read-view display semantics: trimmed
   });
 
-  test('cancel reverts the draft to the value captured on open and exits edit mode without committing', () => {
+  test('cancel reverts the draft to the value captured on open and exits edit mode without committing', async () => {
     const { result, onCommit } = setup('committed');
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('a discarded draft'));
-    act(() => result.current.cancel());
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('a discarded draft'));
+    await act(() => result.current.cancel());
 
     expect(onCommit).not.toHaveBeenCalled();
     expect(result.current.editing).toBe(false);
@@ -58,15 +58,15 @@ describe('useCommittableField', () => {
   // The NoteRow shape: the committed content arrives asynchronously AFTER the hook mounted (a lazy
   // onReadNote resolve), so openEditor must work from the committedValue current at CALL time — never
   // a value frozen at mount.
-  test('openEditor works from the committedValue current at call time, not at mount time', () => {
+  test('openEditor works from the committedValue current at call time, not at mount time', async () => {
     const { result, rerender, onCommit } = setup(''); // mounts before the async body has loaded
     rerender({ committedValue: '# Release process\n\nStep one.\n' }); // the load resolves
 
     expect(result.current.draft).toBe('# Release process\n\nStep one.\n'); // idle draft refreshed
 
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('junk'));
-    act(() => result.current.cancel());
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('junk'));
+    await act(() => result.current.cancel());
     expect(result.current.draft).toBe('# Release process\n\nStep one.\n'); // reverts to the loaded value
     expect(onCommit).not.toHaveBeenCalled();
   });
@@ -76,75 +76,75 @@ describe('useCommittableField', () => {
   // reload, so right after a commit it still holds the PRE-save text. Re-opening the editor and
   // cancelling inside that window must revert to what THIS hook last committed — reading the prop
   // would silently undo the just-completed save.
-  test('cancel after a commit reverts to the just-committed value, never the stale committedValue prop', () => {
+  test('cancel after a commit reverts to the just-committed value, never the stale committedValue prop', async () => {
     const { result, onCommit } = setup('A monetary amount.');
 
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('A freshly saved amount.'));
-    act(() => result.current.commit());
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('A freshly saved amount.'));
+    await act(() => result.current.commit());
     expect(onCommit).toHaveBeenCalledWith('A freshly saved amount.');
     expect(result.current.draft).toBe('A freshly saved amount.');
 
     // Re-open while the prop is still stale ('A monetary amount.' — no rerender happened at all).
-    act(() => result.current.openEditor());
+    await act(() => result.current.openEditor());
     expect(result.current.draft).toBe('A freshly saved amount.'); // seeded from the commit, not the prop
-    act(() => result.current.setDraft('a discarded second draft'));
-    act(() => result.current.cancel());
+    await act(() => result.current.setDraft('a discarded second draft'));
+    await act(() => result.current.cancel());
     expect(result.current.draft).toBe('A freshly saved amount.');
   });
 
-  test('an external committedValue change while EDITING clobbers neither the draft nor the revert target, and cancel adopts it', () => {
+  test('an external committedValue change while EDITING clobbers neither the draft nor the revert target, and cancel adopts it', async () => {
     const { result, rerender, onCommit } = setup('open-time value');
 
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('mid-edit typing'));
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('mid-edit typing'));
     rerender({ committedValue: 'externally changed' }); // arrives mid-edit
 
     expect(result.current.draft).toBe('mid-edit typing'); // the in-progress edit survives
-    act(() => result.current.cancel());
+    await act(() => result.current.cancel());
     expect(result.current.draft).toBe('externally changed'); // cancel-adopts: shows the latest external truth
     expect(onCommit).not.toHaveBeenCalled();
   });
 
-  test('commit wins over a mid-edit external change: the pending external value is discarded', () => {
+  test('commit wins over a mid-edit external change: the pending external value is discarded', async () => {
     const { result, rerender, onCommit } = setup('open-time value');
 
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('my edit'));
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('my edit'));
     rerender({ committedValue: 'externally changed' }); // arrives mid-edit
-    act(() => result.current.commit());
+    await act(() => result.current.commit());
 
     expect(onCommit).toHaveBeenCalledWith('my edit');
     expect(result.current.draft).toBe('my edit'); // the user's save wins, not the discarded external value
 
     // Re-open and cancel: reverts to what was just committed, never the discarded external value.
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('a discarded second draft'));
-    act(() => result.current.cancel());
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('a discarded second draft'));
+    await act(() => result.current.cancel());
     expect(result.current.draft).toBe('my edit');
   });
 
-  test('a cancel-adopted external value does not resurrect a stale pending value in a later edit session', () => {
+  test('a cancel-adopted external value does not resurrect a stale pending value in a later edit session', async () => {
     const { result, rerender } = setup('open-time value');
 
-    act(() => result.current.openEditor());
+    await act(() => result.current.openEditor());
     rerender({ committedValue: 'externally changed' }); // arrives mid-edit
-    act(() => result.current.cancel());
+    await act(() => result.current.cancel());
     expect(result.current.draft).toBe('externally changed');
 
     // A second session with no new external change: cancel reverts to the adopted value, not stale state.
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('typing again'));
-    act(() => result.current.cancel());
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('typing again'));
+    await act(() => result.current.cancel());
     expect(result.current.draft).toBe('externally changed');
   });
 
-  test('an empty-string external change mid-edit is adopted on cancel (null-vs-empty distinction)', () => {
+  test('an empty-string external change mid-edit is adopted on cancel (null-vs-empty distinction)', async () => {
     const { result, rerender } = setup('open-time value');
 
-    act(() => result.current.openEditor());
+    await act(() => result.current.openEditor());
     rerender({ committedValue: '' }); // arrives mid-edit
-    act(() => result.current.cancel());
+    await act(() => result.current.cancel());
     expect(result.current.draft).toBe('');
   });
 
@@ -157,19 +157,19 @@ describe('useCommittableField', () => {
 
   // The hook-owned editor keydown (code-review fix): Escape prevents the default and takes the SAME
   // revert-and-close path as the Cancel button; any other key falls through untouched.
-  test('editorOnKeyDown: Escape → preventDefault + cancel; other keys fall through', () => {
+  test('editorOnKeyDown: Escape → preventDefault + cancel; other keys fall through', async () => {
     const { result, onCommit } = setup('committed');
-    act(() => result.current.openEditor());
-    act(() => result.current.setDraft('a discarded draft'));
+    await act(() => result.current.openEditor());
+    await act(() => result.current.setDraft('a discarded draft'));
 
     const other = { key: 'Enter', preventDefault: vi.fn() };
-    act(() => result.current.editorOnKeyDown(other));
+    await act(() => result.current.editorOnKeyDown(other));
     expect(other.preventDefault).not.toHaveBeenCalled();
     expect(result.current.editing).toBe(true); // untouched — still editing, draft intact
     expect(result.current.draft).toBe('a discarded draft');
 
     const escape = { key: 'Escape', preventDefault: vi.fn() };
-    act(() => result.current.editorOnKeyDown(escape));
+    await act(() => result.current.editorOnKeyDown(escape));
     expect(escape.preventDefault).toHaveBeenCalledTimes(1);
     expect(result.current.editing).toBe(false);
     expect(result.current.draft).toBe('committed'); // reverted to the open-time capture

@@ -71,11 +71,11 @@ describe('Transcript (#990)', () => {
     expect(md.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 
-  test('appending a message patches the list: the earlier bubble keeps its element identity', () => {
+  test('appending a message patches the list: the earlier bubble keeps its element identity', async () => {
     const store = exchangeStore();
     const { container } = mount(store);
     const firstBefore = bubbles(container)[0];
-    act(() => store.getState().appendChatMessage({ role: 'user', content: 'And invoices?' }));
+    await act(() => store.getState().appendChatMessage({ role: 'user', content: 'And invoices?' }));
     const all = bubbles(container);
     expect(all.length).toBe(3);
     expect(all[0]).toBe(firstBefore); // stable key: no rebuild
@@ -121,7 +121,7 @@ describe('Transcript (#990)', () => {
   });
 
   describe('streaming turn', () => {
-    test('renders the live text as a plain-text assistant bubble ("…" until the first delta)', () => {
+    test('renders the live text as a plain-text assistant bubble ("…" until the first delta)', async () => {
       const store = createAppStore();
       store.getState().appendChatMessage({ role: 'user', content: 'q' });
       store.getState().startChatTurn();
@@ -133,33 +133,33 @@ describe('Transcript (#990)', () => {
       // Plain text while streaming (the imperative panel streamed textContent, not markdown).
       expect(stream.querySelector('.koi-md')).toBeNull();
 
-      act(() => store.getState().appendStreamingText('Hello **there**'));
+      await act(() => store.getState().appendStreamingText('Hello **there**'));
       expect(stream.textContent).toBe('Hello **there**');
       expect(stream.querySelector('strong')).toBeNull();
     });
 
-    test('streaming updates patch in place: earlier bubbles and the streaming bubble keep identity', () => {
+    test('streaming updates patch in place: earlier bubbles and the streaming bubble keep identity', async () => {
       const store = createAppStore();
       store.getState().appendChatMessage({ role: 'user', content: 'q' });
       store.getState().startChatTurn();
       const { container } = mount(store);
       const [userBefore, streamBefore] = bubbles(container);
 
-      act(() => store.getState().appendStreamingText('first '));
-      act(() => store.getState().appendStreamingText('second'));
+      await act(() => store.getState().appendStreamingText('first '));
+      await act(() => store.getState().appendStreamingText('second'));
       const [userAfter, streamAfter] = bubbles(container);
       expect(userAfter).toBe(userBefore);
       expect(streamAfter).toBe(streamBefore);
       expect(streamAfter.textContent).toBe('first second');
     });
 
-    test('the streaming bubble disappears once the turn settles', () => {
+    test('the streaming bubble disappears once the turn settles', async () => {
       const store = createAppStore();
       store.getState().appendChatMessage({ role: 'user', content: 'q' });
       store.getState().startChatTurn();
       const { container } = mount(store);
       expect(bubbles(container).length).toBe(2);
-      act(() => {
+      await act(() => {
         store.getState().appendChatMessage({ role: 'assistant', content: 'done' });
         store.getState().finishChatTurn();
       });
@@ -196,12 +196,12 @@ describe('Transcript (#990)', () => {
       expect(children.indexOf(card)).toBeLessThan(children.indexOf(bubbles(container)[1]));
     });
 
-    test('completing a call flips the SAME element pending → ok with summary, duration and body', () => {
+    test('completing a call flips the SAME element pending → ok with summary, duration and body', async () => {
       const store = streamingWithCall();
       const { container } = mount(store);
       const cardBefore = cards(container)[0];
 
-      act(() =>
+      await act(() =>
         store.getState().completeToolCall({
           id: 1,
           state: 'ok',
@@ -228,10 +228,10 @@ describe('Transcript (#990)', () => {
       expect(card.querySelector('.koi-tool-truncated')).toBeNull();
     });
 
-    test('a failed call flips to error: ✕ glyph, sr-only "failed", the error message as the Result body', () => {
+    test('a failed call flips to error: ✕ glyph, sr-only "failed", the error message as the Result body', async () => {
       const store = streamingWithCall();
       const { container } = mount(store);
-      act(() =>
+      await act(() =>
         store.getState().completeToolCall({ id: 1, state: 'error', summary: 'failed', result: 'boom', durationMs: 1400 }),
       );
       const card = cards(container)[0];
@@ -242,11 +242,11 @@ describe('Transcript (#990)', () => {
       expect(card.querySelectorAll('.koi-tool-detail dd pre')[1].textContent).toBe('boom');
     });
 
-    test('a result past TOOL_RESULT_CLAMP is clamped with the "(truncated)" note', () => {
+    test('a result past TOOL_RESULT_CLAMP is clamped with the "(truncated)" note', async () => {
       const store = streamingWithCall();
       const { container } = mount(store);
       const huge = 'x'.repeat(TOOL_RESULT_CLAMP + 100);
-      act(() =>
+      await act(() =>
         store.getState().completeToolCall({ id: 1, state: 'ok', summary: 'big', result: huge, durationMs: 5 }),
       );
       const card = cards(container)[0];
@@ -254,13 +254,13 @@ describe('Transcript (#990)', () => {
       expect(card.querySelector('.koi-tool-truncated')!.textContent).toBe('(truncated)');
     });
 
-    test('a second call appends a second card in order, patching (not rebuilding) the first', () => {
+    test('a second call appends a second card in order, patching (not rebuilding) the first', async () => {
       const store = streamingWithCall();
       const { container } = mount(store);
       const firstBefore = cards(container)[0];
       const streamBefore = bubbles(container)[1];
 
-      act(() => store.getState().startToolCall({ id: 2, name: 'koine_compile', args: '{}' }));
+      await act(() => store.getState().startToolCall({ id: 2, name: 'koine_compile', args: '{}' }));
       const all = cards(container);
       expect(all.length).toBe(2);
       expect(all[0]).toBe(firstBefore);
@@ -307,7 +307,7 @@ describe('Transcript (#990)', () => {
       expect(children.indexOf(allCards[1])).toBeLessThan(children.indexOf(allBubbles[3]));
     });
 
-    test('expanding a live card, then committing the turn, keeps it open across the remount', () => {
+    test('expanding a live card, then committing the turn, keeps it open across the remount', async () => {
       const store = createAppStore();
       store.getState().appendChatMessage({ role: 'user', content: 'q' });
       store.getState().startChatTurn();
@@ -316,31 +316,31 @@ describe('Transcript (#990)', () => {
       const { container } = mount(store);
 
       const before = cards(container)[0] as HTMLDetailsElement;
-      act(() => {
+      await act(() => {
         before.open = true;
         before.dispatchEvent(new Event('toggle'));
       });
       expect(before.open).toBe(true);
 
-      act(() => store.getState().commitChatTurn({ role: 'assistant', content: 'done' }));
+      await act(() => store.getState().commitChatTurn({ role: 'assistant', content: 'done' }));
 
       const after = cards(container)[0] as HTMLDetailsElement;
       expect(after.open).toBe(true);
     });
 
-    test('a workspace-key change renders cards collapsed (no cross-workspace open-state reuse)', () => {
+    test('a workspace-key change renders cards collapsed (no cross-workspace open-state reuse)', async () => {
       const store = createAppStore();
       store.getState().hydrateChat('ws-A', [{ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] }]);
       const { container } = mount(store);
 
       const before = cards(container)[0] as HTMLDetailsElement;
-      act(() => {
+      await act(() => {
         before.open = true;
         before.dispatchEvent(new Event('toggle'));
       });
       expect(before.open).toBe(true);
 
-      act(() =>
+      await act(() =>
         store.getState().hydrateChat('ws-B', [{ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] }]),
       );
 
@@ -351,22 +351,22 @@ describe('Transcript (#990)', () => {
     // Code-review finding (#1133): "Clear conversation" empties `messages` WITHOUT changing
     // `workspaceKey` (unlike a workspace swap), so a brand-new conversation's card at the same
     // index/call-id would otherwise collide with a stale identity left over from before the clear.
-    test('clearing the conversation resets card expansion (no stale-identity reuse in the next conversation)', () => {
+    test('clearing the conversation resets card expansion (no stale-identity reuse in the next conversation)', async () => {
       const store = createAppStore();
       store.getState().appendChatMessage({ role: 'assistant', content: 'reply', toolCalls: [settledCall(1)] });
       const { container } = mount(store);
 
       const before = cards(container)[0] as HTMLDetailsElement;
-      act(() => {
+      await act(() => {
         before.open = true;
         before.dispatchEvent(new Event('toggle'));
       });
       expect(before.open).toBe(true);
 
-      act(() => store.getState().clearChatTranscript());
+      await act(() => store.getState().clearChatTranscript());
       // The next conversation's first assistant reply lands at the SAME message index with the SAME
       // tool-call id — an identity collision with the stale (pre-clear) entry, absent a reset.
-      act(() =>
+      await act(() =>
         store.getState().appendChatMessage({ role: 'assistant', content: 'new reply', toolCalls: [settledCall(1)] }),
       );
 
@@ -381,7 +381,7 @@ describe('Transcript (#990)', () => {
   // start and its own commit. A future feature (e.g. inserting a message mid-turn) breaks that
   // unenforced convention; turnId removes the dependency on array position entirely.
   describe('tool-card identity survives an out-of-band append mid-turn (#1286)', () => {
-    test('expanding a live card, then an EXTRA message is appended before the turn commits, keeps the card open across the remount', () => {
+    test('expanding a live card, then an EXTRA message is appended before the turn commits, keeps the card open across the remount', async () => {
       const store = createAppStore();
       store.getState().appendChatMessage({ role: 'user', content: 'q' });
       store.getState().startChatTurn();
@@ -390,7 +390,7 @@ describe('Transcript (#990)', () => {
       const { container } = mount(store);
 
       const before = cards(container)[0] as HTMLDetailsElement;
-      act(() => {
+      await act(() => {
         before.open = true;
         before.dispatchEvent(new Event('toggle'));
       });
@@ -399,10 +399,10 @@ describe('Transcript (#990)', () => {
       // Simulate a future append-ordering change (a regenerate/edit-turn feature, a second entry
       // point) inserting an EXTRA message BEFORE this turn commits — `messages.length` at the card's
       // open time no longer predicts the index the committed message will actually land at.
-      act(() =>
+      await act(() =>
         store.getState().appendChatMessage({ role: 'assistant', content: 'injected mid-turn', offerApply: false }),
       );
-      act(() => store.getState().commitChatTurn({ role: 'assistant', content: 'done' }));
+      await act(() => store.getState().commitChatTurn({ role: 'assistant', content: 'done' }));
 
       // Exactly one card (the injected message carries no tool calls) — it must be the SAME element
       // identity-wise, still open, not reset by the intervening append shifting its final index.
@@ -477,7 +477,7 @@ describe('Transcript (#990)', () => {
 
       // Swap to workspace B, whose transcript ALSO has an assistant message at index 1. B's gate is
       // held pending, so any Apply visible now is A's stale candidate leaking across the swap.
-      act(() =>
+      await act(() =>
         store.getState().hydrateChat('ws-B', [
           { role: 'user', content: 'q in B' },
           { role: 'assistant', content: 'B reply' },
@@ -509,7 +509,7 @@ describe('Transcript (#990)', () => {
       // The SAME workspace re-hydrates a different conversation whose message at this index is an
       // explanatory turn (offerApply: false). The reused bubble takes the early return — no new gate
       // run will ever overwrite the old candidate — so the reset must happen BEFORE that return.
-      act(() =>
+      await act(() =>
         store.getState().hydrateChat('ws-1', [
           { role: 'user', content: 'q2' },
           { role: 'assistant', content: 'explanation', offerApply: false },
@@ -522,7 +522,7 @@ describe('Transcript (#990)', () => {
     });
   });
 
-  test('autoscrolls to the bottom as the transcript grows', () => {
+  test('autoscrolls to the bottom as the transcript grows', async () => {
     const store = exchangeStore();
     const { container } = mount(store);
     const el = transcript(container);
@@ -536,7 +536,7 @@ describe('Transcript (#990)', () => {
         scrolled = v;
       },
     });
-    act(() => store.getState().appendChatMessage({ role: 'user', content: 'more' }));
+    await act(() => store.getState().appendChatMessage({ role: 'user', content: 'more' }));
     expect(scrolled).toBe(500);
   });
 

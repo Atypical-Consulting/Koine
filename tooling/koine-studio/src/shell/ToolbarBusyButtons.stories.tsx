@@ -68,10 +68,10 @@ export const Busy: Story = {
   play: async ({ canvasElement }) => {
     for (const id of ['btn-new', 'btn-open-folder']) {
       const btn = canvasElement.querySelector<HTMLButtonElement>(`#${id}`);
-      expect(btn).toBeTruthy();
-      expect(btn!.disabled).toBe(true);
-      expect(btn!.getAttribute('aria-disabled')).toBe('true');
-      expect(btn!.title).toBe(BUSY_TITLE);
+      await expect(btn).toBeTruthy();
+      await expect(btn!.disabled).toBe(true);
+      await expect(btn!.getAttribute('aria-disabled')).toBe('true');
+      await expect(btn!.title).toBe(BUSY_TITLE);
     }
   },
 };

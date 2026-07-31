@@ -73,14 +73,14 @@ describe('EventsPanel', () => {
     expect(EventsPanelFromBarrel).toBe(EventsPanel);
   });
 
-  test('lists every context’s events, and a host scope change (set) narrows them', () => {
+  test('lists every context’s events, and a host scope change (set) narrows them', async () => {
     const store = createTestReadableStore<EventsPanelSlice>(allSlice);
     const { container } = render(<EventsPanel store={store} handlers={{ goto: () => {} }} renderFlow={noRender} />);
 
     expect(container.textContent).toContain('OrderPlaced');
     expect(container.textContent).toContain('ShipDispatched');
 
-    act(() => store.set(salesSlice));
+    await act(() => store.set(salesSlice));
     expect(container.textContent).toContain('OrderPlaced');
     expect(container.textContent).not.toContain('ShipDispatched');
   });
@@ -96,23 +96,23 @@ describe('EventsPanel — Table | Flow toggle (#270)', () => {
   const flowBtn = (c: Element) => c.querySelector('button[data-view="flow"]') as HTMLElement;
   const tableBtn = (c: Element) => c.querySelector('button[data-view="table"]') as HTMLElement;
 
-  test('defaults to the table, switches to the flow canvas, and restores the table', () => {
+  test('defaults to the table, switches to the flow canvas, and restores the table', async () => {
     const store = createTestReadableStore<EventsPanelSlice>(allSlice);
     const { container } = render(<EventsPanel store={store} handlers={{ goto: () => {} }} renderFlow={noRender} />);
 
     expect(container.querySelector('.koi-events-mount')).not.toBeNull();
     expect(container.querySelector('.koi-event-flow-mount')).toBeNull();
 
-    act(() => flowBtn(container).click());
+    await act(() => flowBtn(container).click());
     expect(container.querySelector('.koi-event-flow-mount')).not.toBeNull();
     expect(container.querySelector('.koi-events-mount')).toBeNull();
 
-    act(() => tableBtn(container).click());
+    await act(() => tableBtn(container).click());
     expect(container.querySelector('.koi-events-mount')).not.toBeNull();
     expect(container.querySelector('.koi-event-flow-mount')).toBeNull();
   });
 
-  test('switching to Flow invokes the injected renderer with the mount node + scope key; a scope change re-invokes it and disposes the prior; unmount disposes once', () => {
+  test('switching to Flow invokes the injected renderer with the mount node + scope key; a scope change re-invokes it and disposes the prior; unmount disposes once', async () => {
     const { renderFlow, calls } = makeRenderFlow();
     const store = createTestReadableStore<EventsPanelSlice>(allSlice);
     const { container, unmount } = render(
@@ -120,14 +120,14 @@ describe('EventsPanel — Table | Flow toggle (#270)', () => {
     );
 
     // Switch to Flow → renderFlow called once with the mount node and the current scope key.
-    act(() => flowBtn(container).click());
+    await act(() => flowBtn(container).click());
     expect(calls).toHaveLength(1);
     expect(calls[0].host).toBe(container.querySelector('.koi-event-flow-mount'));
     expect(calls[0].scopeKey).toBe('all');
 
     // A host scope change re-derives the flow: the prior handle is disposed exactly once and renderFlow
     // is re-invoked with the new scope key.
-    act(() => store.set(salesSlice));
+    await act(() => store.set(salesSlice));
     expect(calls[0].dispose).toHaveBeenCalledTimes(1);
     expect(calls).toHaveLength(2);
     expect(calls[1].scopeKey).toBe('Sales');
@@ -137,16 +137,16 @@ describe('EventsPanel — Table | Flow toggle (#270)', () => {
     expect(calls[1].dispose).toHaveBeenCalledTimes(1);
   });
 
-  test('the flow legend tracks the active context (its SR-only text alternative narrows on scope change)', () => {
+  test('the flow legend tracks the active context (its SR-only text alternative narrows on scope change)', async () => {
     const store = createTestReadableStore<EventsPanelSlice>(allSlice);
     const { container } = render(<EventsPanel store={store} handlers={{ goto: () => {} }} renderFlow={noRender} />);
-    act(() => flowBtn(container).click());
+    await act(() => flowBtn(container).click());
 
     const legend = () => container.querySelector('.koi-event-flow-legend')!.textContent;
     expect(legend()).toContain('OrderPlaced');
     expect(legend()).toContain('ShipDispatched');
 
-    act(() => store.set(salesSlice));
+    await act(() => store.set(salesSlice));
     expect(legend()).toContain('OrderPlaced');
     expect(legend()).not.toContain('ShipDispatched');
   });
@@ -154,7 +154,7 @@ describe('EventsPanel — Table | Flow toggle (#270)', () => {
   test('the flow view has no accessibility violations', async () => {
     const store = createTestReadableStore<EventsPanelSlice>(allSlice);
     const { container } = render(<EventsPanel store={store} handlers={{ goto: () => {} }} renderFlow={noRender} />);
-    act(() => flowBtn(container).click());
+    await act(() => flowBtn(container).click());
     expect(await axe(container)).toHaveNoViolations();
   });
 });
@@ -197,7 +197,7 @@ describe('EventsPanel — table', () => {
 
   // Regression (#1382 follow-up): rows are keyed on the QUALIFIED event name, not the simple-name label, so
   // same-named events in two contexts keep their own DOM row across a sort and activate their own declaration.
-  test('same-named events in two contexts keep their own DOM row across a sort and activate their own declaration', () => {
+  test('same-named events in two contexts keep their own DOM row across a sort and activate their own declaration', async () => {
     const goto = vi.fn();
     const salesSpan = span(12);
     const billingSpan = span(42);
@@ -215,7 +215,7 @@ describe('EventsPanel — table', () => {
     expect(before.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Sales', 'Billing']);
 
     // Sort ascending by Bounded Context: Billing < Sales.
-    act(() => container.querySelectorAll('thead th')[3].querySelector('button')!.click());
+    await act(() => container.querySelectorAll('thead th')[3].querySelector('button')!.click());
 
     const after = Array.from(container.querySelectorAll('tbody tr'));
     expect(after.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Billing', 'Sales']);

@@ -73,27 +73,27 @@ describe('CanvasPalette', () => {
     }
   });
 
-  test('context-scoped buttons are disabled under "All contexts" and enabled once a context is active', () => {
+  test('context-scoped buttons are disabled under "All contexts" and enabled once a context is active', async () => {
     const store = createAppStore();
     const { container } = renderPalette(store);
     expect(btn(container, 'entity').disabled).toBe(true);
-    act(() => store.getState().setActiveContext('Ordering'));
+    await act(() => store.getState().setActiveContext('Ordering'));
     expect(btn(container, 'entity').disabled).toBe(false);
   });
 
-  test('under "All contexts", buttons enable when the model has exactly one context (the only home)', () => {
+  test('under "All contexts", buttons enable when the model has exactly one context (the only home)', async () => {
     const store = createAppStore(); // defaults to ALL_CONTEXTS
     const { container } = renderPalette(store);
     expect(btn(container, 'entity').disabled).toBe(true); // no contexts known yet
-    act(() => store.getState().setContexts(['Ordering']));
+    await act(() => store.getState().setContexts(['Ordering']));
     expect(btn(container, 'entity').disabled).toBe(false); // single context = unambiguous target
-    act(() => store.getState().setContexts(['Ordering', 'Billing']));
+    await act(() => store.getState().setContexts(['Ordering', 'Billing']));
     expect(btn(container, 'entity').disabled).toBe(true); // 2+ contexts = ambiguous, must pick
   });
 
-  test('clicking an enabled construct calls onAdd with its kind', () => {
+  test('clicking an enabled construct calls onAdd with its kind', async () => {
     const store = createAppStore();
-    act(() => store.getState().setActiveContext('Ordering'));
+    await act(() => store.getState().setActiveContext('Ordering'));
     const onAdd = vi.fn();
     const { container } = renderPalette(store, { onAdd });
     fireEvent.click(btn(container, 'aggregate'));
@@ -116,31 +116,31 @@ describe('CanvasPalette', () => {
     expect(onAddAnnotation).toHaveBeenCalledWith('group');
   });
 
-  test('aggregate-scoped buttons (rule/repository) are disabled until an aggregate is selected', () => {
+  test('aggregate-scoped buttons (rule/repository) are disabled until an aggregate is selected', async () => {
     const store = createAppStore();
     const { container } = renderPalette(store, { index: aggregateIndex() });
     // No selection yet → both disabled.
     expect(btn(container, 'rule').disabled).toBe(true);
     expect(btn(container, 'repository').disabled).toBe(true);
     // Selecting the aggregate enables them.
-    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Orders', context: 'Sales' }));
+    await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Orders', context: 'Sales' }));
     expect(btn(container, 'rule').disabled).toBe(false);
     expect(btn(container, 'repository').disabled).toBe(false);
   });
 
-  test('clicking an aggregate-scoped button calls onAddAggregateMember with its kind and the aggregate qname', () => {
+  test('clicking an aggregate-scoped button calls onAddAggregateMember with its kind and the aggregate qname', async () => {
     const store = createAppStore();
-    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Orders', context: 'Sales' }));
+    await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Orders', context: 'Sales' }));
     const onAddAggregateMember = vi.fn();
     const { container } = renderPalette(store, { index: aggregateIndex(), onAddAggregateMember });
     fireEvent.click(btn(container, 'repository'));
     expect(onAddAggregateMember).toHaveBeenCalledWith('repository', 'Sales.Orders');
   });
 
-  test('selecting a non-aggregate element keeps the aggregate-scoped buttons disabled', () => {
+  test('selecting a non-aggregate element keeps the aggregate-scoped buttons disabled', async () => {
     const store = createAppStore();
     // Resolves to nothing in the index → not an aggregate.
-    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Money', context: 'Sales' }));
+    await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Money', context: 'Sales' }));
     const { container } = renderPalette(store, { index: aggregateIndex() });
     expect(btn(container, 'rule').disabled).toBe(true);
     expect(btn(container, 'repository').disabled).toBe(true);
@@ -202,7 +202,7 @@ describe('CanvasPalette', () => {
 
   test('has no accessibility violations', async () => {
     const store = createAppStore();
-    act(() => store.getState().setActiveContext('Ordering'));
+    await act(() => store.getState().setActiveContext('Ordering'));
     const { container } = renderPalette(store, { index: aggregateIndex() });
     expect(await axe(container)).toHaveNoViolations();
   });

@@ -5,6 +5,7 @@ import { createSettingsPage, type SettingsPageHandle } from '@/settings/settings
 import type { SettingsEditorMode } from '@/settings/settingsTypes';
 import type { PrefsCallbacks } from '@/settings/prefs';
 import { WORKSPACE_OVERRIDE_KEY_PREFIX } from '@/settings/persistence';
+import { createAppStore } from '@/store/index';
 
 // The gear-launched Settings center PAGE (#center-panel-settings) — a transient center view, NOT a modal.
 // createSettingsPage is a vanilla DOM factory: it mounts a Visual/JSON segmented toggle into the page
@@ -54,7 +55,7 @@ function mountSettingsPage(mode: SettingsEditorMode, cb: PrefsCallbacks = callba
       }
       const header = root.querySelector<HTMLElement>('#settings-page-header')!;
       const body = root.querySelector<HTMLElement>('#settings-page-body')!;
-      handle = createSettingsPage({ header, body }, cb);
+      handle = createSettingsPage({ header, body }, cb, createAppStore());
     } else if (!root && handle) {
       handle.destroy();
       handle = null;
@@ -104,10 +105,10 @@ export const InvalidJson: Story = {
     const view = EditorView.findFromDOM(canvasElement.querySelector<HTMLElement>('.cm-editor')!)!;
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '{ "theme": ' } });
     await waitFor(
-      () => {
+      async () => {
         const strip = canvasElement.querySelector<HTMLElement>('.settings-json-diagnostics');
-        expect(strip).not.toBeNull();
-        expect(strip!.hidden).toBe(false);
+        await expect(strip).not.toBeNull();
+        await expect(strip!.hidden).toBe(false);
       },
       { timeout: 3000 },
     );
@@ -125,8 +126,8 @@ export const JsonWorkspaceScope: Story = {
     const wsRadio = scopeGroup?.querySelector<HTMLElement>('[data-value="workspace"]');
     wsRadio?.click();
     await waitFor(
-      () => {
-        expect(wsRadio?.getAttribute('aria-checked')).toBe('true');
+      async () => {
+        await expect(wsRadio?.getAttribute('aria-checked')).toBe('true');
       },
       { timeout: 3000 },
     );
@@ -140,9 +141,9 @@ export const JsonNoWorkspace: Story = {
   render: () => mountSettingsPage('json'),
   play: async ({ canvasElement }) => {
     const note = canvasElement.querySelector<HTMLElement>('.settings-json-scope-empty');
-    expect(note).not.toBeNull();
+    await expect(note).not.toBeNull();
     const scopeGroup = canvasElement.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Settings JSON scope"]');
     const wsRadio = scopeGroup?.querySelector<HTMLButtonElement>('[data-value="workspace"]');
-    expect(wsRadio?.disabled).toBe(true);
+    await expect(wsRadio?.disabled).toBe(true);
   },
 };

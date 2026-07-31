@@ -20,8 +20,11 @@ namespace Koine.Compiler.Semantics;
 ///   <item>an entity/aggregate-root member holds domain state, never a domain/integration event,
 ///   read model, or query (<see cref="DiagnosticCodes.EntityFieldReferencesMessageType"/>).</item>
 /// </list>
-/// Classification is by <see cref="ModelIndex.Classify(string)"/> (genuinely-unknown names are left to
-/// <see cref="DiagnosticCodes.UnknownType"/>); collection element/value types are checked recursively.
+/// Classification is by the context-aware <see cref="ModelIndex.Classify(string?, string)"/> overload,
+/// resolved against each type's own declaring context (R13.2 allows the same simple name to be reused
+/// across contexts, so a context-blind classify can be won by an unrelated same-named type elsewhere —
+/// issue #1664); genuinely-unknown names are left to <see cref="DiagnosticCodes.UnknownType"/>.
+/// Collection element/value types are checked recursively.
 /// TARGET-AGNOSTIC — it reports diagnostics only.
 /// </summary>
 internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
@@ -44,14 +47,14 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
                 switch (type)
                 {
                     case ValueObjectDecl vo:
-                        CheckValueObject(vo, index, diagnostics);
+                        CheckValueObject(vo, ctx.Name, index, diagnostics);
                         break;
                     case EventDecl ev:
-                        CheckDomainEvent(ev, index, diagnostics);
+                        CheckDomainEvent(ev, ctx.Name, index, diagnostics);
                         break;
                     case EntityDecl entity:
-                        CheckEntityReferences(entity, owningAggregate, index, diagnostics);
-                        CheckEntityBehaviors(entity, index, diagnostics);
+                        CheckEntityReferences(entity, ctx.Name, owningAggregate, index, diagnostics);
+                        CheckEntityBehaviors(entity, ctx.Name, index, diagnostics);
                         break;
                 }
             }
@@ -102,6 +105,7 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
     /// </summary>
     private static void CheckEntityReferences(
         EntityDecl entity,
+        string context,
         IReadOnlyDictionary<string, string> owningAggregate,
         ModelIndex index,
         List<Diagnostic> diagnostics)
@@ -109,19 +113,20 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
         owningAggregate.TryGetValue(entity.Name, out string? declaringOwner);
         foreach (Member m in entity.Members)
         {
-            CheckCrossAggregate(m.Name, m.Type, declaringOwner, owningAggregate, index, diagnostics);
+            CheckCrossAggregate(m.Name, m.Type, context, declaringOwner, owningAggregate, index, diagnostics);
         }
     }
 
     private static void CheckCrossAggregate(
         string memberName,
         TypeRef tr,
+        string context,
         string? declaringOwner,
         IReadOnlyDictionary<string, string> owningAggregate,
         ModelIndex index,
         List<Diagnostic> diagnostics)
     {
-        TypeKind kind = index.Classify(tr.Name);
+        TypeKind kind = index.Classify(context, tr.Name);
 
         // An entity holds domain state — value objects, enums, ids, and its own child entities. A
         // domain/integration event is an immutable record of what happened; a read model / query is a
@@ -152,12 +157,12 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
 
         if (tr.Element is not null)
         {
-            CheckCrossAggregate(memberName, tr.Element, declaringOwner, owningAggregate, index, diagnostics);
+            CheckCrossAggregate(memberName, tr.Element, context, declaringOwner, owningAggregate, index, diagnostics);
         }
 
         if (tr.Value is not null)
         {
-            CheckCrossAggregate(memberName, tr.Value, declaringOwner, owningAggregate, index, diagnostics);
+            CheckCrossAggregate(memberName, tr.Value, context, declaringOwner, owningAggregate, index, diagnostics);
         }
     }
 
@@ -166,12 +171,12 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
     /// ID value objects, and other value objects (and collections of those). An entity, aggregate, or
     /// any other reference type smuggles identity and mutability into a value — KOI1601.
     /// </summary>
-    private static void CheckValueObject(ValueObjectDecl vo, ModelIndex index, List<Diagnostic> diagnostics)
+    private static void CheckValueObject(ValueObjectDecl vo, string context, ModelIndex index, List<Diagnostic> diagnostics)
     {
         foreach (Member m in vo.Members)
         {
             CheckMemberType(
-                m.Name, m.Type, index, IsAllowedAsData,
+                m.Name, m.Type, context, index, IsAllowedAsData,
                 DiagnosticCodes.ValueObjectReferencesEntity,
                 (name, t) => $"value-object field '{name}' references '{t}'; a value object has no identity and must be composed only of primitives, enums, ID value objects, and other value objects",
                 diagnostics);
@@ -183,12 +188,12 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
     /// not live entity/aggregate references (those would not serialize and would couple the event to a
     /// mutable object) — KOI1604.
     /// </summary>
-    private static void CheckDomainEvent(EventDecl ev, ModelIndex index, List<Diagnostic> diagnostics)
+    private static void CheckDomainEvent(EventDecl ev, string context, ModelIndex index, List<Diagnostic> diagnostics)
     {
         foreach (Member m in ev.Members)
         {
             CheckMemberType(
-                m.Name, m.Type, index, IsAllowedAsData,
+                m.Name, m.Type, context, index, IsAllowedAsData,
                 DiagnosticCodes.DomainEventReferencesEntity,
                 (name, t) => $"domain-event field '{name}' references '{t}'; a domain event carries data and identities (e.g. an Id), not entity or aggregate references",
                 diagnostics);
@@ -199,26 +204,26 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
     /// A command or factory is a message/use-case: its parameters carry data and identities, not live
     /// entity/aggregate references — the caller passes an Id and the handler loads the aggregate (KOI1603).
     /// </summary>
-    private static void CheckEntityBehaviors(EntityDecl entity, ModelIndex index, List<Diagnostic> diagnostics)
+    private static void CheckEntityBehaviors(EntityDecl entity, string context, ModelIndex index, List<Diagnostic> diagnostics)
     {
         foreach (CommandDecl cmd in entity.Commands)
         {
-            CheckParameters("command", cmd.Parameters, index, diagnostics);
+            CheckParameters("command", cmd.Parameters, context, index, diagnostics);
         }
 
         foreach (FactoryDecl factory in entity.Factories)
         {
-            CheckParameters("factory", factory.Parameters, index, diagnostics);
+            CheckParameters("factory", factory.Parameters, context, index, diagnostics);
         }
     }
 
     private static void CheckParameters(
-        string kind, IReadOnlyList<Param> parameters, ModelIndex index, List<Diagnostic> diagnostics)
+        string kind, IReadOnlyList<Param> parameters, string context, ModelIndex index, List<Diagnostic> diagnostics)
     {
         foreach (Param p in parameters)
         {
             CheckMemberType(
-                p.Name, p.Type, index, IsAllowedAsData,
+                p.Name, p.Type, context, index, IsAllowedAsData,
                 DiagnosticCodes.CommandParameterReferencesEntity,
                 (name, t) => $"{kind} parameter '{name}' references '{t}'; a {kind} carries data and identities (e.g. an Id), not entity or aggregate references",
                 diagnostics);
@@ -266,25 +271,26 @@ internal sealed class ReferenceDisciplineAnalyzer : IModelAnalyzer
     private static void CheckMemberType(
         string memberName,
         TypeRef tr,
+        string context,
         ModelIndex index,
         Func<TypeKind, bool> allowed,
         string code,
         Func<string, string, string> describe,
         List<Diagnostic> diagnostics)
     {
-        if (!allowed(index.Classify(tr.Name)))
+        if (!allowed(index.Classify(context, tr.Name)))
         {
             diagnostics.Add(Diagnostic.Error(code, describe(memberName, tr.Name), tr.Span));
         }
 
         if (tr.Element is not null)
         {
-            CheckMemberType(memberName, tr.Element, index, allowed, code, describe, diagnostics);
+            CheckMemberType(memberName, tr.Element, context, index, allowed, code, describe, diagnostics);
         }
 
         if (tr.Value is not null)
         {
-            CheckMemberType(memberName, tr.Value, index, allowed, code, describe, diagnostics);
+            CheckMemberType(memberName, tr.Value, context, index, allowed, code, describe, diagnostics);
         }
     }
 }

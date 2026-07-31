@@ -155,3 +155,14 @@ export const CollidingRelPaths: Story = {
     return <ChangeSetPanel {...args} store={store} />;
   },
 };
+
+/** A multi-root workspace (#1132): the brand-new file's row grows a `koi-changeset-root` picker — one
+ *  option per root, labelled by folder name and titled with the full root token — so the review can
+ *  redirect a model-proposed new file before Apply writes it. The modified row stays picker-free. */
+export const MultiRootNewFile: Story = {
+  render: (args) => {
+    const store = reviewingStore();
+    store.getState().setRoots(['file:///workspace/backend', 'file:///workspace/frontend']);
+    return <ChangeSetPanel {...args} store={store} />;
+  },
+};

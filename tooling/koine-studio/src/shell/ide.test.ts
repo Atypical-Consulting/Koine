@@ -1377,7 +1377,7 @@ describe('ide init() — mobile Props zone reflects selected state (#221)', () =
       const propsTab = document.querySelector<HTMLButtonElement>('#mobile-zone-bar-host button[data-zone="props"]')!;
       expect(propsTab.getAttribute('aria-selected')).toBe('false');
 
-      act(() => propsTab.click()); // flush the store-driven MobileZoneBar re-render
+      await act(() => propsTab.click()); // flush the store-driven MobileZoneBar re-render
 
       // The Props tab now reflects selected state (store-driven aria-selected + roving tabindex): the bug
       // was that selecting Props opened the sheet and returned BEFORE writing the slice, so the tab never

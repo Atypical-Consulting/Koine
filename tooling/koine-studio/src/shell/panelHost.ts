@@ -17,9 +17,12 @@ import { domById } from '@/shared/domById';
 import type { PrefsCallbacks } from '@/settings/prefs';
 import type { Platform } from '@/host';
 import type { KoineLsp, SourceSpan } from '@/lsp/lsp';
+import type { AppStore } from '@/store/index';
 
 export interface PanelHostDeps {
   prefsCallbacks: PrefsCallbacks;
+  /** The app store, threaded into createSettingsPage as its injected dependency (#1351). */
+  store: AppStore;
   /** The store's pending landing category (appStore.settingsCategory) for the Settings page. */
   settingsCategory(): string | undefined;
   /** Record the Settings-open intent in the store (controller.showSettings) before building the page. */
@@ -37,9 +40,10 @@ export interface PanelHostDeps {
   workspace: {
     activeUri(): string;
     /** Every open buffer, keyed by its file:// uri (the assistant's opaque session key, #472). */
-    buffers: ReadonlyMap<string, { name?: string; relPath: string; text: string }>;
+    buffers: ReadonlyMap<string, { name?: string; relPath: string; text: string; rootToken: string }>;
     folderRootToken(): string;
-    /** Keyed write: an open buffer's uri, or a `new:<relPath>` key creating under the primary root. */
+    /** Keyed write: an open buffer's uri, or a `new:`/`new-in:` key (#1132) creating under the
+     *  primary root or an explicitly chosen one, respectively. */
     applyFileEdit(key: string, body: string): Promise<unknown>;
   };
   /** The controller's cached domain index (two LSP recompiles), reused until the next edit clears it. */
@@ -104,6 +108,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     settingsPage = createSettingsPage(
       { header: domById('settings-page-header'), body: domById('settings-page-body') },
       deps.prefsCallbacks,
+      deps.store,
       () => closeSettings(), // use the focus-restoring wrapper, not the raw store action
     );
     // A first build already paints from the live settings; only a deep-link needs the extra repaint to
@@ -210,11 +215,15 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
       getWorkspaceFiles: () => {
         const files: Record<string, string> = {};
         const displayPath: Record<string, string> = {};
+        // Each key's owning root token (#1132) — lets the panel infer which root a brand-new file
+        // proposed alongside a revision of an existing file should be created under.
+        const rootOf: Record<string, string> = {};
         for (const [uri, buf] of deps.workspace.buffers) {
           files[uri] = buf.text;
           displayPath[uri] = buf.relPath;
+          rootOf[uri] = buf.rootToken;
         }
-        return { files, displayPath };
+        return { files, displayPath, rootOf };
       },
       // Host executor for the staged list/read/write edit tools (browser WASM / desktop MCP).
       runEditTool: deps.platform.runEditTool ? (name, argsJson, session) => deps.platform.runEditTool!(name, argsJson, session) : undefined,

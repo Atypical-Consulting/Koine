@@ -58,7 +58,11 @@ function mount(store: ReviewStore, onNavigate: (file: string, span: SourceSpan) 
   // Wrap the mount in act so the subscription effect flushes — otherwise a later store mutation has no
   // subscriber and the panel never re-renders.
   let panel!: ReturnType<typeof createReviewPanel>;
-  act(() => {
+  // `mount` is a synchronous helper shared by every test below; `act`'s own docs guarantee a
+  // synchronous callback is fully flushed before `act` returns, so the panel is already subscribed
+  // by the time callers use it regardless of whether we await the call here — `void` keeps this
+  // helper synchronous rather than forcing every call site to become async.
+  void act(() => {
     panel = createReviewPanel({ parent, store, onNavigate });
   });
   return { parent, panel, cleanup: () => { panel.dispose(); parent.remove(); } };
@@ -87,14 +91,14 @@ describe('ReviewPanel', () => {
     cleanup();
   });
 
-  test('resolving a thread updates its rendered status', () => {
+  test('resolving a thread updates its rendered status', async () => {
     const store = fakeStore([
       { id: 'r1', file: 'file:///a.koi', span: span('file:///a.koi', 3), status: 'open', comments: [{ author: 'Ada', body: 'look here', ts: 1 }] },
     ]);
     const { parent, cleanup } = mount(store);
 
     expect(parent.querySelector('.koi-review-status')!.textContent).toBe('Open');
-    act(() => {
+    await act(() => {
       fireEvent.click(parent.querySelector<HTMLButtonElement>('.koi-review-toggle')!);
     });
     expect(parent.querySelector('.koi-review-status')!.textContent).toBe('Resolved');
@@ -104,7 +108,7 @@ describe('ReviewPanel', () => {
     cleanup();
   });
 
-  test('appending a reply renders the new comment', () => {
+  test('appending a reply renders the new comment', async () => {
     const store = fakeStore([
       { id: 'r1', file: 'file:///a.koi', span: span('file:///a.koi', 3), status: 'open', comments: [{ author: 'Ada', body: 'first', ts: 1 }] },
     ]);
@@ -112,7 +116,7 @@ describe('ReviewPanel', () => {
 
     const input = parent.querySelector<HTMLInputElement>('.koi-review-reply-input')!;
     input.value = 'second';
-    act(() => {
+    await act(() => {
       fireEvent.submit(parent.querySelector('.koi-review-reply')!);
     });
     expect(parent.textContent).toContain('second');

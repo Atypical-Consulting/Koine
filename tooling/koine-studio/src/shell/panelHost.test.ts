@@ -36,6 +36,7 @@ const closeSettings = vi.fn();
 function makeDeps(): PanelHostDeps {
   return {
     prefsCallbacks: {} as PanelHostDeps['prefsCallbacks'],
+    store: {} as PanelHostDeps['store'],
     settingsCategory: () => undefined,
     showSettings,
     closeSettings,
@@ -119,20 +120,27 @@ describe('panelHost', () => {
   // #472 Task 3: the snapshot producer keys by the buffer uri (the buffers Map key), so two roots
   // holding the SAME relPath both survive — no collapse — while displayPath carries each key's
   // workspace-relative label for the review UI.
-  it('snapshots the workspace keyed by buffer uri with relPath as the display path (#472)', () => {
+  // #1132 Task 3: the snapshot also carries `rootOf`, mapping each key to its buffer's rootToken —
+  // the root-inference/apply-routing seam needs to know which root a staged edit's buffer lives under.
+  it('snapshots the workspace keyed by buffer uri with relPath as the display path (#472), plus rootOf per key (#1132)', () => {
     const deps = makeDeps();
     deps.workspace.buffers = new Map([
-      ['file:///wsA/model.koi', { relPath: 'model.koi', text: 'context A {}' }],
-      ['file:///wsB/model.koi', { relPath: 'model.koi', text: 'context B {}' }],
+      ['file:///wsA/model.koi', { relPath: 'model.koi', text: 'context A {}', rootToken: 'mem://wsA' }],
+      ['file:///wsB/model.koi', { relPath: 'model.koi', text: 'context B {}', rootToken: 'mem://wsB' }],
     ]);
     const host = createPanelHost(deps);
     host.ensureAssistant();
     const opts = ctors.createAssistantChat.mock.calls[0][0] as {
-      getWorkspaceFiles?: () => { files: Record<string, string>; displayPath: Record<string, string> };
+      getWorkspaceFiles?: () => {
+        files: Record<string, string>;
+        displayPath: Record<string, string>;
+        rootOf: Record<string, string>;
+      };
     };
     expect(opts.getWorkspaceFiles!()).toEqual({
       files: { 'file:///wsA/model.koi': 'context A {}', 'file:///wsB/model.koi': 'context B {}' },
       displayPath: { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
+      rootOf: { 'file:///wsA/model.koi': 'mem://wsA', 'file:///wsB/model.koi': 'mem://wsB' },
     });
   });
 

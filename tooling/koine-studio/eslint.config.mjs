@@ -167,13 +167,11 @@ export default tseslint.config(
       'no-restricted-syntax': ['error', ...selectorsExcept(INNER_HTML_ASSIGN_SELECTOR, INSERT_ADJACENT_HTML_SELECTOR)],
     },
   },
-  // Tests & stories: the deliberate fire-and-forget promises in vitest fixtures and Storybook play
-  // functions are a documented follow-up (fix the ~93 by awaiting), not a prod convention breach.
-  // TODO(2026-07-02): await the test/stories promises and drop this `off`; tracked as a PR follow-up.
+  // Tests & stories: no-floating-promises is fully enforced here too (#997) — every vitest/Storybook
+  // site now awaits or void-marks its promises, same as prod code.
   {
     files: ['src/**/*.{test,stories}.{ts,tsx}', 'src/test-setup*.ts'],
     rules: {
-      '@typescript-eslint/no-floating-promises': 'off',
       // Tests legitimately probe optional-absence in fixture DOM (getElementById → null is the assertion).
       'no-restricted-properties': 'off',
       // Fixture/DOM setup in vitest and Storybook legitimately writes innerHTML to stage markup.

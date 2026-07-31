@@ -48,7 +48,7 @@ import { makeTextCoalescer } from '@/ai/textCoalescer';
 import type { ComposerQuickAction } from '@/ai/components/Composer';
 import type { TranscriptNotice, TurnMechanism } from '@/ai/components/Transcript';
 import { buildDisplayIndex } from '@/ai/assistantTools';
-import { createEditSession, type EditSession, type StagedEdit } from '@/ai/editSession';
+import { createEditSession, newFileKeyInRoot, type EditSession, type StagedEdit } from '@/ai/editSession';
 import { loadChat, saveChat, clearChat } from '@/settings/persistence';
 import { appStore, type AppState } from '@/store/index';
 import type { ChangeSetFileState } from '@/store/slices/chat';
@@ -73,6 +73,33 @@ export interface WorkspaceFilesSnapshot {
   files: Record<string, string>;
   /** Workspace-relative display path per key — NOT unique across the roots of a multi-root workspace. */
   displayPath: Record<string, string>;
+  /**
+   * Each key's owning workspace root token (#1132), when the host can supply it. Optional so a
+   * legacy/test snapshot built without it still compiles and behaves as "no root info available" —
+   * {@link inferNewFileRoot} and the new-file drift check both treat a missing map the same way.
+   */
+  rootOf?: Record<string, string>;
+}
+
+/**
+ * Infer which workspace root a brand-new staged file should be created under (#1132), from the roots
+ * of the OTHER staged edits this turn — a new file names no root of its own, but a turn that also
+ * revises existing files gives a strong signal of which part of the workspace the model was working
+ * in. Collects the distinct roots (via `rootOf`) of every staged edit that is NOT itself new; exactly
+ * one distinct root ⇒ that root, zero or several (ambiguous) ⇒ null, so the caller falls back to
+ * today's behavior (create under the primary root) rather than guess. `rootOf` absent (the host can't
+ * supply root info, or a single-root/legacy snapshot) ⇒ null, same as ambiguous.
+ */
+export function inferNewFileRoot(staged: StagedEdit[], rootOf: Record<string, string> | undefined): string | null {
+  if (!rootOf) return null;
+  const roots = new Set<string>();
+  for (const edit of staged) {
+    if (edit.isNew) continue;
+    const root = rootOf[edit.key];
+    if (root === undefined) continue;
+    roots.add(root);
+  }
+  return roots.size === 1 ? [...roots][0]! : null;
 }
 
 export interface AssistantPanelOptions {
@@ -368,11 +395,22 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     freshPaths: ReadonlySet<string> | null,
   ): boolean {
     if (file.isNew) {
-      // A brand-new file's key is synthetic (`new:<relPath>`) and never appears in the live snapshot:
-      // drift iff the path it would CREATE now exists — in a root's display map, or as a raw key in a
-      // legacy relPath-keyed host — so a file created since SEND is never clobbered. Absent ⇒ still
-      // new ⇒ no drift.
+      // A brand-new file's key is synthetic (`new:<relPath>`/`new-in:<root>:<relPath>`) and never
+      // appears in the live snapshot: drift iff the path it would CREATE now exists — in a root's
+      // display map, or as a raw key in a legacy relPath-keyed host — so a file created since SEND is
+      // never clobbered. Absent ⇒ still new ⇒ no drift.
       if (!fresh) return false;
+      // #1132: when this row has a CHOSEN destination root and the fresh read can supply root info,
+      // scope the check to THAT root — a same-relPath hit under a DIFFERENT root must not block
+      // creating this file under its own (two roots may each legitimately want their own events.koi).
+      // No target root yet, or the fresh read can't supply root info: fall back to today's any-root check.
+      if (file.targetRoot && fresh.rootOf) {
+        const rootOf = fresh.rootOf;
+        for (const key of Object.keys(rootOf)) {
+          if (fresh.displayPath[key] === file.relPath && rootOf[key] === file.targetRoot) return true;
+        }
+        return false;
+      }
       return (freshPaths?.has(file.relPath) ?? false) || file.relPath in fresh.files;
     }
     const cur = fresh?.files[file.key];
@@ -450,8 +488,12 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
     // key it was staged under. The row's DISPLAY label rides in the relPath slot as the failure
     // report's name, so a partial apply names the exact twin (a bare colliding relPath could mean
     // either root); the write itself never reads it.
+    // A new-file row with a RESOLVED destination root (#1132 — inferred at stage time, or a later
+    // explicit pick) mints a `new-in:<root>:<relPath>` key so the host creates it under that root
+    // instead of always the primary one; an existing-file row, or a new file with no resolved root,
+    // keeps its original key exactly as before.
     const payload: StagedEdit[] = clean.map((f) => ({
-      key: f.key,
+      key: f.isNew && f.targetRoot ? newFileKeyInRoot(f.targetRoot, f.relPath) : f.key,
       relPath: f.display,
       body: f.body,
       isNew: f.isNew,
@@ -851,7 +893,18 @@ export function createAssistantChat(opts: AssistantPanelOptions): AssistantPanel
           const label = displayFor.get(edit.key);
           if (label !== undefined) display[edit.key] = label;
         }
-        store.getState().stageChangeSet(editSession.staged(), before, stagedDiagnostics, display);
+        // Infer a destination root for every brand-new file from the roots of this turn's OTHER staged
+        // (existing-file) edits (#1132): computed ONCE per turn — exactly one distinct root among them
+        // resolves every new-file row to it; ambiguous/none leaves them at the slice's default null,
+        // which is also correct (today's create-under-primary-root behavior, until a later explicit pick).
+        const inferredRoot = inferNewFileRoot(editSession.staged(), snapshot?.rootOf);
+        const targetRoots: Record<string, string> = {};
+        if (inferredRoot) {
+          for (const edit of editSession.staged()) {
+            if (edit.isNew) targetRoots[edit.key] = inferredRoot;
+          }
+        }
+        store.getState().stageChangeSet(editSession.staged(), before, stagedDiagnostics, display, targetRoots);
         rerender();
       } else {
         // The apply-gate lives here: a constrained turn validates (and, on the repair path, re-prompts)

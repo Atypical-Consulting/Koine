@@ -21,15 +21,15 @@ describe('HistoryControls', () => {
     expect(redoBtn(container).disabled).toBe(true);
   });
 
-  test('canUndo/canRedo toggle the disabled state', () => {
+  test('canUndo/canRedo toggle the disabled state', async () => {
     const store = createTestReadableStore<HistoryControlsSlice>({ canUndo: false, canRedo: false });
     const { container } = render(
       <HistoryControls store={store} onUndo={() => {}} onRedo={() => {}} undoTitle="Undo" redoTitle="Redo" />,
     );
-    act(() => store.set({ canUndo: true, canRedo: false }));
+    await act(() => store.set({ canUndo: true, canRedo: false }));
     expect(undoBtn(container).disabled).toBe(false);
     expect(redoBtn(container).disabled).toBe(true);
-    act(() => store.set({ canUndo: false, canRedo: true }));
+    await act(() => store.set({ canUndo: false, canRedo: true }));
     expect(undoBtn(container).disabled).toBe(true);
     expect(redoBtn(container).disabled).toBe(false);
   });
