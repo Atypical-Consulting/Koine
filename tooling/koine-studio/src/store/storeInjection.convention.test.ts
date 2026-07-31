@@ -19,6 +19,13 @@ const ROOT = join(SRC, '..'); // tooling/koine-studio
 // a deliberate choice (inject the store instead, or extend this allowlist with a reviewed reason).
 // Shrinking this list (e.g. converting `editorSession.tsx` to injection) is tracked separately and
 // should update the allowlist alongside the conversion, not silently.
+// `diagramContract.ts` and `theme.ts` (#1351, the opportunistic follow-up tail of #760): re-grepped at
+// implementation time and found a SCATTERED fan-out — flat, directly-exported getter/setter functions
+// (no factory/deps seam) called from independent composition roots (main.ts's pre-workspace Home route
+// welcome/Home.tsx, AND ide.tsx's controller graph), plus a rendering engine (diagrams-maxgraph.ts) and
+// settings/command-palette call sites. Forcing every caller to construct/thread a controller would be
+// disproportionate churn for a handful of getters/setters with no meaningful behavior to isolate in
+// tests — a deliberate, reasoned exception, not deferred debt. Re-verify the fan-out before revisiting.
 const ALLOWLIST = [
   'src/ai/aiPanel.ts',
   'src/diagrams/diagramContract.ts',
