@@ -249,4 +249,36 @@ public class SemanticTests
             """;
         Validate(src).ShouldBeEmpty();
     }
+
+    /// <summary>
+    /// Issue #1634: <c>CheckMember</c>'s qualified-enum-reference check
+    /// (<c>ma.Target is IdentifierExpr typeId &amp;&amp; _index.IsEnumType(typeId.Name)</c>) must resolve
+    /// context-first (R13.2), same as the context-aware <see cref="Koine.Compiler.Ast.ModelIndex.Classify(string?, string)"/>
+    /// overload #1560/#1612 introduced. Billing legally declares its own <c>enum Status</c> while Shipping
+    /// separately declares an unrelated, non-enum <c>Status</c> value object — R13.2 permits this since
+    /// uniqueness is enforced per-context, not globally. A context-blind <c>IsEnumType("Status")</c> can
+    /// answer for whichever declaration last won the flat, global lookup, wrongly treating Billing's own
+    /// qualified <c>Status.Draft</c> reference as an unknown field instead of a valid enum-member access.
+    /// </summary>
+    [Fact]
+    public void Qualified_enum_reference_resolves_against_its_own_context_despite_a_same_named_type_elsewhere()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status { Draft, Paid }
+              value Invoice {
+                status: Status
+                isDraft: Bool = status == Status.Draft
+              }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+            """;
+        Validate(src).ShouldBeEmpty();
+    }
 }
