@@ -53,7 +53,7 @@ Parses and validates the model, then — if you ask for output — emits files.
 |------|---------|--------------|
 | *(positional)* | — | The `.koi` file or directory to compile. Required. |
 | `--target` | `csharp` | The emitter: `csharp`, `typescript`, `python`, `php`, `rust`, `java`, `glossary`, `docs`, or `openapi`. |
-| `--layers <list>` | `domain` | Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable realization — EF Core for C#; a dependency-light in-memory realization for TypeScript & Python). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers) and [TypeScript & Python infrastructure](#typescript--python-infrastructure---layers). |
+| `--layers <list>` | `domain` | Comma-separated layers to emit: `domain` (the model + application contracts) and/or `infrastructure` (a runnable realization — EF Core for C#; a dependency-light in-memory realization for TypeScript, Python & Java). `infrastructure` implies `domain`. See [C# infrastructure layer](#c-infrastructure-layer---layers), [TypeScript & Python infrastructure](#typescript--python-infrastructure---layers), and [Java infrastructure](#java-infrastructure---layers). |
 | `--out <dir>` | *(none)* | Write the emitted files under this directory. Omit to only validate. |
 | `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
 | `--app-mediatr` | *(off)* | Application layer: emit the MediatR request/handler shape + validation/transaction pipeline behaviors instead of plain handlers. |
@@ -158,6 +158,16 @@ Per bounded context with at least one entity-rooted aggregate, the infrastructur
 - a **composition-root factory** (TypeScript `create<Context>Infrastructure`) / **provider helper** (Python `create_<context>_infrastructure`) — the analogue of C#'s `Add<Context>Infrastructure`.
 
 The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koine_infrastructure.py`. The layer is **off by default**, so an unconfigured emit stays **byte-identical**; the generated TypeScript is `tsc --strict`-clean and the Python is `mypy --strict`-clean.
+
+### Java infrastructure (`--layers`)
+
+The **Java** target honours the same selector (issue #1090). Per bounded context with at least one entity-rooted aggregate it emits an `InMemory<Root>Repository` implementing the repository contract over an injectable `koine.runtime.AggregateStore` (declarative finders become concrete in-memory queries), and — for a context that publishes an integration event — an `IntegrationEventDispatcher` draining a transactional outbox:
+
+```bash
+koine build templates/pizzeria --target java --out Generated --layers domain,infrastructure
+```
+
+The shared primitives (`AggregateStore`, `InMemoryStore`, `OutboxMessage`, `OutboxStore`, `InMemoryOutboxStore`, `IntegrationEventHandler`) ship once into the `koine.runtime` package. Everything stays stdlib-only and dependency-free, and the layer is **off by default**, so an unconfigured Java emit is **byte-identical** to the domain-only output.
 
 ### Emit a glossary
 
