@@ -1,10 +1,13 @@
 using System.Collections;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text;
 using System.Text.RegularExpressions;
 using Koine.Compiler.Emit;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Data.Sqlite;
@@ -355,6 +358,60 @@ public static class TestSupport
         }
 
         public void Dispose() => _connection.Dispose();
+    }
+
+    /// <summary>
+    /// Compiles <paramref name="files"/> together with a caller-supplied C# <paramref name="driverSource"/>
+    /// (the same driver-script shape as <see cref="RunPython"/>/<see cref="RunTypeScript"/>) and boots the
+    /// driver's <c>ApiHostDriver.Build()</c> factory — expected to return a <see cref="WebApplication"/>
+    /// wired with <c>UseTestServer()</c> — so an emitter meta-test can prove the emitted <c>api</c> layer's
+    /// Minimal-API endpoints work over a real, in-process HTTP request/response cycle (issue #1591), not
+    /// merely that they Roslyn-compile (<see cref="Compile"/>). The driver has to be compiled ALONGSIDE the
+    /// emitted files (as one more syntax tree), rather than referenced from this project, because it needs
+    /// direct source-level access to per-model generated types (<c>IUnitOfWork</c>, the aggregate, its
+    /// repository) that exist only inside that one dynamic compilation. Throws with the compiler errors when
+    /// the combined source does not compile, mirroring <see cref="EfRoundTripHarness.Create"/>.
+    /// </summary>
+    public static ApiHostHarness RunApi(IEnumerable<EmittedFile> files, string driverSource)
+    {
+        var allFiles = files.Append(new EmittedFile("__ApiHostDriver.cs", driverSource)).ToList();
+        var (assembly, errors) = Compile(allFiles);
+        if (assembly is null)
+        {
+            throw new InvalidOperationException(
+                "the generated api host did not compile:\n" + string.Join("\n", errors));
+        }
+
+        var driverType = assembly.GetTypes().Single(t => t.Name == "ApiHostDriver");
+        var buildMethod = driverType.GetMethod("Build", BindingFlags.Public | BindingFlags.Static)
+            ?? throw new InvalidOperationException("ApiHostDriver has no public static Build() method");
+        var app = (WebApplication)buildMethod.Invoke(null, null)!;
+        return new ApiHostHarness(app);
+    }
+
+    /// <summary>
+    /// An in-process ASP.NET Core Minimal-API host booted over emitted <c>api</c>-layer C# via
+    /// <see cref="RunApi"/>, exposing an <see cref="HttpClient"/> wired directly to the in-process test
+    /// server so a meta-test can issue real HTTP requests. Disposing stops the host.
+    /// </summary>
+    public sealed class ApiHostHarness : IDisposable
+    {
+        private readonly WebApplication _app;
+
+        /// <summary>An <see cref="HttpClient"/> talking to the in-process test server.</summary>
+        public HttpClient Client { get; }
+
+        internal ApiHostHarness(WebApplication app)
+        {
+            _app = app;
+            Client = app.GetTestClient();
+        }
+
+        public void Dispose()
+        {
+            Client.Dispose();
+            _app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 
     /// <summary>The env var that opts conformance suites into REQUIRING every target toolchain.</summary>
