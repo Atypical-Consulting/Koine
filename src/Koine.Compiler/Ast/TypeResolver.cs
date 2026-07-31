@@ -113,10 +113,10 @@ public sealed class TypeResolver
     public static bool IsBool(TypeRef? t) => t is not null && t.Name == "Bool";
 
     public bool IsValueLike(TypeRef? t) =>
-        t is not null && _index.Classify(t.Name) is TypeKind.Value or TypeKind.IdValueObject;
+        t is not null && _index.Classify(Context, t.Name) is TypeKind.Value or TypeKind.IdValueObject;
 
     public bool IsUserType(TypeRef? t) =>
-        t is not null && _index.Classify(t.Name) is TypeKind.Value or TypeKind.Entity;
+        t is not null && _index.Classify(Context, t.Name) is TypeKind.Value or TypeKind.Entity;
 
     /// <summary>
     /// The resolved type of an expression as a <see cref="KoineType"/> (never <c>null</c>; an
