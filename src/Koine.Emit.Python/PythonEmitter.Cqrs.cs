@@ -55,7 +55,7 @@ public sealed partial class PythonEmitter
             else
             {
                 pyType = typeMapper.Map(f.Type!);
-                var expectedEnum = emit.Index.Classify(context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
+                var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, PythonExpressionTranslator.NameMode.Property, expectedEnum);
             }
 

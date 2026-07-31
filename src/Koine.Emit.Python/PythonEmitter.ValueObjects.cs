@@ -504,5 +504,5 @@ public sealed partial class PythonEmitter
         PythonExpressionTranslator.NameMode.Parameter;
 
     private static string? EnumExpected(Member m, ModelIndex index, string? context) =>
-        index.Classify(context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+        index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 }
