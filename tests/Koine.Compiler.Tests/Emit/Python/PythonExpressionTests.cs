@@ -547,6 +547,49 @@ public class PythonExpressionTests
         Translate(expr).ShouldBe("OrderStatus.CANCELLED");
     }
 
+    /// <summary>
+    /// Issue #1619: <c>ModelIndex.Classify(string)</c> is context-blind (the same gap #1560/#1612
+    /// fixed for the Rust emitter) — its flat, last-write-wins <c>_byName</c> index can answer
+    /// non-<c>Enum</c> for a type name that legally resolves to an <c>enum</c> in ITS OWN declaring
+    /// context, when a DIFFERENT context declares a same-named, non-enum type afterwards (R13.2
+    /// permits this). Here <c>Billing.Status</c> is the enum; <c>Shipping.Status</c> (registered
+    /// after it) is a plain value, so the blind index answers non-Enum for the bare name "Status"
+    /// even when resolving Billing's own qualified reference. <c>WriteMemberAccess</c>'s qualified
+    /// enum-member-access shape then never matches, and the expression falls through to the generic
+    /// attribute-access codegen — emitting <c>status.draft</c>, a reference to a name that doesn't
+    /// exist in the generated module, instead of <c>Status.DRAFT</c>.
+    /// </summary>
+    [Fact]
+    public void Qualified_enum_access_resolves_the_correct_context_when_names_collide()
+    {
+        const string source = """
+            context Billing {
+              enum Status { Draft, Paid }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(source, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var model = result.Model!;
+        var semantic = new SemanticModel(model);
+        ModelIndex index = semantic.Index;
+        var typeMapper = new PythonTypeMapper(index);
+
+        // Billing's own translator, resolving its own Status.Draft reference.
+        var translator = new PythonExpressionTranslator(
+            index, Array.Empty<Member>(), index.EnumMemberToType, typeMapper, context: "Billing");
+
+        var expr = new MemberAccessExpr(Id("Status"), "Draft");
+        translator.Translate(expr).ShouldBe("Status.DRAFT");
+    }
+
     [Fact]
     public void Decimal_literal_renders_money_safe_decimal()
     {
