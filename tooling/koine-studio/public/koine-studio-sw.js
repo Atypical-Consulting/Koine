@@ -6,8 +6,9 @@
 //   Studio compiles `.koi` entirely in the browser via a multi-megabyte Blazor-WASM bundle (the .NET
 //   runtime + the rooted Koine.Compiler/ANTLR assemblies under <base>koine-wasm/_framework/*). This
 //   worker makes the installed Studio launch and compile with ZERO network once warmed:
-//     • APP SHELL (index.html + content-hashed assets/*, manifest, icons) — cached so the IDE boots
-//       offline.
+//     • APP SHELL (index.html + EVERY content-hashed assets/* file, precached at `install` from a
+//       build-time manifest — see `shellAssetManifestUrls`) — cached so the IDE boots offline after a
+//       single visit, not just a repeat one (issue #1685).
 //     • WASM COMPILER (_framework/*) — cache-first by content-hashed generation so a repeat visit boots
 //       the compiler with no network.
 //
@@ -65,11 +66,11 @@ export function shellCacheName() {
 
 /**
  * The stable (non-fingerprinted) shell URLs to precache at install so the IDE boots offline: the base
- * document and index.html (what the navigation fallback serves). The content-hashed JS/CSS chunks
- * index.html references are cached on demand (cache-first) — their names aren't known here. The PWA
- * manifest + launcher icons are deliberately NOT listed: the browser keeps its own install-time copies
- * and the running app uses inline SVG marks, so precaching them here would be dead work the fetch
- * handler never serves.
+ * document and index.html (what the navigation fallback serves). The content-hashed JS/CSS/font chunks
+ * are precached separately via `shellAssetManifestUrls` (the build-time manifest) so their names don't
+ * need to be known here. The PWA manifest + launcher icons are deliberately NOT listed: the browser
+ * keeps its own install-time copies and the running app uses inline SVG marks, so precaching them here
+ * would be dead work the fetch handler never serves.
  */
 export function shellAssetUrls(scope) {
   const b = scope.endsWith('/') ? scope : scope + '/';
@@ -110,6 +111,38 @@ export function isShellAssetPath(pathname, scopePath) {
 export function frameworkBaseOf(url) {
   const i = url.indexOf(FRAMEWORK_MARKER);
   return i >= 0 ? url.slice(0, i + FRAMEWORK_MARKER.length) : null;
+}
+
+/**
+ * URL of the build-time shell asset manifest (emitted by vite.config.ts's `shellManifestPlugin`): a
+ * flat JSON array of every content-hashed file under `<scope>assets/` (JS/CSS chunks, fonts). Absent
+ * under `vite dev` (no bundle) — `shellAssetManifestUrls` tolerates a fetch failure there.
+ */
+export function shellManifestUrl(scope) {
+  const b = scope.endsWith('/') ? scope : scope + '/';
+  return `${b}koine-studio-shell-manifest.json`;
+}
+
+/**
+ * The full list of content-hashed shell asset URLs to precache at install: not just index.html's own
+ * entry `<script>`/`<link>`, but every `assets/*` file the build emits (the compiler Web Worker script,
+ * CodeMirror language/theme chunks, fonts, …). Studio's boot sequence `import()`s several of these the
+ * instant its entry script runs — before this service worker's install→activate→claim lifecycle can
+ * possibly finish — so on a brand-new install they're fetched directly over the network, bypassing the
+ * SW's cache-first fetch handler entirely (issue #1685). Precaching the whole list here, as a fetch made
+ * by the SW itself, is unaffected by that client-control race. Best-effort: a missing/unreachable
+ * manifest (e.g. `vite dev`, no bundle) yields an empty list rather than failing `install`.
+ */
+export async function shellAssetManifestUrls(scope, deps) {
+  const b = scope.endsWith('/') ? scope : scope + '/';
+  try {
+    const res = await deps.fetch(shellManifestUrl(scope));
+    if (!res || !res.ok) return [];
+    const fileNames = await res.json();
+    return fileNames.map((fileName) => b + fileName);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -307,11 +340,19 @@ export async function evictStaleShellCaches(currentShellName, deps) {
   return stale;
 }
 
-/** Precache the stable shell URLs into the shell cache so the IDE boots offline. Best-effort. */
+/**
+ * Precache the stable shell URLs into the shell cache so the IDE boots offline, PLUS every built shell
+ * asset listed in the build-time manifest (see `shellAssetManifestUrls`) — without these, a brand-new
+ * install's first-ever visit races the SW's own install→activate→claim lifecycle for anything the app
+ * itself requests early (its entry `<script>`/`<link>`, the compiler Web Worker script, CodeMirror
+ * chunks, …), so an immediate offline reload (no warm-up second visit) would otherwise fail to boot
+ * (issue #1685). Best-effort throughout: install must not fail just because a shell URL is unreachable.
+ */
 export async function precacheShell(scopePath, deps) {
   const cache = await deps.caches.open(shellCacheName());
+  const urls = [...shellAssetUrls(scopePath), ...(await shellAssetManifestUrls(scopePath, deps))];
   await Promise.all(
-    shellAssetUrls(scopePath).map(async (url) => {
+    urls.map(async (url) => {
       try {
         const res = await deps.fetch(url);
         if (res && res.ok) await cache.put(url, res.clone());
