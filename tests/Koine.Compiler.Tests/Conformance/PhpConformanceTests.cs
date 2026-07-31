@@ -976,4 +976,63 @@ public class PhpConformanceTests
             "Guard-narrowed Int?/Int division should truncate toward zero (7/2==3, -7/2==-3), not throw:\n"
             + string.Join("\n", run.Errors));
     }
+
+    /// <summary>
+    /// Issue #1620: <c>ModelIndex.Classify</c> is context-blind — its flat, last-write-wins
+    /// <c>_byName</c> index can answer for the WRONG context's same-named declaration (R13.2 legally
+    /// lets two contexts each declare their own <c>Status</c>). Here <c>Shipping</c>'s <c>value Status</c>
+    /// is registered after <c>Billing</c>'s <c>enum Status</c>, so a context-blind
+    /// <c>Classify("Status")</c> answers <c>Value</c> even for <c>Billing.Invoice</c>'s own
+    /// <c>status: Status</c> member — losing the "expected enum" hint
+    /// (<see cref="PhpExpressionTranslator"/>'s <c>EnumTypeName</c>) that a bare-member equality
+    /// comparison (<c>status == Open</c>) needs to render <c>Open</c> as <c>Status::OPEN</c>. Before the
+    /// fix this emits <c>$this-&gt;status-&gt;equals($open)</c> — a reference to a PHP variable that was
+    /// never defined, a runtime fatal <c>phpstan</c>/<c>php -l</c> alone cannot see (the emitted code is
+    /// syntactically valid PHP); only executing it proves the bug.
+    /// </summary>
+    [Fact]
+    public void Same_named_type_across_two_contexts_resolves_the_correct_context_for_an_equality_comparison()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status { Open Closed }
+              value Invoice {
+                status: Status
+                isOpen: Bool = status == Open
+              }
+            }
+            context Shipping {
+              value Status { code: Int }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Billing/Enums/Status.php';
+            require __DIR__ . '/src/Billing/ValueObjects/Invoice.php';
+
+            $open = new Koine\Billing\ValueObjects\Invoice(Koine\Billing\Enums\Status::OPEN);
+            if ($open->isOpen() !== true) {
+                fwrite(STDERR, "expected isOpen() true for Status::OPEN, got " . var_export($open->isOpen(), true) . "\n");
+                exit(1);
+            }
+
+            $closed = new Koine\Billing\ValueObjects\Invoice(Koine\Billing\Enums\Status::CLOSED);
+            if ($closed->isOpen() !== false) {
+                fwrite(STDERR, "expected isOpen() false for Status::CLOSED, got " . var_export($closed->isOpen(), true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+
+        run.Ok.ShouldBeTrue(
+            "A same-named Status in another context must not make Billing.Invoice's own Status "
+            + "misclassify (undefined $open variable at runtime):\n" + string.Join("\n", run.Errors));
+    }
 }
