@@ -420,4 +420,122 @@ public class DddReferenceDisciplineTests
 
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
     }
+
+    // ---- issue #1664: Classify must resolve against the declaring context --
+
+    /// <summary>
+    /// Issue #1664: <c>CheckCrossAggregate</c> called the context-blind 1-arg
+    /// <c>ModelIndex.Classify(string)</c> overload, instead of the context-aware
+    /// <see cref="Koine.Compiler.Ast.ModelIndex.Classify(string?, string)"/> overload the
+    /// <c>ExpressionChecker.cs</c> series (#1634/#1641/#1655) already adopted for the same
+    /// anti-pattern. R13.2 lets two contexts each legally declare a type with the same simple name —
+    /// uniqueness is enforced per-context, not globally — so <c>ModelIndex</c>'s by-name registry is
+    /// last-write-wins across the whole model: context B's later-declared <c>event Order</c> won the
+    /// context-blind classify for context A's own, genuinely-a-value-object <c>Order</c> field too,
+    /// wrongly rejecting a valid model with KOI1605.
+    /// </summary>
+    [Fact]
+    public void An_entity_field_referencing_its_own_contexts_value_object_is_not_confused_with_a_same_named_event_elsewhere()
+    {
+        const string src = """
+            context A {
+              value Order {
+                total: Decimal
+              }
+              entity Receipt identified by ReceiptId {
+                order: Order
+              }
+            }
+
+            context B {
+              event Order {
+                note: String
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
+    }
+
+    /// <summary>
+    /// The inverse of the previous case: guards against the fix hiding a genuine violation. Before
+    /// the fix, context B's later-declared <c>value Order</c> would win the context-blind classify,
+    /// masking context A's real mistake of holding its own <c>event Order</c> as an entity field.
+    /// </summary>
+    [Fact]
+    public void An_entity_field_referencing_its_own_contexts_event_is_still_reported_despite_a_same_named_value_object_elsewhere()
+    {
+        const string src = """
+            context A {
+              event Order {
+                note: String
+              }
+              entity Receipt identified by ReceiptId {
+                order: Order
+              }
+            }
+
+            context B {
+              value Order {
+                total: Decimal
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.EntityFieldReferencesMessageType);
+    }
+
+    /// <summary>
+    /// Same anti-pattern, the other call site: <c>CheckMemberType</c> (feeds KOI1601/1603/1604) also
+    /// called the context-blind overload. Context B's later-declared <c>entity Currency</c> would win
+    /// the context-blind classify for context A's own <c>enum Currency</c> value-object member too.
+    /// </summary>
+    [Fact]
+    public void A_value_object_field_referencing_its_own_contexts_enum_is_not_confused_with_a_same_named_entity_elsewhere()
+    {
+        const string src = """
+            context A {
+              enum Currency { EUR, USD }
+              value Money {
+                amount:   Decimal
+                currency: Currency
+              }
+            }
+
+            context B {
+              entity Currency identified by CurrencyId {
+                name: String
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.ValueObjectReferencesEntity);
+    }
+
+    /// <summary>
+    /// The inverse of the previous case: guards against the fix hiding a genuine violation. Before
+    /// the fix, context B's later-declared <c>enum Currency</c> would win the context-blind classify,
+    /// masking context A's real mistake of composing its value object from its own <c>entity Currency</c>.
+    /// </summary>
+    [Fact]
+    public void A_value_object_field_referencing_its_own_contexts_entity_is_still_reported_despite_a_same_named_enum_elsewhere()
+    {
+        const string src = """
+            context A {
+              entity Currency identified by CurrencyId {
+                name: String
+              }
+              value Money {
+                amount:   Decimal
+                currency: Currency
+              }
+            }
+
+            context B {
+              enum Currency { EUR, USD }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.ValueObjectReferencesEntity);
+    }
 }
