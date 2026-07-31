@@ -12,6 +12,7 @@ import type {
   Graph as MxGraph,
   Cell as MxCell,
   ConnectionHandler,
+  FitPlugin,
   PanningHandler,
   SelectionHandler,
   TooltipHandler,
@@ -1092,17 +1093,13 @@ function mountChrome(mx: Mx, handle: CanvasHandle, host: HTMLElement, readOnly =
   graph.centerZoom = false;
   graph.zoomFactor = 1.2;
 
-  const fitPlugin = graph.getPlugin('fit') as unknown as
-    | { fit?: (o?: unknown) => void; fitCenter?: (o?: unknown) => void }
-    | undefined;
+  const fitPlugin = graph.getPlugin<FitPlugin>('fit');
   const fit = (): void => {
     // The layout can place content at negative/large coordinates; scale it to fit then center BOTH axes
     // (fitCenter alone left it hugging the top). No-op until the surface is measurable in the live DOM.
     try {
-      const g = graph as unknown as { fit?: (b?: number) => void; center?: (h?: boolean, v?: boolean) => void };
-      if (fitPlugin?.fit) fitPlugin.fit({ border: 24 });
-      else if (typeof g.fit === 'function') g.fit(24);
-      g.center?.(true, true);
+      fitPlugin?.fit({ border: 24 });
+      graph.center(true, true);
     } catch {
       /* container not measurable yet — ignore */
     }
