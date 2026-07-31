@@ -591,6 +591,63 @@
   color: var(--koi-on-error);
 }
 
+/* Raw keybindings.json editor (Advanced panel, #434): a collapsed-by-default power-user disclosure
+   spanning the full panel width (appended directly to the panel, like .koi-mcp-recipe, not laid out
+   as a label/control row). */
+.koi-kbdjson-details {
+  padding: var(--koi-space-2-5) 0;
+  border-top: 1px solid var(--koi-line);
+}
+
+.koi-kbdjson-summary {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--koi-text-base);
+  color: var(--koi-fg);
+}
+
+.koi-kbdjson-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1-5);
+  margin-top: var(--koi-space-2);
+}
+
+/* Hosts the EDITABLE CodeMirror JSON view (createEditableJsonView) — same box treatment as the
+   read-only .koi-mcp-snippet, minus the max-height clamp (a hand-edited blob may run longer). */
+.koi-kbdjson-editor {
+  padding: var(--koi-space-2-5) var(--koi-space-3);
+  background: var(--koi-paper-2);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  overflow-x: auto;
+
+  .cm-editor {
+    background: transparent;
+  }
+
+  .cm-content {
+    font-family: var(--koi-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.78rem;
+  }
+}
+
+.koi-kbdjson-editor:focus-within {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 2px;
+}
+
+.koi-kbdjson-error {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--koi-error);
+}
+
+.koi-kbdjson-actions {
+  display: flex;
+  gap: var(--koi-space-1-5);
+}
+
 /* MCP endpoint row: a read-only URL field beside a "Copy mcp.json" action. Widen the control so the
    loopback URL is readable, and lay the field + button out side by side. */
 .koi-set-row:has(.koi-mcp-control) .koi-set-control {

@@ -437,6 +437,7 @@ describe('change-set state machine', () => {
         before: 'context Old {}',
         accepted: true,
         drifted: false,
+        targetRoot: null,
       },
       {
         key: 'shipping.koi',
@@ -447,6 +448,7 @@ describe('change-set state machine', () => {
         before: '', // a new file has no send-time text
         accepted: true,
         drifted: false,
+        targetRoot: null,
       },
     ]);
   });
@@ -879,5 +881,78 @@ describe('change-set keying by staged-edit key (#472)', () => {
     const files = s.getState().chat.changeSet!.files;
     expect(files.map((f) => f.key)).toEqual([wsB, wsA]); // row order = stage order
     expect(files.map((f) => f.display)).toEqual(['model.koi@2', 'model.koi@1']); // labels follow the KEY
+  });
+});
+
+// #1132 Task 2: a chosen target root per new-file row, carried on the change set so a later UI picker
+// (Task 4) and inference (Task 3) have state to bind to. `targetRoot` starts null on every row and is
+// set only by `stageChangeSet`'s optional `targetRoots` map or by `setChangeSetFileRoot`.
+describe('targetRoot / setChangeSetFileRoot (#1132)', () => {
+  test('stageChangeSet sets targetRoot from the targetRoots map, and null for keys absent from it', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet(
+      [edit('a.koi', 'x', true), edit('b.koi', 'y', true), edit('c.koi', 'z', true)],
+      {},
+      null,
+      undefined,
+      { 'a.koi': '/root/one', 'c.koi': '/root/two' },
+    );
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.find((f) => f.key === 'a.koi')?.targetRoot).toBe('/root/one');
+    expect(files.find((f) => f.key === 'b.koi')?.targetRoot).toBeNull();
+    expect(files.find((f) => f.key === 'c.koi')?.targetRoot).toBe('/root/two');
+  });
+
+  test('stageChangeSet without a targetRoots param yields targetRoot: null on every row (backward compatibility)', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null);
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.every((f) => f.targetRoot === null)).toBe(true);
+  });
+
+  test('setChangeSetFileRoot updates exactly the addressed row while reviewing, leaving others untouched', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null);
+    s.getState().setChangeSetFileRoot('a.koi', '/chosen/root');
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.find((f) => f.key === 'a.koi')?.targetRoot).toBe('/chosen/root');
+    expect(files.find((f) => f.key === 'b.koi')?.targetRoot).toBeNull();
+  });
+
+  test('setChangeSetFileRoot is a no-op while applying (an in-flight apply must not have its destination swapped)', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().beginChangeSetApply(1);
+    s.getState().setChangeSetFileRoot('a.koi', '/chosen/root');
+    expect(s.getState().chat.changeSet?.files[0]?.targetRoot).toBeNull();
+  });
+
+  test('setChangeSetFileRoot is a no-op once applied, and on invalidated and null', () => {
+    const s = createAppStore();
+    s.getState().setChangeSetFileRoot('a.koi', '/x'); // null: must not throw
+    expect(s.getState().chat.changeSet).toBeNull();
+
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().beginChangeSetApply(1);
+    s.getState().resolveChangeSetApply({ failed: [] });
+    s.getState().setChangeSetFileRoot('a.koi', '/x');
+    expect(s.getState().chat.changeSet?.files[0]?.targetRoot).toBeNull(); // applied: untouched
+
+    s.getState().stageChangeSet([edit('b.koi', 'y')], {}, null);
+    s.getState().invalidateChangeSet('superseded');
+    s.getState().setChangeSetFileRoot('b.koi', '/x');
+    expect(s.getState().chat.changeSet?.files[0]?.targetRoot).toBeNull(); // invalidated: untouched
+  });
+
+  test('setChangeSetFileRoot does not touch accepted or drifted', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    s.getState().markChangeSetDrift(['a.koi']);
+    s.getState().setChangeSetFileAccepted('a.koi', false);
+    s.getState().setChangeSetFileRoot('a.koi', '/chosen/root');
+    const row = s.getState().chat.changeSet!.files[0];
+    expect(row.targetRoot).toBe('/chosen/root');
+    expect(row.accepted).toBe(false);
+    expect(row.drifted).toBe(true);
   });
 });

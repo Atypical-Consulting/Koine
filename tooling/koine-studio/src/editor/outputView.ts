@@ -130,3 +130,41 @@ export function createJsonView(parent: HTMLElement): ConfigView {
     destroy: () => view.destroy(),
   };
 }
+
+export interface EditableJsonView {
+  getValue(): string;
+  setValue(text: string): void;
+  destroy(): void;
+}
+
+/**
+ * An EDITABLE, syntax-highlighted JSON view for small power-user config surfaces — the writable twin
+ * of {@link createJsonView} (raw keybindings.json in Advanced settings, #434). Unlike
+ * `createJsonSettingsEditor` it carries no JSON-schema lint/completion/hover: a sparse `{id: chord}`
+ * override map has no schema, so the host validates via the existing keybinding-override store guard
+ * instead. The host owns parse/validate/persist; this factory is just the editing surface.
+ */
+export function createEditableJsonView(parent: HTMLElement, ariaLabel: string): EditableJsonView {
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: '',
+      extensions: [
+        EditorView.contentAttributes.of({ 'aria-label': ariaLabel }),
+        lineNumbers(),
+        langExt('json'),
+        syntaxHighlighting(koineHighlight),
+        syntaxHighlighting(defaultHighlightStyle),
+        sharedTheme,
+      ],
+    }),
+  });
+
+  return {
+    getValue: () => view.state.doc.toString(),
+    setValue(text) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    },
+    destroy: () => view.destroy(),
+  };
+}

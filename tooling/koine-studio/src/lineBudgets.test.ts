@@ -206,7 +206,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // and prefsSections/{scopeKit,types}.ts. prefs.ts is now a thin assembler — ctx/scopeKit construction,
   // the 8 section builder calls, the category rail/tab wiring, and populate/applyOpenState/refresh/
   // suspend/destroy/onReset. End-state 506 LOC, ceil(506 × 1.02) = 517.
-  { file: 'src/settings/prefs.ts', maxLines: 517 },
+  // Raised 517 → 530: #434's raw keybindings.json editor added the OTHER genuine cross-section fan-out
+  // in this pane (alongside onReset) — a successful Apply must repaint the Keyboard panel's rows, which
+  // buildAdvancedSection can't reach into directly. onKeybindingsApplied (repaint Keyboard + live-apply
+  // via cb.onKeybindingsChanged) stays in the assembler for the same reason onReset does. Measured
+  // end-state 519 LOC, ceil(519 × 1.02) = 530.
+  { file: 'src/settings/prefs.ts', maxLines: 530 },
   // Frozen 2026-07-02 at 1745 LOC, ceil(1745 × 1.02) = 1780. #986 ratchets this down as it decomposes
   // editor.ts. Freezing prevents further regrowth; it does not mandate the split — #986 owns that.
   // Lowered 1780 → 953: #986 split editor.ts's 38-export grab-bag into four sibling modules behind
@@ -227,7 +232,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/editor/cmTheme.ts', maxLines: 116 },
   // Frozen 2026-07-09 at 130 LOC, ceil(130 × 1.02) = 133. Guards the #986 split's new sibling from
   // regrowing unguarded — see #981/#757.
-  { file: 'src/editor/outputView.ts', maxLines: 133 },
+  // Raised 133 → 176: #434 added createEditableJsonView, the writable twin of createJsonView, for the
+  // Advanced-settings raw keybindings.json editor — it belongs beside its read-only sibling rather than
+  // a new leaf module (both are small CodeMirror view factories with no schema/lint wiring). Measured
+  // end-state 172 LOC, ceil(172 × 1.02) = 176.
+  { file: 'src/editor/outputView.ts', maxLines: 176 },
   // Frozen 2026-07-09 at 176 LOC, ceil(176 × 1.02) = 180. Guards the #986 split's new sibling from
   // regrowing unguarded — see #981/#757.
   { file: 'src/editor/settingsJsonEditor.ts', maxLines: 180 },
@@ -276,7 +285,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // only its wiring: the per-send coalescer + the synchronous flushNow() at each semantic boundary —
   // tool-call start, commit, abort — with their ordering comments), and the `files(n)` pluralizer
   // moved to its single home in ChangeSetPanel.tsx. Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 953 },
+  // Raised 953 → 1014: #1132 Task 3 infers a default target root for a model-proposed new file from the
+  // turn's staged existing-file edits (`inferNewFileRoot`), mints the root-qualified apply-payload key,
+  // and scopes new-file drift to the chosen root — 994 LOC, ceil(994 × 1.02) = 1014.
+  { file: 'src/ai/aiPanel.ts', maxLines: 1014 },
   // Lowered 1387 → 261: #989 task 8 (the final task of the arc) retired the entire imperative tree-build/
   // diff/interaction-defer implementation this ceiling used to track — `createExplorer()` is now a thin
   // facade (a per-instance vanilla-zustand props store + a small mount wrapper) over the keyed Preact
@@ -305,7 +317,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 165 → 173: #472 Task 3 re-keys applyFileEdit by the opaque session key — the O(1)
   // buffers.get resolution, the `new:<relPath>` create-under-primary-root branch, and the
   // unknown-key → null guard — 169 LOC, ceil(169 × 1.02) = 173.
-  { file: 'src/shell/workspaceBuffers.ts', maxLines: 173 },
+  // Raised 173 → 179: #1132 Task 3 routes a `new-in:<root>:<relPath>` key to `platform.createFile`
+  // under the chosen (validated-live) root instead of always `roots[0]`, honestly failing (null, no
+  // fallback) when that root is gone — 175 LOC, ceil(175 × 1.02) = 179.
+  { file: 'src/shell/workspaceBuffers.ts', maxLines: 179 },
   { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
   // Raised 178 → 195: #1009 guards saveActive/saveAllDirty's post-write lsp.didSave() against a
   // buffer switch during the write/format await AND a mid-write keystroke re-dirtying the saved

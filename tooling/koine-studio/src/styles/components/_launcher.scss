@@ -193,6 +193,17 @@
   position: relative;
 }
 
+/* The row's `role="gridcell"` content wrapper (#1673 — `.lx-item` is `role="row"`, ResultRow.tsx has
+   the full ARIA rationale): carries the flex layout `.lx-item` used to own directly, now that `.lx-item`
+   wraps this single cell rather than laying out the glyph/main/tail children itself. */
+.lx-opt {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 1;
+  min-width: 0;
+}
+
 .lx-item:hover {
   background: color-mix(in srgb, var(--koi-fg) 5%, transparent);
 }

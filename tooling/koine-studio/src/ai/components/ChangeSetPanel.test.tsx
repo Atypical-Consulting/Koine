@@ -387,3 +387,113 @@ describe('colliding relPaths across roots (#472)', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 });
+
+// #1132 Task 4: in a multi-root workspace, a model-proposed brand-new file needs a place to land.
+// The new-file row grows a native `<select class="koi-changeset-root">` — one `<option>` per
+// workspace root, labelled by folder name (title carries the full root so two roots with colliding
+// last segments stay disambiguated) — wired straight to `setChangeSetFileRoot` (#1132 Task 2). A
+// modified row, or a workspace with one root or none, renders no select at all.
+describe('root picker for new-file rows (#1132)', () => {
+  const rootA = 'file:///workspaceA/shared';
+  const rootB = 'file:///workspaceB/shared';
+
+  /** A reviewing store over the same two-file `staged` set (row 0 modified, row 1 new), with `roots`
+   *  seeded and an optional per-key `targetRoot` map (mirrors Task 2/3's `stageChangeSet` wiring). */
+  function storeWithRoots(roots: readonly string[], targetRoots?: Record<string, string>): StoreApi<AppState> {
+    const store = createAppStore();
+    store.getState().setRoots(roots);
+    store.getState().stageChangeSet(staged, before, null, undefined, targetRoots);
+    return store;
+  }
+
+  const rootSelect = (row: Element) => row.querySelector('.koi-changeset-root') as HTMLSelectElement | null;
+
+  test('a new-file row in a multi-root workspace renders a select with one option per root, folder-labelled and full-root-titled', () => {
+    const store = storeWithRoots([rootA, rootB]);
+    const { container } = mount(store);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+
+    const select = rootSelect(rows[1])!;
+    expect(select).not.toBeNull();
+    expect(select.tagName).toBe('SELECT');
+    expect(select.getAttribute('aria-label')).toBe('Folder for new file billing/invoice.koi');
+
+    const options = [...select.querySelectorAll('option')];
+    // Both roots share the last path segment ("shared") — the visible label collides, but `title`
+    // (the full root token) still disambiguates them.
+    expect(options.map((o) => o.textContent)).toEqual(['shared', 'shared']);
+    expect(options.map((o) => o.getAttribute('title'))).toEqual([rootA, rootB]);
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual([rootA, rootB]);
+  });
+
+  test('a MODIFIED row renders no root select, even in a multi-root workspace', () => {
+    const store = storeWithRoots([rootA, rootB]);
+    const { container } = mount(store);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[0])).toBeNull();
+  });
+
+  test('a single-root workspace renders no root select at all, even for a new-file row', () => {
+    const store = storeWithRoots([rootA]);
+    const { container } = mount(store);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[1])).toBeNull();
+  });
+
+  test('a zero-root store (no folder open yet) renders no root select either', () => {
+    const store = reviewingStore();
+    const { container } = mount(store);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[1])).toBeNull();
+  });
+
+  test('the initial value is the row targetRoot when Task 2/3 already chose one', () => {
+    const store = storeWithRoots([rootA, rootB], { 'billing/invoice.koi': rootB });
+    const { container } = mount(store);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[1])!.value).toBe(rootB);
+  });
+
+  test('the initial value falls back to roots[0] when no targetRoot was chosen', () => {
+    const store = storeWithRoots([rootA, rootB]);
+    const { container } = mount(store);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[1])!.value).toBe(rootA);
+  });
+
+  test('changing the select dispatches setChangeSetFileRoot with the row key and the chosen root', () => {
+    const store = storeWithRoots([rootA, rootB]);
+    const { container } = mount(store);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    const select = rootSelect(rows[1])!;
+
+    // `@testing-library/preact`'s `fireEvent.change` special-cases `change` → `input` when it detects
+    // preact/compat is loaded ANYWHERE in the process (this repo aliases `react`/`react-dom` to
+    // preact/compat for other dependencies) — a global, not per-component, signal, so it mis-fires
+    // even for this component's plain-preact `<select onChange>` (bound to the real `change` event).
+    // Dispatching the native event directly through the base `fireEvent(el, event)` form sidesteps
+    // that renaming and exercises exactly what a real browser does when a user picks an option.
+    select.value = rootB;
+    fireEvent(select, new Event('change', { bubbles: true }));
+
+    const fileState = store.getState().chat.changeSet!.files.find((f) => f.key === 'billing/invoice.koi');
+    expect(fileState?.targetRoot).toBe(rootB);
+  });
+
+  test('the select is disabled once the review is terminal, same rule as the accept checkbox', async () => {
+    const store = storeWithRoots([rootA, rootB]);
+    const { container } = mount(store);
+    await act(() => {
+      store.getState().beginChangeSetApply(2);
+      store.getState().resolveChangeSetApply({ failed: [] });
+    });
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[1])!.disabled).toBe(true);
+  });
+
+  test('has no accessibility violations (multi-root new-file picker)', async () => {
+    const store = storeWithRoots([rootA, rootB]);
+    const { container } = mount(store);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+});

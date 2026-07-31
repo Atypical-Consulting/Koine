@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from 'vitest';
-import { langExt, createJsonView, type ConfigView } from '@/editor/editor';
+import { langExt, createJsonView, createEditableJsonView, type ConfigView, type EditableJsonView } from '@/editor/editor';
 
 // The MCP configuration recipe is highlighted as JSON via the editor module's mode registry.
 // `langExt('json')` must resolve to a real CodeMirror mode (a non-empty Extension), while unknown
@@ -34,5 +34,27 @@ describe('createJsonView', () => {
     view.setContent(snippet);
     expect(view.getText()).toBe(snippet);
     expect(parent.querySelector('.cm-editor')).not.toBeNull();
+  });
+});
+
+// The writable twin used by the Advanced-settings raw keybindings.json editor (#434): unlike
+// createJsonView it must actually be editable (contenteditable, no aria-readonly) and round-trip
+// setValue/getValue exactly, since Apply reads getValue() back to parse/validate.
+describe('createEditableJsonView', () => {
+  let view: EditableJsonView | undefined;
+
+  afterEach(() => {
+    view?.destroy();
+    view = undefined;
+  });
+
+  it('mounts an editable, highlighted view and round-trips setValue/getValue', () => {
+    const parent = document.createElement('div');
+    const blob = '{\n  "format": "Ctrl-d"\n}';
+    view = createEditableJsonView(parent, 'Keybinding overrides JSON');
+    view.setValue(blob);
+    expect(view.getValue()).toBe(blob);
+    expect(parent.querySelector('.cm-editor')).not.toBeNull();
+    expect(parent.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('true');
   });
 });

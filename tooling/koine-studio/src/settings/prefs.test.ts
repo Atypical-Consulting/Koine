@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { EditorView } from "@codemirror/view";
 import {
     mountPreferencesPane,
     segmented,
@@ -987,6 +988,54 @@ describe("keyboard settings", () => {
         );
         expect(loadKeybindingOverrides().format).toBeUndefined();
         expect(onKeybindingsChanged).not.toHaveBeenCalled();
+    });
+});
+
+// The raw keybindings.json editor lives in the Advanced panel (#434) but round-trips with the
+// Keyboard panel's graphical recorder above — proving that end-to-end (not just the section-level
+// pin in advanced.section.test.ts) is the point of this block: Apply must repaint the Keyboard rows,
+// a cross-section fan-out only the assembler (prefs.ts) can wire.
+describe("Settings → Advanced: raw keybindings.json editor (#434)", () => {
+    beforeEach(() => {
+        document.body.innerHTML = "";
+        localStorage.clear();
+        saveSettings({ ...DEFAULT_SETTINGS });
+    });
+
+    const advancedTab = () =>
+        document.querySelector<HTMLButtonElement>("#koi-settings-tab-advanced")!;
+    const kbdJsonEditor = () =>
+        document.querySelector<HTMLElement>(
+            "#koi-settings-panel-advanced .koi-kbdjson-editor .cm-editor",
+        )!;
+    const kbdJsonApply = () =>
+        document.querySelector<HTMLButtonElement>(
+            "#koi-settings-panel-advanced .koi-kbdjson-apply",
+        )!;
+    const chordOf = (id: string) =>
+        document.querySelector<HTMLElement>(
+            `#koi-settings-panel-keyboard .koi-kbd-row[data-binding-id="${id}"] .koi-kbd-chord`,
+        )!;
+
+    function typeKbdJson(text: string): void {
+        const view = EditorView.findFromDOM(kbdJsonEditor())!;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+    }
+
+    it("Apply persists the edited overrides, repaints the Keyboard panel, and fires onKeybindingsChanged", () => {
+        const onKeybindingsChanged = vi.fn();
+        openPrefs({ onKeybindingsChanged });
+        advancedTab().click();
+
+        typeKbdJson('{"format": "Mod-j"}');
+        kbdJsonApply().click();
+
+        expect(loadKeybindingOverrides()).toEqual({ format: "Mod-j" });
+        expect(resolveKeybindings().format).toBe("Mod-j");
+        expect(onKeybindingsChanged).toHaveBeenCalledTimes(1);
+
+        // The graphical row (Keyboard panel), never touched directly, reflects the new chord.
+        expect(chordOf("format").textContent).toBe("Ctrl+J");
     });
 });
 
