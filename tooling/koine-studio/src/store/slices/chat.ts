@@ -188,6 +188,16 @@ export interface ChatSlice {
    * applying/terminal phases and on a null change set.
    */
   setChangeSetFileRoot(key: string, root: string): void;
+  /**
+   * Reconcile every row's `targetRoot` against the workspace's live `roots` list (#1689): a row whose
+   * `targetRoot` is no longer a member of `liveRoots` is reset to `null` — the same "ambiguous, pick
+   * again" state a fresh new-file row starts in — so a review never keeps showing a dead selection
+   * after its root is removed mid-review (`workspaceController.ts`'s `removeRoot`). reviewing-ONLY,
+   * mirroring {@link ChatSlice.setChangeSetFileRoot}'s phase guard: an in-flight or settled apply must
+   * not have its destination silently rewritten. No-op if no row needs it (avoids a pointless
+   * re-render) and on a null change set.
+   */
+  reconcileChangeSetRoots(liveRoots: readonly string[]): void;
   /** Set `drifted: true` on the files named by KEY — sticky (never unsets) and idempotent (#473). */
   markChangeSetDrift(keys: readonly string[]): void;
   /**
@@ -360,6 +370,17 @@ export function createChatSlice(
       setChangeSet({
         ...cs,
         files: cs.files.map((f) => (f.key === key ? { ...f, targetRoot: root } : f)),
+      });
+    },
+    reconcileChangeSetRoots: (liveRoots) => {
+      const cs = get().chat.changeSet;
+      if (!cs || cs.phase.kind !== 'reviewing') return;
+      if (!cs.files.some((f) => f.targetRoot !== null && !liveRoots.includes(f.targetRoot))) return;
+      setChangeSet({
+        ...cs,
+        files: cs.files.map((f) =>
+          f.targetRoot !== null && !liveRoots.includes(f.targetRoot) ? { ...f, targetRoot: null } : f,
+        ),
       });
     },
     markChangeSetDrift: (keys) => {

@@ -497,3 +497,66 @@ describe('root picker for new-file rows (#1132)', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 });
+
+// #1689: a root removed mid-review (workspaceController.ts's removeRoot) must not leave the picker —
+// or the underlying slice state — pointing at a dead root. The panel reconciles reactively whenever
+// `roots` changes, via reconcileChangeSetRoots (#1689 Task 1).
+describe('root reconciliation when a workspace root is removed mid-review (#1689)', () => {
+  const rootA = 'file:///workspaceA/shared';
+  const rootB = 'file:///workspaceB/shared';
+
+  function storeWithRoots(roots: readonly string[], targetRoots?: Record<string, string>): StoreApi<AppState> {
+    const store = createAppStore();
+    store.getState().setRoots(roots);
+    store.getState().stageChangeSet(staged, before, null, undefined, targetRoots);
+    return store;
+  }
+
+  const rootSelect = (row: Element) => row.querySelector('.koi-changeset-root') as HTMLSelectElement | null;
+
+  test('root removed, count drops to 1: targetRoot resets to null and the picker disappears', async () => {
+    const store = storeWithRoots([rootA, rootB], { 'billing/invoice.koi': rootB });
+    const { container } = mount(store);
+
+    await act(() => {
+      store.getState().setRoots([rootA]);
+    });
+
+    const fileState = store.getState().chat.changeSet!.files.find((f) => f.key === 'billing/invoice.koi');
+    expect(fileState?.targetRoot).toBeNull();
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    // Only rootA survives, so the multi-root picker no longer renders — but the value it WOULD show
+    // (had a second root remained) is proven by the slice-level assertion above; here we only need to
+    // confirm the row no longer holds the dead root's value anywhere observable.
+    expect(rootSelect(rows[1])).toBeNull();
+  });
+
+  test('root removed, a second root still present: the surviving picker shows the roots[0] fallback', async () => {
+    const rootC = 'file:///workspaceC/shared';
+    const store = storeWithRoots([rootA, rootB, rootC], { 'billing/invoice.koi': rootB });
+    const { container } = mount(store);
+
+    await act(() => {
+      store.getState().setRoots([rootA, rootC]);
+    });
+
+    const fileState = store.getState().chat.changeSet!.files.find((f) => f.key === 'billing/invoice.koi');
+    expect(fileState?.targetRoot).toBeNull();
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[1])!.value).toBe(rootA);
+  });
+
+  test('the still-present root is left untouched', async () => {
+    const store = storeWithRoots([rootA, rootB], { 'billing/invoice.koi': rootB });
+    const { container } = mount(store);
+
+    await act(() => {
+      store.getState().setRoots([rootA, rootB]);
+    });
+
+    const fileState = store.getState().chat.changeSet!.files.find((f) => f.key === 'billing/invoice.koi');
+    expect(fileState?.targetRoot).toBe(rootB);
+    const rows = container.querySelectorAll('.koi-changeset-file');
+    expect(rootSelect(rows[1])!.value).toBe(rootB);
+  });
+});
