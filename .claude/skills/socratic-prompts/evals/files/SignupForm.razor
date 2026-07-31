@@ -1,0 +1,33 @@
+@* A signup form component with several rough UX / accessibility edges. *@
+<div class="signup">
+    <div class="title">Sign up</div>
+
+    <input @bind="Email" placeholder="email" />
+    <input @bind="Password" type="password" placeholder="password" />
+    <input @bind="Confirm" type="password" placeholder="repeat password" />
+
+    @if (HasError)
+    {
+        <div class="err">Error</div>
+    }
+
+    <div class="btn" @onclick="Submit">Go</div>
+</div>
+
+@code {
+    private string Email = "";
+    private string Password = "";
+    private string Confirm = "";
+    private bool HasError;
+
+    private void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(Email) || Password != Confirm)
+        {
+            HasError = true;
+            return;
+        }
+        HasError = false;
+        // ... create account
+    }
+}

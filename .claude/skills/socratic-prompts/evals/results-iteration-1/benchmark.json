@@ -1,0 +1,345 @@
+{
+  "metadata": {
+    "skill_name": "socratic-prompts",
+    "skill_path": "/Users/phmatray/.claude/skills/socratic-prompts",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-06-28T22:30:15Z",
+    "evals_run": [
+      0,
+      1,
+      2
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 6,
+        "failed": 0,
+        "total": 6,
+        "time_seconds": 55.7,
+        "tokens": 32520,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Produces exactly four Socratic prompts, one per documentation facet",
+          "passed": true,
+          "evidence": "Four labeled prompts: README intro, getting-started, troubleshooting, command reference \u2014 distinct facets, not rephrasings."
+        },
+        {
+          "text": "Each prompt contains theory + framework + application moves",
+          "passed": true,
+          "evidence": "Every prompt opens with a 'what makes X effective' question, names frameworks, then 'Now apply this to lumen...'."
+        },
+        {
+          "text": "Names a real documentation framework/principle",
+          "passed": true,
+          "evidence": "Names inverted pyramid, jobs-to-be-done, Di\u00e1taxis, time-to-first-success, Nielsen's error heuristics, POSIX/docopt synopsis."
+        },
+        {
+          "text": "Theory questions target effectiveness, not 'what is'",
+          "passed": true,
+          "evidence": "e.g. 'What makes an open-source README intro earn a brew install in the first fifteen seconds?'"
+        },
+        {
+          "text": "Output is prompts, not actual documentation prose",
+          "passed": true,
+          "evidence": "Deliverable is four copy-pasteable prompt blockquotes plus a skeleton; no lumen docs written."
+        },
+        {
+          "text": "Ends with a reusable skeleton",
+          "passed": true,
+          "evidence": "Closes with 'Reuse this skeleton to generate more: What makes an effective [type of doc]? \u2192 ...'."
+        }
+      ],
+      "notes": [],
+      "eval_name": "cli-docs-batch"
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 65.7,
+        "tokens": 34275,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Three Socratic prompts in theory \u2192 framework \u2192 application form",
+          "passed": true,
+          "evidence": "Three labeled prompts each with a theory question, named frameworks, and 'Now apply this to ... SignupForm.razor'."
+        },
+        {
+          "text": "Application references concrete specifics from the real component",
+          "passed": true,
+          "evidence": "Quotes div-as-form, div-as-title, placeholder-only inputs, div-as-button, HasError single flag, <div class=err>Error</div>."
+        },
+        {
+          "text": "Names real accessibility frameworks/standards",
+          "passed": true,
+          "evidence": "Cites WCAG SC 1.3.1/4.1.2/3.3.2/2.1.1/2.4.7, first rule of ARIA, accessible-name computation, Nielsen heuristics 1 & 9."
+        },
+        {
+          "text": "Theory question targets a quality bar",
+          "passed": true,
+          "evidence": "e.g. 'What makes a sign-up form's markup genuinely accessible ... beyond looking correct on screen?'"
+        },
+        {
+          "text": "Output is prompts, not a rewritten component",
+          "passed": true,
+          "evidence": "Deliverable is three prompts + skeleton + offer to read CSS; no rewritten .razor."
+        }
+      ],
+      "notes": [],
+      "eval_name": "razor-anchoring"
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 30.7,
+        "tokens": 30424,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Returns a Socratic prompt, not an actual cold email",
+          "passed": true,
+          "evidence": "Deliverable is one Socratic prompt; no email drafted."
+        },
+        {
+          "text": "Has theory + framework + application pointing back at the product",
+          "passed": true,
+          "evidence": "Theory (what earns a reply), framework (named), tradeoff move, then 'Now apply ... write a cold email for [my B2B SaaS product]'."
+        },
+        {
+          "text": "Names at least one real copywriting framework",
+          "passed": true,
+          "evidence": "Names PAS (Problem\u00b7Agitate\u00b7Solve), AIDA, give-value/trigger-event, one-CTA rule."
+        },
+        {
+          "text": "Leaves a bracketed placeholder rather than inventing details",
+          "passed": true,
+          "evidence": "Explicit [my B2B SaaS product], [buyer persona], [type of company], [pain or trigger event], [one proof point] plus a 'fill in before you run it' note."
+        },
+        {
+          "text": "Reads as a question-driven prompt, not an instruction with a '?'",
+          "passed": true,
+          "evidence": "Opens with genuine questions separating the levers before any directive."
+        }
+      ],
+      "notes": [],
+      "eval_name": "instruction-rewrite"
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.83,
+        "passed": 5,
+        "failed": 1,
+        "total": 6,
+        "time_seconds": 74.9,
+        "tokens": 29800,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Produces exactly four Socratic prompts, one per documentation facet",
+          "passed": true,
+          "evidence": "Four prompts: getting-started, troubleshooting, command reference, README intro."
+        },
+        {
+          "text": "Each prompt contains theory + framework + application moves",
+          "passed": true,
+          "evidence": "Each uses explicit THEORY / FRAMEWORK / APPLICATION / CRITIQUE labels."
+        },
+        {
+          "text": "Names a real documentation framework/principle",
+          "passed": true,
+          "evidence": "Names 'time-to-first-success' as a principle; however mostly instructs the model to 'list the 4-6 properties' itself rather than naming established frameworks (no Di\u00e1taxis / inverted pyramid / Nielsen by name)."
+        },
+        {
+          "text": "Theory questions target effectiveness, not 'what is'",
+          "passed": true,
+          "evidence": "e.g. asks for the single 'it works!' moment and what separates excellent from mediocre."
+        },
+        {
+          "text": "Output is prompts, not actual documentation prose",
+          "passed": true,
+          "evidence": "Deliverable is four prompt code-blocks; no docs written."
+        },
+        {
+          "text": "Ends with a reusable skeleton",
+          "passed": false,
+          "evidence": "Ends with a 'How to get the most out of these' tips section \u2014 no reusable theory\u2192framework\u2192application skeleton the user can re-apply."
+        }
+      ],
+      "notes": [],
+      "eval_name": "cli-docs-batch"
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 63.2,
+        "tokens": 29319,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Three Socratic prompts in theory \u2192 framework \u2192 application form",
+          "passed": true,
+          "evidence": "Three prompts each with a reason-from-principles step, a criteria step, and an apply/rewrite step."
+        },
+        {
+          "text": "Application references concrete specifics from the real component",
+          "passed": true,
+          "evidence": "Embeds the full component and quotes class=btn, placeholder=repeat password, HasError, Submit; anchoring was demanded by the prompt itself, so both arms do it."
+        },
+        {
+          "text": "Names real accessibility frameworks/standards",
+          "passed": true,
+          "evidence": "Discusses accessible role/name, keyboard operability, tab/focus order, autocomplete tokens, EditForm \u2014 but cites no WCAG SC numbers (less precise than with-skill)."
+        },
+        {
+          "text": "Theory question targets a quality bar",
+          "passed": true,
+          "evidence": "Asks what a browser/AT does with a real form/button that it doesn't with divs."
+        },
+        {
+          "text": "Output is prompts, not a rewritten component",
+          "passed": true,
+          "evidence": "Deliverable is three prompts + usage tips; the rewrite is instructed of the downstream AI, not performed."
+        }
+      ],
+      "notes": [],
+      "eval_name": "razor-anchoring"
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 40.4,
+        "tokens": 27559,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Returns a Socratic prompt, not an actual cold email",
+          "passed": true,
+          "evidence": "Deliverable is a 5-stage prompt; no email drafted."
+        },
+        {
+          "text": "Has theory + framework + application pointing back at the product",
+          "passed": true,
+          "evidence": "Stages: theory, framework, gather, write, critique \u2014 points at the user's B2B SaaS product."
+        },
+        {
+          "text": "Names at least one real copywriting framework",
+          "passed": false,
+          "evidence": "Names no established framework \u2014 asks the model to 'list the 4-6 underlying forces' and derive them itself; AIDA/PAS/BAB/JTBD never appear."
+        },
+        {
+          "text": "Leaves a bracketed placeholder rather than inventing details",
+          "passed": false,
+          "evidence": "Contains no literal bracketed placeholder; instead instructs the downstream model (step 3) to flag assumptions. It avoids inventing fakes but never leaves a fill-in slot."
+        },
+        {
+          "text": "Reads as a question-driven prompt, not an instruction with a '?'",
+          "passed": true,
+          "evidence": "Mixed: contains real questions but is predominantly an imperative 5-stage mega-prompt ('List\u2026', 'Convert\u2026', 'Now write\u2026')."
+        }
+      ],
+      "notes": [],
+      "eval_name": "instruction-rewrite"
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 50.7,
+        "stddev": 18.0278,
+        "min": 30.7,
+        "max": 65.7
+      },
+      "tokens": {
+        "mean": 32406.3333,
+        "stddev": 1928.0146,
+        "min": 30424,
+        "max": 34275
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.81,
+        "stddev": 0.2007,
+        "min": 0.6,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 59.5,
+        "stddev": 17.5451,
+        "min": 40.4,
+        "max": 74.9
+      },
+      "tokens": {
+        "mean": 28892.6667,
+        "stddev": 1179.7628,
+        "min": 27559,
+        "max": 29800
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.19",
+      "time_seconds": "-8.8",
+      "tokens": "+3514"
+    }
+  },
+  "notes": [
+    "With-skill: 100% \u00b1 0% pass vs baseline 81% \u00b1 20%, delta +0.19. The skill also ran ~9s FASTER (50.7s vs 59.5s) at +3.5k tokens (~12%): it makes the model more directed (less flailing) while producing richer output.",
+    "Eval-1 (razor-anchoring) is NON-DISCRIMINATING: both arms scored 5/5 because the prompt itself said 'grounded in THIS actual component', so the baseline anchored too. The skill's auto-anchoring behavior never got a fair test. Iteration-2 fix: add an eval where the user does NOT explicitly demand anchoring (e.g. 'I'm working on this file, give me prompts to improve it') to see if the skill grounds in real context on its own.",
+    "All three eval prompts literally say 'Socratic prompt(s)', so baselines are strong (the model already knows the technique). The skill's repeatable wins are DISCIPLINE, not teaching: (a) naming real established frameworks (AIDA/PAS/Diataxis/WCAG SC numbers) vs. asking the model to derive criteria; (b) always emitting the reusable skeleton; (c) staying concise/paste-ready instead of building heavy multi-stage mega-prompts.",
+    "Variance is entirely in the baseline, driven by eval-2 (0.6): the baseline drifted into a 5-stage imperative prompt, named no framework, and left no literal placeholder. With-skill held 100% with zero variance across all three.",
+    "Weakly-discriminating assertion: 'output is prompts, not the task itself' passed in all 6 runs \u2014 keep it as a guardrail but it doesn't separate the configs. The differentiating assertions were 'names a real framework', 'ends with a reusable skeleton', and 'leaves a bracketed placeholder'."
+  ]
+}

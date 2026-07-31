@@ -29,6 +29,10 @@ jobs:
     # Backstop so a hung wasm publish/smoke step can't run to the 6-hour default. The AOT
     # publish is ~24-32 s slower than interpreter but still finishes in a few minutes warm.
     timeout-minutes: 30
+    # See ci.yml's build-and-test job for why (issue #1552): cheap insurance against a runner that
+    # gets reused sharing a wedged MSBuild node with this job's `dotnet publish`.
+    env:
+      MSBUILDDISABLENODEREUSE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7

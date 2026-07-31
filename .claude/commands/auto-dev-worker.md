@@ -1,19 +1,19 @@
 ---
-description: Run one issue end-to-end as an auto-dev worker — implement-issue → mandatory merge-pr → structured report. Dispatched by the auto-dev supervisor; invoke as `/auto-dev-worker <issue-number>` (the model tier is set by the spawning `claude -p --model` flag, not here).
+description: Run one issue end-to-end as an auto-dev worker — ai-migration-kit:implement-issue → mandatory ai-migration-kit:merge-pr → structured report. Dispatched by the auto-dev supervisor; invoke as `/auto-dev-worker <issue-number>` (the model tier is set by the spawning `claude -p --model` flag, not here).
 argument-hint: <issue-number>
 ---
 
 You are an auto-dev worker for this repo. Your assigned issue is #$1. Run this pipeline end-to-end,
 autonomously, no confirmations:
 
-1. Invoke `implement-issue` with args "$1". Let it create its OWN git worktree (do NOT reuse the
+1. Invoke `ai-migration-kit:implement-issue` with args "$1". Let it create its OWN git worktree (do NOT reuse the
    shared/main checkout — other workers are active), open a draft PR, implement each plan task, run
    code-review, sync main, format, and flip the PR to ready.
 
-2. Invoke `merge-pr` with args "<the PR number>". THIS IS MANDATORY — your job is NOT done at "ready".
-   Drive the PR all the way to MERGED: merge-pr waits for CI, clears blockers (red/flaky checks,
+2. Invoke `ai-migration-kit:merge-pr` with args "<the PR number>". THIS IS MANDATORY — your job is NOT done at "ready".
+   Drive the PR all the way to MERGED: it waits for CI, clears blockers (red/flaky checks,
    conflicts with main, unresolved reviews), squash-merges, files follow-ups, tears down the worktree.
-   Don't go idle while a merge is still achievable — if CI is mid-run, keep re-checking per `merge-pr`
+   Don't go idle while a merge is still achievable — if CI is mid-run, keep re-checking per `ai-migration-kit:merge-pr`
    SKILL.md Step 3 (the check-runs API on the head SHA — NOT `gh pr checks`, which #1530 can make
    misreport) and merge once nothing failed, nothing is pending, and the PR is `CLEAN`. A `skipped`
    `build-and-test` on a front-end-only PR is legitimate (#1486) — don't wait on it as if it were
@@ -21,7 +21,7 @@ autonomously, no confirmations:
 
 OFF-SCOPE PROTOCOL: if you hit a problem NOT part of #$1 — an unrelated/flaky CI failure, a pre-existing
 bug, a design smell, missing/broken tests, tech debt — do NOT fix it inline (scope-creep) and do NOT
-silently ignore it. FILE it as a new issue via `create-issue`, then continue your task. List anything
+silently ignore it. FILE it as a new issue via `ai-migration-kit:create-issue`, then continue your task. List anything
 filed in your report.
 
 CONTEXT DISCIPLINE: your context is re-read every turn, so keep it lean. To read widely, dispatch an

@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "Returns a Socratic prompt, not an actual cold email",
+      "passed": true,
+      "evidence": "Deliverable is one Socratic prompt; no email drafted."
+    },
+    {
+      "text": "Has theory + framework + application pointing back at the product",
+      "passed": true,
+      "evidence": "Theory (what earns a reply), framework (named), tradeoff move, then 'Now apply ... write a cold email for [my B2B SaaS product]'."
+    },
+    {
+      "text": "Names at least one real copywriting framework",
+      "passed": true,
+      "evidence": "Names PAS (Problem\u00b7Agitate\u00b7Solve), AIDA, give-value/trigger-event, one-CTA rule."
+    },
+    {
+      "text": "Leaves a bracketed placeholder rather than inventing details",
+      "passed": true,
+      "evidence": "Explicit [my B2B SaaS product], [buyer persona], [type of company], [pain or trigger event], [one proof point] plus a 'fill in before you run it' note."
+    },
+    {
+      "text": "Reads as a question-driven prompt, not an instruction with a '?'",
+      "passed": true,
+      "evidence": "Opens with genuine questions separating the levers before any directive."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  }
+}

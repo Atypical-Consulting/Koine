@@ -117,6 +117,12 @@ jobs:
     # Backstop so a hung step (stalled restore, wedged toolchain fetch) fails fast instead
     # of running to the 6-hour default. Cold build+test+demo lands well under this.
     timeout-minutes: 30
+    # MSBuild's persistent build nodes are keyed by a pipe name derived from the toolset install, not
+    # by working directory — on a machine that reuses runners (self-hosted, or a future matrix sharing
+    # one box) a leftover node from a prior job could be picked up by this one and deadlock it the same
+    # way concurrent git worktrees do locally (issue #1552). Disabling reuse here is cheap insurance.
+    env:
+      MSBUILDDISABLENODEREUSE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -246,7 +252,7 @@ jobs:
           mypy --version
 
       - name: Build
-        run: dotnet build -c Release
+        run: dotnet build -c Release -nodereuse:false
 
       # Enforce .editorconfig on hand-written code (generated files carry the
       # auto-generated header and are skipped here; their conformance is verified
@@ -283,7 +289,7 @@ jobs:
         env:
           KOINE_REQUIRE_CONFORMANCE: 1
         run: >-
-          dotnet test Koine.slnx -c Release --no-build
+          dotnet test Koine.slnx -c Release --no-build -nodereuse:false
           --results-directory "${{ github.workspace }}/TestResults"
           --blame-hang --blame-hang-timeout 15m --blame-hang-dump-type full
 

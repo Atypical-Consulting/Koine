@@ -44,6 +44,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- So the Roslyn compile meta-test (TestSupport.Compile, TRUSTED_PLATFORM_ASSEMBLIES-based) can
+         resolve IEndpointRouteBuilder/Results/MapPost and Roslyn-compile the opt-in `api` (Minimal-API
+         endpoint) layer (issue #1148). Declared explicitly rather than relying on the ASP.NET Core
+         shared framework flowing in transitively via the Koine.Mcp ProjectReference (its HTTP MCP
+         server, #95) — that path is an implementation detail of an unrelated project and isn't a
+         guarantee this test project should depend on. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="Shouldly" />
   </ItemGroup>

@@ -32,6 +32,10 @@ jobs:
     name: studio (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    # See ci.yml's build-and-test job for why: MSBuild node reuse can wedge a job on a runner that
+    # gets reused (issue #1552). Cheap insurance here too, since this job also runs `dotnet test`.
+    env:
+      MSBUILDDISABLENODEREUSE: 1
     strategy:
       fail-fast: false
       matrix:
@@ -71,11 +75,25 @@ jobs:
       # and apt's transfer timeout doesn't catch a slowly-trickling connection (one such
       # stall burned ~50 min before being cancelled). Only a cold cache hits apt; the
       # timeout config below makes that one fetch fail fast instead of hanging.
-      - name: Cap apt acquire timeouts (cold-cache safety net)
+      #
+      # `apt-get update` is the other half of the cold-cache safety net. The runner image
+      # ships a pre-baked apt index that goes stale as Ubuntu supersedes package versions,
+      # and cache-apt-pkgs-action does not refresh it. When the index still points at a
+      # version the mirror has already rotated out, the download 404s — and the action
+      # reports SUCCESS anyway, so the job continues with the libraries missing and only
+      # fails much later at `cargo build`, as an unrelated-looking pkg-config error:
+      #
+      #   E: Failed to fetch …/libgstreamer-plugins-good1.0-0_1.24.2-1ubuntu1.4_amd64.deb  404
+      #   → error: failed to run custom build command for `gobject-sys v0.18.0`
+      #     Package 'gobject-2.0', required by 'virtual:world', not found
+      #
+      # (gstreamer arrives as a transitive dependency of libwebkit2gtk-4.1-dev.)
+      - name: Cap apt acquire timeouts and refresh the index (cold-cache safety net)
         if: runner.os == 'Linux'
         run: |
           printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
             | sudo tee /etc/apt/apt.conf.d/99-koine-timeouts >/dev/null
+          sudo apt-get update
 
       - name: Install Linux system dependencies (Tauri v2)
         if: runner.os == 'Linux'
@@ -84,11 +102,43 @@ jobs:
           packages: libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf
           version: koine-tauri-1
 
+      # The step above reports success even when it installed nothing: a failed download
+      # still exits 0, AND the action saves its cache anyway — a 6 KB entry instead of the
+      # real 132 MB. Every later run on that ref then restores the poisoned cache, skips
+      # the download entirely, and dies at `cargo build` on `gobject-sys` / `glib-sys`,
+      # which reads as a Rust problem and is not one.
+      #
+      # Assert the libraries are actually present, so the job fails here — at the real
+      # cause, in one second — instead of 20 seconds later behind a misleading error.
+      - name: Verify Tauri system libraries are present
+        if: runner.os == 'Linux'
+        run: |
+          # Only the three modules the failing build named verbatim
+          # ("Package 'gio-2.0', required by 'virtual:world', not found").
+          # Guessing further pkg-config module names would risk reddening a healthy
+          # runner over a typo — and these three are enough: a poisoned cache loses
+          # all of them at once.
+          missing=""
+          for pkg in glib-2.0 gobject-2.0 gio-2.0; do
+            pkg-config --exists "$pkg" || missing="$missing $pkg"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Tauri system libraries missing:$missing"
+            echo "The apt install step reported success but produced nothing usable."
+            echo "Most likely its Actions cache is poisoned — a run whose download 404'd"
+            echo "saved a near-empty entry. Compare sizes and delete the small one:"
+            echo "  gh api repos/\${{ github.repository }}/actions/caches?per_page=100 \\"
+            echo "    --jq '.actions_caches[] | select(.key|test(\"cache-apt-pkgs\")) | \"\\(.ref) \\(.size_in_bytes)\"'"
+            echo "A healthy entry is ~132 MB; a poisoned one is a few KB."
+            exit 1
+          fi
+          echo "All Tauri system libraries present."
+
       - name: Publish LSP sidecar
         run: dotnet publish src/Koine.Cli -p:PublishProfile=${{ matrix.rid }}
 
       - name: Run headless LSP tests
-        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release --filter "FullyQualifiedName~LspServerTests"
+        run: dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj -c Release -nodereuse:false --filter "FullyQualifiedName~LspServerTests"
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6

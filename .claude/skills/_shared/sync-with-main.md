@@ -1,7 +1,7 @@
 # Sync a branch with `main` and resolve conflicts
 
-Shared procedure for the issue/PR lifecycle skills. `implement-issue` reads it before the ready-flip
-(Step 8); `merge-pr` reads it when the merge state reports `BEHIND`/`DIRTY` in its corrections loop
+Shared procedure for the issue/PR lifecycle skills. `ai-migration-kit:implement-issue` reads it before the ready-flip
+(Step 8); `ai-migration-kit:merge-pr` reads it when the merge state reports `BEHIND`/`DIRTY` in its corrections loop
 (Step 4). The two skills add their own trigger framing; the procedure itself lives **here**, once.
 
 Throughout, `git <commit-identity>` is the author line from the repo profile's *Commit identity*

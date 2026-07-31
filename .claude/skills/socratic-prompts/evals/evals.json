@@ -1,0 +1,58 @@
+{
+  "skill_name": "socratic-prompts",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "I'm writing the docs for my open-source CLI tool (it's a little log-parsing utility called `lumen`). Give me 4 Socratic prompts I can paste into an AI to get genuinely sharp help on the docs — I'm thinking the getting-started page, the error/troubleshooting section, the command reference, and the README intro. I keep getting generic mush when I just ask it to 'write the docs'.",
+      "expected_output": "Four distinct Socratic prompts, one per doc facet, each following theory -> framework -> application. Each names real documentation principles/frameworks. Since no doc files are attached, application questions use bracketed placeholders. Ends with a reusable skeleton. Does NOT actually write the documentation.",
+      "files": [],
+      "expectations": [
+        "Produces exactly four Socratic prompts, each covering a different documentation facet (getting-started, errors/troubleshooting, command reference, README)",
+        "Each prompt contains all three moves: a theory question about what makes that doc effective, a framework question naming real principles, and an application question grounding it in lumen",
+        "At least one prompt names a concrete, real documentation framework or principle (e.g. Diataxis, progressive disclosure, the inverted pyramid, 'show don't tell')",
+        "The theory questions ask what makes the output effective/good/clear rather than merely 'what is' the artifact",
+        "The output is a set of prompts/questions, not actual finished documentation prose for lumen",
+        "Ends with a reusable pattern/skeleton the user can apply to other doc pages"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "Attached is a Blazor component (SignupForm.razor) I wrote. Help me write 3 Socratic prompts I can use to get an AI to seriously improve its UX and accessibility — but I want them grounded in THIS actual component, not generic advice.",
+      "expected_output": "Three Socratic prompts grounded in the real SignupForm.razor — referencing its actual specifics (missing labels, placeholder-as-label, the div-as-button, the generic 'Error' message, password-confirm handling). Each follows theory -> framework -> application with real a11y/UX frameworks (WCAG, ARIA, Nielsen heuristics). Anchors to real artifacts rather than [placeholders].",
+      "files": ["evals/files/SignupForm.razor"],
+      "expectations": [
+        "Produces three Socratic prompts following the theory -> framework -> application structure",
+        "The application questions reference concrete specifics from the attached SignupForm.razor (e.g. the placeholder-only inputs, the <div> used as a button, the generic 'Error' message, or the password/confirm fields) rather than generic [placeholders]",
+        "Names real accessibility/UX frameworks or standards (e.g. WCAG 2.1, ARIA labels, keyboard operability, Nielsen's heuristics)",
+        "Each prompt's theory question targets a quality bar (what makes a form accessible/usable) rather than asking 'what is accessibility'",
+        "The output is prompts to drive an AI, not a rewritten version of the component"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Turn this instruction into a Socratic prompt that makes the AI reason first instead of spitting out slop: \"Write a cold outreach email for my B2B SaaS product.\"",
+      "expected_output": "A single Socratic prompt (optionally a tight chain) that rewrites the flat instruction into theory -> framework -> application: what makes cold outreach convert, which frameworks apply (AIDA, problem-agitate-solve, personalization/relevance), then apply to the B2B SaaS product with a placeholder for specifics. Does NOT write an actual cold email.",
+      "files": [],
+      "expectations": [
+        "Returns a Socratic-style prompt, not an actual cold outreach email",
+        "The rewritten prompt contains a theory question (what makes cold outreach effective/get replies), a framework question naming real copywriting frameworks, and an application question pointing back at the B2B SaaS product",
+        "Names at least one real, relevant framework (e.g. AIDA, problem-agitate-solve, before/after/bridge, jobs-to-be-done)",
+        "Leaves a bracketed placeholder for product/buyer specifics that the original instruction didn't provide, rather than inventing fake details",
+        "The result is recognizably a question-driven prompt rather than an imperative instruction with a question mark appended"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I'm refactoring this checkout function (attached, checkout.ts) and it's a mess. Give me a couple of prompts I can feed an AI to think through how to clean it up.",
+      "expected_output": "Socratic prompts whose application questions are grounded in the ACTUAL checkout.ts (its real function names, branches, smells) even though the user never said 'Socratic' or 'grounded in this file'. Tests whether the skill auto-anchors to real context on its own and recognizes the Socratic intent from 'think through' / sharper-output framing.",
+      "files": ["evals/files/checkout.ts"],
+      "expectations": [
+        "Produces Socratic prompts (theory -> framework -> application) even though the user never used the word 'Socratic'",
+        "The application questions reference concrete specifics from the attached checkout.ts (real function/variable names or actual code smells) rather than generic [placeholders], without being explicitly told to ground in the file",
+        "Names at least one real refactoring principle or framework (e.g. single-responsibility, guard clauses, separation of concerns, Fowler's refactoring catalog)",
+        "Does not actually rewrite checkout.ts — it returns prompts to drive the work",
+        "Ends with a reusable skeleton or an offer to anchor deeper in the real code"
+      ]
+    }
+  ]
+}
