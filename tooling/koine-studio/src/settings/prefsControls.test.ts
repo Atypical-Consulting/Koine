@@ -3,7 +3,7 @@
 // These are DOM builders only — no Settings/persistence wiring — so each test drives a control in
 // isolation via the callbacks it takes as parameters, matching how prefs.ts calls them today.
 import { describe, it, expect, vi } from "vitest";
-import { row, panel, toggle, metricInput, textInput } from "@/settings/prefsControls";
+import { row, panel, toggle, metricInput, textInput, actionButton } from "@/settings/prefsControls";
 
 describe("prefsControls: row()", () => {
     it("gives a labelable control a koi-set-<slug> id and pairs it with <label for>", () => {
@@ -122,6 +122,29 @@ describe("prefsControls: textInput()", () => {
         const input = textInput({ id: "koi-mcp-url" });
         expect(input.id).toBe("koi-mcp-url");
         expect(input.getAttribute("name")).toBe("koi-mcp-url");
+    });
+});
+
+describe("prefsControls: actionButton()", () => {
+    it("builds a type=button koi-set-action button with the given label, calling onClick on click", () => {
+        const onClick = vi.fn();
+        const btn = actionButton("Change…", onClick);
+        expect(btn.type).toBe("button");
+        expect(btn.className).toBe("koi-set-action");
+        expect(btn.textContent).toBe("Change…");
+        btn.click();
+        expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("applies ariaLabel and an extra className when passed", () => {
+        const btn = actionButton("Record", vi.fn(), {
+            className: "koi-set-action koi-kbd-record",
+            ariaLabel: "Record a new shortcut for Format document",
+        });
+        expect(btn.className).toBe("koi-set-action koi-kbd-record");
+        expect(btn.getAttribute("aria-label")).toBe(
+            "Record a new shortcut for Format document",
+        );
     });
 });
 

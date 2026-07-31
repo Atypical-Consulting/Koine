@@ -235,6 +235,31 @@ export function textInput(options: TextInputOptions = {}): HTMLInputElement {
     return input;
 }
 
+export interface ActionButtonOptions {
+    className?: string; // full class string; default "koi-set-action" (pass the extra class alongside it, e.g. "koi-set-action koi-kbd-record")
+    ariaLabel?: string;
+    ariaDescribedBy?: string;
+}
+
+// A "koi-set-action" <button type="button">, generalizing the seven hand-rolled action buttons across
+// the settings sections. Returns the built button so callers needing runtime state (e.g. keyboard.ts's
+// label-swap-on-arm) can still mutate it directly after construction.
+export function actionButton(
+    label: string,
+    onClick: () => void,
+    options?: ActionButtonOptions,
+): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = options?.className ?? "koi-set-action";
+    btn.textContent = label;
+    if (options?.ariaLabel) btn.setAttribute("aria-label", options.ariaLabel);
+    if (options?.ariaDescribedBy)
+        btn.setAttribute("aria-describedby", options.ariaDescribedBy);
+    btn.addEventListener("click", onClick);
+    return btn;
+}
+
 // A labelled settings row: a title (+ optional description) on the left, the control on the right.
 // `content` is what fills the control cell (usually `control` itself, but a scoped row passes a
 // wrapper holding the value control + its User/Workspace toggle); `control` is the labelable target
