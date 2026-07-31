@@ -37,6 +37,13 @@ public sealed partial class PythonEmitter
         var name = PythonNaming.ToPascalCase(rm.Name);
         var sourceName = PythonNaming.ToPascalCase(rm.SourceType);
 
+        // Per-symbol import hint for Assemble (issue #1701): a direct field's cross-type import must
+        // resolve against the SOURCE type's own owning context, mirroring the ResolveOwner-based
+        // Map/Classify fix below (#1638) — a sibling mechanism (the module's cross-type import list)
+        // that fix didn't reach. Without a hint here, Assemble falls back to this read model's OWN
+        // context, so a same-named-but-unrelated local type can silently shadow the source's real one.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+
         // Each field carries its Python type annotation, snake_case attribute name, and the
         // projection expression (rooted at `src`) used in the mapper.
         var fields = new List<(string PyType, string Attr, string Rhs)>();
@@ -51,9 +58,16 @@ public sealed partial class PythonEmitter
                 // this read model (R12.3 cross-context projection) — classify/map a bare field type
                 // against the SOURCE's own owning context, not this read model's, so a same-named but
                 // differently-kinded sibling type declared locally here can't misclassify it (#1638).
-                pyType = emit.Index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t)
-                    ? typeMapper.Map(t, emit.Index.ResolveOwner(rm.SourceType, context).Owner ?? context)
-                    : "object";
+                if (emit.Index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t))
+                {
+                    var ownerContext = emit.Index.ResolveOwner(rm.SourceType, context).Owner ?? context;
+                    pyType = typeMapper.Map(t, ownerContext);
+                    CollectImportHints(t, ownerContext, symbolContext);
+                }
+                else
+                {
+                    pyType = "object";
+                }
                 rhs = "src." + attr;
             }
             else
@@ -100,8 +114,51 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.ReadModels, rm.Name),
-            Assemble(emit, ns, sb.ToString(), name),
+            Assemble(emit, ns, sb.ToString(), name, symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.ReadModels));
+    }
+
+    /// <summary>
+    /// Walks <paramref name="type"/> (recursing into a <c>List</c>/<c>Set</c>/<c>Map</c>/<c>Range</c>
+    /// element/value) and records, for every named model type it finds, that its cross-type import
+    /// must resolve against <paramref name="context"/> — the context the field's OWN declaration
+    /// belongs to, not necessarily the emitting module's. A built-in scalar (<c>String</c>/<c>Int</c>/…)
+    /// never needs an import and is skipped.
+    /// </summary>
+    private static void CollectImportHints(TypeRef type, string context, Dictionary<string, string> symbolContext)
+    {
+        switch (type.Name)
+        {
+            case "String":
+            case "Int":
+            case "Bool":
+            case "Decimal":
+            case "Instant":
+            case "Uuid":
+            case "Guid":
+                return;
+            case ModelIndex.ListTypeName:
+            case ModelIndex.SetTypeName:
+            case ModelIndex.RangeTypeName:
+                if (type.Element is not null)
+                {
+                    CollectImportHints(type.Element, context, symbolContext);
+                }
+                return;
+            case ModelIndex.MapTypeName:
+                if (type.Element is not null)
+                {
+                    CollectImportHints(type.Element, context, symbolContext);
+                }
+                if (type.Value is not null)
+                {
+                    CollectImportHints(type.Value, context, symbolContext);
+                }
+                return;
+            default:
+                symbolContext[PythonNaming.ToPascalCase(type.Name)] = context;
+                return;
+        }
     }
 
     // ----------------------------------------------------------------------

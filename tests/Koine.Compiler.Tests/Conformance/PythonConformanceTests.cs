@@ -973,6 +973,58 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1701 — a read model's DIRECT-field cross-type import is a SEPARATE code path
+    /// (<c>PythonEmitter.Support.cs</c>'s <c>Assemble</c>) from the <c>PythonTypeMapper.Map</c>/
+    /// <c>Classify</c> calls #1638 already made context-aware. Before this fix, <c>EmitReadModel</c>
+    /// called <c>Assemble</c> with no per-symbol hint, so a direct field's type always resolved its
+    /// import against the read model's OWN declaring context, not the source member's, silently
+    /// binding the unrelated local class. Unlike PHP's twin of this test, this is NOT also
+    /// runtime-observable via a driver script: Python dataclasses don't enforce their field type
+    /// annotations at construction time, so the wrong import never raises — the field still holds
+    /// whatever value the source actually carried, and only <c>mypy</c> can see the annotation now
+    /// resolves to the wrong module. Skipped (not failed) when no <c>mypy</c> toolchain is present
+    /// locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_import_resolves_against_the_source_s_own_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Item }
+
+              readmodel ItemSummary from Item {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Pending
+                Shipped
+                Delivered
+              }
+
+              value Item {
+                status: Status = Pending
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var summary = FileText(result.Files, "billing/read_models/item_summary.py");
+        summary.ShouldContain("from ordering.enums.status import Status");
+        summary.ShouldNotContain("from billing.value_objects.status import Status");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
