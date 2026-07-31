@@ -2039,6 +2039,15 @@ fn can_reuse_cached_endpoint(info: &McpEndpointInfo, port: u16) -> bool {
     !info.fallback && (port == 0 || info.requested_port == port)
 }
 
+/// True if `port` (non-zero) can be bound on loopback right now — i.e. the originally-requested
+/// port has freed up, so a lingering fallback should self-heal instead of being reused verbatim.
+/// `port == 0` (the OS-assigned wildcard) is never "freed" in this sense, so it always reads false.
+/// The probe listener is dropped immediately on success, releasing the port before the sidecar
+/// re-binds it (a small TOCTOU window — see `mcp_endpoint`'s doc comment).
+fn requested_port_is_free(port: u16) -> bool {
+    port != 0 && std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok()
+}
+
 /// Lazily start the `koine mcp --http` sidecar (idempotent) on `port` and return the endpoint it bound
 /// (`0` = OS-assigned). If a specific (non-zero) `port` never comes up — the child exits, or the wait
 /// times out, with no announce line — it is most likely busy: the dead child is reaped and the server is
@@ -2688,6 +2697,28 @@ mod tests {
             fallback: false,
         };
         assert!(can_reuse_cached_endpoint(&info, 0));
+    }
+
+    #[test]
+    fn requested_port_is_free_detects_a_free_port() {
+        // Bind an ephemeral port so we know it's busy for the duration of the listener.
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        assert!(
+            !requested_port_is_free(port),
+            "the port is bound by `listener`, so it must read as busy"
+        );
+
+        drop(listener);
+
+        assert!(
+            requested_port_is_free(port),
+            "the port was released, so it must read as free"
+        );
+
+        // `0` is the OS-assigned wildcard, never a concrete "freed" port.
+        assert!(!requested_port_is_free(0));
     }
 
     // --- sidecar launcher selection (pure) ----------------------------------
