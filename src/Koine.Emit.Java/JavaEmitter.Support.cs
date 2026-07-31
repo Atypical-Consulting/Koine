@@ -100,7 +100,12 @@ public sealed partial class JavaEmitter
         }
 
         sb.Append(indent).Append("/**\n");
-        foreach (var line in doc.Split('\n'))
+        // A `*/` anywhere in the text would close the comment early and leave the rest of it as stray
+        // source — a hard `javac` error. It cannot appear in a doc comment the modeller wrote (the lexer
+        // would not produce one), but Phase 2's policy sketches interpolate TRANSLATED EXPRESSIONS, which
+        // can carry an arbitrary string literal. Neutralize it with the HTML entity for `/`, which renders
+        // identically in the generated Javadoc.
+        foreach (var line in doc.Replace("*/", "*&#47;", StringComparison.Ordinal).Split('\n'))
         {
             sb.Append(indent).Append(" *");
             if (line.Length > 0)

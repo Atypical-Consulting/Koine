@@ -105,6 +105,13 @@ public sealed partial class JavaEmitter : IEmitter
                 }
             }
 
+            // Policies (R10.3) also live outside `Types`, on ContextNode.Policies: each emits a reactor
+            // interface seam (JavaEmitter.Policies.cs) the consumer wires.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, ctx.Name, policy));
+            }
+
             EmitContextExtras(emit, files, ctx);
         }
 

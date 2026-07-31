@@ -170,4 +170,35 @@ public class JavaSnapshotTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 2) — a cross-aggregate <c>policy</c>: the reviewed snapshot locks the
+    /// emitted <c>&lt;Name&gt;Policy</c> reactor interface and, crucially, the reaction sketch that
+    /// translates the triggering event's fields into the target command's named arguments.
+    /// </summary>
+    [Fact]
+    public Task Java_policy_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaPoliciesTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The policy emit must be real Java — in particular the Javadoc sketch, which interpolates a
+    /// translated expression and so is the one place an emitted comment could be malformed enough to
+    /// break the parse.
+    /// </summary>
+    [Fact]
+    public void Java_policy_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaPoliciesTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
