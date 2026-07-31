@@ -1,0 +1,16 @@
+/* Symbols Nerd Font Mono (issue #1412): an icons-only Nerd Font fallback for the integrated
+   terminal (see shell/terminal/terminalPanel.tsx). Popular shell prompt themes (starship,
+   oh-my-posh, powerlevel10k, …) render glyphs from the Private Use Area that the primary code
+   font (JetBrains Mono Variable) doesn't cover, so without this fallback those glyphs paint as
+   tofu. Vendored as a static asset rather than an npm package — no `@fontsource`-style package
+   for the Nerd Fonts symbols-only build exists (checked npm at implementation time). Source:
+   https://github.com/ryanoasis/nerd-fonts v3.4.0, NerdFontsSymbolsOnly release, SymbolsNerdFontMono
+   variant — SIL Open Font License 1.1 (see ../../assets/fonts/SymbolsNerdFontMono-LICENSE.txt),
+   which permits bundling and redistribution. */
+@font-face {
+  font-family: 'Symbols Nerd Font Mono';
+  src: url('../../assets/fonts/SymbolsNerdFontMono-Regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
