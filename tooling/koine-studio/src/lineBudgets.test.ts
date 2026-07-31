@@ -285,7 +285,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // only its wiring: the per-send coalescer + the synchronous flushNow() at each semantic boundary —
   // tool-call start, commit, abort — with their ordering comments), and the `files(n)` pluralizer
   // moved to its single home in ChangeSetPanel.tsx. Measured end-state, no headroom.
-  { file: 'src/ai/aiPanel.ts', maxLines: 953 },
+  // Raised 953 → 1014: #1132 Task 3 infers a default target root for a model-proposed new file from the
+  // turn's staged existing-file edits (`inferNewFileRoot`), mints the root-qualified apply-payload key,
+  // and scopes new-file drift to the chosen root — 994 LOC, ceil(994 × 1.02) = 1014.
+  { file: 'src/ai/aiPanel.ts', maxLines: 1014 },
   // Lowered 1387 → 261: #989 task 8 (the final task of the arc) retired the entire imperative tree-build/
   // diff/interaction-defer implementation this ceiling used to track — `createExplorer()` is now a thin
   // facade (a per-instance vanilla-zustand props store + a small mount wrapper) over the keyed Preact
@@ -314,7 +317,10 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // Raised 165 → 173: #472 Task 3 re-keys applyFileEdit by the opaque session key — the O(1)
   // buffers.get resolution, the `new:<relPath>` create-under-primary-root branch, and the
   // unknown-key → null guard — 169 LOC, ceil(169 × 1.02) = 173.
-  { file: 'src/shell/workspaceBuffers.ts', maxLines: 173 },
+  // Raised 173 → 179: #1132 Task 3 routes a `new-in:<root>:<relPath>` key to `platform.createFile`
+  // under the chosen (validated-live) root instead of always `roots[0]`, honestly failing (null, no
+  // fallback) when that root is gone — 175 LOC, ceil(175 × 1.02) = 179.
+  { file: 'src/shell/workspaceBuffers.ts', maxLines: 179 },
   { file: 'src/shell/workspaceMutations.ts', maxLines: 179 },
   // Raised 178 → 195: #1009 guards saveActive/saveAllDirty's post-write lsp.didSave() against a
   // buffer switch during the write/format await AND a mid-write keystroke re-dirtying the saved

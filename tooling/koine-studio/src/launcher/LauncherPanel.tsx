@@ -362,7 +362,12 @@ export function LauncherPanel(props: LauncherPanelProps) {
             ref={resultsRef}
             id="lx-results"
             class="lx-results"
-            role="listbox"
+            // A `role="grid"` combobox popup, not `listbox` (#1673): each `ResultRow` is a `role="row"`
+            // owning one `role="gridcell"`, which — unlike `option` — permits the row's tail
+            // `.lx-actbtn` to live inside it as a real focusable descendant without an axe
+            // `nested-interactive`/`aria-required-children` violation. See `ResultRow.tsx` for the
+            // full rationale.
+            role="grid"
             aria-label="Results"
             data-mode={mode.key}
             data-query={query}
