@@ -211,9 +211,9 @@ internal sealed class TypeScriptExpressionTranslator
                 sb.Append('(');
                 Write(cond.Condition, sb);
                 sb.Append(" ? ");
-                WriteReconciledBranch(cond.Then, thenType, cond.Else, elseType, sb);
+                WriteReconciledBranch(cond.Then, thenType, elseType, sb);
                 sb.Append(" : ");
-                WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
+                WriteReconciledBranch(cond.Else, elseType, thenType, sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
@@ -248,7 +248,18 @@ internal sealed class TypeScriptExpressionTranslator
                 sb.Append(')');
                 break;
             case GuardExpr g:
-                Write(g.Body, sb);
+                // A bare `<body> when <condition>` narrows the same way `if <condition> then <body>
+                // else undefined` would: TS has no lifted-optional arithmetic, so *something* must
+                // render the `!== undefined` check or `tsc --strict` rejects any operator on the
+                // guard-narrowed operand (#1604). Reuses ConditionalExpr's own ternary shape and
+                // branch-reconciliation helper for structural consistency between the two guard forms.
+                TypeScope guardScope = EffectiveScope();
+                TypeRef? guardBodyType = _resolver.Infer(g.Body, guardScope);
+                sb.Append('(');
+                Write(g.Condition, sb);
+                sb.Append(" ? ");
+                WriteReconciledBranch(g.Body, guardBodyType, null, sb);
+                sb.Append(" : undefined)");
                 break;
             case LetExpr let:
                 WriteLet(let, sb);
@@ -260,8 +271,11 @@ internal sealed class TypeScriptExpressionTranslator
     }
 
     /// <summary>
-    /// Writes one <c>ConditionalExpr</c> branch, individually widened to <c>Decimal</c> when its own
-    /// inferred type is a non-optional <c>Int</c> while the SIBLING branch is <c>Decimal</c>
+    /// Writes one <c>ConditionalExpr</c> branch (or a <c>GuardExpr</c>'s body, treated as the "then"
+    /// of an implicit <c>undefined</c> else — <paramref name="siblingType"/> is <see langword="null"/>
+    /// there, which degrades every dimension to "no reconciliation needed", per the remarks below),
+    /// individually widened to <c>Decimal</c> when its own inferred type is a non-optional <c>Int</c>
+    /// while the SIBLING branch is <c>Decimal</c>
     /// (<c>Decimal.fromInt(...)</c>), or null-check-widened when its own inferred type is an OPTIONAL
     /// <c>Int</c> while the SIBLING branch is <c>Decimal</c> — a JS <c>number | undefined</c> has no
     /// <c>Option.map</c>, so the widen is an inline arrow function that passes <c>undefined</c> through
@@ -288,7 +302,7 @@ internal sealed class TypeScriptExpressionTranslator
     /// passed in rather than re-inferred here — <c>Then</c>/<c>Else</c> would otherwise each be walked
     /// twice per conditional (#1369).
     /// </summary>
-    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, Expr sibling, TypeRef? siblingType, StringBuilder sb)
+    private void WriteReconciledBranch(Expr branch, TypeRef? branchType, TypeRef? siblingType, StringBuilder sb)
     {
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
 
