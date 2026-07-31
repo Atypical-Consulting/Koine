@@ -139,7 +139,7 @@ public sealed partial class RustEmitter
         // `Option<T>` against `T` (a real `cargo check` E0308).
         foreach (Member m in defaultedParams)
         {
-            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index);
+            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, typeMapper);
             var field = RustNaming.Field(m.Name);
             sb.Append(Indent).Append(Indent).Append("let ").Append(field).Append(" = ")
               .Append(field).Append(".unwrap_or_else(|| ").Append(defaultValue).Append(");\n");
@@ -836,9 +836,6 @@ public sealed partial class RustEmitter
 
     /// <summary>True when a stored member carries a constant default (an initializer that is not derived).</summary>
     private static bool HasConstantDefault(Member m) => m.Initializer is not null;
-
-    private static string? EnumExpected(Member m, ModelIndex index) =>
-        index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 
     private static string? EnumExpectedRef(Member m, RustTypeMapper typeMapper) =>
         typeMapper.IsEnum(m.Type) ? m.Type.Name : null;

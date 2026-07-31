@@ -4179,6 +4179,69 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1700: <c>RustEmitter.ValueObjects.cs</c>'s <c>EnumExpected(Member, ModelIndex)</c> helper —
+    /// used by <c>CoercedDefaultValue</c> to hint a defaulted member's bare-word initializer (e.g.
+    /// <c>Pending</c>) as an enum-variant reference — called the flat, context-BLIND
+    /// <c>ModelIndex.Classify(string)</c> overload directly, never threading a context at all (unlike
+    /// #1638's fix to <c>RustTypeMapper.IsEnum</c>/<c>IsCopy</c>/<c>IsQualifiable</c>, which #1638 scoped
+    /// to <c>RustTypeMapper</c> only). The fix replaces it with the already-existing, context-aware
+    /// <c>EnumExpectedRef(Member, RustTypeMapper)</c> sibling (already used by the two derived-member call
+    /// sites below), threading <c>CoercedDefaultValue</c>'s own <c>RustTypeMapper</c> through instead of a
+    /// bare <c>ModelIndex</c>.
+    /// <para>
+    /// <b>A cargo-check-observable repro proved unreachable within this emitter's scope.</b> Investigated
+    /// exhaustively: the ONLY consumer of this hint is <see cref="RustExpressionTranslator.WriteIdentifier"/>
+    /// case (3), and it only matters when a bare variant name is ambiguous across ≥2 *distinctly-named*
+    /// enums (<c>owners.Count &gt; 1</c> in <c>ModelIndex.EnumsDeclaring</c>) — but that index (and
+    /// <c>ModelIndex.AllTypes()</c> it's built from) is itself populated by iterating the flat,
+    /// last-write-wins <c>_byName</c> dictionary, so the ONLY way to make blind vs. context-aware
+    /// classification of <c>m.Type.Name</c> diverge (a same-named, differently-kinded sibling in another
+    /// context) is exactly the condition that evicts the shadowed enum from <c>_byName</c> — and with it,
+    /// from <c>EnumsDeclaring</c>'s candidate list — making the hint irrelevant regardless of its
+    /// correctness (confirmed empirically with instrumented logging during development). Closing this
+    /// fully needs <c>ModelIndex.AllTypes()</c>/<c>EnumsDeclaring</c> to be built by merging every
+    /// context's own declarations rather than the shadowing flat index — shared <c>Ast/</c> code, filed as
+    /// a follow-up (see the PR description).
+    /// </para>
+    /// <para>
+    /// This test instead pins the REACHABLE part of the fix's contract: <c>CoercedDefaultValue</c>'s
+    /// context-aware hint still correctly disambiguates a bare variant name that's genuinely ambiguous
+    /// across two independently-named (non-colliding) enums, proving the <c>ModelIndex</c>-&gt;
+    /// <c>RustTypeMapper</c> signature change is behavior-preserving for the case that IS reachable today.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Defaulted_member_s_bare_enum_initializer_disambiguates_against_its_own_declared_type()
+    {
+        const string src =
+            """
+            context Shipping {
+              enum Status {
+                Pending
+                Delivered
+              }
+              value Shipment {
+                status: Status = Pending
+              }
+            }
+
+            context Billing {
+              enum PaymentState {
+                Pending
+                Paid
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1533 edge case: an OPTIONAL-declared <c>String?</c> derived member whose body is a smart
     /// enum's <c>String</c> associated-data accessor must be owned (<c>.to_string()</c>) BEFORE
     /// <c>SomeWrapIfNeeded</c> wraps it in <c>Some(...)</c> — mirrors #1332's ordering for the sibling

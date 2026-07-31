@@ -96,7 +96,7 @@ public sealed partial class RustEmitter
         // operand mismatch `Option<T>` against `T` (a real `cargo check` E0308).
         foreach (Member m in defaultedParams)
         {
-            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, emit.Index);
+            var defaultValue = CoercedDefaultValue(m, UnderlyingType(m.Type), translator, typeMapper);
 
             // `unwrap_or_else` (not `unwrap_or`): the latter always evaluates its argument eagerly,
             // so an overriding caller would still pay for constructing the discarded default.
@@ -185,9 +185,9 @@ public sealed partial class RustEmitter
     /// ctor-parameter unwrap loop, which every defaulted member goes through regardless of whether its
     /// declared type is itself optional (#1380/#1437).
     /// </summary>
-    private static string CoercedDefaultValue(Member m, TypeRef targetType, RustExpressionTranslator translator, ModelIndex index)
+    private static string CoercedDefaultValue(Member m, TypeRef targetType, RustExpressionTranslator translator, RustTypeMapper typeMapper)
     {
-        var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpected(m, index));
+        var defaultValue = translator.Translate(m.Initializer!, RustExpressionTranslator.NameMode.Parameter, EnumExpectedRef(m, typeMapper));
 
         if (NumericCoercionWrap(targetType, translator.InferType(m.Initializer!)) is { } wrap)
         {

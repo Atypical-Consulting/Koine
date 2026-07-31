@@ -370,6 +370,66 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #1700: <c>WriteQuantityOps</c>'s unit-detection (<c>TypeScriptEmitter.Types.cs</c>) picked a
+    /// quantity's "unit" member via <c>index.Classify(m.Type.Qualifier, m.Type.Name)</c> — but for a bare
+    /// (unqualified) type reference, <c>m.Type.Qualifier</c> is <see langword="null"/>, so this call
+    /// degraded to the flat, context-BLIND <c>Classify(typeName)</c> overload exactly like the
+    /// <c>EnumExpected</c> call sites (#1638's fix never touched <c>WriteQuantityOps</c>, out of its
+    /// declared <c>TypeMapper</c>-only scope). The fix threads the emitting context as a fallback
+    /// resolution frame (<c>m.Type.Qualifier ?? context</c>), mirroring <see cref="EnumExpected"/>'s own
+    /// fix — and the same fallback was applied to <c>WriteCommand</c>'s transition <c>expectedEnum</c>
+    /// inline classify (the identical blind shape, one call site over) and to all four
+    /// <see cref="EnumExpected"/> call sites (now context-parameterized).
+    /// <para>
+    /// <b>A same-named-sibling repro proved unreachable within this emitter's scope</b> — for the same
+    /// structural reason documented on <c>RustConformanceTests</c>'
+    /// <c>Defaulted_member_s_bare_enum_initializer_disambiguates_against_its_own_declared_type</c>: a
+    /// same-named, differently-kinded sibling in another context is the ONLY way to make blind vs.
+    /// context-aware classification diverge, but for a <c>quantity</c>'s unit member specifically that
+    /// same collision is independently rejected by <c>SemanticValidator.ValidateQuantity</c>'s OWN
+    /// <c>IsUnit</c> check (<c>index.Classify(m.Type.Name) == TypeKind.Enum</c>, in
+    /// <c>Semantics/SemanticValidator.cs</c> — also context-blind, but out of this emitter-only PR's
+    /// scope) before the model ever reaches emission (confirmed empirically: the collision model fails
+    /// compilation with <c>KOI0904</c>, "must declare exactly one enum-typed unit member, found 0").
+    /// Closing this fully needs that validator fixed too — filed as a follow-up alongside the
+    /// <c>ModelIndex.AllTypes()</c>/<c>EnumsDeclaring</c> gap (see the PR description).
+    /// </para>
+    /// <para>
+    /// This test instead pins the REACHABLE part of the fix's contract: a quantity's unit-checked
+    /// operators are still correctly emitted once a second, non-colliding context exists in the model —
+    /// regression coverage for the <c>ModelIndex</c>-&gt;<c>context</c>-parameter signature change.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Quantity_ops_still_emit_with_the_context_parameter_threaded_through()
+    {
+        const string src =
+            "context Freight {\n" +
+            "  enum Weight { Light, Heavy }\n" +
+            "  quantity Load {\n" +
+            "    amount: Decimal\n" +
+            "    unit: Weight\n" +
+            "  }\n" +
+            "}\n" +
+            "context Shipping {\n" +
+            "  enum PackageSize { Small, Large }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("freight.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rendered = TestSupport.Render(result.Files);
+        rendered.ShouldContain("add(other: Load): Load");
+        rendered.ShouldContain("subtract(other: Load): Load");
+        rendered.ShouldContain("multiply(factor: number): Load");
+        rendered.ShouldContain("divide(divisor: number): Load");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue("quantity unit detection should type-check under --strict:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Issue #1344: a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in numeric
     /// type (a non-optional <c>Int</c> branch against a <c>Decimal</c> sibling) must widen the <c>Int</c>
     /// branch to <c>Decimal.fromInt(...)</c> so both ternary arms share a type — <c>tsc --strict</c>
