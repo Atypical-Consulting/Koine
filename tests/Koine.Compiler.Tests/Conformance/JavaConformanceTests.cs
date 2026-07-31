@@ -845,6 +845,165 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// #1548: a coalesce whose two operands are BOTH <c>Optional</c>-typed but of DIFFERENT numeric types
+    /// (<c>Int?</c> vs <c>Decimal?</c>) must reconcile that mismatch before emitting <c>.or(() -&gt; ...)</c>
+    /// — #1520's fix alone picks the right method (<c>.or</c> vs <c>.orElse</c>) but leaves the two
+    /// operands' element types unreconciled, which is a real <c>javac</c> "incompatible types" error:
+    /// <c>Optional&lt;Long&gt;.or(Supplier&lt;? extends Optional&lt;? extends Long&gt;&gt;)</c> cannot accept
+    /// a lambda returning <c>Optional&lt;BigDecimal&gt;</c>. The narrower <c>Int?</c> receiver must widen via
+    /// <c>.map(BigDecimal::valueOf)</c> before <c>.or(...)</c> is called on it.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_between_optional_operands()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Int?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no JDK required): the narrower Int? receiver is widened inside its own Optional
+        // before `.or(...)` is called, so both sides agree on Optional<BigDecimal>.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a.map(java.math.BigDecimal::valueOf).or(() -> b)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1548's symmetric operand order: the LEFT operand (the <c>.or(...)</c> receiver) is already the
+    /// wider <c>Decimal?</c>, so it needs no widening — instead the narrower <c>Int?</c> right operand must
+    /// widen INSIDE its own <c>Optional</c> (<c>.map(BigDecimal::valueOf)</c>) before it's returned from the
+    /// <c>.or(() -&gt; ...)</c> lambda, since the receiver's <c>Optional&lt;BigDecimal&gt;</c> constrains the
+    /// lambda's required return type.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_symmetric_operand_order()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Int?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a.or(() -> b.map(java.math.BigDecimal::valueOf))");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1548: the same numeric-type-mismatch reconciliation must also apply on the bare-value
+    /// <c>.orElse(...)</c> path (right operand NOT optional-typed), widening the narrower side with a plain
+    /// (non-<c>Optional</c>) <c>BigDecimal.valueOf(...)</c>/<c>.map(...)</c> as appropriate.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_on_the_orElse_path()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make(a: Int?, b: Decimal) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a.map(java.math.BigDecimal::valueOf).orElse(b)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1548 (Task 2): the same numeric-type-mismatch reconciliation must also hold through a
+    /// <c>field -&gt; a ?? b</c> STATE TRANSITION (a mutating behavior), not just a factory ctor arg —
+    /// <c>WriteTransition</c> applies no numeric reconciliation of its own (only an <c>Optional.of(...)</c>
+    /// wrap for a bare value into an optional field), so this exercises that the fix living inside the
+    /// shared <c>CoalesceExpr</c> case covers this call site for free.
+    /// </summary>
+    [Fact]
+    public void Coalesce_numeric_reconciliation_covers_state_transitions()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    command adjust(a: Int?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a.map(java.math.BigDecimal::valueOf).or(() -> b)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1548 (Task 2): the same numeric-type-mismatch reconciliation must also hold through a DERIVED
+    /// (computed) member body — <c>WriteDerivedMethod</c> applies no reconciliation at all (it just returns
+    /// the translated body verbatim), so this exercises that the fix living inside the shared
+    /// <c>CoalesceExpr</c> case covers this call site for free too.
+    /// </summary>
+    [Fact]
+    public void Coalesce_numeric_reconciliation_covers_derived_members()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    a: Int?\n" +
+            "    b: Decimal?\n" +
+            "    total: Decimal? = a ?? b\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.a.map(java.math.BigDecimal::valueOf).or(() -> this.b)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must
