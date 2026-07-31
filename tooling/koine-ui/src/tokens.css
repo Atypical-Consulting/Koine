@@ -143,6 +143,37 @@
      ~7:1 on --koi-paper-2) but overridden darker in light theme below, since --koi-accent itself is
      sub-AA (3.71:1) on the launcher row surface. */
   --koi-hl-match: #5aa9ff;
+
+  /* launcher `.lx-kind` chip TEXT (issue #1672): the `--koi-ddd-*` identity hues (concept-colors.
+     generated.css) are deliberately dark-only across both themes (ADR 0004 — the maxGraph canvas
+     paints the literal dark hex into SVG, var() can't resolve there), so a chip's own text can't just
+     reuse `--kc` (that identity hue) — on the light theme's near-white surface it measures ~1.2–2.4:1,
+     and even in dark theme several kinds drop under 4.5:1 once the auto-selected first row's accent
+     tint is the background (the worst case; see tokens.test.ts). These are a TEXT-ONLY derivative, each
+     lightness-adjusted off its own `--koi-ddd-<slug>` hue (same hue/saturation, so the kind stays
+     recognizable) just enough to clear 4.5:1 there — `.lx-kind`'s background tint keeps using the raw
+     `--koi-ddd-*` identity unchanged, and every other consumer (canvas, explorer icons, editor semantic
+     tokens) is untouched. Dark values equal the identity hue where it already clears the floor
+     (entity/enum/integration-event); the rest are lightened. Only the 10 kinds catalog.ts's KIND_META
+     renders a chip for exist here. */
+  --koi-ddd-aggregate-ink: #a8a6f8;
+  --koi-ddd-entity-ink: #34d399;
+  --koi-ddd-value-ink: #76b8f3;
+  --koi-ddd-enum-ink: #fbbf24;
+  --koi-ddd-service-ink: #fb9a49;
+  --koi-ddd-repository-ink: #a6b3c4;
+  --koi-ddd-command-ink: #f48383;
+  --koi-ddd-query-ink: #43c1f8;
+  --koi-ddd-event-ink: #f68cc3;
+  --koi-ddd-integration-event-ink: #2dd4bf;
+
+  /* launcher `.lx-sub` secondary text (issue #1672): --koi-muted's dark value clears the floor against
+     a fully opaque --koi-surface (issue #991/PR #1416) but not against the launcher card's own less-
+     opaque, blurred surface once the auto-selected row's accent tint composites in (~4.05:1, the worst
+     case) — a scoped, slightly darker-clearing variant rather than raising the shared --koi-muted
+     itself (which would touch every other muted-text consumer). Light theme's --koi-muted already
+     clears the floor there (~4.58:1), so it stays unchanged. */
+  --koi-muted-strong: #8f98a5;
 }
 
 /* --- light theme override ---
@@ -195,6 +226,28 @@ html[data-theme='light'] {
      ~6.2:1 on the resting --koi-paper-2 and ~5.2:1 on the worst-case selected-row tint
      (color-mix(--koi-accent 15%, transparent) composited over --koi-paper-2). */
   --koi-hl-match: #175ab0;
+
+  /* launcher `.lx-kind` chip TEXT, light theme (issue #1672): the dark-only `--koi-ddd-*` identity hue
+     rendered directly as text on this near-white surface measures ~1.2–2.4:1 for every kind. Each value
+     below is the SAME dark identity hue's own hue/saturation, darkened just enough to clear 4.5:1
+     against the worst-case (auto-selected row) background — see the :root block's ink tokens above for
+     the full rationale; `.lx-kind`'s background tint is untouched. */
+  --koi-ddd-aggregate-ink: #403aef;
+  --koi-ddd-entity-ink: #176b4d;
+  --koi-ddd-value-ink: #0f5da4;
+  --koi-ddd-enum-ink: #7c5a02;
+  --koi-ddd-service-ink: #964503;
+  --koi-ddd-repository-ink: #4d5d74;
+  --koi-ddd-command-ink: #ad0f0f;
+  --koi-ddd-query-ink: #05638d;
+  --koi-ddd-event-ink: #af0e62;
+  --koi-ddd-integration-event-ink: #166a60;
+
+  /* launcher `.lx-sub` secondary text, light theme (issue #1672): --koi-muted already clears 4.5:1
+     against the launcher card's worst-case (selected-row) background here (~4.58:1), so this scoped
+     token stays equal to it rather than diverging for no reason — see the :root block for why dark
+     needs its own value. */
+  --koi-muted-strong: #5b6573;
 }
 
 /* The dark theme is the :root default; data-theme='dark' needs no override block. */
