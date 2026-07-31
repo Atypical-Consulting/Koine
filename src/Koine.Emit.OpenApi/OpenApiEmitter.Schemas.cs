@@ -48,7 +48,7 @@ public sealed partial class OpenApiEmitter
                     schemas.Add(vo.Name, ValueObjectSchema(vo, index, emitted));
                     break;
                 case ReadModelDecl rm:
-                    schemas.Add(rm.Name, ReadModelSchema(rm, index, emitted));
+                    schemas.Add(rm.Name, ReadModelSchema(rm, index, emitted, ctx.Name));
                     break;
             }
         }
@@ -96,8 +96,13 @@ public sealed partial class OpenApiEmitter
     }
 
     /// <summary>A read model → an <c>object</c> schema; direct fields resolve their type from the source member.</summary>
-    private static YamlObject ReadModelSchema(ReadModelDecl rm, ModelIndex index, HashSet<string> emitted)
+    private static YamlObject ReadModelSchema(ReadModelDecl rm, ModelIndex index, HashSet<string> emitted, string ownerContext)
     {
+        // The source type (and thus a direct field's own declaration) may live in a DIFFERENT bounded
+        // context than this read model (R12.3 cross-context projection) — resolve its owning context so
+        // a direct field's type can be qualified against ITS OWN home, not silently assumed local.
+        string sourceContext = index.ResolveOwner(rm.SourceType, ownerContext).Owner ?? ownerContext;
+
         var fields = new List<(string Name, TypeRef Type, string? Doc, IReadOnlyList<KeyValuePair<string, Yaml>>? Keywords)>();
         foreach (ReadModelField field in rm.Fields)
         {
@@ -106,12 +111,41 @@ public sealed partial class OpenApiEmitter
             // names an identity), fall back to an opaque string so the schema stays valid.
             TypeRef type = field.Type
                 ?? (index.TryGetMemberType(rm.SourceType, field.Name, out TypeRef resolved)
-                    ? resolved
+                    ? QualifyForeignReference(resolved, index, sourceContext, ownerContext)
                     : new TypeRef("String"));
             fields.Add((field.Name, type, field.Doc, null));
         }
 
         return ObjectSchema(rm.Doc, fields, index, emitted);
+    }
+
+    /// <summary>
+    /// Rewrites a read-model direct field's <see cref="TypeRef"/> so any BARE (unqualified) simple name
+    /// within it carries an explicit <see cref="TypeRef.Qualifier"/> whenever it does NOT belong to
+    /// <paramref name="ownerContext"/> (this schema's own context) — resolved relative to
+    /// <paramref name="sourceContext"/>, the field's real owning context. <c>BaseSchema</c> never treats
+    /// a qualified reference as a candidate for a local <c>$ref</c>, since <paramref name="emitted"/>
+    /// only lists <paramref name="ownerContext"/>'s own schema names: left bare, a same-named,
+    /// differently-kinded sibling schema declared LOCALLY in <paramref name="ownerContext"/> would
+    /// otherwise be $ref'd instead of the source field's actual type (#1702, mirrors #1638). Recurses
+    /// into List/Set/Map element/value types, since the same misattribution risk applies to a nested
+    /// type reference just as much as a top-level one.
+    /// </summary>
+    private static TypeRef QualifyForeignReference(TypeRef type, ModelIndex index, string sourceContext, string ownerContext)
+    {
+        TypeRef? element = type.Element is { } e ? QualifyForeignReference(e, index, sourceContext, ownerContext) : null;
+        TypeRef? value = type.Value is { } v ? QualifyForeignReference(v, index, sourceContext, ownerContext) : null;
+        TypeRef rewritten = ReferenceEquals(element, type.Element) && ReferenceEquals(value, type.Value)
+            ? type
+            : type with { Element = element, Value = value };
+
+        if (rewritten.Qualifier is null
+            && index.ResolveOwner(rewritten.Name, sourceContext) is { Owner: { } owner } && owner != ownerContext)
+        {
+            return rewritten with { Qualifier = owner };
+        }
+
+        return rewritten;
     }
 
     /// <summary>Shared <c>object</c>-schema builder: properties (with optional per-member keywords) + a required list.</summary>
@@ -214,8 +248,12 @@ public sealed partial class OpenApiEmitter
             default:
                 // A type we emit as a named schema in THIS context → a local $ref. An ID value object
                 // wraps a Guid. Anything else (a cross-context reference, an entity, an aggregate) has
-                // no local schema, so degrade to an opaque object rather than emit a dangling $ref.
-                if (emitted.Contains(type.Name))
+                // no local schema, so degrade to an opaque object rather than emit a dangling $ref. An
+                // explicit Qualifier (only ever set by QualifyForeignReference, for a read model's
+                // direct field copied from a foreign source, #1702) means this bare name's REAL owner is
+                // NOT this context, so it must never match `emitted` — a same-named, differently-kinded
+                // sibling schema declared locally here is not the type this reference actually means.
+                if (type.Qualifier is null && emitted.Contains(type.Name))
                 {
                     return Ref(type.Name);
                 }

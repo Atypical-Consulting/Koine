@@ -98,6 +98,11 @@ public sealed partial class CSharpEmitter
         IReadOnlyList<Member> sourceMembers = ReadModelSourceMembers(context, rm.SourceType, index);
         var translator = new CSharpExpressionTranslator(index, sourceMembers, enumMemberToType, memberReceiver: "src", context: context, options: _options);
 
+        // The source type (and thus a direct field's own declaration) may live in a DIFFERENT bounded
+        // context than this read model (R12.3 cross-context projection) — resolve its owning context
+        // once so a direct field's bare type can be qualified against ITS OWN home (#1702, mirrors #1638).
+        var sourceContext = index.ResolveOwner(rm.SourceType, context).Owner ?? context;
+
         var fields = new List<(string CsType, string Prop, string Rhs)>();
         foreach (ReadModelField f in rm.Fields)
         {
@@ -105,8 +110,13 @@ public sealed partial class CSharpEmitter
             string csType, rhs;
             if (f.Projection is null)
             {
-                // Direct field: type and value come from the like-named source member.
-                csType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t) ? typeMapper.Map(t) : "object";
+                // Direct field: type and value come from the like-named source member. Left bare, a
+                // same-named but differently-kinded sibling type declared locally in this read model's
+                // own context would win over a same-named `using` — so qualify against the source's
+                // own owning context instead of relying on `context` here.
+                csType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t)
+                    ? typeMapper.Map(QualifyAgainstSource(t, index, sourceContext, context))
+                    : "object";
                 rhs = $"src.{prop}";
             }
             else
@@ -172,6 +182,35 @@ public sealed partial class CSharpEmitter
 
         var usesLinq = rm.Fields.Any(f => f.Projection is not null && ExprUsesLinq(f.Projection));
         return new EmittedFile(PathFor(emit, ns, KindFolder.ReadModels, $"{rm.Name}.cs"), Assemble(emit, ns, sb.ToString(), usesLinq), Kind: KindForFolder(KindFolder.ReadModels));
+    }
+
+    /// <summary>
+    /// Rewrites a read-model direct field's <see cref="TypeRef"/> so any BARE (unqualified) simple name
+    /// within it is force-qualified to <paramref name="sourceContext"/> — the field was read off the
+    /// read model's SOURCE type (R12.3), which may live in a DIFFERENT bounded context than the read
+    /// model itself (<paramref name="emittingContext"/>). Left bare, <see cref="CSharpTypeMapper"/> would
+    /// print the type name as-is and rely on a <c>using</c> to bring it into scope — but a same-named,
+    /// differently-kinded sibling type declared LOCALLY in <paramref name="emittingContext"/> wins over
+    /// any <c>using</c> under C#'s own name-resolution rules, silently rebinding the property to the
+    /// wrong type (#1702, mirrors #1638). An already-explicit <see cref="TypeRef.Qualifier"/> (a genuine
+    /// R13.2 cross-context reference) is left untouched. Recurses into List/Set/Map element/value types,
+    /// since the same shadowing risk applies to a nested type reference just as much as a top-level one.
+    /// </summary>
+    private static TypeRef QualifyAgainstSource(TypeRef type, ModelIndex index, string sourceContext, string emittingContext)
+    {
+        TypeRef? element = type.Element is { } e ? QualifyAgainstSource(e, index, sourceContext, emittingContext) : null;
+        TypeRef? value = type.Value is { } v ? QualifyAgainstSource(v, index, sourceContext, emittingContext) : null;
+        TypeRef rewritten = ReferenceEquals(element, type.Element) && ReferenceEquals(value, type.Value)
+            ? type
+            : type with { Element = element, Value = value };
+
+        if (rewritten.Qualifier is null
+            && index.ResolveOwner(rewritten.Name, sourceContext) is { Owner: { } owner } && owner != emittingContext)
+        {
+            return rewritten with { Qualifier = owner };
+        }
+
+        return rewritten;
     }
 
     /// <summary>
