@@ -11,8 +11,6 @@ describe('storeInspectorToggle', () => {
   let hostElement: HTMLElement | null;
 
   beforeEach(() => {
-    // Create a minimal test store - use any to avoid typing headaches with complex AppState
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     store = createStore<any>(() => ({
       selection: null,
       activeContext: null,
