@@ -100,6 +100,7 @@ public static class DiagnosticCodes
     public const string OptionalAssignedToNonOptional = "KOI0401";
     public const string OptionalDereference = "KOI0402";
     public const string PresenceOnNonOptional = "KOI0403";
+    public const string AggregateSelectorOptional = "KOI0404";
 
     // ---- Commands & transitions (KOI0500–0599) ----------------------------
     public const string InvalidTransitionTarget = "KOI0501";
@@ -301,6 +302,7 @@ public static class DiagnosticCodes
             [OptionalAssignedToNonOptional] = D(OptionalAssignedToNonOptional, "An optional value was assigned to a non-optional field.", DiagnosticCategory.Optionality, DiagnosticSeverity.Error),
             [OptionalDereference] = D(OptionalDereference, "An optional value may be null at the point it is used.", DiagnosticCategory.Optionality, DiagnosticSeverity.Error),
             [PresenceOnNonOptional] = D(PresenceOnNonOptional, "A presence check was applied to a non-optional value.", DiagnosticCategory.Optionality, DiagnosticSeverity.Error),
+            [AggregateSelectorOptional] = D(AggregateSelectorOptional, "A sum/min/max selector's inferred type is optional.", DiagnosticCategory.Optionality, DiagnosticSeverity.Error),
 
             // ---- Commands & transitions --------------------------------------
             [InvalidTransitionTarget] = D(InvalidTransitionTarget, "A state transition targets something that is not a mutable field.", DiagnosticCategory.Commands, DiagnosticSeverity.Error),
