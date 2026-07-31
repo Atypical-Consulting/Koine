@@ -58,6 +58,7 @@ Parses and validates the model, then — if you ask for output — emits files.
 | `--layers <list>` | `domain` | Comma-separated output layers (`domain`, `application`). `application` implies `domain`. C# only. See [the Application layer](#the-c-application-layer). |
 | `--app-mediatr` | *(off)* | Application layer: emit the MediatR request/handler shape + validation/transaction pipeline behaviors instead of plain handlers. |
 | `--app-mapping <mode>` | `plain` | Application layer: DTO/read-model mapping strategy — `plain` (hand-rolled) or `mapperly` (reserved). |
+| `--app-dispatch-events` | *(off)* | Application layer: dispatch each domain event an aggregate recorded **after** the transaction commits, then clear it. Koine emits the `IDomainEventDispatcher` contract; you supply the implementation. See [post-commit domain-event dispatch](#post-commit-domain-event-dispatch---app-dispatch-events). |
 | `--regex-match-timeout-ms <ms>` | *(config / `1000`)* | Override the C# `matches`-invariant ReDoS-guard timeout for this invocation (ms). Wins over `targets.csharp.regexMatchTimeoutMs` in `koine.config`. Must be a positive integer. |
 | `--glossary <file.md>` | *(none)* | Also write a Markdown ubiquitous-language glossary to this file. |
 | `--config <file>` | *(discovered)* | Read build defaults from this `koine.config` instead of the discovered one. See [`koine.config`](#koineconfig). |
@@ -107,18 +108,63 @@ Per **query** it emits a concrete `IQueryHandler<,>` (a single result keyed by t
 loads + projects via the `To<ReadModel>` mapper). It also emits an
 `Add<Context>Application(this IServiceCollection)` DI extension registering them all.
 
-Plain handlers (no runtime dependency beyond FluentValidation) are the default. Two opt-in
+Plain handlers (no runtime dependency beyond FluentValidation) are the default. Opt-in
 sub-options:
 
 - `--app-mediatr` — emit the **MediatR** shape (`IRequest`/`IRequest<T>`, `IRequestHandler<,>`, and
   validation + transaction `IPipelineBehavior<,>`s) instead of plain handlers.
 - `--app-mapping plain|mapperly` — mapping strategy (`mapperly` reserved for source-generated mapping).
+- `--app-dispatch-events` — dispatch recorded domain events after the commit (see below).
 
 With the layer **off** (the default), the emitted C# is byte-identical to before. Koine `usecase`
 declarations carry no binding to a specific aggregate behavior, so the generated `I<Service>`
 implementation throws `NotImplementedException` until wired — the generated command/factory handlers
 are the real entry points. The sub-options can also be set in `koine.config`
-(`targets.csharp.layers`, `targets.csharp.application.mediatr`, `targets.csharp.application.mapping`).
+(`targets.csharp.layers`, `targets.csharp.application.mediatr`, `targets.csharp.application.mapping`,
+`targets.csharp.application.dispatchEvents`). Any of them also **implies** the Application layer, so
+passing one alone is never a silent no-op.
+
+#### Post-commit domain-event dispatch (`--app-dispatch-events`)
+
+Every entity whose commands or factories `emit` an event already records those events in a
+`DomainEvents` list. `--app-dispatch-events` makes the generated handlers actually *deliver* them —
+**after** the transaction commits, then clearing the list:
+
+```csharp
+aggregate.Place();
+await _unitOfWork.SaveChangesAsync(ct);
+foreach (var domainEvent in aggregate.DomainEvents)
+{
+    await _dispatcher.DispatchAsync(domainEvent, ct);
+}
+
+aggregate.ClearDomainEvents();
+```
+
+Post-commit is the point: an event delivered *before* the commit could announce a transaction that
+then rolled back. Dispatch is sequential and in recording order, failures propagate (no swallowing),
+and the clear runs only once the loop completes — so a mid-dispatch throw leaves the events visible
+for a retry rather than dropping them.
+
+Koine emits the **contract**, never an implementation:
+
+```csharp
+namespace Koine.Runtime;
+
+public interface IDomainEventDispatcher
+{
+    Task DispatchAsync(IDomainEvent domainEvent, CancellationToken ct = default);
+}
+```
+
+Register your own (an in-process mediator, an outbox relay, a SignalR broadcaster) — the same
+emit-the-contract, you-supply-the-realization split Koine already uses for `IUnitOfWork`. The
+generated `Add<Context>Application` extension deliberately does **not** register it.
+
+Under `--app-mediatr` the commit lives in the emitted `TransactionBehavior` rather than the handler,
+so the handler instead parks its events in a scoped `IDomainEventAccumulator` (also emitted, and
+registered for you) and the behavior drains and dispatches them after committing. The observable
+semantics are identical.
 
 ### C# infrastructure layer (`--layers`)
 

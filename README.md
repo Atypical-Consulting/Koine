@@ -379,13 +379,18 @@ emit the **Application layer** that fills those in:
 | **DI** | an `Add<Context>Application(this IServiceCollection)` extension registering every handler, validator and query handler. |
 
 Plain handlers (no third-party runtime dependency beyond FluentValidation) are the **default**.
-Two opt-in sub-options, also settable via `koine.config` (`targets.csharp.application.mediatr`,
-`targets.csharp.application.mapping`):
+Opt-in sub-options, also settable via `koine.config` (`targets.csharp.application.mediatr`,
+`targets.csharp.application.mapping`, `targets.csharp.application.dispatchEvents`):
 
 - `--app-mediatr` — emit the **MediatR** shape instead: `IRequest`/`IRequest<T>` requests,
   `IRequestHandler<,>` handlers, and validation + transaction `IPipelineBehavior<,>`s.
 - `--app-mapping plain|mapperly` — DTO/read-model mapping strategy (`plain` hand-rolled mappers by
   default; `mapperly` is reserved for source-generated mapping).
+- `--app-dispatch-events` — dispatch each domain event an aggregate recorded **after** the
+  transaction commits, then clear it (an event delivered before the commit could announce a
+  transaction that then rolled back). Koine emits the `Koine.Runtime.IDomainEventDispatcher`
+  *contract*; you supply and register the implementation, the same split already used for
+  `IUnitOfWork`.
 
 With the layer **off** (the default), the emitted C# is byte-identical to before. Koine `usecase`
 declarations carry no binding to a specific aggregate behavior, so the generated `I<Service>`
