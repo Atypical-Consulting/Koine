@@ -75,14 +75,22 @@ internal static class OperatorNeedsAnalyzer
 
     private static IReadOnlyDictionary<string, ValueObjectOperatorNeeds> ComputeOperatorNeeds(KoineModel model, ModelIndex index)
     {
-        var resolver = new TypeResolver(index);
+        // One TypeResolver per owning context (R13.2), reused across every scan site from that
+        // context rather than reconstructed per expression — a name shared across two contexts
+        // (legal under R13.2) must classify against ITS OWN context, not whichever context's
+        // declaration happens to win ModelIndex's context-blind by-name registry (#1642).
+        var resolvers = new Dictionary<string, TypeResolver>(StringComparer.Ordinal);
+        TypeResolver ResolverFor(string context) =>
+            resolvers.TryGetValue(context, out TypeResolver? cached) ? cached : resolvers[context] = new TypeResolver(index, context);
+
         var multiply = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var divide = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var binary = new Dictionary<string, HashSet<BinaryOp>>(StringComparer.Ordinal);
         var summable = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach ((Expr expr, TypeScope scope) in ExpressionScanSites(model, index))
+        foreach ((Expr expr, TypeScope scope, string context) in ExpressionScanSites(model, index))
         {
+            TypeResolver resolver = ResolverFor(context);
             new ScalarOpWalker(BinaryOp.Mul, scope, resolver, index, multiply).Visit(expr);
             new ScalarOpWalker(BinaryOp.Div, scope, resolver, index, divide).Visit(expr);
             new ValueObjectSumWalker(scope, resolver, summable).Visit(expr);
@@ -177,14 +185,16 @@ internal static class OperatorNeedsAnalyzer
 
     /// <summary>
     /// Every expression the demand-driven value-object analyses scan, paired with the
-    /// <see cref="TypeScope"/> it is resolved in: member initializers, invariant conditions, command
-    /// and factory bodies, state-rule guards, service operation bodies, spec conditions, and
-    /// read-model field projections. The <b>single</b> site enumerator that
-    /// <see cref="BuildOperatorNeeds"/> walks to accumulate every per-VO need signal (scalar
-    /// <c>*</c>/<c>/</c> factors, the <c>sum</c> fold, and plain binary <c>+</c>/<c>-</c>) in one pass, so
-    /// the site list lives in one place and cannot drift between analyses (#836).
+    /// <see cref="TypeScope"/> it is resolved in and the name of the <see cref="ContextNode"/> that
+    /// owns it (R13.2 — needed so each site's <see cref="TypeResolver"/> classifies a same-named type
+    /// against ITS OWN context rather than another context's colliding declaration, #1642): member
+    /// initializers, invariant conditions, command and factory bodies, state-rule guards, service
+    /// operation bodies, spec conditions, and read-model field projections. The <b>single</b> site
+    /// enumerator that <see cref="BuildOperatorNeeds"/> walks to accumulate every per-VO need signal
+    /// (scalar <c>*</c>/<c>/</c> factors, the <c>sum</c> fold, and plain binary <c>+</c>/<c>-</c>) in one
+    /// pass, so the site list lives in one place and cannot drift between analyses (#836).
     /// </summary>
-    private static IEnumerable<(Expr Expr, TypeScope Scope)> ExpressionScanSites(KoineModel model, ModelIndex index)
+    private static IEnumerable<(Expr Expr, TypeScope Scope, string Context)> ExpressionScanSites(KoineModel model, ModelIndex index)
     {
         foreach (ContextNode ctx in model.Contexts)
         {
@@ -207,14 +217,14 @@ internal static class OperatorNeedsAnalyzer
                 {
                     if (m.Initializer is not null)
                     {
-                        yield return (m.Initializer, scope);
+                        yield return (m.Initializer, scope, ctx.Name);
                     }
                 }
 
                 // Invariant conditions over the type's members can also use value-object arithmetic.
                 foreach (Invariant inv in Invariants(type))
                 {
-                    yield return (inv.Condition, scope);
+                    yield return (inv.Condition, scope, ctx.Name);
                 }
 
                 // Command bodies and state-rule guards can also use value-object arithmetic.
@@ -227,17 +237,17 @@ internal static class OperatorNeedsAnalyzer
                         {
                             if (stmt is RequiresClause req)
                             {
-                                yield return (req.Condition, cmdScope);
+                                yield return (req.Condition, cmdScope, ctx.Name);
                             }
                             else if (stmt is Transition tr)
                             {
-                                yield return (tr.Value, cmdScope);
+                                yield return (tr.Value, cmdScope, ctx.Name);
                             }
                             else if (stmt is EmitClause em)
                             {
                                 foreach (EmitArg arg in em.Args)
                                 {
-                                    yield return (arg.Value, cmdScope);
+                                    yield return (arg.Value, cmdScope, ctx.Name);
                                 }
                             }
                         }
@@ -249,24 +259,24 @@ internal static class OperatorNeedsAnalyzer
                         {
                             if (stmt is RequiresClause req)
                             {
-                                yield return (req.Condition, factScope);
+                                yield return (req.Condition, factScope, ctx.Name);
                             }
                             else if (stmt is Initialization ini)
                             {
-                                yield return (ini.Value, factScope);
+                                yield return (ini.Value, factScope, ctx.Name);
                             }
                             else if (stmt is EmitClause em)
                             {
                                 foreach (EmitArg arg in em.Args)
                                 {
-                                    yield return (arg.Value, factScope);
+                                    yield return (arg.Value, factScope, ctx.Name);
                                 }
                             }
                         }
                     }
                     foreach (Expr guard in StateGuards(entity))
                     {
-                        yield return (guard, scope);
+                        yield return (guard, scope, ctx.Name);
                     }
                 }
             }
@@ -281,16 +291,16 @@ internal static class OperatorNeedsAnalyzer
                 {
                     if (op.Body is not null)
                     {
-                        yield return (op.Body, TypeScope.FromParams(op.Parameters, index));
+                        yield return (op.Body, TypeScope.FromParams(op.Parameters, index), ctx.Name);
                     }
                 }
             }
         }
 
         // Spec conditions (rendered over the target type's members) can use value-object arithmetic too.
-        foreach (SpecDecl spec in AllSpecs(model))
+        foreach ((SpecDecl spec, string specContext) in AllSpecs(model))
         {
-            yield return (spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index), index));
+            yield return (spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index), index), specContext);
         }
 
         // Read-model derived-field projections (over the source type's members) can use value-object arithmetic too.
@@ -301,7 +311,7 @@ internal static class OperatorNeedsAnalyzer
             {
                 if (f.Projection is not null)
                 {
-                    yield return (f.Projection, scope);
+                    yield return (f.Projection, scope, context);
                 }
             }
         }
@@ -344,9 +354,11 @@ internal static class OperatorNeedsAnalyzer
         // The same predicate the emitter routes on (`Classify == Value`) is used here so the recorded
         // need and the lowered call site agree exactly. Optionality is intentionally ignored — a
         // guard-narrowed optional operand infers as the same value type and needs the method just as much.
+        // Classified against the resolver's OWN context (R13.2, #1642) rather than the context-blind
+        // overload — a name shared across contexts must resolve to the declaration owning THIS site.
         private void RecordValueObjectOperand(Expr operand, BinaryOp op)
         {
-            if (_resolver.TypeOf(operand, _scope).Name is { } name && _index.Classify(name) == TypeKind.Value)
+            if (_resolver.TypeOf(operand, _scope).Name is { } name && _index.Classify(_resolver.Context, name) == TypeKind.Value)
             {
                 if (!_needs.TryGetValue(name, out HashSet<BinaryOp>? set))
                 {
@@ -384,7 +396,12 @@ internal static class OperatorNeedsAnalyzer
                 if (_resolver.TypeOf(n.Target, _scope).SequenceElement is { } element)
                 {
                     KoineType selector = _resolver.TypeOf(lambda.Body, _scope.With(lambda.Parameter, element));
-                    if (selector.IsValueLike)
+                    // Re-derived against the resolver's own context (R13.2, #1642) rather than trusting
+                    // selector.Kind: that Kind was baked in when the scope's KoineType was built from the
+                    // bare (context-blind) TypeRef, so a name shared across contexts could carry the WRONG
+                    // context's Kind — ToTypeRef() strips it back to a bare name for a fresh, context-aware
+                    // classification, the same pattern IsValueLike(TypeRef) already uses.
+                    if (_resolver.IsValueLike(selector.ToTypeRef()))
                     {
                         _needs.Add(selector.Name!);
                     }
@@ -440,14 +457,14 @@ internal static class OperatorNeedsAnalyzer
         };
     }
 
-    /// <summary>Every spec declared in the model (context- and aggregate-scoped).</summary>
-    private static IEnumerable<SpecDecl> AllSpecs(KoineModel model)
+    /// <summary>Every spec declared in the model (context- and aggregate-scoped), paired with the name of the declaring context.</summary>
+    private static IEnumerable<(SpecDecl Spec, string Context)> AllSpecs(KoineModel model)
     {
         foreach (ContextNode ctx in model.Contexts)
         {
             foreach (SpecDecl s in ctx.Specs)
             {
-                yield return s;
+                yield return (s, ctx.Name);
             }
 
             foreach (TypeDecl t in ctx.Types)
@@ -456,7 +473,7 @@ internal static class OperatorNeedsAnalyzer
                 {
                     foreach (SpecDecl s in agg.Specs)
                     {
-                        yield return s;
+                        yield return (s, ctx.Name);
                     }
                 }
             }
@@ -531,6 +548,8 @@ internal static class OperatorNeedsAnalyzer
         // a `let`, a nested call) is recognized exactly as a bare place would be (#1289). A collection or
         // otherwise un-named type (whose `KoineType.Name` is `null` — including the unresolvable-operand
         // `ErrorType`) is neither a value object nor a scalar, so it falls through unrecorded — as before.
+        // Classified against the resolver's OWN context (R13.2, #1642) rather than the context-blind
+        // overload — a name shared across contexts must resolve to the declaration owning THIS site.
         private (string? ValueObject, string? Scalar) InferOperand(Expr expr)
         {
             if (_resolver.TypeOf(expr, _scope).Name is not { } typeName)
@@ -538,7 +557,7 @@ internal static class OperatorNeedsAnalyzer
                 return (null, null);
             }
 
-            if (_index.Classify(typeName) == TypeKind.Value)
+            if (_index.Classify(_resolver.Context, typeName) == TypeKind.Value)
             {
                 return (typeName, null);
             }
