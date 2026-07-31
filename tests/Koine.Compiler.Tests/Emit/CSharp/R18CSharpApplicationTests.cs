@@ -585,6 +585,19 @@ public class R18CSharpApplicationTests
         endpoints.ShouldContain("return result is null ? Results.NotFound() : Results.Ok(result);");
     }
 
+    /// <summary>
+    /// Unlike every other emitted C# target, the api (endpoint) layer was never Roslyn-compiled — only
+    /// string-asserted — because the test process didn't reference <c>Microsoft.AspNetCore.App</c>, so
+    /// <see cref="TestSupport.Compile"/> couldn't resolve <c>IEndpointRouteBuilder</c>/<c>Results</c>/
+    /// <c>MapPost</c>. A `FrameworkReference` in the test csproj closes that gap (issue #1148).
+    /// </summary>
+    [Fact]
+    public void Api_layer_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
     [Fact]
     public void Config_supplied_application_mediatr_upgrades_layers_without_a_layers_flag()
     {
