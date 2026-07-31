@@ -224,11 +224,17 @@ internal sealed class ExpressionChecker
         // value objects, strings and bools have no relational operators in C#.
         if (isRelational)
         {
-            // A lifted relational op on a null operand is silently false — a trap.
-            if (IsUnguardedOptional(b.Left, left, scope) || IsUnguardedOptional(b.Right, right, scope))
+            // A lifted relational op on a null operand is silently false — a trap. #1589: guard
+            // per-operand against IsAlreadyInvalid, mirroring CheckArithmeticNullSafety, so comparing
+            // an already-reported unguarded compound operand (e.g. `surcharge + fee < threshold` where
+            // the inner arithmetic check already flagged it) doesn't echo the same KOI0402 again.
+            var leftIsNewViolation = IsUnguardedOptional(b.Left, left, scope) && !IsAlreadyInvalid(b.Left);
+            var rightIsNewViolation = IsUnguardedOptional(b.Right, right, scope) && !IsAlreadyInvalid(b.Right);
+            if (leftIsNewViolation || rightIsNewViolation)
             {
                 Report(DiagnosticCodes.OptionalDereference,
                     "optional value may be null; guard with isPresent or use '??' before comparing", b);
+                MarkInvalid(b);
                 return;
             }
 
@@ -658,6 +664,17 @@ internal sealed class ExpressionChecker
         _ => null
     };
 
+    /// <summary>
+    /// #1589: a left-associative chain (<c>a + b + c</c>) visits both the inner <c>(a + b)</c> node
+    /// and the outer <c>(a + b) + c</c> node, and both independently re-derive whether their LEFT
+    /// operand is an unguarded optional. When the inner node already reported <c>b</c> as unguarded and
+    /// marked itself invalid, the outer node's own re-derivation over that same already-reported operand
+    /// would otherwise echo the identical defect a second time at a different span. Consulting
+    /// <see cref="IsAlreadyInvalid"/> per-operand (not per-node, unlike the type-mismatch checks above)
+    /// keeps a GENUINELY distinct violation on the other operand reportable — e.g. in <c>a + b + c</c>
+    /// where both the inner <c>a</c>/<c>b</c> pair AND the outer's own <c>c</c> are independently
+    /// unguarded, both must still be reported.
+    /// </summary>
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
     {
         if (b.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div))
@@ -667,10 +684,13 @@ internal sealed class ExpressionChecker
 
         TypeRef? left = _resolver.Infer(b.Left, scope);
         TypeRef? right = _resolver.Infer(b.Right, scope);
-        if (IsUnguardedOptional(b.Left, left, scope) || IsUnguardedOptional(b.Right, right, scope))
+        var leftIsNewViolation = IsUnguardedOptional(b.Left, left, scope) && !IsAlreadyInvalid(b.Left);
+        var rightIsNewViolation = IsUnguardedOptional(b.Right, right, scope) && !IsAlreadyInvalid(b.Right);
+        if (leftIsNewViolation || rightIsNewViolation)
         {
             Report(DiagnosticCodes.OptionalDereference,
                 "optional value may be null; guard with isPresent or use '??' before arithmetic", b);
+            MarkInvalid(b);
         }
     }
 
