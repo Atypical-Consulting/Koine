@@ -144,7 +144,7 @@ public sealed partial class PythonEmitter
         //    C# `WriteStateMachineGuard`) — unless it would just restate a precondition.
         foreach (Transition tr in transitions)
         {
-            var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft) && index.Classify(ft.Name) == TypeKind.Enum
+            var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft) && index.Classify(translator.Context, ft.Name) == TypeKind.Enum
                 ? ft.Name : null;
 
             // A single-source guard that merely restates a precondition is suppressed; both sides are
@@ -406,7 +406,7 @@ public sealed partial class PythonEmitter
             var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                var expectedEnum = index.Classify(translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 args.Add($"{field}={translator.Translate(value, PythonExpressionTranslator.NameMode.Property, expectedEnum)}");
             }
             else if (factoryParams.Contains(m.Name))
@@ -493,7 +493,7 @@ public sealed partial class PythonEmitter
             .Select(f =>
             {
                 var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(f.Name));
-                var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
+                var expectedEnum = index.Classify(translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
                 return $"{field}={translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum)}";
             });
 
@@ -560,7 +560,7 @@ public sealed partial class PythonEmitter
               .Append("(self) -> ").Append(typeMapper.Map(m.Type)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index))).Append('\n');
+              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');
         }
 
         return new EmittedFile(

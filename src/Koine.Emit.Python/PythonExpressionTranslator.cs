@@ -89,6 +89,13 @@ internal sealed class PythonExpressionTranslator
         _regexMatchTimeoutMs = regexMatchTimeoutMs;
     }
 
+    /// <summary>
+    /// The declaring context this translator resolves types against (R13.2) — the same context
+    /// source callers thread into an <c>expectedEnum</c> hint so a same-named enum in another
+    /// context can't be misclassified.
+    /// </summary>
+    public string? Context => _resolver.Context;
+
     public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
 
     public void PopLocal(string name) => _locals.PopLocal(name);
