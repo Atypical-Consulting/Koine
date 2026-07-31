@@ -186,7 +186,7 @@ internal sealed class TypeScriptExpressionTranslator
                 WriteBinary(bin, sb, parenthesize: true);
                 break;
             case UnaryExpr un:
-                sb.Append(un.Op == UnaryOp.Not ? "!" : "-");
+                sb.Append(un.Op.Symbol());
                 if (un.Operand is IdentifierExpr or LiteralExpr or BinaryExpr or ConditionalExpr or CoalesceExpr)
                 {
                     Write(un.Operand, sb);

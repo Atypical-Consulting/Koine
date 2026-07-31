@@ -61,6 +61,23 @@ public static class BinaryOpExtensions
 
 public enum UnaryOp { Not, Negate }
 
+/// <summary>
+/// The single shared <see cref="UnaryOp"/> → symbol mapping (#1522), replacing 7+ independently
+/// duplicated <c>UnaryOp.Not ? "!" : "-"</c>-shaped ternaries/switches across
+/// <c>Koine.Compiler</c>'s core and every code-emitting <c>Koine.Emit.&lt;Target&gt;</c> translator —
+/// the same drift shape <see cref="BinaryOpExtensions.Symbol"/> (#1313) fixed for <see cref="BinaryOp"/>.
+/// </summary>
+public static class UnaryOpExtensions
+{
+    /// <summary>The Koine source-syntax operator token for <paramref name="op"/>.</summary>
+    public static string Symbol(this UnaryOp op) => op switch
+    {
+        UnaryOp.Not => "!",
+        UnaryOp.Negate => "-",
+        _ => "?"
+    };
+}
+
 public enum LiteralKind { Int, Decimal, String, Bool }
 
 /// <summary>A binary operation: <c>left op right</c>.</summary>

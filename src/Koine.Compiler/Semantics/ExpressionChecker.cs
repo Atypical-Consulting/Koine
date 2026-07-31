@@ -272,7 +272,7 @@ internal sealed class ExpressionChecker
         var ok = u.Op == UnaryOp.Not ? TypeResolver.IsBool(operand) : TypeResolver.IsNumeric(operand);
         if (!ok)
         {
-            var symbol = u.Op == UnaryOp.Not ? "!" : "-";
+            var symbol = u.Op.Symbol();
             Report(DiagnosticCodes.UnaryOperandTypeMismatch,
                 $"unary operator '{symbol}' cannot be applied to '{operand.Name}'", u);
             MarkInvalid(u);

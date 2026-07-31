@@ -529,6 +529,8 @@ Koine.Compiler.Ast.TypeRef.Deconstruct(out string! Name, out Koine.Compiler.Ast.
 Koine.Compiler.Ast.TypeRef.Equals(Koine.Compiler.Ast.TypeRef? other) -> bool
 Koine.Compiler.Ast.UnaryExpr.Deconstruct(out Koine.Compiler.Ast.UnaryOp Op, out Koine.Compiler.Ast.Expr! Operand) -> void
 Koine.Compiler.Ast.UnaryExpr.Equals(Koine.Compiler.Ast.UnaryExpr? other) -> bool
+Koine.Compiler.Ast.UnaryOpExtensions
+static Koine.Compiler.Ast.UnaryOpExtensions.Symbol(this Koine.Compiler.Ast.UnaryOp op) -> string!
 Koine.Compiler.Ast.UseCaseDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out Koine.Compiler.Ast.TypeRef? ReturnType) -> void
 Koine.Compiler.Ast.UseCaseDecl.Equals(Koine.Compiler.Ast.UseCaseDecl? other) -> bool
 Koine.Compiler.Ast.ValueObjectDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! Members, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! Invariants, out bool IsQuantity) -> void

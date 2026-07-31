@@ -193,7 +193,7 @@ internal sealed class KotlinExpressionTranslator
             return;
         }
 
-        sb.Append(un.Op == UnaryOp.Not ? '!' : '-');
+        sb.Append(un.Op.Symbol());
         WriteAtom(un.Operand, sb);
     }
 
