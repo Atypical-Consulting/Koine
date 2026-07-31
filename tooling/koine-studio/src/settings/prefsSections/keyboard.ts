@@ -26,7 +26,7 @@ import {
     clearKeybindingOverrides,
     type Settings,
 } from "@/settings/persistence";
-import { row, panel } from "@/settings/prefsControls";
+import { row, panel, actionButton } from "@/settings/prefsControls";
 import {
     KEYBINDINGS,
     DEFAULT_BINDINGS,
@@ -216,15 +216,19 @@ export function buildKeyboardSection(
         // "Record a new shortcut for Format document, ⌘S" instead of a bare, ambiguous "Record".
         chord.id = `koi-kbd-chord-${id}`;
 
-        const recordBtn = document.createElement("button");
-        recordBtn.type = "button";
-        recordBtn.className = "koi-set-action koi-kbd-record";
-        recordBtn.textContent = "Record";
-        recordBtn.setAttribute(
-            "aria-label",
-            `Record a new shortcut for ${label}`,
+        const recordBtn = actionButton(
+            "Record",
+            () => {
+                if (kbdArmed === id)
+                    disarmRecording(); // a second click toggles recording off
+                else armRecording(id);
+            },
+            {
+                className: "koi-set-action koi-kbd-record",
+                ariaLabel: `Record a new shortcut for ${label}`,
+                ariaDescribedBy: chord.id,
+            },
         );
-        recordBtn.setAttribute("aria-describedby", chord.id);
 
         const resetBtn = document.createElement("button");
         resetBtn.type = "button";
@@ -240,13 +244,28 @@ export function buildKeyboardSection(
         conflict.setAttribute("role", "alert");
         conflict.hidden = true;
 
-        const reassignBtn = document.createElement("button");
-        reassignBtn.type = "button";
-        reassignBtn.className = "koi-set-action koi-kbd-reassign";
-        reassignBtn.textContent = "Reassign";
-        reassignBtn.setAttribute(
-            "aria-label",
-            `Reassign this shortcut to ${label}`,
+        const reassignBtn = actionButton(
+            "Reassign",
+            () => {
+                const row = kbdRows.get(id);
+                const p = row?.pending;
+                if (!p) return;
+                if (p.otherId) saveKeybindingOverride(p.otherId, ""); // a rebindable prior owner becomes unbound
+                // This command takes the chord (shadowing a built-in if reserved); taking back its OWN
+                // default drops the override instead of persisting a redundant one, keeping the store clean.
+                saveKeybindingOverride(
+                    id,
+                    p.chord === DEFAULT_BINDINGS[id] ? null : p.chord,
+                );
+                hideKbdConflict(id);
+                repaintKbdRow(id);
+                if (p.otherId) repaintKbdRow(p.otherId);
+                deps.onKeybindingsChanged?.();
+            },
+            {
+                className: "koi-set-action koi-kbd-reassign",
+                ariaLabel: `Reassign this shortcut to ${label}`,
+            },
         );
         reassignBtn.hidden = true;
 
@@ -283,11 +302,6 @@ export function buildKeyboardSection(
             pending: null,
         });
 
-        recordBtn.addEventListener("click", () => {
-            if (kbdArmed === id)
-                disarmRecording(); // a second click toggles recording off
-            else armRecording(id);
-        });
         resetBtn.addEventListener("click", () => {
             hideKbdConflict(id);
             // Reset restores the default chord, which the Reassign flow may meanwhile have handed to
@@ -304,22 +318,6 @@ export function buildKeyboardSection(
             }
             saveKeybindingOverride(id, null); // drop the remap so the default wins again
             repaintKbdRow(id);
-            deps.onKeybindingsChanged?.();
-        });
-        reassignBtn.addEventListener("click", () => {
-            const row = kbdRows.get(id);
-            const p = row?.pending;
-            if (!p) return;
-            if (p.otherId) saveKeybindingOverride(p.otherId, ""); // a rebindable prior owner becomes unbound
-            // This command takes the chord (shadowing a built-in if reserved); taking back its OWN default
-            // drops the override instead of persisting a redundant one, keeping the store clean.
-            saveKeybindingOverride(
-                id,
-                p.chord === DEFAULT_BINDINGS[id] ? null : p.chord,
-            );
-            hideKbdConflict(id);
-            repaintKbdRow(id);
-            if (p.otherId) repaintKbdRow(p.otherId);
             deps.onKeybindingsChanged?.();
         });
         cancelBtn.addEventListener("click", () => hideKbdConflict(id)); // dismiss — keep the current binding
@@ -342,16 +340,16 @@ export function buildKeyboardSection(
     const rowsForScope = (scope: "editor" | "global"): HTMLElement[] =>
         KEYBINDINGS.filter((b) => b.scope === scope).map((b) => buildKbdRow(b.id, b.label));
 
-    const kbdResetAll = document.createElement("button");
-    kbdResetAll.type = "button";
-    kbdResetAll.className = "koi-set-action koi-kbd-reset-all";
-    kbdResetAll.textContent = "Reset all shortcuts";
-    kbdResetAll.addEventListener("click", () => {
-        clearKeybindingOverrides();
-        for (const id of kbdRows.keys()) hideKbdConflict(id);
-        repaintKeyboard();
-        deps.onKeybindingsChanged?.();
-    });
+    const kbdResetAll = actionButton(
+        "Reset all shortcuts",
+        () => {
+            clearKeybindingOverrides();
+            for (const id of kbdRows.keys()) hideKbdConflict(id);
+            repaintKeyboard();
+            deps.onKeybindingsChanged?.();
+        },
+        { className: "koi-set-action koi-kbd-reset-all" },
+    );
 
     const keyboardPanel = panel(
         "keyboard",

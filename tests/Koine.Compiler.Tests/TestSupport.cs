@@ -1105,6 +1105,61 @@ public static class TestSupport
     }
 
     /// <summary>
+    /// Writes the emitted PHP files to a fresh temp directory and EXECUTES <paramref name="driver"/>
+    /// against them with <c>php</c> — the PHP analogue of <see cref="RunPython"/>, for runtime hazards
+    /// a type-check/lint alone can't see (e.g. a bare <c>/</c> that type-checks as producing an
+    /// <c>int</c>-declared return but throws a <c>TypeError</c> at call time because PHP's <c>/</c>
+    /// silently promotes to <c>float</c> on an inexact division). The driver is expected to assert its
+    /// own expectations (e.g. via <c>assert()</c> or by throwing) so a wrong value surfaces as a non-zero
+    /// exit, mirroring how <see cref="RunPython"/> driver scripts use a bare Python <c>assert</c>. When no
+    /// <c>php</c> interpreter is found the result is <see cref="PhpCheck.Skipped"/> so the suite stays
+    /// green without a PHP toolchain; CI installs one and runs this for real.
+    /// </summary>
+    public static PhpCheck RunPhp(IEnumerable<EmittedFile> files, string driver)
+    {
+        var fileList = files.ToList();
+        if (ResolvePhp() is not { } php)
+        {
+            return PhpCheck.Skipped;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "koine-phprun-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            foreach (EmittedFile f in fileList)
+            {
+                string path = Path.Combine(root, f.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, f.Contents);
+            }
+
+            string driverPath = Path.Combine(root, "__driver.php");
+            File.WriteAllText(driverPath, driver);
+
+            var args = new List<string>(php.Arguments) { driverPath };
+            if (RunProcess(php.FileName, args, root) is not { } run)
+            {
+                return PhpCheck.Skipped;
+            }
+
+            if (run.ExitCode == 0)
+            {
+                return new PhpCheck(ToolchainAvailable: true, Ok: true, Array.Empty<string>());
+            }
+
+            var errors = (run.StdOut + run.StdErr)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            return new PhpCheck(ToolchainAvailable: true, Ok: false, errors);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    /// <summary>
     /// Locates a usable <c>phpstan</c>: an explicit <c>KOINE_PHPSTAN</c> override (always wins),
     /// a direct <c>phpstan</c> on PATH, or <c>vendor/bin/phpstan</c> resolved from the repo root.
     /// Returns <c>null</c> when none works so the caller can skip.

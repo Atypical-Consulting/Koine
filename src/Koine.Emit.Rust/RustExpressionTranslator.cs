@@ -41,7 +41,7 @@ internal sealed class RustExpressionTranslator
 
     // Per-name shadow stack: pushing a name that's already bound stacks the new binding on top rather
     // than evicting the outer one, so popping it back off restores whatever was there before (#1370).
-    private readonly Dictionary<string, Stack<TypeRef?>> _localStacks = new(StringComparer.Ordinal);
+    private readonly LocalScopeStack _locals = new();
     private readonly ISet<string> _derivedMembers;
     private readonly ISet<string> _constantDefaultedMembers;
     private readonly bool _membersAsAccessors;
@@ -85,28 +85,9 @@ internal sealed class RustExpressionTranslator
             StringComparer.Ordinal);
     }
 
-    public void PushLocal(string name, TypeRef? type = null)
-    {
-        if (!_localStacks.TryGetValue(name, out Stack<TypeRef?>? stack))
-        {
-            stack = new Stack<TypeRef?>();
-            _localStacks[name] = stack;
-        }
+    public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
 
-        stack.Push(type);
-    }
-
-    public void PopLocal(string name)
-    {
-        if (_localStacks.TryGetValue(name, out Stack<TypeRef?>? stack) && stack.Count > 0)
-        {
-            stack.Pop();
-            if (stack.Count == 0)
-            {
-                _localStacks.Remove(name);
-            }
-        }
-    }
+    public void PopLocal(string name) => _locals.PopLocal(name);
 
     /// <summary>
     /// True when <paramref name="name"/> is a constant-defaulted member (see the constructor doc) — i.e.
@@ -140,7 +121,7 @@ internal sealed class RustExpressionTranslator
     /// own <c>is_some()</c>.
     /// </para>
     /// </summary>
-    public bool IsShadowedByLocal(string name) => _localStacks.ContainsKey(name);
+    public bool IsShadowedByLocal(string name) => _locals.IsLocal(name);
 
     /// <summary>
     /// The receiver an instance-body (<see cref="NameMode.Property"/>) member read is qualified with
@@ -184,18 +165,7 @@ internal sealed class RustExpressionTranslator
     /// reintroduces one bug or the other.
     /// </para>
     /// </summary>
-    private TypeScope EffectiveScope()
-    {
-        TypeScope scope = _scope;
-        foreach (KeyValuePair<string, Stack<TypeRef?>> kv in _localStacks)
-        {
-            scope = kv.Value.Peek() is { } type
-                ? scope.WithRef(kv.Key, type, _index)
-                : scope.With(kv.Key, ErrorType.Instance);
-        }
-
-        return scope;
-    }
+    private TypeScope EffectiveScope() => _locals.Overlay(_scope, _index, ErrorType.Instance);
 
     /// <summary>Translates an expression to a Rust expression string (members render as <c>self.x</c>).</summary>
     public string Translate(Expr expr, string? expectedEnum = null) => Translate(expr, NameMode.Property, expectedEnum);
@@ -834,7 +804,7 @@ internal sealed class RustExpressionTranslator
     /// unreachable from any real <c>.koi</c> model today (#1355), so this is the only way to pin its
     /// behavior independent of <see cref="WriteOperand"/>'s already-covered path.
     /// <para>
-    /// Resolves the identifier's own optionality internally (locals via <c>_localStacks</c>, members via
+    /// Resolves the identifier's own optionality internally (locals via <c>_locals</c>, members via
     /// <see cref="TypeResolver.Infer"/>) rather than depending on a caller-supplied <c>ownType</c> — the
     /// two call sites (this one and <see cref="WriteOperand"/>'s) can no longer silently diverge, since
     /// neither threads its own type through anymore (#1355, closes the gap #1347 patched at only one of
@@ -844,7 +814,7 @@ internal sealed class RustExpressionTranslator
     internal void WriteIdentifier(string name, StringBuilder sb, string? enumHint, TypeRef? coerceTo)
     {
         // (1) Local (lambda/command/factory parameter, let binding): verbatim snake_case.
-        if (_localStacks.TryGetValue(name, out Stack<TypeRef?>? localStack))
+        if (_locals.IsLocal(name))
         {
             // A local pushed with NO type (a let binding whose value the resolver couldn't infer, or a
             // collection-lambda parameter whose element type didn't resolve) has an unknown optionality.
@@ -854,7 +824,7 @@ internal sealed class RustExpressionTranslator
             // evidence for the one question EmitCoerced is asking here (a Decimal widen is already owed:
             // is the value Option-shaped, so it must map inside the Option?), and exactly what this
             // branch resolved before #1367 replaced a caller-threaded `ownType` with the precise
-            // `_localStacks` lookup (#1374).
+            // `_locals` lookup (#1374).
             //
             // Asked of DeclaredMemberType (the base member scope) rather than InferType (EffectiveScope),
             // because EffectiveScope now MASKS an unresolved shadow instead of letting it fall through to
@@ -864,7 +834,7 @@ internal sealed class RustExpressionTranslator
             // actually wants instead of depending on the other's fold. Gated on the Decimal coercion
             // EmitCoerced actually consults, mirroring the member branch below, so the common case pays
             // no resolver walk.
-            TypeRef? ownType = localStack.Peek()
+            TypeRef? ownType = _locals.TypeOf(name)
                 ?? (coerceTo?.Name == "Decimal" ? DeclaredMemberType(new IdentifierExpr(name)) : null);
             EmitCoerced(sb, coerceTo, ownType, () => sb.Append(RustNaming.Field(name)));
             return;
@@ -948,7 +918,7 @@ internal sealed class RustExpressionTranslator
     /// <paramref name="ownType"/> that does not resolve. <see cref="BranchReconciliation"/> degrades a
     /// <see langword="null"/> type to "reconcile nothing" (right for a branch pair: render it as-is), but a
     /// <see langword="null"/> <paramref name="ownType"/> is reachable and must still widen — a local is
-    /// registered in <c>_localStacks</c> with a <see langword="null"/> top-of-stack type when one isn't known
+    /// registered in <c>_locals</c> with a <see langword="null"/> top-of-stack type when one isn't known
     /// (<see cref="PushLocal"/>'s type is optional; a lambda parameter whose element type does not resolve
     /// passes none), while <c>coerceTo</c> comes from <see cref="TypeResolver"/> via
     /// <see cref="WriteBinary"/>. So an unknown-typed local opposite a <c>Decimal</c> still needs its
@@ -981,7 +951,7 @@ internal sealed class RustExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus::Cancelled`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_localStacks.ContainsKey(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append("::").Append(VariantOf(qualifier.Name, ma.MemberName));
             return;
@@ -1064,9 +1034,9 @@ internal sealed class RustExpressionTranslator
             return false;
         }
 
-        if (_localStacks.TryGetValue(id.Name, out Stack<TypeRef?>? stack))
+        if (_locals.IsLocal(id.Name))
         {
-            return stack.Peek() is { IsOptional: false };
+            return _locals.TypeOf(id.Name) is { IsOptional: false };
         }
 
         return _mode == NameMode.Parameter && _constantDefaultedMembers.Contains(id.Name);
