@@ -489,6 +489,66 @@ public class KotlinConformanceTests
     }
 
     /// <summary>
+    /// #1615 (Task 2): the same numeric-type-mismatch reconciliation must also hold through a
+    /// <c>field -&gt; a ?? b</c> STATE TRANSITION (a mutating behavior), not just a factory ctor arg —
+    /// <c>WriteTransition</c> applies no numeric reconciliation of its own, so this exercises that the fix
+    /// living inside the shared <c>CoalesceExpr</c> case covers this call site for free.
+    /// </summary>
+    [Fact]
+    public void Coalesce_numeric_reconciliation_covers_state_transitions()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    command adjust(a: Int?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a?.let { java.math.BigDecimal.valueOf(it) } ?: b");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1615 (Task 2): the same numeric-type-mismatch reconciliation must also hold through a DERIVED
+    /// (computed) member body — <c>WriteEntityDerived</c> applies no reconciliation at all (it returns the
+    /// translated body verbatim), so this exercises that the fix living inside the shared
+    /// <c>CoalesceExpr</c> case covers this call site for free too.
+    /// </summary>
+    [Fact]
+    public void Coalesce_numeric_reconciliation_covers_derived_members()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    a: Int?\n" +
+            "    b: Decimal?\n" +
+            "    total: Decimal? = a ?? b\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.a?.let { java.math.BigDecimal.valueOf(it) } ?: this.b");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a genuine
     /// <c>kotlinc</c> check. We take a well-formed emit and corrupt one file with a deliberate syntax error;
     /// the compile must FAIL.
