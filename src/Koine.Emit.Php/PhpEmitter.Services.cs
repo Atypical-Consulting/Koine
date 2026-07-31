@@ -117,7 +117,7 @@ public sealed partial class PhpEmitter
                     translator.PushLocal(p.Name, p.Type);
                 }
 
-                var expectedEnum = emit.Index.Classify(op.ReturnType.Name) == TypeKind.Enum
+                var expectedEnum = emit.Index.Classify(op.ReturnType.Qualifier ?? translator.Context, op.ReturnType.Name) == TypeKind.Enum
                     ? op.ReturnType.Name
                     : null;
                 var body = translator.Translate(op.Body, expectedEnum);

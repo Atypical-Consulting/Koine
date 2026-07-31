@@ -722,6 +722,30 @@
   flex: 0 0 auto;
 }
 
+/* Scope subheadings (Editor / Global, #432): a muted eyebrow, same register as the left rail's
+   section labels (#right-title / .rail-sect-head) — distinct from the ordinary row-label typography
+   it inherits from .koi-set-label so the two scopes read as section breaks, not rows. */
+.koi-kbd-subhead {
+  margin: var(--koi-space-4) 0 var(--koi-space-1-5);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+}
+
+.koi-kbd-subhead:first-child {
+  margin-top: 0;
+}
+
+/* Each scope's rows wrap in a role="group" container for a11y (#1421); the generic
+   .koi-set-row:last-child rule strips the bottom border off the panel's true final row (Reset all)
+   only — restore it here so a scope's own last row doesn't also lose its separator. */
+.koi-kbd-scope-group .koi-kbd-row:last-child {
+  border-bottom: 1px solid var(--koi-line);
+}
+
 .koi-kbd-control {
   display: flex;
   flex-wrap: wrap;

@@ -327,11 +327,13 @@ export function buildKeyboardSection(
 
     // Rows grouped by scope (#432): editor-scope shortcuts act inside the code editor; global-scope ones
     // (command palette, save all) fire app-wide with no editor focused. Each group carries a subheading so
-    // the two binding sites read distinctly, but every row stays a direct `.koi-kbd-row` in the panel so the
-    // record/reset/conflict wiring (and the panel-level `.koi-kbd-row` queries) are untouched.
+    // the two binding sites read distinctly; every row keeps its `.koi-kbd-row` class regardless of nesting
+    // depth, so the record/reset/conflict wiring (and the panel-level `.koi-kbd-row` queries, which use
+    // querySelectorAll and don't care about depth) are untouched by the scopeRowGroup() wrapper below (#1421).
     const scopeHeading = (text: string, id: string): HTMLElement => {
         const h = document.createElement("h3");
-        // Reuse the settings label typography; koi-kbd-subhead is the scope-heading hook (styling TBD).
+        // koi-set-label is the base row-label typography; koi-kbd-subhead (styled in _settings.scss, #1421)
+        // overrides it to read as a muted section eyebrow instead of an ordinary row label.
         h.className = "koi-set-label koi-kbd-subhead";
         h.id = id;
         h.textContent = text;
@@ -339,6 +341,22 @@ export function buildKeyboardSection(
     };
     const rowsForScope = (scope: "editor" | "global"): HTMLElement[] =>
         KEYBINDINGS.filter((b) => b.scope === scope).map((b) => buildKbdRow(b.id, b.label));
+
+    // A scope's rows, wrapped so assistive tech announces the Editor/Global grouping (#1421) — currently
+    // conveyed only visually, by the subheading sitting above the rows. `aria-labelledby` points at the
+    // heading's id rather than the heading living inside the group, so the heading stays a normal document
+    // heading a screen-reader's heading navigation can still land on.
+    const scopeRowGroup = (
+        scope: "editor" | "global",
+        headingId: string,
+    ): HTMLElement => {
+        const group = document.createElement("div");
+        group.className = "koi-kbd-scope-group";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-labelledby", headingId);
+        group.append(...rowsForScope(scope));
+        return group;
+    };
 
     const kbdResetAll = actionButton(
         "Reset all shortcuts",
@@ -354,9 +372,9 @@ export function buildKeyboardSection(
     const keyboardPanel = panel(
         "keyboard",
         scopeHeading("Editor", "koi-kbd-scope-editor"),
-        ...rowsForScope("editor"),
+        scopeRowGroup("editor", "koi-kbd-scope-editor"),
         scopeHeading("Global", "koi-kbd-scope-global"),
-        ...rowsForScope("global"),
+        scopeRowGroup("global", "koi-kbd-scope-global"),
         row(
             "Reset all",
             "Restore the default shortcut for every command.",

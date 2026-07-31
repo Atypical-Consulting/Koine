@@ -79,7 +79,7 @@ public sealed partial class PhpEmitter
             {
                 phpType = typeMapper.Map(f.Type!);
                 fieldType = f.Type;
-                var expectedEnum = emit.Index.Classify(f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
+                var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? translator.Context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, PhpExpressionTranslator.NameMode.Property, expectedEnum);
             }
 

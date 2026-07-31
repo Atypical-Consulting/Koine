@@ -71,6 +71,7 @@ public sealed partial class PhpEmitter
             emit.Index,
             scopeMembers,
             emit.EnumMemberToType,
+            context: contextName,
             regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();

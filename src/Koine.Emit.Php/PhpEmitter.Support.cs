@@ -449,7 +449,7 @@ public sealed partial class PhpEmitter
         {
             if (!owned.Contains(name)
                 && !index.TryGetDecl(name, out _)
-                && index.Classify(name) == TypeKind.IdValueObject)
+                && index.Classify(ctx.Name, name) == TypeKind.IdValueObject)
             {
                 yield return name;
             }

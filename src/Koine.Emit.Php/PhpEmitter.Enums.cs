@@ -49,6 +49,7 @@ public sealed partial class PhpEmitter
             emit.Index,
             Array.Empty<Member>(),
             emit.EnumMemberToType,
+            context: contextName,
             regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         // PHP enum case names: UPPER_SNAKE, so they align with the expression translator's
