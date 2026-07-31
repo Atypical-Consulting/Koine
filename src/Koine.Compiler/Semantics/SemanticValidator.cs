@@ -600,7 +600,7 @@ public sealed class SemanticValidator
                 ValidateMembersAndInvariants(v.Members, v.Invariants, index, resolver, enumMembers, diagnostics, SpecNames(index, v.Name));
                 if (v.IsQuantity)
                 {
-                    ValidateQuantity(v, index, diagnostics);
+                    ValidateQuantity(v, index, resolver, diagnostics);
                 }
 
                 break;
@@ -1256,15 +1256,20 @@ public sealed class SemanticValidator
     /// amount member and exactly one enum-typed unit member, and nothing else, so the
     /// generated unit-checked arithmetic is well-defined.
     /// </summary>
-    private static void ValidateQuantity(ValueObjectDecl q, ModelIndex index, List<Diagnostic> diagnostics)
+    private static void ValidateQuantity(ValueObjectDecl q, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         var memberNames = MemberNameSet(q.Members);
 
         // The amount is a non-optional Decimal: this keeps scalar */÷ exact (an Int amount
-        // would silently integer-divide / truncate when scaled by a fraction).
+        // would silently integer-divide / truncate when scaled by a fraction). "Decimal" is a
+        // primitive builtin (R13.2 uniqueness doesn't apply to it), so this needs no context.
         bool IsAmount(Member m) => m.Type.Name == "Decimal" && !m.Type.IsOptional
             && !MemberAnalysis.IsDerived(m, memberNames);
-        bool IsUnit(Member m) => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional
+
+        // Resolved against the quantity's OWN declaring context (resolver.Context) — a same-named
+        // but differently-kinded type declared in another context (R13.2) must not shadow it via
+        // the flat, last-write-wins ModelIndex.Classify(name) overload (#1711).
+        bool IsUnit(Member m) => index.Classify(resolver.Context, m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional
             && !MemberAnalysis.IsDerived(m, memberNames);
 
         // One pass, calling the local predicates directly (no Count(delegate) closures).

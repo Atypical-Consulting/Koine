@@ -268,6 +268,63 @@ public class R9ValueObjectTests
     }
 
     [Fact]
+    public void Quantity_unit_member_resolves_against_its_own_context_when_a_later_context_reuses_the_type_name()
+    {
+        // #1711: ValidateQuantity's IsUnit used the flat, context-blind Classify(name) overload.
+        // Shipping's later-declared, differently-kinded "Weight" was overwriting Freight's own
+        // enum "Weight" in ModelIndex's flat last-write-wins lookup, so Freight.Load's unit member
+        // was misclassified as "not an enum" and the whole model was falsely rejected with KOI0904.
+        const string src = """
+            context Freight {
+              enum Weight {
+                Light
+                Heavy
+              }
+              quantity Load {
+                amount: Decimal
+                unit: Weight
+              }
+            }
+
+            context Shipping {
+              value Weight {
+                grams: Decimal
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.QuantityUnitCardinality);
+    }
+
+    [Fact]
+    public void Quantity_unit_member_that_is_genuinely_not_an_enum_in_its_own_context_is_still_reported()
+    {
+        // Regression guard against over-widening #1711's fix: Freight's OWN "Weight" is a value
+        // object, not an enum — Shipping's later-declared enum "Weight" must NOT leak in and make
+        // this quantity look valid just because a same-named enum exists somewhere else.
+        const string src = """
+            context Freight {
+              value Weight {
+                grams: Decimal
+              }
+              quantity Load {
+                amount: Decimal
+                unit: Weight
+              }
+            }
+
+            context Shipping {
+              enum Weight {
+                Light
+                Heavy
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.QuantityUnitCardinality);
+    }
+
+    [Fact]
     public void Plain_value_with_numeric_and_enum_is_not_a_quantity()
     {
         // Money-shaped value (numeric + enum) must NOT get forced unit-checked operators.
