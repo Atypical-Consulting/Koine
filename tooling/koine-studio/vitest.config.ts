@@ -159,6 +159,22 @@ export default defineConfig({
       storybookTest({
         configDir: path.join(dirname, '.storybook')
       })],
+      // `@storybook/preact`'s own framework preset unconditionally lists `@storybook/react-dom-shim`
+      // in its `optimizeViteDeps` hint (node_modules/@storybook/preact/dist/preset.js) — a React-only
+      // package this Preact-only project never installs or imports, and it's force-included via
+      // `optimizeDeps.include` (an `exclude` entry can't override that — `include` wins). Vite's dep
+      // optimizer then tries and fails to resolve it on every run, logging "Failed to resolve
+      // dependency: @storybook/react-dom-shim" while it rescans/re-bundles — extra optimizer churn
+      // that has been observed to make the ensuing dev-server reload race the browser's first module
+      // fetch (a known Vite/addon-vitest first-run class, e.g. storybookjs/storybook#32049),
+      // occasionally failing the whole project's boot instead of just one story (issue #1686). Alias
+      // it to a local no-op stub so the optimizer can actually resolve and pre-bundle it — safe
+      // because nothing in the Preact story render path ever imports it for real.
+      resolve: {
+        alias: [
+          { find: '@storybook/react-dom-shim', replacement: path.join(dirname, '.storybook/react-dom-shim-stub.ts') }
+        ]
+      },
       test: {
         name: 'storybook',
         browser: {
