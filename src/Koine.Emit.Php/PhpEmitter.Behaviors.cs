@@ -114,13 +114,13 @@ public sealed partial class PhpEmitter
         var methodName = PhpNaming.EscapeIdentifier(PhpNaming.MethodName(cmd.Name));
         var className = PhpNaming.ClassName(entity.Name);
         var memberTypes = entity.Members.ToDictionary(m => m.Name, m => m.Type, StringComparer.Ordinal);
-        var returnType = cmd.ReturnType is { } rt ? typeMapper.Map(rt) : "void";
+        var returnType = cmd.ReturnType is { } rt ? typeMapper.Map(rt, translator.Context) : "void";
 
         sb.Append('\n');
         var cmdDocParams = cmd.Parameters
             .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)), p.Type))
             .ToList();
-        WriteMethodDoc(sb, Indent, typeMapper, cmdDocParams, cmd.ReturnType, cmd.Doc);
+        WriteMethodDoc(sb, Indent, typeMapper, cmdDocParams, cmd.ReturnType, cmd.Doc, translator.Context);
         sb.Append(Indent).Append("public function ").Append(methodName).Append('(');
 
         var first = true;
@@ -132,7 +132,7 @@ public sealed partial class PhpEmitter
             }
 
             first = false;
-            sb.Append(typeMapper.Map(p.Type)).Append(" $")
+            sb.Append(typeMapper.Map(p.Type, translator.Context)).Append(" $")
               .Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)));
         }
 
@@ -234,7 +234,7 @@ public sealed partial class PhpEmitter
         var factoryDocParams = factory.Parameters
             .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)), p.Type))
             .ToList();
-        WriteMethodDoc(sb, Indent, typeMapper, factoryDocParams, null, factory.Doc);
+        WriteMethodDoc(sb, Indent, typeMapper, factoryDocParams, null, factory.Doc, translator.Context);
         sb.Append(Indent).Append("public static function ").Append(methodName).Append('(');
 
         var first = true;
@@ -246,7 +246,7 @@ public sealed partial class PhpEmitter
             }
 
             first = false;
-            sb.Append(typeMapper.Map(p.Type)).Append(" $")
+            sb.Append(typeMapper.Map(p.Type, translator.Context)).Append(" $")
               .Append(PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(p.Name)));
         }
 
@@ -531,7 +531,7 @@ public sealed partial class PhpEmitter
         var docParams = ordered
             .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
             .ToList();
-        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null, contextName);
 
         // Constructor-promoted readonly properties for all stored fields.
         sb.Append(Indent).Append("public function __construct(\n");
@@ -540,7 +540,7 @@ public sealed partial class PhpEmitter
         {
             Member m = ordered[i];
             var propName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            var typeName = typeMapper.Map(m.Type);
+            var typeName = typeMapper.Map(m.Type, contextName);
             sb.Append(Indent).Append(Indent).Append("public readonly ").Append(typeName).Append(" $").Append(propName);
 
             // Default value for constant-initializer fields. A Decimal default is folded first

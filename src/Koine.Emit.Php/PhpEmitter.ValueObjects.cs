@@ -74,9 +74,9 @@ public sealed partial class PhpEmitter
         foreach (Member m in derived)
         {
             sb.Append('\n');
-            WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, m.Type, m.Doc);
+            WriteMethodDoc(sb, Indent, typeMapper, NoDocParams, m.Type, m.Doc, contextName);
             var methodName = PhpNaming.MethodName(m.Name);
-            var returnType = typeMapper.Map(m.Type);
+            var returnType = typeMapper.Map(m.Type, contextName);
             sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("return ")
@@ -167,7 +167,7 @@ public sealed partial class PhpEmitter
         var docParams = ordered
             .Select(m => (PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name)), m.Type))
             .ToList();
-        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null, translator.Context);
 
         sb.Append(Indent).Append("public function __construct(\n");
 
@@ -176,7 +176,7 @@ public sealed partial class PhpEmitter
         {
             Member m = ordered[i];
             var propName = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            var typeName = typeMapper.Map(m.Type);
+            var typeName = typeMapper.Map(m.Type, translator.Context);
             sb.Append(Indent).Append(Indent).Append("public readonly ").Append(typeName).Append(" $").Append(propName);
             // Default value for constant-initializer fields (not derived, but has an initializer).
             // A Decimal default is folded first (FoldDecimalConstantDefault, issue #971) so a

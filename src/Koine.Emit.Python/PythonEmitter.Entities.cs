@@ -45,7 +45,8 @@ public sealed partial class PythonEmitter
         // The translator sees the members plus the synthetic `id` field (so an invariant or computed
         // member referencing the identity resolves), mirroring the TS emitter's scope augmentation.
         var scopeMembers = entity.Members.Append(new Member("id", new TypeRef(entity.IdentityName), null)).ToList();
-        var translator = new PythonExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
+        var context = ContextOf(ns);
+        var translator = new PythonExpressionTranslator(emit.Index, scopeMembers, emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
         sb.Append("@dataclass(eq=False)\n");
@@ -69,7 +70,7 @@ public sealed partial class PythonEmitter
         {
             WriteDoc(sb, m.Doc, Indent);
             var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name));
-            sb.Append(Indent).Append(field).Append(": ").Append(typeMapper.Map(m.Type));
+            sb.Append(Indent).Append(field).Append(": ").Append(typeMapper.Map(m.Type, context));
             if (DefaultExpr(m, translator, emit.Index) is { } def)
             {
                 sb.Append(" = ").Append(def);
@@ -113,7 +114,7 @@ public sealed partial class PythonEmitter
             sb.Append('\n');
             sb.Append(Indent).Append("@property\n");
             sb.Append(Indent).Append("def ").Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(m.Name)))
-              .Append("(self) -> ").Append(typeMapper.Map(m.Type)).Append(":\n");
+              .Append("(self) -> ").Append(typeMapper.Map(m.Type, context)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
               .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');

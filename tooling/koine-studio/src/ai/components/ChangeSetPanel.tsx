@@ -1,4 +1,4 @@
-import { useMemo } from 'preact/hooks';
+import { useEffect, useMemo } from 'preact/hooks';
 import type { StoreApi } from 'zustand/vanilla';
 import { useAppStore } from '@/store/hooks';
 import type { AppState } from '@/store/index';
@@ -159,6 +159,14 @@ export function ChangeSetPanel({ store, onApply, onDiscard }: ChangeSetPanelProp
   // Read the SAME way as `chat.changeSet` above — `roots` lives directly on AppState (#1132), driving
   // the new-file root picker below.
   const roots = useAppStore(store, (s) => s.roots);
+  // Reconcile the review the moment a targeted root vanishes mid-review (#1689) — a workspace root
+  // removed while a new-file row's `targetRoot` still points at it must not leave the picker (or the
+  // apply payload) aimed at a dead root. Runs before the early return below so hooks stay unconditional
+  // (react-hooks/rules-of-hooks); `reconcileChangeSetRoots` itself is reviewing-only and a no-op when
+  // there's nothing to fix, so this is a harmless call on every other `roots` identity change too.
+  useEffect(() => {
+    store.getState().reconcileChangeSetRoots(roots);
+  }, [store, roots]);
   if (!changeSet) return null;
 
   const { phase, diagnostics } = changeSet;

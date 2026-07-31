@@ -591,6 +591,8 @@ public sealed partial class PhpEmitter
     /// already-rendered variable name (no leading <c>$</c>) paired with its declared type, so the tag's
     /// variable matches the emitted signature exactly. When nothing needs refining this falls back to
     /// <see cref="WriteDoc"/> — leaving a scalar/class-only signature's output unchanged.
+    /// <paramref name="context"/> is the bounded context the parameters/return type are declared in,
+    /// forwarded to <see cref="PhpTypeMapper.DocType"/> (issue #1638; see <see cref="PhpTypeMapper.Map"/>).
     /// </summary>
     private static void WriteMethodDoc(
         StringBuilder sb,
@@ -598,18 +600,19 @@ public sealed partial class PhpEmitter
         PhpTypeMapper typeMapper,
         IReadOnlyList<(string VarName, TypeRef Type)> parameters,
         TypeRef? returnType,
-        string? doc)
+        string? doc,
+        string? context)
     {
         var tags = new List<string>();
         foreach (var (varName, type) in parameters)
         {
-            if (typeMapper.DocType(type) is { } d)
+            if (typeMapper.DocType(type, context) is { } d)
             {
                 tags.Add("@param " + d + " $" + varName);
             }
         }
 
-        if (returnType is not null && typeMapper.DocType(returnType) is { } rd)
+        if (returnType is not null && typeMapper.DocType(returnType, context) is { } rd)
         {
             tags.Add("@return " + rd);
         }

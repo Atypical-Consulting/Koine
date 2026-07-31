@@ -69,7 +69,7 @@ public sealed partial class TypeScriptEmitter
 
         foreach (FinderDecl finder in finders)
         {
-            WriteFinderImpl(sb, rootName, finder, rootProps, typeMapper);
+            WriteFinderImpl(sb, rootName, finder, rootProps, typeMapper, contextName);
         }
 
         sb.Append("}\n");
@@ -101,12 +101,12 @@ public sealed partial class TypeScriptEmitter
     /// the signature for the developer to wire up (the generated query ignores it), mirroring the C#
     /// emitter's convention.
     /// </summary>
-    private void WriteFinderImpl(StringBuilder sb, string rootName, FinderDecl finder, ISet<string> rootProps, TypeScriptTypeMapper typeMapper)
+    private void WriteFinderImpl(StringBuilder sb, string rootName, FinderDecl finder, ISet<string> rootProps, TypeScriptTypeMapper typeMapper, string contextName)
     {
         var isList = finder.ResultType.Name == ModelIndex.ListTypeName;
         var method = TypeScriptNaming.ToCamelCase(finder.Name);
         var paramList = string.Join(", ", finder.Parameters.Select(p =>
-            $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type)}"));
+            $"{TypeScriptNaming.ToCamelCase(p.Name)}: {typeMapper.Map(p.Type, contextName)}"));
         var predicate = string.Join(" && ", finder.Parameters
             .Where(p => rootProps.Contains(TypeScriptNaming.ToCamelCase(p.Name)))
             .Select(p =>

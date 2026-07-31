@@ -48,6 +48,7 @@ public sealed partial class PythonEmitter
 
         var rootName = PythonNaming.ToPascalCase(root.Name);
         var idType = PythonNaming.ToPascalCase(root.IdentityName);
+        var context = ContextOf(ns);
         IReadOnlyList<string> ops = agg.Repository?.Operations ?? DefaultRepositoryOps;
         IReadOnlyList<FinderDecl> finders = agg.Repository?.Finders ?? Array.Empty<FinderDecl>();
         var protocol = $"{rootName}Repository";
@@ -101,7 +102,7 @@ public sealed partial class PythonEmitter
             var ret = isList ? $"tuple[{rootName}, ...]" : $"{rootName} | None";
             var method = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(finder.Name));
             var paramList = string.Join(", ", finder.Parameters.Select(p =>
-                $"{PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type)}"));
+                $"{PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type, context)}"));
             if (paramList.Length > 0)
             {
                 paramList = ", " + paramList;
@@ -174,9 +175,9 @@ public sealed partial class PythonEmitter
             first = false;
 
             var method = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(op.Name));
-            var ret = typeMapper.Map(op.ReturnType);
+            var ret = typeMapper.Map(op.ReturnType, context);
             var paramList = string.Join("", op.Parameters.Select(p =>
-                $", {PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type)}"));
+                $", {PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type, context)}"));
 
             if (op.Body is null)
             {
@@ -238,9 +239,9 @@ public sealed partial class PythonEmitter
             WriteDoc(sb, uc.Doc, Indent);
 
             var method = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(uc.Name));
-            var ret = uc.ReturnType is null ? "None" : typeMapper.Map(uc.ReturnType);
+            var ret = uc.ReturnType is null ? "None" : typeMapper.Map(uc.ReturnType, context);
             var paramList = string.Join("", uc.Parameters.Select(p =>
-                $", {PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type)}"));
+                $", {PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name))}: {typeMapper.Map(p.Type, context)}"));
 
             sb.Append(Indent).Append("async def ").Append(method).Append("(self").Append(paramList)
               .Append(") -> ").Append(ret).Append(": ...\n");

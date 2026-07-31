@@ -24,15 +24,22 @@ internal sealed class PhpTypeMapper
 
     public PhpTypeMapper(ModelIndex index) => _index = index;
 
-    /// <summary>The PHP type-hint string for a member's declared type.</summary>
-    public string Map(TypeRef type)
+    /// <summary>
+    /// The PHP type-hint string for a member's declared type. <paramref name="context"/> is the
+    /// bounded context the reference is DECLARED in (e.g. the owning value object/entity's own
+    /// context) — this mapper is built once per compile and reused across every context, so it
+    /// carries no ambient context of its own; the caller supplies whichever context it already has
+    /// in scope. Falls back to <see cref="TypeRef.Qualifier"/> alone (today's behavior) when a call
+    /// site genuinely has no context to give (pass <c>null</c> explicitly).
+    /// </summary>
+    public string Map(TypeRef type, string? context)
     {
-        var baseType = MapBase(type);
+        var baseType = MapBase(type, context);
         // PHP nullable: prefix with `?`
         return type.IsOptional ? "?" + baseType : baseType;
     }
 
-    private string MapBase(TypeRef type)
+    private string MapBase(TypeRef type, string? context)
     {
         switch (type.Name)
         {
@@ -58,8 +65,14 @@ internal sealed class PhpTypeMapper
                 // PHP uses `array` for all collection types; generics are not a runtime concept.
                 return "array";
             default:
-                // Model-declared enum → the PascalCase class name (PHP backed enum).
-                if (_index.Classify(type.Qualifier, type.Name) == TypeKind.Enum)
+                // Model-declared enum → the PascalCase class name (PHP backed enum). A qualified
+                // reference (`type.Qualifier`) always wins; otherwise fall back to the caller's own
+                // context — closing the gap for a BARE reference to the declaring context's own
+                // same-named type (issue #1638). Note the enum/non-enum branches here happen to
+                // return the identical PascalCase name either way, so this particular call site's
+                // classification never surfaces a visibly different `Map` result today — see
+                // `IsEnum` below for the call site where a misclassification IS observable.
+                if (_index.Classify(type.Qualifier ?? context, type.Name) == TypeKind.Enum)
                 {
                     return PhpNaming.ClassName(type.Name);
                 }
@@ -82,13 +95,15 @@ internal sealed class PhpTypeMapper
     /// (scalars, value objects, entities, enums). The element/value types reuse <see cref="Map"/>, so a
     /// class element renders as its short name (imported via the file's body scan) while
     /// <c>Instant</c>/<c>Decimal</c> stay fully-qualified. A nullable collection adds <c>|null</c>.
+    /// <paramref name="context"/> is forwarded to <see cref="InnerDocType"/>/<see cref="Map"/> for the
+    /// same reason <see cref="Map"/> needs it — see its doc comment.
     /// </summary>
-    public string? DocType(TypeRef type)
+    public string? DocType(TypeRef type, string? context)
     {
         string? inner = type.Name switch
         {
             ModelIndex.ListTypeName or ModelIndex.SetTypeName when type.Element is not null
-                => $"list<{InnerDocType(type.Element)}>",
+                => $"list<{InnerDocType(type.Element, context)}>",
             // `Map<K, V>` → `array<K, V>`. A non-scalar key (a value object / entity) renders e.g.
             // `array<Sku, int>`; phpstan --level max accepts this (it does not enforce the
             // int|string array-key constraint inside a generic PHPDoc — empirically [OK] on
@@ -96,9 +111,9 @@ internal sealed class PhpTypeMapper
             // key and value both thread through `InnerDocType`, so a nested collection in either
             // position is typed fully rather than as a bare `array`.
             ModelIndex.MapTypeName when type.Element is not null && type.Value is not null
-                => $"array<{InnerDocType(type.Element)}, {InnerDocType(type.Value)}>",
+                => $"array<{InnerDocType(type.Element, context)}, {InnerDocType(type.Value, context)}>",
             ModelIndex.RangeTypeName when type.Element is not null
-                => $"Range<{InnerDocType(type.Element)}>",
+                => $"Range<{InnerDocType(type.Element, context)}>",
             _ => null,
         };
 
@@ -123,7 +138,7 @@ internal sealed class PhpTypeMapper
     /// <c>array&lt;string, list&lt;OrderLine&gt;&gt;</c>, <c>List&lt;List&lt;Int&gt;&gt;</c> →
     /// <c>list&lt;list&lt;int&gt;&gt;</c> (#588).
     /// </summary>
-    private string InnerDocType(TypeRef type) => DocType(type) ?? Map(type);
+    private string InnerDocType(TypeRef type, string? context) => DocType(type, context) ?? Map(type, context);
 
     /// <summary>True when the member's type is a Koine <c>List&lt;T&gt;</c>.</summary>
     public static bool IsList(TypeRef type) => type.Name == ModelIndex.ListTypeName;
@@ -131,6 +146,10 @@ internal sealed class PhpTypeMapper
     /// <summary>True when the member's type is a Koine <c>Map&lt;K,V&gt;</c>.</summary>
     public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
 
-    /// <summary>True when the type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier, type.Name) == TypeKind.Enum;
+    /// <summary>
+    /// True when the type classifies as a Koine smart enum. <paramref name="context"/> is the
+    /// bounded context the reference is declared in — see <see cref="Map"/> for why the mapper needs
+    /// it passed per call instead of holding it itself.
+    /// </summary>
+    public bool IsEnum(TypeRef type, string? context) => _index.Classify(type.Qualifier ?? context, type.Name) == TypeKind.Enum;
 }

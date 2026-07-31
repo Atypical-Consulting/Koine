@@ -46,15 +46,19 @@ public sealed partial class PythonEmitter
             string pyType, rhs;
             if (f.Projection is null)
             {
-                // Direct field: type and value come from the like-named source member.
+                // Direct field: type and value come from the like-named source member. The source type
+                // (and thus this member's own declaration) may live in a DIFFERENT bounded context than
+                // this read model (R12.3 cross-context projection) — classify/map a bare field type
+                // against the SOURCE's own owning context, not this read model's, so a same-named but
+                // differently-kinded sibling type declared locally here can't misclassify it (#1638).
                 pyType = emit.Index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t)
-                    ? typeMapper.Map(t)
+                    ? typeMapper.Map(t, emit.Index.ResolveOwner(rm.SourceType, context).Owner ?? context)
                     : "object";
                 rhs = "src." + attr;
             }
             else
             {
-                pyType = typeMapper.Map(f.Type!);
+                pyType = typeMapper.Map(f.Type!, context);
                 var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, PythonExpressionTranslator.NameMode.Property, expectedEnum);
             }
@@ -117,7 +121,8 @@ public sealed partial class PythonEmitter
     {
         var name = PythonNaming.ToPascalCase(q.Name);
         var handlerName = name + "Handler";
-        var resultType = typeMapper.Map(q.ResultType);
+        var context = ContextOf(ns);
+        var resultType = typeMapper.Map(q.ResultType, context);
 
         var sb = new StringBuilder();
         sb.Append("@dataclass(frozen=True)\n");
@@ -131,7 +136,7 @@ public sealed partial class PythonEmitter
         foreach (Param p in q.Criteria)
         {
             sb.Append(Indent).Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(p.Name)))
-              .Append(": ").Append(typeMapper.Map(p.Type)).Append('\n');
+              .Append(": ").Append(typeMapper.Map(p.Type, context)).Append('\n');
         }
 
         // The handler seam: a Protocol specializing the generic QueryHandler. Including `Protocol` in

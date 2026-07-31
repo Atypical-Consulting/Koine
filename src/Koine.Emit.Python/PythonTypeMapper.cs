@@ -33,15 +33,22 @@ internal sealed class PythonTypeMapper
 
     public PythonTypeMapper(ModelIndex index) => _index = index;
 
-    /// <summary>The Python type-annotation string for a member's declared type.</summary>
-    public string Map(TypeRef type)
+    /// <summary>
+    /// The Python type-annotation string for a member's declared type. <paramref name="context"/> is
+    /// the bounded context the reference is DECLARED in (e.g. the owning value object/entity's own
+    /// context) — this mapper is built once per compile and reused across every context, so it
+    /// carries no ambient context of its own; the caller supplies whichever context it already has
+    /// in scope. Falls back to <see cref="TypeRef.Qualifier"/> alone (today's behavior) when a call
+    /// site genuinely has no context to give (pass <c>null</c> explicitly).
+    /// </summary>
+    public string Map(TypeRef type, string? context)
     {
-        var baseType = MapBase(type);
+        var baseType = MapBase(type, context);
         // An optional field is a union with `None` (Python PEP 604 `T | None`).
         return type.IsOptional ? baseType + " | None" : baseType;
     }
 
-    private string MapBase(TypeRef type)
+    private string MapBase(TypeRef type, string? context)
     {
         switch (type.Name)
         {
@@ -61,21 +68,28 @@ internal sealed class PythonTypeMapper
                 return "datetime";
             case ModelIndex.ListTypeName:
                 // Immutable homogeneous sequence: tuple[T, ...]  (builtin, no import).
-                return $"tuple[{MapArg(type.Element)}, ...]";
+                return $"tuple[{MapArg(type.Element, context)}, ...]";
             case ModelIndex.SetTypeName:
                 // Immutable set: frozenset[T]  (builtin, no import).
-                return $"frozenset[{MapArg(type.Element)}]";
+                return $"frozenset[{MapArg(type.Element, context)}]";
             case ModelIndex.MapTypeName:
                 // Read-only mapping: Mapping[K, V]
                 // Import: `from collections.abc import Mapping` — emitter's per-file header responsibility.
-                return $"Mapping[{MapArg(type.Element)}, {MapArg(type.Value)}]";
+                return $"Mapping[{MapArg(type.Element, context)}, {MapArg(type.Value, context)}]";
             case ModelIndex.RangeTypeName:
                 // Koine range: Range[T] from koine_runtime.
-                return $"Range[{MapArg(type.Element)}]";
+                return $"Range[{MapArg(type.Element, context)}]";
             default:
                 // Python uses the enum class directly as a type annotation (unlike TypeScript,
-                // which indirects through a <Enum>Member interface). The class IS the type.
-                if (_index.Classify(type.Qualifier, type.Name) == TypeKind.Enum)
+                // which indirects through a <Enum>Member interface). The class IS the type. A
+                // qualified reference (`type.Qualifier`) always wins; otherwise fall back to the
+                // caller's own context — closing the gap for a BARE reference to the declaring
+                // context's own same-named type (issue #1638). Note the enum/non-enum branches here
+                // happen to return the identical PascalCase name either way (unlike TS's `<Enum>Member`
+                // indirection), so this particular call site's classification never surfaces a visibly
+                // different `Map` result today — see `IsEnum` below for the call site where a
+                // misclassification IS observable.
+                if (_index.Classify(type.Qualifier ?? context, type.Name) == TypeKind.Enum)
                 {
                     return PythonNaming.ToPascalCase(type.Name);
                 }
@@ -86,7 +100,7 @@ internal sealed class PythonTypeMapper
     }
 
     /// <summary>Maps a type argument, returning <c>object</c> for a missing/null arg.</summary>
-    private string MapArg(TypeRef? arg) => arg is not null ? Map(arg) : "object";
+    private string MapArg(TypeRef? arg, string? context) => arg is not null ? Map(arg, context) : "object";
 
     /// <summary>True when the member's type is a Koine <c>List&lt;T&gt;</c>.</summary>
     public static bool IsList(TypeRef type) => type.Name == ModelIndex.ListTypeName;
@@ -97,6 +111,10 @@ internal sealed class PythonTypeMapper
     /// <summary>True when the member's type is a Koine <c>Map&lt;K,V&gt;</c>.</summary>
     public static bool IsMap(TypeRef type) => type.Name == ModelIndex.MapTypeName;
 
-    /// <summary>True when the type classifies as a Koine smart enum.</summary>
-    public bool IsEnum(TypeRef type) => _index.Classify(type.Qualifier, type.Name) == TypeKind.Enum;
+    /// <summary>
+    /// True when the type classifies as a Koine smart enum. <paramref name="context"/> is the
+    /// bounded context the reference is declared in — see <see cref="Map"/> for why the mapper needs
+    /// it passed per call instead of holding it itself.
+    /// </summary>
+    public bool IsEnum(TypeRef type, string? context) => _index.Classify(type.Qualifier ?? context, type.Name) == TypeKind.Enum;
 }
