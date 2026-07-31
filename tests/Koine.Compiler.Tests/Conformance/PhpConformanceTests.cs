@@ -1555,4 +1555,171 @@ public class PhpConformanceTests
         order.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
         order.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
     }
+
+    /// <summary>
+    /// Issue #1716 — the THIRD call site of the #1701/#1712 qualifier-blind import gap: a command's
+    /// own PARAMETER ignores an EXPLICIT cross-context qualifier (R13.2's <c>Context.Type</c> syntax).
+    /// <c>WriteCommand</c> runs inside <c>EmitEntityClass</c>, but before this fix nothing fed
+    /// command-parameter types into the <c>symbolContext</c> hint dictionary #1712 introduced for the
+    /// entity's own fields — so <c>Assemble</c>/<c>CollectUses</c> fell back to the entity's own
+    /// context for a parameter too. Here <c>setShippingStatus</c>'s <c>newStatus</c> parameter is
+    /// declared <c>Shipping.Status</c> — an EXPLICIT qualifier — while <c>Ordering</c> separately
+    /// declares its own, unrelated <c>Status</c> enum (what the entity's own context would resolve to
+    /// without a hint). Before the fix, <c>Order.php</c> imported <c>Ordering</c>'s own <c>Status</c>
+    /// instead of the parameter's actually-declared <c>Shipping.Status</c> (verified live: reverting
+    /// this fix reproduces exactly that wrong import).
+    /// </summary>
+    [Fact]
+    public void Command_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+
+                  command setShippingStatus(newStatus: Shipping.Status): Shipping.Status {
+                    result newStatus
+                  }
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.php", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        order.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        order.ShouldContain("function setShippingStatus(Status $newStatus): Status");
+    }
+
+    /// <summary>
+    /// The runtime twin of <see cref="Command_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>:
+    /// with the wrong import, <c>setShippingStatus</c>'s parameter is type-hinted against
+    /// <c>Ordering</c>'s own <c>Status</c>, so calling it with <c>Shipping</c>'s own
+    /// <c>Status::ACTIVE</c> is a hard runtime <c>TypeError</c> under <c>declare(strict_types=1)</c>
+    /// — not observable via <c>phpstan</c>/<c>php -l</c> alone, since both branches render the
+    /// identical short class name in source. Skipped (not failed) when no <c>php</c> interpreter is
+    /// present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Command_parameter_binds_the_qualified_type_at_runtime()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+
+                  command setShippingStatus(newStatus: Shipping.Status): Shipping.Status {
+                    result newStatus
+                  }
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Shipping/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/ValueObjects/OrderId.php';
+            require __DIR__ . '/src/Ordering/Entities/Order.php';
+
+            $order = new Koine\Ordering\Entities\Order(Koine\Ordering\ValueObjects\OrderId::generate(), 1);
+            $result = $order->setShippingStatus(Koine\Shipping\Enums\Status::ACTIVE);
+            if ($result !== Koine\Shipping\Enums\Status::ACTIVE) {
+                fwrite(STDERR, "expected Shipping's own Status::ACTIVE, got " . var_export($result, true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "setShippingStatus's 'newStatus' parameter must bind Shipping's own Status enum (not "
+            + "Ordering's wrongly imported, differently-cased same-named sibling enum) at runtime:\n"
+            + string.Join("\n", run.Errors));
+    }
+
+    /// <summary>
+    /// The factory-emission counterpart of
+    /// <see cref="Command_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>
+    /// (issue #1716): <c>WriteFactory</c> shares the exact same qualifier-blind parameter-hint gap as
+    /// <c>WriteCommand</c> did — a <c>create</c> factory's own parameter, not just a command's.
+    /// </summary>
+    [Fact]
+    public void Factory_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+
+                  create place(quantity: Int, newStatus: Shipping.Status) {
+                    emit OrderPlaced(order: id)
+                  }
+                }
+              }
+
+              event OrderPlaced {
+                order: OrderId
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.php", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        order.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        order.ShouldContain("public static function place(int $quantity, Status $newStatus): self");
+    }
 }

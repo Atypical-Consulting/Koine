@@ -1237,6 +1237,174 @@ public class PythonConformanceTests
         order.ShouldNotContain("from ordering.enums.status import Status");
     }
 
+    /// <summary>
+    /// Issue #1716 — the THIRD call site of the #1701/#1712 qualifier-blind import gap: a command's
+    /// own PARAMETER ignores an EXPLICIT cross-context qualifier (R13.2's <c>Context.Type</c> syntax).
+    /// <c>WriteCommand</c> runs inside <c>EmitEntity</c>, but before this fix nothing fed
+    /// command-parameter types into the <c>symbolContext</c> hint dictionary #1712 introduced for the
+    /// entity's own fields — so <c>Assemble</c> fell back to the entity's own context for a parameter
+    /// too. Here <c>set_shipping_status</c>'s <c>new_status</c> parameter is declared
+    /// <c>Shipping.Status</c> — an EXPLICIT qualifier — while <c>Ordering</c> separately declares its
+    /// own, unrelated <c>Status</c> enum (what the entity's own context would resolve to without a
+    /// hint). Before the fix, <c>order.py</c> imported <c>Ordering</c>'s own <c>Status</c> instead of
+    /// the parameter's actually-declared <c>Shipping.Status</c> (verified live: reverting this fix
+    /// reproduces exactly that wrong import).
+    /// </summary>
+    [Fact]
+    public void Command_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+
+                  command setShippingStatus(newStatus: Shipping.Status): Shipping.Status {
+                    result newStatus
+                  }
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = FileText(result.Files, "ordering/order.py");
+        order.ShouldContain("from shipping.enums.status import Status");
+        order.ShouldNotContain("from ordering.enums.status import Status");
+        order.ShouldContain("def set_shipping_status(self, new_status: Status) -> Status:");
+    }
+
+    /// <summary>
+    /// The mypy twin of <see cref="Command_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>:
+    /// proves the bug at the TYPE level rather than just the emitted-text level. A synthetic downstream
+    /// consumer takes a parameter explicitly typed <c>Shipping</c>'s own <c>Status</c> and passes it
+    /// <c>set_shipping_status</c>'s return value straight back into a function that only accepts
+    /// <c>Shipping</c>'s own <c>Status</c>. Before the fix, <c>order.py</c>'s parameter/return
+    /// annotation resolved against <c>Ordering</c>'s own (differently-cased, same-named) <c>Status</c>
+    /// class — a REAL nominal-type mismatch under <c>mypy --strict</c>, even though both classes
+    /// render as the bare name <c>Status</c> in source. Skipped (not failed) when no <c>mypy</c>
+    /// toolchain is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Command_parameter_import_qualification_typechecks_at_mypy_strict()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+
+                  command setShippingStatus(newStatus: Shipping.Status): Shipping.Status {
+                    result newStatus
+                  }
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string consumer = """
+            from shipping.enums.status import Status
+            from ordering.order import Order
+            from ordering.value_objects.order_id import OrderId
+
+
+            def take_shipping_status(status: Status) -> None:
+                pass
+
+
+            order = Order(id=OrderId.new(), quantity=1)
+            take_shipping_status(order.set_shipping_status(Status.ACTIVE))
+            """;
+        var files = result.Files.Append(new EmittedFile("consumer.py", consumer)).ToList();
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "set_shipping_status's 'new_status' parameter/return must bind Shipping's own Status enum "
+            + "(not Ordering's wrongly imported, differently-cased same-named sibling enum) so a "
+            + "downstream consumer type-checks:\n" + string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// The factory-emission counterpart of
+    /// <see cref="Command_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>
+    /// (issue #1716): <c>WriteFactory</c> shares the exact same qualifier-blind parameter-hint gap as
+    /// <c>WriteCommand</c> did — a <c>create</c> factory's own parameter, not just a command's.
+    /// </summary>
+    [Fact]
+    public void Factory_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+
+                  create place(quantity: Int, newStatus: Shipping.Status) {
+                    emit OrderPlaced(order: id)
+                  }
+                }
+              }
+
+              event OrderPlaced {
+                order: OrderId
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = FileText(result.Files, "ordering/order.py");
+        order.ShouldContain("from shipping.enums.status import Status");
+        order.ShouldNotContain("from ordering.enums.status import Status");
+        order.ShouldContain("def place(cls, quantity: int, new_status: Status) -> Order:");
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
