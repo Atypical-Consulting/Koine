@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http;
 using Koine.Cli;
 using Koine.Cli.Commands;
 using Koine.Compiler.Emit;
@@ -628,6 +630,43 @@ public class R18CSharpApplicationTests
         var fake = Activator.CreateInstance(fakeType);
 
         repositoryType.IsInstanceOfType(fake).ShouldBeTrue();
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #1591 — Task 2: TestSupport.RunApi boots an in-process host over
+    // a driver's ApiHostDriver.Build(), so a real HttpClient can drive the
+    // emitted endpoints. This trivial fixture proves the harness mechanics
+    // (compile, boot, real HTTP round-trip) without any emitted routes yet:
+    // an unmapped path 404s via ASP.NET Core's default routing fallthrough.
+    // ------------------------------------------------------------------
+
+    private const string TrivialApiHostDriver = """
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Hosting;
+        using Microsoft.AspNetCore.TestHost;
+        using Microsoft.Extensions.Hosting;
+
+        public static class ApiHostDriver
+        {
+            public static WebApplication Build()
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.WebHost.UseTestServer();
+                var app = builder.Build();
+                app.Start();
+                return app;
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task RunApi_boots_a_test_host_and_returns_a_working_http_client()
+    {
+        using var harness = TestSupport.RunApi(Array.Empty<EmittedFile>(), TrivialApiHostDriver);
+
+        var response = await harness.Client.GetAsync("/does-not-exist", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
