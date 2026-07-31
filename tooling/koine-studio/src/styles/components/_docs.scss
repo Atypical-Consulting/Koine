@@ -114,7 +114,11 @@
   background: color-mix(in srgb, var(--koi-fg) 9%, transparent);
 
   &.is-proposed {
-    color: var(--koi-accent);
+    // TEXT-ONLY swap (issue #1704, mirroring #1677): the badge's real backdrop composites
+    // .koi-docs-item's own translucent --koi-surface tint over #center's --koi-paper, where raw
+    // --koi-accent measures ~3.03:1 in the light theme (sub-AA); --koi-accent-text clears ≥4.5:1 in
+    // both themes there (see tokens.test.ts). Background tint is unchanged.
+    color: var(--koi-accent-text);
     background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
   }
 

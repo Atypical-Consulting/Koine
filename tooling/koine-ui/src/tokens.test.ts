@@ -263,3 +263,142 @@ describe('launcher .lx-modepill / .lx-mchip.on contrast (issue #1677)', () => {
     });
   }
 });
+
+// Guards the remaining 6 accent-on-accent-tint sites found by #1677's own audit (issue #1704 — the
+// same root-cause class as #1161/#1263/#1672/#1677 above, different elements each time). Each site's
+// REAL composited background is computed here rather than assumed to be a copy of the launcher's
+// 16%-over---koi-paper-2 shape, since #1704's own spec calls out that the mix weight AND base surface
+// differ per site (docs/source-control/model sit behind Koine Studio's own panel chrome; the koine-ui
+// sites establish their own opaque backdrop on a sibling/parent element).
+describe('docs .koi-docs-badge.is-proposed contrast (issue #1704)', () => {
+  // `.koi-docs-badge` sits inside `.koi-docs-item` (_docs.scss), whose own
+  // `color-mix(in srgb, var(--koi-surface) 60%, transparent)` background is itself translucent —
+  // composited over Koine Studio's `#center` panel background (--koi-paper), NOT --koi-paper-2 (the
+  // badge has no interactive/hover state, so there is no further worst-case background to check).
+  for (const [themeName, selector] of [
+    ['dark', ':root'],
+    ['light', "html[data-theme='light']"],
+  ] as const) {
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA (>= 4.5:1) on the composited docs-item/badge background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const surface = extractToken(block, '--koi-surface');
+      const paper = extractToken(block, '--koi-paper');
+      const itemBg = mixSrgb(surface, paper, 0.6);
+      const badgeBg = mixSrgb(accent, itemBg, 0.16);
+      expect(contrastRatio(accentText, badgeBg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
+describe('source-control .koi-sc-avatar contrast (issue #1704)', () => {
+  // `.koi-sc-avatar` sits inside `.koi-sc-log-item`, directly on the Properties rail's `--koi-paper-2`
+  // (_source-control.scss) at rest. A launcher-focused commit row
+  // (`.koi-sc-log-item[data-focused='true']`) tints ITS OWN background
+  // (`color-mix(in srgb, var(--koi-accent) 12%, transparent)`) underneath the avatar's own 18% tint —
+  // the worst case, mirroring #1672's "worst-case selected-row" precedent. `--koi-accent-text` clears
+  // the resting case but not this worst case in either theme, so this site gets its own
+  // `--koi-sc-avatar-ink` token (see tokens.css).
+  for (const [themeName, selector] of [
+    ['dark', ':root'],
+    ['light', "html[data-theme='light']"],
+  ] as const) {
+    test(`${themeName} theme: --koi-sc-avatar-ink clears WCAG AA (>= 4.5:1) on the resting 18%-tinted --koi-paper-2 background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const ink = extractToken(block, '--koi-sc-avatar-ink');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const restingBg = mixSrgb(accent, paper2, 0.18);
+      expect(contrastRatio(ink, restingBg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test(`${themeName} theme: --koi-sc-avatar-ink clears WCAG AA on the worst-case focused-row double-tinted background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const ink = extractToken(block, '--koi-sc-avatar-ink');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const focusedRowBg = mixSrgb(accent, paper2, 0.12);
+      const worstBg = mixSrgb(accent, focusedRowBg, 0.18);
+      expect(contrastRatio(ink, worstBg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
+describe('model .koi-ctx-row--scoped contrast (issue #1704)', () => {
+  // `.koi-ctx-row--scoped` sits on the Domain navigator rail's `--koi-paper-2` (via `#leftrail`,
+  // _model.scss) at 10% at rest and deepens to 16% on `:hover` — both must clear AA.
+  for (const [themeName, selector] of [
+    ['dark', ':root'],
+    ['light', "html[data-theme='light']"],
+  ] as const) {
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA (>= 4.5:1) on the resting 10%-tinted background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const restBg = mixSrgb(accent, paper2, 0.1);
+      expect(contrastRatio(accentText, restBg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA on the hover 16%-tinted background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const hoverBg = mixSrgb(accent, paper2, 0.16);
+      expect(contrastRatio(accentText, hoverBg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
+
+describe('koine-ui .rail-axis / .deck-sub.on / .koi-events-view-btn contrast (issue #1704)', () => {
+  for (const [themeName, selector] of [
+    ['dark', ':root'],
+    ['light', "html[data-theme='light']"],
+  ] as const) {
+    // `.rail-axis[aria-selected='true']` sits directly on `#rail-axis-switch`'s own opaque
+    // `--koi-paper` background (components.css) — NOT --koi-paper-2.
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA on .rail-axis's 16%-tinted --koi-paper background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const paper = extractToken(block, '--koi-paper');
+      const bg = mixSrgb(accent, paper, 0.16);
+      expect(contrastRatio(accentText, bg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+
+    // `.deck-sub.on` sits on `.deck-head`'s own opaque background: --koi-paper-2 at rest, or an
+    // accent-tinted --koi-paper-2 in the worst case (`.deck-card.in-pair.is-selected .deck-head`).
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA on .deck-sub.on's resting 13%-tinted --koi-paper-2 background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const bg = mixSrgb(accent, paper2, 0.13);
+      expect(contrastRatio(accentText, bg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA on .deck-sub.on's worst-case selected-pair background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const selectedHeadBg = mixSrgb(accent, paper2, 0.11);
+      const worstBg = mixSrgb(accent, selectedHeadBg, 0.13);
+      expect(contrastRatio(accentText, worstBg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+
+    // `.koi-events-view-btn[aria-pressed='true']` establishes no background of its own consumer-side
+    // (koine-ui's EventsPanel component sets none); Koine Studio's real host mounts it inside
+    // `#diagnostics`, whose own opaque background is --koi-paper-2.
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA on .koi-events-view-btn's 16%-tinted --koi-paper-2 background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const bg = mixSrgb(accent, paper2, 0.16);
+      expect(contrastRatio(accentText, bg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
