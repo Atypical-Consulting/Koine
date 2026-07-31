@@ -72,18 +72,19 @@ function selectorsExcept(...excluded) {
 //
 // Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on day
 // one; the 8 cheapest of the remaining 17 were fixed and enforced in the same PR that opened this).
-// Burn-down order is cheapest-first; counts are from `npx eslint . -f json` grouped by rule.
+// Burn-down order is cheapest-first. Counts are LIVE — re-measure before editing this table, with
+// `npx eslint . -f json` under a config that adds the preset with no `off` entries, grouped by rule.
 // Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
 // down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
-// (the per-directory ratchet #998 explicitly rejected) — koine-ui's config carries the mirror table.
+// (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-unsafe-argument': 'off', //             51 findings /  8 files
+  '@typescript-eslint/no-unsafe-argument': 'off', //             50 findings /  7 files
   '@typescript-eslint/no-explicit-any': 'off', //                65 findings /  9 files
+  '@typescript-eslint/no-unsafe-assignment': 'off', //           68 findings / 22 files
   '@typescript-eslint/no-unused-vars': 'off', //                 72 findings / 28 files
-  '@typescript-eslint/no-unsafe-assignment': 'off', //           78 findings / 25 files
   '@typescript-eslint/no-unsafe-call': 'off', //                129 findings /  5 files
   '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 221 findings / 68 files
-  '@typescript-eslint/no-unsafe-member-access': 'off', //       272 findings / 26 files
+  '@typescript-eslint/no-unsafe-member-access': 'off', //       261 findings / 26 files
   '@typescript-eslint/require-await': 'off', //                 477 findings / 61 files
   '@typescript-eslint/unbound-method': 'off', //                546 findings / 57 files
 };

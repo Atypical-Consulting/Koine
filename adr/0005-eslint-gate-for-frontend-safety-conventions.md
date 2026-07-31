@@ -98,16 +98,20 @@ Starting per-rule burn-down (findings at ratchet time; ✅ = enforced by the PR 
 | `no-base-to-string` | 9 ✅ | 0 ✅ |
 | `prefer-promise-reject-errors` | 10 ✅ | 0 ✅ |
 | `no-unsafe-return` | 12 ✅ | 0 ✅ |
+| `no-unsafe-argument` | 50 | 0 ✅ |
 | `no-explicit-any` | 65 | 1 |
+| `no-unsafe-assignment` | 68 | 0 ✅ |
 | `no-unused-vars` | 72 | 1 |
-| `no-unsafe-argument` | 51 | 0 ✅ |
-| `no-unsafe-assignment` | 78 | 0 ✅ |
 | `no-unsafe-call` | 129 | 0 ✅ |
 | `no-unnecessary-type-assertion` | 221 | 15 |
-| `no-unsafe-member-access` | 272 | 0 ✅ |
+| `no-unsafe-member-access` | 261 | 0 ✅ |
 | `require-await` | 477 | 0 ✅ |
 | `unbound-method` | 546 | 22 |
 | *(the other 30 preset rules)* | 0 ✅ | 0 ✅ |
+
+The still-pending counts above are the **post-fix** figures the configs' `RATCHET_PENDING` tables carry
+(1,889 in koine-studio, 39 in koine-ui): typing the seams that the cheap rules forced also removed
+findings from rules that remain off. Re-measure before editing either table.
 
 A rule is burned down across **both** packages in the same PR, so it is never half-enforced across the
 tree — the per-directory ratchet #998 considered and rejected. Two rules carry a non-default *option*
