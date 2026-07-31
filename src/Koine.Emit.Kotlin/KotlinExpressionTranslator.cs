@@ -279,13 +279,17 @@ internal sealed class KotlinExpressionTranslator
         {
             WriteBigDecimalOperand(co.Right, rightType, sb);
         }
+        else if (rightNeeds.NeedsOptionalWiden)
+        {
+            // Atomized (not `Write`): the `?.let { … }` suffix binds tighter than a bare `?:`, so a compound
+            // right operand (e.g. a nested coalesce) must be parenthesized or the suffix silently attaches
+            // to only its innermost operand instead of the whole thing (#1615 code review).
+            WriteAtom(co.Right, sb);
+            sb.Append("?.let { java.math.BigDecimal.valueOf(it) }");
+        }
         else
         {
             Write(co.Right, sb);
-            if (rightNeeds.NeedsOptionalWiden)
-            {
-                sb.Append("?.let { java.math.BigDecimal.valueOf(it) }");
-            }
         }
     }
 

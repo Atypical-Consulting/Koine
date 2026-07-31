@@ -549,6 +549,44 @@ public class KotlinConformanceTests
     }
 
     /// <summary>
+    /// #1615 code-review finding: a coalesce's RIGHT operand is written via <c>Write</c> (no parens for a
+    /// low-precedence compound), unlike the LEFT operand's <c>WriteAtom</c> — harmless while nothing follows
+    /// it, but the numeric-widen suffix (<c>?.let { … }</c>) DOES follow it when the right side needs
+    /// <c>NeedsOptionalWiden</c>. A nested coalesce right operand (itself <c>Int?</c>, mismatched against a
+    /// <c>Decimal?</c> left) must therefore be parenthesized before the suffix attaches, or Kotlin's
+    /// tighter-binding safe-call <c>?.</c> attaches the widen to only the INNERMOST operand
+    /// (<c>a ?: x ?: y?.let { … }</c>, parsing as <c>a ?: (x ?: y?.let { … })</c>) instead of the whole
+    /// nested coalesce (<c>a ?: (x ?: y)?.let { … }</c>) — reproducing the exact type mismatch this issue
+    /// exists to fix.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_against_a_nested_coalesce_right_operand()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, x: Int?, y: Int?) {\n" +
+            "      total -> a ?? (x ?? y)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no kotlinc required): the nested coalesce must be parenthesized before the
+        // widen suffix attaches to the whole thing, not just its innermost operand.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("a ?: (x ?: y)?.let { java.math.BigDecimal.valueOf(it) }");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a genuine
     /// <c>kotlinc</c> check. We take a well-formed emit and corrupt one file with a deliberate syntax error;
     /// the compile must FAIL.
