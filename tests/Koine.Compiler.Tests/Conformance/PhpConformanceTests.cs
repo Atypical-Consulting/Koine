@@ -1183,4 +1183,103 @@ public class PhpConformanceTests
             "a bare, unqualified reference to Billing's OWN enum Status must not misclassify against "
             + "Shipping's differently-kinded, same-named sibling Status:\n" + string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// The <c>readmodel</c> fixture shared by
+    /// <see cref="Read_model_direct_field_import_resolves_against_the_source_s_own_context"/> and
+    /// <see cref="Read_model_direct_field_binds_the_source_s_own_type_at_runtime"/> (issue #1701):
+    /// <c>Billing</c>'s <c>ItemSummary</c> projects <c>Ordering.Item</c>'s <c>status</c> (an
+    /// <c>Ordering</c>-owned enum) while <c>Billing</c> separately declares its own, differently-kinded,
+    /// same-named <c>Status</c> value object.
+    /// </summary>
+    private const string ReadModelCrossContextImportFixture = """
+        context Billing {
+          value Status {
+            code: String
+          }
+
+          import Ordering.{ Item }
+
+          readmodel ItemSummary from Item {
+            status
+          }
+        }
+
+        context Ordering {
+          enum Status {
+            Pending
+            Shipped
+            Delivered
+          }
+
+          value Item {
+            status: Status = Pending
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1701 — a read model's DIRECT-field <c>use</c> import is a SEPARATE code path
+    /// (<c>PhpEmitter.Support.cs</c>'s <c>CollectUses</c>/<c>Assemble</c>) from the
+    /// <c>PhpTypeMapper.Map</c>/<c>Classify</c> calls #1638 already made context-aware. Before this
+    /// fix, <c>EmitReadModel</c> called <c>Assemble</c> with no per-symbol hint, so a direct field's
+    /// type always resolved its import against the read model's OWN declaring context, not the
+    /// source member's, silently binding the unrelated local class. Skipped (not failed) when no
+    /// <c>phpstan</c> toolchain is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_import_resolves_against_the_source_s_own_context()
+    {
+        var result = new KoineCompiler().Compile(ReadModelCrossContextImportFixture, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var summary = result.Files.Single(f => f.RelativePath == "src/Billing/ReadModels/ItemSummary.php").Contents;
+        summary.ShouldContain("use Koine\\Ordering\\Enums\\Status;");
+        summary.ShouldNotContain("use Koine\\Billing\\ValueObjects\\Status;");
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+        r.Ok.ShouldBeTrue(
+            "ItemSummary's direct 'status' field must import Ordering's own Status enum, not Billing's "
+            + "differently-kinded, same-named sibling value object:\n" + string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// The runtime twin of <see cref="Read_model_direct_field_import_resolves_against_the_source_s_own_context"/>
+    /// (issue #1701): non-observable via <c>phpstan</c>/<c>php -l</c> alone today (PHP's enum/non-enum
+    /// <c>Map</c> branches render the identical class-name string, per the earlier same-named-sibling
+    /// test's comment), but a REAL bug — the wrong import means the promoted constructor parameter ends
+    /// up type-hinted against Billing's own <c>Status</c> while the value actually passed is an
+    /// <c>Ordering\Enums\Status</c> case, a hard runtime <c>TypeError</c> under
+    /// <c>declare(strict_types=1)</c>. Only executing the emitted PHP proves it; skipped (not failed)
+    /// when no <c>php</c> interpreter is present locally, CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_binds_the_source_s_own_type_at_runtime()
+    {
+        var result = new KoineCompiler().Compile(ReadModelCrossContextImportFixture, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Ordering/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/ValueObjects/Item.php';
+            require __DIR__ . '/src/Billing/ValueObjects/Status.php';
+            require __DIR__ . '/src/Billing/ReadModels/ItemSummary.php';
+
+            $item = new Koine\Ordering\ValueObjects\Item(Koine\Ordering\Enums\Status::SHIPPED);
+            $summary = Koine\Billing\ReadModels\toItemSummary($item);
+            if ($summary->status !== Koine\Ordering\Enums\Status::SHIPPED) {
+                fwrite(STDERR, "expected Ordering's own Status::SHIPPED, got " . var_export($summary->status, true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "Projecting Item to ItemSummary must bind Ordering's own Status enum (not Billing's wrongly "
+            + "imported same-named sibling value object) at runtime:\n" + string.Join("\n", run.Errors));
+    }
 }

@@ -40,6 +40,14 @@ public sealed partial class PhpEmitter
         var name = PhpNaming.ClassName(rm.Name);
         var sourceName = PhpNaming.ClassName(rm.SourceType);
 
+        // Per-symbol import hint for Assemble/CollectUses (issue #1701): a direct field's `use`
+        // import must resolve against the SOURCE type's own owning context, mirroring the
+        // ResolveOwner-based Map/Classify fix below (#1638) — a sibling mechanism (the file's
+        // cross-namespace `use` list) that fix didn't reach. Without a hint here, CollectUses falls
+        // back to this read model's OWN context, so a same-named-but-unrelated local type can
+        // silently shadow the source's real one.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+
         // Each field carries its PHP type-hint, camelCase property name, the projection
         // expression (rooted at $src) used in the mapper, and its declared Koine type (for the
         // phpstan PHPDoc refinement of a collection/Range field — null when a direct field's source
@@ -59,8 +67,10 @@ public sealed partial class PhpEmitter
                 // differently-kinded sibling type declared locally here can't misclassify it (#1638).
                 if (emit.Index.TryGetMemberType(contextName, rm.SourceType, f.Name, out TypeRef t))
                 {
-                    phpType = typeMapper.Map(t, emit.Index.ResolveOwner(rm.SourceType, contextName).Owner ?? contextName);
+                    var ownerContext = emit.Index.ResolveOwner(rm.SourceType, contextName).Owner ?? contextName;
+                    phpType = typeMapper.Map(t, ownerContext);
                     fieldType = t;
+                    CollectImportHints(t, ownerContext, symbolContext);
                 }
                 else
                 {
@@ -154,8 +164,52 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.ReadModels, rm.Name),
-            Assemble(contextName, KindFolder.ReadModels, sb.ToString(), name),
+            Assemble(contextName, KindFolder.ReadModels, sb.ToString(), name,
+                symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.ReadModels));
+    }
+
+    /// <summary>
+    /// Walks <paramref name="type"/> (recursing into a <c>List</c>/<c>Set</c>/<c>Map</c>/<c>Range</c>
+    /// element/value) and records, for every named model type it finds, that its <c>use</c> import
+    /// must resolve against <paramref name="context"/> — the context the field's OWN declaration
+    /// belongs to, not necessarily the emitting file's. A built-in scalar (<c>String</c>/<c>Int</c>/…)
+    /// never needs an import and is skipped.
+    /// </summary>
+    private static void CollectImportHints(TypeRef type, string context, Dictionary<string, string> symbolContext)
+    {
+        switch (type.Name)
+        {
+            case "String":
+            case "Int":
+            case "Bool":
+            case "Decimal":
+            case "Instant":
+            case "Uuid":
+            case "Guid":
+                return;
+            case ModelIndex.ListTypeName:
+            case ModelIndex.SetTypeName:
+            case ModelIndex.RangeTypeName:
+                if (type.Element is not null)
+                {
+                    CollectImportHints(type.Element, context, symbolContext);
+                }
+                return;
+            case ModelIndex.MapTypeName:
+                if (type.Element is not null)
+                {
+                    CollectImportHints(type.Element, context, symbolContext);
+                }
+                if (type.Value is not null)
+                {
+                    CollectImportHints(type.Value, context, symbolContext);
+                }
+                return;
+            default:
+                symbolContext[PhpNaming.ClassName(type.Name)] = context;
+                return;
+        }
     }
 
     // ----------------------------------------------------------------------
