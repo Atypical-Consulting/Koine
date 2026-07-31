@@ -682,8 +682,8 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        TypeRef? left = _resolver.Infer(b.Left, scope);
-        TypeRef? right = _resolver.Infer(b.Right, scope);
+        TypeRef? left = EffectiveType(b.Left, scope);
+        TypeRef? right = EffectiveType(b.Right, scope);
         var leftIsNewViolation = IsUnguardedOptional(b.Left, left, scope) && !IsAlreadyInvalid(b.Left);
         var rightIsNewViolation = IsUnguardedOptional(b.Right, right, scope) && !IsAlreadyInvalid(b.Right);
         if (leftIsNewViolation || rightIsNewViolation)
@@ -1132,19 +1132,20 @@ internal sealed class ExpressionChecker
             return;
         }
 
-        TypeRef? selector = _resolver.Infer(lambda.Body, inner);
+        TypeRef? selector = EffectiveType(lambda.Body, inner);
         if (selector is null)
         {
             return;
         }
 
-        // Guard-narrowing (`if x.isPresent then …`) is validator-only bookkeeping (see
-        // IsUnguardedOptional) that never feeds back into TypeResolver, so a selector built from a
-        // guard-narrowed optional operand still infers as optional here — exactly the case where an
+        // Guard-narrowing (`if x.isPresent then …`) is validator-only bookkeeping that never feeds back
+        // into TypeResolver, so EffectiveType only recognizes it when the guard and the narrowed read
+        // live in the SAME expression (#1564) — a selector built from a guard narrowed in an OUTER,
+        // different lambda scope still infers as optional here (#1556), exactly the case where an
         // emitter (e.g. TypeScript, whose own closure-scoped narrowing can't see the guard either)
-        // would otherwise have to render a fold over a possibly-absent element. Reject it uniformly
-        // instead of letting the shape reach any emitter; a selector resolved with '??' first is
-        // already non-optional by the time it gets here, so it's unaffected.
+        // would otherwise have to render a fold over a possibly-absent element. Reject that case
+        // uniformly instead of letting the shape reach any emitter; a selector resolved with '??' first
+        // is already non-optional by the time it gets here, so it's unaffected either way.
         if (selector.IsOptional)
         {
             Report(DiagnosticCodes.AggregateSelectorOptional,
