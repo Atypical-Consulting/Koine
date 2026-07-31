@@ -973,6 +973,127 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1701 — a read model's DIRECT-field cross-type import is a SEPARATE code path
+    /// (<c>PythonEmitter.Support.cs</c>'s <c>Assemble</c>) from the <c>PythonTypeMapper.Map</c>/
+    /// <c>Classify</c> calls #1638 already made context-aware. Before this fix, <c>EmitReadModel</c>
+    /// called <c>Assemble</c> with no per-symbol hint, so a direct field's type always resolved its
+    /// import against the read model's OWN declaring context, not the source member's, silently
+    /// binding the unrelated local class. Unlike PHP's twin of this test, this is NOT also
+    /// runtime-observable via a driver script: Python dataclasses don't enforce their field type
+    /// annotations at construction time, so the wrong import never raises — the field still holds
+    /// whatever value the source actually carried, and only <c>mypy</c> can see the annotation now
+    /// resolves to the wrong module. Skipped (not failed) when no <c>mypy</c> toolchain is present
+    /// locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_import_resolves_against_the_source_s_own_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Item }
+
+              readmodel ItemSummary from Item {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Pending
+                Shipped
+                Delivered
+              }
+
+              value Item {
+                status: Status = Pending
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var summary = FileText(result.Files, "billing/read_models/item_summary.py");
+        summary.ShouldContain("from ordering.enums.status import Status");
+        summary.ShouldNotContain("from billing.value_objects.status import Status");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Code-review finding on issue #1701's own PR: <c>CollectImportHints</c>'s <c>default</c> case
+    /// recorded <c>symbolContext[name] = context</c> (the SOURCE type's resolved OWNER context)
+    /// unconditionally — every other resolution call site in this emitter uses the
+    /// <c>type.Qualifier ?? context</c> idiom instead, since a field's own declared type can carry an
+    /// EXPLICIT <c>Context.Type</c> qualifier (R13.2) that wins over the ambient/owner context. Here
+    /// <c>Ordering.Item</c>'s <c>status</c> field is declared <c>Shipping.Status</c> — an EXPLICIT
+    /// qualifier to a THIRD context — while <c>Ordering</c> separately declares its own, unrelated
+    /// <c>Status</c> enum (the type <c>ResolveOwner(rm.SourceType, ...)</c> would resolve to as
+    /// <c>Item</c>'s owning context). Before the fix, the import hint ignored the qualifier and bound
+    /// <c>Ordering</c>'s own <c>Status</c> instead of the field's actually-declared <c>Shipping.Status</c>.
+    /// <para>
+    /// Deliberately checks syntax only, not <c>mypy</c>: this fixture's SOURCE field
+    /// (<c>Item.status: Shipping.Status</c>) trips a separate, pre-existing, out-of-scope gap in
+    /// <c>item.py</c>'s OWN field emission (tracked as #1712) — a value object's own qualified-field
+    /// import ignores its qualifier the same way this call site used to, but that call site is
+    /// untouched by this PR. Gating on full <c>mypy</c> here would make this test red for a DIFFERENT
+    /// bug than the one it verifies.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_import_honors_an_explicit_qualifier_over_the_source_s_owning_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Item }
+
+              readmodel ItemSummary from Item {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value Item {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var summary = FileText(result.Files, "billing/read_models/item_summary.py");
+        summary.ShouldContain("from shipping.enums.status import Status");
+        summary.ShouldNotContain("from ordering.enums.status import Status");
+        summary.ShouldNotContain("from billing.value_objects.status import Status");
+
+        TestSupport.PythonCheck syntax = TestSupport.SyntaxCheckPython(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted Python should parse (ast.parse):\n" + string.Join("\n", syntax.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
