@@ -139,3 +139,97 @@ describe('muted text contrast', () => {
     expect(contrastRatio(muted, surface)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+// Guards the launcher `.lx-kind` chip / `.lx-sub` WCAG AA contrast fix (issue #1672 — the same root-
+// cause class as #1161/#1263 above, different elements). `.lx-kind`'s background stays the raw
+// `--koi-ddd-<slug>` identity hue tinted 18% (`--kc`, deliberately dark-only across both themes per
+// ADR 0004 — the maxGraph canvas paints the literal dark hex into SVG) — only the TEXT moved to a
+// scoped `--koi-ddd-<slug>-ink` token (see tokens.css) so every other `--koi-ddd-*` consumer (canvas,
+// explorer icons, editor semantic tokens) stays untouched. Only the 10 kinds `catalog.ts`'s `KIND_META`
+// renders a launcher chip for get checked (the other 5 DDD concepts — read-model, policy, factory,
+// state-machine, spec — have no `.lx-kind` today). The worst-case background is the auto-selected first
+// row's tint (`.lx-item.sel { background: color-mix(in srgb, var(--koi-accent) 15%, transparent) }` —
+// `LauncherPanel` resets `selectedIndex` to 0 on every query/mode change, so the "Order" aggregate row
+// axe measured this against IS selected by default), mirroring `--koi-hl-match`'s own "worst-case
+// selected-row tint" tests above; it reproduces the issue's own measured ~4.09:1 dark-theme number for
+// `.lx-sub` almost exactly.
+const LAUNCHER_CHIP_KINDS = [
+  'aggregate',
+  'entity',
+  'value',
+  'enum',
+  'service',
+  'repository',
+  'command',
+  'query',
+  'event',
+  'integration-event',
+];
+
+const conceptColorsCss = readFileSync(
+  fileURLToPath(new URL('./concept-colors.generated.css', import.meta.url)),
+  'utf8',
+);
+
+/** Mirrors `.lx-kind { background: color-mix(in srgb, var(--kc) 18%, transparent) }` composited over
+ * the launcher card's real surface. */
+function chipBg(kcHex: string, panelBgHex: string): string {
+  return mixSrgb(kcHex, panelBgHex, 0.18);
+}
+
+/** Mirrors `.lx-item.sel { background: color-mix(in srgb, var(--koi-accent) 15%, transparent) }`
+ * composited over the panel surface — the worst-case row background a chip/sub can render on. */
+function selectedRowBg(accentHex: string, panelBgHex: string): string {
+  return mixSrgb(accentHex, panelBgHex, 0.15);
+}
+
+describe('launcher .lx-kind chip contrast (issue #1672)', () => {
+  for (const [themeName, selector] of [
+    ['dark', ':root'],
+    ['light', "html[data-theme='light']"],
+  ] as const) {
+    test(`${themeName} theme: every chip kind's --koi-ddd-*-ink text clears WCAG AA (>= 4.5:1) on its resting background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const paper2 = extractToken(block, '--koi-paper-2');
+      for (const slug of LAUNCHER_CHIP_KINDS) {
+        const kc = extractToken(conceptColorsCss, `--koi-ddd-${slug}`); // background tint stays the raw identity hue
+        const ink = extractToken(block, `--koi-ddd-${slug}-ink`); // text uses the scoped, contrast-safe token
+        const bg = chipBg(kc, paper2);
+        expect(contrastRatio(ink, bg), `${slug} (${themeName}, resting)`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    test(`${themeName} theme: every chip kind's --koi-ddd-*-ink text clears WCAG AA on the worst-case selected-row background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const accent = extractToken(block, '--koi-accent');
+      const worstBg = selectedRowBg(accent, paper2);
+      for (const slug of LAUNCHER_CHIP_KINDS) {
+        const kc = extractToken(conceptColorsCss, `--koi-ddd-${slug}`);
+        const ink = extractToken(block, `--koi-ddd-${slug}-ink`);
+        const bg = chipBg(kc, worstBg);
+        expect(contrastRatio(ink, bg), `${slug} (${themeName}, selected)`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  }
+});
+
+describe('launcher .lx-sub contrast (issue #1672)', () => {
+  test('dark theme --koi-muted-strong clears WCAG AA on the worst-case selected-row background', () => {
+    const darkBlock = extractThemeBlock(css, ':root');
+    const mutedStrong = extractToken(darkBlock, '--koi-muted-strong');
+    const paper2 = extractToken(darkBlock, '--koi-paper-2');
+    const accent = extractToken(darkBlock, '--koi-accent');
+    const worstBg = selectedRowBg(accent, paper2);
+    expect(contrastRatio(mutedStrong, worstBg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('light theme --koi-muted-strong clears WCAG AA on the worst-case selected-row background', () => {
+    const lightBlock = extractThemeBlock(css, "html[data-theme='light']");
+    const mutedStrong = extractToken(lightBlock, '--koi-muted-strong');
+    const paper2 = extractToken(lightBlock, '--koi-paper-2');
+    const accent = extractToken(lightBlock, '--koi-accent');
+    const worstBg = selectedRowBg(accent, paper2);
+    expect(contrastRatio(mutedStrong, worstBg)).toBeGreaterThanOrEqual(4.5);
+  });
+});
