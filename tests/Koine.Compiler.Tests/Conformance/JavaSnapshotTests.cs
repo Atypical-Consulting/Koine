@@ -232,4 +232,35 @@ public class JavaSnapshotTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 4) — an <c>anti-corruption-layer</c> context-map relation: the reviewed
+    /// snapshot locks the translator interface emitted into the downstream package, including the
+    /// package-qualified upstream parameter types.
+    /// </summary>
+    [Fact]
+    public Task Java_acl_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaAclTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The ACL translator is where cross-package references are unavoidable — the downstream package
+    /// names an upstream type — so <c>javac</c> is the only check that proves the qualification is right;
+    /// a bare simple name would read fine in a string assertion and fail to resolve for real.
+    /// </summary>
+    [Fact]
+    public void Java_acl_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaAclTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }

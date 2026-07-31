@@ -115,6 +115,11 @@ public sealed partial class JavaEmitter : IEmitter
             EmitContextExtras(emit, files, ctx);
         }
 
+        // Anti-corruption-layer translator seams (R14.2): one interface per ACL relation carrying a
+        // mapping block, emitted into the DOWNSTREAM context (JavaEmitter.Acl.cs). Model-wide rather
+        // than per-context, since the relations live on the context map.
+        EmitAclTranslators(emit, model, files);
+
         return files;
     }
 
