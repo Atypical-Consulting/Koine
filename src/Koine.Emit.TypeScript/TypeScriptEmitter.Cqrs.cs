@@ -103,7 +103,7 @@ public sealed partial class TypeScriptEmitter
             else
             {
                 tsType = typeMapper.Map(f.Type!);
-                var expectedEnum = index.Classify(f.Type!.Qualifier, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
+                var expectedEnum = index.Classify(f.Type!.Qualifier ?? context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, TypeScriptExpressionTranslator.NameMode.Property, expectedEnum);
             }
             fields.Add((tsType, prop, rhs));
