@@ -625,6 +625,52 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #1597: a guard-narrowed <c>Int? / Int</c> division — narrowed present via
+    /// <c>if qty.isPresent then … else …</c> — must also truncate toward zero, closing the
+    /// optional-operand gap #1558 left open. <c>IsIntDivision</c>'s original gate required the binary
+    /// expression's own inferred type to be non-optional <c>Int</c>; a guarded optional still infers as
+    /// optional at this call site (guard narrowing is validator-only and never reaches
+    /// <c>TypeResolver.Infer</c>), so the gate excluded it and the plain-numeric fallback rendered a
+    /// bare JS <c>/</c> inside the narrowed ternary branch — a silent fractional runtime value
+    /// (<c>3.5</c> instead of <c>3</c>) even though the validator already guarantees the operand is
+    /// present at the arithmetic site. (The <c>if/then/else</c> form is used here rather than the
+    /// bare-postfix <c>qty / 2 when qty.isPresent</c> from the issue's repro: TypeScript's own
+    /// control-flow narrowing needs the <c>this.qty !== undefined ? … : …</c> ternary the conditional
+    /// form emits — the bare <c>when</c> form renders the guarded body with no narrowing check at all,
+    /// which fails <c>tsc --strict</c> for ANY operator on the optional operand, not just division; a
+    /// broader, pre-existing gap tracked separately.)
+    /// </summary>
+    [Fact]
+    public void Guarded_optional_int_field_derived_division_truncates_toward_zero_at_runtime()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                qty:  Int?
+                half: Int? = if qty.isPresent then qty / 2 else 0
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            import { Order } from './Shop/value-objects/Order.js';
+
+            const positive = new Order(7).half;
+            const negative = new Order(-7).half;
+            console.log(JSON.stringify({ positive, negative }));
+            """;
+
+        TestSupport.NodeRun run = TestSupport.RunTypeScript(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoToolchainNotice);
+
+        run.Ok.ShouldBeTrue("Guarded-optional Int/Int derived-member division should evaluate under node:\n" + string.Join("\n", run.Errors));
+        run.Stdout.Trim().ShouldBe("{\"positive\":3,\"negative\":-3}");
+    }
+
+    /// <summary>
     /// Issue #1537 acceptance: Decimal arithmetic against a non-Decimal Int operand — an Int LITERAL,
     /// an Int MEMBER, on either side of the operator, across all four of <c>+ - * /</c>, and a guarded
     /// OPTIONAL Int member — must all widen to <c>Decimal</c> at the call site and type-check under
