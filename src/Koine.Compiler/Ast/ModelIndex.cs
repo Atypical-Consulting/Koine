@@ -1382,18 +1382,7 @@ public sealed class ModelIndex
 
         if (_byName.TryGetValue(typeName, out TypeDecl? decl))
         {
-            return decl switch
-            {
-                ValueObjectDecl => TypeKind.Value,
-                EntityDecl => TypeKind.Entity,
-                AggregateDecl => TypeKind.Aggregate,
-                EnumDecl => TypeKind.Enum,
-                EventDecl => TypeKind.Event,
-                IntegrationEventDecl => TypeKind.IntegrationEvent,
-                ReadModelDecl => TypeKind.ReadModel,
-                QueryDecl => TypeKind.Query,
-                _ => TypeKind.Unknown
-            };
+            return ClassifyDecl(decl);
         }
 
         if (_idTypeNames.Contains(typeName) || IsIdConvention(typeName))
@@ -1403,6 +1392,35 @@ public sealed class ModelIndex
 
         return TypeKind.Unknown;
     }
+
+    /// <summary>
+    /// Classifies a type with <paramref name="context"/>-aware type resolution (R13.2): the named type
+    /// is resolved in that context's scope first (local, then an unambiguous import), falling back to
+    /// the global view — so a <c>Status</c> declared in two contexts classifies to the right one at
+    /// each reference site.
+    /// </summary>
+    public TypeKind Classify(string? context, string typeName)
+    {
+        if (context is not null && TryGetDeclIn(context, typeName, out TypeDecl decl))
+        {
+            return ClassifyDecl(decl);
+        }
+
+        return Classify(typeName);
+    }
+
+    private static TypeKind ClassifyDecl(TypeDecl decl) => decl switch
+    {
+        ValueObjectDecl => TypeKind.Value,
+        EntityDecl => TypeKind.Entity,
+        AggregateDecl => TypeKind.Aggregate,
+        EnumDecl => TypeKind.Enum,
+        EventDecl => TypeKind.Event,
+        IntegrationEventDecl => TypeKind.IntegrationEvent,
+        ReadModelDecl => TypeKind.ReadModel,
+        QueryDecl => TypeKind.Query,
+        _ => TypeKind.Unknown
+    };
 
     /// <summary>True when a type reference resolves to a known type.</summary>
     public bool IsKnownType(string typeName) => Classify(typeName) != TypeKind.Unknown;
