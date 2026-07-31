@@ -770,7 +770,9 @@ public sealed partial class CSharpEmitter
     private EmittedFile EmitTransactionBehavior(EmitContext emit, string ns, bool hasUnitOfWork)
     {
         var sb = new StringBuilder();
-        sb.Append("/// <summary>MediatR pipeline behavior: commits the unit of work after a successful handler.</summary>\n");
+        sb.Append(_options.DispatchEvents && hasUnitOfWork
+            ? "/// <summary>MediatR pipeline behavior: commits the unit of work after a successful handler, then dispatches the domain events the handlers recorded.</summary>\n"
+            : "/// <summary>MediatR pipeline behavior: commits the unit of work after a successful handler.</summary>\n");
         sb.Append("public sealed class TransactionBehavior<TRequest, TResponse> : MediatR.IPipelineBehavior<TRequest, TResponse>\n");
         sb.Append(Indent).Append("where TRequest : notnull\n{\n");
         if (hasUnitOfWork)
@@ -836,7 +838,15 @@ public sealed partial class CSharpEmitter
     {
         var method = "Add" + ns + "Application";
         var sb = new StringBuilder();
-        WriteXmlDoc(sb, $"Registers the {ns} application handlers, validators and query handlers.", "");
+        var doc = $"Registers the {ns} application handlers, validators and query handlers.";
+        if (_options.DispatchEvents)
+        {
+            // Say it in the generated code, not just the docs: the one dependency this extension does
+            // NOT register is the one the consumer must supply.
+            doc += " Supply your own IDomainEventDispatcher registration — Koine emits that contract but no implementation.";
+        }
+
+        WriteXmlDoc(sb, doc, "");
         sb.Append("public static class ").Append(ns).Append("ApplicationServiceCollectionExtensions\n{\n");
         sb.Append(Indent).Append("public static Microsoft.Extensions.DependencyInjection.IServiceCollection ")
           .Append(method).Append("(this Microsoft.Extensions.DependencyInjection.IServiceCollection services)\n");
@@ -872,6 +882,15 @@ public sealed partial class CSharpEmitter
         {
             sb.Append(Indent).Append(Indent).Append("services.AddTransient(typeof(MediatR.IPipelineBehavior<,>), typeof(ValidationBehavior<,>));\n");
             sb.Append(Indent).Append(Indent).Append("services.AddTransient(typeof(MediatR.IPipelineBehavior<,>), typeof(TransactionBehavior<,>));\n");
+
+            // Scoped so one accumulator spans a single request: the handlers fill it and
+            // TransactionBehavior drains it, and a concurrent request cannot see those events.
+            // IDomainEventDispatcher is deliberately NOT registered — Koine emits that contract but
+            // never an implementation, so the consumer supplies (and registers) its own.
+            if (_options.DispatchEvents)
+            {
+                sb.Append(Indent).Append(Indent).Append("services.AddScoped<IDomainEventAccumulator, DomainEventAccumulator>();\n");
+            }
         }
 
         sb.Append(Indent).Append(Indent).Append("return services;\n");

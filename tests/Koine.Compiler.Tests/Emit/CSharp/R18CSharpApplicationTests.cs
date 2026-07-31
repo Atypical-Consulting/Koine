@@ -562,6 +562,7 @@ public class R18CSharpApplicationTests
     {
         var behavior = File(Emit(MediatrDispatchOn), "TransactionBehavior.cs").Contents;
 
+        behavior.ShouldContain("then dispatches the domain events the handlers recorded");
         behavior.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork, IDomainEventAccumulator accumulator, IDomainEventDispatcher dispatcher)");
         var commit = IndexOfOrFail(behavior, "await _unitOfWork.SaveChangesAsync(cancellationToken);");
         var drain = IndexOfOrFail(behavior, "foreach (var domainEvent in _accumulator.Drain())");
@@ -579,6 +580,146 @@ public class R18CSharpApplicationTests
         off.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork)");
         off.ShouldNotContain("IDomainEventAccumulator");
         off.ShouldNotContain("DispatchAsync");
+    }
+
+    [Fact]
+    public void Dispatch_events_registers_the_accumulator_but_never_the_dispatcher()
+    {
+        var di = File(Emit(MediatrDispatchOn), "SalesApplicationServiceCollectionExtensions.cs").Contents;
+
+        // Scoped, so one accumulator spans a request and its events cannot leak into another's.
+        di.ShouldContain("services.AddScoped<IDomainEventAccumulator, DomainEventAccumulator>();");
+
+        // The dispatcher is a CONTRACT Koine emits but never implements — registering a binding for
+        // it would either fail at resolve time or silently shadow the consumer's own registration.
+        di.ShouldNotContain("IDomainEventDispatcher,");
+        di.ShouldNotContain("AddScoped<IDomainEventDispatcher");
+        di.ShouldNotContain("AddTransient<IDomainEventDispatcher");
+
+        // …and the generated code says so itself, so a consumer reading only the output knows.
+        di.ShouldContain("Supply your own IDomainEventDispatcher registration");
+    }
+
+    [Fact]
+    public void Dispatch_events_registers_no_accumulator_in_plain_mode()
+    {
+        // Plain handlers dispatch inline, so there is nothing to accumulate.
+        var di = File(Emit(AppOn with { DispatchEvents = true }), "SalesApplicationServiceCollectionExtensions.cs").Contents;
+        di.ShouldNotContain("IDomainEventAccumulator");
+    }
+
+    /// <summary>A recording <c>IDomainEventDispatcher</c> plus a unit of work that logs its commit, so a
+    /// test can assert the emitted handler dispatches <b>after</b> committing and not before.</summary>
+    private const string RecordingDispatcherSource = """
+        namespace Sales;
+
+        public sealed class RecordingDispatcher : Koine.Runtime.IDomainEventDispatcher
+        {
+            public static readonly System.Collections.Generic.List<string> Log = new();
+
+            public System.Threading.Tasks.Task DispatchAsync(Koine.Runtime.IDomainEvent domainEvent, System.Threading.CancellationToken ct = default)
+            {
+                Log.Add("dispatch:" + domainEvent.GetType().Name);
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+        }
+
+        public sealed class RecordingUnitOfWork : IUnitOfWork
+        {
+            public RecordingUnitOfWork(IOrderRepository orders) => Orders = orders;
+
+            public IOrderRepository Orders { get; }
+
+            public System.Threading.Tasks.Task<int> SaveChangesAsync(System.Threading.CancellationToken ct = default)
+            {
+                RecordingDispatcher.Log.Add("commit");
+                return System.Threading.Tasks.Task.FromResult(0);
+            }
+        }
+        """;
+
+    [Fact]
+    public void Dispatch_events_plain_output_compiles()
+    {
+        var files = Emit(AppOn with { DispatchEvents = true }, CommandsOnlyFixture)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .Append(new EmittedFile("RecordingDispatcher.cs", RecordingDispatcherSource))
+            .ToList();
+
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Dispatch_events_mediatr_output_compiles()
+    {
+        var files = Emit(MediatrDispatchOn, CommandsOnlyFixture)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .Append(new EmittedFile("RecordingDispatcher.cs", RecordingDispatcherSource))
+            .ToList();
+
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    /// <summary>Boots the emitted api layer with post-commit dispatch on, wiring the recording
+    /// dispatcher through the emitted DI extension so a real HTTP call exercises the whole path.</summary>
+    private const string DispatchingApiHostDriver = """
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Hosting;
+        using Microsoft.AspNetCore.TestHost;
+        using Microsoft.Extensions.DependencyInjection;
+        using Microsoft.Extensions.Hosting;
+
+        namespace Sales;
+
+        public static class ApiHostDriver
+        {
+            public static WebApplication Build()
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.WebHost.UseTestServer();
+                builder.Services.AddSalesApplication();
+
+                var repository = new FakeOrderRepository();
+                builder.Services.AddSingleton<IUnitOfWork>(new RecordingUnitOfWork(repository));
+
+                // The consumer supplies the dispatcher implementation — Koine emits only the contract.
+                builder.Services.AddSingleton<Koine.Runtime.IDomainEventDispatcher, RecordingDispatcher>();
+
+                var app = builder.Build();
+                app.MapSalesEndpoints();
+
+                // Surfaces the recorded ordering so the test can read it over the same HTTP hop.
+                app.MapGet("/__log", () => RecordingDispatcher.Log);
+
+                app.Start();
+                return app;
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task Dispatch_events_dispatches_a_real_event_after_the_commit_over_http()
+    {
+        // Each RunApi compiles a fresh assembly, so RecordingDispatcher.Log starts empty.
+        var files = Emit(ApiOn with { DispatchEvents = true }, CommandsOnlyFixture)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .Append(new EmittedFile("RecordingDispatcher.cs", RecordingDispatcherSource));
+
+        using var harness = TestSupport.RunApi(files, DispatchingApiHostDriver);
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 42.50m, currency = "USD" } },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // The factory's `emit OrderPlaced` reached a real dispatcher — and only after the commit.
+        var log = await harness.Client.GetFromJsonAsync<string[]>(
+            "/__log", TestContext.Current.CancellationToken);
+        log.ShouldBe(new[] { "commit", "dispatch:OrderPlaced" });
     }
 
     // ------------------------------------------------------------------
