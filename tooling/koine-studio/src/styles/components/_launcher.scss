@@ -254,6 +254,26 @@
   background: color-mix(in srgb, var(--kc) 18%, transparent);
 }
 
+/* Per-kind WCAG AA text overrides (issue #1672): `.lx-kind`'s `color` otherwise reads the raw
+   `--koi-ddd-<slug>` identity hue via `--kc` (set inline in ResultRow.tsx/PreviewPane.tsx as
+   `var(${chip.token})`) — dark-only across both themes by design (ADR 0004), so it fails WCAG AA
+   against this chip's own tinted background in light theme, and against the auto-selected row's tint
+   in dark theme too, for several kinds (see tokens.test.ts). There's no per-kind CSS hook other than
+   the chip's own `title` (already set to `chip.word` for the tooltip) — keying off it here, rather than
+   adding a new DOM attribute, keeps this a selector/value-only change (`.lx-kind`'s background tint,
+   `ResultRow.tsx`, and every other `--koi-ddd-*` consumer stay untouched). Word strings must match
+   catalog.ts's `KIND_META` verbatim. */
+.lx-kind[title='aggregate root'] { color: var(--koi-ddd-aggregate-ink); }
+.lx-kind[title='entity'] { color: var(--koi-ddd-entity-ink); }
+.lx-kind[title='value object'] { color: var(--koi-ddd-value-ink); }
+.lx-kind[title='enum'] { color: var(--koi-ddd-enum-ink); }
+.lx-kind[title='domain service'] { color: var(--koi-ddd-service-ink); }
+.lx-kind[title='repository'] { color: var(--koi-ddd-repository-ink); }
+.lx-kind[title='command'] { color: var(--koi-ddd-command-ink); }
+.lx-kind[title='query'] { color: var(--koi-ddd-query-ink); }
+.lx-kind[title='domain event'] { color: var(--koi-ddd-event-ink); }
+.lx-kind[title='integration event'] { color: var(--koi-ddd-integration-event-ink); }
+
 .lx-glyph {
   width: 26px;
   height: 26px;
@@ -304,7 +324,11 @@
 
 .lx-sub {
   font-size: 11.5px;
-  color: var(--koi-muted);
+  /* --koi-muted-strong, not the shared --koi-muted (issue #1672): this card's own less-opaque, blurred
+     surface drops dark-theme contrast to ~4.05:1 (worst case, the auto-selected row's accent tint)
+     even though --koi-muted clears 4.5:1 on every other panel's fully-opaque --koi-surface. A scoped
+     token avoids touching every other --koi-muted consumer. */
+  color: var(--koi-muted-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
