@@ -28,8 +28,10 @@ import type { Command } from '@atypical/koine-ui';
 // Task 3 adds the `CommandMode`/`SymbolMode`/`EventMode` (+ `*Light`) stories below, exercising the
 // `>`/`@`/`#` mode-switch prefixes against the same known-catalog fixture — no fixture changes needed,
 // since Task 2's `Ordering`/`Shipping` entries already cover one command, one symbol, and two events.
-// Later #1160 tasks add the preview/action-menu stories; keep the fixture easy to extend rather than
-// forking it.
+//
+// Task 4 (final) adds the `PreviewPopulated`/`ActionMenuOpen` (+ `*Light`) stories below, covering the
+// live preview pane and the quick-action popover — both driven by the empty-query default's
+// auto-selected `Order` aggregate, so neither needs any fixture change or query typing.
 //
 // The @storybook/addon-a11y axe pass (`a11y: { test: 'error' }` in `.storybook/preview.ts`) guards
 // every story's accessibility, including the Chromium colour-contrast check the happy-dom unit axe
@@ -420,5 +422,78 @@ export const EventModeLight: Story = {
       expect(groupLabels.some((label) => label?.includes('Events'))).toBe(true);
       expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
     });
+  },
+};
+
+/**
+ * The live preview pane (issue #1143, task 5) on the app's dark theme: no query typing needed — the
+ * empty-query curated "Top hits" default already selects `.lx-item` index 0 (`selectedIndex` defaults
+ * to 0 in `LauncherPanel.tsx`), which per `makeKnownCatalogSources`'s catalog order and
+ * `LauncherPanel.test.tsx`'s own "adds .has-preview and renders the first visible result's preview"
+ * test is the `Ordering.Order` aggregate. So this story reuses {@link Empty}'s catalog-load wait and
+ * adds two assertions on top of it: the `.lx` container carries `.has-preview`, and
+ * `.lx-preview .pv-name` reads `'Order'` — the same pane `ResultRow`'s selected-row sibling renders,
+ * proving the preview auto-populates without any interaction.
+ */
+export const PreviewPopulated: Story = {
+  decorators: [withTheme('dark')],
+  play: async ({ canvasElement }) => {
+    await waitFor(() => {
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+      expect(canvasElement.querySelector('.lx.has-preview')).toBeTruthy();
+      expect(canvasElement.querySelector('.lx-preview .pv-name')?.textContent).toBe('Order');
+    });
+  },
+};
+
+/** The same auto-populated preview pane as {@link PreviewPopulated}, forced to the light theme
+ *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
+ *  for `.lx-preview` (including its `.pv-head .lx-kind` chip) on the light `--koi-*` token set. */
+export const PreviewPopulatedLight: Story = {
+  decorators: [withTheme('light')],
+  parameters: { backgrounds: { default: 'light' } },
+  play: async ({ canvasElement }) => {
+    await waitFor(() => {
+      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+      expect(canvasElement.querySelector('.lx.has-preview')).toBeTruthy();
+      expect(canvasElement.querySelector('.lx-preview .pv-name')?.textContent).toBe('Order');
+    });
+  },
+};
+
+/**
+ * The quick-action popover (issue #1143, task 6) on the app's dark theme: waits for the curated
+ * default results to render (same wait as {@link Empty}), then clicks the footer "⌘K actions" trigger
+ * — found the same way `LauncherPanel.test.tsx` does, `within(canvasElement).getByText('actions')
+ * .closest('button')` — and waits for the `.lx-actmenu[role="menu"]` popover to open. The auto-selected
+ * `Order` aggregate (see {@link PreviewPopulated}) backs the menu's five `[role="menuitem"]` rows: "Go
+ * to definition", "Find usages", "Peek", "Rename symbol", "Copy name" (`LauncherPanel.test.tsx`'s own
+ * "the footer '⌘K actions' trigger opens the popover" test).
+ */
+export const ActionMenuOpen: Story = {
+  decorators: [withTheme('dark')],
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    const trigger = within(canvasElement).getByText('actions').closest('button') as HTMLButtonElement;
+    trigger.click();
+
+    await waitFor(() => expect(canvasElement.querySelector('.lx-actmenu[role="menu"]')).toBeTruthy());
+  },
+};
+
+/** The same quick-action popover as {@link ActionMenuOpen}, forced to the light theme
+ *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
+ *  for the `.lx-actmenu` popover and its `[role="menuitem"]` rows on the light `--koi-*` token set. */
+export const ActionMenuOpenLight: Story = {
+  decorators: [withTheme('light')],
+  parameters: { backgrounds: { default: 'light' } },
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0));
+
+    const trigger = within(canvasElement).getByText('actions').closest('button') as HTMLButtonElement;
+    trigger.click();
+
+    await waitFor(() => expect(canvasElement.querySelector('.lx-actmenu[role="menu"]')).toBeTruthy());
   },
 };
