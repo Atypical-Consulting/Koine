@@ -1132,4 +1132,75 @@ public class JavaConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1635 (the value-object analogue of #1621's own entity-based test/fix): a <c>value</c>
+    /// object's stored member with a default <c>Initializer</c> must have that default applied, mirroring
+    /// how <c>WriteEntityConstructor</c> already applies one for entities. Before the fix,
+    /// <c>EmitValueObject</c> only ever routed a member's <c>Initializer</c> through a <c>derived</c>
+    /// member's accessor (<c>WriteDerivedAccessor</c>) — a defaulted STORED member became a bare,
+    /// always-required record component with the declared default silently dropped.
+    /// </summary>
+    [Fact]
+    public void Value_object_applies_a_stored_member_default_initializer()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status {
+                Open
+                Closed
+              }
+              value Invoice {
+                status: Status = Status.Open
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("public record Invoice(Status status) {"); // canonical constructor unchanged
+        invoice.ShouldContain("public Invoice() {");                     // secondary, no-arg (every member defaulted)
+        invoice.ShouldContain("this(Status.Open);");                     // delegates, applying the default
+
+        var r2 = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r2.ToolchainAvailable, NoToolchainNotice);
+
+        r2.Ok.ShouldBeTrue(string.Join("\n", r2.Errors));
+    }
+
+    /// <summary>
+    /// A defaulted stored member is NOT required to be a trailing/independent subset: this pins a
+    /// value object whose FIRST stored member is defaulted and whose SECOND is required (interleaved,
+    /// the shape the issue's own spec flagged as a possible limitation). The secondary constructor's
+    /// delegating <c>this(...)</c> call must still fill each argument by its position in the record's
+    /// declared component order — the defaulted member's initializer first, then the required
+    /// parameter — never mis-ordered.
+    /// </summary>
+    [Fact]
+    public void Value_object_applies_an_interleaved_stored_member_default_initializer()
+    {
+        const string src =
+            """
+            context Billing {
+              value Discount {
+                percent: Int = 10
+                reason:  String
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var discount = result.Files.Single(f => f.RelativePath.EndsWith("Discount.java", StringComparison.Ordinal)).Contents;
+        discount.ShouldContain("public record Discount(long percent, String reason) {"); // canonical constructor unchanged
+        discount.ShouldContain("public Discount(String reason) {");                      // secondary, over just the required member
+        discount.ShouldContain("this(10L, reason);");                                    // default first, required second — matches declaration order
+
+        var r2 = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r2.ToolchainAvailable, NoToolchainNotice);
+
+        r2.Ok.ShouldBeTrue(string.Join("\n", r2.Errors));
+    }
 }
