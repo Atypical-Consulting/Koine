@@ -212,12 +212,11 @@ public class LocalScopeStackTests
     }
 
     /// <summary>
-    /// <see cref="LocalScopeStack.Overlay"/> is every translator's <c>EffectiveScope()</c>: the member
-    /// scope with the active locals layered on top, so a local SHADOWS a same-named member for type
-    /// resolution — and un-shadows it, at the member's own type, once it pops.
+    /// Compiles a single value object (<c>Money { n: String, base: Int }</c>) and returns its member
+    /// <see cref="TypeScope"/> plus the <see cref="ModelIndex"/> to resolve against — the shared fixture
+    /// every <c>Overlay</c> test layers a <see cref="LocalScopeStack"/> on top of.
     /// </summary>
-    [Fact]
-    public void Overlay_ShadowsASameNamedMember_AndUnshadowsItOnPop()
+    private static (ModelIndex Index, TypeScope Members) CompileMoneyMemberScope()
     {
         const string src =
             """
@@ -238,7 +237,18 @@ public class LocalScopeStackTests
             .OfType<ValueObjectDecl>()
             .First(v => v.Name == "Money");
 
-        TypeScope members = TypeScope.FromMembers(money.Members, index);
+        return (index, TypeScope.FromMembers(money.Members, index));
+    }
+
+    /// <summary>
+    /// <see cref="LocalScopeStack.Overlay"/> is every translator's <c>EffectiveScope()</c>: the member
+    /// scope with the active locals layered on top, so a local SHADOWS a same-named member for type
+    /// resolution — and un-shadows it, at the member's own type, once it pops.
+    /// </summary>
+    [Fact]
+    public void Overlay_ShadowsASameNamedMember_AndUnshadowsItOnPop()
+    {
+        (ModelIndex index, TypeScope members) = CompileMoneyMemberScope();
         var resolver = new TypeResolver(index, "Shop");
         var stack = new LocalScopeStack();
 
@@ -252,5 +262,59 @@ public class LocalScopeStackTests
         // ...and popping it hands the member back.
         stack.PopLocal("n");
         resolver.Infer(new IdentifierExpr("n"), stack.Overlay(members, index))!.Name.ShouldBe("String");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // #1594 — direct coverage of Overlay's `unresolvedType` parameter (#1583/#1538/#1498), exercised
+    // until now only indirectly through RustExpressionTranslator's own snapshot/conformance suite.
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Overlay_WithNoTypeAndDefaultUnresolvedType_SkipsTheBinding()
+    {
+        (ModelIndex index, TypeScope members) = CompileMoneyMemberScope();
+        var stack = new LocalScopeStack();
+        stack.PushLocal("n"); // bound, but no known type
+
+        TypeScope overlay = stack.Overlay(members, index);
+
+        // The default `unresolvedType: null` introduces no override — `n` resolves exactly as the bare
+        // member scope would.
+        overlay.TryGet("n", out KoineType overlaid).ShouldBeTrue();
+        members.TryGet("n", out KoineType fromMembers).ShouldBeTrue();
+        overlaid.ShouldBeSameAs(fromMembers);
+    }
+
+    [Fact]
+    public void Overlay_WithNoTypeAndAnUnresolvedType_MasksTheMemberInstead()
+    {
+        (ModelIndex index, TypeScope members) = CompileMoneyMemberScope();
+        var stack = new LocalScopeStack();
+        stack.PushLocal("n"); // bound, but no known type
+
+        TypeScope overlay = stack.Overlay(members, index, ErrorType.Instance);
+
+        // A non-null unresolvedType DOES introduce a binding — the mask shadows the member rather than
+        // letting it answer for the name by coincidence.
+        overlay.TryGet("n", out KoineType masked).ShouldBeTrue();
+        masked.ShouldBeSameAs(ErrorType.Instance);
+
+        members.TryGet("n", out KoineType fromMembers).ShouldBeTrue();
+        masked.ShouldNotBeSameAs(fromMembers);
+    }
+
+    [Fact]
+    public void Overlay_WithAKnownType_IsUnaffectedByAnUnresolvedType()
+    {
+        (ModelIndex index, TypeScope members) = CompileMoneyMemberScope();
+        var stack = new LocalScopeStack();
+        stack.PushLocal("n", Type("Int"));
+
+        TypeScope overlay = stack.Overlay(members, index, ErrorType.Instance);
+
+        // unresolvedType only ever applies to the UNRESOLVED branch — a local with a known type resolves
+        // to its own type, not the sentinel.
+        overlay.TryGet("n", out KoineType resolved).ShouldBeTrue();
+        resolved.Name.ShouldBe("Int");
     }
 }
