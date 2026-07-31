@@ -18,6 +18,7 @@ import {
   runEditToolStaging,
   stagedWorkspaceFiles,
   summarizeForChip,
+  buildDisplayIndex,
 } from '@/ai/assistantTools';
 import { createEditSession, newFileKey } from '@/ai/editSession';
 
@@ -429,6 +430,62 @@ describe('runEditToolStaging — multi-root display paths (#472)', () => {
       await runEditToolStaging('koine_read_file', JSON.stringify({ relPath: 'shared/events.koi' }), session),
     ).toContain('context E {}');
     expect(await runEditToolStaging('koine_list_files', '{}', session)).toContain('shared/events.koi');
+  });
+});
+
+// buildDisplayIndex is memoized per session state (#1135): rebuilt only when the session's version()
+// moves (a successful stage()/clear()), not on every call.
+describe('buildDisplayIndex — memoized per session version (#1135)', () => {
+  test('two calls with no mutation in between return the SAME index object', () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    const first = buildDisplayIndex(session);
+    const second = buildDisplayIndex(session);
+    expect(second).toBe(first);
+  });
+
+  test('staging a new file busts the cache: the fresh index includes it, and runEditToolStaging shows it', async () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    const before = buildDisplayIndex(session);
+
+    await runEditToolStaging(
+      'koine_write_file',
+      JSON.stringify({ relPath: 'b.koi', contents: 'context B {}' }),
+      session,
+    );
+
+    const after = buildDisplayIndex(session);
+    expect(after).not.toBe(before);
+    expect(after.displayFor.size).toBe(2);
+    expect(await runEditToolStaging('koine_list_files', '{}', session)).toContain('b.koi');
+  });
+
+  test('staging a colliding relPath refreshes the @n disambiguation', () => {
+    const session = createEditSession(
+      { 'mem://a/model.koi': 'context A {}' },
+      { 'mem://a/model.koi': 'model.koi' },
+    );
+    const before = buildDisplayIndex(session);
+    expect(before.ambiguous.size).toBe(0);
+
+    session.stage('new:model.koi', 'context B {}');
+
+    const after = buildDisplayIndex(session);
+    expect(after).not.toBe(before);
+    // Both colliding keys — the original and the newly-staged one — get disambiguated once the
+    // collision exists; neither displays bare anymore.
+    expect(after.ambiguous.get('model.koi')).toEqual(['model.koi@1', 'model.koi@2']);
+  });
+
+  test('clear() invalidates the cache', () => {
+    const session = createEditSession({ 'a.koi': 'context A {}' });
+    session.stage('b.koi', 'context B {}');
+    const before = buildDisplayIndex(session);
+
+    session.clear();
+
+    const after = buildDisplayIndex(session);
+    expect(after).not.toBe(before);
+    expect(after.displayFor.size).toBe(1);
   });
 });
 
