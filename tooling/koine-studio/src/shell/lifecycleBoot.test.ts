@@ -240,6 +240,47 @@ describe('lifecycleBoot', () => {
       expect(deps.openRecentFolder).toHaveBeenCalledWith('/proj');
     });
 
+    // Verification (#1065, follow-up from #1017/#1058): does the "Open anyway" retry — a SECOND
+    // guarded open-recent intent for the same cloned-empty path, queued after main.ts's
+    // onOpenEmptyAnyway seeds a first model and re-navigates — pop a redundant SECOND
+    // "Replace your work?" confirm? It does, but that is NOT a bug: `hasOpenWorkspace()` mirrors
+    // ide.tsx's real predicate (`workspace.rootsList().length > 0 || workspace.buffers.size > 0`),
+    // and the production `open-recent` action for an EMPTY target folder
+    // (workspaceController.openFolderPath) returns `{ ok:false, reason:'empty' }` BEFORE clearing
+    // buffers/roots — so the dirty workspace behind the first confirm is untouched by that failed
+    // attempt. `hasOpenWorkspace()` stays true into the retry's own guarded confirm, which is
+    // therefore reconfirming REAL still-unreplaced dirty state, not re-asking about nothing. This
+    // falsifies the spec's Approach B assumption ("hasOpenWorkspace() returning false is a reliable
+    // proxy for nothing to lose") for this exact scenario: since it never goes false here, gating the
+    // guard on `!hasOpenWorkspace()` would be inert — the confirm would still fire twice, unchanged.
+    it('the "Open anyway" retry reconfirms Replace-your-work — legitimately, since the first accepted intent never actually cleared the workspace', async () => {
+      const confirmReplaceWork = vi.fn(async () => true);
+      // Real workspace state is never touched by the first (failed-empty) open-recent, so this stays
+      // true across both guarded confirms — exactly like ide.tsx's live `hasOpenWorkspace` would.
+      const deps = makeDeps({ confirmReplaceWork, hasOpenWorkspace: vi.fn(() => true) });
+      createLifecycleBoot(deps);
+      await flush();
+
+      // 1st guarded return-visit intent: the clone's own open-recent (user accepts the confirm).
+      takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/cloned' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+      expect(confirmReplaceWork).toHaveBeenCalledTimes(1);
+      expect(deps.openRecentFolder).toHaveBeenNthCalledWith(1, '/cloned');
+
+      // That open-recent resolved empty; main.ts's onOpenRecentFailed navigates back to Home, then
+      // "Open anyway" seeds a first model and queues a SECOND open-recent intent for the same path —
+      // a second Home→editor transition, guarded exactly like the first.
+      takeStartIntentMock.mockReturnValue({ kind: 'open-recent', path: '/cloned' });
+      routeCallback()({ route: 'editor' }, { route: 'home' });
+      await flush();
+
+      // The guard fires AGAIN — reproducing the "double prompt" — but legitimately: nothing was ever
+      // actually discarded by the first (failed) attempt, so there is still something real to lose.
+      expect(confirmReplaceWork).toHaveBeenCalledTimes(2);
+      expect(deps.openRecentFolder).toHaveBeenNthCalledWith(2, '/cloned');
+    });
+
     // Regression (desktop "Model request failed: LSP not started"): on a Home-first cold boot the IDE is
     // lazy-initialised INSIDE main.ts's route→editor `set()` notification, and Set.forEach visits the
     // freshly-registered route-intent listener during that same transition. If it consumed the intent
