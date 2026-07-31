@@ -38,7 +38,9 @@ public sealed partial class PhpEmitter
 
         // Classifies a field's type for `equals()`: a value object / id value object compares
         // structurally (via its own `equals()`), a primitive/enum by value (`===`) — see #686.
-        var resolver = new TypeResolver(emit.Index);
+        // Passing contextName lets IsValueLike/IsUserType resolve context-first (#1633/#1641), so a
+        // same-named type in another context can't misclassify this context's own declaration.
+        var resolver = new TypeResolver(emit.Index, contextName);
 
         // This value object's full operator demand, resolved once from the analyzer's single-pass model
         // (#836): the scalar multiply factors, the `sum`-fold `Summable` flag, the plain binary `+`/`-`
