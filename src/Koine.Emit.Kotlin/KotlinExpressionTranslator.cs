@@ -156,10 +156,7 @@ internal sealed class KotlinExpressionTranslator
                 WriteReconciledBranch(cond.Else, elseType, cond.Then, thenType, sb);
                 break;
             case CoalesceExpr co:
-                // The left is nullable (T?); Koine `l ?? r` -> Kotlin elvis `l ?: r`, yielding the non-null T.
-                WriteAtom(co.Left, sb);
-                sb.Append(" ?: ");
-                Write(co.Right, sb);
+                WriteCoalesce(co, sb);
                 break;
             case MemberAccessExpr ma:
                 WriteMemberAccess(ma, sb);
@@ -247,6 +244,53 @@ internal sealed class KotlinExpressionTranslator
         }
 
         Write(branch, sb);
+    }
+
+    /// <summary>
+    /// Writes a coalesce <c>l ?? r</c>, reconciling a numeric-type mismatch between the two operands
+    /// (<c>Int?</c> vs <c>Decimal?</c>) before emitting Kotlin's elvis <c>?:</c> — the left is nullable
+    /// (<c>T?</c>) and the elvis yields the non-null <c>T</c>. Unreconciled, a <c>Long?</c>/<c>BigDecimal?</c>
+    /// pair infers Kotlin's nearest common supertype (<c>Number? &amp; Comparable&lt;*&gt;?</c>, not
+    /// <c>BigDecimal?</c>) — a real <c>kotlinc</c> "initializer type mismatch" error (#1615), the Kotlin
+    /// counterpart of #1548's Java <c>Optional.or</c>/<c>.orElse</c> fix. Unlike Java's <c>Optional&lt;T&gt;</c>
+    /// (a T-fixed instance method whose receiver type forces an <c>.or</c>-vs-<c>.orElse</c> branch), Kotlin's
+    /// elvis is a plain binary operator with no receiver-fixed-generic constraint: each side is reconciled
+    /// against the OTHER'S type independently, then joined with a bare <c>?:</c>.
+    /// <see cref="BranchReconciliation.NeedsSomeWrap"/> never applies to either side: <c>co.Left</c> is
+    /// always nullable (that's what makes <c>??</c> meaningful) so it structurally never needs a wrap, and
+    /// <c>co.Right</c>'s own nullability already IS the elvis semantics — Kotlin's nullable union needs no
+    /// extra lift the way Java's <c>Optional</c> would.
+    /// </summary>
+    private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
+    {
+        TypeRef? leftType = InferType(co.Left);
+        TypeRef? rightType = InferType(co.Right);
+
+        WriteAtom(co.Left, sb);
+        if (BranchReconciliation.Classify(leftType, rightType).NeedsOptionalWiden)
+        {
+            sb.Append("?.let { java.math.BigDecimal.valueOf(it) }");
+        }
+
+        sb.Append(" ?: ");
+
+        BranchReconciliation rightNeeds = BranchReconciliation.Classify(rightType, leftType);
+        if (rightNeeds.NeedsWiden)
+        {
+            WriteBigDecimalOperand(co.Right, rightType, sb);
+        }
+        else if (rightNeeds.NeedsOptionalWiden)
+        {
+            // Atomized (not `Write`): the `?.let { … }` suffix binds tighter than a bare `?:`, so a compound
+            // right operand (e.g. a nested coalesce) must be parenthesized or the suffix silently attaches
+            // to only its innermost operand instead of the whole thing (#1615 code review).
+            WriteAtom(co.Right, sb);
+            sb.Append("?.let { java.math.BigDecimal.valueOf(it) }");
+        }
+        else
+        {
+            Write(co.Right, sb);
+        }
     }
 
     /// <summary>Writes an operand as an atom: a compound (binary/conditional/coalesce) is parenthesized so it composes safely as a receiver or a unary/argument operand.</summary>
