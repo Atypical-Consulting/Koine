@@ -557,4 +557,42 @@ public class ScenarioRunnerTests
         precondition.Outcome.ShouldBe(CheckOutcome.Failed);
         result.Ok.ShouldBeFalse();
     }
+
+    [Fact]
+    public void Requires_lambda_distinctBy_selector_passes_when_every_quantity_is_unique()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkUniqueQuantities",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(3)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_distinctBy_selector_fails_when_two_lines_share_a_quantity()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkUniqueQuantities",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(2)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
 }
