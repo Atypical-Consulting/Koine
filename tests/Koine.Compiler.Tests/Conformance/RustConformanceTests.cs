@@ -4123,6 +4123,62 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1638 code-review finding: a read model's DIRECT field (<c>EmitReadModel</c>,
+    /// <c>RustEmitter.Cqrs.cs</c>) copies a like-named member straight off the SOURCE type — which, per
+    /// R12.3, may live in a DIFFERENT bounded context than the read model itself (here the read model is
+    /// declared in <c>Billing</c>, projecting <c>Ordering.Order</c> via an explicit import). The very first
+    /// draft of this issue's fix passed the read model's OWN context (<c>Billing</c>) as the classification
+    /// fallback for the source field's bare (unqualified) type — but that field is declared ON <c>Order</c>,
+    /// i.e. WITHIN <c>Ordering</c>'s own model, so its correct resolution frame is <c>Ordering</c>, not the
+    /// projecting read model's context. <c>Billing</c> independently declaring its own, differently-kinded
+    /// <c>Status</c> (a value object, vs. <c>Ordering.Status</c>'s data-free enum) makes the misclassification
+    /// observable: the read model's <c>status</c> field would be typed/qualified as <c>Billing</c>'s own
+    /// <c>Status</c> struct (a same-module bare name, since the read model's own file IS Billing's module)
+    /// while the accessor assigns an <c>Ordering::Status</c> value — a real <c>rustc</c> E0308 ("mismatched
+    /// types"). The fix threads the SOURCE type's own resolved owning context (via
+    /// <c>ModelIndex.ResolveOwner</c>) as <c>RustTypeMapper</c>'s <c>referencingContext</c> override for
+    /// direct fields only — a derived field's own declared type stays resolved against the read model's own
+    /// context, since that type IS declared there.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_from_a_foreign_context_resolves_against_the_source_s_own_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Order }
+
+              readmodel OrderSummary from Order {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Pending
+                Shipped
+                Delivered
+              }
+
+              entity Order identified by OrderId {
+                status: Status = Pending
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1533 edge case: an OPTIONAL-declared <c>String?</c> derived member whose body is a smart
     /// enum's <c>String</c> associated-data accessor must be owned (<c>.to_string()</c>) BEFORE
     /// <c>SomeWrapIfNeeded</c> wraps it in <c>Some(...)</c> — mirrors #1332's ordering for the sibling

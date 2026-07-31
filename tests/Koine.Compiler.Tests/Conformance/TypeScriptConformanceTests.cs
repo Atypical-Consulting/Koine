@@ -895,4 +895,61 @@ public class TypeScriptConformanceTests
             "a bare, unqualified reference to Billing's OWN enum Status must not misclassify against "
             + "Shipping's differently-kinded, same-named sibling Status:\n" + string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1638 code-review finding: a read model's DIRECT field (<c>TypeScriptEmitter.Cqrs.cs</c>)
+    /// copies a like-named member straight off the SOURCE type — which, per R12.3, may live in a
+    /// DIFFERENT bounded context than the read model itself (here the read model is declared in
+    /// <c>Billing</c>, projecting <c>Ordering.Order</c> via an explicit import). The very first draft of
+    /// this issue's fix passed the read model's OWN context (<c>Billing</c>) as the classification
+    /// fallback for the source field's bare (unqualified) type — but that field is declared ON
+    /// <c>Order</c>, i.e. WITHIN <c>Ordering</c>'s own model, so its correct resolution frame is
+    /// <c>Ordering</c>, not the projecting read model's context. <c>Billing</c> independently declaring
+    /// its own, differently-kinded <c>Status</c> (a value object, vs. <c>Ordering.Status</c>'s data-free
+    /// enum) makes the misclassification observable: the read model's <c>status</c> field would be typed
+    /// <c>Status</c> (Billing's own value-object interface) instead of <c>StatusMember</c>
+    /// (<c>Ordering</c>'s enum interface) — a genuine <c>tsc --strict</c> error ("Type 'StatusMember' is
+    /// missing the following properties from type 'Status'"). The fix resolves the SOURCE type's own
+    /// owning context via <c>ModelIndex.ResolveOwner</c> and passes THAT as the classify-fallback for a
+    /// direct field's type, instead of the read model's own context.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_from_a_foreign_context_resolves_against_the_source_s_own_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Order }
+
+              readmodel OrderSummary from Order {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Pending
+                Shipped
+                Delivered
+              }
+
+              entity Order identified by OrderId {
+                status: Status = Pending
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "a read model's direct field must classify the SOURCE type's own bare member reference against "
+            + "the source's own owning context, not the read model's:\n" + string.Join("\n", check.Errors));
+    }
 }

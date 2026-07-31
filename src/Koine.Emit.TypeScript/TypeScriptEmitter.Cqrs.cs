@@ -97,8 +97,14 @@ public sealed partial class TypeScriptEmitter
             string tsType, rhs;
             if (f.Projection is null)
             {
-                // Direct field: type and value come from the like-named source member.
-                tsType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t) ? typeMapper.Map(t, context) : "unknown";
+                // Direct field: type and value come from the like-named source member. The source type
+                // (and thus this member's own declaration) may live in a DIFFERENT bounded context than
+                // this read model (R12.3 cross-context projection) — classify/map a bare field type
+                // against the SOURCE's own owning context, not this read model's, so a same-named but
+                // differently-kinded sibling type declared locally here can't misclassify it (#1638).
+                tsType = index.TryGetMemberType(context, rm.SourceType, f.Name, out TypeRef t)
+                    ? typeMapper.Map(t, index.ResolveOwner(rm.SourceType, context).Owner ?? context)
+                    : "unknown";
                 rhs = "src." + prop;
             }
             else
