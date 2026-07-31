@@ -236,17 +236,7 @@ internal sealed class JavaExpressionTranslator
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
-                // The left is optional (Optional<T>). `l ?? r` -> `l.orElse(r)` yields the non-optional T
-                // when `r` is a bare value, but `Optional<T>.orElse(T)` requires a non-Optional argument —
-                // when `r` is ITSELF Optional-typed (e.g. another `T?` factory parameter), the result must
-                // stay Optional-shaped via `l.or(() -> r)` instead, matching TypeResolver.VisitCoalesce's
-                // own `right.IsOptional` propagation (#1520). Mirrors the Rust translator's
-                // `.or_else`/`.unwrap_or_else` split.
-                WriteAtom(co.Left, sb);
-                bool rightIsOptional = InferType(co.Right)?.IsOptional == true;
-                sb.Append(rightIsOptional ? ".or(() -> " : ".orElse(");
-                WriteTopLevel(co.Right, sb);
-                sb.Append(')');
+                WriteCoalesce(co, sb);
                 break;
             case MemberAccessExpr ma:
                 WriteMemberAccess(ma, sb);
@@ -332,6 +322,55 @@ internal sealed class JavaExpressionTranslator
         {
             sb.Append(')');
         }
+    }
+
+    /// <summary>
+    /// Writes a coalesce <c>l ?? r</c>, reconciling a numeric-type mismatch between the two operands
+    /// (<c>Int?</c> vs <c>Decimal?</c>) before choosing <c>.or(() -&gt; r)</c> (<c>r</c> itself
+    /// <c>Optional</c>-typed, #1520) vs <c>.orElse(r)</c> (bare <c>r</c>). <c>TypeResolver</c> legitimately
+    /// widens a coalesce between mismatched numeric operands the same way it does for a conditional's two
+    /// branches (#975) — but <c>Optional&lt;T&gt;.or</c>/<c>.orElse</c> is a T-fixed INSTANCE method: the
+    /// receiver's own static type (here, <c>co.Left</c>'s) fixes what the argument must be, so unlike
+    /// <see cref="WriteReconciledBranch"/>'s two independent branches, only ONE side's widen dimension can
+    /// ever legitimately fire per position — unused here on purpose: <see cref="BranchReconciliation.NeedsSomeWrap"/>
+    /// never applies to either operand. <c>co.Left</c> is always <c>Optional</c>-typed (that's what makes
+    /// <c>??</c> meaningful), so it structurally never needs a wrap; <c>co.Right</c>'s own optionality is
+    /// what already picks <c>.or</c> vs <c>.orElse</c> above, so wrapping it in an extra <c>Optional.of(...)</c>
+    /// would corrupt the bare-value <c>.orElse</c> argument.
+    /// </summary>
+    private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
+    {
+        TypeRef? leftType = InferType(co.Left);
+        TypeRef? rightType = InferType(co.Right);
+        bool rightIsOptional = rightType?.IsOptional == true;
+
+        WriteAtom(co.Left, sb);
+        if (BranchReconciliation.Classify(leftType, rightType).NeedsOptionalWiden)
+        {
+            sb.Append(".map(java.math.BigDecimal::valueOf)");
+        }
+
+        sb.Append(rightIsOptional ? ".or(() -> " : ".orElse(");
+
+        BranchReconciliation rightNeeds = BranchReconciliation.Classify(rightType, leftType);
+        if (rightIsOptional)
+        {
+            WriteTopLevel(co.Right, sb);
+            if (rightNeeds.NeedsOptionalWiden)
+            {
+                sb.Append(".map(java.math.BigDecimal::valueOf)");
+            }
+        }
+        else if (rightNeeds.NeedsWiden)
+        {
+            WriteBigDecimalOperand(co.Right, rightType, sb);
+        }
+        else
+        {
+            WriteTopLevel(co.Right, sb);
+        }
+
+        sb.Append(')');
     }
 
     private void WriteUnary(UnaryExpr un, StringBuilder sb)
