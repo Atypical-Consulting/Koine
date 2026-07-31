@@ -17,9 +17,12 @@ import { domById } from '@/shared/domById';
 import type { PrefsCallbacks } from '@/settings/prefs';
 import type { Platform } from '@/host';
 import type { KoineLsp, SourceSpan } from '@/lsp/lsp';
+import type { AppStore } from '@/store/index';
 
 export interface PanelHostDeps {
   prefsCallbacks: PrefsCallbacks;
+  /** The app store, threaded into createSettingsPage as its injected dependency (#1351). */
+  store: AppStore;
   /** The store's pending landing category (appStore.settingsCategory) for the Settings page. */
   settingsCategory(): string | undefined;
   /** Record the Settings-open intent in the store (controller.showSettings) before building the page. */
@@ -104,6 +107,7 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     settingsPage = createSettingsPage(
       { header: domById('settings-page-header'), body: domById('settings-page-body') },
       deps.prefsCallbacks,
+      deps.store,
       () => closeSettings(), // use the focus-restoring wrapper, not the raw store action
     );
     // A first build already paints from the live settings; only a deep-link needs the extra repaint to
