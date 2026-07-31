@@ -110,9 +110,9 @@ export const LargeTreeScrolledToBand: Story = {
     // the story first renders (until then it paints the "Parsing…" state). Re-query INSIDE `waitFor` and
     // return the element once it exists — capturing the scroller once, up front, would close over a `null`
     // (the fetch hasn't settled) that `waitFor` can never see mount.
-    const scroller = await waitFor(() => {
+    const scroller = await waitFor(async () => {
       const el = canvasElement.querySelector<HTMLElement>('.koi-stree-scroll');
-      expect(el?.querySelector('[role="tree"]')).toBeTruthy();
+      await expect(el?.querySelector('[role="tree"]')).toBeTruthy();
       return el!;
     });
     // Scroll deep so the window mounts only level-3 members; the root/context ancestors move into the band.

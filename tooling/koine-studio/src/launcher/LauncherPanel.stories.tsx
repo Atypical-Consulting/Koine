@@ -262,20 +262,20 @@ export const Results: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: 'Shipment' } });
+    await fireEvent.input(input, { target: { value: 'Shipment' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelectorAll('.lx-kind').length).toBeGreaterThanOrEqual(4);
-      expect(canvasElement.querySelector('.lx-title mark')).toBeTruthy();
+    await waitFor(async () => {
+      await expect(canvasElement.querySelectorAll('.lx-kind').length).toBeGreaterThanOrEqual(4);
+      await expect(canvasElement.querySelector('.lx-title mark')).toBeTruthy();
     });
 
     // Documents the real chip codes (`catalog.ts`'s `KIND_META`): AR/EN/VO/IE — NOT the "AR/EM/VO/IE"
     // that issue #1160's Task 2 text mistakenly lists (EM is the enum code, not entity's).
     const codes = Array.from(canvasElement.querySelectorAll('.lx-kind')).map((el) => el.textContent);
-    expect(codes).toContain('AR');
-    expect(codes).toContain('EN');
-    expect(codes).toContain('VO');
-    expect(codes).toContain('IE');
+    await expect(codes).toContain('AR');
+    await expect(codes).toContain('EN');
+    await expect(codes).toContain('VO');
+    await expect(codes).toContain('IE');
   },
 };
 
@@ -292,18 +292,18 @@ export const ResultsLight: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: 'Shipment' } });
+    await fireEvent.input(input, { target: { value: 'Shipment' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelectorAll('.lx-kind').length).toBeGreaterThanOrEqual(4);
-      expect(canvasElement.querySelector('.lx-title mark')).toBeTruthy();
+    await waitFor(async () => {
+      await expect(canvasElement.querySelectorAll('.lx-kind').length).toBeGreaterThanOrEqual(4);
+      await expect(canvasElement.querySelector('.lx-title mark')).toBeTruthy();
     });
 
     const codes = Array.from(canvasElement.querySelectorAll('.lx-kind')).map((el) => el.textContent);
-    expect(codes).toContain('AR');
-    expect(codes).toContain('EN');
-    expect(codes).toContain('VO');
-    expect(codes).toContain('IE');
+    await expect(codes).toContain('AR');
+    await expect(codes).toContain('EN');
+    await expect(codes).toContain('VO');
+    await expect(codes).toContain('IE');
   },
 };
 
@@ -322,11 +322,11 @@ export const CommandMode: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: '>' } });
+    await fireEvent.input(input, { target: { value: '>' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Commands');
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    await waitFor(async () => {
+      await expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Commands');
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
     });
   },
 };
@@ -342,11 +342,11 @@ export const CommandModeLight: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: '>' } });
+    await fireEvent.input(input, { target: { value: '>' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Commands');
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    await waitFor(async () => {
+      await expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Commands');
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
     });
   },
 };
@@ -362,11 +362,11 @@ export const SymbolMode: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: '@Or' } });
+    await fireEvent.input(input, { target: { value: '@Or' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Symbols');
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    await waitFor(async () => {
+      await expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Symbols');
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
     });
   },
 };
@@ -383,11 +383,11 @@ export const SymbolModeLight: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: '@Or' } });
+    await fireEvent.input(input, { target: { value: '@Or' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Symbols');
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+    await waitFor(async () => {
+      await expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Symbols');
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
     });
   },
 };
@@ -405,13 +405,13 @@ export const EventMode: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: '#' } });
+    await fireEvent.input(input, { target: { value: '#' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Events');
+    await waitFor(async () => {
+      await expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Events');
       const groupLabels = Array.from(canvasElement.querySelectorAll('.lx-group-label')).map((el) => el.textContent);
-      expect(groupLabels.some((label) => label?.includes('Events'))).toBe(true);
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+      await expect(groupLabels.some((label) => label?.includes('Events'))).toBe(true);
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
     });
   },
 };
@@ -426,13 +426,13 @@ export const EventModeLight: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = canvas.getByLabelText('Search commands, symbols, files…');
-    fireEvent.input(input, { target: { value: '#' } });
+    await fireEvent.input(input, { target: { value: '#' } });
 
-    await waitFor(() => {
-      expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Events');
+    await waitFor(async () => {
+      await expect(canvasElement.querySelector('.lx-modepill')?.textContent).toContain('Events');
       const groupLabels = Array.from(canvasElement.querySelectorAll('.lx-group-label')).map((el) => el.textContent);
-      expect(groupLabels.some((label) => label?.includes('Events'))).toBe(true);
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+      await expect(groupLabels.some((label) => label?.includes('Events'))).toBe(true);
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
     });
   },
 };
@@ -450,10 +450,10 @@ export const EventModeLight: Story = {
 export const PreviewPopulated: Story = {
   decorators: [withTheme('dark')],
   play: async ({ canvasElement }) => {
-    await waitFor(() => {
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
-      expect(canvasElement.querySelector('.lx.has-preview')).toBeTruthy();
-      expect(canvasElement.querySelector('.lx-preview .pv-name')?.textContent).toBe('Order');
+    await waitFor(async () => {
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+      await expect(canvasElement.querySelector('.lx.has-preview')).toBeTruthy();
+      await expect(canvasElement.querySelector('.lx-preview .pv-name')?.textContent).toBe('Order');
     });
   },
 };
@@ -467,10 +467,10 @@ export const PreviewPopulatedLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
   play: async ({ canvasElement }) => {
-    await waitFor(() => {
-      expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
-      expect(canvasElement.querySelector('.lx.has-preview')).toBeTruthy();
-      expect(canvasElement.querySelector('.lx-preview .pv-name')?.textContent).toBe('Order');
+    await waitFor(async () => {
+      await expect(canvasElement.querySelectorAll('.lx-item').length).toBeGreaterThan(0);
+      await expect(canvasElement.querySelector('.lx.has-preview')).toBeTruthy();
+      await expect(canvasElement.querySelector('.lx-preview .pv-name')?.textContent).toBe('Order');
     });
   },
 };

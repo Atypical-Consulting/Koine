@@ -50,7 +50,7 @@ describe('SearchPanel', () => {
       <SearchPanel {...opts} visible={true} onClose={() => {}} onRegisterSeed={(fn) => (seedFn = fn)} />,
     );
     // The launcher's "Find in model" seeds the term instead of leaving the box empty.
-    act(() => seedFn!('Money'));
+    await act(() => seedFn!('Money'));
     await view.findByText('2 results in 2 files');
     expect((view.getByLabelText('Search text') as HTMLInputElement).value).toBe('Money');
   });

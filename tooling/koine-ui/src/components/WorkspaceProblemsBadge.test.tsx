@@ -18,11 +18,11 @@ describe('WorkspaceProblemsBadge', () => {
     expect(badge(container)).toBeNull();
   });
 
-  test('renders the host-provided kind/parts across ALL files and the affected-file count', () => {
+  test('renders the host-provided kind/parts across ALL files and the affected-file count', async () => {
     const store = createTestReadableStore<WorkspaceProblemsSlice>({ kind: 'clean', parts: [], fileCount: 0 });
     const { container } = render(<WorkspaceProblemsBadge store={store} />);
 
-    act(() => store.set({ kind: 'error', parts: ['1 error', '1 warning'], fileCount: 2 }));
+    await act(() => store.set({ kind: 'error', parts: ['1 error', '1 warning'], fileCount: 2 }));
 
     const el = badge(container)!;
     expect(el).not.toBeNull();
@@ -32,17 +32,17 @@ describe('WorkspaceProblemsBadge', () => {
     expect(el.textContent).toContain('in 2 files');
   });
 
-  test('uses the singular "file" for a single affected file, and clears when diagnostics go away', () => {
+  test('uses the singular "file" for a single affected file, and clears when diagnostics go away', async () => {
     const store = createTestReadableStore<WorkspaceProblemsSlice>({ kind: 'clean', parts: [], fileCount: 0 });
     const { container } = render(<WorkspaceProblemsBadge store={store} />);
 
-    act(() => store.set({ kind: 'warn', parts: ['2 warnings'], fileCount: 1 }));
+    await act(() => store.set({ kind: 'warn', parts: ['2 warnings'], fileCount: 1 }));
     const el = badge(container)!;
     expect(el.getAttribute('data-kind')).toBe('warn');
     expect(el.textContent).toContain('2 warnings');
     expect(el.textContent).toContain('in 1 file');
 
-    act(() => store.set({ kind: 'clean', parts: [], fileCount: 0 }));
+    await act(() => store.set({ kind: 'clean', parts: [], fileCount: 0 }));
     expect(badge(container)).toBeNull();
   });
 

@@ -11,14 +11,14 @@ import { appStore, createAppStore } from '@/store/index';
 describe('useAppStore', () => {
   afterEach(() => cleanup());
 
-  test('1-arg overload (singleton store): re-renders on its slice, not on an unrelated slice', () => {
+  test('1-arg overload (singleton store): re-renders on its slice, not on an unrelated slice', async () => {
     let renders = 0;
     function Probe() {
       renders++;
       return <span>{useAppStore((s) => s.emitTarget)}</span>;
     }
     // Known baseline on the shared singleton (vitest isolates modules per file, but be explicit).
-    act(() => {
+    await act(() => {
       appStore.getState().setEmitTarget('csharp');
       appStore.getState().setNavAltitude('strategic');
     });
@@ -28,16 +28,16 @@ describe('useAppStore', () => {
     const base = renders;
 
     // Unrelated slice change → the selected value is unchanged → no re-render.
-    act(() => appStore.getState().setNavAltitude('tactical'));
+    await act(() => appStore.getState().setNavAltitude('tactical'));
     expect(renders).toBe(base);
 
     // Selected slice change → exactly one re-render, with the new value.
-    act(() => appStore.getState().setEmitTarget('typescript'));
+    await act(() => appStore.getState().setEmitTarget('typescript'));
     expect(renders).toBe(base + 1);
     expect(container.textContent).toBe('typescript');
   });
 
-  test('2-arg overload (injected store): re-renders on its slice, not on an unrelated slice', () => {
+  test('2-arg overload (injected store): re-renders on its slice, not on an unrelated slice', async () => {
     const store = createAppStore();
     let renders = 0;
     function Probe() {
@@ -50,11 +50,11 @@ describe('useAppStore', () => {
     const base = renders;
 
     // Unrelated slice change on the injected store → no re-render.
-    act(() => store.getState().setNavAltitude('tactical'));
+    await act(() => store.getState().setNavAltitude('tactical'));
     expect(renders).toBe(base);
 
     // Selected slice change → exactly one re-render, with the new value.
-    act(() => store.getState().setEmitTarget('php'));
+    await act(() => store.getState().setEmitTarget('php'));
     expect(renders).toBe(base + 1);
     expect(container.textContent).toBe('php');
 

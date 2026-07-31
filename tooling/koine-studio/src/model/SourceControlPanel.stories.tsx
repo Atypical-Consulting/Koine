@@ -117,7 +117,7 @@ export const OverflowMenuOpen: Story = {
     // items compute against real data (enabled) rather than the transient empty snapshot.
     await waitFor(() => expect(canvasElement.querySelector('.koi-sc-composer')).toBeTruthy());
     const trigger = canvasElement.querySelector<HTMLElement>('button[aria-label="Views and more actions"]');
-    expect(trigger).toBeTruthy();
+    await expect(trigger).toBeTruthy();
     trigger!.click();
     // createFloatingMenu mounts on document.body (outside canvasElement) — assert against the document.
     await waitFor(() => expect(document.querySelector('.koi-sc-menu')).toBeTruthy());
@@ -132,7 +132,7 @@ export const CommitOptionsMenuOpen: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(() => expect(canvasElement.querySelector('.koi-sc-composer')).toBeTruthy());
     const trigger = canvasElement.querySelector<HTMLElement>('button[aria-label="Commit options"]');
-    expect(trigger).toBeTruthy();
+    await expect(trigger).toBeTruthy();
     trigger!.click();
     await waitFor(() => expect(document.querySelector('.koi-sc-menu')).toBeTruthy());
   },
@@ -147,13 +147,13 @@ export const FullHistoryExpanded: Story = {
   args: { git: makeGit(changedFiles, longLog, changedNumstat) },
   play: async ({ canvasElement }) => {
     // Wait for the log to load capped at 10, then expand it via "View all".
-    const region = await waitFor(() => {
+    const region = await waitFor(async () => {
       const el = canvasElement.querySelector<HTMLElement>('[aria-label="Recent commits"]');
-      expect(el?.querySelectorAll('.koi-sc-log-item').length).toBe(10);
+      await expect(el?.querySelectorAll('.koi-sc-log-item').length).toBe(10);
       return el!;
     });
     const viewAll = canvasElement.querySelector<HTMLElement>('.koi-sc-viewall');
-    expect(viewAll).toBeTruthy();
+    await expect(viewAll).toBeTruthy();
     viewAll!.click();
     await waitFor(() => expect(region.querySelectorAll('.koi-sc-log-item').length).toBe(14));
   },
