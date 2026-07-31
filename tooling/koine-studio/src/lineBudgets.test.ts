@@ -206,7 +206,12 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // and prefsSections/{scopeKit,types}.ts. prefs.ts is now a thin assembler — ctx/scopeKit construction,
   // the 8 section builder calls, the category rail/tab wiring, and populate/applyOpenState/refresh/
   // suspend/destroy/onReset. End-state 506 LOC, ceil(506 × 1.02) = 517.
-  { file: 'src/settings/prefs.ts', maxLines: 517 },
+  // Raised 517 → 530: #434's raw keybindings.json editor added the OTHER genuine cross-section fan-out
+  // in this pane (alongside onReset) — a successful Apply must repaint the Keyboard panel's rows, which
+  // buildAdvancedSection can't reach into directly. onKeybindingsApplied (repaint Keyboard + live-apply
+  // via cb.onKeybindingsChanged) stays in the assembler for the same reason onReset does. Measured
+  // end-state 519 LOC, ceil(519 × 1.02) = 530.
+  { file: 'src/settings/prefs.ts', maxLines: 530 },
   // Frozen 2026-07-02 at 1745 LOC, ceil(1745 × 1.02) = 1780. #986 ratchets this down as it decomposes
   // editor.ts. Freezing prevents further regrowth; it does not mandate the split — #986 owns that.
   // Lowered 1780 → 953: #986 split editor.ts's 38-export grab-bag into four sibling modules behind
@@ -227,7 +232,11 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   { file: 'src/editor/cmTheme.ts', maxLines: 116 },
   // Frozen 2026-07-09 at 130 LOC, ceil(130 × 1.02) = 133. Guards the #986 split's new sibling from
   // regrowing unguarded — see #981/#757.
-  { file: 'src/editor/outputView.ts', maxLines: 133 },
+  // Raised 133 → 176: #434 added createEditableJsonView, the writable twin of createJsonView, for the
+  // Advanced-settings raw keybindings.json editor — it belongs beside its read-only sibling rather than
+  // a new leaf module (both are small CodeMirror view factories with no schema/lint wiring). Measured
+  // end-state 172 LOC, ceil(172 × 1.02) = 176.
+  { file: 'src/editor/outputView.ts', maxLines: 176 },
   // Frozen 2026-07-09 at 176 LOC, ceil(176 × 1.02) = 180. Guards the #986 split's new sibling from
   // regrowing unguarded — see #981/#757.
   { file: 'src/editor/settingsJsonEditor.ts', maxLines: 180 },

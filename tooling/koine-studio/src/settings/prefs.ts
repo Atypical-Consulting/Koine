@@ -303,6 +303,17 @@ export function mountPreferencesPane(
         cb.onKeybindingsChanged?.(); // live-apply the restored default keymap to the editor
     }
 
+    // A successful Apply on the raw keybindings.json editor is the OTHER genuine cross-section fan-out in
+    // this pane (alongside onReset above): the Keyboard panel's rows must repaint to show whatever the
+    // edited JSON just persisted, which a section module must never reach into directly. So this hook —
+    // like onReset — stays in the assembler: repaint Keyboard from the fresh overrides, then live-apply
+    // via cb.onKeybindingsChanged (reconfigures the editor keymap), exactly mirroring what the Keyboard
+    // panel's OWN commit paths (record/reset/reassign) already do at each of their own call sites.
+    function onKeybindingsApplied(): void {
+        keyboard.populate(loadSettings());
+        cb.onKeybindingsChanged?.();
+    }
+
     const advanced = buildAdvancedSection(sectionCtx, {
         scopeKit,
         canSaveProjects: cb.canSaveProjects,
@@ -310,6 +321,7 @@ export function mountPreferencesPane(
         workspaceRootName: cb.workspaceRootName,
         pickWorkspaceRoot: cb.pickWorkspaceRoot,
         onReset,
+        onKeybindingsChanged: onKeybindingsApplied,
     });
 
     // --- About ----------------------------------------------------------------

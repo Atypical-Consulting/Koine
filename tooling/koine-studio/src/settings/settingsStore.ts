@@ -482,3 +482,40 @@ export function saveKeybindingOverride(id: BindingId, key: string | null): void 
 export function clearKeybindingOverrides(): void {
   removeKey(KEYBINDINGS_KEY);
 }
+
+/** The result of {@link parseKeybindingOverrides}: either the parsed override map, or a named error
+ *  describing exactly what was wrong (so the raw-JSON editor can surface it inline). */
+export type ParsedKeybindingOverrides =
+  | { ok: true; value: Partial<Record<BindingId, string>> }
+  | { ok: false; error: string };
+
+/**
+ * Parse and validate hand-edited `keybindings.json` text for the Advanced-settings raw JSON editor
+ * (#434). Shares {@link loadKeybindingOverrides}' guard (must be a known BindingId; value must be a
+ * string) but — unlike that loader, which silently drops a bad entry from a corrupt/legacy blob —
+ * REPORTS the first violation as a named error, since here the user typed it deliberately and a
+ * silent drop would look like the edit was simply ignored.
+ */
+export function parseKeybindingOverrides(text: string): ParsedKeybindingOverrides {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: 'Invalid JSON.' };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: 'Must be a JSON object mapping command ids to shortcuts.' };
+  }
+  const value: Partial<Record<BindingId, string>> = {};
+  for (const [id, v] of Object.entries(parsed as Record<string, unknown>)) {
+    // hasOwnProperty, not `in` — see loadKeybindingOverrides' own guard above for why.
+    if (!Object.prototype.hasOwnProperty.call(DEFAULT_BINDINGS, id)) {
+      return { ok: false, error: `Unknown command id "${id}".` };
+    }
+    if (typeof v !== 'string') {
+      return { ok: false, error: `"${id}" must be a string shortcut (use "" for unbound).` };
+    }
+    value[id as BindingId] = v;
+  }
+  return { ok: true, value };
+}

@@ -1011,9 +1011,9 @@ export function renderSymbolTree(
 }
 
 // The read-only output viewers (createOutputView / createJsonView / langExt / OutputLang / OutputView /
-// ConfigView) live in ./outputView (#986); re-exported so `@/editor/editor` consumers keep resolving
-// them here.
-export { langExt, createOutputView, createJsonView, type OutputLang, type OutputView, type ConfigView } from '@/editor/outputView';
+// ConfigView) plus the editable JSON view (createEditableJsonView / EditableJsonView, #434) live in
+// ./outputView (#986); re-exported so `@/editor/editor` consumers keep resolving them here.
+export { langExt, createOutputView, createJsonView, createEditableJsonView, type OutputLang, type OutputView, type ConfigView, type EditableJsonView } from '@/editor/outputView';
 
 // The editable settings.json editor (createJsonSettingsEditor / settingsSchemaHover /
 // settingsCompletionSource / JsonSettingsEditor) lives in ./settingsJsonEditor (#986); re-exported so
