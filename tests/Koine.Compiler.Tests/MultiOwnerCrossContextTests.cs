@@ -83,6 +83,24 @@ public class MultiOwnerCrossContextTests
         money.ShouldContain("record Money");
     }
 
+    [Fact]
+    public void Kotlin_qualifies_a_multi_owner_cross_context_reference()
+    {
+        var result = new KoineCompiler().Compile(MultiOwnerFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var wallet = result.Files.Single(f => f.RelativePath.EndsWith("gamma/Wallet.kt", StringComparison.Ordinal)).Contents;
+
+        // The multi-owner reference must be package-qualified to Alpha's package, NOT a bare `Money`
+        // (which Gamma's own package does not declare, so the source would not compile).
+        wallet.ShouldContain("koine.generated.alpha.Money");
+        wallet.ShouldNotContain("val balance: Money,");
+
+        // The owning package still declares the type bare.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("alpha/Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("data class Money");
+    }
+
     /// <summary>
     /// Same three contexts, but Gamma references <c>Beta.Money</c> with an EXPLICIT qualifier (no import).
     /// The qualifier is the modeller's intent, so the reference must qualify to <b>Beta</b> — not the
@@ -128,6 +146,19 @@ public class MultiOwnerCrossContextTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var wallet = result.Files.Single(f => f.RelativePath.EndsWith("gamma/Wallet.java", StringComparison.Ordinal)).Contents;
+
+        // The explicit `Beta.Money` qualifier must win: package-qualify to Beta, NOT Alpha.
+        wallet.ShouldContain("koine.generated.beta.Money");
+        wallet.ShouldNotContain("koine.generated.alpha.Money");
+    }
+
+    [Fact]
+    public void Kotlin_qualifies_an_explicit_qualifier_to_the_named_owner_not_the_ordinal_default()
+    {
+        var result = new KoineCompiler().Compile(QualifiedMultiOwnerFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var wallet = result.Files.Single(f => f.RelativePath.EndsWith("gamma/Wallet.kt", StringComparison.Ordinal)).Contents;
 
         // The explicit `Beta.Money` qualifier must win: package-qualify to Beta, NOT Alpha.
         wallet.ShouldContain("koine.generated.beta.Money");
