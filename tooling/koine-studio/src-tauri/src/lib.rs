@@ -2770,7 +2770,10 @@ mod tests {
                 false
             }
         });
-        assert!(freed, "the port was released, so it must eventually read as free");
+        assert!(
+            freed,
+            "the port was released, so it must eventually read as free"
+        );
 
         // `0` is the OS-assigned wildcard, never a concrete "freed" port.
         assert!(!requested_port_is_free(0));
