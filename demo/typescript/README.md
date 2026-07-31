@@ -20,7 +20,11 @@ end-to-end as part of its own `dotnet build`).
      the same id but different lines/status are equal, and two orders with different ids are not;
    - the `Draft`, `Placed`, and `Shipped` `OrderStatus` values are all constructible, mutually
      distinguishable, and route correctly through the generated `OrderStatusMatch` exhaustive
-     switch.
+     switch;
+   - the generated `place()`/`ship()` mutators drive a legal `Draft -> Placed -> Shipped` walk, and
+     calling `ship()` directly on a fresh `Draft` order (an illegal `Draft -> Shipped` transition)
+     throws `DomainInvariantViolationError`, proving the `states status { ... }` block's runtime
+     guard actually rejects illegal transitions.
 
    The driver asserts **values**, never emitted formatting/whitespace, so this demo never churns
    when the emitter's output shape changes — only when its *behavior* does.
@@ -52,29 +56,6 @@ locally, and a hard **Failed** under `KOINE_REQUIRE_CONFORMANCE=true` — the fl
 toolchain that silently goes missing in CI reddens the build instead of hiding as a skip). No npm
 `node_modules` install is required: the demo relies only on a global `tsc`/`node`, the same way the
 conformance harness does.
-
-## What this demo does NOT prove
-
-`templates/starters/ordering`'s `states status { Draft -> Placed; Placed -> Shipped; Placed ->
-Cancelled }` block has **no paired `command` declarations**. Per Koine's documented semantics (see
-[§11.6](../../website/src/content/docs/reference/commands-events-state.md)), *"the block by itself
-emits nothing — it is a constraint. Its effect appears wherever a command assigns that field"* — the
-runtime transition guard is only generated on a `command`'s assignment of the governed field. Because
-this starter template declares no commands, the emitted `Order` constructor accepts any
-`OrderStatus` value directly, with no generated mutator and no illegal-transition guard to exercise.
-
-This is a property of **the template**, not a TypeScript-emitter bug — every other Koine template
-that uses a `states` block (`pizzeria`, `library`, `saas-subscription`, `ticketing`) pairs it with
-commands, and the same gap applies identically to the C#, Python, PHP, and Rust output for this same
-template. This demo therefore constructs `Order` snapshots directly at each lifecycle value (`Draft`,
-`Placed`, `Shipped`) to prove the status values themselves are correct and distinguishable, and does
-**not** assert that constructing an illegal transition (e.g. `Draft -> Shipped`) is rejected, because
-nothing in the emitted code rejects it today.
-
-A human may want to file a follow-up issue to enrich `templates/starters/ordering.koi` with real
-`place`/`ship`/`cancel` commands (making its `template.json` "state transitions" teaching claim
-literally exercised by a generated guard), which would let this demo — and its Python/PHP/Rust
-siblings — assert a genuine illegal-transition rejection.
 
 ## Layout
 
