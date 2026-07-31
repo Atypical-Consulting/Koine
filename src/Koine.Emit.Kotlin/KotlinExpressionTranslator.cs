@@ -95,6 +95,9 @@ internal sealed class KotlinExpressionTranslator
     /// <summary>The semantic type an expression infers to in this type's scope (locals included).</summary>
     public TypeRef? InferType(Expr expr) => _resolver.Infer(expr, EffectiveScope());
 
+    /// <summary>The bounded context this translator resolves identifiers within (null = global/legacy mode).</summary>
+    internal string? Context => _resolver.Context;
+
     /// <summary>Translates an expression to a Kotlin expression string (no redundant outer parentheses).</summary>
     public string Translate(Expr expr, NameMode mode = NameMode.Parameter, string? expectedEnum = null)
     {
@@ -449,7 +452,8 @@ internal sealed class KotlinExpressionTranslator
     }
 
     /// <summary>True when a type classifies as a Koine value object (so its arithmetic lowers to a method call).</summary>
-    private bool IsValueObject(TypeRef? type) => type is not null && _index.Classify(type.Name) == TypeKind.Value;
+    private bool IsValueObject(TypeRef? type) =>
+        type is not null && _index.Classify(type.Qualifier ?? _resolver.Context, type.Name) == TypeKind.Value;
 
     /// <summary>Renders one operand of a plain-infix binary, dropping the redundant parentheses precedence/associativity does not require.</summary>
     private void WriteBinaryChild(Expr expr, BinaryOp parentOp, bool rightOperand, StringBuilder sb)
@@ -704,7 +708,7 @@ internal sealed class KotlinExpressionTranslator
     private void WriteSum(CallExpr call, string target, StringBuilder sb)
     {
         TypeRef? selector = InferSelectorType(call);
-        if (selector is not null && _index.Classify(selector.Name) == TypeKind.Value)
+        if (selector is not null && _index.Classify(selector.Qualifier ?? _resolver.Context, selector.Name) == TypeKind.Value)
         {
             sb.Append(target).Append(".map { ").Append(LambdaParam(call)).Append(" -> ");
             WriteLambdaBody(call, sb);
