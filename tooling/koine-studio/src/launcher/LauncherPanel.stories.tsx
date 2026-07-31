@@ -183,25 +183,18 @@ const meta = {
   component: LauncherPanel,
   parameters: {
     layout: 'fullscreen',
-    // ONE real, pre-existing launcher-runtime a11y defect surfaced by bringing this panel under
-    // Chromium axe coverage for the first time (this file, #1160) — not a fixture bug, and not
-    // fixable from a stories-only change (see the file-level "no launcher runtime changes"
-    // constraint), so it's narrowly gated here rather than left red or silently ignored. Filed as its
-    // own follow-up; remove its gate once that issue lands so this file's axe pass covers the element
-    // again:
-    //  - `.lx-modepill-label` / `.lx-mchip.on` (the active mode-switch pill/chip) fail color-contrast
-    //    in the LIGHT theme (#1677, surfaced by Task 3's prefix-mode stories) — excluded from the axe
-    //    context by selector, so no OTHER rule is skipped for them.
-    // A second defect, the selected row's tail `.lx-actbtn` tripping `nested-interactive` inside its
-    // `.lx-item[role="option"]`, is now FIXED (#1673: the results list is `role="grid"`/`row`/`gridcell`
-    // rather than `listbox`/`option` — see `ResultRow.tsx`) — no rule-disable needed any more. A third,
-    // `.lx-kind` (DDD chip) / `.lx-sub` (secondary text) failing color-contrast in both themes, is also
-    // now FIXED (#1672: per-kind `--koi-ddd-<slug>-ink` text tokens + a scoped `--koi-muted-strong` —
-    // see `tooling/koine-ui/src/tokens.css`) — full axe coverage (including those two elements) runs on
-    // every story below.
-    a11y: {
-      context: { exclude: ['.lx-modepill-label', '.lx-mchip.on'] },
-    },
+    // Every launcher-runtime a11y defect this panel's Chromium axe coverage (#1160) has surfaced is now
+    // FIXED, so no rule-disable is needed any more:
+    //  - The selected row's tail `.lx-actbtn` tripping `nested-interactive` inside its
+    //    `.lx-item[role="option"]` — FIXED (#1673: the results list is `role="grid"`/`row`/`gridcell`
+    //    rather than `listbox`/`option` — see `ResultRow.tsx`).
+    //  - `.lx-kind` (DDD chip) / `.lx-sub` (secondary text) failing color-contrast in both themes —
+    //    FIXED (#1672: per-kind `--koi-ddd-<slug>-ink` text tokens + a scoped `--koi-muted-strong` —
+    //    see `tooling/koine-ui/src/tokens.css`).
+    //  - `.lx-modepill-label` / `.lx-mchip.on` (the active mode-switch pill/chip) failing color-contrast
+    //    in the LIGHT theme — FIXED (#1677: a `--koi-accent-text` token, same pattern as #1672 — see
+    //    `tooling/koine-ui/src/tokens.css`).
+    // Full axe coverage (including all of the above) runs on every story below.
   },
   args: {
     visible: true,
@@ -330,10 +323,10 @@ export const CommandMode: Story = {
 };
 
 /** The same bare-`>` Commands-mode switch as {@link CommandMode}, forced to the light theme
- *  (`withTheme('light')`) on the matching `light` background. Note `.lx-modepill-label`'s own
- *  color-contrast stays excluded by the file-level `meta.parameters.a11y` gate (#1677) like every
- *  other story here — this still exercises the rest of the light-theme render (layout, other text)
- *  under Chromium axe. */
+ *  (`withTheme('light')`) on the matching `light` background. `.lx-modepill-label`'s own
+ *  color-contrast is now a genuine pass too (#1677, no longer excluded by the file-level
+ *  `meta.parameters.a11y` gate), so this story guards that fix alongside the rest of the
+ *  light-theme render under Chromium axe. */
 export const CommandModeLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
@@ -370,11 +363,11 @@ export const SymbolMode: Story = {
 };
 
 /** The same `@Or` Symbols-mode switch as {@link SymbolMode}, forced to the light theme
- *  (`withTheme('light')`) on the matching `light` background. Note `.lx-modepill-label`'s own
- *  color-contrast stays excluded by the file-level `meta.parameters.a11y` gate (#1677) like every
- *  other story here — this still exercises the rest of the light-theme render (layout, other text,
- *  and the matched `Order` row's own `.lx-kind`/`.lx-sub` contrast, a genuine pass since #1672) under
- *  Chromium axe. */
+ *  (`withTheme('light')`) on the matching `light` background. `.lx-modepill-label`'s own
+ *  color-contrast is now a genuine pass too (#1677, no longer excluded by the file-level
+ *  `meta.parameters.a11y` gate), so this story guards that fix alongside the rest of the
+ *  light-theme render (layout, other text, and the matched `Order` row's own `.lx-kind`/`.lx-sub`
+ *  contrast, a genuine pass since #1672) under Chromium axe. */
 export const SymbolModeLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
@@ -416,8 +409,8 @@ export const EventMode: Story = {
 
 /** The same bare-`#` Events-mode switch as {@link EventMode}, forced to the light theme
  *  (`withTheme('light')`) on the matching `light` background — the Chromium colour-contrast axe check
- *  genuinely covers `.lx-group-label` here (unexcluded); `.lx-modepill-label`'s own contrast stays
- *  excluded by the file-level `meta.parameters.a11y` gate (#1677) like every other story here. */
+ *  genuinely covers both `.lx-group-label` and `.lx-modepill-label` here (#1677, no longer excluded by
+ *  the file-level `meta.parameters.a11y` gate). */
 export const EventModeLight: Story = {
   decorators: [withTheme('light')],
   parameters: { backgrounds: { default: 'light' } },
