@@ -55,6 +55,10 @@ export interface EditSession {
   staged(): StagedEdit[];
   /** Empty the staging area: `staged()` → `[]` and `read()` falls back to `initial` again. */
   clear(): void;
+  /** Monotonic change counter: starts at 0, increments on every successful `stage()` (new or
+   *  re-staged key) and on `clear()`. A `stage()` rejected by the safety/extension guards does NOT
+   *  increment. Callers memoize derived state (e.g. the display index) keyed on this value. */
+  version(): number;
 }
 
 /**
@@ -93,6 +97,7 @@ export function createEditSession(
   const initialSet = new Set(initialKeys);
   // Map preserves insertion (stage) order, which `staged()` and `list()` rely on for determinism.
   const stagedMap = new Map<string, string>();
+  let changeVersion = 0;
 
   /** The display/validation relPath for `key`: the `display` entry, else the key itself (a new-file
    *  key contributes the relPath it was minted from). */
@@ -132,6 +137,7 @@ export function createEditSession(
         throw new Error(`Unsafe relPath (only .koi files can be edited): ${relPath}`);
       }
       stagedMap.set(key, body);
+      changeVersion++;
     },
 
     isNew(key: string): boolean {
@@ -153,6 +159,11 @@ export function createEditSession(
 
     clear(): void {
       stagedMap.clear();
+      changeVersion++;
+    },
+
+    version(): number {
+      return changeVersion;
     },
   };
 }
