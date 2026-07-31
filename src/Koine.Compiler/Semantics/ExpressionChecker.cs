@@ -1175,7 +1175,7 @@ internal sealed class ExpressionChecker
 
         if (op == "sum")
         {
-            if (!TypeResolver.IsNumeric(selector) && !_resolver.IsValueLike(selector))
+            if (!TypeResolver.IsNumeric(selector) && _index.Classify(_resolver.Context, selector.Name) != TypeKind.Value)
             {
                 Report(DiagnosticCodes.AggregateSelector, $"sum requires a numeric or value-object selector, but got '{selector.Name}'", call);
             }

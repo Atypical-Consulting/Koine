@@ -360,13 +360,14 @@ public class SemanticTests
     /// <summary>
     /// Issue #1655: <c>CheckAggregateSelector</c>'s <c>sum</c>/<c>min</c>/<c>max</c> selector-kind checks
     /// called the context-blind 1-arg <c>ModelIndex.Classify(string)</c> overload directly, instead of the
-    /// context-aware overload/<see cref="TypeResolver.IsValueLike"/> the way #1634/#1641 already fixed for
-    /// <c>CheckMember</c>. R13.2 lets Shop and Billing each legally declare their own <c>Status</c> type —
-    /// uniqueness is enforced per-context, not globally — so <c>ModelIndex</c>'s by-name registry is
-    /// last-write-wins across the whole model: whichever context is indexed last wins the context-blind
-    /// classify for every other context's same-named reference too. A context-blind check answered
-    /// Billing's later-declared <c>enum Status</c> even for a <c>sum(p =&gt; p)</c> fold over Shop's own,
-    /// genuinely-a-value-object <c>Status</c>, wrongly rejecting a valid model with <c>KOI0212</c>.
+    /// context-aware <see cref="ModelIndex.Classify(string?, string)"/> overload the way #1634/#1641
+    /// already fixed for <c>CheckMember</c>. R13.2 lets Shop and Billing each legally declare their own
+    /// <c>Status</c> type — uniqueness is enforced per-context, not globally — so <c>ModelIndex</c>'s
+    /// by-name registry is last-write-wins across the whole model: whichever context is indexed last wins
+    /// the context-blind classify for every other context's same-named reference too. A context-blind
+    /// check answered Billing's later-declared <c>enum Status</c> even for a <c>sum(p =&gt; p)</c> fold
+    /// over Shop's own, genuinely-a-value-object <c>Status</c>, wrongly rejecting a valid model with
+    /// <c>KOI0212</c>.
     /// </summary>
     [Fact]
     public void Sum_fold_over_a_value_object_resolves_against_its_own_context_despite_a_same_named_type_elsewhere()
@@ -388,5 +389,33 @@ public class SemanticTests
             }
             """;
         Validate(src).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Guards the fix's boundary: the <c>sum</c> branch must stay narrowly <see cref="TypeKind.Value"/>
+    /// -only, NOT widen to <see cref="TypeResolver.IsValueLike"/> (which also accepts
+    /// <see cref="TypeKind.IdValueObject"/>). <c>CSharpEmitter</c>'s ID value objects
+    /// (<c>EmitIdValueObject</c>) never generate an <c>operator+</c> — only <c>CheckAggregateSelector</c>
+    /// stood between an ID-selector <c>sum</c> and <c>WriteSum</c>'s value-like fold emitting
+    /// uncompilable <c>a + b</c> over two <c>OrderId</c>s. Widening this check (as an earlier draft of
+    /// #1655 did, mirroring the min/max branch's pre-existing <c>IsValueLike</c> call) would have let
+    /// this validate with zero diagnostics, then produce a Roslyn compile error downstream.
+    /// </summary>
+    [Fact]
+    public void Sum_fold_over_an_id_value_object_selector_is_still_rejected()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Order identified by OrderId {
+                total: Decimal
+              }
+              value Batch {
+                ids: List<OrderId>
+                canonical: OrderId = ids.sum(x => x)
+              }
+            }
+            """;
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.AggregateSelector && d.Message.Contains("'OrderId'"));
     }
 }
