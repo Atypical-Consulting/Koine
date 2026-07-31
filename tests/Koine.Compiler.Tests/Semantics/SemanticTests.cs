@@ -281,4 +281,47 @@ public class SemanticTests
             """;
         Validate(src).ShouldBeEmpty();
     }
+
+    /// <summary>
+    /// Issue #1644: <c>ConcreteEnumType</c>'s three <c>_index.IsEnumType(...)</c> call sites are the
+    /// same context-blind flat lookup #1634 fixed for <c>CheckMember</c>, just left untouched there.
+    /// Billing's own <c>status: Status</c> field is genuinely enum-typed, but Shipping separately (and
+    /// legally, per R13.2) declares an unrelated, non-enum <c>Status</c> value object that registers
+    /// AFTER Billing's in <see cref="Koine.Compiler.Ast.ModelIndex"/>'s flat, last-write-wins
+    /// <c>_byName</c> map — so the blind <c>IsEnumType("Status")</c> answers for Shipping's declaration
+    /// and wrongly says <c>status</c> is NOT enum-typed. This isn't just a missed disambiguation: with
+    /// <c>ConcreteEnumType(status, ...)</c> wrongly returning <c>null</c>, <c>CheckComparison</c>'s
+    /// <c>ResolveEnumOperand</c> call for the bare <c>Draft</c> member on the other side never gets
+    /// <c>status</c>'s own concrete type to resolve against, so it falls through to the raw inferred
+    /// type of <c>Draft</c> — which resolves via <see cref="Koine.Compiler.Ast.ModelIndex.EnumMemberToType"/>'s
+    /// own last-write-wins map to <c>Other.Stage</c> (registered after Billing's <c>Status</c>), NOT
+    /// Billing's own <c>Status</c>. The result is exactly the "wrong operand type fed into a downstream
+    /// check" failure mode the issue called out: a bogus KOI0210 <c>cannot compare 'Status' with 'Stage'</c>
+    /// on a model that should type-check cleanly.
+    /// </summary>
+    [Fact]
+    public void Bare_enum_member_disambiguates_via_a_fields_own_type_despite_a_same_named_type_elsewhere()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status { Draft, Paid }
+              value Invoice {
+                status: Status
+                isDraft: Bool = status == Draft
+              }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+
+            context Other {
+              enum Stage { Draft, Live }
+            }
+            """;
+        Validate(src).ShouldBeEmpty();
+    }
 }
