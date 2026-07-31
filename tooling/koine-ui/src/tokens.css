@@ -151,9 +151,23 @@
      .koi-events-view-btn[aria-pressed], .rail-axis[aria-selected]) all pair `color: var(--koi-accent)`
      with the identical background shape. Rather than a launcher-scoped token, this is broadly reusable —
      equal to --koi-accent in dark theme (already ~5.3:1 there, clean per the issue) and darkened in light theme
-     below, where raw --koi-accent measures only ~3.1–3.17:1 (sub-AA). Only wired up on
-     `.lx-modepill`/`.lx-mchip.on` by this issue; the other sites are follow-up candidates. */
+     below, where raw --koi-accent measures only ~3.1–3.17:1 (sub-AA). Wired up on `.lx-modepill`/
+     `.lx-mchip.on` by #1677; the other five of those sites are wired up by the #1704 follow-up sweep
+     below (docs/source-control/model in Koine Studio's own SCSS, `.deck-sub.on`/`.koi-events-view-btn`/
+     `.rail-axis` here) — source-control's avatar chip needed its own token instead (see
+     --koi-sc-avatar-ink below) since its worst-case background doesn't clear with this one. */
   --koi-accent-text: #5aa9ff;
+
+  /* source-control commit-avatar TEXT (issue #1704, the #1677 follow-up sweep): `.koi-sc-avatar`
+     pairs `color: var(--koi-accent)` with `color-mix(in srgb, var(--koi-accent) 18%, transparent)`
+     over the Properties rail's `--koi-paper-2`, but a launcher-focused commit row
+     (`.koi-sc-log-item[data-focused='true']`) ALSO tints its own background
+     `color-mix(in srgb, var(--koi-accent) 12%, transparent)` underneath the avatar's own tint — a
+     worst-case double-tint `--koi-accent-text` doesn't clear (~4.14:1 dark, ~4.47:1 light; see
+     tokens.test.ts). A dedicated, slightly-further-adjusted token clears both the resting and the
+     worst-case backgrounds in both themes without touching `--koi-accent-text` (whose calibration
+     #1677's launcher fix depends on). */
+  --koi-sc-avatar-ink: #6ab2ff;
 
   /* launcher `.lx-kind` chip TEXT (issue #1672): the `--koi-ddd-*` identity hues (concept-colors.
      generated.css) are deliberately dark-only across both themes (ADR 0004 — the maxGraph canvas
@@ -244,6 +258,12 @@ html[data-theme='light'] {
      `.lx-mchip.on`). This darkened blue clears ~5.16:1 there — see the :root block above for why dark
      theme needs no change and the full list of other same-shape consumers this token is meant to cover. */
   --koi-accent-text: #175ab0;
+
+  /* source-control commit-avatar TEXT, light theme (issue #1704): see the :root block above for the
+     worst-case double-tint rationale (a launcher-focused commit row's own background tint compositing
+     under the avatar's own tint). `--koi-accent-text` clears the resting background here (~5.06:1) but
+     not the worst case (~4.47:1); this darkened blue clears both (~5.15:1 resting, ~4.55:1 worst-case). */
+  --koi-sc-avatar-ink: #195aa8;
 
   /* launcher `.lx-kind` chip TEXT, light theme (issue #1672): the dark-only `--koi-ddd-*` identity hue
      rendered directly as text on this near-white surface measures ~1.2–2.4:1 for every kind. Each value
