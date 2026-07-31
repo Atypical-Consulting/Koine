@@ -308,6 +308,22 @@ public class R2OptionalityTests
     }
 
     [Fact]
+    public void Guarded_conditional_with_an_optional_fallback_stays_optional()
+    {
+        // `qty` is guarded, but the OTHER branch (`price`) is itself optional — the overall value can
+        // still be null via that path, so narrowing `qty` must not make the whole conditional appear safe.
+        const string src =
+            "context C {\n" +
+            "  value Item {\n" +
+            "    qty:      Int?\n" +
+            "    price:    Int?\n" +
+            "    resolved: Int = if qty.isPresent then qty else price\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldContain(d => d.Message.Contains("optional value assigned to non-optional field 'resolved'"));
+    }
+
+    [Fact]
     public void Guarded_conditional_resolves_narrowed_for_aggregate_selector_in_same_scope()
     {
         // #1564's aggregate-selector shape: the guard and the narrowed read are in the SAME lambda
