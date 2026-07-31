@@ -929,11 +929,15 @@ internal sealed class ExpressionChecker
 
     private void CheckMember(MemberAccessExpr ma, TypeScope scope)
     {
-        // Qualified enum reference `EnumType.Member`: validate the member, don't
-        // treat the enum type name as a field.
-        if (ma.Target is IdentifierExpr typeId && _index.IsEnumType(typeId.Name))
+        // Qualified enum reference `EnumType.Member`: validate the member, don't treat the enum
+        // type name as a field. Resolved context-first via the same ResolveDecl(...) every other
+        // lookup in this file uses (R13.2), so a same-named type legally declared in another
+        // context neither misclassifies this context's own enum nor hides its member set (the
+        // flat, global ModelIndex.EnumsDeclaring index can miss a shadowed enum's members —
+        // #1632 — but ResolveDecl's per-context lookup isn't built off that shadowed index).
+        if (ma.Target is IdentifierExpr typeId && ResolveDecl(new TypeRef(typeId.Name)) is EnumDecl enumDecl)
         {
-            if (!_index.EnumsDeclaring(ma.MemberName).Contains(typeId.Name))
+            if (!enumDecl.MemberNames.Contains(ma.MemberName))
             {
                 Report(DiagnosticCodes.UnknownEnumMemberForType,
                     $"unknown enum member '{ma.MemberName}' for type '{typeId.Name}'", ma);
