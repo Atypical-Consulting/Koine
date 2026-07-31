@@ -300,7 +300,7 @@ internal static class OperatorNeedsAnalyzer
         // Spec conditions (rendered over the target type's members) can use value-object arithmetic too.
         foreach ((SpecDecl spec, string specContext) in AllSpecs(model))
         {
-            yield return (spec.Condition, TypeScope.FromMembers(SpecTargetMembers(spec.TargetType, index), index), specContext);
+            yield return (spec.Condition, TypeScope.FromMembers(SpecTargetMembers(specContext, spec.TargetType, index), index), specContext);
         }
 
         // Read-model derived-field projections (over the source type's members) can use value-object arithmetic too.
@@ -586,10 +586,16 @@ internal static class OperatorNeedsAnalyzer
         set.Add(scalar);
     }
 
-    /// <summary>The members in scope for a spec on <paramref name="typeName"/> (entities add a synthetic <c>id</c>).</summary>
-    private static IReadOnlyList<Member> SpecTargetMembers(string typeName, ModelIndex index)
+    /// <summary>
+    /// The members in scope for a spec on <paramref name="typeName"/> (entities add a synthetic <c>id</c>).
+    /// Mirrors <see cref="ReadModelSourceMembers"/>: the target type is resolved in the spec's own
+    /// <paramref name="context"/> first, falling back to the global view (R13.2, #1642) — otherwise a
+    /// same-named target type in another context could resolve to the wrong declaration and silently
+    /// empty this scope.
+    /// </summary>
+    private static IReadOnlyList<Member> SpecTargetMembers(string context, string typeName, ModelIndex index)
     {
-        if (!index.TryGetDecl(typeName, out TypeDecl decl))
+        if (!index.TryGetDeclIn(context, typeName, out TypeDecl decl) && !index.TryGetDecl(typeName, out decl))
         {
             return Array.Empty<Member>();
         }

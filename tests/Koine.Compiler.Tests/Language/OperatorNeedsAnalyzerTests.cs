@@ -292,6 +292,55 @@ public class OperatorNeedsAnalyzerTests
     }
 
     /// <summary>
+    /// Sibling regression, surfaced by code review of the fix above: <c>SpecTargetMembers</c> (the
+    /// helper that builds a spec condition's <see cref="TypeScope"/>) resolved its target type via the
+    /// context-blind <c>ModelIndex.TryGetDecl</c> only, unlike its sibling <c>ReadModelSourceMembers</c>
+    /// which already resolves in the read model's own context first. So a spec declared <c>on</c> a type
+    /// whose simple name collides with a same-named type in a LATER context could have its condition's
+    /// scope silently emptied (the wrong-context decl isn't a value/entity, so <c>SpecTargetMembers</c>
+    /// falls to its empty-members branch) — dropping every operator need referenced from inside the
+    /// spec's condition, even though the spec itself validates fine (the semantic validator already
+    /// resolves the spec's target type context-first). Here <c>Shop</c>'s own <c>value Ticket</c>
+    /// (target of <c>spec Discountable</c>) collides with a same-named <c>enum Ticket</c> declared in a
+    /// LATER context (<c>Billing</c>), and the spec's condition multiplies a nested <c>Money</c> member.
+    /// </summary>
+    [Fact]
+    public void A_spec_on_a_same_named_type_in_a_later_context_does_not_suppress_its_operator_needs()
+    {
+        const string source = """
+            context Shop {
+              value Money {
+                amount: Decimal
+              }
+              value Ticket {
+                price: Money
+              }
+              spec Discountable on Ticket = price * 2 == price
+            }
+
+            context Billing {
+              enum Ticket { Open Closed }
+            }
+            """;
+
+        CompileResult result = new KoineCompiler().Compile(source, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        KoineModel model = result.Model!;
+        ModelIndex index = new SemanticModel(model).Index;
+
+        // The collision is real: a context-blind classify of "Ticket" resolves to Billing's enum
+        // (last-write-wins), NOT Shop's own value object.
+        index.Classify("Ticket").ShouldBe(TypeKind.Enum);
+        index.Classify("Shop", "Ticket").ShouldBe(TypeKind.Value);
+
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+
+        needs["Money"].MultiplyFactors.ShouldBe(new[] { "int" }, ignoreOrder: true);
+    }
+
+    /// <summary>
     /// <see cref="OperatorNeedsAnalyzer.BuildOperatorNeeds"/> is cached per (model, index) so that the
     /// four public projections and <see cref="OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds"/> share
     /// one site enumeration across separate calls, not just within one (#836) — a repeat call with the
