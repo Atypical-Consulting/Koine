@@ -163,3 +163,14 @@ jobs:
         env:
           KOINE_STUDIO_BASE: /Koine/studio/
         run: npm run test:browser
+
+      # The registered service worker (#443/#517) is unit-tested against an in-memory FAKE Cache
+      # Storage and the boot smoke-test above MOCKS the compiler worker — so nothing else here proves
+      # the real SW actually intercepts _framework/* fetches, populates the real Cache Storage, and
+      # serves the app + compiler with the network down (issue #521). Reuses the Chromium install
+      # above — no second `setup-playwright` step needed.
+      - name: Offline smoke-test — the service worker actually caches and serves offline (#521)
+        working-directory: tooling/koine-studio
+        env:
+          KOINE_STUDIO_BASE: /Koine/studio/
+        run: npm run test:offline
