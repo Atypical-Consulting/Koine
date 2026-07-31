@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { contrastOnWhite } from '@atypical/koine-ui/contrast';
 import { CONCEPT_COLORS, CONCEPT_SLUGS, type ConceptSlug } from '@/model/conceptColors.generated';
 
 // Concept Colors (ADR 0004): the generated TS module must never drift from the single source of truth
@@ -16,18 +17,6 @@ const source = JSON.parse(
 };
 
 const HEX = /^#[0-9a-f]{6}$/;
-
-/** WCAG relative luminance of a #rrggbb color. */
-function luminance(hex: string): number {
-  const n = parseInt(hex.slice(1), 16);
-  const chan = (c: number): number => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * chan((n >> 16) & 255) + 0.7152 * chan((n >> 8) & 255) + 0.0722 * chan(n & 255);
-}
-
-const contrastOnWhite = (hex: string): number => 1.05 / (luminance(hex) + 0.05);
 
 describe('concept colors — generated module vs source', () => {
   test('the generated module exists and covers all 15 concepts, in source order', () => {

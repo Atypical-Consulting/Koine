@@ -392,15 +392,20 @@ internal sealed class TypeScriptExpressionTranslator
         && _resolver.Infer(bin, EffectiveScope()) is { Name: "String" };
 
     /// <summary>
-    /// True when <paramref name="bin"/> is a plain <c>/</c> whose own inferred type is non-optional
-    /// <c>Int</c> — bare Int/Int division reached via the plain-numeric fallback (neither operand is
-    /// Decimal or a Koine value object, so <see cref="TryWriteValueArithmetic"/> already declined).
-    /// JS's native <c>/</c> yields a fraction, but a Koine <c>Int</c> must stay whole, so this truncates
-    /// toward zero — matching the value-object scalar-divide rule already established (#938, #1558).
+    /// True when <paramref name="bin"/> is a plain <c>/</c> whose own inferred type is <c>Int</c>
+    /// (optional or not) — bare Int/Int division reached via the plain-numeric fallback (neither
+    /// operand is Decimal or a Koine value object, so <see cref="TryWriteValueArithmetic"/> already
+    /// declined). JS's native <c>/</c> yields a fraction, but a Koine <c>Int</c> must stay whole, so
+    /// this truncates toward zero — matching the value-object scalar-divide rule already established
+    /// (#938, #1558). The gate admits the OPTIONAL case too (#1597): a guard-narrowed <c>Int?</c>
+    /// division still infers as optional here (guard narrowing is validator-only and never reaches
+    /// <see cref="TypeResolver.Infer"/>), but the validator already guarantees the operand is present
+    /// wherever this expression compiles, the same guarantee the Decimal/value-object arithmetic paths
+    /// in this translator already rely on to admit a guard-narrowed optional operand.
     /// </summary>
     private bool IsIntDivision(BinaryExpr bin)
         => bin.Op == BinaryOp.Div
-        && _resolver.Infer(bin, EffectiveScope()) is { Name: "Int", IsOptional: false };
+        && _resolver.Infer(bin, EffectiveScope()) is { Name: "Int" };
 
     /// <summary>
     /// Writes one operand of a String-typed <c>+</c>, lowering a non-optional <c>Bool</c>-typed

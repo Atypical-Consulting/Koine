@@ -925,4 +925,55 @@ public class PhpConformanceTests
             "Int/Int derived-member division should truncate toward zero (7/2==3, -7/2==-3), not throw:\n"
             + string.Join("\n", run.Errors));
     }
+
+    /// <summary>
+    /// Issue #1598: the optional twin of #1587. A <b>guard-narrowed</b> <c>Int?</c> division — <c>qty / 2
+    /// when qty.isPresent</c> — still infers as optional <c>Int?</c> at the binary-expression call site
+    /// (guard narrowing is validator-only and never reaches <see cref="TypeResolver"/>), so before the fix
+    /// <c>IsIntDivision</c>'s <c>IsOptional: false</c> gate excluded it and the plain-numeric fallback
+    /// rendered a bare PHP <c>/</c> — the exact runtime <c>TypeError</c> #1587 fixed for the non-optional
+    /// case, reachable again through the guarded path because the emitted member is still declared to
+    /// return <c>?int</c> under <c>declare(strict_types=1)</c>. Skipped (not failed) when no <c>php</c>
+    /// interpreter is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Guarded_optional_int_division_truncates_toward_zero_at_runtime()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                qty:  Int?
+                half: Int? = qty / 2 when qty.isPresent
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Shop/ValueObjects/Order.php';
+
+            $positive = new Koine\Shop\ValueObjects\Order(7);
+            if ($positive->half() !== 3) {
+                fwrite(STDERR, "positive half expected 3, got " . var_export($positive->half(), true) . "\n");
+                exit(1);
+            }
+
+            $negative = new Koine\Shop\ValueObjects\Order(-7);
+            if ($negative->half() !== -3) {
+                fwrite(STDERR, "negative half expected -3, got " . var_export($negative->half(), true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+
+        run.Ok.ShouldBeTrue(
+            "Guard-narrowed Int?/Int division should truncate toward zero (7/2==3, -7/2==-3), not throw:\n"
+            + string.Join("\n", run.Errors));
+    }
 }

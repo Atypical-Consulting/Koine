@@ -26,9 +26,16 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
+      // `contrast` is a second entry (issue #1267) so plain-Node consumers (koine-studio's
+      // gen-concept-colors.mjs script, no DOM) can import just the contrast math without pulling
+      // in index.ts's module-level side effects — e.g. primitives/overlay.ts's top-level
+      // `document.addEventListener`, which throws under Node with no DOM.
+      entry: {
+        index: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
+        contrast: fileURLToPath(new URL('./src/contrast.ts', import.meta.url)),
+      },
       formats: ['es'],
-      fileName: () => 'index.js',
+      fileName: (_format, entryName) => `${entryName}.js`,
       // src/index.ts imports './styles.css' as a side effect so Vite's library build extracts the
       // design tokens (issue #905, Task 2) into their own file; name it to match the package.json
       // "./styles.css" export (Vite's default would otherwise derive the name from package.json's
