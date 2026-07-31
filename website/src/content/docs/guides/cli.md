@@ -207,15 +207,13 @@ The first one found wins; if none is found, no defaults are applied. A flag on t
 
 **Keys read today.** The flat keys `target` (`csharp`, `typescript`, `python`, `php`, `rust`, `java`, `glossary`, `docs`, or `openapi`) and `out` (the output directory) are honoured, plus these per-target keys:
 
+- `targets.<target>.out` — a per-target output directory, overriding the flat `out` for just that target; the explicit `--out` flag still wins over both.
 - `targets.csharp.layers` (e.g. `domain,infrastructure`) — the config equivalent of [`--layers`](#c-infrastructure-layer---layers), overridden by an explicit `--layers` flag.
+- `targets.<target>.namespaces.<Context> = <value>` — remaps one bounded context's emitted namespace/module/package (C# namespace, TypeScript module path, Python/Rust/Kotlin/Java package, PHP namespace) for that target. `<Context>` must name a real context in the compiled model — it follows the same grammar-legal, ASCII-only identifier shape as every other Koine name (`context Foo { … }`), so a non-ASCII or misspelled key can never match one. A key that matches no context in the model is a silent no-op (it never remaps anything) and, since it's usually a typo, produces a build-time warning naming the offending key and target rather than failing silently.
 - `targets.<target>.regexMatchTimeoutMs` (default `1000` for C#) — the per-call match-timeout budget in milliseconds for the [`matches`-invariant ReDoS guard](/Koine/reference/invariants/#bounded-evaluation-redos-hardening): set it tighter for hostile-input value objects or looser for an expensive pattern on trusted batch input. The neutral key reaches every code target, each honoring it as its runtime allows — C# and Python **honor** it as a real per-call timeout, TypeScript **plumbs** it into the advisory `regexMatch` seam, PHP **substitutes** the PCRE-limit note (see the [per-target table](/Koine/reference/invariants/#bounded-evaluation-redos-hardening)). It must be a positive integer — `0` or a negative value is rejected at build time. For a single-invocation override without editing the config, use the [`--regex-match-timeout-ms <ms>` flag](#koine-build) — the flag wins over this key.
 - `targets.csharp.regexMode` (`inline` | `sourceGenerated`, default `inline`) — selects how a `matches`-invariant regex guard is evaluated in emitted C#. The default (`inline`) emits the bounded `Regex.IsMatch(…)` call, byte-identical to the historical output. `sourceGenerated` opts in to the cached, allocation-free `[GeneratedRegex]` partial-method form (the .NET source generator), which compiles the pattern once ahead of time. Both modes carry the same pattern, `RegexOptions.None`, and match-timeout, so match behaviour is identical; only the evaluation strategy differs. Requires C# 11+/.NET 7+ (Koine targets `net10.0`, so it is always satisfied). An unrecognised value (e.g. a typo like `sourcegen`) is rejected at build time.
 
 Every other key is **silently ignored**, which keeps the file forward-compatible — older tooling tolerates a newer config.
-
-:::note[`targets.*` is reserved for a future config block]
-A structured `targets.<name> = { … }` block (per-target namespace maps, `instantMode`, output layout) is sketched in the scaffolded config but **not yet implemented** — it is reserved for a [future multi-target config block](/Koine/guides/roadmap/#generate-to-your-stack) and ignored today. `koine init` writes a commented example of it for forward reference.
-:::
 
 ## `koine fmt`
 

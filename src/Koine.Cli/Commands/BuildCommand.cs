@@ -346,6 +346,16 @@ internal sealed class BuildCommand : Command<BuildSettings>
             return 1;
         }
 
+        // A koine.config namespace-map key that matches no real context (issue #1255) silently no-ops
+        // otherwise; warn once the model's context names are known, naming the offending key and target.
+        if (result.Model is not null)
+        {
+            foreach (var warning in NamespaceMapAudit.UnmatchedKeyWarnings(r.Target, r.Options, result.Model))
+            {
+                Console.Error.WriteLine(warning);
+            }
+        }
+
         // --glossary writes a Markdown glossary to a specific file, independent of
         // the chosen --target/--out (so you can emit C# AND a glossary in one run).
         if (r.GlossaryFile is not null && result.Model is not null)
