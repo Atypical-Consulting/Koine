@@ -30,6 +30,8 @@ public sealed partial class JavaEmitter
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
         var stored = vo.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
         var derived = vo.Members.Where(m => MemberAnalysis.IsDerived(m, memberNames)).ToList();
+        var required = stored.Where(m => m.Initializer is null).ToList();
+        var defaulted = stored.Where(m => m.Initializer is not null).ToList();
 
         var typeMapper = new JavaTypeMapper(emit.Index, context, PackageFor);
         // membersAsAccessors: a record's components are private, so a member read in an instance body
@@ -48,6 +50,12 @@ public sealed partial class JavaEmitter
         sb.Append("public record ").Append(name).Append('(').Append(components).Append(") {\n");
 
         WriteCompactConstructor(sb, name, vo, stored, translator);
+
+        if (defaulted.Count > 0)
+        {
+            sb.Append('\n');
+            WriteDefaultingConstructor(sb, emit, name, typeMapper, stored, required, defaulted, translator);
+        }
 
         foreach (Member m in derived)
         {
@@ -262,6 +270,50 @@ public sealed partial class JavaEmitter
             translator.PopLocal(m.Name);
         }
 
+        sb.Append(Indent).Append("}\n");
+    }
+
+    /// <summary>
+    /// Writes a secondary constructor omitting the record's defaulted stored members — the value-object
+    /// analogue of <c>WriteEntityConstructor</c>'s own required/defaulted split (<c>JavaEmitter.Entities.cs</c>),
+    /// since a Java record has no notion of an optional constructor parameter. It takes only
+    /// <paramref name="required"/> (in declaration order) and delegates to the canonical, record-generated
+    /// constructor (<c>this(...)</c>), filling each omitted position with that member's translated
+    /// <c>Initializer</c> — so the delegating call still runs the compact constructor's own
+    /// normalization/invariant checks. Positions are filled by name, not by trailing-subset assumption, so
+    /// a defaulted member anywhere among the stored members (not just at the end) is handled correctly.
+    /// Emitted only when at least one stored member is defaulted; a value object where every member is
+    /// defaulted gets a genuine no-arg constructor.
+    /// </summary>
+    private static void WriteDefaultingConstructor(
+        StringBuilder sb, JavaEmitContext emit, string name, JavaTypeMapper typeMapper,
+        IReadOnlyList<Member> stored, IReadOnlyList<Member> required, IReadOnlyList<Member> defaulted,
+        JavaExpressionTranslator translator)
+    {
+        var ctorParams = required.Select(m => typeMapper.Map(m.Type) + " " + JavaNaming.Member(m.Name));
+
+        WriteJavadoc(sb, "Creates a " + name + " applying its defaulted member" + (defaulted.Count > 1 ? "s" : "") + ".", Indent);
+        sb.Append(Indent).Append("public ").Append(name).Append('(').Append(string.Join(", ", ctorParams)).Append(") {\n");
+
+        // The constructor's own PARAMETERS (each required member) are live Java locals while translating a
+        // defaulted member's initializer (NameMode.Parameter reads them bare) — mirrors the entity
+        // constructor's own scope handling (#1536).
+        foreach (Member m in required)
+        {
+            translator.PushLocal(m.Name, m.Type);
+        }
+
+        var defaultedArgs = defaulted.ToDictionary(
+            m => m.Name,
+            m => translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context)));
+
+        foreach (Member m in required)
+        {
+            translator.PopLocal(m.Name);
+        }
+
+        var args = stored.Select(m => m.Initializer is null ? JavaNaming.Member(m.Name) : defaultedArgs[m.Name]);
+        sb.Append(Indent).Append(Indent).Append("this(").Append(string.Join(", ", args)).Append(");\n");
         sb.Append(Indent).Append("}\n");
     }
 

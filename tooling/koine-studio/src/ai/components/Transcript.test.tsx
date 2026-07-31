@@ -375,6 +375,43 @@ describe('Transcript (#990)', () => {
     });
   });
 
+  // Tool-card identity keyed by turnId (#1286), not message position: #1133 derived a LIVE card's
+  // identity from `messages.length` at render time as a stand-in for "the index the committed
+  // message will occupy" — correct only because nothing else appends to `messages` between a turn's
+  // start and its own commit. A future feature (e.g. inserting a message mid-turn) breaks that
+  // unenforced convention; turnId removes the dependency on array position entirely.
+  describe('tool-card identity survives an out-of-band append mid-turn (#1286)', () => {
+    test('expanding a live card, then an EXTRA message is appended before the turn commits, keeps the card open across the remount', () => {
+      const store = createAppStore();
+      store.getState().appendChatMessage({ role: 'user', content: 'q' });
+      store.getState().startChatTurn();
+      store.getState().startToolCall({ id: 1, name: 'koine_compile', args: '{}' });
+      store.getState().completeToolCall({ id: 1, state: 'ok', summary: 'ok', result: 'compiled', durationMs: 10 });
+      const { container } = mount(store);
+
+      const before = cards(container)[0] as HTMLDetailsElement;
+      act(() => {
+        before.open = true;
+        before.dispatchEvent(new Event('toggle'));
+      });
+      expect(before.open).toBe(true);
+
+      // Simulate a future append-ordering change (a regenerate/edit-turn feature, a second entry
+      // point) inserting an EXTRA message BEFORE this turn commits — `messages.length` at the card's
+      // open time no longer predicts the index the committed message will actually land at.
+      act(() =>
+        store.getState().appendChatMessage({ role: 'assistant', content: 'injected mid-turn', offerApply: false }),
+      );
+      act(() => store.getState().commitChatTurn({ role: 'assistant', content: 'done' }));
+
+      // Exactly one card (the injected message carries no tool calls) — it must be the SAME element
+      // identity-wise, still open, not reset by the intervening append shifting its final index.
+      const allCards = cards(container);
+      expect(allCards.length).toBe(1);
+      expect((allCards[0] as HTMLDetailsElement).open).toBe(true);
+    });
+  });
+
   describe('ephemeral notices', () => {
     test('the no-key note: koi-msg-note bubble whose Open Settings link-button routes to onOpenPrefs', () => {
       const onOpenPrefs = vi.fn();

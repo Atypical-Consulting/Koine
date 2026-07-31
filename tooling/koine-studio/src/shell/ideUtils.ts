@@ -3,6 +3,8 @@
 // to test in a plain Node/vitest environment.
 import { type AclMapping, type CheckResult, type ContextMapResult, type LspDiagnostic, type Range } from '@/lsp/lsp';
 import { type ShortcutRow } from '@/shared/help';
+import { type BindingId } from '@/editor/keybindings';
+import { prettyChord } from '@/shared/platform';
 
 /** Escape the HTML-significant characters in a string so domain text can't break the markup it's
  *  interpolated into. The single shared escaper for the context-map surfaces (the table here, plus the
@@ -158,11 +160,15 @@ export function diagnosticsInRange(diags: LspDiagnostic[], range: Range): LspDia
 
 // Keyboard shortcuts shown in the help overlay; mirrors the global keydown handler and the
 // palette command hints. 'mod' renders as a keycap as-is (Cmd on mac / Ctrl elsewhere).
-export function helpRows(): ShortcutRow[] {
+// `commandPalette` and `saveAll` are rebindable (Settings → Keyboard, #432), so their rows render the
+// LIVE resolved chord via `prettyChord` — same as the toolbar's palette-hint keycap (#1421) — instead of
+// a hardcoded default that goes stale after a rebind (#1627). The other rows aren't in the rebindable
+// registry and stay literal.
+export function helpRows(resolved: Record<BindingId, string>): ShortcutRow[] {
   return [
-    { keys: 'mod+K', description: 'Command palette' },
+    { keys: prettyChord(resolved.commandPalette), description: 'Command palette' },
     { keys: 'mod+S', description: 'Save / format the active model' },
-    { keys: 'mod+Alt+S', description: 'Save all unsaved files' },
+    { keys: prettyChord(resolved.saveAll), description: 'Save all unsaved files' },
     { keys: 'mod+Shift+O', description: 'Open a folder of models' },
     { keys: 'mod+Shift+F', description: 'Search across files' },
     { keys: 'mod+N', description: 'New model' },
