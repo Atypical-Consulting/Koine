@@ -62,6 +62,87 @@ function clamp(i: number, length: number): number {
  * untouched so the host can handle its own panel-specific keys around this call. An empty tree is a
  * no-op for every key.
  */
+// --- roving-tabindex DOM glue (#1365) -----------------------------------------------------------------
+// The seed/resolve half of the roving-tabindex pattern — as opposed to the key-ROUTING above, which is
+// already framework/DOM-agnostic. `generatedFileTree.ts` and `model/DomainNavigator.tsx` (formerly
+// `domainNavigator.ts`) had each hand-rolled the same "seed the lone tab stop" ternary and "resolve an
+// event/the current focus to its treeitem" lookup; this factory is their one shared implementation.
+// Unlike {@link handleTreeKeydown} above, this half DOES touch the DOM by necessity — the two real
+// differences between the panels are opt-in via `opts` so a caller pays for neither: `isVisible` (a
+// collapse-aware visible/all split — `generatedFileTree.ts` has one, `DomainNavigator.tsx`'s trees never
+// collapse a branch so every treeitem is always visible) and `nestedButtonSelector` (a treeitem row that
+// nests its own interactive control — an overflow menu, an aggregate head — must pull it out of the tab
+// order first; `generatedFileTree.ts`'s plain `<li>` rows have none).
+
+export interface RovingTabIndexOptions {
+  /** Selector for nested interactive controls that must leave the tab order before the tree's own tab
+   *  stop is seeded (e.g. `'button'` for a row's overflow-menu trigger). Omit when no treeitem ever
+   *  nests a focusable control — nothing is queried or touched in that case. */
+  nestedButtonSelector?: string;
+  /** Whether a treeitem is eligible to hold the roving tab stop — omit for a tree that never collapses
+   *  a branch, where every rendered treeitem is always eligible. */
+  isVisible?: (el: HTMLElement) => boolean;
+}
+
+export interface RovingTabIndexHelper {
+  /** The tree's treeitems eligible for the roving tab stop, in DOM/visual order — every treeitem the
+   *  `isVisible` option admits (all of them, when omitted). */
+  visibleTreeItems(): HTMLElement[];
+  /** Seed/refresh the roving tabindex: the eligible `active` item (else the first eligible item) becomes
+   *  the lone tab stop; every other treeitem — eligible or not — leaves the tab order. */
+  setRovingItem(active: HTMLElement | null): void;
+  /** Move roving focus to `item` (seeding it as the tab stop first), then `.focus()` it. */
+  focusItem(item: HTMLElement): void;
+  /** The treeitem a DOM event targets: the nearest treeitem to the event's target (resolved via the
+   *  target's `parentElement` first when the target itself isn't an `Element` — e.g. a bare Text node),
+   *  else the currently-focused element's nearest treeitem. */
+  currentTreeItem(ev: Event): HTMLElement | null;
+}
+
+/**
+ * Build the roving-tabindex seed/resolve helper over `tree`, a `role="tree"` root. See the options above
+ * for the two ways a caller's DOM shape can differ from the default (every treeitem visible, no nested
+ * controls to clear).
+ */
+export function createRovingTabIndex(tree: HTMLElement, opts: RovingTabIndexOptions = {}): RovingTabIndexHelper {
+  const isVisible = opts.isVisible ?? (() => true);
+
+  function allTreeItems(): HTMLElement[] {
+    return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+  }
+
+  function visibleTreeItems(): HTMLElement[] {
+    return allTreeItems().filter(isVisible);
+  }
+
+  function setRovingItem(active: HTMLElement | null): void {
+    if (opts.nestedButtonSelector) {
+      for (const btn of tree.querySelectorAll<HTMLElement>(opts.nestedButtonSelector)) btn.tabIndex = -1;
+    }
+    const all = allTreeItems();
+    const visible = all.filter(isVisible);
+    const tabbable = active && visible.includes(active) ? active : (visible[0] ?? null);
+    for (const item of all) item.tabIndex = item === tabbable ? 0 : -1;
+  }
+
+  function focusItem(item: HTMLElement): void {
+    setRovingItem(item);
+    item.focus();
+  }
+
+  function currentTreeItem(ev: Event): HTMLElement | null {
+    const target = ev.target;
+    const start = target instanceof Element ? target : ((target as Node | null)?.parentElement ?? null);
+    return (
+      start?.closest<HTMLElement>('[role="treeitem"]') ??
+      (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
+      null
+    );
+  }
+
+  return { visibleTreeItems, setRovingItem, focusItem, currentTreeItem };
+}
+
 export function handleTreeKeydown<T>(nav: RovingTreeNav<T>, ev: KeyboardEvent): void {
   const items = nav.items();
   if (items.length === 0) return;
