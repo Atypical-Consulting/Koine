@@ -122,6 +122,14 @@ public class SmartEnumApiTests
     }
 
     [Fact]
+    public void Member_named_TryParse_is_rejected()
+    {
+        // Issue #1656: TryParse is now a generated member (ASP.NET Core Minimal APIs' binding
+        // convention) — a member of that exact name would collide with it and produce uncompilable C#.
+        Diagnose("context C { enum E { TryParse, Other } }").ShouldContain(d => d.Code == DiagnosticCodes.ReservedEnumMember);
+    }
+
+    [Fact]
     public void Member_colliding_with_a_base_smart_enum_member_is_rejected()
     {
         // Pre-existing latent hole now closed: a member named `Value`/`All` collided
