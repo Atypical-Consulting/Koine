@@ -659,8 +659,9 @@ internal sealed class JavaExpressionTranslator
             return;
         }
 
-        // (5) A bare enum *type* reference (the qualifier of `OrderStatus.Draft`).
-        if (_index.Classify(name) == TypeKind.Enum)
+        // (5) A bare enum *type* reference (the qualifier of `OrderStatus.Draft`). Context-first (R13.2):
+        // a same-named enum in another context must not shadow this one's own declaration (#1621).
+        if (_index.Classify(_resolver.Context, name) == TypeKind.Enum)
         {
             sb.Append(JavaNaming.Type(name));
             return;
@@ -672,9 +673,10 @@ internal sealed class JavaExpressionTranslator
 
     private void WriteMemberAccess(MemberAccessExpr ma, StringBuilder sb)
     {
-        // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus.CANCELLED`.
+        // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus.CANCELLED`. Context-first
+        // (R13.2): a same-named enum in another context must not shadow this one's own declaration (#1621).
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(JavaNaming.Type(qualifier.Name)).Append('.').Append(JavaNaming.EscapeIdentifier(ma.MemberName));
             return;
