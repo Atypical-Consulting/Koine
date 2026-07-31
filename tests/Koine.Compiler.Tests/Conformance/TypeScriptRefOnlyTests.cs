@@ -12,7 +12,9 @@ namespace Koine.Compiler.Tests.Conformance;
 /// add/subtract/multiply/divide branch pair added in #1269, an entity's <c>checkInvariants</c>/
 /// <c>domainEvents</c>/<c>equals</c> stubs, or the read-model projection stub — so a signature drift
 /// between a real method and its <c>RefOnly</c> stub (the exact mistake #1269's fix had to avoid by
-/// hand) had no test that would catch it. This file closes that gap.
+/// hand) had no test that would catch it. This file closes that gap: one test proves the stub shape
+/// (no leaked bodies), the other proves every dual-branch method's stub signature is byte-identical to
+/// its real counterpart.
 /// </summary>
 public class TypeScriptRefOnlyTests
 {
@@ -141,6 +143,26 @@ public class TypeScriptRefOnlyTests
         foreach (var signature in DualBranchSignatures)
         {
             gated.ShouldContain(signature);
+        }
+    }
+
+    /// <summary>
+    /// For every dual-branch method identified in Task 1's table, the <c>RefOnly</c> stub's declared
+    /// signature must be byte-identical to the real method's — this is the regression class #1269 had
+    /// to manually avoid (a hand-written stub whose parameter/return shape drifts from its real
+    /// counterpart). A characterization test: all 13 pairs already match, so this proves the current
+    /// (correct) state stays correct.
+    /// </summary>
+    [Fact]
+    public void RefOnly_stub_signatures_match_their_real_method_counterparts()
+    {
+        var real = Gated(EmitFiles(refOnly: false));
+        var stub = Gated(EmitFiles(refOnly: true));
+
+        foreach (var signature in DualBranchSignatures)
+        {
+            real.ShouldContain(signature);
+            stub.ShouldContain(signature);
         }
     }
 }
