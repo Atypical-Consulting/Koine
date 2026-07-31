@@ -80,17 +80,62 @@ describe("buildKeyboardSection — panel shape", () => {
             ),
         ).not.toBeNull();
 
-        // The Global heading sits AFTER every editor row and BEFORE the global rows (document order).
-        const kids = [...section.panel.children];
-        const globalHeadIdx = kids.findIndex((n) => n.id === "koi-kbd-scope-global");
-        const callHierIdx = kids.findIndex(
-            (n) => (n as HTMLElement).dataset?.bindingId === "callHierarchy",
+        // The Global heading sits AFTER every editor row and BEFORE the global rows (document order,
+        // via querySelectorAll — the editor/global rows now nest inside a role="group" wrapper, #1421).
+        const ordered = [
+            ...section.panel.querySelectorAll<HTMLElement>(
+                ".koi-kbd-subhead, .koi-kbd-row",
+            ),
+        ];
+        const globalHeadIdx = ordered.findIndex(
+            (n) => n.id === "koi-kbd-scope-global",
         );
-        const paletteIdx = kids.findIndex(
-            (n) => (n as HTMLElement).dataset?.bindingId === "commandPalette",
+        const callHierIdx = ordered.findIndex(
+            (n) => n.dataset?.bindingId === "callHierarchy",
+        );
+        const paletteIdx = ordered.findIndex(
+            (n) => n.dataset?.bindingId === "commandPalette",
         );
         expect(callHierIdx).toBeLessThan(globalHeadIdx);
         expect(globalHeadIdx).toBeLessThan(paletteIdx);
+    });
+
+    it("exposes each scope's rows as a role=group labelled by its subheading (#1421)", () => {
+        const section = buildKeyboardSection({});
+        const groups = [
+            ...section.panel.querySelectorAll<HTMLElement>(
+                ".koi-kbd-scope-group",
+            ),
+        ];
+        expect(groups).toHaveLength(2);
+
+        const editorGroup = groups.find(
+            (g) => g.getAttribute("aria-labelledby") === "koi-kbd-scope-editor",
+        )!;
+        const globalGroup = groups.find(
+            (g) => g.getAttribute("aria-labelledby") === "koi-kbd-scope-global",
+        )!;
+        expect(editorGroup).not.toBeUndefined();
+        expect(globalGroup).not.toBeUndefined();
+        expect(editorGroup.getAttribute("role")).toBe("group");
+        expect(globalGroup.getAttribute("role")).toBe("group");
+
+        // Both referenced headings actually exist, and every row sits inside its own scope's group.
+        expect(
+            section.panel.querySelector("#koi-kbd-scope-editor"),
+        ).not.toBeNull();
+        expect(
+            section.panel.querySelector("#koi-kbd-scope-global"),
+        ).not.toBeNull();
+        expect(
+            editorGroup.querySelector('[data-binding-id="callHierarchy"]'),
+        ).not.toBeNull();
+        expect(
+            globalGroup.querySelector('[data-binding-id="commandPalette"]'),
+        ).not.toBeNull();
+        expect(
+            editorGroup.querySelector('[data-binding-id="commandPalette"]'),
+        ).toBeNull();
     });
 });
 
