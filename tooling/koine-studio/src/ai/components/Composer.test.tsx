@@ -161,7 +161,9 @@ describe('Composer (#990)', () => {
   });
 
   test('each quick action reports its identity; Explain and Clear route to their own callbacks', () => {
-    const onQuickAction = vi.fn();
+    // Typed to the real prop signature so `mock.calls` below reads back as the action ids it records
+    // rather than `any[]` — this test's whole assertion is on those recorded identities.
+    const onQuickAction = vi.fn<ComposerProps['onQuickAction']>();
     const onExplain = vi.fn();
     const onClear = vi.fn();
     const { container } = mount(createAppStore(), { onQuickAction, onExplain, onClear });

@@ -37,7 +37,7 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE);
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'));
   });
   dbPromise = pending;
   // A failed open must not poison the cache for the session — getOrCreateKey's documented retry of a
@@ -68,7 +68,7 @@ function idbPut(key: string, value: unknown): Promise<void> {
         const tx = db.transaction(STORE, 'readwrite');
         tx.objectStore(STORE).put(value, key);
         tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
+        tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
       }),
   );
 }
@@ -80,7 +80,7 @@ function idbDelete(key: string): Promise<void> {
         const tx = db.transaction(STORE, 'readwrite');
         tx.objectStore(STORE).delete(key);
         tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
+        tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
       }),
   );
 }

@@ -20,8 +20,13 @@ export type Category = 'action' | 'symbol' | 'event' | 'rule' | 'file' | 'glossa
 export interface CatalogEntry {
   id: string;
   cat: Category;
-  /** A DDD concept slug (see `KIND`) when this entry is a domain symbol/event; a plain string otherwise. */
-  kind?: ConceptSlug | string;
+  /**
+   * A DDD concept slug (see `KIND`, and {@link ConceptSlug}) when this entry is a domain symbol/event;
+   * a plain string otherwise. Typed as bare `string` rather than `ConceptSlug | string`: the union is
+   * redundant — `string` already subsumes every slug — so it bought no narrowing, only the appearance
+   * of one.
+   */
+  kind?: string;
   title: string;
   sub?: string;
   ctx?: string;

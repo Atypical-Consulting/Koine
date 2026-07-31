@@ -29,6 +29,11 @@ function harness(trace?: 'off' | 'messages' | 'verbose') {
 
 const byMethod = (sent: Sent[], method: string) => sent.filter((m) => m.method === method);
 
+// `Sent.params` is deliberately `any` (every JSON-RPC method carries its own shape). Read a
+// document-sync message's header back through a real type so mapping over it doesn't hand an `any`
+// out of the callback.
+const docParams = (m: Sent) => m.params as { textDocument: { uri: string; version: number } };
+
 const URI = 'file:///a.koi';
 
 describe('KoineLsp document sync', () => {
@@ -45,7 +50,7 @@ describe('KoineLsp document sync', () => {
     lsp.openDoc(URI, 'v1');
     lsp.openDoc(URI, 'v2');
     const opens = byMethod(sent, 'textDocument/didOpen');
-    expect(opens.map((o) => o.params.textDocument.version)).toEqual([1, 2]);
+    expect(opens.map((o) => docParams(o).textDocument.version)).toEqual([1, 2]);
   });
 
   test('changeDoc on an unopened uri is dropped (never a didChange before a didOpen)', () => {

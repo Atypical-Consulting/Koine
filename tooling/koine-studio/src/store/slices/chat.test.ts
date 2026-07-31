@@ -323,7 +323,9 @@ describe('commitChatTurn (#1133)', () => {
     s.getState().completeToolCall({ id: 1, state: 'ok', summary: 'ok', result: 'compiled', durationMs: 10 });
 
     const fn = vi.fn();
-    s.subscribe((state) => fn(state.chat));
+    s.subscribe((state) => {
+      fn(state.chat);
+    });
     s.getState().commitChatTurn({ role: 'assistant', content: 'done' });
 
     // Exactly one notification: a subscriber can never observe the committed message without its

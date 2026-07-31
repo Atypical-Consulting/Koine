@@ -90,7 +90,7 @@ Starting per-rule burn-down (findings at ratchet time; ✅ = enforced by the PR 
 
 | Rule | koine-studio | koine-ui |
 |---|---:|---:|
-| `no-empty-object-type` | 2 ✅ | 2 |
+| `no-empty-object-type` | 2 ✅ | 2 ✅ |
 | `no-redundant-type-constituents` | 2 ✅ | 0 ✅ |
 | `restrict-template-expressions` | 2 ✅ | 0 ✅ |
 | `await-thenable` | 5 ✅ | 0 ✅ |
@@ -108,6 +108,15 @@ Starting per-rule burn-down (findings at ratchet time; ✅ = enforced by the PR 
 | `require-await` | 477 | 0 ✅ |
 | `unbound-method` | 546 | 22 |
 | *(the other 30 preset rules)* | 0 ✅ | 0 ✅ |
+
+A rule is burned down across **both** packages in the same PR, so it is never half-enforced across the
+tree — the per-directory ratchet #998 considered and rejected. Two rules carry a non-default *option*
+(both still `error`, neither an exemption): `no-empty-object-type: { allowInterfaces: 'with-single-extends' }`,
+because a `declare module` augmentation only merges through an interface, so `vitest-axe.d.ts`'s body is
+necessarily empty; and `prefer-const: { ignoreReadBeforeAssign: true }`, because the codebase's
+forward-declaration idiom for mutually-referencing controllers (`let workspace: WorkspaceController;`,
+read by a thunk defined above its single assignment) *cannot* be `const` — the default rule demands an
+edit that does not compile.
 
 `src/templates.generated.ts` (koine-studio) is excluded from the gate outright: it is a ~180KB
 machine-generated, git-ignored module, and CI runs `npm run lint` before the generator has produced it — so

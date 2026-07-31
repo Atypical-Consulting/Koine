@@ -180,7 +180,9 @@ describe("Settings → MCP panel", () => {
             "koine_examples",
         ];
         const fetchStub = vi.fn((_url: string, init?: RequestInit) => {
-            const body = JSON.parse(String(init?.body));
+            // `RequestInit['body']` is the whole `BodyInit` union, so stringifying it would risk a
+            // default `[object Object]`; this stub is only ever sent a JSON string.
+            const body = JSON.parse(init?.body as string) as { method?: string };
             const payload =
                 body.method === "initialize"
                     ? { result: { serverInfo: { name: "koine" } } }

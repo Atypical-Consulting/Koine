@@ -13,7 +13,6 @@ import reactHooks from 'eslint-plugin-react-hooks';
 const RATCHET_PENDING = {
   '@typescript-eslint/no-explicit-any': 'off', //                 1 finding  / 1 file
   '@typescript-eslint/no-unused-vars': 'off', //                  1 finding  / 1 file
-  '@typescript-eslint/no-empty-object-type': 'off', //            2 findings / 1 file
   '@typescript-eslint/no-unnecessary-type-assertion': 'off', //  15 findings / 3 files
   '@typescript-eslint/unbound-method': 'off', //                 22 findings / 5 files
 };
@@ -28,7 +27,14 @@ export default tseslint.config(
       parser: tseslint.parser,
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
-    rules: { ...RATCHET_PENDING },
+    rules: {
+      ...RATCHET_PENDING,
+      // Same narrowing as koine-studio's config: `with-single-extends` is the rule's own allowance for
+      // declaration-MERGING interfaces (src/vitest-axe.d.ts augments vitest's `Assertion` /
+      // `AsymmetricMatchersContaining`), where an empty body is unavoidable — augmentation only works
+      // through an interface. Genuinely-empty declarations are still 'error'.
+      '@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
+    },
   },
   {
     files: ['src/**/*.{ts,tsx}'],

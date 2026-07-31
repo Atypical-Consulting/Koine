@@ -49,7 +49,7 @@ export function pathToFileUri(path: string): string {
  */
 export function fileUriToPath(uri: string): string | null {
   if (!uri.startsWith('file://')) return null;
-  let rest = uri.slice('file://'.length);
+  const rest = uri.slice('file://'.length);
   // Strip an authority/empty-host segment: 'file:///a' -> '/a' leaves a leading '/'.
   if (rest.startsWith('/')) {
     // keep the leading slash for POSIX; a Windows drive ('/C:/…') sheds it below.

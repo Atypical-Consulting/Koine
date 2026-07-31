@@ -70,19 +70,13 @@ function selectorsExcept(...excluded) {
 // and DELETES its entry — the table only ever shrinks, so the gate monotonically tightens and the
 // remaining debt is visible in the config itself rather than in a wiki nobody reads.
 //
-// Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on
-// day one).
+// Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on day
+// one; the 8 cheapest of the remaining 17 were fixed and enforced in the same PR that opened this).
 // Burn-down order is cheapest-first; counts are from `npx eslint . -f json` grouped by rule.
-// Invariant: never re-add an entry, and never clear one with a blanket `eslint-disable`.
+// Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
+// down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
+// (the per-directory ratchet #998 explicitly rejected) — koine-ui's config carries the mirror table.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-empty-object-type': 'off', //            2 findings /  1 file
-  '@typescript-eslint/no-redundant-type-constituents': 'off', //  2 findings /  2 files
-  '@typescript-eslint/restrict-template-expressions': 'off', //   2 findings /  1 file
-  '@typescript-eslint/await-thenable': 'off', //                  5 findings /  1 file
-  'prefer-const': 'off', //                                       8 findings /  6 files
-  '@typescript-eslint/no-base-to-string': 'off', //               9 findings /  3 files
-  '@typescript-eslint/prefer-promise-reject-errors': 'off', //   10 findings /  4 files
-  '@typescript-eslint/no-unsafe-return': 'off', //               12 findings /  9 files
   '@typescript-eslint/no-unsafe-argument': 'off', //             51 findings /  8 files
   '@typescript-eslint/no-explicit-any': 'off', //                65 findings /  9 files
   '@typescript-eslint/no-unused-vars': 'off', //                 72 findings / 28 files
@@ -110,7 +104,22 @@ export default tseslint.config(
       parser: tseslint.parser,
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
-    rules: { ...RATCHET_PENDING },
+    rules: {
+      ...RATCHET_PENDING,
+      // `with-single-extends` (not the default `never`) is the rule's own sanctioned allowance for
+      // declaration-MERGING interfaces: src/vitest-axe.d.ts augments vitest's `Assertion` /
+      // `AsymmetricMatchersContaining` with the vitest-axe matchers, and augmentation only works
+      // through an interface — a type alias doesn't merge — so the body is necessarily empty. The rule
+      // stays 'error' for genuinely empty declarations; this is a narrowing, not a ratchet exemption.
+      '@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
+      // `ignoreReadBeforeAssign` (off by default) exempts the forward-declaration idiom this codebase
+      // uses for mutually-referencing controllers — `let workspace: WorkspaceController;` read by a
+      // thunk defined above its single assignment (ide.tsx, inspectorController.tsx,
+      // workspaceController.ts, scopeKit.ts, wasm.ts). Those CANNOT be `const`: the declaration and the
+      // assignment are deliberately separated, so the default rule demands an impossible edit (and its
+      // autofix would produce code that doesn't compile). Genuinely-const `let`s are still reported.
+      'prefer-const': ['error', { ignoreReadBeforeAssign: true }],
+    },
   },
   {
     files: ['src/**/*.{ts,tsx}'],

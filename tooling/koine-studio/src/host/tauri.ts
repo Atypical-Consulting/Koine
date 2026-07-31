@@ -284,7 +284,13 @@ export class TauriPlatform implements Platform {
   }
 
   async pickFolder(title: string): Promise<string | null> {
-    const picked = await openDialog({ directory: true, title });
+    // openDialog resolves to `any` here, and `Array.isArray()` on an `any` narrows to `any[]` — so
+    // without pinning the type at the seam, `picked[0]` is an `any` leaking straight out of this
+    // method. The plugin types `{ directory: true }` without `multiple` as `string | null`; the array
+    // branch below stays as a tolerance for a host that hands one back anyway. It must be an
+    // assertion, not an annotation: a declared type on an `any` initializer is checked but does not
+    // become the variable's flow type.
+    const picked = (await openDialog({ directory: true, title })) as string | string[] | null;
     return Array.isArray(picked) ? picked[0] ?? null : picked;
   }
 

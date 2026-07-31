@@ -134,11 +134,11 @@ describe('settings.json schema hover + completion (#765)', () => {
     document.body.innerHTML = '';
   });
 
-  it('a hover over a field key surfaces its schema title + description', async () => {
+  it('a hover over a field key surfaces its schema title + description', () => {
     const doc = settingsToJsonDoc(DEFAULT_SETTINGS);
     const view = mount(doc);
     const pos = doc.indexOf('"tabSize"') + 3; // inside the `tabSize` key
-    const tip = await settingsSchemaHover(view, pos, 1);
+    const tip = settingsSchemaHover(view, pos, 1);
     expect(tip).not.toBeNull();
     const dom = tip!.create(view).dom as HTMLElement;
     expect(dom.className).toContain('koi-hover');
@@ -148,21 +148,21 @@ describe('settings.json schema hover + completion (#765)', () => {
     expect(dom.querySelector('strong')?.textContent).toBe('Tab size'); // title rendered bold
   });
 
-  it('degrades silently (no tooltip) on a group key, the root, and an unknown key', async () => {
+  it('degrades silently (no tooltip) on a group key, the root, and an unknown key', () => {
     const doc = settingsToJsonDoc(DEFAULT_SETTINGS);
     const view = mount(doc);
-    expect(await settingsSchemaHover(view, doc.indexOf('"editor"') + 3, 1)).toBeNull(); // group key
-    expect(await settingsSchemaHover(view, 1, 1)).toBeNull(); // document root
+    expect(settingsSchemaHover(view, doc.indexOf('"editor"') + 3, 1)).toBeNull(); // group key
+    expect(settingsSchemaHover(view, 1, 1)).toBeNull(); // document root
 
     const typo = mount('{\n  "editor": {\n    "tabSiz": 2\n  }\n}');
-    expect(await settingsSchemaHover(typo, '{\n  "editor": {\n    "tabSiz'.length - 2, 1)).toBeNull();
+    expect(settingsSchemaHover(typo, '{\n  "editor": {\n    "tabSiz'.length - 2, 1)).toBeNull();
   });
 
   it('a completion inside a group carries the field title as detail + description as info', async () => {
     const doc = '{\n  "editor": {\n    "tab"\n  }\n}';
     const view = mount(doc);
     const caret = doc.indexOf('"tab"') + 4; // inside the partial key
-    const result = await settingsCompletionSource(new CompletionContext(view.state, caret, true));
+    const result = settingsCompletionSource(new CompletionContext(view.state, caret, true));
     expect(result).not.toBeNull();
     const opt = result!.options.find((o) => o.label === 'tabSize');
     expect(opt, 'tabSize completion offered').toBeDefined();
@@ -170,10 +170,15 @@ describe('settings.json schema hover + completion (#765)', () => {
     expect(opt!.detail).toBe('Tab size');
     // The description is still carried as the info panel (unchanged from the bundled source).
     const infoEl = typeof opt!.info === 'function' ? await opt!.info(opt!) : opt!.info;
+    // `info` may be a DOM node, a plain string, or absent. Only the node branch carries the schema
+    // description here; the string branch is CodeMirror's other legal shape, and absent → '' so a
+    // regression fails the toContain below rather than passing on the literal "null"/"undefined".
     const infoText =
       infoEl && typeof infoEl === 'object' && 'textContent' in infoEl
         ? (infoEl as HTMLElement).textContent
-        : String(infoEl);
+        : typeof infoEl === 'string'
+          ? infoEl
+          : '';
     expect(infoText).toContain('Indent width in spaces.');
   });
 });
