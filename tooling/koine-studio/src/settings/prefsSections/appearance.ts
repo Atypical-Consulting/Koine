@@ -22,6 +22,7 @@ import {
     select,
     accentPicker,
     segmented,
+    textInput,
 } from "@/settings/prefsControls";
 import type { PrefsSection, SectionCtx } from "@/settings/prefsSections/types";
 
@@ -48,26 +49,20 @@ export function buildAppearanceSection(ctx: SectionCtx): PrefsSection {
     // The name attributed to review comments authored from Studio (#479). Committed trimmed; a blank
     // value is stored as-is and resolves to the 'You' fallback at comment-creation time
     // (resolveReviewAuthor).
-    const displayNameInput = document.createElement("input");
-    displayNameInput.type = "text";
-    displayNameInput.className = "koi-text";
-    displayNameInput.spellcheck = false;
-    displayNameInput.autocomplete = "off";
-    displayNameInput.placeholder = "You";
-    displayNameInput.addEventListener("change", () => {
-        ctx.commit({ displayName: displayNameInput.value.trim() });
+    const displayNameInput = textInput({
+        spellcheck: false,
+        autocomplete: "off",
+        placeholder: "You",
+        onChange: (value) => ctx.commit({ displayName: value.trim() }),
     });
 
     // Editor font-stack override (#750). A blank value falls back to the theme's default mono font,
     // applied live via applyAppearance (onChange) like the other appearance fields. Committed trimmed.
-    const fontFamilyInput = document.createElement("input");
-    fontFamilyInput.type = "text";
-    fontFamilyInput.className = "koi-text";
-    fontFamilyInput.spellcheck = false;
-    fontFamilyInput.autocomplete = "off";
-    fontFamilyInput.placeholder = "Theme default (monospace)";
-    fontFamilyInput.addEventListener("change", () => {
-        ctx.commit({ fontFamily: fontFamilyInput.value.trim() });
+    const fontFamilyInput = textInput({
+        spellcheck: false,
+        autocomplete: "off",
+        placeholder: "Theme default (monospace)",
+        onChange: (value) => ctx.commit({ fontFamily: value.trim() }),
     });
 
     // “On startup” (#770): which view to open on a cold boot (no explicit hash / share link). The

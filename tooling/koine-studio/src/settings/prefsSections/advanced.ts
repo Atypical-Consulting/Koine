@@ -17,6 +17,7 @@ import {
     panel,
     select,
     stringListInput,
+    actionButton,
 } from "@/settings/prefsControls";
 import type { ScopeKit } from "@/settings/prefsSections/scopeKit";
 import type { PrefsSection, SectionCtx } from "@/settings/prefsSections/types";
@@ -65,11 +66,7 @@ export function buildAdvancedSection(
     wsRootValue.className = "koi-set-label";
     wsRootValue.textContent = "Not set yet";
 
-    const wsRootBtn = document.createElement("button");
-    wsRootBtn.type = "button";
-    wsRootBtn.className = "koi-set-action";
-    wsRootBtn.textContent = "Change…";
-    wsRootBtn.addEventListener("click", () => {
+    const wsRootBtn = actionButton("Change…", () => {
         void deps.pickWorkspaceRoot?.().then((name) => {
             if (name !== null) wsRootValue.textContent = name;
         });
