@@ -22,8 +22,11 @@ public enum BinaryOp
 /// switch expressions that had drifted apart (<c>Emit/ExprDescriber.cs</c> and <c>Ast/Bound/Lowerer.cs</c>
 /// rendered <c>Or</c>/<c>And</c> differently — one as the actual Koine operator tokens
 /// <c>"||"</c>/<c>"&amp;&amp;"</c> from <c>Grammar/KoineLexer.g4</c>'s <c>OR</c>/<c>AND</c>, the other as
-/// the English words <c>"or"</c>/<c>"and"</c>). <see cref="Symbol"/> unifies on the real grammar tokens —
-/// never exercised by an existing snapshot, so this changes no observed output.
+/// the English words <c>"or"</c>/<c>"and"</c>). <see cref="Symbol"/> unifies on the real grammar tokens.
+/// This IS user-visible: it feeds the synthesized rule message of an unmessaged invariant (see
+/// <c>CSharpEmitter.SynthesizeMessage</c> → <c>Lowerer.SourceText</c>), so the emitted
+/// <c>DomainInvariantViolationException.Rule</c> changed with it. Pinned end-to-end by
+/// <c>SynthesizedRuleMessageTests</c> — do not let this table drift from <c>Grammar/KoineLexer.g4</c> again.
 /// </summary>
 public static class BinaryOpExtensions
 {
