@@ -499,7 +499,11 @@
   color: var(--koi-fg);
 }
 .deck-sub.on {
-  color: var(--koi-accent);
+  /* TEXT-ONLY swap (issue #1704): raw --koi-accent measures ~3.20:1 in the light theme against
+     .deck-head's real --koi-paper-2 backdrop — sub-AA. --koi-accent-text clears ≥4.5:1 at both the
+     resting 13% tint and the worst-case selected-pair background in both themes (see
+     tokens.test.ts). Background tint is unchanged. */
+  color: var(--koi-accent-text);
   background: color-mix(in srgb, var(--koi-accent) 13%, transparent);
 }
 .deck-sub:focus-visible {
@@ -826,7 +830,12 @@
 .rail-axis[aria-selected='true'] {
   background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
   border-color: var(--koi-accent);
-  color: var(--koi-accent);
+  /* TEXT-ONLY swap (issue #1704): raw --koi-accent measures ~3.32:1 in the light theme against
+     #rail-axis-switch's own opaque --koi-paper backdrop — sub-AA. --koi-accent-text clears ≥4.5:1
+     there in both themes (see tokens.test.ts). Note: Koine Studio's own _leftrail.scss carries a
+     byte-identical duplicate of this rule, loaded after this file and shadowing it in the real app —
+     that copy gets the same swap. */
+  color: var(--koi-accent-text);
 }
 .rail-axis:focus-visible {
   outline: 2px solid var(--koi-accent);
@@ -1509,7 +1518,13 @@ th[aria-sort='descending'] .koi-th-sort::after {
 .koi-events-view-btn[aria-pressed='true'] {
   background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
   border-color: var(--koi-accent);
-  color: var(--koi-accent);
+  /* TEXT-ONLY swap (issue #1704): this pressed state fully replaces the button's own resting
+     --koi-paper background, so it composites against whatever's behind the button — Koine Studio's
+     real host is #diagnostics's own --koi-paper-2. Raw --koi-accent there measures ~3.08:1 in the
+     light theme (sub-AA); --koi-accent-text clears ≥4.5:1 in both themes (see tokens.test.ts). Note:
+     Koine Studio's own _event-flow.scss carries a byte-identical duplicate of this rule, loaded after
+     this file and shadowing it in the real app — that copy gets the same swap. */
+  color: var(--koi-accent-text);
 }
 .koi-events-view-btn:focus-visible {
   outline: 2px solid var(--koi-accent);

@@ -151,8 +151,11 @@
      .koi-events-view-btn[aria-pressed], .rail-axis[aria-selected]) all pair `color: var(--koi-accent)`
      with the identical background shape. Rather than a launcher-scoped token, this is broadly reusable —
      equal to --koi-accent in dark theme (already ~5.3:1 there, clean per the issue) and darkened in light theme
-     below, where raw --koi-accent measures only ~3.1–3.17:1 (sub-AA). Only wired up on
-     `.lx-modepill`/`.lx-mchip.on` by this issue; the other sites are follow-up candidates. */
+     below, where raw --koi-accent measures only ~3.1–3.17:1 (sub-AA). Wired up on `.lx-modepill`/
+     `.lx-mchip.on` by #1677; the other five of those sites are wired up by the #1704 follow-up sweep
+     below (docs/source-control/model in Koine Studio's own SCSS, `.deck-sub.on`/`.koi-events-view-btn`/
+     `.rail-axis` here) — source-control's avatar chip needed its own token instead (see
+     --koi-sc-avatar-ink below) since its worst-case background doesn't clear with this one. */
   --koi-accent-text: #5aa9ff;
 
   /* source-control commit-avatar TEXT (issue #1704, the #1677 follow-up sweep): `.koi-sc-avatar`

@@ -763,7 +763,11 @@
   font-size: var(--koi-text-2xs);
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--koi-accent);
+  // TEXT-ONLY swap (issue #1704): a launcher-focused commit row (.koi-sc-log-item[data-focused])
+  // tints its own background underneath this avatar's own 18% tint — a worst-case double-tint that
+  // --koi-accent-text doesn't clear in either theme (~4.14:1 dark, ~4.47:1 light), so this site gets
+  // its own token calibrated for both the resting and worst-case backgrounds (see tokens.test.ts).
+  color: var(--koi-sc-avatar-ink);
   background: color-mix(in srgb, var(--koi-accent) 18%, transparent);
 }
 
