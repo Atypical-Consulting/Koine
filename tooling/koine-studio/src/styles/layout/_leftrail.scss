@@ -84,7 +84,11 @@
   &[aria-selected='true'] {
     background: color-mix(in srgb, var(--koi-accent) 16%, transparent);
     border-color: var(--koi-accent);
-    color: var(--koi-accent);
+    // TEXT-ONLY swap (issue #1704): this rule is a byte-identical duplicate of koine-ui's
+    // components.css .rail-axis[aria-selected='true'] — loaded AFTER it (main.ts imports
+    // '@atypical/koine-ui/styles.css' before this file), so this copy wins the cascade for the real
+    // app and must carry the same fix. See components.css for the contrast rationale.
+    color: var(--koi-accent-text);
   }
   &:focus-visible {
     outline: 2px solid var(--koi-accent);
