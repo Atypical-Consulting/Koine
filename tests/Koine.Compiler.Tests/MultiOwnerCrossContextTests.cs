@@ -24,6 +24,10 @@ public class MultiOwnerCrossContextTests
         "No usable JDK 17+ toolchain (javac >= 17) available; the multi-owner sources were not compiled. " +
         "Install a JDK 17+ (or set KOINE_JAVAC to a javac >= 17) — CI runs this for real.";
 
+    private const string KotlinNoToolchainNotice =
+        "No usable Kotlin toolchain (kotlinc) available; the multi-owner sources were not compiled. " +
+        "Install Kotlin — CI runs this for real.";
+
     /// <summary>Three contexts: <c>Money</c> owned by both Alpha and Beta, referenced from Gamma (imported from Alpha).</summary>
     private const string MultiOwnerFixture = """
         context Alpha {
@@ -83,6 +87,24 @@ public class MultiOwnerCrossContextTests
         money.ShouldContain("record Money");
     }
 
+    [Fact]
+    public void Kotlin_qualifies_a_multi_owner_cross_context_reference()
+    {
+        var result = new KoineCompiler().Compile(MultiOwnerFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var wallet = result.Files.Single(f => f.RelativePath.EndsWith("gamma/Wallet.kt", StringComparison.Ordinal)).Contents;
+
+        // The multi-owner reference must be package-qualified to Alpha's package, NOT a bare `Money`
+        // (which Gamma's own package does not declare, so the source would not compile).
+        wallet.ShouldContain("koine.generated.alpha.Money");
+        wallet.ShouldNotContain("val balance: Money,");
+
+        // The owning package still declares the type bare.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("alpha/Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("data class Money");
+    }
+
     /// <summary>
     /// Same three contexts, but Gamma references <c>Beta.Money</c> with an EXPLICIT qualifier (no import).
     /// The qualifier is the modeller's intent, so the reference must qualify to <b>Beta</b> — not the
@@ -135,6 +157,19 @@ public class MultiOwnerCrossContextTests
     }
 
     [Fact]
+    public void Kotlin_qualifies_an_explicit_qualifier_to_the_named_owner_not_the_ordinal_default()
+    {
+        var result = new KoineCompiler().Compile(QualifiedMultiOwnerFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var wallet = result.Files.Single(f => f.RelativePath.EndsWith("gamma/Wallet.kt", StringComparison.Ordinal)).Contents;
+
+        // The explicit `Beta.Money` qualifier must win: package-qualify to Beta, NOT Alpha.
+        wallet.ShouldContain("koine.generated.beta.Money");
+        wallet.ShouldNotContain("koine.generated.alpha.Money");
+    }
+
+    [Fact]
     public void Rust_multi_owner_cross_context_crate_compiles()
     {
         var result = new KoineCompiler().Compile(MultiOwnerFixture, new RustEmitter());
@@ -155,6 +190,20 @@ public class MultiOwnerCrossContextTests
 
         var check = TestSupport.CompileJava(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, JavaNoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Kotlin_multi_owner_cross_context_sources_compile()
+    {
+        var result = new KoineCompiler().Compile(MultiOwnerFixture, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The whole point of #1091 (and its #1130 Kotlin migration): the qualified reference must
+        // actually resolve — a string assertion alone would miss an unresolvable
+        // `koine.generated.alpha.Money`, so compile the sources for real.
+        var check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, KotlinNoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 }
