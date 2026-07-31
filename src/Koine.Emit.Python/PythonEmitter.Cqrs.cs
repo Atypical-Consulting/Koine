@@ -156,7 +156,11 @@ public sealed partial class PythonEmitter
                 }
                 return;
             default:
-                symbolContext[PythonNaming.ToPascalCase(type.Name)] = context;
+                // A field's own declared type can carry an explicit `Context.Type` qualifier that
+                // wins over the ambient context — the same `type.Qualifier ?? context` idiom every
+                // other resolution call site in this emitter uses (e.g. PythonTypeMapper.MapBase,
+                // PythonExpressionTranslator). Skipping it here would mis-hint a qualified reference.
+                symbolContext[PythonNaming.ToPascalCase(type.Name)] = type.Qualifier ?? context;
                 return;
         }
     }

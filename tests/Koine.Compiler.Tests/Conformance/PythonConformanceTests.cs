@@ -1025,6 +1025,65 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Code-review finding on issue #1701's own PR: <c>CollectImportHints</c>'s <c>default</c> case
+    /// recorded <c>symbolContext[name] = context</c> (the SOURCE type's resolved OWNER context)
+    /// unconditionally — every other resolution call site in this emitter uses the
+    /// <c>type.Qualifier ?? context</c> idiom instead, since a field's own declared type can carry an
+    /// EXPLICIT <c>Context.Type</c> qualifier (R13.2) that wins over the ambient/owner context. Here
+    /// <c>Ordering.Item</c>'s <c>status</c> field is declared <c>Shipping.Status</c> — an EXPLICIT
+    /// qualifier to a THIRD context — while <c>Ordering</c> separately declares its own, unrelated
+    /// <c>Status</c> enum (the type <c>ResolveOwner(rm.SourceType, ...)</c> would resolve to as
+    /// <c>Item</c>'s owning context). Before the fix, the import hint ignored the qualifier and bound
+    /// <c>Ordering</c>'s own <c>Status</c> instead of the field's actually-declared <c>Shipping.Status</c>.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_import_honors_an_explicit_qualifier_over_the_source_s_owning_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Item }
+
+              readmodel ItemSummary from Item {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value Item {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var summary = FileText(result.Files, "billing/read_models/item_summary.py");
+        summary.ShouldContain("from shipping.enums.status import Status");
+        summary.ShouldNotContain("from ordering.enums.status import Status");
+        summary.ShouldNotContain("from billing.value_objects.status import Status");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

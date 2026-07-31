@@ -1348,4 +1348,68 @@ public class PhpConformanceTests
             + "Ordering's own Status enum, not Billing's differently-kinded, same-named sibling value "
             + "object:\n" + string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Code-review finding on issue #1701's own PR: <c>CollectImportHints</c>'s <c>default</c> case
+    /// recorded <c>symbolContext[name] = context</c> (the SOURCE type's resolved OWNER context)
+    /// unconditionally — every other resolution call site in this emitter uses the
+    /// <c>type.Qualifier ?? context</c> idiom instead, since a field's own declared type can carry an
+    /// EXPLICIT <c>Context.Type</c> qualifier (R13.2) that wins over the ambient/owner context. Here
+    /// <c>Ordering.Item</c>'s <c>status</c> field is declared <c>Shipping.Status</c> — an EXPLICIT
+    /// qualifier to a THIRD context — while <c>Ordering</c> separately declares its own, unrelated
+    /// <c>Status</c> enum (the type <c>ResolveOwner(rm.SourceType, ...)</c> would resolve to as
+    /// <c>Item</c>'s owning context). Before the fix, the import hint ignored the qualifier and bound
+    /// <c>Ordering</c>'s own <c>Status</c> instead of the field's actually-declared <c>Shipping.Status</c>.
+    /// </summary>
+    [Fact]
+    public void Read_model_direct_field_import_honors_an_explicit_qualifier_over_the_source_s_owning_context()
+    {
+        const string src =
+            """
+            context Billing {
+              value Status {
+                code: String
+              }
+
+              import Ordering.{ Item }
+
+              readmodel ItemSummary from Item {
+                status
+              }
+            }
+
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value Item {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var summary = result.Files.Single(f => f.RelativePath == "src/Billing/ReadModels/ItemSummary.php").Contents;
+        summary.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        summary.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        summary.ShouldNotContain("use Koine\\Billing\\ValueObjects\\Status;");
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+        r.Ok.ShouldBeTrue(
+            "ItemSummary's direct 'status' field must import Shipping's Status per Item's own EXPLICIT "
+            + "qualifier, not Ordering's (Item's owning context) or Billing's (the read model's own "
+            + "context):\n" + string.Join("\n", r.Errors));
+    }
 }

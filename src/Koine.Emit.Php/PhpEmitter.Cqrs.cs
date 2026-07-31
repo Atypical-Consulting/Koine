@@ -214,7 +214,11 @@ public sealed partial class PhpEmitter
                 }
                 return;
             default:
-                symbolContext[PhpNaming.ClassName(type.Name)] = context;
+                // A field's own declared type can carry an explicit `Context.Type` qualifier that
+                // wins over the ambient context — the same `type.Qualifier ?? context` idiom every
+                // other resolution call site in this emitter uses (e.g. PhpTypeMapper.MapBase,
+                // PhpExpressionTranslator). Skipping it here would mis-hint a qualified reference.
+                symbolContext[PhpNaming.ClassName(type.Name)] = type.Qualifier ?? context;
                 return;
         }
     }
