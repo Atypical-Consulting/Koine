@@ -2030,13 +2030,54 @@ fn spawn_and_wait_for_endpoint(state: &McpState, port: u16) -> Result<Option<Str
 }
 
 /// Whether a cached endpoint (resolved for `info.requested_port`) may be reused verbatim for a fresh
-/// request for `port`, or whether the sidecar must be moved (torn down + respawned). Reuse only on an
-/// exact, non-fallback match: a different `port` — the JSON-apply path (#947) — must move the server,
-/// and a lingering busy-port `fallback` must re-attempt the originally-requested port (self-heal once
-/// it frees up). Port `0` (OS-assigned) is a wildcard: a caller asking for "whatever's running" reuses
-/// a live non-fallback endpoint. The port is the sidecar's identity, so it belongs in the cache key.
+/// request for `port` on this predicate ALONE — the non-fallback fast path. Reuse only on an exact,
+/// non-fallback match: a different `port` — the JSON-apply path (#947) — must move the server. Port
+/// `0` (OS-assigned) is a wildcard: a caller asking for "whatever's running" reuses a live non-fallback
+/// endpoint. The port is the sidecar's identity, so it belongs in the cache key. Deliberately stays
+/// pure and blind to a lingering `fallback`; [`endpoint_action`] layers that (conditional) case on top
+/// so this predicate's own truth-table tests never have to change.
 fn can_reuse_cached_endpoint(info: &McpEndpointInfo, port: u16) -> bool {
     !info.fallback && (port == 0 || info.requested_port == port)
+}
+
+/// True if `port` (non-zero) can be bound on loopback right now — i.e. the originally-requested
+/// port has freed up, so a lingering fallback should self-heal instead of being reused verbatim.
+/// `port == 0` (the OS-assigned wildcard) is never "freed" in this sense, so it always reads false.
+/// The probe listener is dropped immediately on success, releasing the port before the sidecar
+/// re-binds it (a small TOCTOU window — see `mcp_endpoint`'s doc comment).
+fn requested_port_is_free(port: u16) -> bool {
+    port != 0 && std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok()
+}
+
+/// What `mcp_endpoint` should do with a cached `info` for a fresh request on `port`.
+#[derive(Debug, PartialEq, Eq)]
+enum EndpointAction {
+    /// Return the cached endpoint verbatim — no teardown, no respawn.
+    Reuse,
+    /// Tear the sidecar down and (re)spawn it for `port`.
+    Teardown,
+}
+
+/// The cached-`info` decision `mcp_endpoint` acts on, factored out as a pure function so its truth
+/// table is unit-testable without a Tauri `State` (`mcp_endpoint` itself can't be called directly in
+/// a `#[test]`). `port_is_free` is the caller-supplied result of [`requested_port_is_free`] — callers
+/// should short-circuit that bind probe to when it can actually change the outcome (a fallback for
+/// THIS port), since this function re-checks the same guard and a probe on an irrelevant port would
+/// just be wasted work.
+///
+/// - A non-fallback exact/wildcard match ([`can_reuse_cached_endpoint`]) ⇒ `Reuse` (unchanged fast path).
+/// - A lingering `fallback` for the SAME concrete port, still busy ⇒ `Reuse` — the churn fix this
+///   issue adds: don't tear down and respawn every call while the real port stays busy.
+/// - That same fallback once the port frees, or a fallback for a DIFFERENT port, or port `0` against
+///   a fallback (the wildcard is never "freed") ⇒ `Teardown`, self-healing onto the real port.
+fn endpoint_action(info: &McpEndpointInfo, port: u16, port_is_free: bool) -> EndpointAction {
+    if can_reuse_cached_endpoint(info, port) {
+        return EndpointAction::Reuse;
+    }
+    if info.fallback && port != 0 && info.requested_port == port && !port_is_free {
+        return EndpointAction::Reuse;
+    }
+    EndpointAction::Teardown
 }
 
 /// Lazily start the `koine mcp --http` sidecar (idempotent) on `port` and return the endpoint it bound
@@ -2047,9 +2088,14 @@ fn can_reuse_cached_endpoint(info: &McpEndpointInfo, port: u16) -> bool {
 /// port** ([`can_reuse_cached_endpoint`]): a repeat call for the SAME port reuses the running server
 /// verbatim (no re-spawn, no re-wait), but a call for a DIFFERENT port — the JSON-settings apply path,
 /// which changes `mcp.port` without an `mcp_stop` (#947) — tears the sidecar down and moves it to the
-/// new port; a lingering `fallback` likewise re-attempts the originally-requested port so it self-heals
-/// once that port frees up. The browser backend never calls this (its `Platform.mcpEndpoint` returns
-/// null without touching IPC), so a desktop-only affordance can gate purely on the resolved value.
+/// new port. A lingering `fallback` for the SAME port is reused verbatim too, as long as a cheap
+/// loopback bind-probe ([`requested_port_is_free`]) says the real port is still busy — this is the
+/// churn fix (#958): `TauriPlatform.runCompilerTool` resolves the endpoint on every Assistant tool
+/// call, so without this a busy configured port meant a teardown+respawn on EVERY call. The probe runs
+/// under the held `resolving` lock, so it can't race our own teardown/spawn; the moment it reports the
+/// port free, [`endpoint_action`] falls through to the self-heal teardown+respawn below (#947). The
+/// browser backend never calls this (its `Platform.mcpEndpoint` returns null without touching IPC), so
+/// a desktop-only affordance can gate purely on the resolved value.
 #[tauri::command]
 fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpointInfo>, String> {
     // Serialize resolution: the busy-port fallback reaps the child and respawns across two spawn/wait
@@ -2057,18 +2103,24 @@ fn mcp_endpoint(port: u16, state: State<'_, McpState>) -> Result<Option<McpEndpo
     // second caller blocks here, then falls through to the cached-`info` fast path below.
     let _resolving = state.resolving.lock().map_err(|e| e.to_string())?;
 
-    // Idempotent fast path — reuse the running server verbatim ONLY when the cached endpoint still
-    // matches what's being asked for (same requested port, not a lingering busy-port fallback; port `0`
-    // is a wildcard). A port change — the JSON-apply path (#947) — or a stale fallback must MOVE the
-    // server: tear the sidecar down (via the non-reentrant `teardown_sidecar`, safe under the held
-    // `resolving` lock) and fall through to a fresh spawn on `port`.
+    // Idempotent fast path — reuse the running server verbatim when the cached endpoint still matches
+    // what's being asked for (exact non-fallback match, or a same-port fallback while the real port
+    // stays busy — see `endpoint_action`'s doc comment). Anything else must MOVE the server: tear the
+    // sidecar down (via the non-reentrant `teardown_sidecar`, safe under the held `resolving` lock) and
+    // fall through to a fresh spawn on `port`.
     let mut needs_teardown = false;
     if let Ok(g) = state.info.lock() {
         if let Some(info) = g.as_ref() {
-            if can_reuse_cached_endpoint(info, port) {
-                return Ok(Some(info.clone()));
+            // Only probe the port when it could actually change the outcome (a fallback for THIS
+            // port) — `&&` short-circuits, so every other cached-`info` shape skips the bind syscall.
+            let port_is_free = info.fallback
+                && port != 0
+                && info.requested_port == port
+                && requested_port_is_free(port);
+            match endpoint_action(info, port, port_is_free) {
+                EndpointAction::Reuse => return Ok(Some(info.clone())),
+                EndpointAction::Teardown => needs_teardown = true,
             }
-            needs_teardown = true;
         }
     }
     if needs_teardown {
@@ -2672,8 +2724,10 @@ mod tests {
             requested_port: 7900,
             fallback: true,
         };
-        // Even when asked for the SAME requested port, a lingering fallback must re-attempt
-        // (teardown + respawn) so it self-heals once the original port frees up — never returned stale.
+        // Even when asked for the SAME requested port, a lingering fallback is never reused via
+        // THIS predicate — it stays the pure non-fallback matcher. `mcp_endpoint` now reuses a
+        // same-port fallback while the port is still busy via the separate `endpoint_action`
+        // decision (see its truth table below), not by loosening this one.
         assert!(!can_reuse_cached_endpoint(&fb, 7900));
         assert!(!can_reuse_cached_endpoint(&fb, 7901));
     }
@@ -2688,6 +2742,54 @@ mod tests {
             fallback: false,
         };
         assert!(can_reuse_cached_endpoint(&info, 0));
+    }
+
+    #[test]
+    fn requested_port_is_free_detects_a_free_port() {
+        // Bind an ephemeral port so we know it's busy for the duration of the listener.
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        assert!(
+            !requested_port_is_free(port),
+            "the port is bound by `listener`, so it must read as busy"
+        );
+
+        drop(listener);
+
+        assert!(
+            requested_port_is_free(port),
+            "the port was released, so it must read as free"
+        );
+
+        // `0` is the OS-assigned wildcard, never a concrete "freed" port.
+        assert!(!requested_port_is_free(0));
+    }
+
+    #[test]
+    fn endpoint_action_truth_table() {
+        let exact = McpEndpointInfo {
+            url: "http://127.0.0.1:7900/mcp".into(),
+            requested_port: 7900,
+            fallback: false,
+        };
+        // Non-fallback exact match ⇒ Reuse, regardless of `port_is_free` (unused on this branch).
+        assert_eq!(endpoint_action(&exact, 7900, false), EndpointAction::Reuse);
+
+        let fb = McpEndpointInfo {
+            url: "http://127.0.0.1:50123/mcp".into(),
+            requested_port: 7900,
+            fallback: true,
+        };
+        // Fallback for the SAME port, still busy ⇒ Reuse (the churn fix this issue adds).
+        assert_eq!(endpoint_action(&fb, 7900, false), EndpointAction::Reuse);
+        // Fallback for the SAME port, now free ⇒ Teardown (self-heal onto the real port).
+        assert_eq!(endpoint_action(&fb, 7900, true), EndpointAction::Teardown);
+        // Fallback for a DIFFERENT port (the JSON-apply move path) ⇒ Teardown, whatever `port_is_free` says.
+        assert_eq!(endpoint_action(&fb, 7901, false), EndpointAction::Teardown);
+        assert_eq!(endpoint_action(&fb, 7901, true), EndpointAction::Teardown);
+        // Port 0 (wildcard) against a fallback ⇒ Teardown — #947's wildcard semantics are out of scope.
+        assert_eq!(endpoint_action(&fb, 0, false), EndpointAction::Teardown);
     }
 
     // --- sidecar launcher selection (pure) ----------------------------------

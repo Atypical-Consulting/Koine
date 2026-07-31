@@ -1049,7 +1049,7 @@ internal sealed class ExpressionChecker
     /// member access means (#1498). Classifies once — this runs per member access.
     /// </summary>
     private bool HasKnownMemberSet(TypeRef t) =>
-        _index.Classify(t.Name) is TypeKind.Value or TypeKind.Entity or TypeKind.Enum;
+        _index.Classify(_resolver.Context, t.Name) is TypeKind.Value or TypeKind.Entity or TypeKind.Enum;
 
     /// <summary>List/Set/Map — types that expose count/isEmpty/isNotEmpty.</summary>
     private bool IsCollection(TypeRef t) =>
@@ -1175,14 +1175,14 @@ internal sealed class ExpressionChecker
 
         if (op == "sum")
         {
-            if (!TypeResolver.IsNumeric(selector) && _index.Classify(selector.Name) != TypeKind.Value)
+            if (!TypeResolver.IsNumeric(selector) && _index.Classify(_resolver.Context, selector.Name) != TypeKind.Value)
             {
                 Report(DiagnosticCodes.AggregateSelector, $"sum requires a numeric or value-object selector, but got '{selector.Name}'", call);
             }
         }
         else // min / max
         {
-            TypeKind kind = _index.Classify(selector.Name);
+            TypeKind kind = _index.Classify(_resolver.Context, selector.Name);
             if (_resolver.IsValueLike(selector) || kind == TypeKind.Entity)
             {
                 Report(DiagnosticCodes.AggregateSelector, $"{op} requires a comparable selector; '{selector.Name}' is not orderable", call);

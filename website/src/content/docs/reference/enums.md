@@ -95,6 +95,7 @@ Every enum emits the following fixed surface:
 | `FromValue(int)` | look up by ordinal; throws `ArgumentOutOfRangeException` if unknown |
 | `TryFromName(string, out T)` | non-throwing name lookup; returns `false` (and `null`) if unknown |
 | `TryFromValue(int, out T)` | non-throwing ordinal lookup; returns `false` (and `null`) if unknown |
+| `TryParse(string?, out T)` | case-insensitive name lookup satisfying ASP.NET Core Minimal APIs' `TryParse` binding convention, so an enum-typed query/route parameter binds from a string instead of falling back to an illegal inferred request body |
 | `Match<TResult>(…)` | exhaustive: one `Func<TResult>` per member, returns the matched arm's result |
 | `Switch(…)` | exhaustive: one `Action` per member, runs the matched arm |
 | `Equals` / `GetHashCode` | value equality on `Value` |
@@ -111,8 +112,8 @@ Because the members in [§8.3.1](#831-generated-api) are generated on every enum
 apply to **all** enums:
 
 - A **member** may not be named after a generated member — `Name`, `Value`, `All`, `FromName`,
-  `FromValue`, `TryFromName`, `TryFromValue`, `Match`, `Switch`, `ToString`, `Equals`, `GetHashCode`
-  (`KOI0910`).
+  `FromValue`, `TryFromName`, `TryFromValue`, `TryParse`, `Match`, `Switch`, `ToString`, `Equals`,
+  `GetHashCode` (`KOI0910`).
 - **Signature field names** are case-insensitively reserved against the same list. A field named
   `value: Int` is rejected (`KOI0903`).
 
@@ -147,6 +148,7 @@ public sealed class OrderStatus : IEquatable<OrderStatus>
     public static OrderStatus FromValue(int value) => /* ... */;
     public static bool TryFromName(string name, out OrderStatus result) => /* ... */;
     public static bool TryFromValue(int value, out OrderStatus result) => /* ... */;
+    public static bool TryParse(string? value, out OrderStatus result) => /* ... */;
 
     public TResult Match<TResult>(Func<TResult> draft, Func<TResult> submitted, /* … */) => /* ... */;
     public void Switch(Action draft, Action submitted, /* … */) => /* ... */;
@@ -257,8 +259,8 @@ The compiler enforces a few constraints so the emitted class is always well-form
   associated data can never reference cross-context types.
 - **Reserved associated-data field names.** Field names are case-insensitively reserved against the
   generated members: `Name`, `Value`, `All`, `FromName`, `FromValue`, `TryFromName`, `TryFromValue`,
-  `Match`, `Switch`, `ToString`, `Equals`, `GetHashCode`. A field named `value: Int` is rejected
-  (`KOI0903`).
+  `TryParse`, `Match`, `Switch`, `ToString`, `Equals`, `GetHashCode`. A field named `value: Int` is
+  rejected (`KOI0903`).
 - **Arity must match.** Each member's argument count must equal the signature arity (`KOI0901`).
   Supplying args to a signature-less enum (`enum E { X(1) }`) is the same error.
 - **Argument types must match.** A literal's type must fit the field's type (`KOI0902`). `Int`
