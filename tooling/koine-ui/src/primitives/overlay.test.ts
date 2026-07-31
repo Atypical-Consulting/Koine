@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { createModal, createPromptDialog } from "./overlay";
+import { createConfirmDialog, createModal, createPromptDialog } from "./overlay";
 
 // Each test builds a fresh modal mounted on document.body; clear it between tests so
 // stale backdrops/handlers don't leak across cases.
@@ -158,5 +158,47 @@ describe("createPromptDialog", () => {
     const p = createPromptDialog().ask({ title: "New entity", initialValue: "Order" });
     fields().cancel.click();
     await expect(p).resolves.toBeNull();
+  });
+});
+
+describe("createConfirmDialog overlapping requests", () => {
+  // createConfirmDialog appends [cancel, confirm] into the footer, in that order.
+  function footerButtons(): [HTMLButtonElement, HTMLButtonElement] {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".koi-modal-footer button"));
+    return [buttons[0], buttons[1]];
+  }
+
+  test("a second ask() call made while one is pending queues instead of pre-empting the first", async () => {
+    const dialog = createConfirmDialog();
+    const first = dialog.ask({ title: "First", message: "m1", confirmLabel: "Yes" });
+    const second = dialog.ask({ title: "Second", message: "m2", confirmLabel: "Yes" });
+
+    // The dialog still shows the FIRST request — the second call hasn't pre-empted it.
+    expect(document.querySelector(".koi-modal-title")!.textContent).toBe("First");
+
+    footerButtons()[1].click();
+    await expect(first).resolves.toBe(true);
+
+    // Once the dialog frees up, the queued second request takes its turn — settled by a real
+    // interaction of its own, not silently cancelled by the first.
+    expect(document.querySelector(".koi-modal-title")!.textContent).toBe("Second");
+    footerButtons()[1].click();
+    await expect(second).resolves.toBe(true);
+  });
+
+  test("dismissing the shown request via Esc resolves it false and still surfaces the queued one", async () => {
+    const dialog = createConfirmDialog();
+    const first = dialog.ask({ title: "First", message: "m1", confirmLabel: "Yes" });
+    const second = dialog.ask({ title: "Second", message: "m2", confirmLabel: "Yes" });
+
+    // Mirrors a caller abandoning its request without an explicit answer (e.g. navigating away):
+    // the existing Esc → settle(false) path resolves it, and the queue must still drain from there
+    // rather than leaving the second request hanging forever.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await expect(first).resolves.toBe(false);
+
+    expect(document.querySelector(".koi-modal-title")!.textContent).toBe("Second");
+    footerButtons()[1].click();
+    await expect(second).resolves.toBe(true);
   });
 });

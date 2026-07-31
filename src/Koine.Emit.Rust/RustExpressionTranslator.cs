@@ -894,7 +894,7 @@ internal sealed class RustExpressionTranslator
 
         // (5) An enum *type* reference (qualifier of `OrderStatus.Draft`): the PascalCase type,
         // module-qualified when the enum is owned by another bounded context.
-        if (_index.Classify(name) == TypeKind.Enum)
+        if (_index.Classify(_resolver.Context, name) == TypeKind.Enum)
         {
             sb.Append(_typeMapper.QualifyTypeName(name));
             return;
@@ -951,7 +951,7 @@ internal sealed class RustExpressionTranslator
     {
         // Qualified enum-member access: `OrderStatus.Cancelled` -> `OrderStatus::Cancelled`.
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
-            && !_locals.IsLocal(qualifier.Name) && _index.Classify(qualifier.Name) == TypeKind.Enum)
+            && !_locals.IsLocal(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
         {
             sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append("::").Append(VariantOf(qualifier.Name, ma.MemberName));
             return;
@@ -1205,7 +1205,7 @@ internal sealed class RustExpressionTranslator
         // (CSharp/Java/Kotlin/Php/Python/TypeScript), rather than a context-blind global overload.
         string? context = receiverType.Qualifier ?? _resolver.Context;
 
-        if (_index.Classify(receiverType.Name) == TypeKind.Enum)
+        if (_index.Classify(context, receiverType.Name) == TypeKind.Enum)
         {
             return _index.TryGetMemberType(context, receiverType.Name, ma.MemberName, out TypeRef enumMemberType)
                 && enumMemberType is { Name: "String", IsOptional: false };
@@ -1392,7 +1392,13 @@ internal sealed class RustExpressionTranslator
     private string? EnumTypeName(Expr expr)
     {
         TypeRef? type = _resolver.Infer(expr, EffectiveScope());
-        return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
+        if (type is null)
+        {
+            return null;
+        }
+
+        string? context = type.Qualifier ?? _resolver.Context;
+        return _index.Classify(context, type.Name) == TypeKind.Enum ? type.Name : null;
     }
 
     /// <summary>
