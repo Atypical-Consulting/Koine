@@ -98,6 +98,12 @@ public sealed class Currency : IEquatable<Currency>
         return result is not null;
     }
 
+    public static bool TryParse(string? value, out Currency result)
+    {
+        result = All.FirstOrDefault(e => string.Equals(e.Name, value, StringComparison.OrdinalIgnoreCase))!;
+        return result is not null;
+    }
+
     public TResult Match<TResult>(
         Func<TResult> eUR,
         Func<TResult> uSD,
@@ -184,6 +190,12 @@ public sealed class OrderStatus : IEquatable<OrderStatus>
     public static bool TryFromValue(int value, out OrderStatus result)
     {
         result = All.FirstOrDefault(e => e.Value == value)!;
+        return result is not null;
+    }
+
+    public static bool TryParse(string? value, out OrderStatus result)
+    {
+        result = All.FirstOrDefault(e => string.Equals(e.Name, value, StringComparison.OrdinalIgnoreCase))!;
         return result is not null;
     }
 
