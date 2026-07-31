@@ -152,8 +152,11 @@ Two `Customer` instances are equal exactly when their `Id` matches — every oth
 
 The generated `Id` property is of the emitted ID value object type. The ID value object itself
 derives from `ValueObject` (in `Koine.Runtime`) and contributes the wrapped primitive to structural
-equality via `GetEqualityComponents()`. The exact shape of the ID value object depends on the
-identity strategy in use; see [§6.5](#65-identity-strategies) for per-strategy emitted shapes.
+equality via `GetEqualityComponents()`. Every strategy also emits a `TryParse(string?, out TId?)`
+satisfying ASP.NET Core Minimal APIs' binding convention, so a typed ID binds directly from a query
+string or route value on an emitted `api`-layer endpoint. The exact shape of the ID value object
+depends on the identity strategy in use; see [§6.5](#65-identity-strategies) for per-strategy emitted
+shapes.
 
 ## 6.5 Identity strategies
 
@@ -191,6 +194,18 @@ public sealed class CustomerId : ValueObject
     public CustomerId(Guid value) => Value = value;
 
     public static CustomerId New() => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out CustomerId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -233,6 +248,18 @@ public sealed class ProductCode : ValueObject
         Value = value;
     }
 
+    public static bool TryParse(string? value, [NotNullWhen(true)] out ProductCode? result)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            result = null;
+            return false;
+        }
+
+        result = new(value);
+        return true;
+    }
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Value;
@@ -253,7 +280,7 @@ entity LegacyAccount identified by AccountNo as natural(Int) {
 }
 ```
 
-Emits `public int Value { get; }`, value-equality, and no `New()`.
+Emits `public int Value { get; }`, value-equality, a `TryParse(string?, out AccountNo?)`, and no `New()`.
 
 :::caution
 Natural keys accept only `String` or `Int` as the backing type. `as natural(Decimal)` — or any
@@ -279,6 +306,18 @@ public sealed class InvoiceNo : ValueObject
     public long Value { get; }
 
     public InvoiceNo(long value) => Value = value;
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out InvoiceNo? result)
+    {
+        if (long.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {

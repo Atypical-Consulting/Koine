@@ -273,6 +273,7 @@ public interface IOrderRepository
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -288,6 +289,18 @@ public sealed class CustomerId : ValueObject
     public static CustomerId New()
         => new(Guid.NewGuid());
 
+    public static bool TryParse(string? value, [NotNullWhen(true)] out CustomerId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Value;
@@ -299,6 +312,7 @@ public sealed class CustomerId : ValueObject
 #nullable enable
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -310,6 +324,18 @@ public sealed class InvoiceNo : ValueObject
 
     public InvoiceNo(long value)
         => Value = value;
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out InvoiceNo? result)
+    {
+        if (long.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -323,6 +349,7 @@ public sealed class InvoiceNo : ValueObject
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -337,6 +364,18 @@ public sealed class OrderId : ValueObject
 
     public static OrderId New()
         => new(Guid.NewGuid());
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out OrderId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
 
     protected override IEnumerable<object?> GetEqualityComponents()
     {
@@ -380,6 +419,7 @@ public sealed class OrderLine : ValueObject
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -395,6 +435,18 @@ public sealed class ProductId : ValueObject
     public static ProductId New()
         => new(Guid.NewGuid());
 
+    public static bool TryParse(string? value, [NotNullWhen(true)] out ProductId? result)
+    {
+        if (Guid.TryParse(value, out var parsed))
+        {
+            result = new(parsed);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
     protected override IEnumerable<object?> GetEqualityComponents()
     {
         yield return Value;
@@ -406,6 +458,7 @@ public sealed class ProductId : ValueObject
 #nullable enable
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Koine.Runtime;
 
 namespace Sales;
@@ -424,6 +477,18 @@ public sealed class Sku : ValueObject
                 rule: "identity value cannot be blank");
         }
         Value = value;
+    }
+
+    public static bool TryParse(string? value, [NotNullWhen(true)] out Sku? result)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            result = null;
+            return false;
+        }
+
+        result = new(value);
+        return true;
     }
 
     protected override IEnumerable<object?> GetEqualityComponents()
