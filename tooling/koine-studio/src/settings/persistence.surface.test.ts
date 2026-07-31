@@ -45,6 +45,7 @@ describe('persistence.ts export surface (#988 barrel guard)', () => {
       'loadWorkspaceCenter',
       'loadWorkspaceDeck',
       'loadWorkspaceOverrides',
+      'parseKeybindingOverrides',
       'patchSettings',
       'peekLegacyScratch',
       'pinRecentFolder',

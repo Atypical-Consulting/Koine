@@ -50,6 +50,7 @@ import {
   saveKeybindingOverride,
   resolveKeybindings,
   clearKeybindingOverrides,
+  parseKeybindingOverrides,
 } from '@/settings/persistence';
 import { DEFAULT_DECK_STATE, isValidDeckState } from '@/store/slices/uiChrome';
 import type { DeckState } from '@/store/slices/uiChrome';
@@ -1360,6 +1361,53 @@ describe('keybinding overrides', () => {
     saveKeybindingOverride('rename', '');
     expect(loadKeybindingOverrides().rename).toBe('');
     expect(resolveKeybindings().rename).toBe('');
+  });
+});
+
+// The raw keybindings.json editor's Apply validator (#434): shares loadKeybindingOverrides' guard
+// (known BindingId, string value) but REPORTS a violation instead of silently dropping it, since the
+// user typed it deliberately.
+describe('parseKeybindingOverrides', () => {
+  test('a valid blob parses to its override map', () => {
+    const result = parseKeybindingOverrides('{"format": "Ctrl-d", "rename": ""}');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual({ format: 'Ctrl-d', rename: '' });
+  });
+
+  test('an empty object parses to an empty override map', () => {
+    const result = parseKeybindingOverrides('{}');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual({});
+  });
+
+  test('malformed JSON is rejected with a named error', () => {
+    const result = parseKeybindingOverrides('not json{');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/json/i);
+  });
+
+  test('an array is rejected with a named error', () => {
+    const result = parseKeybindingOverrides('["format"]');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
+  });
+
+  test('an unknown command id is rejected (not silently dropped)', () => {
+    const result = parseKeybindingOverrides('{"bogusCommand": "Ctrl-x"}');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('bogusCommand');
+  });
+
+  test('an inherited Object key (e.g. "toString") is rejected as an unknown id', () => {
+    const result = parseKeybindingOverrides('{"toString": "Mod-q"}');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('toString');
+  });
+
+  test('a non-string value is rejected with a named error', () => {
+    const result = parseKeybindingOverrides('{"format": 42}');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('format');
   });
 });
 

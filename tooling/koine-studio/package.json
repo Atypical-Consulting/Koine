@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "node scripts/smoke-boot.mjs",
+    "test:offline": "node scripts/smoke-offline.mjs",
     "lint": "eslint .",
     "build": "tsc && vite build",
     "prebuild": "node scripts/ensure-workspace-deps.mjs && node scripts/generate-templates.mjs",
