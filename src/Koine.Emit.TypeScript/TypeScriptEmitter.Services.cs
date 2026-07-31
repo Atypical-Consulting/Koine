@@ -173,7 +173,7 @@ public sealed partial class TypeScriptEmitter
                     translator.PushLocal(p.Name, p.Type);
                 }
 
-                var expectedEnum = index.Classify(op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
+                var expectedEnum = index.Classify(op.ReturnType.Qualifier, op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
                 var body = translator.Translate(op.Body, TypeScriptExpressionTranslator.NameMode.Property, expectedEnum);
                 foreach (Param p in op.Parameters)
                 {
