@@ -29,7 +29,7 @@
 // in the new tree simply loses its (moot) collapsed state.
 import type { EmitFile } from '@/lsp/protocol';
 import { buildFileTree, type TreeNode } from '@/shell/output/fileTree';
-import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
+import { createRovingTabIndex, handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
 
 export interface GeneratedFileTreeOptions {
   /** Fired when a file treeitem is activated (clicked, or Enter/Space while it holds keyboard focus). */
@@ -83,13 +83,6 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   // instead of walking the DOM. Reset on every setFiles() rebuild.
   let byPath = new Map<string, HTMLElement>();
 
-  /** Every treeitem in the current render, in DOM/visual order — the one `querySelectorAll` both
-   *  {@link visibleTreeItems} and {@link setRovingItem} derive from, so a call that needs both the full
-   *  and the visible set (setRovingItem) only ever traverses the tree once. */
-  function allTreeItems(): HTMLElement[] {
-    return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
-  }
-
   /** Whether a row is reachable (not collapsed away): true unless some ANCESTOR folder row is collapsed.
    *  Deliberately ancestor-only (#1366): `closest` tests the element ITSELF before its ancestors, and a
    *  collapsed folder's own `<li>` also carries `aria-expanded="false"` — an `el.closest(...)` check
@@ -100,41 +93,11 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
     return !el.parentElement?.closest('[role="treeitem"][aria-expanded="false"]');
   }
 
-  /** The visible (not collapsed-away) treeitems, in DOM/visual order — a row is excluded once any
-   *  ancestor folder is collapsed (see {@link isReachable}). */
-  function visibleTreeItems(): HTMLElement[] {
-    return allTreeItems().filter(isReachable);
-  }
-
-  /** Seed/refresh the roving tabindex: exactly one visible treeitem (`active`, else the first) is the
-   *  lone tab stop; every other treeitem — visible or not — leaves the tab order. */
-  function setRovingItem(active: HTMLElement | null): void {
-    const all = allTreeItems();
-    const visible = all.filter(isReachable);
-    const tabbable = active && visible.includes(active) ? active : (visible[0] ?? null);
-    for (const item of all) item.tabIndex = item === tabbable ? 0 : -1;
-  }
-
-  function focusItem(item: HTMLElement): void {
-    setRovingItem(item);
-    item.focus();
-  }
-
-  /** The treeitem a DOM event targets: the event target's nearest treeitem, else the currently-focused
-   *  element's (the listeners below are delegated on the root). Code-review fix: `ev.target` isn't always
-   *  an `Element` — a row's label is a bare Text node (`buildRow` sets `li.textContent` directly, no
-   *  wrapping `<span>`), and in Firefox a real mouse click landing on rendered text sets `event.target` to
-   *  that Text node, which has no `.closest`. Resolve to the nearest Element first (its `.parentElement`
-   *  when the target itself isn't one) before calling `.closest` on it. */
-  function currentTreeItem(ev: Event): HTMLElement | null {
-    const target = ev.target;
-    const start = target instanceof Element ? target : ((target as Node | null)?.parentElement ?? null);
-    return (
-      start?.closest<HTMLElement>('[role="treeitem"]') ??
-      (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
-      null
-    );
-  }
+  // Seed-the-tab-stop / resolve-event-to-treeitem glue shared with every other Studio tree panel
+  // (shell/rovingTreeNav.ts, #1365) — `isVisible: isReachable` is this widget's one real difference from
+  // the default (a collapse-aware visible/all split; `DomainNavigator.tsx`'s trees never collapse a
+  // branch, so they omit it).
+  const rovingTabIndex = createRovingTabIndex(tree, { isVisible: isReachable });
 
   function clearSelection(): void {
     for (const el of tree.querySelectorAll<HTMLElement>('[aria-selected="true"]')) {
@@ -177,20 +140,20 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       const path = li.dataset.path;
       if (path) selectFile(li, path, true);
     }
-    focusItem(li);
+    rovingTabIndex.focusItem(li);
   }
 
   function navFor(ev: KeyboardEvent): RovingTreeNav<HTMLElement> {
-    const items = visibleTreeItems();
+    const items = rovingTabIndex.visibleTreeItems();
     return {
       items: () => items,
       activeIndex: () => {
-        const current = currentTreeItem(ev);
+        const current = rovingTabIndex.currentTreeItem(ev);
         return current ? items.indexOf(current) : -1;
       },
       focusIndex: (i) => {
         const item = items[i];
-        if (item) focusItem(item);
+        if (item) rovingTabIndex.focusItem(item);
       },
       activate: (i) => {
         const item = items[i];
@@ -210,7 +173,7 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
           if (!expanded) {
             setFolderExpanded(item, true);
           } else if (i < items.length - 1) {
-            focusItem(items[i + 1]);
+            rovingTabIndex.focusItem(items[i + 1]);
           }
         }
         return true;
@@ -225,7 +188,7 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
           setFolderExpanded(item, false);
         } else {
           const parent = item?.parentElement?.closest<HTMLElement>('[role="treeitem"]') ?? null;
-          if (parent) focusItem(parent);
+          if (parent) rovingTabIndex.focusItem(parent);
         }
         return true;
       },
@@ -281,7 +244,7 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
   }
 
   element.addEventListener('click', (ev) => {
-    const li = currentTreeItem(ev);
+    const li = rovingTabIndex.currentTreeItem(ev);
     if (li) activateItem(li);
   });
   element.addEventListener('keydown', (ev) => handleTreeKeydown(navFor(ev), ev));
@@ -320,7 +283,7 @@ export function createGeneratedFileTree(opts: GeneratedFileTreeOptions): Generat
       if (li?.dataset.kind === 'folder') setFolderExpanded(li, false);
     }
 
-    setRovingItem(null); // seed the first VISIBLE treeitem as the lone tab stop (honors the collapse above)
+    rovingTabIndex.setRovingItem(null); // seed the first VISIBLE treeitem as the lone tab stop (honors the collapse above)
   }
 
   function selectPath(path: string): boolean {
