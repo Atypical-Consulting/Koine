@@ -55,7 +55,7 @@ public sealed partial class PhpEmitter
                 // Direct field: type and value come from the like-named source member.
                 if (emit.Index.TryGetMemberType(contextName, rm.SourceType, f.Name, out TypeRef t))
                 {
-                    phpType = typeMapper.Map(t);
+                    phpType = typeMapper.Map(t, contextName);
                     fieldType = t;
                 }
                 else
@@ -77,7 +77,7 @@ public sealed partial class PhpEmitter
             }
             else
             {
-                phpType = typeMapper.Map(f.Type!);
+                phpType = typeMapper.Map(f.Type!, contextName);
                 fieldType = f.Type;
                 var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? translator.Context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.Translate(f.Projection, PhpExpressionTranslator.NameMode.Property, expectedEnum);
@@ -100,7 +100,7 @@ public sealed partial class PhpEmitter
             .Where(f => f.Type is not null)
             .Select(f => (f.Prop, f.Type!))
             .ToList();
-        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null);
+        WriteMethodDoc(sb, Indent, typeMapper, docParams, null, null, contextName);
 
         sb.Append(Indent).Append("public function __construct(\n");
         if (fields.Count == 0)
@@ -169,7 +169,7 @@ public sealed partial class PhpEmitter
     {
         var name = PhpNaming.ClassName(q.Name);
         var handlerName = name + "Handler";
-        var resultType = typeMapper.Map(q.ResultType);
+        var resultType = typeMapper.Map(q.ResultType, contextName);
 
         var sb = new StringBuilder();
         WriteDoc(sb, q.Doc ?? $"Query returning {resultType}; handled by {handlerName}.", "");
@@ -183,7 +183,7 @@ public sealed partial class PhpEmitter
         var criteriaDocParams = q.Criteria
             .Select(p => (PhpNaming.PropertyName(p.Name), p.Type))
             .ToList();
-        WriteMethodDoc(sb, Indent, typeMapper, criteriaDocParams, null, null);
+        WriteMethodDoc(sb, Indent, typeMapper, criteriaDocParams, null, null, contextName);
 
         sb.Append(Indent).Append("public function __construct(\n");
         if (q.Criteria.Count == 0)
@@ -196,7 +196,7 @@ public sealed partial class PhpEmitter
             {
                 Param p = q.Criteria[i];
                 var prop = PhpNaming.PropertyName(p.Name);
-                var phpType = typeMapper.Map(p.Type);
+                var phpType = typeMapper.Map(p.Type, contextName);
                 bool last = i == q.Criteria.Count - 1;
                 sb.Append(Indent).Append(Indent)
                   .Append("public ").Append(phpType).Append(" $").Append(prop);
@@ -215,7 +215,7 @@ public sealed partial class PhpEmitter
         // binds QueryHandler's TQuery/TResult to the concrete query and result, so phpstan
         // --level max sees the generic arguments instead of `missingType.generics`; a list result
         // threads `list<T>` via DocType (a bare `array` `@return` is `missingType.iterableValue`).
-        var resultDoc = typeMapper.DocType(q.ResultType) ?? resultType;
+        var resultDoc = typeMapper.DocType(q.ResultType, contextName) ?? resultType;
         sb.Append('\n');
         sb.Append("/**\n");
         sb.Append(" * Handles ").Append(name).Append(", returning ").Append(resultDoc).Append(".\n");

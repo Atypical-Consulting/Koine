@@ -96,12 +96,12 @@ public sealed partial class PhpEmitter
             var opDocParams = op.Parameters
                 .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name)), p.Type))
                 .ToList();
-            WriteMethodDoc(sb, Indent, typeMapper, opDocParams, op.ReturnType, op.Doc);
+            WriteMethodDoc(sb, Indent, typeMapper, opDocParams, op.ReturnType, op.Doc, ctxName);
 
             var method = PhpNaming.MethodName(op.Name);
-            var ret = typeMapper.Map(op.ReturnType);
+            var ret = typeMapper.Map(op.ReturnType, ctxName);
             var paramList = string.Join(", ", op.Parameters.Select(p =>
-                $"{typeMapper.Map(p.Type)} ${PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name))}"));
+                $"{typeMapper.Map(p.Type, ctxName)} ${PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name))}"));
 
             if (op.Body is null)
             {
@@ -175,12 +175,12 @@ public sealed partial class PhpEmitter
             var ucDocParams = uc.Parameters
                 .Select(p => (PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name)), p.Type))
                 .ToList();
-            WriteMethodDoc(sb, Indent, typeMapper, ucDocParams, uc.ReturnType, uc.Doc);
+            WriteMethodDoc(sb, Indent, typeMapper, ucDocParams, uc.ReturnType, uc.Doc, ctxName);
 
             var method = PhpNaming.MethodName(uc.Name);
-            var ret = uc.ReturnType is null ? "void" : typeMapper.Map(uc.ReturnType);
+            var ret = uc.ReturnType is null ? "void" : typeMapper.Map(uc.ReturnType, ctxName);
             var paramList = string.Join(", ", uc.Parameters.Select(p =>
-                $"{typeMapper.Map(p.Type)} ${PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name))}"));
+                $"{typeMapper.Map(p.Type, ctxName)} ${PhpNaming.EscapeIdentifier(PhpNaming.MethodName(p.Name))}"));
 
             sb.Append(Indent).Append("public function ").Append(method)
               .Append('(').Append(paramList).Append("): ").Append(ret).Append(";\n");

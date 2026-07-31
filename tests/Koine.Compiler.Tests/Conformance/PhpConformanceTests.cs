@@ -1116,4 +1116,71 @@ public class PhpConformanceTests
             + "Status::equals()):\n"
             + string.Join("\n", run.Errors));
     }
+
+    /// <summary>
+    /// Issue #1638: <c>PhpTypeMapper</c> is constructed ONCE per compile and reused across every
+    /// context, so it carries no ambient context of its own — only the <c>TypeRef.Qualifier</c>,
+    /// which the parser leaves <c>null</c> for the common, BARE (unqualified) same-context
+    /// reference. Here <c>Billing</c> (declared FIRST) owns an ENUM named <c>Status</c>; a
+    /// differently-KINDED sibling <c>Status</c> (a VALUE OBJECT) is declared in <c>Shipping</c>
+    /// AFTER it, so the flat index's last-write-wins registration resolves a context-blind
+    /// <c>Classify("Status")</c> to Shipping's value object, not Billing's own enum — exactly the
+    /// TypeScript regression pinned by
+    /// <c>TypeScriptConformanceTests.Bare_unqualified_member_field_resolves_the_correct_context_for_a_same_named_sibling_type</c>.
+    /// <para>
+    /// Unlike TypeScript — whose enum/non-enum branches emit visibly different strings (a bare
+    /// <c>Status</c> value vs. a <c>StatusMember</c> type), so the misclassification breaks
+    /// <c>tsc --strict</c> — PHP's <c>PhpTypeMapper.MapBase</c> enum/non-enum branches both return
+    /// the identical <c>PhpNaming.ClassName(type.Name)</c> string (a PHP backed enum's own class name
+    /// IS the type-hint, exactly like a value object's), and <c>IsEnum</c> itself has no emitter
+    /// caller today. So this full-pipeline construct does NOT actually regress before the fix —
+    /// phpstan already accepts the field as-is either way, and the type-catalog import resolver (a
+    /// separate mechanism from <c>PhpTypeMapper.Classify</c> — see <c>PhpEmitter.Support.cs</c>'s
+    /// <c>CollectUses</c>/<c>BuildTypeCatalog</c>) already resolves <c>Invoice.status</c>'s
+    /// <c>use Koine\Billing\Enums\Status;</c> import correctly regardless. This test therefore pins
+    /// the CORRECT, already-passing behavior (not a fail-before/pass-after reproduction); the actual
+    /// observable gap this task closes lives one layer down, in
+    /// <c>PhpTypeMapperTests.IsEnum_resolves_bare_reference_against_declaring_context_not_flat_last_writer</c>,
+    /// which fails before the fix and passes after (verified directly against
+    /// <see cref="PhpTypeMapper.IsEnum"/>). Threading <c>context</c> through
+    /// <c>Map</c>/<c>MapBase</c>/<c>DocType</c>/<c>IsEnum</c> here is still the right fix: it keeps
+    /// PHP's API consistent with the TS/Rust/Python mappers and protects <c>IsEnum</c> for any
+    /// future caller.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Bare_unqualified_member_field_resolves_the_correct_context_for_a_same_named_sibling_type()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status {
+                Open
+                Closed
+              }
+              value Invoice {
+                status: Status
+              }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath == "src/Billing/ValueObjects/Invoice.php").Contents;
+        invoice.ShouldContain("use Koine\\Billing\\Enums\\Status;");
+        invoice.ShouldContain("public readonly Status $status");
+
+        var r = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(
+            "a bare, unqualified reference to Billing's OWN enum Status must not misclassify against "
+            + "Shipping's differently-kinded, same-named sibling Status:\n" + string.Join("\n", r.Errors));
+    }
 }
