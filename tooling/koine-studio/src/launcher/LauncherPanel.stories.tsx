@@ -183,7 +183,7 @@ const meta = {
   component: LauncherPanel,
   parameters: {
     layout: 'fullscreen',
-    // THREE real, pre-existing launcher-runtime a11y defects surfaced by bringing this panel under
+    // TWO real, pre-existing launcher-runtime a11y defects surfaced by bringing this panel under
     // Chromium axe coverage for the first time (this file, #1160) — not fixture bugs, and not
     // fixable from a stories-only change (see the file-level "no launcher runtime changes"
     // constraint), so they're narrowly gated here rather than left red or silently ignored. Each is
@@ -196,13 +196,12 @@ const meta = {
     //  - `.lx-modepill-label` / `.lx-mchip.on` (the active mode-switch pill/chip) fail color-contrast
     //    in the LIGHT theme (#1677, surfaced by Task 3's prefix-mode stories) — same excluded-by-
     //    selector treatment, for the same reason.
-    //  - the selected row's tail `.lx-actbtn` renders inside its `.lx-item[role="option"]`, tripping
-    //    `nested-interactive` on essentially every populated result list (#1673) — disabled as a
-    //    whole rule (axe's `context.exclude` prunes a node's entire subtree, which would ALSO hide
-    //    `.lx-title mark` since it lives inside the same option row — a per-rule disable avoids that).
+    // A third defect, the selected row's tail `.lx-actbtn` tripping `nested-interactive` inside its
+    // `.lx-item[role="option"]`, is now FIXED (#1673: the results list is `role="grid"`/`row`/`gridcell`
+    // rather than `listbox`/`option` — see `ResultRow.tsx`) — no rule-disable needed any more, so full
+    // axe coverage (including `nested-interactive`) runs on every story below.
     a11y: {
       context: { exclude: ['.lx-kind', '.lx-sub', '.lx-modepill-label', '.lx-mchip.on'] },
-      options: { rules: { 'nested-interactive': { enabled: false } } },
     },
   },
   args: {
