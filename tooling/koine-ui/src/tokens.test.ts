@@ -233,3 +233,33 @@ describe('launcher .lx-sub contrast (issue #1672)', () => {
     expect(contrastRatio(mutedStrong, worstBg)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+// Guards the launcher `.lx-modepill` / `.lx-mchip.on` WCAG AA contrast fix (issue #1677 — the same
+// root-cause class as #1161/#1263/#1672 above: `color: var(--koi-accent)` text painted directly on a
+// `color-mix(in srgb, var(--koi-accent) 16%, transparent)` tint of the SAME hue, composited over the
+// launcher's `--koi-paper-2`-ish surface). Unlike #1672's two elements, neither `.lx-modepill` (the
+// input-row active-mode pill) nor `.lx-mchip.on` (the footer legend's active-mode chip) sit on a
+// selected-row tint — their own 16%-accent background is the only tint layered on `--koi-paper-2`, so
+// there is no separate "worst case" background to test (unlike --koi-hl-match/--koi-ddd-*-ink above).
+// The audit for this issue (grepping `color: var(--koi-accent)` paired with a `color-mix(in srgb,
+// var(--koi-accent) ...)` background in the same/adjacent rule) found this exact pattern repeated well
+// beyond the launcher (docs ADR-badge, source-control avatar chip, model-rail hover, and several
+// koine-ui components: .deck-sub.on, .koi-events-view-btn[aria-pressed], .rail-axis[aria-selected],
+// .lstrip-btn[aria-pressed], .koi-palette-item[aria-selected]) — so the fix introduces a broadly
+// reusable `--koi-accent-text` token rather than a launcher-scoped one, though this issue only wires it
+// up on `.lx-modepill`/`.lx-mchip.on`; the rest are noted as follow-up candidates.
+describe('launcher .lx-modepill / .lx-mchip.on contrast (issue #1677)', () => {
+  for (const [themeName, selector] of [
+    ['dark', ':root'],
+    ['light', "html[data-theme='light']"],
+  ] as const) {
+    test(`${themeName} theme: --koi-accent-text clears WCAG AA (>= 4.5:1) on the 16%-accent-tinted --koi-paper-2 background`, () => {
+      const block = extractThemeBlock(css, selector);
+      const accentText = extractToken(block, '--koi-accent-text');
+      const accent = extractToken(block, '--koi-accent');
+      const paper2 = extractToken(block, '--koi-paper-2');
+      const pillBg = mixSrgb(accent, paper2, 0.16);
+      expect(contrastRatio(accentText, pillBg), `${themeName} theme`).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
