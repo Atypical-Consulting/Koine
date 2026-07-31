@@ -169,12 +169,12 @@ function renderSelectedOrder(h: InspectorHandlers) {
   const store = createAppStore();
   const index = makeRichIndex();
   const utils = render(<PropertiesPanel store={store} index={index} handlers={h} />);
-  act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+  void act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
   return { ...utils, store, index };
 }
 
 describe('PropertiesPanel', () => {
-  test('renders the selected element name and re-renders when selection changes', () => {
+  test('renders the selected element name and re-renders when selection changes', async () => {
     const store = createAppStore();
     const index = makeIndex();
     const { container } = render(<PropertiesPanel store={store} index={index} handlers={handlers} />);
@@ -185,11 +185,11 @@ describe('PropertiesPanel', () => {
 
     // Selecting an element re-renders the panel and shows the resolved element's name. The store
     // mutation is wrapped in act() so Preact flushes the (async-batched) re-render before we assert.
-    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+    await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
     expect(container.textContent).toContain('Order');
   });
 
-  test('does NOT re-render on an unrelated slice change (bottom tab)', () => {
+  test('does NOT re-render on an unrelated slice change (bottom tab)', async () => {
     const store = createAppStore();
     const index = makeIndex();
 
@@ -205,11 +205,11 @@ describe('PropertiesPanel', () => {
     const before = renders.mock.calls.length;
 
     // An unrelated slice change must not re-render a selection subscriber (flushed via act()).
-    act(() => store.getState().setBottom('events'));
+    await act(() => store.getState().setBottom('events'));
     expect(renders.mock.calls.length).toBe(before); // no re-render
 
     // Sanity: a relevant change DOES re-render, proving the probe is actually wired.
-    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+    await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
     expect(renders.mock.calls.length).toBeGreaterThan(before);
   });
 
@@ -217,7 +217,7 @@ describe('PropertiesPanel', () => {
     const store = createAppStore();
     const index = makeIndex();
     const { container } = render(<PropertiesPanel store={store} index={index} handlers={handlers} />);
-    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+    await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
     expect(await axe(container)).toHaveNoViolations();
   });
 
@@ -252,11 +252,11 @@ describe('PropertiesPanel', () => {
     ['integration event', 'integration-event'],
     ['service', 'type'],
     ['unknown-kind', 'type'],
-  ])('data-kind reflects the DDD-palette mapping of kind %s → %s', (kind, expected) => {
+  ])('data-kind reflects the DDD-palette mapping of kind %s → %s', async (kind, expected) => {
     const store = createAppStore();
     const index = indexWithKind(kind);
     const { container } = render(<PropertiesPanel store={store} index={index} handlers={handlers} />);
-    act(() => store.getState().setSelection({ qualifiedName: 'Sales.Thing', context: 'Sales' }));
+    await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Thing', context: 'Sales' }));
     expect(container.querySelector('.koi-inspector')!.getAttribute('data-kind')).toBe(expected);
     expect(container.querySelector('.koi-inspector')!.getAttribute('data-qname')).toBe('Sales.Thing');
   });
@@ -273,23 +273,23 @@ describe('PropertiesPanel', () => {
       expect(label.contains(input)).toBe(true);
     });
 
-    test('commits a changed name on blur; leaves an unchanged/blank name uncommitted and reset', () => {
+    test('commits a changed name on blur; leaves an unchanged/blank name uncommitted and reset', async () => {
       const onRename = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onRename });
       const input = container.querySelector<HTMLInputElement>('#koi-insp-name')!;
 
-      act(() => input.focus()); // .blur() below is a no-op unless the node is actually focused
+      await act(() => input.focus()); // .blur() below is a no-op unless the node is actually focused
       input.value = 'PurchaseOrder';
-      act(() => {
+      await act(() => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.blur();
       });
       expect(onRename).toHaveBeenCalledWith(expect.objectContaining({ name: 'Order' }), 'PurchaseOrder');
 
       onRename.mockClear();
-      act(() => input.focus());
+      await act(() => input.focus());
       input.value = 'Order'; // back to the original
-      act(() => {
+      await act(() => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.blur();
       });
@@ -297,26 +297,26 @@ describe('PropertiesPanel', () => {
       expect(input.value).toBe('Order');
     });
 
-    test('Enter blurs (and commits a changed value)', () => {
+    test('Enter blurs (and commits a changed value)', async () => {
       const onRename = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onRename });
       const input = container.querySelector<HTMLInputElement>('#koi-insp-name')!;
-      act(() => input.focus());
+      await act(() => input.focus());
       input.value = 'PurchaseOrder';
-      act(() => {
+      await act(() => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         fireEvent.keyDown(input, { key: 'Enter' });
       });
       expect(onRename).toHaveBeenCalledWith(expect.objectContaining({ name: 'Order' }), 'PurchaseOrder');
     });
 
-    test('Escape reverts the typed value and does not commit', () => {
+    test('Escape reverts the typed value and does not commit', async () => {
       const onRename = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onRename });
       const input = container.querySelector<HTMLInputElement>('#koi-insp-name')!;
-      act(() => input.focus());
+      await act(() => input.focus());
       input.value = 'Discarded';
-      act(() => {
+      await act(() => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
         fireEvent.keyDown(input, { key: 'Escape' });
       });
@@ -331,35 +331,35 @@ describe('PropertiesPanel', () => {
     // value from the first element survives, and a later blur would attribute it to the SECOND element.
     // Keying on `element.qualifiedName` (a stable per-element identity) fixes this: this test fails
     // (stays on 'RenamedSalesItem', or fires onRename) if the key regresses back to `element.name`.
-    test('remounts (resets) the Name field on a focus-retaining selection change to a different element sharing the same name (cross-element rename write-leak regression, #992 task-4 review)', () => {
+    test('remounts (resets) the Name field on a focus-retaining selection change to a different element sharing the same name (cross-element rename write-leak regression, #992 task-4 review)', async () => {
       const store = createAppStore();
       const index = makeNameCollisionIndex();
       const onRename = vi.fn();
       const { container } = render(
         <PropertiesPanel store={store} index={index} handlers={{ onGoto: () => {}, onRename }} />,
       );
-      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Item', context: 'Sales' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Item', context: 'Sales' }));
 
       const input = container.querySelector<HTMLInputElement>('#koi-insp-name')!;
       expect(input.value).toBe('Item');
 
       // Type into the field WITHOUT blurring.
-      act(() => input.focus());
+      await act(() => input.focus());
       input.value = 'RenamedSalesItem';
-      act(() => {
+      await act(() => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
 
       // Selection moves to a DIFFERENT element (different qualifiedName/context) that happens to share
       // the same current name ("Item") — no blur fired in between, simulating a focus-retaining
       // selection change (e.g. keyboard navigation in the outline).
-      act(() => store.getState().setSelection({ qualifiedName: 'Shipping.Item', context: 'Shipping' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Shipping.Item', context: 'Shipping' }));
 
       const inputAfter = container.querySelector<HTMLInputElement>('#koi-insp-name')!;
       expect(inputAfter.value).toBe('Item'); // reset to Shipping.Item's own name, not the stale typed text
 
       // Blurring now must not attribute Sales.Item's uncommitted text to Shipping.Item.
-      act(() => inputAfter.blur());
+      await act(() => inputAfter.blur());
       expect(onRename).not.toHaveBeenCalled();
     });
   });
@@ -376,14 +376,14 @@ describe('PropertiesPanel', () => {
       expect(label.contains(textarea)).toBe(true);
     });
 
-    test('commits a changed description on blur; an unchanged one does not commit', () => {
+    test('commits a changed description on blur; an unchanged one does not commit', async () => {
       const onSaveDescription = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onSaveDescription });
       const textarea = container.querySelector<HTMLTextAreaElement>('#koi-insp-description')!;
 
-      act(() => textarea.focus());
+      await act(() => textarea.focus());
       textarea.value = 'An order placed by a customer.';
-      act(() => {
+      await act(() => {
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.blur();
       });
@@ -393,9 +393,9 @@ describe('PropertiesPanel', () => {
       );
 
       onSaveDescription.mockClear();
-      act(() => textarea.focus());
+      await act(() => textarea.focus());
       textarea.value = 'A customer order.'; // back to the original — an unchanged commit
-      act(() => {
+      await act(() => {
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.blur();
       });
@@ -409,14 +409,14 @@ describe('PropertiesPanel', () => {
     // attribute it to the SECOND element via `onSaveDescription`. Keying on `element.qualifiedName`
     // fixes this: this test fails (stays on the stale text, or fires onSaveDescription) if the key
     // regresses back to a value-derived key.
-    test('remounts (resets) the Description field on a focus-retaining selection change to a different element sharing the same description (cross-element write-leak regression, #992 task-4 review)', () => {
+    test('remounts (resets) the Description field on a focus-retaining selection change to a different element sharing the same description (cross-element write-leak regression, #992 task-4 review)', async () => {
       const store = createAppStore();
       const index = makeDescriptionCollisionIndex();
       const onSaveDescription = vi.fn();
       const { container } = render(
         <PropertiesPanel store={store} index={index} handlers={{ onGoto: () => {}, onSaveDescription }} />,
       );
-      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
 
       const textarea = container.querySelector<HTMLTextAreaElement>('#koi-insp-description')!;
       expect(textarea.value).toBe(''); // Order is undocumented
@@ -424,21 +424,21 @@ describe('PropertiesPanel', () => {
       // Type into the field WITHOUT blurring — a focus-retaining selection change (e.g. keyboard
       // navigation in the outline, or an outline click that doesn't blur the textarea) can move the
       // selection while this text is still uncommitted.
-      act(() => textarea.focus());
+      await act(() => textarea.focus());
       textarea.value = 'Uncommitted note meant for Order';
-      act(() => {
+      await act(() => {
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
       });
 
       // Selection moves to a DIFFERENT element that happens to share the same ('') description — still
       // no blur fired.
-      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
 
       const textareaAfter = container.querySelector<HTMLTextAreaElement>('#koi-insp-description')!;
       expect(textareaAfter.value).toBe(''); // reset to Payment's own description, not the stale typed text
 
       // Blurring now must not attribute Order's uncommitted text to Payment.
-      act(() => textareaAfter.blur());
+      await act(() => textareaAfter.blur());
       expect(onSaveDescription).not.toHaveBeenCalled();
     });
   });
@@ -467,42 +467,42 @@ describe('PropertiesPanel', () => {
       expect(rows.map((tr) => tr.querySelector('th')?.getAttribute('scope'))).toEqual(['row', 'row', 'row']);
     });
 
-    test('committing a changed property name calls onRenameProperty with the old + new names', () => {
+    test('committing a changed property name calls onRenameProperty with the old + new names', async () => {
       const onRenameProperty = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onRenameProperty });
       const nameInput = container.querySelector<HTMLInputElement>(
         '.koi-inspector-row-editable .koi-inspector-prop-name input',
       )!;
-      act(() => nameInput.focus()); // .blur() below is a no-op unless the node is actually focused
+      await act(() => nameInput.focus()); // .blur() below is a no-op unless the node is actually focused
       nameInput.value = 'identifier';
-      act(() => {
+      await act(() => {
         nameInput.dispatchEvent(new Event('input', { bubbles: true }));
         nameInput.blur();
       });
       expect(onRenameProperty).toHaveBeenCalledWith(expect.objectContaining({ name: 'Order' }), 'id', 'identifier');
     });
 
-    test('an unchanged property input does not fire an edit', () => {
+    test('an unchanged property input does not fire an edit', async () => {
       const onRenameProperty = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onRenameProperty });
       const nameInput = container.querySelector<HTMLInputElement>(
         '.koi-inspector-row-editable .koi-inspector-prop-name input',
       )!;
-      act(() => nameInput.focus());
-      act(() => nameInput.blur()); // untouched
+      await act(() => nameInput.focus());
+      await act(() => nameInput.blur()); // untouched
       expect(onRenameProperty).not.toHaveBeenCalled();
     });
 
     // The Task-1-review bug class: Escape must revert to the CURRENT value, not a stale one.
-    test('Escape reverts an in-progress property edit and does not commit', () => {
+    test('Escape reverts an in-progress property edit and does not commit', async () => {
       const onRenameProperty = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onRenameProperty });
       const nameInput = container.querySelector<HTMLInputElement>(
         '.koi-inspector-row-editable .koi-inspector-prop-name input',
       )!;
-      act(() => nameInput.focus());
+      await act(() => nameInput.focus());
       nameInput.value = 'discarded';
-      act(() => {
+      await act(() => {
         nameInput.dispatchEvent(new Event('input', { bubbles: true }));
         fireEvent.keyDown(nameInput, { key: 'Escape' });
       });
@@ -510,16 +510,16 @@ describe('PropertiesPanel', () => {
       expect(onRenameProperty).not.toHaveBeenCalled();
     });
 
-    test('committing a changed property type calls onChangeType; the type input carries the datalist `list`', () => {
+    test('committing a changed property type calls onChangeType; the type input carries the datalist `list`', async () => {
       const onChangeType = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onChangeType });
       const typeInput = container.querySelector<HTMLInputElement>(
         '.koi-inspector-row-editable .koi-inspector-prop-type input',
       )!;
       expect(typeInput.getAttribute('list')).toBe('koi-inspector-type-options');
-      act(() => typeInput.focus());
+      await act(() => typeInput.focus());
       typeInput.value = 'OrderNumber';
-      act(() => {
+      await act(() => {
         typeInput.dispatchEvent(new Event('input', { bubbles: true }));
         typeInput.blur();
       });
@@ -535,7 +535,7 @@ describe('PropertiesPanel', () => {
       expect(onRemoveProperty).toHaveBeenCalledWith(expect.objectContaining({ name: 'Order' }), 'id');
     });
 
-    test('the add-property row requires both fields, then clears and refocuses the name field', () => {
+    test('the add-property row requires both fields, then clears and refocuses the name field', async () => {
       const onAddProperty = vi.fn();
       const { container } = renderSelectedOrder({ onGoto: () => {}, onAddProperty });
       const name = container.querySelector<HTMLInputElement>('.koi-inspector-add-name')!;
@@ -548,7 +548,7 @@ describe('PropertiesPanel', () => {
 
       name.value = 'quantity';
       type.value = 'Int';
-      act(() => {
+      await act(() => {
         name.dispatchEvent(new Event('input', { bubbles: true }));
         type.dispatchEvent(new Event('input', { bubbles: true }));
       });
@@ -576,35 +576,35 @@ describe('PropertiesPanel', () => {
     // a focus-retaining selection change (no blur in between), so an uncommitted edit typed for the first
     // element could commit onto the second on blur. Keying on `${element.qualifiedName}:${name}` forces
     // a remount on any selection change while staying stable across re-renders of the SAME element/property.
-    test('remounts (resets) a property row on a focus-retaining selection change to a different element sharing the same property name (cross-element property write-leak regression, final #992 review Finding 1)', () => {
+    test('remounts (resets) a property row on a focus-retaining selection change to a different element sharing the same property name (cross-element property write-leak regression, final #992 review Finding 1)', async () => {
       const store = createAppStore();
       const index = makePropertyNameCollisionIndex();
       const onRenameProperty = vi.fn();
       const { container } = render(
         <PropertiesPanel store={store} index={index} handlers={{ onGoto: () => {}, onRenameProperty }} />,
       );
-      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
 
       const nameInput = () =>
         container.querySelector<HTMLInputElement>('.koi-inspector-row-editable .koi-inspector-prop-name input')!;
       expect(nameInput().value).toBe('code');
 
       // Type into Order's "code" name field WITHOUT blurring.
-      act(() => nameInput().focus());
+      await act(() => nameInput().focus());
       nameInput().value = 'renamedByOrder';
-      act(() => {
+      await act(() => {
         nameInput().dispatchEvent(new Event('input', { bubbles: true }));
       });
 
       // Selection moves to a DIFFERENT element (Payment) that happens to have a property with the SAME
       // name ("code") — no blur fired in between, simulating a focus-retaining selection change.
-      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
 
       const inputAfter = nameInput();
       expect(inputAfter.value).toBe('code'); // reset to Payment's own "code", not Order's stale typed text
 
       // Blurring now must not attribute Order's uncommitted text to Payment.
-      act(() => inputAfter.blur());
+      await act(() => inputAfter.blur());
       expect(onRenameProperty).not.toHaveBeenCalled();
     });
   });
@@ -668,10 +668,10 @@ describe('PropertiesPanel', () => {
       const h: InspectorHandlers = { onGoto: () => {}, loadHistory };
       const { container } = render(<PropertiesPanel store={store} index={index} handlers={h} />);
 
-      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Order', context: 'Sales' }));
       await waitFor(() => expect(loadHistory).toHaveBeenCalledWith(expect.objectContaining({ qualifiedName: 'Sales.Order' })));
 
-      act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
+      await act(() => store.getState().setSelection({ qualifiedName: 'Sales.Payment', context: 'Sales' }));
       await waitFor(() =>
         expect(loadHistory).toHaveBeenCalledWith(expect.objectContaining({ qualifiedName: 'Sales.Payment' })),
       );
@@ -686,7 +686,7 @@ describe('PropertiesPanel', () => {
       expect(container.textContent).not.toContain('stale entry');
 
       // Payment's own resolve DOES render — proving the guard isn't just permanently broken.
-      act(() => resolvePayment([{ sha: 'fresh01', author: 'B', date: '2026-02-02T00:00:00Z', message: 'fresh entry' }]));
+      await act(() => resolvePayment([{ sha: 'fresh01', author: 'B', date: '2026-02-02T00:00:00Z', message: 'fresh entry' }]));
       await waitFor(() => expect(container.querySelector('.koi-inspector-history')).not.toBeNull());
       expect(container.textContent).toContain('fresh entry');
       expect(container.textContent).not.toContain('stale entry');

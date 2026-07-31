@@ -18,11 +18,11 @@ describe('EmitTargetSelector', () => {
     expect(container.querySelector('.emit-menu')).toBeNull();
   });
 
-  test('reflects a store change (e.g. a Settings-driven switch) without reopening', () => {
+  test('reflects a store change (e.g. a Settings-driven switch) without reopening', async () => {
     const store = createAppStore();
     const { container } = render(<EmitTargetSelector store={store} onChange={() => {}} />);
 
-    act(() => store.getState().setEmitTarget('typescript'));
+    await act(() => store.getState().setEmitTarget('typescript'));
     expect(trigger(container).querySelector('.emit-name')!.textContent).toBe('TypeScript');
   });
 

@@ -39,20 +39,20 @@ describe('CompilingIndicator (#516)', () => {
     expect(live!.textContent).toBe('');
   });
 
-  it('reveals "compiling…" only after the debounce elapses while still busy', () => {
+  it('reveals "compiling…" only after the debounce elapses while still busy', async () => {
     const { container } = render(<CompilingIndicator />);
 
-    act(() => {
+    await act(() => {
       markCompileStart(); // idle → busy
     });
     expect(isShown(indicator(container))).toBe(false); // not yet — the reveal is debounced
 
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(DEBOUNCE_MS - 1);
     });
     expect(isShown(indicator(container))).toBe(false); // still within the debounce window
 
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(1);
     });
     const el = indicator(container);
@@ -62,68 +62,68 @@ describe('CompilingIndicator (#516)', () => {
     expect(liveRegion(container)!.textContent).toContain('compiling');
   });
 
-  it('shows nothing when busy ends before the debounce fires (fast keystroke-diagnose)', () => {
+  it('shows nothing when busy ends before the debounce fires (fast keystroke-diagnose)', async () => {
     const { container } = render(<CompilingIndicator />);
 
-    act(() => {
+    await act(() => {
       markCompileStart(); // idle → busy
     });
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(DEBOUNCE_MS - 50); // a quick compile finishes inside the window
     });
-    act(() => {
+    await act(() => {
       markCompileEnd(); // busy → idle before the reveal timer fires
     });
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(200); // let any stale timer fire — it must NOT reveal
     });
     expect(isShown(indicator(container))).toBe(false);
   });
 
-  it('hides immediately when busy ends after it became visible', () => {
+  it('hides immediately when busy ends after it became visible', async () => {
     const { container } = render(<CompilingIndicator />);
 
-    act(() => {
+    await act(() => {
       markCompileStart();
     });
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(isShown(indicator(container))).toBe(true);
 
-    act(() => {
+    await act(() => {
       markCompileEnd(); // busy → idle
     });
     expect(isShown(indicator(container))).toBe(false); // hidden immediately, no debounce on hide
   });
 
-  it('stays visible across a nested compile and hides only when the last one settles', () => {
+  it('stays visible across a nested compile and hides only when the last one settles', async () => {
     const { container } = render(<CompilingIndicator />);
 
-    act(() => {
+    await act(() => {
       markCompileStart(); // 0 → 1
       markCompileStart(); // 1 → 2 (nested, e.g. diagnose + emit-preview)
     });
-    act(() => {
+    await act(() => {
       vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(isShown(indicator(container))).toBe(true);
 
-    act(() => {
+    await act(() => {
       markCompileEnd(); // 2 → 1, still busy
     });
     expect(isShown(indicator(container))).toBe(true); // one compile still outstanding
 
-    act(() => {
+    await act(() => {
       markCompileEnd(); // 1 → 0
     });
     expect(isShown(indicator(container))).toBe(false);
   });
 
-  it('unsubscribes and clears the timer on teardown (no late update after unmount)', () => {
+  it('unsubscribes and clears the timer on teardown (no late update after unmount)', async () => {
     const { container, unmount } = render(<CompilingIndicator />);
 
-    act(() => {
+    await act(() => {
       markCompileStart(); // schedule the reveal timer
     });
     unmount();

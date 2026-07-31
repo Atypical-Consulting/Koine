@@ -132,10 +132,10 @@ describe('ChangeSetPanel (#990)', () => {
     expect(onDiscard).toHaveBeenCalledOnce();
   });
 
-  test('applying: Apply stays label-tracked but disabled (no second concurrent apply), checkboxes stay live', () => {
+  test('applying: Apply stays label-tracked but disabled (no second concurrent apply), checkboxes stay live', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => store.getState().beginChangeSetApply(2));
+    await act(() => store.getState().beginChangeSetApply(2));
 
     expect(applyBtn(container).textContent).toBe('Apply 2 files');
     expect(applyBtn(container).disabled).toBe(true);
@@ -146,10 +146,10 @@ describe('ChangeSetPanel (#990)', () => {
   // #1136: the live region derives ENTIRELY from `chat.changeSet.phase` — no host-owned `attempt`
   // side-channel. `beginChangeSetApply`'s `note` (the host's in-flight wording, e.g. a drift-skip
   // announcement) must render live while applying, before any settle.
-  test('applying: the live region renders phase.note (#1136 — no attempt prop involved)', () => {
+  test('applying: the live region renders phase.note (#1136 — no attempt prop involved)', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() =>
+    await act(() =>
       store
         .getState()
         .beginChangeSetApply(2, 'Applying 1 clean file. Skipped 1 that changed since it was proposed.'),
@@ -160,10 +160,10 @@ describe('ChangeSetPanel (#990)', () => {
     );
   });
 
-  test('applied: the live region renders phase.note when the host supplied one, and the terminal label uses phase.appliedCount (#1136)', () => {
+  test('applied: the live region renders phase.note when the host supplied one, and the terminal label uses phase.appliedCount (#1136)', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => {
+    await act(() => {
       store.getState().beginChangeSetApply(2);
       store
         .getState()
@@ -176,10 +176,10 @@ describe('ChangeSetPanel (#990)', () => {
     );
   });
 
-  test('reviewing with a note (#633): the note lands in the live region and Apply is RE-ENABLED for retry', () => {
+  test('reviewing with a note (#633): the note lands in the live region and Apply is RE-ENABLED for retry', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => {
+    await act(() => {
       store.getState().beginChangeSetApply(2);
       store.getState().rejectChangeSetApply('Apply failed: Error: disk write failed');
     });
@@ -190,10 +190,10 @@ describe('ChangeSetPanel (#990)', () => {
     expect(discardBtn(container)).not.toBeNull();
   });
 
-  test('a partial failure settles back to reviewing with the failed-files note and Apply re-enabled', () => {
+  test('a partial failure settles back to reviewing with the failed-files note and Apply re-enabled', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => {
+    await act(() => {
       store.getState().beginChangeSetApply(2);
       store.getState().resolveChangeSetApply({ failed: ['billing/invoice.koi'] });
     });
@@ -202,10 +202,10 @@ describe('ChangeSetPanel (#990)', () => {
     expect(applyBtn(container).disabled).toBe(false);
   });
 
-  test('applied is terminal: "Applied ✓" label, Discard gone, checkboxes disabled, outcome announced', () => {
+  test('applied is terminal: "Applied ✓" label, Discard gone, checkboxes disabled, outcome announced', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => {
+    await act(() => {
       store.getState().beginChangeSetApply(2);
       store.getState().resolveChangeSetApply({ failed: [] });
     });
@@ -217,10 +217,10 @@ describe('ChangeSetPanel (#990)', () => {
     expect(status(container).textContent).toBe('Applied 2 files.');
   });
 
-  test('applied count follows the slice appliedCount (singular form at 1 file)', () => {
+  test('applied count follows the slice appliedCount (singular form at 1 file)', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => {
+    await act(() => {
       store.getState().setChangeSetFileAccepted('billing/invoice.koi', false);
       store.getState().beginChangeSetApply(1);
       store.getState().resolveChangeSetApply({ failed: [] });
@@ -230,10 +230,10 @@ describe('ChangeSetPanel (#990)', () => {
     expect(status(container).textContent).toBe('Applied 1 file.');
   });
 
-  test('invalidated (#473): superseded treatment, Apply + checkboxes disabled, reason announced', () => {
+  test('invalidated (#473): superseded treatment, Apply + checkboxes disabled, reason announced', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => store.getState().invalidateChangeSet('superseded'));
+    await act(() => store.getState().invalidateChangeSet('superseded'));
 
     expect(panel(container)!.classList.contains('koi-changeset-superseded')).toBe(true);
     expect(applyBtn(container).disabled).toBe(true);
@@ -243,10 +243,10 @@ describe('ChangeSetPanel (#990)', () => {
     );
   });
 
-  test('drifted rows (#473) carry the sticky drift warning on the right row', () => {
+  test('drifted rows (#473) carry the sticky drift warning on the right row', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
-    act(() => store.getState().markChangeSetDrift(['ordering/order.koi']));
+    await act(() => store.getState().markChangeSetDrift(['ordering/order.koi']));
 
     const rows = container.querySelectorAll('.koi-changeset-file');
     const warn = rows[0].querySelector('.koi-changeset-drift');
@@ -266,11 +266,11 @@ describe('ChangeSetPanel (#990)', () => {
     expect(clean.container.querySelector('.koi-changeset-diagnostics')).toBeNull();
   });
 
-  test('a discard from the slice unmounts the panel (renders null again)', () => {
+  test('a discard from the slice unmounts the panel (renders null again)', async () => {
     const store = reviewingStore();
     const { container } = mount(store);
     expect(panel(container)).not.toBeNull();
-    act(() => store.getState().discardChangeSet());
+    await act(() => store.getState().discardChangeSet());
     expect(panel(container)).toBeNull();
   });
 

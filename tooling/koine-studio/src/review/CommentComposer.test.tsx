@@ -10,7 +10,11 @@ function mount(onSubmit = vi.fn(), onCancel = vi.fn()) {
   const parent = document.createElement('div');
   document.body.appendChild(parent);
   let composer!: CommentComposer;
-  act(() => {
+  // `mount` is a synchronous helper shared by every test below; `act`'s own docs guarantee a
+  // synchronous callback is fully flushed before `act` returns, so the composer is already mounted
+  // by the time we query for it a few lines down regardless of whether we await the call here —
+  // `void` keeps this helper synchronous rather than forcing every call site to become async.
+  void act(() => {
     composer = createCommentComposer({ parent, onSubmit, onCancel });
   });
   const textarea = parent.querySelector<HTMLTextAreaElement>('.koi-comment-composer-input')!;
@@ -42,11 +46,11 @@ describe('CommentComposer (#479)', () => {
     cleanup();
   });
 
-  test('typing text then Add calls onSubmit with the trimmed text', () => {
+  test('typing text then Add calls onSubmit with the trimmed text', async () => {
     const { textarea, addBtn, onSubmit, onCancel, cleanup } = mount();
     textarea.value = '  needs an invariant  ';
     fireEvent.input(textarea);
-    act(() => {
+    await act(() => {
       fireEvent.click(addBtn);
     });
     expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -55,25 +59,25 @@ describe('CommentComposer (#479)', () => {
     cleanup();
   });
 
-  test('Add with empty or whitespace-only text adds nothing', () => {
+  test('Add with empty or whitespace-only text adds nothing', async () => {
     const { textarea, addBtn, onSubmit, cleanup } = mount();
-    act(() => {
+    await act(() => {
       fireEvent.click(addBtn); // empty
     });
     textarea.value = '   ';
     fireEvent.input(textarea);
-    act(() => {
+    await act(() => {
       fireEvent.click(addBtn); // whitespace only
     });
     expect(onSubmit).not.toHaveBeenCalled();
     cleanup();
   });
 
-  test('Cancel calls onCancel and never onSubmit', () => {
+  test('Cancel calls onCancel and never onSubmit', async () => {
     const { textarea, cancelBtn, onSubmit, onCancel, cleanup } = mount();
     textarea.value = 'discard me';
     fireEvent.input(textarea);
-    act(() => {
+    await act(() => {
       fireEvent.click(cancelBtn);
     });
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -81,11 +85,11 @@ describe('CommentComposer (#479)', () => {
     cleanup();
   });
 
-  test('Escape dismisses via onCancel and never submits', () => {
+  test('Escape dismisses via onCancel and never submits', async () => {
     const { textarea, onSubmit, onCancel, cleanup } = mount();
     textarea.value = 'discard me';
     fireEvent.input(textarea);
-    act(() => {
+    await act(() => {
       fireEvent.keyDown(textarea, { key: 'Escape' });
     });
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -93,11 +97,11 @@ describe('CommentComposer (#479)', () => {
     cleanup();
   });
 
-  test('Cmd/Ctrl+Enter submits the trimmed text', () => {
+  test('Cmd/Ctrl+Enter submits the trimmed text', async () => {
     const { textarea, onSubmit, cleanup } = mount();
     textarea.value = 'quick add';
     fireEvent.input(textarea);
-    act(() => {
+    await act(() => {
       fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
     });
     expect(onSubmit).toHaveBeenCalledWith('quick add');

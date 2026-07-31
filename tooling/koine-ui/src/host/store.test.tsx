@@ -42,7 +42,7 @@ describe('useReadableStore', () => {
     expect(container.textContent).toBe('1');
   });
 
-  test('re-renders with the new value when the store notifies a change', () => {
+  test('re-renders with the new value when the store notifies a change', async () => {
     const store = createMockStore({ count: 1 });
     let renders = 0;
     function Probe() {
@@ -53,19 +53,19 @@ describe('useReadableStore', () => {
     render(<Probe />);
     const base = renders;
 
-    act(() => store.set({ count: 2 }));
+    await act(() => store.set({ count: 2 }));
 
     expect(renders).toBe(base + 1);
   });
 
-  test('renders the new value after a notification', () => {
+  test('renders the new value after a notification', async () => {
     const store = createMockStore({ count: 1 });
     function Probe() {
       const { count } = useReadableStore(store);
       return <span>{count}</span>;
     }
     const { container } = render(<Probe />);
-    act(() => store.set({ count: 42 }));
+    await act(() => store.set({ count: 42 }));
     expect(container.textContent).toBe('42');
   });
 
@@ -108,7 +108,7 @@ describe('useReadableStore', () => {
     expect(() => act(() => store.set({ count: 99 }))).not.toThrow();
   });
 
-  test('resubscribes when the store prop itself changes to a different instance', () => {
+  test('resubscribes when the store prop itself changes to a different instance', async () => {
     const storeA = createMockStore({ label: 'a' });
     const storeB = createMockStore({ label: 'b' });
     function Probe(props: { store: ReadableStore<{ label: string }> }) {
@@ -122,11 +122,11 @@ describe('useReadableStore', () => {
     expect(container.textContent).toBe('b');
 
     // A change on the OLD store must no longer reach the component.
-    act(() => storeA.set({ label: 'stale' }));
+    await act(() => storeA.set({ label: 'stale' }));
     expect(container.textContent).toBe('b');
 
     // A change on the NEW store does.
-    act(() => storeB.set({ label: 'fresh' }));
+    await act(() => storeB.set({ label: 'fresh' }));
     expect(container.textContent).toBe('fresh');
   });
 

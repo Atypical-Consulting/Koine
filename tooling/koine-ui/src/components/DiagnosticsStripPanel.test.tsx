@@ -26,7 +26,7 @@ const errRow = (msg: string, overrides: Partial<DiagnosticsStripRow> = {}): Diag
 });
 
 describe('DiagnosticsStripPanel', () => {
-  test('shows "clean" with no rows, then the count + a row when the slice changes', () => {
+  test('shows "clean" with no rows, then the count + a row when the slice changes', async () => {
     const store = createTestReadableStore<DiagnosticsStripSlice>(CLEAN);
     const { container } = render(<DiagnosticsStripPanel store={store} onGoto={() => {}} />);
 
@@ -39,7 +39,7 @@ describe('DiagnosticsStripPanel', () => {
 
     // A host notification re-renders the panel (flushed via act()): the count and a row appear with the
     // 1-based line:col + message, matching editorSession.renderStrip byte-for-byte.
-    act(() => store.set({ scoped: false, rows: [errRow('boom')], count: '1 error', kind: 'error' }));
+    await act(() => store.set({ scoped: false, rows: [errRow('boom')], count: '1 error', kind: 'error' }));
     expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('1 error');
     expect(container.querySelector('[data-role="diag-count"]')!.getAttribute('data-kind')).toBe('error');
     const rows = container.querySelectorAll('[data-role="diag-body"] button.diag');
@@ -92,7 +92,7 @@ describe('DiagnosticsStripPanel', () => {
     expect(onOpen).toHaveBeenCalledWith('file:///Billing.koi', row.range);
   });
 
-  test('renders only within its subtree — no imperative host-DOM writes', () => {
+  test('renders only within its subtree — no imperative host-DOM writes', async () => {
     // The component is pure: it reads the store and renders within its own container via Preact
     // (#1406 — removed the old countEl host-element mirror). The host adapter mirrors the pill
     // host-side by subscribing to the same store.
@@ -103,14 +103,14 @@ describe('DiagnosticsStripPanel', () => {
     expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('clean');
     expect(container.querySelector('[data-role="diag-count"]')!.getAttribute('data-kind')).toBe('clean');
 
-    act(() => store.set({ scoped: false, rows: [errRow('boom')], count: '1 error', kind: 'error' }));
+    await act(() => store.set({ scoped: false, rows: [errRow('boom')], count: '1 error', kind: 'error' }));
 
     // After a store update, the strip's own elements update in its subtree.
     expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('1 error');
     // The component only mutates its own DOM, never external host elements (no countEl imperative writes).
   });
 
-  test('a top-level re-render reflects getState() fresh, without a store notification', () => {
+  test('a top-level re-render reflects getState() fresh, without a store notification', async () => {
     // The host (editorSession's paintActive) re-renders the mounted panel SYNCHRONOUSLY on an
     // active-file switch — a change the store may not notify for (the adapter's selector reads the
     // live activeUri). The panel must re-read getState() during render, not serve a cached slice.
@@ -120,7 +120,7 @@ describe('DiagnosticsStripPanel', () => {
     expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('clean');
 
     store.silentSet({ scoped: false, rows: [errRow('boom')], count: '1 error', kind: 'error' });
-    act(() => rerender(ui()));
+    await act(() => rerender(ui()));
     expect(container.querySelector('[data-role="diag-count"]')!.textContent).toBe('1 error');
     expect(container.querySelectorAll('button.diag').length).toBe(1);
   });

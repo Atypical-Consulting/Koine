@@ -328,7 +328,7 @@ describe('LauncherPanel — live preview pane (issue #1143, task 5)', () => {
 
     // Peek a DIFFERENT entry (a glossary term): its preview is pinned into the pane…
     const peeked = { id: 'g:peeked', cat: 'glossary', title: 'Peeked Term' } as unknown as CatalogEntry;
-    act(() => peekFn!(peeked));
+    await act(() => peekFn!(peeked));
     expect(view.container.querySelector('.lx-preview .pv-name')!.textContent).toBe('Peeked Term');
 
     // …while the keyboard selection is untouched (Order is still the selected row).
@@ -750,7 +750,7 @@ describe('LauncherPanel — shared Esc-stack (issue #1164)', () => {
    * stack via `registerOverlay` can act on it. That's what makes this a clean probe of the
    * registration itself, independent of the scrim's keydown trap. */
   function documentEscape(): void {
-    act(() => {
+    void act(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     });
   }

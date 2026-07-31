@@ -66,11 +66,11 @@ export const Unsaved: Story = {
   // the button is momentarily empty after first commit. Await the effect's paint here — `play` runs before
   // the a11y `afterEach` — so axe never races the empty button into a spurious `button-name` violation.
   play: async ({ canvasElement }) => {
-    await waitFor(() => {
+    await waitFor(async () => {
       const host = canvasElement.querySelector<HTMLButtonElement>('.unsaved-indicator');
-      expect(host).not.toBeNull();
-      expect(host!.textContent).toBe('2 unsaved');
-      expect(host!.getAttribute('aria-label')).toBe('Save 2 unsaved files');
+      await expect(host).not.toBeNull();
+      await expect(host!.textContent).toBe('2 unsaved');
+      await expect(host!.getAttribute('aria-label')).toBe('Save 2 unsaved files');
     });
   },
 };

@@ -42,12 +42,12 @@ describe('titleWithDirty', () => {
 });
 
 describe('UnsavedIndicator', () => {
-  test('shows the "N unsaved" pill for the dirty count and hides when all clean', () => {
+  test('shows the "N unsaved" pill for the dirty count and hides when all clean', async () => {
     const button = host();
     const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 0 });
     document.title = 'Koine Studio';
 
-    act(() => {
+    await act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
     });
 
@@ -76,12 +76,12 @@ describe('UnsavedIndicator', () => {
     expect(document.title).toBe('Koine Studio');
   });
 
-  test('clicking the pill calls onSaveAll', () => {
+  test('clicking the pill calls onSaveAll', async () => {
     const button = host();
     const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 1 });
     const onSaveAll = vi.fn();
 
-    act(() => {
+    await act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={onSaveAll} />);
     });
 
@@ -92,13 +92,13 @@ describe('UnsavedIndicator', () => {
   test('has no accessibility violations', async () => {
     const button = host();
     const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 2 });
-    act(() => {
+    await act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
     });
     expect(await axe(button)).toHaveNoViolations();
   });
 
-  test('keeps a baseline aria-label even with no unsaved buffers (so the button is never label-less)', () => {
+  test('keeps a baseline aria-label even with no unsaved buffers (so the button is never label-less)', async () => {
     const button = host();
     const store = createTestReadableStore<UnsavedIndicatorSlice>({ dirtyCount: 0 });
 
@@ -106,7 +106,7 @@ describe('UnsavedIndicator', () => {
     // non-empty baseline aria-label. axe (storybook's a11y addon on macOS CI, #747) can otherwise race
     // the transient window where the static button is visible but the effect hasn't labelled it yet and
     // flag `button-name`; a baseline label means the button is never label-less.
-    act(() => {
+    await act(() => {
       render(<UnsavedIndicator store={store} host={button} baseTitle="Koine Studio" onSaveAll={() => {}} />);
     });
 

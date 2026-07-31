@@ -69,7 +69,7 @@ describe('Composer (#990)', () => {
     expect(clearBtn(container).disabled).toBe(false);
   });
 
-  test('the textarea is CONTROLLED over chat.draft: typing dispatches setChatDraft, a store write renders back', () => {
+  test('the textarea is CONTROLLED over chat.draft: typing dispatches setChatDraft, a store write renders back', async () => {
     const store = createAppStore();
     const { container } = mount(store);
 
@@ -78,7 +78,7 @@ describe('Composer (#990)', () => {
     expect(input(container).value).toBe('model a billing domain');
 
     // The host's error-rollback restore is a plain dispatch — the textarea must follow the slice.
-    act(() => store.getState().setChatDraft('restored prompt'));
+    await act(() => store.getState().setChatDraft('restored prompt'));
     expect(input(container).value).toBe('restored prompt');
   });
 
@@ -118,16 +118,16 @@ describe('Composer (#990)', () => {
     expect(clearBtn(container).disabled).toBe(true);
   });
 
-  test('the busy swap is reactive: streaming flips the controls, settling restores them', () => {
+  test('the busy swap is reactive: streaming flips the controls, settling restores them', async () => {
     const store = createAppStore();
     const { container } = mount(store);
     expect(stopBtn(container).hidden).toBe(true);
 
-    act(() => store.getState().startChatTurn());
+    await act(() => store.getState().startChatTurn());
     expect(stopBtn(container).hidden).toBe(false);
     expect(sendBtn(container).disabled).toBe(true);
 
-    act(() => store.getState().finishChatTurn());
+    await act(() => store.getState().finishChatTurn());
     expect(stopBtn(container).hidden).toBe(true);
     expect(sendBtn(container).disabled).toBe(false);
     expect(input(container).disabled).toBe(false);

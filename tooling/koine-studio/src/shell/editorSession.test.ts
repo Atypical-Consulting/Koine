@@ -143,13 +143,13 @@ afterEach(() => {
 });
 
 describe('createEditorSession — diagnostics for the active uri', () => {
-  test('a published diagnostic for the active uri repaints the strip, status pill, and bar mirrors', () => {
+  test('a published diagnostic for the active uri repaints the strip, status pill, and bar mirrors', async () => {
     const lsp = makeLsp();
     const session = newSession(makeDeps(lsp));
 
     // The strip body is now a Preact panel reading the diagnostics slice; act() flushes its
     // (async-batched) re-render so the rows are in the DOM before we assert.
-    act(() => lsp.firePublish(ACTIVE, [err(0, 'no good'), warn(2, 'meh')]));
+    await act(() => lsp.firePublish(ACTIVE, [err(0, 'no good'), warn(2, 'meh')]));
 
     // Strip count summarises errors + warnings.
     expect(domById('diag-count').textContent).toBe('1 error · 1 warning');
@@ -171,12 +171,12 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     expect(session.diagnosticsFor(ACTIVE).length).toBe(2);
   });
 
-  test('a diagnostics write lands in the injected store, not the global appStore singleton (#760)', () => {
+  test('a diagnostics write lands in the injected store, not the global appStore singleton (#760)', async () => {
     const lsp = makeLsp();
     const store = createAppStore();
     newSession(makeDeps(lsp, { store }));
 
-    act(() => lsp.firePublish(ACTIVE, [err(0, 'no good')]));
+    await act(() => lsp.firePublish(ACTIVE, [err(0, 'no good')]));
 
     // The session was handed `store`, not the global singleton — the write must land there…
     expect(store.getState().diagnosticsFor(ACTIVE).length).toBe(1);
@@ -185,12 +185,12 @@ describe('createEditorSession — diagnostics for the active uri', () => {
     expect(appStore.getState().diagnosticsFor(ACTIVE).length).toBe(0);
   });
 
-  test('a clean push for the active uri clears the pill (no success toast)', () => {
+  test('a clean push for the active uri clears the pill (no success toast)', async () => {
     const lsp = makeLsp();
     newSession(makeDeps(lsp));
 
     // act() flushes the strip panel's re-render so its empty-state span is in the DOM before we assert.
-    act(() => lsp.firePublish(ACTIVE, []));
+    await act(() => lsp.firePublish(ACTIVE, []));
 
     expect(domById('diag-count').textContent).toBe('clean');
     expect(domById('diag-count').dataset.kind).toBe('clean');
@@ -236,14 +236,14 @@ describe('createEditorSession — diagnostics for a non-active uri', () => {
 });
 
 describe('createEditorSession — the #diag-count pill obeys the active-context scope (#1203)', () => {
-  test('scoped to a context whose .koi is NOT the open file: the pill mirrors the scoped strip, the status bar stays active-file', () => {
+  test('scoped to a context whose .koi is NOT the open file: the pill mirrors the scoped strip, the status bar stays active-file', async () => {
     const lsp = makeLsp();
     const store = createAppStore();
     // Scope to Customer while the OPEN file stays order.koi — the mismatch #1203 is about.
     store.getState().setActiveContext('Customer');
     newSession(makeDeps(lsp, { store }));
 
-    act(() => {
+    await act(() => {
       // The open file carries a warning; the scoped context's file carries an error.
       lsp.firePublish(ACTIVE, [warn(2, 'meh')]);
       lsp.firePublish(OTHER, [err(5, 'elsewhere')]);
@@ -265,27 +265,27 @@ describe('createEditorSession — the #diag-count pill obeys the active-context 
     expect(domById('status').textContent).toBe('1 warning');
   });
 
-  test('back to All contexts: the pill returns to the ACTIVE file, byte-for-byte', () => {
+  test('back to All contexts: the pill returns to the ACTIVE file, byte-for-byte', async () => {
     const lsp = makeLsp();
     const store = createAppStore();
     store.getState().setActiveContext('Customer');
     newSession(makeDeps(lsp, { store }));
 
-    act(() => {
+    await act(() => {
       lsp.firePublish(ACTIVE, [warn(2, 'meh')]);
       lsp.firePublish(OTHER, [err(5, 'elsewhere')]);
     });
     expect(domById('diag-count').textContent).toBe('1 error'); // scoped (proven above)
 
     // Widening back to All contexts repaints the pill from the ACTIVE file's diagnostics.
-    act(() => store.getState().setActiveContext(ALL_CONTEXTS));
+    await act(() => store.getState().setActiveContext(ALL_CONTEXTS));
     expect(domById('diag-count').textContent).toBe('1 warning');
     expect(domById('diag-count').dataset.kind).toBe('warn');
   });
 });
 
 describe('createEditorSession — host-side pill mirror (#1406)', () => {
-  test('the host mirrors the #diag-count pill from stripStore after subscription + active-file switch', () => {
+  test('the host mirrors the #diag-count pill from stripStore after subscription + active-file switch', async () => {
     const lsp = makeLsp();
     const store = createAppStore();
     // Track activeUri switches via a mutable ref (simulates ide.ts's activeUri getter).
@@ -297,13 +297,13 @@ describe('createEditorSession — host-side pill mirror (#1406)', () => {
     const session = newSession(deps);
 
     // Seed the ACTIVE file with clean diagnostics; the pill should reflect that.
-    act(() => lsp.firePublish(ACTIVE, []));
+    await act(() => lsp.firePublish(ACTIVE, []));
     expect(domById('diag-count').textContent).toBe('clean');
     expect(domById('diag-count').dataset.kind).toBe('clean');
 
     // Push diagnostics to a NON-active file (OTHER). The store writes (triggering stripStore
     // subscription), but paintActive is NOT called, so only the subscription's mirror fires.
-    act(() => lsp.firePublish(OTHER, [err(0, 'somewhere'), warn(1, 'maybe')]));
+    await act(() => lsp.firePublish(OTHER, [err(0, 'somewhere'), warn(1, 'maybe')]));
     // The strip subscription's renderDiagPill runs, but OTHER is not active, so the pill stays clean.
     expect(domById('diag-count').textContent).toBe('clean');
     expect(domById('diag-count').dataset.kind).toBe('clean');
@@ -313,7 +313,7 @@ describe('createEditorSession — host-side pill mirror (#1406)', () => {
     // happened in paintActive, the subscription won't re-fire. The direct renderDiagPill() call in
     // paintActive handles this.
     currentActiveUri = OTHER;
-    act(() => session.showDiagnostics(OTHER));
+    await act(() => session.showDiagnostics(OTHER));
     // The pill now mirrors the OTHER file's diagnostics (scoped to the strip's state).
     expect(domById('diag-count').textContent).toBe('1 error · 1 warning');
     expect(domById('diag-count').dataset.kind).toBe('error');
@@ -406,17 +406,17 @@ describe('createEditorSession — status + server exit', () => {
     expect(domById('sb-connection').textContent).toBe('');
   });
 
-  test('the connection mirror tracks the LSP lifecycle: a server push reads Ready, an exit reads Offline', () => {
+  test('the connection mirror tracks the LSP lifecycle: a server push reads Ready, an exit reads Offline', async () => {
     const lsp = makeLsp();
     newSession(makeDeps(lsp));
 
     // A diagnostics push WITH a warning still proves the service is live → "Ready" (not "Offline").
     // (Chrome v2, #923 relabelled the online state from "Local" to "Ready".)
-    act(() => lsp.firePublish(ACTIVE, [warn(0, 'meh')]));
+    await act(() => lsp.firePublish(ACTIVE, [warn(0, 'meh')]));
     expect(domById('sb-connection').textContent).toBe('Ready');
     expect(domById('sb-connection').dataset.state).toBe('online');
 
-    act(() => lsp.fireExit(1));
+    await act(() => lsp.fireExit(1));
     expect(domById('sb-connection').textContent).toBe('Offline');
     expect(domById('sb-connection').dataset.state).toBe('offline');
   });

@@ -129,7 +129,7 @@ describe('SortableTable', () => {
     expect(onActivate).toHaveBeenCalledWith(spanless[0]);
   });
 
-  test('clicking a column header sorts rows by that column (numeric-aware, case-insensitive) and toggles direction', () => {
+  test('clicking a column header sorts rows by that column (numeric-aware, case-insensitive) and toggles direction', async () => {
     const { container } = render(
       <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
     );
@@ -138,16 +138,16 @@ describe('SortableTable', () => {
 
     expect(nameHeader.getAttribute('aria-sort')).toBe('none');
 
-    act(() => nameHeader.querySelector('button')!.click()); // ascending — case-insensitive: 'alpha' < 'Bravo'
+    await act(() => nameHeader.querySelector('button')!.click()); // ascending — case-insensitive: 'alpha' < 'Bravo'
     expect(names()).toEqual(['alpha', 'Bravo']);
     expect(nameHeader.getAttribute('aria-sort')).toBe('ascending');
 
-    act(() => nameHeader.querySelector('button')!.click()); // descending
+    await act(() => nameHeader.querySelector('button')!.click()); // descending
     expect(names()).toEqual(['Bravo', 'alpha']);
     expect(nameHeader.getAttribute('aria-sort')).toBe('descending');
   });
 
-  test('sorts numerically, not lexicographically, on a numeric-looking column', () => {
+  test('sorts numerically, not lexicographically, on a numeric-looking column', async () => {
     const numericRows: Row[] = [
       { name: 'ten', value: '10', span: null },
       { name: 'two', value: '2', span: null },
@@ -162,7 +162,7 @@ describe('SortableTable', () => {
       />,
     );
     const valueHeader = container.querySelectorAll('thead th')[1];
-    act(() => valueHeader.querySelector('button')!.click()); // ascending
+    await act(() => valueHeader.querySelector('button')!.click()); // ascending
     // Lexicographic sort would put '10' before '2'; numeric-aware sort puts 2 before 10.
     const values = () => Array.from(container.querySelectorAll('tbody tr')).map((r) => r.querySelectorAll('td')[1].textContent);
     expect(values()).toEqual(['2', '10']);
@@ -172,14 +172,14 @@ describe('SortableTable', () => {
   // a sort click lets Preact match old and new rows by identity and REORDER the existing <tr> DOM nodes.
   // A positional key (`${i}:${label}`) changes on nearly every sort, forcing an unmount/remount of every
   // row — needless DOM churn for a component shared by all the model tables.
-  test('sorting reorders the existing row DOM nodes instead of remounting them', () => {
+  test('sorting reorders the existing row DOM nodes instead of remounting them', async () => {
     const { container } = render(
       <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
     );
     const before = Array.from(container.querySelectorAll('tbody tr'));
     expect(before.map((r) => r.querySelector('td')!.textContent)).toEqual(['Bravo', 'alpha']);
 
-    act(() => container.querySelectorAll('thead th')[0].querySelector('button')!.click()); // ascending by Name
+    await act(() => container.querySelectorAll('thead th')[0].querySelector('button')!.click()); // ascending by Name
 
     const after = Array.from(container.querySelectorAll('tbody tr'));
     expect(after.map((r) => r.querySelector('td')!.textContent)).toEqual(['alpha', 'Bravo']);
@@ -194,7 +194,7 @@ describe('SortableTable', () => {
   // Duplicate sibling keys are undefined behavior under Preact's keyed-children contract — concretely the
   // focused row could come to represent the OTHER same-named row after a sort — so a caller passes an
   // explicit `rowKey` (a qualified/composite identity) and the table keys rows on THAT, not the label.
-  test('rowKey keys same-labelled rows distinctly: both render and keep DOM identity across a sort', () => {
+  test('rowKey keys same-labelled rows distinctly: both render and keep DOM identity across a sort', async () => {
     interface KeyedRow extends Row {
       key: string;
     }
@@ -219,7 +219,7 @@ describe('SortableTable', () => {
     expect(before.map((r) => r.querySelector('td')!.textContent)).toEqual(['OrderPlaced', 'OrderPlaced']);
     expect(before.map((r) => r.querySelectorAll('td')[1].textContent)).toEqual(['2', '1']);
 
-    act(() => container.querySelectorAll('thead th')[1].querySelector('button')!.click()); // ascending by Value
+    await act(() => container.querySelectorAll('thead th')[1].querySelector('button')!.click()); // ascending by Value
 
     const after = Array.from(container.querySelectorAll('tbody tr'));
     expect(after.map((r) => r.querySelectorAll('td')[1].textContent)).toEqual(['1', '2']);
@@ -241,14 +241,14 @@ describe('SortableTable', () => {
   // 'none'. SortableTable owns its sort state via useState, so a re-render that hands it a NEW rows array
   // (the underlying data changed, e.g. a scope/model change) — but keeps the component MOUNTED — must
   // keep the current sort selection, re-applying it to the new rows instead of wiping it.
-  test('sort selection survives a re-render with new rows (delta from the old rebuild-the-DOM behavior)', () => {
+  test('sort selection survives a re-render with new rows (delta from the old rebuild-the-DOM behavior)', async () => {
     const { container, rerender } = render(
       <SortableTable rows={rows} columns={columns} emptyText="none" rowLabel={(r) => r.name} handlers={{ goto: () => {} }} />,
     );
     const nameHeader = () => container.querySelectorAll('thead th')[0];
     const names = () => Array.from(container.querySelectorAll('tbody tr')).map((r) => r.querySelector('td')!.textContent);
 
-    act(() => nameHeader().querySelector('button')!.click()); // ascending by Name
+    await act(() => nameHeader().querySelector('button')!.click()); // ascending by Name
     expect(names()).toEqual(['alpha', 'Bravo']);
     expect(nameHeader().getAttribute('aria-sort')).toBe('ascending');
 
@@ -257,7 +257,7 @@ describe('SortableTable', () => {
       { name: 'Charlie', value: '3', span: span(30) },
       { name: 'delta', value: '4', span: span(40) },
     ];
-    act(() => {
+    await act(() => {
       rerender(
         <SortableTable
           rows={nextRows}
