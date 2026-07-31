@@ -69,8 +69,9 @@ public class ScenarioRunnerTests
         """;
 
     // A `requires` clause (not just an `invariant`) driven by a lambda-taking collection op
-    // (#1071): the interpreter must evaluate `.all(l => l.qty > 0)` to a real Passed/Failed
-    // outcome, not silently degrade to Indeterminate.
+    // (#1071/#1082): the interpreter must evaluate every lambda-taking collection op usable in a
+    // `requires` clause to a real Passed/Failed outcome, not silently degrade to Indeterminate.
+    // One command per operator, all sharing the same Order/Line fixture shape.
     private const string RepricingModel = """
         context Pricing {
           value Line {
@@ -82,6 +83,30 @@ public class ScenarioRunnerTests
 
             command reprice {
               requires lines.all(l => l.qty > 0) "every line needs a positive quantity"
+            }
+
+            command flagHighValue {
+              requires lines.any(l => l.qty > 5) "at least one line must exceed the high-value threshold"
+            }
+
+            command auditSafetyCap {
+              requires lines.none(l => l.qty > 100) "no line may exceed the safety cap"
+            }
+
+            command checkBudget {
+              requires lines.sum(l => l.qty) <= 10 "total quantity must not exceed the budget"
+            }
+
+            command checkMinimum {
+              requires lines.min(l => l.qty) >= 1 "the smallest line must be at least 1"
+            }
+
+            command checkCeiling {
+              requires lines.max(l => l.qty) <= 10 "the largest line must not exceed the ceiling"
+            }
+
+            command checkUniqueQuantities {
+              requires lines.distinctBy(l => l.qty) "no two lines may share the same quantity"
             }
           }
         }
@@ -335,5 +360,239 @@ public class ScenarioRunnerTests
         precondition.Outcome.ShouldBe(CheckOutcome.Indeterminate);
         result.Ok.ShouldBeFalse(
             "an indeterminate requires outcome must fail the scenario closed, not silently pass it open");
+    }
+
+    // ----------------------------------------------------------------------
+    // #1082: the other six lambda-taking collection ops usable in a `requires` clause
+    // (any/none/sum/min/max/distinctBy) get the same interpreter-level coverage #1071 gave
+    // `.all` — each must evaluate to a real Passed/Failed outcome, never Indeterminate.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void Requires_lambda_any_predicate_passes_when_a_line_exceeds_the_threshold()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "flagHighValue",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(6)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_any_predicate_fails_when_no_line_exceeds_the_threshold()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "flagHighValue",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(1), QtyLine(2)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Requires_lambda_none_predicate_passes_when_no_line_exceeds_the_safety_cap()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "auditSafetyCap",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(3)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_none_predicate_fails_when_a_line_exceeds_the_safety_cap()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "auditSafetyCap",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(101)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Requires_lambda_sum_selector_passes_when_the_total_is_within_budget()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkBudget",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(3)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_sum_selector_fails_when_the_total_exceeds_the_budget()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkBudget",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(6), QtyLine(7)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Requires_lambda_min_selector_passes_when_the_smallest_line_meets_the_floor()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkMinimum",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(1), QtyLine(4)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_min_selector_fails_when_the_smallest_line_is_below_the_floor()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkMinimum",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(0), QtyLine(4)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Requires_lambda_max_selector_passes_when_the_largest_line_is_within_the_ceiling()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkCeiling",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(3), QtyLine(9)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_max_selector_fails_when_the_largest_line_exceeds_the_ceiling()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkCeiling",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(3), QtyLine(11)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Requires_lambda_distinctBy_selector_passes_when_every_quantity_is_unique()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkUniqueQuantities",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(3)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Passed);
+        result.Ok.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Requires_lambda_distinctBy_selector_fails_when_two_lines_share_a_quantity()
+    {
+        var sema = Build(RepricingModel);
+        var scenario = new Scenario(
+            "Order", "checkUniqueQuantities",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["lines"] = ScenarioValue.ListOf(QtyLine(2), QtyLine(2)),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario);
+
+        var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
+        precondition.Outcome.ShouldBe(CheckOutcome.Failed);
+        result.Ok.ShouldBeFalse();
     }
 }
