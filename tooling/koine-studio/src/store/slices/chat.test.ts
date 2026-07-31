@@ -956,3 +956,70 @@ describe('targetRoot / setChangeSetFileRoot (#1132)', () => {
     expect(row.drifted).toBe(true);
   });
 });
+
+// #1689: a root removed mid-review (workspaceController.ts's removeRoot) must not leave a row's
+// targetRoot pointing at a dead root — reconcileChangeSetRoots nulls it back to the "ambiguous, pick
+// again" state setChangeSetFileRoot already understands, reviewing-ONLY like its sibling mutator.
+describe('reconcileChangeSetRoots (#1689)', () => {
+  test('nulls a row whose targetRoot is no longer in the live roots list', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null, undefined, {
+      'a.koi': 'A',
+      'b.koi': 'B',
+    });
+    s.getState().reconcileChangeSetRoots(['A']);
+    const files = s.getState().chat.changeSet!.files;
+    expect(files.find((f) => f.key === 'a.koi')?.targetRoot).toBe('A');
+    expect(files.find((f) => f.key === 'b.koi')?.targetRoot).toBeNull();
+  });
+
+  test('leaves accepted/drifted/non-targetRoot fields untouched on a reconciled row', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null, undefined, { 'a.koi': 'B' });
+    s.getState().markChangeSetDrift(['a.koi']);
+    s.getState().setChangeSetFileAccepted('a.koi', false);
+    s.getState().reconcileChangeSetRoots(['A']);
+    const row = s.getState().chat.changeSet!.files[0];
+    expect(row.targetRoot).toBeNull();
+    expect(row.accepted).toBe(false);
+    expect(row.drifted).toBe(true);
+  });
+
+  test('is a no-op when every targetRoot is still present in the live roots list', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x'), edit('b.koi', 'y')], {}, null, undefined, {
+      'a.koi': 'A',
+      'b.koi': 'B',
+    });
+    const before = s.getState().chat.changeSet;
+    s.getState().reconcileChangeSetRoots(['A', 'B']);
+    expect(s.getState().chat.changeSet).toBe(before);
+  });
+
+  test('is a no-op on a null targetRoot row (nothing to reconcile)', () => {
+    const s = createAppStore();
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null);
+    const before = s.getState().chat.changeSet;
+    s.getState().reconcileChangeSetRoots([]);
+    expect(s.getState().chat.changeSet).toBe(before);
+  });
+
+  test('is a no-op while applying, applied, invalidated, or on a null change set', () => {
+    const s = createAppStore();
+    s.getState().reconcileChangeSetRoots(['A']); // null: must not throw
+    expect(s.getState().chat.changeSet).toBeNull();
+
+    s.getState().stageChangeSet([edit('a.koi', 'x')], {}, null, undefined, { 'a.koi': 'B' });
+    s.getState().beginChangeSetApply(1);
+    s.getState().reconcileChangeSetRoots(['A']);
+    expect(s.getState().chat.changeSet?.files[0]?.targetRoot).toBe('B'); // applying: untouched
+    s.getState().resolveChangeSetApply({ failed: [] });
+    s.getState().reconcileChangeSetRoots(['A']);
+    expect(s.getState().chat.changeSet?.files[0]?.targetRoot).toBe('B'); // applied: untouched
+
+    s.getState().stageChangeSet([edit('c.koi', 'z')], {}, null, undefined, { 'c.koi': 'B' });
+    s.getState().invalidateChangeSet('superseded');
+    s.getState().reconcileChangeSetRoots(['A']);
+    expect(s.getState().chat.changeSet?.files[0]?.targetRoot).toBe('B'); // invalidated: untouched
+  });
+});
