@@ -15,7 +15,7 @@ import { devCommands } from '@/shell/devCommands';
 import { canStopCompile, stopRunawayCompile } from '@/host/browser/stopCompile';
 import { formatChord, prettyChord } from '@/shared/platform';
 import { resolveKeybindings } from '@/settings/persistence';
-import { resolveGlobalKeybindings, globalChordFromEvent } from '@/editor/keybindings';
+import { globalChordFromEvent } from '@/editor/keybindings';
 import { toggleTheme } from '@/settings/theme';
 import { buildOverflowItems, toggleOverflowMenu } from '@/shell/toolbarOverflow';
 import { createLauncher } from '@/launcher/createLauncher';
@@ -117,9 +117,10 @@ export interface CommandWiring {
   run(id: string): void;
   /** Release the global keyboard-shortcut listener. */
   dispose(): void;
-  /** Re-render the toolbar's ⌘K keycap from the live-resolved command-palette chord — call after a
-   *  Settings → Keyboard rebind (#1421) so the decoration doesn't keep showing the stale default. */
-  refreshPaletteHint(): void;
+  /** Re-resolve the cached keybindings and repaint the toolbar's ⌘K keycap from them — call after a
+   *  Settings → Keyboard commit (#1421) so neither the hot keydown listener's cache nor the keycap
+   *  decoration keeps showing a stale chord. */
+  refreshKeybindings(): void;
 }
 
 // The id of the palette-toggle command (#758). Registered so global chords — and, in #432, the editor
@@ -366,6 +367,13 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   // filters PALETTE_COMMAND_ID out so it never appears as a row.
   registry.register({ id: PALETTE_COMMAND_ID, title: 'Command launcher', run: () => launcher.toggle() });
 
+  // resolveKeybindings() does a localStorage read + JSON.parse; onKeydown below (a hot path — it runs on
+  // every keydown, not just a chord match) used to pay that cost every time just to check one GLOBAL
+  // chord (#1421). Cache the resolved map instead: read once here, then only re-read by
+  // refreshKeybindings() below, which the onKeybindingsChanged hook calls after each committed
+  // Settings → Keyboard change — the same hook that already reconfigures the editor's keymap.
+  let cachedKeybindings = resolveKeybindings();
+
   // --- toolbar buttons unique to this phase ---------------------------------
   // The command bar (chrome v2, #923): a full command field (search glyph + placeholder + keycap) that
   // opens the palette. Its markup is static in index.html, so we DON'T wipe its children — we only fill
@@ -384,7 +392,7 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     paletteHintKbd = chord;
   }
   function refreshPaletteHint(): void {
-    if (paletteHintKbd) paletteHintKbd.textContent = prettyChord(resolveKeybindings().commandPalette);
+    if (paletteHintKbd) paletteHintKbd.textContent = prettyChord(cachedKeybindings.commandPalette);
   }
   refreshPaletteHint();
   cmdBar?.addEventListener('click', () => registry.run(PALETTE_COMMAND_ID));
@@ -422,13 +430,14 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod && e.key !== 'F1') return;
 
-    // The command palette is a rebindable GLOBAL chord (#432): resolve it live from the keybindings
-    // registry (default Mod-k) instead of the old `e.key==='k'` literal — resolveKeybindings() is re-read
-    // on every keydown, so a Settings remap (onKeybindingsChanged) takes effect with no re-wiring. Matched
-    // code-aware via globalChordFromEvent for macOS Option-glyph safety. It ALWAYS toggles the palette (so
-    // it can also dismiss itself) and runs BEFORE the overlay-open guard, which suppresses every other
-    // global shortcut while an overlay is open so it doesn't act on the editor beneath.
-    if (globalChordFromEvent(e) === resolveGlobalKeybindings(resolveKeybindings()).commandPalette) {
+    // The command palette is a rebindable GLOBAL chord (#432): matched against the cached keybindings
+    // registry (default Mod-k) instead of the old `e.key==='k'` literal — refreshKeybindings() re-reads
+    // it on each committed Settings remap (onKeybindingsChanged, #1421), so a rebind takes effect with no
+    // re-wiring and no per-keydown localStorage read. Matched code-aware via globalChordFromEvent for
+    // macOS Option-glyph safety. It ALWAYS toggles the palette (so it can also dismiss itself) and runs
+    // BEFORE the overlay-open guard, which suppresses every other global shortcut while an overlay is
+    // open so it doesn't act on the editor beneath.
+    if (globalChordFromEvent(e) === cachedKeybindings.commandPalette) {
       // Dispatch through the registry so the chord resolves to a command id (#758) — the seam #432 folds
       // the palette into.
       e.preventDefault();
@@ -473,12 +482,17 @@ export function createCommandWiring(deps: CommandWiringDeps): CommandWiring {
   };
   window.addEventListener('keydown', onKeydown);
 
+  function refreshKeybindings(): void {
+    cachedKeybindings = resolveKeybindings();
+    refreshPaletteHint();
+  }
+
   return {
     getCommands,
     run: (id) => registry.run(id),
     dispose() {
       window.removeEventListener('keydown', onKeydown);
     },
-    refreshPaletteHint,
+    refreshKeybindings,
   };
 }

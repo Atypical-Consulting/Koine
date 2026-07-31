@@ -999,13 +999,19 @@ export function init(hooks: IdeHooks = {}): () => void {
   //
   // Named (not anonymous) so disposeEditorKeys() can removeEventListener them — anonymous functions
   // have no stable identity and cannot be removed from window. (#789)
+  //
+  // resolveKeybindings() does a localStorage read + JSON.parse; onSaveKey below (a hot path — every
+  // keydown, not just Mod-Alt-S) used to pay that cost on every keystroke just to check one chord
+  // (#1421). Cache it instead, re-read only by onKeybindingsChanged below (fired after each committed
+  // Settings → Keyboard change).
+  let cachedSaveAllChord = resolveKeybindings().saveAll;
   const onSaveKey = (e: KeyboardEvent): void => {
     const mod = e.metaKey || e.ctrlKey;
     if (!mod) return;
     if (overlays.overlayOpen()) return; // don't act on the editor under an open overlay
     // Save all is now a rebindable GLOBAL chord (#432): match the keydown (code-aware for the letter base,
-    // so a macOS Option-composed 'ß' resolves) against the live resolved saveAll chord (default Mod-Alt-s).
-    if (globalChordFromEvent(e) === resolveKeybindings().saveAll) {
+    // so a macOS Option-composed 'ß' resolves) against the cached resolved saveAll chord (default Mod-Alt-s).
+    if (globalChordFromEvent(e) === cachedSaveAllChord) {
       // Dispatches through the command registry by id (#758); Save-active (below) has no catalog entry.
       e.preventDefault();
       commandWiring.run('save-all');
@@ -1245,11 +1251,13 @@ export function init(hooks: IdeHooks = {}): () => void {
     // User/Workspace scope toggle and routes scoped commits to the workspace override store.
     workspaceKey: () => wsKey(),
     // Live-apply a keybinding remap from Settings → Keyboard: reconfigure the editor's keymap
-    // compartment in place, and (#1421) refresh the toolbar's ⌘K keycap so a commandPalette rebind
-    // doesn't leave it showing the stale default.
+    // compartment in place, refresh commandWiring's cached global chords + the toolbar's ⌘K keycap
+    // (#1421), and refresh onSaveKey's own cached saveAll chord — so a rebind takes effect immediately
+    // without either hot keydown listener re-reading localStorage on every keystroke in between.
     onKeybindingsChanged: () => {
       editor.reconfigureKeybindings();
-      commandWiring.refreshPaletteHint();
+      commandWiring.refreshKeybindings();
+      cachedSaveAllChord = resolveKeybindings().saveAll;
     },
   };
 

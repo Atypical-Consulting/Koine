@@ -286,16 +286,31 @@ describe('commandWiring', () => {
       expect(launcherToggle).toHaveBeenCalledTimes(2); // toggled again
     });
 
-    it('rebinds the palette chord live from the keybindings registry — new chord toggles, default no longer does (#432)', () => {
+    it('rebinds the palette chord from the keybindings registry once refreshed — new chord toggles, default no longer does (#432)', () => {
       const wiring = createCommandWiring(makeDeps());
       dispose = wiring.dispose;
 
       saveKeybindingOverride('commandPalette', 'Mod-j'); // remapped in Settings → Keyboard
-      // Read live on the next keydown: the rebound Ctrl-J now toggles the launcher…
+      wiring.refreshKeybindings(); // the onKeybindingsChanged hook fires after every committed remap (#1421)
+      // The rebound Ctrl-J now toggles the launcher…
       window.dispatchEvent(key({ key: 'j', code: 'KeyJ', ctrlKey: true }));
       expect(launcherToggle).toHaveBeenCalledTimes(1);
       // …and the old default Ctrl-K is inert (it no longer resolves to the palette chord).
       window.dispatchEvent(key({ key: 'k', code: 'KeyK', ctrlKey: true }));
+      expect(launcherToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it('caches the resolved keybindings (#1421): a remap made without refreshKeybindings() has no effect yet', () => {
+      const wiring = createCommandWiring(makeDeps());
+      dispose = wiring.dispose;
+
+      saveKeybindingOverride('commandPalette', 'Mod-j'); // e.g. written by another surface, no hook fired
+      // The default Ctrl-K still resolves — the cache wasn't invalidated, so no per-keydown localStorage
+      // read picked up the change.
+      window.dispatchEvent(key({ key: 'k', code: 'KeyK', ctrlKey: true }));
+      expect(launcherToggle).toHaveBeenCalledTimes(1);
+      // The new chord Ctrl-J is not yet recognized either.
+      window.dispatchEvent(key({ key: 'j', code: 'KeyJ', ctrlKey: true }));
       expect(launcherToggle).toHaveBeenCalledTimes(1);
     });
 
@@ -369,12 +384,12 @@ describe('commandWiring', () => {
       expect(kbd?.textContent).toBe(prettyChord('Mod-k'));
     });
 
-    it('refreshPaletteHint() re-renders it after a Settings → Keyboard rebind', () => {
+    it('refreshKeybindings() re-renders it after a Settings → Keyboard rebind', () => {
       const wiring = createCommandWiring(makeDeps());
       dispose = wiring.dispose;
 
       saveKeybindingOverride('commandPalette', 'Mod-j');
-      wiring.refreshPaletteHint();
+      wiring.refreshKeybindings();
 
       const kbd = document.querySelector('.palette-hint > [aria-hidden="true"]');
       expect(kbd?.textContent).toBe(prettyChord('Mod-j'));
