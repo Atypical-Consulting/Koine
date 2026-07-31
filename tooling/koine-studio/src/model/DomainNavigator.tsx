@@ -15,15 +15,16 @@
 //
 // The counts shown here reuse `countsByContext` (the one tally source shared with the Model outline), so
 // the two navigators can never disagree on a context's size. Roving-tabindex keyboard routing consumes the
-// SHARED `handleTreeKeydown` router (shell/rovingTreeNav.ts, #1105 / #484 item a) — this file keeps only
-// the thin DOM glue (item source + focus primitive + the panel-specific ContextMenu affordance).
+// SHARED `handleTreeKeydown` router and `createRovingTabIndex` seed/resolve helper (shell/rovingTreeNav.ts,
+// #1105 / #484 item a / #1365) — this file keeps only the item source (via a ref helper) and the
+// panel-specific ContextMenu affordance.
 import { render } from 'preact';
 import type { ComponentChildren, VNode } from 'preact';
 import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
 import { constructForKind, constructIcon, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts, type ContextScope } from '@/model/activeContext';
 import { createFloatingMenu } from '@atypical/koine-ui';
-import { handleTreeKeydown, type RovingTreeNav } from '@/shell/rovingTreeNav';
+import { createRovingTabIndex, handleTreeKeydown, type RovingTabIndexHelper, type RovingTreeNav } from '@/shell/rovingTreeNav';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppState } from '@/store/index';
@@ -150,64 +151,34 @@ function DoorwayRow({
 // Both levels are `role="tree"`s of `role="treeitem"` rows, navigated with Arrow/Home/End and a SINGLE
 // tab stop (roving tabindex). The navigator's trees never collapse a branch (aggregates render expanded;
 // the filter removes non-matching rows from the DOM), so every rendered treeitem is visible and DOM order
-// IS visual order. The key ROUTING is the shared `handleTreeKeydown` (rovingTreeNav.ts, #1105); this file
-// supplies only the item source + focus primitive + the ContextMenu affordance, attached via a ref helper.
+// IS visual order. The key ROUTING is the shared `handleTreeKeydown` (rovingTreeNav.ts, #1105); the
+// seed-the-tab-stop/resolve-event-to-treeitem glue is the shared `createRovingTabIndex`
+// (rovingTreeNav.ts, #1365) — this file supplies only the item source (via a ref helper) and the
+// panel-specific ContextMenu affordance. `nestedButtonSelector: 'button'` pulls this navigator's inner
+// controls (the leaf activator, the ⋯ overflow, the aggregate head) out of the tab order — mouse clicks
+// still work, and keyboard activation is forwarded from the focused treeitem.
 
-/** The visible treeitems of a `role="tree"`, in DOM (visual) order. */
-function treeItems(tree: HTMLElement): HTMLElement[] {
-  return Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
-}
-
-/** Seed/refresh the roving tabindex: every inner control leaves the tab order and exactly one treeitem
- * (the active one, else the first) becomes the lone tab stop — so the whole tree is ONE Tab landing. */
-function setRovingItem(tree: HTMLElement, active: HTMLElement | null): void {
-  // Inner controls (the leaf activator, the ⋯ overflow, the aggregate head) leave the sequential tab
-  // order; mouse clicks still work, and keyboard activation is forwarded from the focused treeitem.
-  for (const btn of tree.querySelectorAll<HTMLElement>('button')) btn.tabIndex = -1;
-  const items = treeItems(tree);
-  const tabbable = active && items.includes(active) ? active : (items[0] ?? null);
-  for (const item of items) item.tabIndex = item === tabbable ? 0 : -1;
-}
-
-/** Move roving focus to `item` — a single tabbable treeitem at a time, then `.focus()` it. */
-function focusTreeItem(tree: HTMLElement, item: HTMLElement): void {
-  setRovingItem(tree, item);
-  item.focus();
-}
-
-/** The treeitem a keydown targets: the event target's nearest treeitem, else the focused element's
- *  (the listener is delegated on the root, so a keydown dispatched on the root carries the root as its
- *  target and we fall back to `document.activeElement`). */
-function currentTreeItem(ev: KeyboardEvent): HTMLElement | null {
-  const focused = document.activeElement as HTMLElement | null;
-  return (
-    (ev.target as HTMLElement | null)?.closest<HTMLElement>('[role="treeitem"]') ??
-    focused?.closest<HTMLElement>('[role="treeitem"]') ??
-    null
-  );
-}
-
-/** A {@link RovingTreeNav} over a `role="tree"` root's live treeitems, built per keydown so it can read
- *  the event's target. The navigator has no ArrowRight/Left (its trees never collapse a branch), so it
- *  omits `expand`/`collapse` and keeps the default Home/End + Space-activation. */
-function treeNav(tree: HTMLElement, ev: KeyboardEvent): RovingTreeNav<HTMLElement> {
+/** A {@link RovingTreeNav} over `rovingTabIndex`'s live treeitems, built per keydown so it can read the
+ *  event's target. The navigator has no ArrowRight/Left (its trees never collapse a branch), so it omits
+ *  `expand`/`collapse` and keeps the default Home/End + Space-activation. */
+function treeNav(rovingTabIndex: RovingTabIndexHelper, ev: KeyboardEvent): RovingTreeNav<HTMLElement> {
   // Snapshot the treeitems once per keydown: the navigator's trees never mutate mid-handler (it has no
   // expand/collapse), so a single querySelectorAll serves items()/activeIndex()/focusIndex().
-  const items = treeItems(tree);
+  const items = rovingTabIndex.visibleTreeItems();
   return {
     items: () => items,
     activeIndex: () => {
-      const current = currentTreeItem(ev);
+      const current = rovingTabIndex.currentTreeItem(ev);
       return current ? items.indexOf(current) : -1;
     },
     focusIndex: (i) => {
       const item = items[i];
-      if (item) focusTreeItem(tree, item);
+      if (item) rovingTabIndex.focusItem(item);
     },
     activate: () => {
       // A `<button>` treeitem activates natively (leave the key to the browser); a wrapper row (the
       // tactical rows) forwards Enter/Space to the primary control inside it.
-      const current = currentTreeItem(ev);
+      const current = rovingTabIndex.currentTreeItem(ev);
       if (current && current.tagName !== 'BUTTON') {
         current.querySelector<HTMLElement>('button')?.click();
         return true;
@@ -227,7 +198,8 @@ const wiredTrees = new WeakSet<HTMLElement>();
  * supplies the item source and the panel-specific ContextMenu affordance. Attached via a callback ref, so
  * it runs synchronously when the fresh tree commits. */
 function wireTreeNav(tree: HTMLElement): void {
-  setRovingItem(tree, null); // seed the first treeitem as the single tab stop (re-run on every commit)
+  const rovingTabIndex = createRovingTabIndex(tree, { nestedButtonSelector: 'button' });
+  rovingTabIndex.setRovingItem(null); // seed the first treeitem as the single tab stop (re-run on every commit)
   if (wiredTrees.has(tree)) return;
   wiredTrees.add(tree);
   tree.addEventListener('keydown', (ev) => {
@@ -238,14 +210,14 @@ function wireTreeNav(tree: HTMLElement): void {
       // Only the row's OWN ⋯ qualifies (a leaf row appends it as a direct child). A bare descendant
       // lookup on an aggregate treeitem would descend into its nested group and open the first owned
       // leaf's menu — a wrongly-targeted action; an aggregate has no overflow, so the key no-ops there.
-      const more = currentTreeItem(ev)?.querySelector<HTMLElement>(':scope > .koi-tactical-more');
+      const more = rovingTabIndex.currentTreeItem(ev)?.querySelector<HTMLElement>(':scope > .koi-tactical-more');
       if (more) {
         ev.preventDefault();
         more.click();
       }
       return;
     }
-    handleTreeKeydown(treeNav(tree, ev), ev);
+    handleTreeKeydown(treeNav(rovingTabIndex, ev), ev);
   });
 }
 
