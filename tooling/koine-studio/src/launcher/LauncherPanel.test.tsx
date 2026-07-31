@@ -461,7 +461,8 @@ describe('LauncherPanel — visible-but-disabled command rows (issue #1407)', ()
 
     expect(row.textContent).toContain('Open folder');
     expect(row.classList.contains('lx-item--disabled')).toBe(true);
-    expect(row.getAttribute('aria-disabled')).toBe('true');
+    // `aria-disabled` lives on the row's `role="gridcell"` (`.lx-opt`, #1673), not `.lx-item` itself.
+    expect(row.querySelector('.lx-opt')!.getAttribute('aria-disabled')).toBe('true');
   });
 
   test('the same command renders with no disabled marker once the op is no longer busy', async () => {
@@ -711,14 +712,16 @@ describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {
     await waitFor(() => expect(view.container.querySelectorAll('.lx-item')).toHaveLength(3));
     const input = view.getByLabelText('Search commands, symbols, files…') as HTMLInputElement;
 
-    const first = view.container.querySelector('.lx-item.sel') as HTMLElement;
+    // The `id` `aria-activedescendant` targets lives on the row's `role="gridcell"` (`.lx-opt`,
+    // #1673), not `.lx-item` itself.
+    const first = view.container.querySelector('.lx-item.sel .lx-opt') as HTMLElement;
     expect(first.id).toBeTruthy();
     expect(input.getAttribute('aria-activedescendant')).toBe(first.id);
 
     const scrim = view.container.querySelector('.lx-scrim') as HTMLElement;
     fireEvent.keyDown(scrim, { key: 'ArrowDown' });
 
-    const next = view.container.querySelector('.lx-item.sel') as HTMLElement;
+    const next = view.container.querySelector('.lx-item.sel .lx-opt') as HTMLElement;
     expect(next.id).not.toBe(first.id);
     expect(input.getAttribute('aria-activedescendant')).toBe(next.id);
   });
