@@ -27,6 +27,13 @@ export interface ChangeSetFileState {
   readonly accepted: boolean;
   /** Sticky once marked at apply time (#473) — never unset. */
   readonly drifted: boolean;
+  /**
+   * The chosen destination workspace root for this row (#1132), or `null` when none has been chosen
+   * yet. Only meaningful for new-file rows in a multi-root workspace — set at stage time from the
+   * `targetRoots` map, or later via {@link ChatSlice.setChangeSetFileRoot}. Purely state at this
+   * stage: nothing yet infers a default or reads this to route a write (later tasks).
+   */
+  readonly targetRoot: string | null;
 }
 
 /**
@@ -158,17 +165,27 @@ export interface ChatSlice {
    * drifted); `before` supplies each staged edit's send-time text keyed by its opaque KEY (#472),
    * defaulting to `''` for new files. `display` supplies each key's tool-layer display label (the
    * `relPath@n` marker for a relPath shared across roots); a key without an entry — or no map at
-   * all, for single-root/legacy callers — falls back to the bare relPath.
+   * all, for single-root/legacy callers — falls back to the bare relPath. `targetRoots` (#1132)
+   * supplies each key's chosen destination workspace root; a key without an entry — or no map at
+   * all — falls back to `null` (no root chosen yet).
    */
   stageChangeSet(
     files: readonly StagedEdit[],
     before: Record<string, string>,
     diagnostics: string | null,
     display?: Record<string, string>,
+    targetRoots?: Record<string, string>,
   ): void;
   /** Toggle one file's accept checkbox, addressed by its staged-edit KEY (#472); works in
    *  reviewing AND applying, no-op once terminal. */
   setChangeSetFileAccepted(key: string, accepted: boolean): void;
+  /**
+   * Set one file's chosen destination root, addressed by its staged-edit KEY (#1132).
+   * reviewing-ONLY (narrower than {@link setChangeSetFileAccepted}'s reviewing+applying) — an
+   * in-flight apply must not have its destination swapped out from under it; no-op on
+   * applying/terminal phases and on a null change set.
+   */
+  setChangeSetFileRoot(key: string, root: string): void;
   /** Set `drifted: true` on the files named by KEY — sticky (never unsets) and idempotent (#473). */
   markChangeSetDrift(keys: readonly string[]): void;
   /**
@@ -309,7 +326,7 @@ export function createChatSlice(
     setChatDraft: (text) => {
       set({ chat: { ...get().chat, draft: text } });
     },
-    stageChangeSet: (files, before, diagnostics, display) => {
+    stageChangeSet: (files, before, diagnostics, display, targetRoots) => {
       setChangeSet({
         id: nextChangeSetId++,
         files: files.map((f) => ({
@@ -321,6 +338,7 @@ export function createChatSlice(
           before: before[f.key] ?? '',
           accepted: true,
           drifted: false,
+          targetRoot: targetRoots?.[f.key] ?? null,
         })),
         diagnostics,
         phase: { kind: 'reviewing' },
@@ -332,6 +350,14 @@ export function createChatSlice(
       setChangeSet({
         ...cs,
         files: cs.files.map((f) => (f.key === key ? { ...f, accepted } : f)),
+      });
+    },
+    setChangeSetFileRoot: (key, root) => {
+      const cs = get().chat.changeSet;
+      if (!cs || cs.phase.kind !== 'reviewing') return;
+      setChangeSet({
+        ...cs,
+        files: cs.files.map((f) => (f.key === key ? { ...f, targetRoot: root } : f)),
       });
     },
     markChangeSetDrift: (keys) => {
