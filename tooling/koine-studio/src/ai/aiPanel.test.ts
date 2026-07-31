@@ -9,7 +9,8 @@
 // assertions became "the retired treatment shows until the new turn's set replaces it" — the guards
 // themselves (supersede, no un-retire, drift) are asserted unchanged.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createAssistantChat, MAX_REPAIR_ROUNDS, type AssistantPanelOptions } from '@/ai/aiPanel';
+import { createAssistantChat, inferNewFileRoot, MAX_REPAIR_ROUNDS, type AssistantPanelOptions } from '@/ai/aiPanel';
+import { newFileKeyInRoot, type StagedEdit } from '@/ai/editSession';
 import { runAssistant } from '@/ai/ai';
 import { GRAMMAR_PROBE_GBNF, GRAMMAR_PROBE_SENTINEL, resetGrammarCapabilityCache } from '@/ai/grammarConstraint';
 import { loadChat, saveChat } from '@/settings/persistence';
@@ -995,6 +996,215 @@ describe('multi-file change set (agentic edits)', () => {
     ]);
   });
 
+  // #1132 Task 3: a brand-new file's destination root is INFERRED from the other staged edits' roots
+  // (via the workspace snapshot's `rootOf`, #1132 Task 3's panelHost/aiPanel wiring) — exactly one
+  // distinct root among the turn's revisions of EXISTING files ⇒ that root; anything else ⇒ null (left
+  // for a later explicit choice, Task 4's picker).
+  describe('new-file target-root inference (#1132)', () => {
+    test('one existing-file edit under a root plus one new file: the new file infers that root', async () => {
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('file:///wsB/orders.koi', 'context Orders { v2 }'); // revision, under root B
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}'); // brand-new
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const store = createAppStore();
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          store,
+          getUseTools: () => true,
+          getWorkspaceFiles: () => ({
+            files: { 'file:///wsB/orders.koi': 'context Orders {}' },
+            displayPath: { 'file:///wsB/orders.koi': 'orders.koi' },
+            rootOf: { 'file:///wsB/orders.koi': 'wsB' },
+          }),
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+        }),
+      );
+      fire(container);
+
+      await vi.waitFor(() => expect(store.getState().chat.changeSet).not.toBeNull());
+      const files = store.getState().chat.changeSet!.files;
+      const newFileRow = files.find((f) => f.isNew)!;
+      expect(newFileRow.targetRoot).toBe('wsB');
+    });
+
+    test('existing-file edits under TWO different roots leave the new file’s targetRoot null (ambiguous)', async () => {
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('file:///wsA/orders.koi', 'context Orders A { v2 }');
+        req.editSession?.stage('file:///wsB/billing.koi', 'context Billing { v2 }');
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const store = createAppStore();
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          store,
+          getUseTools: () => true,
+          getWorkspaceFiles: () => ({
+            files: {
+              'file:///wsA/orders.koi': 'context Orders A {}',
+              'file:///wsB/billing.koi': 'context Billing {}',
+            },
+            displayPath: {
+              'file:///wsA/orders.koi': 'orders.koi',
+              'file:///wsB/billing.koi': 'billing.koi',
+            },
+            rootOf: {
+              'file:///wsA/orders.koi': 'wsA',
+              'file:///wsB/billing.koi': 'wsB',
+            },
+          }),
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+        }),
+      );
+      fire(container);
+
+      await vi.waitFor(() => expect(store.getState().chat.changeSet).not.toBeNull());
+      const files = store.getState().chat.changeSet!.files;
+      const newFileRow = files.find((f) => f.isNew)!;
+      expect(newFileRow.targetRoot).toBeNull();
+    });
+
+    test('a new-file-only turn (no existing-file edits to infer from) leaves targetRoot null', async () => {
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const store = createAppStore();
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          store,
+          getUseTools: () => true,
+          // A legacy/single-root snapshot with no rootOf at all — "no root info available".
+          getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet: vi.fn(async () => ({ failed: [] as string[] })),
+        }),
+      );
+      fire(container);
+
+      await vi.waitFor(() => expect(store.getState().chat.changeSet).not.toBeNull());
+      const files = store.getState().chat.changeSet!.files;
+      const newFileRow = files.find((f) => f.isNew)!;
+      expect(newFileRow.targetRoot).toBeNull();
+    });
+  });
+
+  // #1132: inferNewFileRoot is exported specifically to be a pure, directly-testable helper — these
+  // pin its branches without going through the full turn/DOM integration flow the tests above use.
+  describe('inferNewFileRoot (pure helper, #1132)', () => {
+    const edit = (key: string, isNew: boolean): StagedEdit => ({ key, relPath: key, body: '', isNew });
+
+    test('exactly one distinct root among the non-new edits infers that root', () => {
+      const staged = [edit('a', false), edit('b', false), edit('new:c.koi', true)];
+      const rootOf = { a: 'wsA', b: 'wsA' };
+      expect(inferNewFileRoot(staged, rootOf)).toBe('wsA');
+    });
+
+    test('two distinct roots among the non-new edits is ambiguous → null', () => {
+      const staged = [edit('a', false), edit('b', false), edit('new:c.koi', true)];
+      const rootOf = { a: 'wsA', b: 'wsB' };
+      expect(inferNewFileRoot(staged, rootOf)).toBeNull();
+    });
+
+    test('no non-new edits (new-file-only turn) → null', () => {
+      const staged = [edit('new:c.koi', true)];
+      expect(inferNewFileRoot(staged, { c: 'wsA' })).toBeNull();
+    });
+
+    test('rootOf undefined (host can’t supply root info) → null, even with a single non-new edit', () => {
+      const staged = [edit('a', false), edit('new:c.koi', true)];
+      expect(inferNewFileRoot(staged, undefined)).toBeNull();
+    });
+
+    test('a non-new edit whose key has no rootOf entry is skipped, not counted as a distinct root', () => {
+      const staged = [edit('a', false), edit('b', false), edit('new:c.koi', true)];
+      // Only 'a' resolves; 'b' has no rootOf entry and must not count as a second (ambiguous) root.
+      const rootOf = { a: 'wsA' };
+      expect(inferNewFileRoot(staged, rootOf)).toBe('wsA');
+    });
+
+    test('two new files in the same staged turn both resolve from the same non-new-edit root', () => {
+      const staged = [edit('a', false), edit('new:c.koi', true), edit('new:d.koi', true)];
+      const rootOf = { a: 'wsA' };
+      // inferNewFileRoot itself only computes ONE root for the whole turn; the caller (aiPanel.ts's
+      // stageChangeSet call site) assigns it to every isNew edit — this pins the shared source value.
+      const inferred = inferNewFileRoot(staged, rootOf);
+      expect(inferred).toBe('wsA');
+      expect(staged.filter((e) => e.isNew)).toHaveLength(2);
+    });
+  });
+
+  // #1132 Task 3: the apply payload mints a `new-in:<root>:<relPath>` key for a new-file row whose
+  // targetRoot was resolved, so the host creates it under that root; a row with no resolved root keeps
+  // the plain `new:<relPath>` key exactly as before (unresolved ⇒ today's primary-root behavior).
+  describe('apply payload key routing by targetRoot (#1132)', () => {
+    test('a resolved targetRoot mints a newFileKeyInRoot payload key', async () => {
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('file:///wsB/orders.koi', 'context Orders { v2 }');
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const onApplyChangeSet = vi.fn(async (_files: { key: string; isNew: boolean }[]) => ({ failed: [] as string[] }));
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          getUseTools: () => true,
+          getWorkspaceFiles: () => ({
+            files: { 'file:///wsB/orders.koi': 'context Orders {}' },
+            displayPath: { 'file:///wsB/orders.koi': 'orders.koi' },
+            rootOf: { 'file:///wsB/orders.koi': 'wsB' },
+          }),
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet,
+        }),
+      );
+      fire(container);
+
+      await vi.waitFor(() => expect(container.querySelector('.koi-changeset-apply')).not.toBeNull());
+      container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+      await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+      const payload = onApplyChangeSet.mock.calls[0][0];
+      const newFileEntry = payload.find((f) => f.isNew)!;
+      expect(newFileEntry.key).toBe(newFileKeyInRoot('wsB', 'events.koi'));
+    });
+
+    test('no resolved targetRoot keeps the plain new: payload key', async () => {
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const onApplyChangeSet = vi.fn(async (_files: { key: string; isNew: boolean }[]) => ({ failed: [] as string[] }));
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          getUseTools: () => true,
+          getWorkspaceFiles: () => wsSnapshot({ 'orders.koi': 'context Orders {}' }),
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet,
+        }),
+      );
+      fire(container);
+
+      await vi.waitFor(() => expect(container.querySelector('.koi-changeset-apply')).not.toBeNull());
+      container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+      await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+      const payload = onApplyChangeSet.mock.calls[0][0];
+      const newFileEntry = payload.find((f) => f.isNew)!;
+      expect(newFileEntry.key).toBe('new:events.koi');
+    });
+  });
+
   test('surfaces the end-of-turn validation diagnostics in the change set, before apply (issue #474)', async () => {
     // The model stages a BROKEN file; the agentic loop's single end-of-turn validation reports the
     // error via onStagedValidation. The change-set panel must show those diagnostics alongside the
@@ -1644,6 +1854,127 @@ describe('multi-file change set (agentic edits)', () => {
       r.textContent?.includes('events.koi'),
     )!;
     expect(eventsRow.querySelector('.koi-changeset-drift')).not.toBeNull();
+  });
+
+  // #1132 Task 3: new-file drift is SCOPED to the row's chosen destination root, when the host can
+  // supply root info — a same-relPath hit under a DIFFERENT root must not block creating this file
+  // under its own root (two roots may each legitimately want their own events.koi).
+  describe('new-file drift is scoped by targetRoot when rootOf is available (#1132)', () => {
+    test('a same-relPath hit under a DIFFERENT root than the inferred targetRoot is NOT drift', async () => {
+      let snapshot: { files: Record<string, string>; displayPath: Record<string, string>; rootOf?: Record<string, string> } = {
+        files: { 'file:///wsA/orders.koi': 'context Orders {}' },
+        displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
+        rootOf: { 'file:///wsA/orders.koi': 'wsA' },
+      };
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // infers targetRoot wsA
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const onApplyChangeSet = vi.fn(async (_files: { relPath: string }[]) => ({ failed: [] as string[] }));
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          getUseTools: () => true,
+          getWorkspaceFiles: () => snapshot,
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet,
+        }),
+      );
+      fire(container);
+      await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+      // events.koi now exists, but under root B — NOT the new row's target root (wsA).
+      snapshot = {
+        files: { ...snapshot.files, 'file:///wsB/events.koi': 'context Events {}' },
+        displayPath: { ...snapshot.displayPath, 'file:///wsB/events.koi': 'events.koi' },
+        rootOf: { ...snapshot.rootOf, 'file:///wsB/events.koi': 'wsB' },
+      };
+
+      container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+      await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+      const written = onApplyChangeSet.mock.calls[0][0].map((f: { relPath: string }) => f.relPath);
+      expect(written.sort()).toEqual(['events.koi', 'orders.koi']); // neither row skipped as drift
+    });
+
+    test('a same-relPath hit under the row’s OWN targetRoot still counts as drift', async () => {
+      let snapshot: { files: Record<string, string>; displayPath: Record<string, string>; rootOf?: Record<string, string> } = {
+        files: { 'file:///wsA/orders.koi': 'context Orders {}' },
+        displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
+        rootOf: { 'file:///wsA/orders.koi': 'wsA' },
+      };
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // infers targetRoot wsA
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const onApplyChangeSet = vi.fn(async (_files: { relPath: string }[]) => ({ failed: [] as string[] }));
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          getUseTools: () => true,
+          getWorkspaceFiles: () => snapshot,
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet,
+        }),
+      );
+      fire(container);
+      await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+      // events.koi now exists UNDER root A — the row's OWN target root.
+      snapshot = {
+        files: { ...snapshot.files, 'file:///wsA/events.koi': 'context Events {}' },
+        displayPath: { ...snapshot.displayPath, 'file:///wsA/events.koi': 'events.koi' },
+        rootOf: { ...snapshot.rootOf, 'file:///wsA/events.koi': 'wsA' },
+      };
+
+      container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+      await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+      const written = onApplyChangeSet.mock.calls[0][0].map((f: { relPath: string }) => f.relPath);
+      expect(written).toEqual(['orders.koi']); // events.koi skipped — drifted under its OWN target root
+    });
+
+    test('when the FRESH read carries no rootOf at all, falls back to legacy any-root drift matching', async () => {
+      let snapshot: { files: Record<string, string>; displayPath: Record<string, string>; rootOf?: Record<string, string> } = {
+        files: { 'file:///wsA/orders.koi': 'context Orders {}' },
+        displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
+        rootOf: { 'file:///wsA/orders.koi': 'wsA' },
+      };
+      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+        req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // infers targetRoot wsA
+        req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
+        req.onText('Staged.');
+        return 'Staged.';
+      });
+      const onApplyChangeSet = vi.fn(async (_files: { relPath: string }[]) => ({ failed: [] as string[] }));
+      const container = document.createElement('div');
+      createAssistantChat(
+        opts(container, {
+          getUseTools: () => true,
+          getWorkspaceFiles: () => snapshot,
+          runEditTool: vi.fn(async () => 'ok'),
+          onApplyChangeSet,
+        }),
+      );
+      fire(container);
+      await vi.waitFor(() => expect(container.querySelector('.koi-changeset')).not.toBeNull());
+
+      // events.koi appears under a DIFFERENT root (wsB), and this time the fresh read at apply time
+      // carries NO rootOf at all (the host couldn't supply root info this time) — the legacy any-root
+      // check must still catch it, since there's no root info to scope the match by.
+      snapshot = {
+        files: { ...snapshot.files, 'file:///wsB/events.koi': 'context Events {}' },
+        displayPath: { ...snapshot.displayPath, 'file:///wsB/events.koi': 'events.koi' },
+        rootOf: undefined,
+      };
+
+      container.querySelector<HTMLButtonElement>('.koi-changeset-apply')!.click();
+      await vi.waitFor(() => expect(onApplyChangeSet).toHaveBeenCalledTimes(1));
+      const written = onApplyChangeSet.mock.calls[0][0].map((f: { relPath: string }) => f.relPath);
+      expect(written).toEqual(['orders.koi']); // events.koi treated as drift via the legacy any-root path
+    });
   });
 
   // #473 (Task 3): both guards active on the same turn driver. A new send supersedes the prior set

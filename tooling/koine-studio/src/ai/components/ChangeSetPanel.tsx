@@ -81,19 +81,35 @@ function lineDiff(oldText: string, newText: string): string {
 export const files = (n: number): string => `file${n === 1 ? '' : 's'}`;
 
 /**
- * One reviewed file row: the accept checkbox, the new/modified badge, the display label, the inline
- * line-diff, and the sticky drift warning (#473). A component (keyed by `file.key` in the parent) so
- * the O(m×n) {@link lineDiff} is memoized per row across panel re-renders — a checkbox toggle or a
- * phase change re-renders the panel, but an unchanged before/body pair must not re-run the DP.
+ * The explorer's folder-name convention, reproduced locally (#1132): the last non-empty path segment
+ * of a root token, split on either separator — falling back to the root itself when it has none. Kept
+ * as a small local copy rather than importing `ExplorerPanel.tsx`'s private helper of the same name,
+ * since that module doesn't export it.
+ */
+function folderNameOf(root: string): string {
+  const segs = root.split(/[\\/]/).filter(Boolean);
+  return segs.length ? segs[segs.length - 1] : root;
+}
+
+/**
+ * One reviewed file row: the accept checkbox, the new/modified badge, the display label, the target-
+ * root picker for a brand-new file in a multi-root workspace (#1132), the inline line-diff, and the
+ * sticky drift warning (#473). A component (keyed by `file.key` in the parent) so the O(m×n)
+ * {@link lineDiff} is memoized per row across panel re-renders — a checkbox toggle or a phase change
+ * re-renders the panel, but an unchanged before/body pair must not re-run the DP.
  */
 function ChangeSetFileRow({
   store,
   file: f,
   terminal,
+  roots,
 }: {
   store: StoreApi<AppState>;
   file: ChangeSetFileState;
   terminal: boolean;
+  /** Every workspace root (#1132): a new-file row grows a root picker only when there's a choice to
+   *  make (2+ roots) — a single-root or unopened workspace has nowhere else the file could land. */
+  roots: readonly string[];
 }) {
   const diff = useMemo(() => lineDiff(f.before, f.body), [f.before, f.body]);
   return (
@@ -110,6 +126,25 @@ function ChangeSetFileRow({
         {f.isNew ? 'new' : 'modified'}
       </span>
       <span class="koi-changeset-path">{f.display}</span>
+      {f.isNew && roots.length > 1 && (
+        // The destination root for a model-proposed brand-new file (#1132): a native select so
+        // keyboard/screen-reader semantics come free (WCAG 2.1 AA) — no custom listbox. The visible
+        // option label is the folder name (may collide across roots); `title` carries the full root
+        // token so two same-named folders under different roots stay disambiguated on hover/tooltip.
+        <select
+          class="koi-changeset-root"
+          aria-label={`Folder for new file ${f.display}`}
+          disabled={terminal}
+          value={f.targetRoot ?? roots[0]}
+          onChange={(e) => store.getState().setChangeSetFileRoot(f.key, e.currentTarget.value)}
+        >
+          {roots.map((root) => (
+            <option key={root} value={root} title={root}>
+              {folderNameOf(root)}
+            </option>
+          ))}
+        </select>
+      )}
       <pre class="koi-changeset-diff">{diff}</pre>
       {f.drifted && (
         // Sticky per-file drift (#473): the file changed since it was proposed, so apply skips it.
@@ -121,6 +156,9 @@ function ChangeSetFileRow({
 
 export function ChangeSetPanel({ store, onApply, onDiscard }: ChangeSetPanelProps) {
   const changeSet = useAppStore(store, (s) => s.chat.changeSet);
+  // Read the SAME way as `chat.changeSet` above — `roots` lives directly on AppState (#1132), driving
+  // the new-file root picker below.
+  const roots = useAppStore(store, (s) => s.roots);
   if (!changeSet) return null;
 
   const { phase, diagnostics } = changeSet;
@@ -161,7 +199,7 @@ export function ChangeSetPanel({ store, onApply, onDiscard }: ChangeSetPanelProp
         // so each row's memoized diff survives the panel's re-renders. The rendered label is the
         // row's `display` — the tool layer's disambiguated path, carried on the slice state — so the
         // user reviews exactly the file the model addressed.
-        <ChangeSetFileRow key={f.key} store={store} file={f} terminal={terminal} />
+        <ChangeSetFileRow key={f.key} store={store} file={f} terminal={terminal} roots={roots} />
       ))}
       {/* End-of-turn whole-staged-workspace validation (#474): anything other than a CLEAN compile
           (`ok: true …`) — errors, warnings, or a "could not validate" note — is reviewable BEFORE apply. */}
