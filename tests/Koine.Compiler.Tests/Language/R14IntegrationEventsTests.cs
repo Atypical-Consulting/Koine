@@ -178,6 +178,26 @@ public class R14IntegrationEventsTests
         Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
     }
 
+    [Fact]
+    public void Field_type_resolves_against_its_own_context_when_a_later_context_reuses_the_type_name()
+    {
+        // #1711 sibling: CheckIntegrationEventFieldType's `index.Classify(tr.Name)` was flat and
+        // context-blind. Other's later, differently-kinded "Channel" was overwriting Sales's own
+        // enum "Channel" in ModelIndex's flat lookup, falsely flagging a legal enum field as leaking
+        // internals.
+        const string src = """
+            context Sales {
+              enum Channel { Web, Store }
+              integration event OrderPlaced { channel: Channel }
+            }
+
+            context Other {
+              value Channel { code: Int }
+            }
+            """;
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.IntegrationEventLeaksInternals);
+    }
+
     // ---- publishes ---------------------------------------------------------
 
     [Fact]

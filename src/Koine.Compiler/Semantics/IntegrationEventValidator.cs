@@ -26,7 +26,7 @@ internal static class IntegrationEventValidator
             {
                 foreach (Member m in ev.Members)
                 {
-                    CheckIntegrationEventFieldType(m.Type, index, diagnostics);
+                    CheckIntegrationEventFieldType(m.Type, ctx.Name, index, diagnostics);
                 }
             }
         }
@@ -89,9 +89,11 @@ internal static class IntegrationEventValidator
     /// Allowed: primitives, enums, ID value objects, other integration events, and collections of those.
     /// </summary>
     private static void CheckIntegrationEventFieldType(
-        TypeRef tr, ModelIndex index, List<Diagnostic> diagnostics)
+        TypeRef tr, string context, ModelIndex index, List<Diagnostic> diagnostics)
     {
-        TypeKind kind = index.Classify(tr.Name);
+        // Resolved against the integration event's own declaring context (#1711) so a same-named,
+        // differently-kinded type declared elsewhere can't shadow it via the flat lookup.
+        TypeKind kind = index.Classify(context, tr.Name);
         var allowed = kind switch
         {
             TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range => true,
@@ -109,12 +111,12 @@ internal static class IntegrationEventValidator
 
         if (tr.Element is not null)
         {
-            CheckIntegrationEventFieldType(tr.Element, index, diagnostics);
+            CheckIntegrationEventFieldType(tr.Element, context, index, diagnostics);
         }
 
         if (tr.Value is not null)
         {
-            CheckIntegrationEventFieldType(tr.Value, index, diagnostics);
+            CheckIntegrationEventFieldType(tr.Value, context, index, diagnostics);
         }
     }
 }
