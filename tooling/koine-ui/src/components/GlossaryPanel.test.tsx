@@ -56,7 +56,7 @@ describe('GlossaryPanel', () => {
     expect(GlossaryPanelFromBarrel).toBe(GlossaryPanel);
   });
 
-  test('renders every context’s concepts, and a host scope change (set) narrows them', () => {
+  test('renders every context’s concepts, and a host scope change (set) narrows them', async () => {
     const store = createTestReadableStore<GlossaryPanelSlice>(sliceOf(twoContexts));
     const { container } = render(<GlossaryPanel store={store} handlers={noopHandlers} />);
 
@@ -65,7 +65,7 @@ describe('GlossaryPanel', () => {
     expect(container.textContent).toContain('Stock');
 
     // A host notification narrows to Sales (flushed via act()) and drops the Inv concept.
-    act(() => store.set(sliceOf([entry('Order', 'Sales')])));
+    await act(() => store.set(sliceOf([entry('Order', 'Sales')])));
     expect(container.textContent).toContain('Order');
     expect(container.textContent).not.toContain('Stock');
   });

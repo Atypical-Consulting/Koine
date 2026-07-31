@@ -38,7 +38,7 @@ describe('RelationshipsPanel', () => {
     expect(RelationshipsPanelFromBarrel).toBe(RelationshipsPanel);
   });
 
-  test('lists every structural relation, and a host scope change (set) narrows to the active context', () => {
+  test('lists every structural relation, and a host scope change (set) narrows to the active context', async () => {
     const store = createTestReadableStore<RelationshipsPanelSlice>({ rows: allRows });
     const { container } = render(<RelationshipsPanel store={store} handlers={{ goto: () => {} }} />);
 
@@ -47,7 +47,7 @@ describe('RelationshipsPanel', () => {
     expect(container.textContent).toContain('StockLevel');
 
     // A host notification re-scopes to Sales (flushed via act()): Sales' row kept, Inv's dropped.
-    act(() => store.set({ rows: [allRows[0]] }));
+    await act(() => store.set({ rows: [allRows[0]] }));
     expect(container.textContent).toContain('OrderItem');
     expect(container.textContent).not.toContain('StockLevel');
   });
@@ -79,7 +79,7 @@ describe('RelationshipsPanel', () => {
   // `source relation target` label. Under "All contexts" two contexts can each hold e.g. `Order contains
   // OrderItem`; with label keys the duplicate sibling keys made a sort cross-wire the rows, so the focused
   // row could jump to the OTHER context's declaration.
-  test('the same-named relation in two contexts keeps its own DOM row across a sort and jumps to its own source', () => {
+  test('the same-named relation in two contexts keeps its own DOM row across a sort and jumps to its own source', async () => {
     const goto = vi.fn();
     const salesSpan = span(3);
     const billingSpan = span(20);
@@ -96,7 +96,7 @@ describe('RelationshipsPanel', () => {
     expect(before.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Sales', 'Billing']);
 
     // Sort ascending by Contexts: Billing < Sales.
-    act(() => container.querySelectorAll('thead th')[3].querySelector('button')!.click());
+    await act(() => container.querySelectorAll('thead th')[3].querySelector('button')!.click());
 
     const after = Array.from(container.querySelectorAll('tbody tr'));
     expect(after.map((r) => r.querySelectorAll('td')[3].textContent)).toEqual(['Billing', 'Sales']);

@@ -164,7 +164,7 @@ describe('ExplorerPanel', () => {
     expect(cb.onOpenFile).toHaveBeenCalledWith('ROOT/shared.koi');
   });
 
-  it('toggles a directory open/closed on click, hiding/showing its nested file', () => {
+  it('toggles a directory open/closed on click, hiding/showing its nested file', async () => {
     const store = createAppStore();
     const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
 
@@ -173,11 +173,11 @@ describe('ExplorerPanel', () => {
     expect(container.querySelector('li[data-token="ROOT/orders/order.koi"]')).not.toBeNull();
 
     const row = dir.querySelector<HTMLElement>(':scope > .explorer-row')!;
-    act(() => row.click());
+    await act(() => row.click());
     expect(dir.getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('li[data-token="ROOT/orders/order.koi"]')).toBeNull();
 
-    act(() => row.click());
+    await act(() => row.click());
     expect(dir.getAttribute('aria-expanded')).toBe('true');
     expect(container.querySelector('li[data-token="ROOT/orders/order.koi"]')).not.toBeNull();
   });
@@ -219,18 +219,18 @@ describe('ExplorerPanel', () => {
     expect(li.querySelector('.explorer-row')!.getAttribute('aria-current')).toBe('true');
   });
 
-  it('filters by name (debounced) and highlights the match, reporting a match count', () => {
+  it('filters by name (debounced) and highlights the match, reporting a match count', async () => {
     vi.useFakeTimers();
     try {
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
       const input = container.querySelector<HTMLInputElement>('#koi-explorer-filter')!;
 
-      act(() => {
+      await act(() => {
         input.value = 'shared';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => {
+      await act(() => {
         vi.advanceTimersByTime(150);
       });
 
@@ -300,7 +300,7 @@ describe('ExplorerPanel', () => {
     expect(onAddRoot).toHaveBeenCalledTimes(1);
   });
 
-  it('Collapse all / Expand all toggle every directory at once', () => {
+  it('Collapse all / Expand all toggle every directory at once', async () => {
     const store = createAppStore();
     const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
     const tools = Array.from(container.querySelectorAll<HTMLElement>('.explorer-tool'));
@@ -308,9 +308,9 @@ describe('ExplorerPanel', () => {
     const expandAll = tools.find((b) => b.getAttribute('aria-label') === 'Expand all')!;
 
     expect(container.querySelector('li[data-token="ROOT/orders/order.koi"]')).not.toBeNull();
-    act(() => collapseAll.click());
+    await act(() => collapseAll.click());
     expect(container.querySelector('li[data-token="ROOT/orders/order.koi"]')).toBeNull();
-    act(() => expandAll.click());
+    await act(() => expandAll.click());
     expect(container.querySelector('li[data-token="ROOT/orders/order.koi"]')).not.toBeNull();
   });
 
@@ -322,7 +322,7 @@ describe('ExplorerPanel', () => {
   // <li> — now that children nest inside it (task-2a), the parent's own identity is equally load-bearing:
   // if the recursive render ever rebuilt a directory's wrapper on every render, the nested child would
   // lose its DOM identity too even while still being "the same row" by every other assertion here.
-  it('keeps the same DOM node for an unrelated row (and its nesting parent) across a re-render (keyed identity)', () => {
+  it('keeps the same DOM node for an unrelated row (and its nesting parent) across a re-render (keyed identity)', async () => {
     const cb = makeCallbacks();
     const store = createAppStore();
     const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
@@ -333,7 +333,7 @@ describe('ExplorerPanel', () => {
     expect(untouched).not.toBeNull();
 
     const dirtyCb = makeCallbacks({ isDirty: vi.fn((token: string) => token === 'ROOT/shared.koi') });
-    act(() => rerender(<ExplorerPanel store={store} cb={dirtyCb} groups={[group()]} />));
+    await act(() => rerender(<ExplorerPanel store={store} cb={dirtyCb} groups={[group()]} />));
 
     const stillUntouchedParent = container.querySelector('li[data-token="ROOT/orders"]');
     const stillUntouched = container.querySelector('li[data-token="ROOT/orders/order.koi"]');
@@ -385,113 +385,113 @@ describe('ExplorerPanel', () => {
   // and the syntax-tree panel already use (#1105). These tests pin behavioral parity with explorer.ts's
   // old per-row `rowNav`/`onRowKeydown` (explorer.test.ts's equivalents), not a reinvention of the model.
   describe('keyboard navigation', () => {
-    it('ArrowDown/ArrowUp move the roving tab stop through every visible row in flattenVisible order, crossing group boundaries (clamped, no wrap)', () => {
+    it('ArrowDown/ArrowUp move the roving tab stop through every visible row in flattenVisible order, crossing group boundaries (clamped, no wrap)', async () => {
       const store = createAppStore();
       const { container } = render(
         <ExplorerPanel store={store} cb={makeCallbacks()} groups={[group('/home/me/sales'), secondGroup()]} />,
       );
       const first = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
-      act(() => first.focus());
+      await act(() => first.focus());
       expect(document.activeElement).toBe(first);
 
-      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      await act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders/order.koi');
 
-      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      await act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/shared.koi');
 
-      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      await act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('BILL/invoice.koi');
 
       // Clamped at the last row — no wrap back to the first.
-      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      await act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('BILL/invoice.koi');
 
-      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); });
+      await act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/shared.koi');
     });
 
-    it("ArrowDown skips a collapsed directory's hidden children (matches flattenVisible order)", () => {
+    it("ArrowDown skips a collapsed directory's hidden children (matches flattenVisible order)", async () => {
       const store = createAppStore();
       store.getState().setExplorerCollapsedMany(['ROOT/orders']);
       const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
       const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
       expect(dir.getAttribute('aria-expanded')).toBe('false');
-      act(() => dir.focus());
+      await act(() => dir.focus());
 
-      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      await act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
       // order.koi is hidden (its parent is collapsed) — focus lands directly on shared.koi.
       expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/shared.koi');
     });
 
-    it('ArrowRight opens a closed directory in place (focus stays), then descends into its child on the next press', () => {
+    it('ArrowRight opens a closed directory in place (focus stays), then descends into its child on the next press', async () => {
       const store = createAppStore();
       store.getState().setExplorerCollapsedMany(['ROOT/orders']);
       const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
       const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
       expect(dir.getAttribute('aria-expanded')).toBe('false');
-      act(() => dir.focus());
+      await act(() => dir.focus());
 
-      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+      await act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
       const stillDir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
       expect(stillDir.getAttribute('aria-expanded')).toBe('true');
       expect(document.activeElement).toBe(stillDir); // focus stays on the directory itself
 
-      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
+      await act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders/order.koi');
     });
 
-    it('ArrowLeft collapses an open directory in place, then ascends to the parent on the next press', () => {
+    it('ArrowLeft collapses an open directory in place, then ascends to the parent on the next press', async () => {
       const store = createAppStore();
       const { container } = render(
         <ExplorerPanel store={store} cb={makeCallbacks()} groups={[{ root: 'ROOT', entries: nestedTree() }]} />,
       );
       const inner = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/2024"]')!;
-      act(() => inner.focus());
+      await act(() => inner.focus());
 
-      act(() => { inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+      await act(() => { inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
       const stillInner = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/2024"]')!;
       expect(stillInner.getAttribute('aria-expanded')).toBe('false');
       expect(document.activeElement).toBe(stillInner); // focus stays on the now-closed directory
 
-      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+      await act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders'); // ascended to parent
     });
 
-    it('ArrowLeft on a file (nothing to collapse) focuses its parent directory', () => {
+    it('ArrowLeft on a file (nothing to collapse) focuses its parent directory', async () => {
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
-      act(() => file.focus());
+      await act(() => file.focus());
 
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
       expect((document.activeElement as HTMLElement).dataset.token).toBe('ROOT/orders');
     });
 
-    it('Enter opens a focused file and toggles a focused directory', () => {
+    it('Enter opens a focused file and toggles a focused directory', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
 
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(cb.onOpenFile).toHaveBeenCalledWith('ROOT/shared.koi');
 
       const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
       expect(dir.getAttribute('aria-expanded')).toBe('true');
-      act(() => dir.focus());
-      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => dir.focus());
+      await act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(container.querySelector('li[data-token="ROOT/orders"]')!.getAttribute('aria-expanded')).toBe('false');
     });
 
-    it('moves focus to the treeitem <li> itself, not the inner .explorer-row div', () => {
+    it('moves focus to the treeitem <li> itself, not the inner .explorer-row div', async () => {
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
       const first = container.querySelector<HTMLElement>('li[role="treeitem"]')!;
-      act(() => first.focus());
+      await act(() => first.focus());
 
-      act(() => { first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      await act(() => { first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
       const active = document.activeElement as HTMLElement;
       expect(active.getAttribute('role')).toBe('treeitem');
       expect(active.classList.contains('explorer-row')).toBe(false);
@@ -504,7 +504,7 @@ describe('ExplorerPanel', () => {
     // is exactly ONE delegated handler (on ul[role=tree]) and no per-row listeners at all, so there is
     // nothing to double-fire BY CONSTRUCTION — proven by asserting the observable side effect (onOpenFile)
     // fires exactly once for a row nested three <li> deep, not once per ancestor.
-    it('does not double-fire keydown through nested treeitem ancestors (one delegated handler ⇒ exactly one action per keypress)', () => {
+    it('does not double-fire keydown through nested treeitem ancestors (one delegated handler ⇒ exactly one action per keypress)', async () => {
       const cb = makeCallbacks();
       const nested: FsEntry[] = [
         {
@@ -527,22 +527,22 @@ describe('ExplorerPanel', () => {
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[{ root: 'R', entries: nested }]} />);
 
       const deep = container.querySelector<HTMLElement>('li[data-token="R/a/b/c.koi"]')!;
-      act(() => deep.focus());
-      act(() => { deep.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => deep.focus());
+      await act(() => { deep.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
       expect(cb.onOpenFile).toHaveBeenCalledTimes(1);
       expect(cb.onOpenFile).toHaveBeenCalledWith('R/a/b/c.koi');
     });
 
-    it('does not consume Backspace (no preventDefault, no callback, focus unchanged)', () => {
+    it('does not consume Backspace (no preventDefault, no callback, focus unchanged)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
+      await act(() => file.focus());
 
       const ev = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
-      act(() => { file.dispatchEvent(ev); });
+      await act(() => { file.dispatchEvent(ev); });
 
       expect(ev.defaultPrevented).toBe(false);
       expect(cb.onDelete).not.toHaveBeenCalled();
@@ -553,15 +553,15 @@ describe('ExplorerPanel', () => {
     // out of default browser handling (matching explorer.ts) regardless of whether an action is wired up.
     // Delete/ContextMenu ARE fully wired as of #989 task 4 (see the "context menus + delete confirm"
     // describe block below for their actual behavior); F2 stays a stub pending #989 task 5.
-    it('recognizes F2 / Delete / ContextMenu as consumed panel-specific keys', () => {
+    it('recognizes F2 / Delete / ContextMenu as consumed panel-specific keys', async () => {
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
+      await act(() => file.focus());
 
       for (const key of ['F2', 'Delete', 'ContextMenu']) {
         const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
-        act(() => { file.dispatchEvent(ev); });
+        await act(() => { file.dispatchEvent(ev); });
         expect(ev.defaultPrevented).toBe(true);
       }
     });
@@ -573,18 +573,18 @@ describe('ExplorerPanel', () => {
     // used to open a delete-confirm for the WRONG entry (the tree's first row), not no-op. Arrow-key
     // navigation is deliberately untouched by this fix (still falls back to `effectiveFocusedToken`, by
     // design) — only Delete/F2/ContextMenu require a real row under the event.
-    it('Delete/F2/ContextMenu on a non-row focusable element (the group-remove button) is a no-op, not a wrong-row action', () => {
+    it('Delete/F2/ContextMenu on a non-row focusable element (the group-remove button) is a no-op, not a wrong-row action', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(
         <ExplorerPanel store={store} cb={cb} groups={[group('/home/me/sales'), secondGroup()]} />,
       );
       const removeBtn = container.querySelector<HTMLElement>('.explorer-group-remove')!;
-      act(() => removeBtn.focus());
+      await act(() => removeBtn.focus());
       expect(document.activeElement).toBe(removeBtn);
 
       for (const key of ['Delete', 'F2', 'ContextMenu']) {
-        act(() => {
+        await act(() => {
           removeBtn.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
         });
       }
@@ -621,11 +621,11 @@ describe('ExplorerPanel', () => {
     function commitCreate(container: Element, value: string): void {
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
       expect(input).not.toBeNull();
-      act(() => {
+      void act(() => {
         input.value = value;
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => {
+      void act(() => {
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       });
     }
@@ -633,11 +633,11 @@ describe('ExplorerPanel', () => {
     function commitRename(container: Element, token: string, value: string): void {
       const input = container.querySelector<HTMLInputElement>(`li[data-token="${token}"] .explorer-rename`)!;
       expect(input).not.toBeNull();
-      act(() => {
+      void act(() => {
         input.value = value;
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => {
+      void act(() => {
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       });
     }
@@ -647,7 +647,7 @@ describe('ExplorerPanel', () => {
       const item = Array.from(document.querySelectorAll<HTMLElement>('.explorer-menu-item')).find(
         (b) => b.textContent === label,
       )!;
-      act(() => item.click());
+      void act(() => item.click());
     }
     // The confirm dialog is the shared createModal chrome: a .koi-modal-backdrop that is hidden when
     // closed. It's shown iff the backdrop is present and not hidden (mirrors explorer.test.ts's helper).
@@ -750,7 +750,7 @@ describe('ExplorerPanel', () => {
       expect(confirmShown()).toBe(true);
       expect(cb.onDelete).not.toHaveBeenCalled(); // not until confirmed
 
-      act(() => {
+      await act(() => {
         document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
       });
       await flush();
@@ -763,15 +763,15 @@ describe('ExplorerPanel', () => {
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => {
+      await act(() => file.focus());
+      await act(() => {
         file.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
       });
 
       expect(confirmShown()).toBe(true);
       expect(cb.onDelete).not.toHaveBeenCalled();
 
-      act(() => {
+      await act(() => {
         document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
       });
       await flush();
@@ -789,7 +789,7 @@ describe('ExplorerPanel', () => {
       const cancelBtn = Array.from(document.querySelectorAll<HTMLElement>('.explorer-confirm-btn')).find(
         (b) => b.textContent === 'Cancel',
       )!;
-      act(() => cancelBtn.click());
+      await act(() => cancelBtn.click());
       await flush();
       expect(cb.onDelete).not.toHaveBeenCalled();
       expect(confirmShown()).toBe(false);
@@ -803,7 +803,7 @@ describe('ExplorerPanel', () => {
       clickMenuItem('Delete');
       expect(confirmShown()).toBe(true);
 
-      act(() => {
+      await act(() => {
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       });
       await flush();
@@ -862,14 +862,14 @@ describe('ExplorerPanel', () => {
       )!;
     }
 
-    it("toolbar New File mounts the create row inside the PRIMARY root's group (multi-root)", () => {
+    it("toolbar New File mounts the create row inside the PRIMARY root's group (multi-root)", async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(
         <ExplorerPanel store={store} cb={cb} groups={[group('/home/me/sales'), secondGroup()]} />,
       );
 
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const salesItems = container.querySelector<HTMLElement>(
         '.explorer-group[data-root="/home/me/sales"] > .explorer-group-items',
@@ -886,20 +886,20 @@ describe('ExplorerPanel', () => {
       expect(Array.from(tree.children)).not.toContain(createLi);
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'catalog.koi';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(cb.onNewFile).toHaveBeenCalledWith('/home/me/sales', 'catalog.koi');
     });
 
-    it('toolbar New File in single-root mode mounts the create row directly in the tree (no group)', () => {
+    it('toolbar New File in single-root mode mounts the create row directly in the tree (no group)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
 
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       expect(container.querySelector('.explorer-group')).toBeNull();
       const tree = container.querySelector<HTMLElement>('ul[role="tree"]')!;
@@ -909,75 +909,75 @@ describe('ExplorerPanel', () => {
       const input = createLi!.querySelector<HTMLInputElement>('.explorer-rename')!;
       expect(input.placeholder).toBe('name.koi');
       expect(input.getAttribute('aria-label')).toBe('New file name');
-      act(() => {
+      await act(() => {
         input.value = 'catalog.koi';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'catalog.koi');
     });
 
-    it('the toolbar New folder button opens a folder-flavored create row', () => {
+    it('the toolbar New folder button opens a folder-flavored create row', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const tools = Array.from(container.querySelectorAll<HTMLElement>('.explorer-toolbar .explorer-tool'));
-      act(() => tools.find((b) => b.getAttribute('aria-label') === 'New folder')!.click());
+      await act(() => tools.find((b) => b.getAttribute('aria-label') === 'New folder')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
       expect(input.placeholder).toBe('folder name');
       expect(input.getAttribute('aria-label')).toBe('New folder name');
-      act(() => {
+      await act(() => {
         input.value = 'archive';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(cb.onNewFolder).toHaveBeenCalledWith('ROOT', 'archive');
     });
 
-    it('Escape cancels an inline create without calling onNewFile', () => {
+    it('Escape cancels an inline create without calling onNewFile', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'scrap.koi';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
 
       expect(cb.onNewFile).not.toHaveBeenCalled();
       expect(container.querySelector('.explorer-create')).toBeNull();
     });
 
-    it('keeps an inline create open and flags an invalid name instead of creating (Enter)', () => {
+    it('keeps an inline create open and flags an invalid name instead of creating (Enter)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'bad/name';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
       expect(cb.onNewFile).not.toHaveBeenCalled();
       expect(input.classList.contains('is-invalid')).toBe(true);
       expect(container.querySelector('.explorer-create')).not.toBeNull(); // still open to fix
     });
 
-    it('cancels an inline create with an invalid name on blur (never traps the user in a bad-name row)', () => {
+    it('cancels an inline create with an invalid name on blur (never traps the user in a bad-name row)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'bad/name';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
@@ -988,29 +988,29 @@ describe('ExplorerPanel', () => {
       // un-aliased. happy-dom's real `.blur()` dispatches BOTH 'blur' AND a bubbling 'focusout' (mirroring
       // real browsers), so it satisfies either listener strategy; a bare synthetic 'blur' Event no longer
       // reaches this input's handler now that `preact/compat` is in the module graph.
-      act(() => { input.blur(); });
+      await act(() => { input.blur(); });
 
       expect(cb.onNewFile).not.toHaveBeenCalled();
       expect(container.querySelector('.explorer-create')).toBeNull();
     });
 
-    it('F2 starts an inline rename and commits the typed name on Enter', () => {
+    it('F2 starts an inline rename and commits the typed name on Enter', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
       expect(input).not.toBeNull();
       expect(input.value).toBe('shared.koi');
 
-      act(() => {
+      await act(() => {
         input.value = 'common.koi';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
       const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(renamed[0].token).toBe('ROOT/shared.koi');
@@ -1018,91 +1018,91 @@ describe('ExplorerPanel', () => {
       expect(container.querySelector('.explorer-rename')).toBeNull();
     });
 
-    it('F2 on a DIRECTORY row also starts an inline rename (no file-only guard)', () => {
+    it('F2 on a DIRECTORY row also starts an inline rename (no file-only guard)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const dir = container.querySelector<HTMLElement>('li[data-token="ROOT/orders"]')!;
-      act(() => dir.focus());
-      act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => dir.focus());
+      await act(() => { dir.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = dir.querySelector<HTMLInputElement>(':scope > .explorer-row .explorer-rename')!;
       expect(input).not.toBeNull();
       expect(input.value).toBe('orders');
 
-      act(() => {
+      await act(() => {
         input.value = 'purchase-orders';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(renamed[0].token).toBe('ROOT/orders');
       expect(renamed[1]).toBe('purchase-orders');
     });
 
-    it('preselects the stem (before the last dot) for a file rename', () => {
+    it('preselects the stem (before the last dot) for a file rename', async () => {
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
       expect(input.selectionStart).toBe(0);
       expect(input.selectionEnd).toBe('shared'.length); // up to (not including) ".koi"
     });
 
-    it('Escape cancels an inline rename without calling onRename (label restored)', () => {
+    it('Escape cancels an inline rename without calling onRename (label restored)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'whatever.koi';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
 
       expect(cb.onRename).not.toHaveBeenCalled();
       expect(container.querySelector('.explorer-rename')).toBeNull();
       expect(fileRow(container, 'shared.koi')).toBeTruthy(); // label restored
     });
 
-    it('discards an invalid rename on blur without calling onRename', () => {
+    it('discards an invalid rename on blur without calling onRename', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'bad/name';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
       // Real `.blur()`, not a synthetic 'blur' Event — see the sibling create-row test's comment above for
       // why (#989 task 7: this file now transitively loads `preact/compat`, which listens for 'focusout').
-      act(() => { input.blur(); });
+      await act(() => { input.blur(); });
 
       expect(cb.onRename).not.toHaveBeenCalled();
       expect(container.querySelector('.explorer-rename')).toBeNull(); // discarded, label restored
     });
 
-    it('a no-op rename (name unchanged) closes the edit without calling onRename', () => {
+    it('a no-op rename (name unchanged) closes the edit without calling onRename', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = file.querySelector<HTMLInputElement>('.explorer-rename')!;
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
       expect(cb.onRename).not.toHaveBeenCalled();
       expect(container.querySelector('.explorer-rename')).toBeNull();
@@ -1115,17 +1115,17 @@ describe('ExplorerPanel', () => {
     // plus `flushPendingRender()` to defend against exactly this scenario (see its own parity test,
     // explorer.test.ts:458-478, which only proves survival across an IDENTICAL re-render). This test goes
     // further: the props actually CHANGE mid-edit, which explorer.test.ts's version never exercises.
-    it('survives a re-render with CHANGED groups/cb props while a rename is mid-edit (keyed reconciliation, #989)', () => {
+    it('survives a re-render with CHANGED groups/cb props while a rename is mid-edit (keyed reconciliation, #989)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = container.querySelector<HTMLInputElement>('.explorer-rename')!;
       expect(input).not.toBeNull();
-      act(() => {
+      await act(() => {
         input.value = 'ren'; // half-typed, not yet committed
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
@@ -1134,7 +1134,7 @@ describe('ExplorerPanel', () => {
       // A diagnostics push re-renders with CHANGED props — a DIFFERENT file (order.koi) just became
       // dirty — while the rename above is still open and uncommitted.
       const dirtyCb = makeCallbacks({ isDirty: vi.fn((t: string) => t === 'ROOT/orders/order.koi') });
-      act(() => rerender(<ExplorerPanel store={store} cb={dirtyCb} groups={[group()]} />));
+      await act(() => rerender(<ExplorerPanel store={store} cb={dirtyCb} groups={[group()]} />));
 
       const stillInput = container.querySelector<HTMLInputElement>('.explorer-rename')!;
       expect(stillInput).toBe(input); // SAME DOM node reference — not torn down and rebuilt
@@ -1147,7 +1147,7 @@ describe('ExplorerPanel', () => {
       expect(orderRow.querySelector('.tree-dirty')).not.toBeNull();
 
       // Enter now commits exactly once, with the (still-current) typed value.
-      act(() => { stillInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { stillInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(dirtyCb.onRename).toHaveBeenCalledTimes(1);
       expect((dirtyCb.onRename as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ren');
     });
@@ -1156,13 +1156,13 @@ describe('ExplorerPanel', () => {
     // commits. Simulated here by re-rendering with `shared.koi` removed from `groups` while its rename is
     // open — Preact unmounts the `<input>` (this row no longer exists to render), and a late `blur` event
     // on that now-detached node must be a no-op rather than firing `onRename` for a vanished entry.
-    it('an upstream deletion of the edited entry cancels the pending rename instead of committing (isConnected blur guard)', () => {
+    it('an upstream deletion of the edited entry cancels the pending rename instead of committing (isConnected blur guard)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
 
       const input = container.querySelector<HTMLInputElement>('.explorer-rename')!;
       expect(input).not.toBeNull();
@@ -1170,49 +1170,49 @@ describe('ExplorerPanel', () => {
       const groupsWithoutShared: ExplorerRootGroup[] = [
         { root: 'ROOT', entries: sampleTree().filter((e) => e.token !== 'ROOT/shared.koi') },
       ];
-      act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={groupsWithoutShared} />));
+      await act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={groupsWithoutShared} />));
       expect(input.isConnected).toBe(false); // Preact already removed it — the entry it belonged to is gone
 
       // A synthetic 'blur' Event (not the real `.blur()` method) is intentional here: happy-dom's real
       // `.blur()` no-ops on an already-disconnected node, which would prove nothing about the
       // `isConnected` guard this test targets. The assertion holds either way (no call), so it's immune to
       // the sibling tests' `preact/compat` 'focusout'-translation wrinkle (see their comments).
-      act(() => { input.dispatchEvent(new Event('blur')); });
+      await act(() => { input.dispatchEvent(new Event('blur')); });
       expect(cb.onRename).not.toHaveBeenCalled();
     });
 
     // --- #1396 edge cases (pinned before the useEditableField migration so the behavior is proven
     // identical across it): empty-name cancel, typing-clears-the-mark, blur-commits-a-valid-name, and
     // arrow-keys-inside-the-input-don't-navigate-the-tree (the unconditional stopPropagation).
-    it('an empty name cancels an inline create on Enter without calling onNewFile', () => {
+    it('an empty name cancels an inline create on Enter without calling onNewFile', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
       // Press Enter on the still-empty field.
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
       expect(cb.onNewFile).not.toHaveBeenCalled();
       expect(container.querySelector('.explorer-create')).toBeNull(); // session closed
     });
 
-    it('typing clears the invalid mark on an inline create', () => {
+    it('typing clears the invalid mark on an inline create', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'bad/name';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(input.classList.contains('is-invalid')).toBe(true); // flagged, still open
 
-      act(() => {
+      await act(() => {
         input.value = 'good.koi';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
@@ -1220,35 +1220,35 @@ describe('ExplorerPanel', () => {
       expect(container.querySelector('.explorer-create')).not.toBeNull(); // still open
     });
 
-    it('blur commits a valid inline create name (onNewFile) and closes the session', () => {
+    it('blur commits a valid inline create name (onNewFile) and closes the session', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
-      act(() => {
+      await act(() => {
         input.value = 'catalog.koi';
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
       // Real `.blur()` (not a synthetic Event) — this file transitively loads `preact/compat`, which
       // listens for 'focusout'; see the sibling invalid-blur test's comment above for the full rationale.
-      act(() => { input.blur(); });
+      await act(() => { input.blur(); });
 
       expect(cb.onNewFile).toHaveBeenCalledWith('ROOT', 'catalog.koi');
       expect(container.querySelector('.explorer-create')).toBeNull();
     });
 
-    it('arrow keys inside the create input do not bubble to the tree (no tree navigation mid-edit)', () => {
+    it('arrow keys inside the create input do not bubble to the tree (no tree navigation mid-edit)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
-      act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
+      await act(() => container.querySelector<HTMLElement>('.explorer-toolbar .explorer-tool')!.click());
 
       const input = container.querySelector<HTMLInputElement>('.explorer-create .explorer-rename')!;
       expect(document.activeElement).toBe(input); // focused when the create row appears
 
-      act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+      await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
 
       // If the keydown had bubbled to the tree's delegated handler, the roving tab stop would have moved
       // to a real tree row; the unconditional stopPropagation keeps focus in the input.
@@ -1278,7 +1278,7 @@ describe('ExplorerPanel', () => {
     // handlers only ever touch `ev.dataTransfer` via optional chaining, so a plain Event (whose
     // `dataTransfer` is `undefined`) exercises the exact same code path a real DragEvent would.
     function fireDrag(el: Element, type: string): void {
-      act(() => {
+      void act(() => {
         el.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
       });
     }
@@ -1354,18 +1354,18 @@ describe('ExplorerPanel', () => {
       expect(call[1]).toBe('ROOT');
     });
 
-    it('a rename-input row does not start a row drag (dragstart is prevented while editing targets it)', () => {
+    it('a rename-input row does not start a row drag (dragstart is prevented while editing targets it)', async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
       const file = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
-      act(() => file.focus());
-      act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+      await act(() => file.focus());
+      await act(() => { file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
       expect(file.querySelector('.explorer-rename')).not.toBeNull(); // mid-rename
 
       const row = file.querySelector<HTMLElement>(':scope > .explorer-row')!;
       const ev = new Event('dragstart', { bubbles: true, cancelable: true });
-      act(() => { row.dispatchEvent(ev); });
+      await act(() => { row.dispatchEvent(ev); });
       expect(ev.defaultPrevented).toBe(true); // dragstart was prevented, not started
 
       // Prove no drag actually started: a subsequent drop elsewhere fires no cb.onMove.
@@ -1379,7 +1379,7 @@ describe('ExplorerPanel', () => {
     // flag flips) — proving drop-validity checks stay correct not because a rebuild was deferred (there is
     // no such machinery here, and none is needed), but because validity is DATA-derived (`parentMapOf`) and
     // the dragged row's own DOM identity survives the re-render purely from being a keyed `<li key={token}>`.
-    it("a mid-drag re-render with CHANGED data keeps the dragged row's DOM identity and the drop still fires the right onMove", () => {
+    it("a mid-drag re-render with CHANGED data keeps the dragged row's DOM identity and the drop still fires the right onMove", async () => {
       const cb = makeCallbacks();
       const store = createAppStore();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
@@ -1392,7 +1392,7 @@ describe('ExplorerPanel', () => {
       // drag above is still in flight. NOT a rebuild: this is the same keyed <li>, unlike explorer.ts's
       // innerHTML-wipe render, which the OLD parity test had to defer specifically to avoid.
       const dirtyCb = makeCallbacks({ isDirty: vi.fn((t: string) => t === 'ROOT/orders/order.koi') });
-      act(() => rerender(<ExplorerPanel store={store} cb={dirtyCb} groups={[group()]} />));
+      await act(() => rerender(<ExplorerPanel store={store} cb={dirtyCb} groups={[group()]} />));
 
       const stillSharedLi = container.querySelector<HTMLElement>('li[data-token="ROOT/shared.koi"]')!;
       expect(stillSharedLi).toBe(sharedLi); // SAME DOM node reference, not rebuilt
@@ -1463,14 +1463,14 @@ describe('ExplorerPanel', () => {
       expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
     });
 
-    it('clears the emphasis for the All-contexts view (null)', () => {
+    it('clears the emphasis for the All-contexts view (null)', async () => {
       const store = createAppStore();
       const { container, rerender } = render(
         <ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} activeContext="Billing" />,
       );
       expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
 
-      act(() =>
+      await act(() =>
         rerender(<ExplorerPanel store={store} cb={makeCallbacks()} groups={[scopeGroup()]} activeContext={null} />),
       );
       expect(container.querySelector('.explorer-row.is-scoped')).toBeNull();
@@ -1504,13 +1504,13 @@ describe('ExplorerPanel', () => {
       expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
     });
 
-    it('survives a re-render (the emphasis is derived fresh from props every render)', () => {
+    it('survives a re-render (the emphasis is derived fresh from props every render)', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(
         <ExplorerPanel store={store} cb={cb} groups={[scopeGroup()]} activeContext="Billing" />,
       );
-      act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[scopeGroup()]} activeContext="Billing" />));
+      await act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[scopeGroup()]} activeContext="Billing" />));
       expect(rowByName(container, 'Billing.koi').classList.contains('is-scoped')).toBe(true);
       expect(rowByName(container, 'Ordering.koi').classList.contains('dim')).toBe(true);
     });
@@ -1531,18 +1531,18 @@ describe('ExplorerPanel', () => {
       )!;
     }
 
-    it('revealByContext (the `reveal` prop) expands the ancestor folder and marks the matching .koi file is-revealed', () => {
+    it('revealByContext (the `reveal` prop) expands the ancestor folder and marks the matching .koi file is-revealed', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
 
       // Collapse orders/ so the target is hidden.
-      act(() => dirRow(container).click());
+      await act(() => dirRow(container).click());
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       // The 'order' bounded context lives in orders/order.koi — reveal it by context name (case-
       // insensitive stem match): the ancestor folder re-expands and the file row is marked revealed.
-      act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
+      await act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
       expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
     });
@@ -1553,14 +1553,14 @@ describe('ExplorerPanel', () => {
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
 
       expect(() =>
-        act(() =>
+        void act(() =>
           rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'Nonexistent', seq: 1 }} />),
         ),
       ).not.toThrow();
       expect(container.querySelector('.explorer-row.is-revealed')).toBeNull();
     });
 
-    it('re-triggers on the SAME context via a `seq` bump (a plain string would miss a repeat)', () => {
+    it('re-triggers on the SAME context via a `seq` bump (a plain string would miss a repeat)', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(
@@ -1569,32 +1569,32 @@ describe('ExplorerPanel', () => {
       expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
 
       // The user manually collapses orders/ again after the reveal...
-      act(() => dirRow(container).click());
+      await act(() => dirRow(container).click());
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       // ...and the SAME context is revealed again (seq bumped) — it must re-expand, not no-op as an
       // unchanged `context` string would.
-      act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 2 }} />));
+      await act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 2 }} />));
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
     });
 
-    it('auto-reveal fires only when the active file token changes, and respects a later manual collapse', () => {
+    it('auto-reveal fires only when the active file token changes, and respects a later manual collapse', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
 
-      act(() => dirRow(container).click()); // collapse orders/
+      await act(() => dirRow(container).click()); // collapse orders/
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       // order.koi becomes active — a re-render auto-reveals it by re-expanding orders/.
       const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/orders/order.koi' });
-      act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
+      await act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
 
       // The user collapses again; a re-render with the SAME active file must not fight them (the effect
       // only fires when the active TOKEN changes, not on every re-render).
-      act(() => dirRow(container).click());
-      act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
+      await act(() => dirRow(container).click());
+      await act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
     });
 
@@ -1604,14 +1604,14 @@ describe('ExplorerPanel', () => {
     // the target row (it doesn't exist in the DOM yet — see ExplorerItem.tsx: a collapsed dir's children
     // simply aren't rendered). The expand/highlight land correctly regardless (already covered above) —
     // this pins that the scroll ALSO actually happens, once the row mounts, for BOTH reveal mechanisms.
-    it('retries scrollIntoView (revealByContext) once a previously-collapsed ancestor actually mounts the revealed row', () => {
+    it('retries scrollIntoView (revealByContext) once a previously-collapsed ancestor actually mounts the revealed row', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
 
       // Collapse orders/ BEFORE the reveal fires, so order.koi's row doesn't exist in the DOM at all when
       // the reveal effect's first (synchronous) pass runs.
-      act(() => dirRow(container).click());
+      await act(() => dirRow(container).click());
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       const scrolled: Element[] = [];
@@ -1622,7 +1622,7 @@ describe('ExplorerPanel', () => {
         scrolled.push(this);
       };
       try {
-        act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
+        await act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
         expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
         const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
         expect(scrolled).toContain(targetLi);
@@ -1631,12 +1631,12 @@ describe('ExplorerPanel', () => {
       }
     });
 
-    it('retries scrollIntoView (auto-reveal) once a previously-collapsed ancestor actually mounts the newly-active row', () => {
+    it('retries scrollIntoView (auto-reveal) once a previously-collapsed ancestor actually mounts the newly-active row', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
 
-      act(() => dirRow(container).click()); // collapse orders/
+      await act(() => dirRow(container).click()); // collapse orders/
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       const scrolled: Element[] = [];
@@ -1646,7 +1646,7 @@ describe('ExplorerPanel', () => {
       };
       try {
         const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/orders/order.koi' });
-        act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
+        await act(() => rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} />));
         expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('true');
         const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
         expect(scrolled).toContain(targetLi);
@@ -1660,7 +1660,7 @@ describe('ExplorerPanel', () => {
     // file switches, filtering, diagnostics pushes — until another explicit reveal. It must clear once a
     // DIFFERENT file becomes active (a real user navigation), but NOT when the revealed file itself is the
     // one that becomes active.
-    it('clears the reveal highlight once a DIFFERENT file becomes active (transient, not permanent)', () => {
+    it('clears the reveal highlight once a DIFFERENT file becomes active (transient, not permanent)', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(
@@ -1670,14 +1670,14 @@ describe('ExplorerPanel', () => {
 
       // shared.koi becomes the active/open file — a real user navigation unrelated to the reveal.
       const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/shared.koi' });
-      act(() =>
+      await act(() =>
         rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />),
       );
 
       expect(container.querySelector('.explorer-row.is-revealed')).toBeNull();
     });
 
-    it('does NOT clear the reveal highlight when the revealed file itself becomes the active one', () => {
+    it('does NOT clear the reveal highlight when the revealed file itself becomes the active one', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(
@@ -1686,7 +1686,7 @@ describe('ExplorerPanel', () => {
       expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
 
       const activeCb = makeCallbacks({ isActive: (t: string) => t === 'ROOT/orders/order.koi' });
-      act(() =>
+      await act(() =>
         rerender(<ExplorerPanel store={store} cb={activeCb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />),
       );
 
@@ -1696,7 +1696,7 @@ describe('ExplorerPanel', () => {
     // Code-review fix (Fix 4): a reveal firing while the user has a row/root context menu open shouldn't
     // scroll the tree out from under that menu's fixed-position chrome. The expand/highlight still apply
     // regardless — only the scroll itself is gated.
-    it('skips the reveal scroll (but still expands/highlights) while a context menu is open', () => {
+    it('skips the reveal scroll (but still expands/highlights) while a context menu is open', async () => {
       const store = createAppStore();
       const cb = makeCallbacks();
       const { container, rerender } = render(<ExplorerPanel store={store} cb={cb} groups={[group()]} />);
@@ -1712,7 +1712,7 @@ describe('ExplorerPanel', () => {
         scrolled.push(this);
       };
       try {
-        act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
+        await act(() => rerender(<ExplorerPanel store={store} cb={cb} groups={[group()]} reveal={{ context: 'order', seq: 1 }} />));
         expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
         expect(scrolled.length).toBe(0);
       } finally {

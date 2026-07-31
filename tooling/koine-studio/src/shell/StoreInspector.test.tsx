@@ -11,7 +11,7 @@ const field = (c: Element, name: string) =>
 // Click the "Raw state" summary: happy-dom implements native <details> semantics, so the click flips
 // `open` and dispatches the `toggle` event the component listens for (one call opens, the next closes).
 const toggleRawState = (c: Element) => {
-  act(() => {
+  void act(() => {
     fireEvent.click(c.querySelector('.koi-store-inspector-raw summary')!);
   });
 };
@@ -32,11 +32,11 @@ describe('StoreInspector', () => {
     expect(field(container, 'dirty')).toBe('0');
   });
 
-  test('reflects selection, scope and diagnostics changes live', () => {
+  test('reflects selection, scope and diagnostics changes live', async () => {
     const store = createAppStore();
     const { container } = render(<StoreInspector store={store} />);
 
-    act(() => {
+    await act(() => {
       store.getState().setActiveContext('Ordering');
       store.getState().setSelection({ qualifiedName: 'Ordering.Order', context: 'Ordering' });
       store.getState().setDiagnostics('file:///a.koi', [err]);
@@ -95,7 +95,7 @@ describe('StoreInspector', () => {
       vi.useRealTimers();
     });
 
-    test('raw snapshot tracks slices the curated rows do not subscribe to', () => {
+    test('raw snapshot tracks slices the curated rows do not subscribe to', async () => {
       const store = createAppStore();
       const { container } = render(<StoreInspector store={store} />);
 
@@ -104,10 +104,10 @@ describe('StoreInspector', () => {
       // canUndo/canRedo (History slice) feed no curated row; the open dump must still repaint when
       // they change — otherwise the "whole store" snapshot silently goes stale. The repaint lands at
       // the throttle cadence, not synchronously.
-      act(() => {
+      await act(() => {
         store.getState().setHistoryState({ canUndo: true, canRedo: false });
       });
-      act(() => {
+      await act(() => {
         vi.advanceTimersByTime(THROTTLE_MS);
       });
 
@@ -115,7 +115,7 @@ describe('StoreInspector', () => {
       expect(raw).toContain('"canUndo": true');
     });
 
-    test('re-serializes at most once per window, landing on the latest state', () => {
+    test('re-serializes at most once per window, landing on the latest state', async () => {
       const store = createAppStore();
       const { container } = render(<StoreInspector store={store} />);
 
@@ -123,40 +123,40 @@ describe('StoreInspector', () => {
       // Opening serializes immediately — the dump starts fresh, not deferred.
       expect(field(container, 'rawState')).toContain('"activeContext": "all"');
 
-      act(() => {
+      await act(() => {
         store.getState().setActiveContext('Ordering');
         store.getState().setActiveContext('Billing');
       });
       // Back-to-back updates do NOT repaint the dump inside the throttle window…
       expect(field(container, 'rawState')).toContain('"activeContext": "all"');
-      act(() => {
+      await act(() => {
         vi.advanceTimersByTime(THROTTLE_MS - 1);
       });
       expect(field(container, 'rawState')).toContain('"activeContext": "all"');
 
       // …then ONE trailing repaint lands the LATEST state once the window elapses.
-      act(() => {
+      await act(() => {
         vi.advanceTimersByTime(1);
       });
       expect(field(container, 'rawState')).toContain('"activeContext": "Billing"');
 
       // The cadence is sustained: the next update is deferred by a fresh window again.
-      act(() => {
+      await act(() => {
         store.getState().setActiveContext('Shipping');
       });
       expect(field(container, 'rawState')).toContain('"activeContext": "Billing"');
-      act(() => {
+      await act(() => {
         vi.advanceTimersByTime(THROTTLE_MS);
       });
       expect(field(container, 'rawState')).toContain('"activeContext": "Shipping"');
     });
 
-    test('closing the details with a refresh pending clears the timer and repaints nothing late', () => {
+    test('closing the details with a refresh pending clears the timer and repaints nothing late', async () => {
       const store = createAppStore();
       const { container } = render(<StoreInspector store={store} />);
 
       toggleRawState(container);
-      act(() => {
+      await act(() => {
         store.getState().setActiveContext('Ordering'); // arm a trailing refresh
       });
       expect(vi.getTimerCount()).toBeGreaterThan(0); // a refresh is pending…
@@ -175,14 +175,14 @@ describe('StoreInspector', () => {
     });
   });
 
-  test('summarizes the assistant chat slice and tracks it live', () => {
+  test('summarizes the assistant chat slice and tracks it live', async () => {
     const store = createAppStore();
     const { container } = render(<StoreInspector store={store} />);
 
     // Defaults: idle transcript, no messages, nothing staged (— for the null change set).
     expect(field(container, 'chat')).toBe('idle, 0 messages, —');
 
-    act(() => {
+    await act(() => {
       store.getState().appendChatMessage({ role: 'user', content: 'add an Order aggregate' });
       store.getState().startChatTurn();
       store

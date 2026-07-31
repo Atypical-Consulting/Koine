@@ -664,11 +664,11 @@ describe('commandWiring', () => {
       dispose = wiring.dispose;
 
       const cmd: CatalogEntry = { id: 'cmd:new-model', cat: 'action', title: 'New model', cmdId: 'new-model' };
-      capturedActionDeps.runCommand(cmd);
+      await capturedActionDeps.runCommand(cmd);
       expect(deps.requestNewModel).toHaveBeenCalledOnce();
 
       const file: CatalogEntry = { id: 'file:x', cat: 'file', title: 'x.koi', file: 'file:///x.koi' };
-      capturedActionDeps.openFile(file);
+      await capturedActionDeps.openFile(file);
       expect(deps.openUri).toHaveBeenCalledWith('file:///x.koi');
 
       const writeText = vi.fn().mockResolvedValue(undefined);
@@ -678,13 +678,13 @@ describe('commandWiring', () => {
       vi.unstubAllGlobals();
     });
 
-    it('revertCommit reverts the entry\'s commit through the git seam when the host has git (#1165)', () => {
+    it('revertCommit reverts the entry\'s commit through the git seam when the host has git (#1165)', async () => {
       const deps = makeDeps({ canUseGit: true });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
       const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234567' } as unknown as CatalogEntry;
-      capturedActionDeps.revertCommit(commit);
+      await capturedActionDeps.revertCommit(commit);
       // Routes to the real git revert with the full sha, and closes the launcher…
       expect(deps.gitRevert).toHaveBeenCalledWith('abc1234567');
       expect(launcherClose).toHaveBeenCalledOnce();
@@ -693,20 +693,20 @@ describe('commandWiring', () => {
       expect(launcherToast).not.toHaveBeenCalled();
     });
 
-    it('revertCommit degrades honestly (no revert) on a host without git', () => {
+    it('revertCommit degrades honestly (no revert) on a host without git', async () => {
       const deps = makeDeps({ canUseGit: false });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
       const commit = { id: 'commit:abc', cat: 'commit', title: 'fix: bug', hash: 'abc1234' } as unknown as CatalogEntry;
-      capturedActionDeps.revertCommit(commit);
+      await capturedActionDeps.revertCommit(commit);
       expect(deps.gitRevert).not.toHaveBeenCalled();
       // Honest toast, and still no misleading panel swap.
       expect(launcherToast).toHaveBeenCalledOnce();
       expect(deps.controller.selectRight).not.toHaveBeenCalled();
     });
 
-    it('rename opens the inline rename at the entry\'s declaration and closes the launcher (#1165)', () => {
+    it('rename opens the inline rename at the entry\'s declaration and closes the launcher (#1165)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -719,7 +719,7 @@ describe('commandWiring', () => {
         file: 'file:///order.koi',
         nameRange: range,
       } as unknown as CatalogEntry;
-      capturedActionDeps.rename(entry);
+      await capturedActionDeps.rename(entry);
       // Routes to the editor's inline rename (lsp.rename) at the entry's file + declaration range…
       expect(deps.renameSymbol).toHaveBeenCalledWith('file:///order.koi', range);
       // …closes the launcher so the inline field isn't trapped behind the scrim…
@@ -728,44 +728,44 @@ describe('commandWiring', () => {
       expect(launcherToast).not.toHaveBeenCalled();
     });
 
-    it('rename toasts (no rename) for an entry with no source location', () => {
+    it('rename toasts (no rename) for an entry with no source location', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
       const entry = { id: 'sym:X', cat: 'symbol', title: 'X' } as unknown as CatalogEntry;
-      capturedActionDeps.rename(entry);
+      await capturedActionDeps.rename(entry);
       expect(deps.renameSymbol).not.toHaveBeenCalled();
       expect(launcherToast).toHaveBeenCalledOnce();
     });
 
-    it('revealFile reveals the file in the OS file manager when the host can, not open it in-editor (#1165)', () => {
+    it('revealFile reveals the file in the OS file manager when the host can, not open it in-editor (#1165)', async () => {
       const deps = makeDeps({ canRevealInFileManager: true });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
       const entry = { id: 'file:x', cat: 'file', title: 'a.koi', file: 'file:///ws/a.koi' } as unknown as CatalogEntry;
-      capturedActionDeps.revealFile(entry);
+      await capturedActionDeps.revealFile(entry);
       // Reveals in Finder/Explorer via the host seam…
       expect(deps.revealPath).toHaveBeenCalledWith('file:///ws/a.koi');
       // …NOT the old misleading "open the file in the editor" degrade.
       expect(deps.openUri).not.toHaveBeenCalled();
     });
 
-    it('revealFile degrades (no reveal, no in-editor open) on a host that cannot reveal (#1165)', () => {
+    it('revealFile degrades (no reveal, no in-editor open) on a host that cannot reveal (#1165)', async () => {
       const deps = makeDeps({ canRevealInFileManager: false });
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
       const entry = { id: 'file:x', cat: 'file', title: 'a.koi', file: 'file:///ws/a.koi' } as unknown as CatalogEntry;
-      capturedActionDeps.revealFile(entry);
+      await capturedActionDeps.revealFile(entry);
       // Capability-checked degrade — never a platform.kind / token pattern-match, never the old openUri.
       expect(deps.revealPath).not.toHaveBeenCalled();
       expect(deps.openUri).not.toHaveBeenCalled();
       expect(launcherToast).toHaveBeenCalledOnce();
     });
 
-    it('openFileChanges opens the specific file\'s diff in Source Control, not just the panel (#1165)', () => {
+    it('openFileChanges opens the specific file\'s diff in Source Control, not just the panel (#1165)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -778,12 +778,12 @@ describe('commandWiring', () => {
         file: 'file:///ws/src/a.koi',
         relPath: 'src/a.koi',
       } as unknown as CatalogEntry;
-      capturedActionDeps.openFileChanges(entry);
+      await capturedActionDeps.openFileChanges(entry);
       // Selects Source Control AND carries the file's workspace-relative path as the focus target…
       expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
     });
 
-    it('openFileChanges reads the entry\'s first-class relPath, never re-deriving it from sub+title (#1204)', () => {
+    it('openFileChanges reads the entry\'s first-class relPath, never re-deriving it from sub+title (#1204)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -798,11 +798,11 @@ describe('commandWiring', () => {
         file: 'file:///ws/src/a.koi',
         relPath: 'src/a.koi',
       } as unknown as CatalogEntry;
-      capturedActionDeps.openFileChanges(entry);
+      await capturedActionDeps.openFileChanges(entry);
       expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { file: 'src/a.koi' });
     });
 
-    it('openFileChanges degrades to opening the panel without a focus key when relPath is missing (#1204)', () => {
+    it('openFileChanges degrades to opening the panel without a focus key when relPath is missing (#1204)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -814,12 +814,12 @@ describe('commandWiring', () => {
         sub: 'src',
         file: 'file:///ws/src/a.koi',
       } as unknown as CatalogEntry;
-      capturedActionDeps.openFileChanges(entry);
+      await capturedActionDeps.openFileChanges(entry);
       // Same degrade shape as viewCommit's missing hash: the panel still opens, just without scrolling.
       expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control');
     });
 
-    it('viewCommit focuses the specific commit in Source Control, not just the panel (#1165)', () => {
+    it('viewCommit focuses the specific commit in Source Control, not just the panel (#1165)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -830,11 +830,11 @@ describe('commandWiring', () => {
         title: 'fix: bug',
         hash: 'abcdef1234567',
       } as unknown as CatalogEntry;
-      capturedActionDeps.viewCommit(entry);
+      await capturedActionDeps.viewCommit(entry);
       expect(deps.controller.selectRight).toHaveBeenCalledWith('source-control', { commit: 'abcdef1234567' });
     });
 
-    it('openGlossary scrolls the glossary to the entry\'s term, not just opens the tab (#1165)', () => {
+    it('openGlossary scrolls the glossary to the entry\'s term, not just opens the tab (#1165)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -845,12 +845,12 @@ describe('commandWiring', () => {
         title: 'Order',
         qualifiedName: 'Ordering.Order',
       } as unknown as CatalogEntry;
-      capturedActionDeps.openGlossary(entry);
+      await capturedActionDeps.openGlossary(entry);
       // Passes the term (its qualified name) so the panel scrolls to it, not a bare tab open.
       expect(deps.controller.selectDocsTab).toHaveBeenCalledWith('glossary', 'Ordering.Order');
     });
 
-    it('findInModel seeds the workspace search with the entry\'s term, not just focus (#1165)', () => {
+    it('findInModel seeds the workspace search with the entry\'s term, not just focus (#1165)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -861,14 +861,14 @@ describe('commandWiring', () => {
         title: 'Order',
         qualifiedName: 'Ordering.Order',
       } as unknown as CatalogEntry;
-      capturedActionDeps.findInModel(entry);
+      await capturedActionDeps.findInModel(entry);
       // Seeds the search box with the term (the bare name that appears in the model source)…
       expect(deps.search.seed).toHaveBeenCalledWith('Order');
       // …instead of the old bare focus() that left the box empty.
       expect(deps.search.focus).not.toHaveBeenCalled();
     });
 
-    it('findUsages surfaces references at the entry\'s declaring position, not just search.focus (#1165)', () => {
+    it('findUsages surfaces references at the entry\'s declaring position, not just search.focus (#1165)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -881,26 +881,26 @@ describe('commandWiring', () => {
         file: 'file:///order.koi',
         nameRange: range,
       } as unknown as CatalogEntry;
-      capturedActionDeps.findUsages(entry);
+      await capturedActionDeps.findUsages(entry);
       // Routes to the editor's references surface at the entry's file + declaration range…
       expect(deps.findReferences).toHaveBeenCalledWith('file:///order.koi', range);
       // …instead of the old bare focus() on the text-search box.
       expect(deps.search.focus).not.toHaveBeenCalled();
     });
 
-    it('findUsages degrades to search.focus for an entry with no source location', () => {
+    it('findUsages degrades to search.focus for an entry with no source location', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
 
       // An undrawn element carries no file/nameRange — nothing to resolve references from.
       const entry = { id: 'sym:X', cat: 'symbol', title: 'X' } as unknown as CatalogEntry;
-      capturedActionDeps.findUsages(entry);
+      await capturedActionDeps.findUsages(entry);
       expect(deps.findReferences).not.toHaveBeenCalled();
       expect(deps.search.focus).toHaveBeenCalledOnce();
     });
 
-    it('peek surfaces a non-navigating quick-look — the launcher preview, never revealLocation/openUri (#1165)', () => {
+    it('peek surfaces a non-navigating quick-look — the launcher preview, never revealLocation/openUri (#1165)', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -913,7 +913,7 @@ describe('commandWiring', () => {
         file: 'file:///order.koi',
         nameRange: range,
       } as unknown as CatalogEntry;
-      capturedActionDeps.peek(entry);
+      await capturedActionDeps.peek(entry);
       // Surfaces the read-only preview through the launcher's own preview surface...
       expect(launcherPeek).toHaveBeenCalledWith(entry);
       // ...and does NOT navigate: no editor jump (revealLocation) and no file open (openUri).
@@ -921,7 +921,7 @@ describe('commandWiring', () => {
       expect(deps.openUri).not.toHaveBeenCalled();
     });
 
-    it('binds gotoDefinition to revealLocation using the entry\'s declaring file + nameRange', () => {
+    it('binds gotoDefinition to revealLocation using the entry\'s declaring file + nameRange', async () => {
       const deps = makeDeps();
       const wiring = createCommandWiring(deps);
       dispose = wiring.dispose;
@@ -934,7 +934,7 @@ describe('commandWiring', () => {
         nameRange: range,
         element: { node: { sourceSpan: { file: 'file:///order.koi' } } },
       } as unknown as CatalogEntry;
-      capturedActionDeps.gotoDefinition(entry);
+      await capturedActionDeps.gotoDefinition(entry);
       expect(deps.revealLocation).toHaveBeenCalledWith('file:///order.koi', range);
     });
   });

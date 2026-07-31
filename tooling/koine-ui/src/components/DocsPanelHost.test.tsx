@@ -23,7 +23,7 @@ describe('DocsPanelHost', () => {
     expect(load).not.toHaveBeenCalled();
   });
 
-  test('a folder-token change reloads into the SAME captured node; an unchanged token never does', () => {
+  test('a folder-token change reloads into the SAME captured node; an unchanged token never does', async () => {
     const store = createTestReadableStore<DocsPanelHostSlice>({ folderRootToken: 'WS-A' });
     const onMount = vi.fn();
     const load = vi.fn();
@@ -32,20 +32,20 @@ describe('DocsPanelHost', () => {
 
     // A re-render that does NOT change the token (the host notifying an identical slice models an
     // unrelated parent paint) keeps the current render — no reload.
-    act(() => store.set({ folderRootToken: 'WS-A' }));
+    await act(() => store.set({ folderRootToken: 'WS-A' }));
     expect(load).not.toHaveBeenCalled();
 
     // A REAL folder change reloads, into the same captured mount node.
-    act(() => store.set({ folderRootToken: 'WS-B' }));
+    await act(() => store.set({ folderRootToken: 'WS-B' }));
     expect(load).toHaveBeenCalledTimes(1);
     expect(load).toHaveBeenCalledWith(host);
     // The node was captured once — the reload did not re-run the first-mount capture.
     expect(onMount).toHaveBeenCalledTimes(1);
 
     // Switching again reloads again; switching to the SAME token does not.
-    act(() => store.set({ folderRootToken: 'WS-B' }));
+    await act(() => store.set({ folderRootToken: 'WS-B' }));
     expect(load).toHaveBeenCalledTimes(1);
-    act(() => store.set({ folderRootToken: 'WS-C' }));
+    await act(() => store.set({ folderRootToken: 'WS-C' }));
     expect(load).toHaveBeenCalledTimes(2);
   });
 });
