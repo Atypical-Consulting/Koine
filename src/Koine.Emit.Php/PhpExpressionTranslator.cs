@@ -328,6 +328,14 @@ internal sealed class PhpExpressionTranslator
             sb.Append(" . ");
             WriteStringConcatOperand(bin.Right, sb);
         }
+        else if (IsIntDivision(bin))
+        {
+            sb.Append("intdiv(");
+            WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
+            sb.Append(", ");
+            WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
+            sb.Append(')');
+        }
         else
         {
             WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
@@ -377,6 +385,29 @@ internal sealed class PhpExpressionTranslator
         return (IsStringConcatOperand(left) || IsStringConcatOperand(right))
             && IsStringableOperand(left) && IsStringableOperand(right);
     }
+
+    /// <summary>
+    /// True when <paramref name="bin"/> is a plain <c>/</c> whose own inferred type is <c>Int</c> —
+    /// Int/Int division reached via the plain-numeric fallback (neither operand is Decimal or a Koine
+    /// value object, so <see cref="TryWriteValueBinary"/> already declined). PHP's native <c>/</c>
+    /// promotes to <c>float</c> on any inexact division, but a Koine <c>Int</c> must stay whole — and
+    /// because the emitted member is declared to return <c>int</c>/<c>?int</c> under
+    /// <c>declare(strict_types=1)</c>, a bare <c>/</c> here is a hard runtime <c>TypeError</c>, not merely
+    /// a silently wrong value. <c>intdiv()</c> is PHP's native truncating-integer-division primitive
+    /// (truncates toward zero, operates on integers directly so it can't lose precision the way an
+    /// intermediate-float <c>(int)</c> cast could near <c>PHP_INT_MAX</c>), matching the value-object
+    /// scalar-divide rule already established (#938) and mirroring TypeScript's <c>Math.trunc</c> fix for
+    /// the same defect class (#1558). Admits <c>IsOptional</c> too (#1598): a <b>guard-narrowed</b>
+    /// <c>Int?</c> division still infers as optional here — narrowing is validator-only and never reaches
+    /// <see cref="TypeResolver"/> — but the validator already guarantees the operand is provably present
+    /// wherever this expression compiles, the same guarantee <see cref="TryWriteValueBinary"/>'s
+    /// guarded-optional Decimal/value-object arithmetic already relies on (#787/#813); <c>intdiv()</c> and
+    /// native <c>/</c> both accept the (guaranteed-present) <c>int</c> identically at this narrowed point,
+    /// so admitting the optional case costs nothing while closing the #1587 gap it was otherwise still
+    /// reachable through.
+    /// </summary>
+    private bool IsIntDivision(BinaryExpr bin)
+        => bin.Op == BinaryOp.Div && InferType(bin) is { Name: "Int" };
 
     /// <summary>
     /// Writes one operand of a PHP string concatenation (<c>.</c>).

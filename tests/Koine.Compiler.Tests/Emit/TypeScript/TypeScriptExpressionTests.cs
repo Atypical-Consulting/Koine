@@ -700,6 +700,34 @@ public class TypeScriptExpressionTests
             + string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// #1556 — the follow-up the comment above points to: <c>sum</c>/<c>max</c> selector-type-cast
+    /// gap. `ExpressionChecker.CheckAggregateSelector` now rejects any <c>sum</c>/<c>min</c>/<c>max</c>
+    /// selector whose inferred type is optional (KOI0404) at semantic validation, so the TS emitter
+    /// never has to render the broken <c>readonly Decimal | undefined[]</c> cast this repro used to
+    /// produce. Pinned by the exact message so this doesn't regress to a generic/wrong diagnostic.
+    /// </summary>
+    [Fact]
+    public void Sum_over_a_guard_narrowed_optional_selector_is_rejected_before_reaching_the_ts_emitter()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                rate:   Decimal
+                qty:    Int?
+                rates:  List<Decimal>
+                total:  Decimal? = if qty.isPresent then rates.sum(r => qty + r) else rate
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeFalse();
+        result.Diagnostics.ShouldContain(d =>
+            d.Message == "sum requires a non-optional selector; guard with isPresent or use '??' before folding");
+    }
+
     // ---------------------------------------------------------------------------------------------
     // #1557 — an OPTIONAL Decimal operand opposite a Decimal, the sibling bug class to #1537's
     // OPTIONAL Int case above. Same guarded shapes: KOI0402 requires a guard/`??` before an optional

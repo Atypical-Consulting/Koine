@@ -30,6 +30,7 @@ import {
     toggle,
     select,
     metricInput,
+    textInput,
 } from "@/settings/prefsControls";
 import type { PrefsSection, SectionCtx } from "@/settings/prefsSections/types";
 
@@ -46,12 +47,11 @@ export function buildAssistantSection(
         { value: "openai", label: "OpenAI-compatible" },
     ] as const);
 
-    const aiBaseUrlInput = document.createElement("input");
-    aiBaseUrlInput.type = "text";
-    aiBaseUrlInput.className = "koi-text";
-    aiBaseUrlInput.spellcheck = false;
-    aiBaseUrlInput.placeholder = "https://api.openai.com/v1";
-    aiBaseUrlInput.setAttribute("list", "koi-ai-base-presets");
+    const aiBaseUrlInput = textInput({
+        spellcheck: false,
+        placeholder: "https://api.openai.com/v1",
+        list: "koi-ai-base-presets",
+    });
     const presets = document.createElement("datalist");
     presets.id = "koi-ai-base-presets";
     for (const url of [
@@ -64,17 +64,16 @@ export function buildAssistantSection(
         presets.appendChild(opt);
     }
 
-    const aiKeyInput = document.createElement("input");
-    aiKeyInput.type = "password";
-    aiKeyInput.className = "koi-text";
-    aiKeyInput.autocomplete = "off";
-    aiKeyInput.placeholder = "sk-…  (blank for local Ollama / LM Studio)";
+    const aiKeyInput = textInput({
+        type: "password",
+        autocomplete: "off",
+        placeholder: "sk-…  (blank for local Ollama / LM Studio)",
+    });
 
-    const aiModelInput = document.createElement("input");
-    aiModelInput.type = "text";
-    aiModelInput.className = "koi-text";
-    aiModelInput.spellcheck = false;
-    aiModelInput.placeholder = "claude-opus-4-8";
+    const aiModelInput = textInput({
+        spellcheck: false,
+        placeholder: "claude-opus-4-8",
+    });
 
     // #447: Compiler tools and grammar-constraint are mutually exclusive — a GBNF that only accepts `.koi`
     // can't also emit the tool-call JSON the agentic loop needs, so with both on the grammar would

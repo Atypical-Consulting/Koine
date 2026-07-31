@@ -9,6 +9,7 @@ import type { AccentName, PreviewTarget } from "@/settings/persistence";
 import { ACCENTS, ACCENT_ORDER } from "@/settings/appearance";
 import { EMIT_TARGETS } from "@/shared/emitTargets";
 import { wrapIndex } from "@/shared/wrapIndex";
+import { wireCopyButton } from "@/shell/copyFeedback";
 
 /**
  * A segmented radio group (e.g. Dark / Light): a row of role=radio buttons under a role=radiogroup, with
@@ -200,25 +201,108 @@ export function stringListInput(
     return { el, set };
 }
 
-// A labelled settings row: a title (+ optional description) on the left, the control on the right.
-// `content` is what fills the control cell (usually `control` itself, but a scoped row passes a
-// wrapper holding the value control + its User/Workspace toggle); `control` is the labelable target
-// the <label for> binds to (defaults to `content`).
-export function row(
+export interface TextInputOptions {
+    type?: "text" | "password"; // default "text"
+    id?: string; // sets id AND name together (mirrors row()'s own id/name convention)
+    placeholder?: string;
+    autocomplete?: "off";
+    spellcheck?: boolean; // only touched when explicitly passed; native default (true) otherwise
+    readOnly?: boolean;
+    list?: string; // wires <input list="..."> to a sibling <datalist id="...">
+    ariaLabel?: string;
+    onChange?(value: string): void; // wired to 'change'; call sites do their own trim/fallback logic
+}
+
+// A "koi-text" text input, generalizing the six hand-rolled inputs across the settings sections
+// (displayNameInput, fontFamilyInput, aiBaseUrlInput, aiKeyInput, aiModelInput, mcpUrlInput).
+export function textInput(options: TextInputOptions = {}): HTMLInputElement {
+    const input = document.createElement("input");
+    input.type = options.type ?? "text";
+    input.className = "koi-text";
+    if (options.id) {
+        input.id = options.id;
+        input.name = options.id;
+    }
+    if (options.placeholder !== undefined) input.placeholder = options.placeholder;
+    if (options.autocomplete) input.autocomplete = options.autocomplete;
+    if (options.spellcheck !== undefined) input.spellcheck = options.spellcheck;
+    if (options.readOnly !== undefined) input.readOnly = options.readOnly;
+    if (options.list) input.setAttribute("list", options.list);
+    if (options.ariaLabel) input.setAttribute("aria-label", options.ariaLabel);
+    if (options.onChange) {
+        const onChange = options.onChange;
+        input.addEventListener("change", () => onChange(input.value));
+    }
+    return input;
+}
+
+export interface ActionButtonOptions {
+    className?: string; // full class string; default "koi-set-action" (pass the extra class alongside it, e.g. "koi-set-action koi-kbd-record")
+    ariaLabel?: string;
+    ariaDescribedBy?: string;
+}
+
+// A "koi-set-action" <button type="button">, generalizing the seven hand-rolled action buttons across
+// the settings sections. Returns the built button so callers needing runtime state (e.g. keyboard.ts's
+// label-swap-on-arm) can still mutate it directly after construction.
+export function actionButton(
+    label: string,
+    onClick?: () => void,
+    options?: ActionButtonOptions,
+): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = options?.className ?? "koi-set-action";
+    btn.textContent = label;
+    if (options?.ariaLabel) btn.setAttribute("aria-label", options.ariaLabel);
+    if (options?.ariaDescribedBy)
+        btn.setAttribute("aria-describedby", options.ariaDescribedBy);
+    if (onClick) btn.addEventListener("click", onClick);
+    return btn;
+}
+
+export interface CopyButtonOptions {
+    /** Veto this click BEFORE it reaches the clipboard write (no copy, no label flash) — e.g.
+     *  mcpCopyBtn's empty-URL guard. Return true to let the copy proceed. */
+    guard?(): boolean;
+}
+
+// A "koi-set-action" copy-to-clipboard button: an actionButton() wired via the shared
+// clipboard-copy-with-flash-feedback sequence (wireCopyButton, @/shell/copyFeedback, #1362) rather
+// than reimplementing that sequence a third time here — #1362 already centralized it (mcp.ts's two
+// handlers and surfaceLoaders.tsx's makeCopyButton all route through it), so this factory composes
+// with that shared primitive instead of duplicating it. Returns `cancelReset` (mirroring
+// wireCopyButton's own disposer) for a caller's teardown.
+export function copyButton(
+    label: string,
+    getText: () => string,
+    options?: CopyButtonOptions,
+): { el: HTMLButtonElement; cancelReset: () => void } {
+    const el = actionButton(label);
+    if (options?.guard) {
+        const guard = options.guard;
+        // Registered BEFORE wireCopyButton's own listener below, so stopImmediatePropagation can veto
+        // the copy (same-element listeners fire in registration order).
+        el.addEventListener("click", (e) => {
+            if (!guard()) e.stopImmediatePropagation();
+        });
+    }
+    const cancelReset = wireCopyButton(el, label, getText);
+    return { el, cancelReset };
+}
+
+// The "koi-set-text" label block: a title (+ optional description), plus — when given a labelable
+// form control (input/select/textarea) — a real <label for> bound to it with a stable derived id
+// (fixes the "form field should have an id/name" + "no label associated" DevTools notices). Without a
+// labelable control (a role=switch toggle, a segmented group, or no control at all — output.ts's
+// full-width heading), the title stays a plain <span>. Shared by row() and output.ts's custom heading.
+export function labelBlock(
     title: string,
     description: string,
-    content: HTMLElement,
-    control: HTMLElement = content,
+    control?: HTMLElement,
 ): HTMLElement {
-    const r = document.createElement("div");
-    r.className = "koi-set-row";
     const text = document.createElement("div");
     text.className = "koi-set-text";
-    // Associate the label with a labelable form control (input/select/textarea): give it a stable id
-    // derived from the title and emit a real <label for>, so the field has an accessible name + id
-    // (fixes the "form field should have an id/name" + "no label associated" DevTools notices). Non-form
-    // controls (the role=switch toggle, segmented groups, accent swatches) carry their own aria-label,
-    // so they keep a plain <span>.
     const labelable =
         control instanceof HTMLInputElement ||
         control instanceof HTMLSelectElement ||
@@ -243,6 +327,22 @@ export function row(
         desc.textContent = description;
         text.appendChild(desc);
     }
+    return text;
+}
+
+// A labelled settings row: a title (+ optional description) on the left, the control on the right.
+// `content` is what fills the control cell (usually `control` itself, but a scoped row passes a
+// wrapper holding the value control + its User/Workspace toggle); `control` is the labelable target
+// the <label for> binds to (defaults to `content`).
+export function row(
+    title: string,
+    description: string,
+    content: HTMLElement,
+    control: HTMLElement = content,
+): HTMLElement {
+    const r = document.createElement("div");
+    r.className = "koi-set-row";
+    const text = labelBlock(title, description, control);
     const ctrl = document.createElement("div");
     ctrl.className = "koi-set-control";
     ctrl.appendChild(content);

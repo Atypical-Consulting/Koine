@@ -1070,22 +1070,19 @@ public class RustEmitterTests
 
     /// <summary>
     /// Issue #1354, second shape: a <c>CallExpr</c> operand (<c>items.max(i =&gt; i.bonus)</c>, an
-    /// aggregate over an optional <c>Int?</c> selector) compared via <c>==</c> to a non-optional
-    /// <c>Decimal</c> hits the SAME <c>WriteArithmeticOperand</c> branch as the <c>MemberAccessExpr</c>
-    /// case above — confirms the fix keys off the operand's own <c>type</c>, not its expression shape.
+    /// aggregate over an optional <c>Int?</c> selector) used to hit the SAME <c>WriteArithmeticOperand</c>
+    /// branch as the <c>MemberAccessExpr</c> case above, confirming the fix keyed off the operand's own
+    /// <c>type</c>, not its expression shape. #1556 subsequently closed off this model entirely: an
+    /// optional <c>max</c>/<c>min</c>/<c>sum</c> selector is now rejected at semantic validation (no
+    /// emitter — Rust included — ever sees this shape again), so the <c>CallExpr</c>-operand-wrap coverage
+    /// this exercised is no longer constructible; this test now pins that rejection instead.
     /// </summary>
     [Fact]
-    public void Optional_int_call_operand_compared_via_equality_to_decimal_maps_instead_of_wrapping()
+    public void Optional_selector_for_max_is_rejected_before_reaching_the_operand_wrap_branch()
     {
         var result = new KoineCompiler().Compile(OptionalIntCallOperandComparedToDecimalModel, new RustEmitter());
-        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
-
-        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
-
-        rust.ShouldContain(
-            "crate::koine_runtime::koine_max(self.items.iter().map(|i| i.bonus()))" +
-            ".map(Decimal::from) == Some(self.tax_rate)");
-        rust.ShouldNotContain("Decimal::from(crate::koine_runtime::koine_max(");
+        result.Success.ShouldBeFalse();
+        result.Diagnostics.ShouldContain(d => d.Message.Contains("max requires a non-optional selector"));
     }
 
     private const string NestedLetShadowingOuterBindingModel = """

@@ -224,11 +224,17 @@ internal sealed class ExpressionChecker
         // value objects, strings and bools have no relational operators in C#.
         if (isRelational)
         {
-            // A lifted relational op on a null operand is silently false — a trap.
-            if (IsUnguardedOptional(b.Left, left) || IsUnguardedOptional(b.Right, right))
+            // A lifted relational op on a null operand is silently false — a trap. #1589: guard
+            // per-operand against IsAlreadyInvalid, mirroring CheckArithmeticNullSafety, so comparing
+            // an already-reported unguarded compound operand (e.g. `surcharge + fee < threshold` where
+            // the inner arithmetic check already flagged it) doesn't echo the same KOI0402 again.
+            var leftIsNewViolation = IsUnguardedOptional(b.Left, left, scope) && !IsAlreadyInvalid(b.Left);
+            var rightIsNewViolation = IsUnguardedOptional(b.Right, right, scope) && !IsAlreadyInvalid(b.Right);
+            if (leftIsNewViolation || rightIsNewViolation)
             {
                 Report(DiagnosticCodes.OptionalDereference,
                     "optional value may be null; guard with isPresent or use '??' before comparing", b);
+                MarkInvalid(b);
                 return;
             }
 
@@ -658,6 +664,17 @@ internal sealed class ExpressionChecker
         _ => null
     };
 
+    /// <summary>
+    /// #1589: a left-associative chain (<c>a + b + c</c>) visits both the inner <c>(a + b)</c> node
+    /// and the outer <c>(a + b) + c</c> node, and both independently re-derive whether their LEFT
+    /// operand is an unguarded optional. When the inner node already reported <c>b</c> as unguarded and
+    /// marked itself invalid, the outer node's own re-derivation over that same already-reported operand
+    /// would otherwise echo the identical defect a second time at a different span. Consulting
+    /// <see cref="IsAlreadyInvalid"/> per-operand (not per-node, unlike the type-mismatch checks above)
+    /// keeps a GENUINELY distinct violation on the other operand reportable — e.g. in <c>a + b + c</c>
+    /// where both the inner <c>a</c>/<c>b</c> pair AND the outer's own <c>c</c> are independently
+    /// unguarded, both must still be reported.
+    /// </summary>
     private void CheckArithmeticNullSafety(BinaryExpr b, TypeScope scope)
     {
         if (b.Op is not (BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul or BinaryOp.Div))
@@ -667,10 +684,13 @@ internal sealed class ExpressionChecker
 
         TypeRef? left = _resolver.Infer(b.Left, scope);
         TypeRef? right = _resolver.Infer(b.Right, scope);
-        if (IsUnguardedOptional(b.Left, left) || IsUnguardedOptional(b.Right, right))
+        var leftIsNewViolation = IsUnguardedOptional(b.Left, left, scope) && !IsAlreadyInvalid(b.Left);
+        var rightIsNewViolation = IsUnguardedOptional(b.Right, right, scope) && !IsAlreadyInvalid(b.Right);
+        if (leftIsNewViolation || rightIsNewViolation)
         {
             Report(DiagnosticCodes.OptionalDereference,
                 "optional value may be null; guard with isPresent or use '??' before arithmetic", b);
+            MarkInvalid(b);
         }
     }
 
@@ -747,8 +767,8 @@ internal sealed class ExpressionChecker
         t is null || TypeResolver.IsNumeric(t) || t.Name == "Instant";
 
     /// <summary>An optional operand that has not been narrowed to present by a guard.</summary>
-    private bool IsUnguardedOptional(Expr expr, TypeRef? type) =>
-        type is { IsOptional: true } && !IsNarrowed(expr);
+    private bool IsUnguardedOptional(Expr expr, TypeRef? type, TypeScope scope) =>
+        type is { IsOptional: true } && !IsNarrowed(expr, scope);
 
     /// <summary>
     /// True when a value-object/entity arithmetic check already reported <paramref name="operand"/>
@@ -764,8 +784,27 @@ internal sealed class ExpressionChecker
     /// </summary>
     private void MarkInvalid(Expr expr) => _reportedInvalid.Add(expr);
 
-    /// <summary>True when the expression is a field already proven present in this scope.</summary>
-    private bool IsNarrowed(Expr expr) => expr is IdentifierExpr id && _present.Contains(id.Name);
+    /// <summary>
+    /// True when <paramref name="expr"/> is safe to use as an optional operand without an explicit
+    /// guard: a field already proven present in this scope, or a compound expression
+    /// (<see cref="BinaryExpr"/>/<see cref="UnaryExpr"/>) built entirely from operands that are
+    /// themselves narrowed (recursively) or not optional to begin with. This lets a further operand
+    /// chained onto an already-guarded arithmetic sub-expression (e.g. <c>discount + qty + r</c> when
+    /// both <c>discount</c> and <c>qty</c> are narrowed present, #1563) resolve as narrowed too,
+    /// instead of only recognizing a bare narrowed identifier.
+    /// </summary>
+    private bool IsNarrowed(Expr expr, TypeScope scope) => expr switch
+    {
+        IdentifierExpr id => _present.Contains(id.Name),
+        BinaryExpr b => IsNarrowedOperand(b.Left, scope) && IsNarrowedOperand(b.Right, scope),
+        UnaryExpr u => IsNarrowedOperand(u.Operand, scope),
+        _ => false
+    };
+
+    /// <summary>An operand needs no narrowing when it isn't optional to begin with; otherwise it
+    /// must itself be narrowed.</summary>
+    private bool IsNarrowedOperand(Expr expr, TypeScope scope) =>
+        _resolver.Infer(expr, scope) is not { IsOptional: true } || IsNarrowed(expr, scope);
 
     /// <summary>Checks <paramref name="body"/> with the fields proven present by <paramref name="cond"/> narrowed.</summary>
     private void CheckNarrowed(Expr body, TypeScope scope, Expr cond, bool positive, TypeRef? expected = null)
@@ -863,7 +902,7 @@ internal sealed class ExpressionChecker
         }
 
         // Any other access on an optional value (not narrowed to present) risks null.
-        if (IsUnguardedOptional(ma.Target, target))
+        if (IsUnguardedOptional(ma.Target, target, scope))
         {
             Report(DiagnosticCodes.OptionalDereference,
                 $"optional value may be null; guard with isPresent or use '??' before '.{op}'", ma);
@@ -948,7 +987,7 @@ internal sealed class ExpressionChecker
         TypeRef? target = _resolver.Infer(call.Target, scope);
 
         // A call op on an optional receiver (not narrowed to present) risks null.
-        if (IsUnguardedOptional(call.Target, target))
+        if (IsUnguardedOptional(call.Target, target, scope))
         {
             Report(DiagnosticCodes.OptionalDereference,
                 $"optional value may be null; guard with isPresent or use '??' before '.{op}'", call);
@@ -1039,6 +1078,19 @@ internal sealed class ExpressionChecker
         if (selector is null)
         {
             return;
+        }
+
+        // Guard-narrowing (`if x.isPresent then …`) is validator-only bookkeeping (see
+        // IsUnguardedOptional) that never feeds back into TypeResolver, so a selector built from a
+        // guard-narrowed optional operand still infers as optional here — exactly the case where an
+        // emitter (e.g. TypeScript, whose own closure-scoped narrowing can't see the guard either)
+        // would otherwise have to render a fold over a possibly-absent element. Reject it uniformly
+        // instead of letting the shape reach any emitter; a selector resolved with '??' first is
+        // already non-optional by the time it gets here, so it's unaffected.
+        if (selector.IsOptional)
+        {
+            Report(DiagnosticCodes.AggregateSelectorOptional,
+                $"{op} requires a non-optional selector; guard with isPresent or use '??' before folding", call);
         }
 
         if (op == "sum")

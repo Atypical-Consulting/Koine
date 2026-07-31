@@ -362,6 +362,14 @@ internal sealed class TypeScriptExpressionTranslator
             sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
             WriteStringConcatOperand(bin.Right, sb);
         }
+        else if (IsIntDivision(bin))
+        {
+            sb.Append("Math.trunc(");
+            WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
+            sb.Append(' ').Append(OperatorOf(bin.Op)).Append(' ');
+            WriteOperand(bin.Right, sb, EnumTypeName(bin.Left));
+            sb.Append(')');
+        }
         else
         {
             WriteOperand(bin.Left, sb, EnumTypeName(bin.Right));
@@ -382,6 +390,17 @@ internal sealed class TypeScriptExpressionTranslator
     private bool IsStringConcat(BinaryExpr bin)
         => bin.Op == BinaryOp.Add
         && _resolver.Infer(bin, EffectiveScope()) is { Name: "String" };
+
+    /// <summary>
+    /// True when <paramref name="bin"/> is a plain <c>/</c> whose own inferred type is non-optional
+    /// <c>Int</c> — bare Int/Int division reached via the plain-numeric fallback (neither operand is
+    /// Decimal or a Koine value object, so <see cref="TryWriteValueArithmetic"/> already declined).
+    /// JS's native <c>/</c> yields a fraction, but a Koine <c>Int</c> must stay whole, so this truncates
+    /// toward zero — matching the value-object scalar-divide rule already established (#938, #1558).
+    /// </summary>
+    private bool IsIntDivision(BinaryExpr bin)
+        => bin.Op == BinaryOp.Div
+        && _resolver.Infer(bin, EffectiveScope()) is { Name: "Int", IsOptional: false };
 
     /// <summary>
     /// Writes one operand of a String-typed <c>+</c>, lowering a non-optional <c>Bool</c>-typed

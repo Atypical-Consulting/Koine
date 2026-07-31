@@ -587,6 +587,44 @@ public class TypeScriptConformanceTests
     }
 
     /// <summary>
+    /// Issue #1558: bare <c>Int / Int</c> division in an ordinary derived member — no value object
+    /// scalar method involved, just a plain binary expression — must also truncate toward zero,
+    /// matching the value-object scalar-divide rule #938 already established. Before the fix,
+    /// <c>TryWriteValueArithmetic</c> declines (neither operand is Decimal or a Koine value object)
+    /// and the plain-numeric fallback renders a bare JS <c>/</c> — a silent fractional runtime value
+    /// for a field TypeScript declares (and Koine models) as <c>Int</c>.
+    /// </summary>
+    [Fact]
+    public void Int_field_derived_division_truncates_toward_zero_at_runtime()
+    {
+        const string src =
+            """
+            context Shop {
+              value Order {
+                qty:  Int
+                half: Int = qty / 2
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shop.koi", src) }, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            import { Order } from './Shop/value-objects/Order.js';
+
+            const positive = new Order(7).half;
+            const negative = new Order(-7).half;
+            console.log(JSON.stringify({ positive, negative }));
+            """;
+
+        TestSupport.NodeRun run = TestSupport.RunTypeScript(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoToolchainNotice);
+
+        run.Ok.ShouldBeTrue("Int/Int derived-member division should evaluate under node:\n" + string.Join("\n", run.Errors));
+        run.Stdout.Trim().ShouldBe("{\"positive\":3,\"negative\":-3}");
+    }
+
+    /// <summary>
     /// Issue #1537 acceptance: Decimal arithmetic against a non-Decimal Int operand — an Int LITERAL,
     /// an Int MEMBER, on either side of the operator, across all four of <c>+ - * /</c>, and a guarded
     /// OPTIONAL Int member — must all widen to <c>Decimal</c> at the call site and type-check under
