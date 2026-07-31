@@ -722,6 +722,23 @@
   flex: 0 0 auto;
 }
 
+/* Scope subheadings (Editor / Global, #432): a muted eyebrow, same register as the left rail's
+   section labels (#right-title / .rail-sect-head) — distinct from the ordinary row-label typography
+   it inherits from .koi-set-label so the two scopes read as section breaks, not rows. */
+.koi-kbd-subhead {
+  margin: var(--koi-space-4) 0 var(--koi-space-1-5);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--koi-muted);
+}
+
+.koi-kbd-subhead:first-child {
+  margin-top: 0;
+}
+
 .koi-kbd-control {
   display: flex;
   flex-wrap: wrap;
