@@ -1,3 +1,4 @@
+using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
@@ -280,5 +281,79 @@ public class SemanticTests
             }
             """;
         Validate(src).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #1644: <c>ConcreteEnumType</c>'s three <c>_index.IsEnumType(...)</c> call sites are the same
+    /// context-blind flat lookup #1634 fixed for <c>CheckMember</c>, just left untouched there. Billing's
+    /// own <c>status: Status</c> field is genuinely enum-typed, but Shipping separately (and legally, per
+    /// R13.2) declares an unrelated, non-enum <c>Status</c> value object that registers AFTER Billing's in
+    /// <see cref="ModelIndex"/>'s flat, last-write-wins <c>_byName</c> map — so the blind
+    /// <c>IsEnumType("Status")</c> answers for Shipping's declaration and wrongly says <c>status</c> is NOT
+    /// enum-typed.
+    ///
+    /// <para>This can't be pinned as an end-to-end diagnostic: every diagnostic that consumes
+    /// <c>ConcreteEnumType</c>'s return value (<c>CheckEnumMemberResolvable</c>, <c>ResolveEnumOperand</c>,
+    /// reached via comparison/conditional/coalesce) also depends on <c>ModelIndex.EnumsDeclaring</c>/
+    /// <c>EnumMemberToType</c> — built from the SAME flat <c>_byName</c>/<c>AllTypes()</c> map. Any model
+    /// that collides Billing's <c>Status</c> enum by name (to trigger THIS bug) necessarily also evicts
+    /// Billing's <c>Status</c> from those two dictionaries (#1632, explicitly out of this issue's scope),
+    /// so the surrounding checks stay blind regardless of this fix. Verified empirically: extending this
+    /// exact model with a genuinely ambiguous bare member still mis-reports KOI0210 identically whether or
+    /// not <c>ConcreteEnumType</c> is fixed, because <c>EnumsDeclaring</c> never lists the evicted
+    /// <c>Status</c> as an owner either way. So this test calls <c>ConcreteEnumType</c> directly (made
+    /// <c>internal</c> for exactly this) to pin its own contract in isolation from #1632.</para>
+    /// </summary>
+    [Fact]
+    public void ConcreteEnumType_resolves_every_operand_form_context_first_despite_a_same_named_type_elsewhere()
+    {
+        const string src =
+            """
+            context Billing {
+              enum Status { Draft, Paid }
+              entity Order identified by OrderId {
+                status: Status
+              }
+              value Invoice {
+                status: Status
+                order: Order
+              }
+            }
+
+            context Shipping {
+              value Status {
+                code: Int
+              }
+            }
+            """;
+        var (model, syntax) = new KoineCompiler().Parse(src);
+        syntax.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+
+        var index = new ModelIndex(model);
+        var resolver = new TypeResolver(index, "Billing");
+        var checker = new ExpressionChecker(index, resolver, new HashSet<string>(), new List<Diagnostic>());
+        var billing = model.Contexts.Single(c => c.Name == "Billing");
+        var invoice = (ValueObjectDecl)billing.Types.Single(t => t.Name == "Invoice");
+        var scope = TypeScope.FromMembers(invoice.Members, index);
+
+        // Branch 1: a bare identifier that's a field in scope (`status`) — its declared type is
+        // Billing's own enum, despite Shipping's unrelated, evicting `Status` value object.
+        TypeRef? fieldBranch = checker.ConcreteEnumType(new IdentifierExpr("status"), scope);
+        fieldBranch.ShouldNotBeNull();
+        fieldBranch!.Name.ShouldBe("Status");
+
+        // Branch 2: a qualified `Status.Draft` reference.
+        TypeRef? qualifiedBranch = checker.ConcreteEnumType(
+            new MemberAccessExpr(new IdentifierExpr("Status"), "Draft"), scope);
+        qualifiedBranch.ShouldNotBeNull();
+        qualifiedBranch!.Name.ShouldBe("Status");
+
+        // Branch 3: the general inferred-type fallback, via a nested member access (`order.status`)
+        // whose target isn't itself a type name, so branches 1/2 don't match and it falls through here.
+        TypeRef? fallbackBranch = checker.ConcreteEnumType(
+            new MemberAccessExpr(new IdentifierExpr("order"), "status"), scope);
+        fallbackBranch.ShouldNotBeNull();
+        fallbackBranch!.Name.ShouldBe("Status");
     }
 }
