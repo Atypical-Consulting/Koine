@@ -735,7 +735,7 @@ public sealed class SemanticValidator
     private static readonly IReadOnlySet<string> GeneratedEnumMembers =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue",
+            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue", "TryParse",
             "Match", "Switch", "ToString", "Equals", "GetHashCode"
         };
 
@@ -1321,7 +1321,7 @@ public sealed class SemanticValidator
         // Names generated on every smart enum; an associated field of these would clash.
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue",
+            "Name", "Value", "All", "FromName", "FromValue", "TryFromName", "TryFromValue", "TryParse",
             "Match", "Switch", "ToString", "Equals", "GetHashCode"
         };
         // A field generates a PascalCase property; a member is emitted as a static field of
