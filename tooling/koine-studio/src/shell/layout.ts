@@ -10,11 +10,13 @@
 import { initEdgeResizer } from '@/shell/resize';
 import { loadLayout, saveLayout, type LayoutState } from '@/shell/layoutStore';
 import { type LayoutActions } from '@/shell/layoutCommands';
-import { appStore } from '@/store/index';
+import type { AppStore } from '@/store/index';
 import { domById } from '@/shared/domById';
 import { LEFT_RAIL_IDS } from '@atypical/koine-ui';
 
 export interface LayoutControllerDeps {
+  /** The app store, injected (issue #1351) — the composition root passes the singleton. */
+  store: AppStore;
   /** The #split grid host whose data-* attributes drive the layout reflow + the resizers' target. */
   splitEl: HTMLElement;
   /** Switch the left rail's axis (the inspector controller owns + persists it) — drives ⌘B. */
@@ -45,8 +47,8 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
   // write), then paint #split's data-* attributes (CSS reflows the grid) and anchor the inspector /
   // left-rail resizers on the side each pane currently sits.
   const seed = loadLayout();
-  appStore.getState().setPanelSide(seed.panelSide);
-  appStore.getState().setSideRail(seed.sideRail);
+  deps.store.getState().setPanelSide(seed.panelSide);
+  deps.store.getState().setSideRail(seed.sideRail);
 
   // Mirror the layout enums onto #split as data-* attributes; _split.scss keys the grid off them
   // (data-panel-side docks the bottom panel bottom/right; data-siderail-side moves the inspector rail
@@ -99,7 +101,7 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
   // side-rail flip, persist the transition to layoutStore), and is released in dispose() so the singleton
   // subscription never leaks. saveLayout MERGES the partial into the stored blob, preserving
   // rightCollapsed/leftCollapsed. Boot reads the persisted state, so the arrangement survives a reload too.
-  const unsubscribeLayout = appStore.subscribe((s, prev) => {
+  const unsubscribeLayout = deps.store.subscribe((s, prev) => {
     if (s.panelSide === prev.panelSide && s.sideRail === prev.sideRail) return;
     applyLayoutAttrs(s.panelSide, s.sideRail);
     if (s.sideRail !== prev.sideRail) wireRailResizers(s.sideRail); // re-anchor the handles live
@@ -108,10 +110,10 @@ export function createLayoutController(deps: LayoutControllerDeps): LayoutContro
 
   const actions: LayoutActions = {
     togglePanelSide() {
-      appStore.getState().togglePanelSide();
+      deps.store.getState().togglePanelSide();
     },
     toggleSideRail() {
-      appStore.getState().toggleSideRail();
+      deps.store.getState().toggleSideRail();
     },
     toggleProperties() {
       // The right Properties panel's collapse flag is owned by the uiChrome slice; inspectorController

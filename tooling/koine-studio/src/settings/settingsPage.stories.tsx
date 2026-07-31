@@ -5,6 +5,7 @@ import { createSettingsPage, type SettingsPageHandle } from '@/settings/settings
 import type { SettingsEditorMode } from '@/settings/settingsTypes';
 import type { PrefsCallbacks } from '@/settings/prefs';
 import { WORKSPACE_OVERRIDE_KEY_PREFIX } from '@/settings/persistence';
+import { createAppStore } from '@/store/index';
 
 // The gear-launched Settings center PAGE (#center-panel-settings) — a transient center view, NOT a modal.
 // createSettingsPage is a vanilla DOM factory: it mounts a Visual/JSON segmented toggle into the page
@@ -54,7 +55,7 @@ function mountSettingsPage(mode: SettingsEditorMode, cb: PrefsCallbacks = callba
       }
       const header = root.querySelector<HTMLElement>('#settings-page-header')!;
       const body = root.querySelector<HTMLElement>('#settings-page-body')!;
-      handle = createSettingsPage({ header, body }, cb);
+      handle = createSettingsPage({ header, body }, cb, createAppStore());
     } else if (!root && handle) {
       handle.destroy();
       handle = null;

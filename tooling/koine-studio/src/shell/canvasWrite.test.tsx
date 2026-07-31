@@ -14,6 +14,7 @@ vi.mock('@/review/CommentComposer', () => ({
 import { createCanvasWrite, type CanvasWriteDeps } from '@/shell/canvasWrite';
 import { DIAGRAM_ANNOTATION_CREATE_EVENT, EMPTY_STATE_PICK_EVENT, isDiagramTouchMode } from '@/diagrams/diagramContract';
 import { BP_NARROW } from '@/shared/breakpoint';
+import { appStore, createAppStore } from '@/store/index';
 
 function mountDom(): void {
   document.body.innerHTML = `
@@ -25,6 +26,9 @@ function mountDom(): void {
 let disposers: Array<() => void> = [];
 function build(over: Partial<CanvasWriteDeps> = {}): { cw: ReturnType<typeof createCanvasWrite>; deps: CanvasWriteDeps } {
   const deps = {
+    // A fresh store per controller by default (issue #1351): the controller must read/write whatever
+    // store it is handed, not the global singleton.
+    store: createAppStore(),
     editor: { getDoc: vi.fn(() => ''), setDoc: vi.fn() },
     workspace: { activeUri: vi.fn(() => 'file:///a.koi'), applyWorkspaceEdit: vi.fn() },
     lsp: { applyModelEdit: vi.fn(), rename: vi.fn() },
@@ -64,6 +68,20 @@ describe('canvasWrite', () => {
     document.addEventListener(DIAGRAM_ANNOTATION_CREATE_EVENT, (e) => seen.push((e as CustomEvent).detail.kind), { once: true });
     cw.createCanvasAnnotation('note' as never);
     expect(seen).toEqual(['note']);
+  });
+
+  it('applyDiagramAddType reads activeContext off the injected store, not the global appStore singleton (#1351)', async () => {
+    const store = createAppStore();
+    store.getState().setActiveContext('Ordering');
+    const { cw, deps } = build({ store, prompt: { ask: vi.fn(async () => null) } as never });
+
+    await cw.applyDiagramAddType({ kind: 'value' } as never);
+
+    // Reaching the prompt (rather than the "pick a context" error) proves the scope came from `store`
+    // — seeded with a real context — not the global singleton, which stays unscoped (ALL_CONTEXTS).
+    expect(deps.prompt.ask).toHaveBeenCalledWith(expect.objectContaining({ message: 'In Ordering.' }));
+    expect(deps.setStatus).not.toHaveBeenCalled();
+    expect(appStore.getState().activeContext).toBe('all');
   });
 
   describe('applyStructuredEdit', () => {
