@@ -65,7 +65,8 @@
              palette — it replaces both the old keycap-only palette hint AND the second-tier context
              breadcrumb strip (context now lives in the left Domain navigator + the status-bar segment).
              Keeps the .palette-hint hook so commandWiring binds it; commandWiring fills #cmd-kbd with the
-             platform chord (⌘K / Ctrl+K). -->
+             live-resolved commandPalette chord (⌘K / Ctrl+K by default, tracking a Settings → Keyboard
+             rebind, #1421). -->
         <button type="button" id="palette-hint" class="cmd palette-hint" title="Search commands, symbols, files (⌘K)" aria-label="Open command palette">
           <svg class="cmd-ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" /><path d="M10.2 10.2 14 14" /></svg>
           <span class="cmd-placeholder" aria-hidden="true">Search commands, symbols, files…</span>
