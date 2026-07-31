@@ -29,9 +29,11 @@ export interface ChangeSetFileState {
   readonly drifted: boolean;
   /**
    * The chosen destination workspace root for this row (#1132), or `null` when none has been chosen
-   * yet. Only meaningful for new-file rows in a multi-root workspace — set at stage time from the
-   * `targetRoots` map, or later via {@link ChatSlice.setChangeSetFileRoot}. Purely state at this
-   * stage: nothing yet infers a default or reads this to route a write (later tasks).
+   * yet (ambiguous inference, or a single-root workspace). Only meaningful for new-file rows in a
+   * multi-root workspace — set at stage time from the `targetRoots` map (aiPanel.ts's
+   * `inferNewFileRoot`), or later via {@link ChatSlice.setChangeSetFileRoot} from the review row's
+   * root picker. Read at apply time to mint the row's `new-in:` key (aiPanel.ts) and to scope new-file
+   * drift detection to this root (aiPanel.ts's `isDrifted`).
    */
   readonly targetRoot: string | null;
 }

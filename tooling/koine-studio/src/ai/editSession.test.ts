@@ -225,6 +225,12 @@ describe('root-qualified new-file keys (#1132): new-in: prefix', () => {
     expect(parseNewFileKey('mem://a/model.koi')).toBeNull(); // legacy buffer uri
   });
 
+  test('parseNewFileKey() returns null for a malformed new-in: key with no root/relPath separator', () => {
+    // Unreachable via newFileKeyInRoot itself (it always inserts the separator), but the parser's
+    // contract is "null for anything it can't confidently split" — pin that for a hand-crafted key.
+    expect(parseNewFileKey('new-in:onlyRootNoSeparator')).toBeNull();
+  });
+
   test('a root token containing ":" and "/" survives an encode/decode round trip', () => {
     const key = newFileKeyInRoot('opfs:ws/a/b', 'nested/x.koi');
     expect(parseNewFileKey(key)).toEqual({ relPath: 'nested/x.koi', root: 'opfs:ws/a/b' });

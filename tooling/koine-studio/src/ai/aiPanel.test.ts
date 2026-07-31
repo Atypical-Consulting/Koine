@@ -9,8 +9,8 @@
 // assertions became "the retired treatment shows until the new turn's set replaces it" — the guards
 // themselves (supersede, no un-retire, drift) are asserted unchanged.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { createAssistantChat, MAX_REPAIR_ROUNDS, type AssistantPanelOptions } from '@/ai/aiPanel';
-import { newFileKeyInRoot } from '@/ai/editSession';
+import { createAssistantChat, inferNewFileRoot, MAX_REPAIR_ROUNDS, type AssistantPanelOptions } from '@/ai/aiPanel';
+import { newFileKeyInRoot, type StagedEdit } from '@/ai/editSession';
 import { runAssistant } from '@/ai/ai';
 import { GRAMMAR_PROBE_GBNF, GRAMMAR_PROBE_SENTINEL, resetGrammarCapabilityCache } from '@/ai/grammarConstraint';
 import { loadChat, saveChat } from '@/settings/persistence';
@@ -1095,6 +1095,51 @@ describe('multi-file change set (agentic edits)', () => {
       const files = store.getState().chat.changeSet!.files;
       const newFileRow = files.find((f) => f.isNew)!;
       expect(newFileRow.targetRoot).toBeNull();
+    });
+  });
+
+  // #1132: inferNewFileRoot is exported specifically to be a pure, directly-testable helper — these
+  // pin its branches without going through the full turn/DOM integration flow the tests above use.
+  describe('inferNewFileRoot (pure helper, #1132)', () => {
+    const edit = (key: string, isNew: boolean): StagedEdit => ({ key, relPath: key, body: '', isNew });
+
+    test('exactly one distinct root among the non-new edits infers that root', () => {
+      const staged = [edit('a', false), edit('b', false), edit('new:c.koi', true)];
+      const rootOf = { a: 'wsA', b: 'wsA' };
+      expect(inferNewFileRoot(staged, rootOf)).toBe('wsA');
+    });
+
+    test('two distinct roots among the non-new edits is ambiguous → null', () => {
+      const staged = [edit('a', false), edit('b', false), edit('new:c.koi', true)];
+      const rootOf = { a: 'wsA', b: 'wsB' };
+      expect(inferNewFileRoot(staged, rootOf)).toBeNull();
+    });
+
+    test('no non-new edits (new-file-only turn) → null', () => {
+      const staged = [edit('new:c.koi', true)];
+      expect(inferNewFileRoot(staged, { c: 'wsA' })).toBeNull();
+    });
+
+    test('rootOf undefined (host can’t supply root info) → null, even with a single non-new edit', () => {
+      const staged = [edit('a', false), edit('new:c.koi', true)];
+      expect(inferNewFileRoot(staged, undefined)).toBeNull();
+    });
+
+    test('a non-new edit whose key has no rootOf entry is skipped, not counted as a distinct root', () => {
+      const staged = [edit('a', false), edit('b', false), edit('new:c.koi', true)];
+      // Only 'a' resolves; 'b' has no rootOf entry and must not count as a second (ambiguous) root.
+      const rootOf = { a: 'wsA' };
+      expect(inferNewFileRoot(staged, rootOf)).toBe('wsA');
+    });
+
+    test('two new files in the same staged turn both resolve from the same non-new-edit root', () => {
+      const staged = [edit('a', false), edit('new:c.koi', true), edit('new:d.koi', true)];
+      const rootOf = { a: 'wsA' };
+      // inferNewFileRoot itself only computes ONE root for the whole turn; the caller (aiPanel.ts's
+      // stageChangeSet call site) assigns it to every isNew edit — this pins the shared source value.
+      const inferred = inferNewFileRoot(staged, rootOf);
+      expect(inferred).toBe('wsA');
+      expect(staged.filter((e) => e.isNew)).toHaveLength(2);
     });
   });
 
