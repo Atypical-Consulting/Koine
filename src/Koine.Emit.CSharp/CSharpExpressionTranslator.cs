@@ -761,6 +761,34 @@ internal sealed class CSharpExpressionTranslator
         }
     }
 
+    /// <summary>
+    /// The C# spelling of an enum type picked for a BARE member reference (issue #1799): its simple name
+    /// for this context's own enum, and the fully namespace-qualified <c>&lt;Namespace&gt;.&lt;Enum&gt;</c>
+    /// when the enum is owned by a <em>different</em> bounded context. Owner selection goes through the
+    /// same shared <see cref="ModelIndex.ResolveOwner(string, string)"/> policy the DECLARED type of a
+    /// member already uses, and the namespace through the same
+    /// <see cref="ModelIndex.NamespaceOfTypeIn"/> + <see cref="CSharpEmitterOptions.RemapNamespace"/>
+    /// pair — so a bare member and its own member's declared type always name the same C# type.
+    ///
+    /// <para>Fully-qualified rather than a registered <c>using</c>, mirroring
+    /// <c>CSharpTypeMapper</c>'s qualified-reference branch: it needs no collector pass, never collides
+    /// with a same-named local or imported type, and — the case a <c>using</c> could not fix — still
+    /// resolves when a property of the enclosing type shares the enum's name, where a bare
+    /// <c>Kind.Active</c> binds to the property and Roslyn reports CS0176.</para>
+    /// </summary>
+    private string QualifyEnumType(string enumName)
+    {
+        if (_resolver.Context is not { } context
+            || _index.ResolveOwner(enumName, context).Owner is not { } owner
+            || string.Equals(owner, context, StringComparison.Ordinal))
+        {
+            return enumName;
+        }
+
+        var ns = _options.RemapNamespace(_index.NamespaceOfTypeIn(owner, enumName) ?? owner);
+        return ns + "." + enumName;
+    }
+
     private void WriteIdentifier(string name, NameMode mode, StringBuilder sb, string? enumHint = null)
     {
         // Lambda parameter: rendered verbatim (escaped if a C# keyword).
@@ -796,7 +824,7 @@ internal sealed class CSharpExpressionTranslator
                         : _enumMemberToType.TryGetValue(name, out var fallback) && owners.Contains(fallback)
                             ? fallback
                             : owners[0];
-                sb.Append(enumType).Append('.').Append(CSharpNaming.EscapeIdentifier(name));
+                sb.Append(QualifyEnumType(enumType)).Append('.').Append(CSharpNaming.EscapeIdentifier(name));
                 return;
             }
         }
@@ -978,6 +1006,17 @@ internal sealed class CSharpExpressionTranslator
 
     private void WriteMemberAccess(MemberAccessExpr ma, NameMode mode, StringBuilder sb)
     {
+        // Explicitly qualified enum-member access: `Kind.Active` -> `Other.Kind.Active`. Context-first
+        // (R13.2): a same-named enum in another context must not shadow this one's own declaration.
+        // Routes through the same QualifyEnumType helper as the bare-member branch (#1799) so both
+        // spellings of a reference to the same foreign enum render identically (#1802).
+        if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
+            && !_locals.Contains(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
+        {
+            sb.Append(QualifyEnumType(qualifier.Name)).Append('.').Append(CSharpNaming.EscapeIdentifier(ma.MemberName));
+            return;
+        }
+
         var t = Render(ma.Target, mode);
 
         // A user type that declares a member named after a built-in member-op (isEmpty/trim/…)

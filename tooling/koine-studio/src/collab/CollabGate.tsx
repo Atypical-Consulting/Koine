@@ -5,10 +5,13 @@
 // cannot broker a session gets a calm explanation of why and what would change it; it never gets a
 // thrown error, and never a control that would fail if clicked.
 //
-// The gate itself owns no session state: `renderSession` supplies the start/join/leave UI once the
-// session lifecycle lands (#481 Task 4), and until then a capable host sees the interim note below.
+// The gate itself owns no session state. Hand it a `session` and it renders the start/join/leave panel
+// (#481 Task 4); `renderSession` stays available for a caller that wants to supply its own UI, and a
+// capable host given neither still gets the interim note below rather than an empty box.
 import { render, type ComponentChildren } from 'preact';
 import type { Platform } from '@/host/types';
+import { CollabSessionPanel } from '@/collab/SessionPanel';
+import type { CollabSession } from '@/editor/collab/session';
 
 /**
  * Why a host can't collaborate, in the user's terms. Names both remedies the spec allows — the desktop
@@ -18,7 +21,7 @@ const PLACEHOLDER_TEXT =
   'Live collaboration needs a host that can broker a session. Open this workspace in the Koine Studio ' +
   'desktop app, or configure a collaboration relay, to co-edit a model with someone else.';
 
-/** Shown to a broker-capable host before the session controls exist (#481 Task 4). */
+/** Shown to a broker-capable host that was handed neither a session nor a custom `renderSession`. */
 const NOT_WIRED_TEXT = 'This host can broker a session. Session controls are not wired up yet.';
 
 export interface CollabGateOptions {
@@ -26,7 +29,9 @@ export interface CollabGateOptions {
   parent: Element;
   /** The host platform — the gate reads `canCollaborate` and nothing else. */
   platform: Platform;
-  /** The session UI to render on a broker-capable host; omitted until #481 Task 4 supplies it. */
+  /** The session to drive the start/join/leave panel from, on a broker-capable host. */
+  session?: CollabSession;
+  /** A custom session UI, overriding the built-in panel. Takes precedence over `session`. */
   renderSession?: () => ComponentChildren;
 }
 
@@ -36,7 +41,13 @@ export interface CollabGate {
   dispose(): void;
 }
 
-function CollabGateView({ platform, renderSession }: Omit<CollabGateOptions, 'parent'>) {
+function sessionUi(session?: CollabSession, renderSession?: () => ComponentChildren): ComponentChildren {
+  if (renderSession) return renderSession();
+  if (session) return <CollabSessionPanel session={session} />;
+  return <p class="koi-collab-note">{NOT_WIRED_TEXT}</p>;
+}
+
+function CollabGateView({ platform, session, renderSession }: Omit<CollabGateOptions, 'parent'>) {
   if (!platform.canCollaborate) {
     return (
       <div class="koi-collab koi-collab-placeholder">
@@ -44,7 +55,7 @@ function CollabGateView({ platform, renderSession }: Omit<CollabGateOptions, 'pa
       </div>
     );
   }
-  return <div class="koi-collab">{renderSession ? renderSession() : <p class="koi-collab-note">{NOT_WIRED_TEXT}</p>}</div>;
+  return <div class="koi-collab">{sessionUi(session, renderSession)}</div>;
 }
 
 /**
@@ -52,7 +63,10 @@ function CollabGateView({ platform, renderSession }: Omit<CollabGateOptions, 'pa
  * renders `renderSession()`; otherwise it renders the graceful desktop-only/relay placeholder.
  */
 export function createCollabGate(opts: CollabGateOptions): CollabGate {
-  render(<CollabGateView platform={opts.platform} renderSession={opts.renderSession} />, opts.parent);
+  render(
+    <CollabGateView platform={opts.platform} session={opts.session} renderSession={opts.renderSession} />,
+    opts.parent,
+  );
   return {
     dispose() {
       render(null, opts.parent);

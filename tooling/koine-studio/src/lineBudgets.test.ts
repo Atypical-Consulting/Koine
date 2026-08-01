@@ -232,7 +232,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // (builder, StateField, publisher); only the compartment wiring can live here, because a compartment
   // has to be declared inside `createKoineEditor` to be reconfigurable. Measured end-state (1038) plus
   // a little headroom; #986 still owns the split.
-  { file: 'src/editor/editor.ts', maxLines: 1040 },
+  // Raised 1040 → 1062: #481's CRDT shared document (Phase 2 collaboration, Task 3) adds the `crdt`
+  // Compartment, its one-line `crdt.of([])` slot, the `setCrdtEnabled` method + its interface
+  // declaration, and the import — ~22 LOC net, the same compartment-wiring-only shape presence took
+  // above. The binding's own logic (delta translation, echo guard, hydration) lives in
+  // `src/editor/collab/crdtBinding.ts`. Measured end-state (1060) plus a little headroom; #986 still
+  // owns the split.
+  { file: 'src/editor/editor.ts', maxLines: 1062 },
   // Frozen 2026-07-09 at 113 LOC, ceil(113 × 1.02) = 116. Guards the #986 split's new sibling from
   // regrowing unguarded — see #981/#757.
   { file: 'src/editor/cmTheme.ts', maxLines: 116 },

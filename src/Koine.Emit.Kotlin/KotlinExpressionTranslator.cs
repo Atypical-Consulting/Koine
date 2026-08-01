@@ -607,7 +607,11 @@ internal sealed class KotlinExpressionTranslator
                         : _enumMemberToType.TryGetValue(name, out var fallback) && owners.Contains(fallback)
                             ? fallback
                             : owners[0];
-                sb.Append(KotlinNaming.ToTypeName(enumType)).Append('.').Append(KotlinNaming.EscapeIdentifier(name));
+                // Package-qualified through the type mapper when the owner is a FOREIGN context (#1799):
+                // the flat per-context package layout gives `koine.generated.<owner>.Enum`, and a bare
+                // `Enum` in another package resolves to nothing. Same policy — and therefore the same
+                // spelling — as the declared type of the member being compared.
+                sb.Append(_typeMapper.QualifyTypeName(enumType)).Append('.').Append(KotlinNaming.EscapeIdentifier(name));
                 return;
             }
         }
@@ -646,7 +650,11 @@ internal sealed class KotlinExpressionTranslator
         if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
             && !_locals.IsLocal(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
         {
-            sb.Append(KotlinNaming.ToTypeName(qualifier.Name)).Append('.').Append(KotlinNaming.EscapeIdentifier(ma.MemberName));
+            // Package-qualified through the type mapper when the owner is a FOREIGN context (#1799/#1802):
+            // the flat per-context package layout gives `koine.generated.<owner>.Enum`, and a bare
+            // `Enum` in another package resolves to nothing. Same policy — and therefore the same
+            // spelling — as the bare-member branch's qualification of the same enum.
+            sb.Append(_typeMapper.QualifyTypeName(qualifier.Name)).Append('.').Append(KotlinNaming.EscapeIdentifier(ma.MemberName));
             return;
         }
 

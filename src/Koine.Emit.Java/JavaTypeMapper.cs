@@ -113,6 +113,15 @@ internal sealed class JavaTypeMapper
     }
 
     /// <summary>
+    /// The Java type name for a declared Koine type named with no explicit qualifier — the enum an
+    /// expression's BARE member reference resolved to (issue #1799). Delegates to
+    /// <see cref="QualifyTypeName(TypeRef)"/> through a synthetic <see cref="TypeRef"/>, so a bare member
+    /// and its own member's declared type are package-qualified by one policy and always name the same
+    /// Java type. Mirrors <c>KotlinTypeMapper</c>'s overload of the same name.
+    /// </summary>
+    public string QualifyTypeName(string koineName) => QualifyTypeName(new TypeRef(koineName));
+
+    /// <summary>
     /// The single bounded context whose package emits a type, via the shared, deterministic
     /// <see cref="ModelIndex.ResolveOwner(string, string)"/> policy (issue #1091) — so a <b>multi-owner</b> type
     /// referenced from a third context resolves to a canonical owner (<c>&lt;ownerPackage&gt;.T</c>)
