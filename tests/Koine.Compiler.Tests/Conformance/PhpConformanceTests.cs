@@ -2203,4 +2203,249 @@ public class PhpConformanceTests
         TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
         types.Ok.ShouldBeTrue(string.Join("\n", types.Errors));
     }
+
+    /// <summary>
+    /// Issue #1762: a coalesce (<c>??</c>) whose two operands are nullable but of DIFFERENT numeric
+    /// types (<c>Int?</c> vs <c>Decimal?</c>) must reconcile that mismatch before emitting PHP's
+    /// null-coalescing <c>??</c> — unreconciled, the expression's type is <c>int|Decimal|null</c>, a
+    /// real <c>phpstan analyse --level max</c> error wherever the coalesce's value is consumed. The
+    /// narrower <c>Int?</c> left operand must go through the null-check-and-widen arrow-function shell
+    /// #1732 introduced, mirroring Kotlin's <c>WriteCoalesce</c> (#1615) and Java's <c>Optional.or</c>/
+    /// <c>.orElse</c> fix (#1548).
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_between_nullable_operands()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(a: Int?, b: Decimal?) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no phpstan required): the narrower ?int operand is null-check-and-widened
+        // before the `??`, so both sides agree on `?Decimal`.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"((fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))($a) ?? $b)");
+        product.ShouldNotContain("($a ?? $b)");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// #1762's symmetric operand order: the LEFT operand is already the wider <c>Decimal?</c> (no widen
+    /// needed), while the narrower <c>Int?</c> RIGHT operand must null-check-and-widen after the
+    /// <c>??</c> — each side is classified against the OTHER'S type independently, exactly as Kotlin's
+    /// <c>WriteCoalesce</c> does.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_symmetric_operand_order()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(a: Decimal?, b: Int?) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"($a ?? (fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))($b))");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Zero-change regression guard for #1762: a coalesce whose two operands ALREADY agree in numeric
+    /// type (the common, already-correct case) must keep emitting a bare <c>??</c> with no widening
+    /// wrap — byte-identical to the pre-fix output.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_same_typed_nullable_operands_emits_unchanged()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(a: Decimal?, b: Decimal?) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("$instance = new self($id, ($a ?? $b));");
+        product.ShouldNotContain("$__v");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// #1762 edge case 2 (the shape #1615's own code review caught for Kotlin): a nested coalesce as the
+    /// RIGHT operand must stay atomized when the widen attaches, so the widen covers the WHOLE nested
+    /// coalesce rather than only its innermost operand. PHP's own <c>Write</c> already parenthesizes a
+    /// <c>CoalesceExpr</c> and the arrow-function shell parenthesizes its argument slot, so the widen
+    /// composes safely — this pins that.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_against_a_nested_coalesce_right_operand()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(a: Decimal?, x: Int?, y: Int?) {
+                  total -> a ?? (x ?? y)
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The widen wraps the whole `($x ?? $y)`, not just `$x` or just `$y`.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"new \Koine\Runtime\Decimal($__v))(($x ?? $y))");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// #1762: a nested coalesce as the LEFT operand is the case that forces the effective-type helper to
+    /// RECURSE. <c>TypeResolver.VisitCoalesce</c> reports <c>(x ?? b)</c>'s type as <c>x</c>'s own
+    /// <c>Int?</c>, but the fixed rendering widens <c>x</c>, so the nested coalesce actually renders as
+    /// <c>?Decimal</c>. Classifying the outer operands against the RAW resolver types would see
+    /// <c>Int?</c> vs <c>Int?</c>, leave the outer right operand unwidened, and emit an
+    /// <c>int|Decimal|null</c> — the very mismatch this issue exists to fix.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_against_a_nested_coalesce_left_operand_s_widened_type()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(x: Int?, b: Decimal?, c: Int?) {
+                  total -> (x ?? b) ?? c
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"new \Koine\Runtime\Decimal($__v))($x) ?? $b)");   // inner widen
+        product.ShouldContain(@"new \Koine\Runtime\Decimal($__v))($c))");         // outer widen — needs the recursion
+        product.ShouldNotContain("?? $c)");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// #1762 edge case 4: the fix lives in the shared <c>CoalesceExpr</c> case, not a narrower call
+    /// site, so a command-body state transition and a derived-member body get the reconciliation for
+    /// free. Mirrors Java's #1548 Task 2 coverage.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_in_a_state_transition_and_a_derived_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+                fallback: Decimal?
+                hint: Int?
+                best: Decimal? = hint ?? fallback
+
+                command adjust(a: Int?, b: Decimal?) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"new \Koine\Runtime\Decimal($__v))($this->hint) ?? $this->fallback)");  // derived member
+        product.ShouldContain(@"new \Koine\Runtime\Decimal($__v))($a) ?? $b)");                        // command transition
+        product.ShouldNotContain("($this->hint ?? $this->fallback)");
+        product.ShouldNotContain("($a ?? $b)");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// #1762 × #1732 regression: #1732's ctor-arg guard exists so the factory wrap does NOT misfire on a
+    /// coalesce. Now that the coalesce rendering itself reconciles, the guard must still see the
+    /// coalesce's own (joined) type and add NO second widen on top — exactly one arrow-function shell
+    /// (the operand's), never a <c>new \Koine\Runtime\Decimal((… ?? …))</c> around the whole thing.
+    /// </summary>
+    [Fact]
+    public void Factory_ctor_arg_guard_does_not_double_widen_a_reconciled_coalesce()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(a: Int?, b: Decimal?) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        var factory = product.Split('\n').Single(l => l.Contains("$instance = new self(", StringComparison.Ordinal));
+
+        factory.Trim().ShouldBe(@"$instance = new self($id, ((fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))($a) ?? $b));");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Runs the always-on <c>php -l</c> syntax gate and the <c>phpstan analyse --level max</c>
+    /// type-check over the emitted tree. Skipped (not failed) when no toolchain is present; with one,
+    /// BOTH must pass.
+    /// </summary>
+    private static void AssertPhpIsWellTyped(IReadOnlyList<EmittedFile> files)
+    {
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue("emitted PHP should type-check under phpstan --level max:\n" + string.Join("\n", types.Errors));
+    }
 }
