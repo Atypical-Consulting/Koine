@@ -145,4 +145,40 @@ public class EnumMemberContextScopeEmitterTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable cargo toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1793, Task 2 — pre-fix, Python emitted <c>if not (Status.RED != Flag.BLUE)</c> plus a
+    /// matching <c>from a.enums.status import Status</c>, i.e. importable, runnable, silently wrong
+    /// code: the guard compares an unrelated context's enum member and can therefore never hold.
+    /// </summary>
+    [Fact]
+    public void Python_qualifies_both_operands_against_the_referencing_contexts_own_enum()
+    {
+        var result = new KoineCompiler().Compile(CrossContextCollision, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("item.py", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Flag.RED");
+        item.ShouldContain("Flag.BLUE");
+        item.ShouldNotContain("Marker.");
+        item.ShouldNotContain("Signal.");
+        item.ShouldNotContain("Status.");
+        // The wrong qualifier also dragged in an import of the wrong context's enum module; a
+        // correctly scoped resolution leaves `C`'s entity with no dependency on `A`/`D`/`E` at all.
+        item.ShouldNotContain("from a.enums");
+        item.ShouldNotContain("from d.enums");
+        item.ShouldNotContain("from e.enums");
+
+        // Syntax-only (`python -m py_compile`), not TestSupport.TypeCheckPython/mypy, for exactly the
+        // reason the PHP sibling above uses `php -l`: the fixture's invariant deliberately compares two
+        // literal enum members with no other-operand hint (the shape that exercises this fix's fallback
+        // branch), and mypy's `comparison-overlap` rule correctly — but irrelevantly — rejects THAT as a
+        // non-overlapping equality check regardless of which enum qualifies it, both before and after
+        // the fix. Real-world code hitting this bug compares a runtime FIELD against a bare member
+        // (e.g. `status == Active`), which mypy cannot fold; this fixture isolates the no-hint path
+        // deliberately, at the cost of being unrepresentative of realistic Python.
+        var check = TestSupport.SyntaxCheckPython(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable python toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
