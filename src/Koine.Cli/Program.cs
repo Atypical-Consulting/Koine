@@ -89,6 +89,12 @@ internal static class Program
             config.AddCommand<ScenarioExecCommand>("scenario-exec")
                 .WithDescription("Run one scenario against the model's emitted code (stdio protocol; internal).")
                 .IsHidden();
+
+            // HIDDEN, for the same reason: the Linux write-confinement launcher of that same sandbox
+            // (#1781, ADR 0012). ScenarioSandbox composes this invocation; nobody types it.
+            config.AddCommand<SandboxLandlockCommand>(SandboxLandlockCommand.Verb)
+                .WithDescription("Install a Landlock ruleset and exec the given command (internal).")
+                .IsHidden();
         });
 
         // Spectre returns -1 for its own parse/validation/usage failures; the commands return
