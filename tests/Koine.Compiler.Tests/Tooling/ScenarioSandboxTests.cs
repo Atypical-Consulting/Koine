@@ -266,6 +266,42 @@ public class ScenarioSandboxTests
         tree.ShouldNotContain("timed out", customMessage: tree);
     }
 
+    /// <summary>The margin that keeps the test above meaningful on Windows (issue #1791).</summary>
+    /// <remarks>
+    /// Asserted here rather than left to a comment because the alternative is a terrible bargain: sizing
+    /// the Job Object's commit cap AT the managed-heap ceiling is a one-token edit, and the only thing
+    /// that notices is a Windows-only test that still passes about one run in six — so the change reads as
+    /// "a flake reappeared" for however long it takes someone to disbelieve that. This is a pure
+    /// arithmetic check on the same platform-neutral translation the confinement uses, so it fails on
+    /// every OS, immediately, at the edit.
+    /// </remarks>
+    [Fact]
+    public void The_windows_job_commit_cap_stays_clear_of_the_managed_heap_ceiling()
+    {
+        // A .NET child hosting Roslyn commits a hundred-odd MiB that is not managed heap — runtime, JIT,
+        // loader heaps, thread stacks. The cap has to clear all of it, so "merely greater" is not the
+        // property worth pinning: a 1-byte margin would satisfy that and still lose the race every time.
+        const long MinimumUsefulMargin = 128L << 20;
+
+        foreach (long ceiling in new[] { ExhaustibleMemoryLimitBytes, ScenarioSandboxOptions.DefaultMemoryLimitBytes })
+        {
+            long? cap = ScenarioConfinement.WindowsJobCommitLimitFor(ceiling);
+
+            cap.ShouldNotBeNull();
+            (cap.Value - ceiling).ShouldBeGreaterThanOrEqualTo(
+                MinimumUsefulMargin,
+                $"the job commit cap for a {ScenarioConfinement.Mebibytes(ceiling)} heap ceiling must leave "
+                + "room for the runtime's own committed memory, or the OS cap fires first and the child "
+                + "dies of an uncatchable stack overflow instead of naming the ceiling (#1791)");
+        }
+
+        // Asking for no ceiling must not acquire one: a sandbox told to run uncapped stays uncapped.
+        ScenarioConfinement.WindowsJobCommitLimitFor(null).ShouldBeNull();
+
+        // Saturating, never wrapping — a ceiling near the top of the range must not come out as a tiny cap.
+        ScenarioConfinement.WindowsJobCommitLimitFor(long.MaxValue).ShouldBe(long.MaxValue);
+    }
+
     [Fact]
     public void A_child_that_burns_past_the_processor_ceiling_is_reported_as_a_cap_not_a_timeout()
     {
