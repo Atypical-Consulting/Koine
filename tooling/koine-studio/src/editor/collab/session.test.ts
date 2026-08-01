@@ -17,6 +17,7 @@ import { EditorSelection } from '@codemirror/state';
 
 const ADA: CollabParticipant = { id: 'ada', displayName: 'Ada', color: '#e8637c' };
 const GRACE: CollabParticipant = { id: 'grace', displayName: 'Grace', color: '#54b8a0' };
+const LINUS: CollabParticipant = { id: 'linus', displayName: 'Linus', color: '#7c8fe8' };
 
 const editors: KoineEditor[] = [];
 const sessions: CollabSession[] = [];
@@ -160,6 +161,46 @@ describe('createCollabSession — join', () => {
     expect(state.error ?? '').not.toContain('super-secret-token');
   });
 
+  it('unbinds the previous session when a second one is entered', async () => {
+    // Re-entering without detaching would leave the buffer mirroring a replica nobody is in any more,
+    // and pushing every keystroke into a document that has been abandoned.
+    const broker = createInMemoryCollabBroker();
+    const first = createCollabSession({ transport: broker.createTransport(), identity: ADA, editor: editor('first\n') });
+    const mover = { editor: editor('mine\n'), transport: broker.createTransport() };
+    const second = createCollabSession({ transport: broker.createTransport(), identity: LINUS, editor: editor('second\n') });
+    const moverSession = createCollabSession({ transport: mover.transport, identity: GRACE, editor: mover.editor });
+    sessions.push(first, second, moverSession);
+    const firstToken = (await first.create()).token ?? '';
+    const secondToken = (await second.create()).token ?? '';
+
+    await moverSession.join(firstToken);
+    await Promise.resolve();
+    await moverSession.join(secondToken);
+    await Promise.resolve();
+
+    mover.editor.view.dispatch({ changes: { from: 0, to: 0, insert: 'x' } });
+
+    expect(second.getState().participants.map((p) => p.id).sort()).toEqual(['grace', 'linus']);
+    expect(first.getState().participants.map((p) => p.id)).toEqual(['ada']);
+    expect(mover.editor.view.state.doc.toString()).toBe('xsecond\n');
+  });
+
+  it('unbinds the editor when a join FAILS from a live session', async () => {
+    // The failure path releases the replica, so the binding has to go with it: a buffer still mirroring
+    // a destroyed `Y.Doc` pushes every subsequent keystroke into nothing, with no visible symptom.
+    const { host, hostSession } = pair('context Sales {}\n');
+    await hostSession.create();
+
+    const failed = await hostSession.join('not-a-real-token');
+
+    expect(failed.status).toBe('error');
+    expect(() => host.editor.view.dispatch({ changes: { from: 0, to: 0, insert: 'x' } })).not.toThrow();
+    expect(host.editor.view.state.doc.toString()).toBe('xcontext Sales {}\n');
+    // The presence layer goes too: publishing a local caret into a session we are not in is the same
+    // bug wearing a different hat.
+    expect(host.editor.view.state.field(presenceField, false)).toBeUndefined();
+  });
+
   it('sees the peers already in the room', async () => {
     const { hostSession, guestSession } = pair();
     const created = await hostSession.create();
@@ -262,6 +303,64 @@ describe('createCollabSession — reconnect', () => {
     const state = await guestSession.reconnect();
     expect(state.status).toBe('error');
     expect(state.error).toBeTruthy();
+  });
+
+  it('keeps the replica and the token when the reconnect itself FAILS, so it can be retried', async () => {
+    const broker = createInMemoryCollabBroker();
+    const hostEd = editor('shared\n');
+    const guestEd = editor('scratch\n');
+    const guestTransport = broker.createTransport();
+    const hostSession = createCollabSession({ transport: broker.createTransport(), identity: ADA, editor: hostEd });
+    const guestSession = createCollabSession({ transport: guestTransport, identity: GRACE, editor: guestEd });
+    sessions.push(hostSession, guestSession);
+
+    const created = await hostSession.create();
+    await guestSession.join(created.token ?? '');
+    await Promise.resolve();
+
+    // Grace drops off and keeps typing, then her first reconnect attempt fails outright.
+    await guestTransport.stop();
+    const end = guestEd.view.state.doc.length;
+    guestEd.view.dispatch({ changes: { from: end, to: end, insert: 'typed offline\n' } });
+    const realStart = guestTransport.start.bind(guestTransport);
+    guestTransport.start = () => Promise.reject(new Error('network down'));
+
+    const failed = await guestSession.reconnect();
+
+    expect(failed.status).toBe('error');
+    // The replica holds the offline edits and the token is the only way back in — losing either here
+    // would silently throw away work that the CRDT was supposed to protect.
+    expect(failed.token).toBe(created.token);
+
+    guestTransport.start = realStart;
+    const recovered = await guestSession.reconnect();
+
+    expect(recovered.status).toBe('live');
+    expect(hostEd.view.state.doc.toString()).toContain('typed offline');
+  });
+
+  it('forgets peers that left while this participant was disconnected', async () => {
+    const broker = createInMemoryCollabBroker();
+    const guestTransport = broker.createTransport();
+    const hostSession = createCollabSession({ transport: broker.createTransport(), identity: ADA, editor: editor('a\n') });
+    const guestSession = createCollabSession({ transport: guestTransport, identity: GRACE, editor: editor('b\n') });
+    sessions.push(hostSession, guestSession);
+    const created = await hostSession.create();
+
+    const linusTransport = broker.createTransport();
+    await linusTransport.start({ mode: 'join', token: created.token ?? '', identity: LINUS });
+    await guestSession.join(created.token ?? '');
+    expect(guestSession.getState().participants.map((p) => p.id).sort()).toEqual(['ada', 'grace', 'linus']);
+
+    // Grace goes offline, and Linus leaves while she is away — so she never sees his peer-leave event.
+    await guestTransport.stop();
+    await linusTransport.stop();
+
+    await guestSession.reconnect();
+
+    // The broker replays the room on re-join, so the reconnect must trust that replay over what this
+    // participant remembered — otherwise a ghost caret and a ghost name outlive the person.
+    expect(guestSession.getState().participants.map((p) => p.id).sort()).toEqual(['ada', 'grace']);
   });
 });
 

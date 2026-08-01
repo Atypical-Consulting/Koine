@@ -101,10 +101,11 @@ function deltaToChanges(delta: readonly Y.YTextEvent['delta'][number][], docLeng
       if (pos > docLength) return null;
       changes.push({ from: pos, to: pos, insert: op.insert });
     } else if (op.insert != null) {
-      // An embedded Yjs type. `.koi` documents are plain text, so this can only be a peer (or a relay)
-      // sending something this binding does not model — skipping it keeps the offsets honest, since an
-      // embed occupies one position in the delta but no characters in our buffer.
-      continue;
+      // An embedded Yjs type. `.koi` documents are plain text, so this can only come from a peer (or a
+      // relay) sending something this binding does not model. Skipping it would leave the replica one
+      // position longer than the buffer FOREVER, and every later delta would land a character off, so
+      // the whole delta is abandoned and the caller resynchronises from the replica instead.
+      return null;
     } else if (typeof op.delete === 'number') {
       if (pos + op.delete > docLength) return null;
       changes.push({ from: pos, to: pos + op.delete });
@@ -204,15 +205,22 @@ class CrdtSync implements PluginValue {
     if (this.detached) return;
     const changes = deltaToChanges(event.delta, this.view.state.doc.length);
     if (changes === null) {
-      // The delta doesn't fit the buffer, so the two drifted apart — a bug here, or a peer/relay sending
-      // a delta for a document we don't have. Dispatching it would throw out of the observer and leave
-      // the editor wedged, so resynchronise wholesale instead: the CRDT is the shared truth, and after
-      // this the buffer matches it again.
+      // The delta doesn't fit the buffer — a peer or relay sending a document we don't have, or an op
+      // this binding doesn't model. Dispatching it would throw straight out of the observer and wedge
+      // the editor, so resynchronise wholesale: the replica is the shared truth.
       hydrateEditorFromCrdt(this.view, this.text);
       return;
     }
-    if (changes.length === 0) return;
-    this.view.dispatch({ changes, annotations: fromCrdt.of(true) });
+    if (changes.length > 0) this.view.dispatch({ changes, annotations: fromCrdt.of(true) });
+
+    // The invariant, checked rather than assumed: after any remote update the buffer IS the replica.
+    // Delta translation is offset arithmetic over untrusted input, and the failure mode of getting it
+    // subtly wrong is not a crash but a document that diverges a character at a time until the two
+    // participants are editing different models. A whole-string compare per inbound update is cheap at
+    // `.koi` sizes, and it makes the binding self-healing instead of merely careful.
+    if (this.view.state.doc.toString() !== this.text.toJSON()) {
+      hydrateEditorFromCrdt(this.view, this.text);
+    }
   }
 }
 

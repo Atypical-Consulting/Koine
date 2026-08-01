@@ -10,7 +10,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import * as Y from 'yjs';
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
-import { crdtExtension, sharedText, SHARED_TEXT_KEY } from '@/editor/collab/crdtBinding';
+import { crdtExtension, fromCrdt, sharedText, SHARED_TEXT_KEY } from '@/editor/collab/crdtBinding';
 
 const views: EditorView[] = [];
 const docs: Y.Doc[] = [];
@@ -133,6 +133,39 @@ describe('crdtExtension — CRDT updates reach the editor', () => {
     await Promise.resolve();
 
     expect(view.state.doc.toString()).toBe('context Billing {}');
+  });
+});
+
+describe('crdtExtension — self-healing against a replica it cannot model', () => {
+  it('keeps the buffer equal to the replica even after an op it does not understand', () => {
+    const text = sharedText(ydoc());
+    const view = boundEditor(text, 'context Sales {}');
+
+    // An embed occupies a position in Y.Text coordinates but contributes no characters to the text, so
+    // every later delta is offset against a buffer that never saw it. `.koi` is plain text and Studio
+    // never inserts one — but a peer or a user-configured relay is untrusted, and the answer to
+    // "I can't map this" has to be resynchronisation, never a silently drifting document.
+    text.insertEmbed(0, { notText: true });
+    text.insert(3, 'X');
+
+    expect(view.state.doc.toString()).toBe(text.toJSON());
+  });
+
+  it('recovers from a delta that describes a longer document than the buffer holds', () => {
+    const text = sharedText(ydoc());
+    const view = boundEditor(text, 'a long enough document');
+
+    // Shrink the buffer behind the binding's back — `fromCrdt` is exactly the annotation that stops a
+    // change reaching the replica, so this reproduces the state a mis-mapped delta would leave: a buffer
+    // far shorter than the replica everyone else is editing.
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'x' }, annotations: fromCrdt.of(true) });
+    expect(view.state.doc.toString()).toBe('x');
+
+    // The next remote delta retains well past the end of what we have. Dispatching it verbatim throws
+    // ("Invalid change range") straight out of the Yjs observer, which would wedge the editor for good.
+    text.insert(text.length, '!');
+
+    expect(view.state.doc.toString()).toBe(text.toJSON());
   });
 });
 

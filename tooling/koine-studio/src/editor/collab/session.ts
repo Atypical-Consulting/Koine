@@ -227,8 +227,24 @@ export function createCollabSession({ transport, identity, editor }: CollabSessi
     });
   }
 
-  function fail(message: string): CollabSessionState {
-    return publish({ status: 'error', error: message, sessionId: null, token: null, authority: false, canSave: false });
+  /** Unbind the editor and drop every remote caret. Shared by `leave` and by re-entering a session. */
+  function detachEditor(): void {
+    presence.clear();
+    paintPresence(); // repaint (to nothing) while the layer is still attached to receive it
+    editor.setPresenceEnabled(false);
+    editor.setCrdtEnabled(false);
+    peers.clear();
+  }
+
+  /**
+   * Report a failed attempt. `keepSession` is the difference between "this session is over" and "this
+   * connection dropped": a failed RECONNECT must keep the replica and the token, because the replica
+   * holds everything typed while offline and the token is the only way back in.
+   */
+  function fail(message: string, keepSession = false): CollabSessionState {
+    return keepSession
+      ? publish({ status: 'error', error: message })
+      : publish({ status: 'error', error: message, sessionId: null, token: null, authority: false, canSave: false });
   }
 
   /** The shared body of create/join/reconnect: connect, then reflect the broker's answer. */
@@ -237,12 +253,19 @@ export function createCollabSession({ transport, identity, editor }: CollabSessi
     reuseReplica: boolean,
   ): Promise<CollabSessionState> {
     attachHandlers();
-    publish({ status: 'connecting', error: null });
     if (!reuseReplica) {
+      // Entering a session always starts from a clean editor: re-binding without detaching would leave
+      // the buffer mirroring the replica we are about to discard.
+      detachEditor();
+      openReplica();
+    } else {
+      // A reconnect re-enters the same room, and the broker replays its membership — so drop what we
+      // remember rather than keeping peers who left while we were away.
       peers.clear();
       presence.clear();
-      openReplica();
+      paintPresence();
     }
+    publish({ status: 'connecting', error: null, participants: participantList() });
     try {
       const info = await transport.start({ mode: request.mode, token: request.token, identity });
       const next = publish({
@@ -255,14 +278,18 @@ export function createCollabSession({ transport, identity, editor }: CollabSessi
         participants: participantList(),
         error: null,
       });
+      // A reconnect keeps its binding and pushes the whole replica, so anything typed while the
+      // transport was down merges into every peer; a fresh session binds the editor instead.
       if (reuseReplica) broadcastFullState();
       else attachEditor(info.authority);
       return next;
     } catch (err) {
       // The message may name the token on some transports, so it is never surfaced verbatim.
       void err;
-      peers.clear();
-      presence.clear();
+      if (reuseReplica) {
+        return fail('Lost the connection to this session. Try reconnecting.', true);
+      }
+      detachEditor();
       doc?.destroy();
       doc = null;
       return fail(
@@ -300,11 +327,7 @@ export function createCollabSession({ transport, identity, editor }: CollabSessi
     },
 
     async leave() {
-      presence.clear();
-      paintPresence(); // drop every remote caret while the layer is still attached to paint into
-      editor.setPresenceEnabled(false);
-      editor.setCrdtEnabled(false);
-      peers.clear();
+      detachEditor();
       await transport.stop();
       doc?.destroy();
       doc = null;

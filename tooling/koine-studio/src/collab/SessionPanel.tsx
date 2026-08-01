@@ -54,6 +54,9 @@ function ParticipantList({ participants }: { participants: CollabSessionState['p
 /** The live half: who is here, the invitation to hand out, who can save, and the way out. */
 function LiveSession({ session, state }: { session: CollabSession; state: CollabSessionState }) {
   const [copied, setCopied] = useState(false);
+  // A new session means a new invitation, and a stale "Copied" would claim the wrong one is on the
+  // clipboard — the sort of small lie that ends with the wrong secret pasted into a chat window.
+  useEffect(() => setCopied(false), [state.token]);
 
   const copy = () => {
     const token = state.token;
