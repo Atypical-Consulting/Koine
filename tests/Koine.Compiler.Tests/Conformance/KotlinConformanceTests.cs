@@ -680,6 +680,97 @@ public class KotlinConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1531 (audit, Task 1) — the Rust (#1467/PR #1476) and Java (#1480/PR #1521) emitters both
+    /// shipped the identical bug in <c>BuildFactoryCtorArgs</c>'s auto-bound branch: a
+    /// <c>required</c>-bucket member declared optional but carrying no member-level default
+    /// (<c>total: Decimal?</c>), auto-bound to a NON-optional same-named factory parameter
+    /// (<c>create make(total: Decimal)</c>), had its bare field passed straight into a constructor slot
+    /// typed <c>Option&lt;T&gt;</c>/<c>Optional&lt;T&gt;</c> — a real <c>rustc</c> E0308 / <c>javac</c>
+    /// "incompatible types" error, fixed by wrapping in <c>Some(…)</c>/<c>Optional.of(…)</c>.
+    /// <para>
+    /// Kotlin's <c>BuildFactoryCtorArgs</c> has the textually identical loop shape and likewise passes
+    /// the bare field — but Kotlin maps <c>T?</c> to a NULLABLE TYPE
+    /// (<c>java.math.BigDecimal?</c>, <c>KotlinTypeMapper</c>), not to a wrapper value, and a non-null
+    /// <c>T</c> is directly assignable to a <c>T?</c> slot. There is no wrap construct to apply and none
+    /// is needed. This test records that negative audit result and locks it in: it asserts the
+    /// nullable-type constructor slot AND the bare, unwrapped argument, then proves with a real
+    /// <c>kotlinc</c> compile that the pair is valid Kotlin. Were the Kotlin backend ever to move to a
+    /// wrapper-typed optional representation, this test fails and the Rust/Java wrap becomes required.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Factory_autobound_parameter_binding_to_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(total: Decimal) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no kotlinc required): the optional-declared member's constructor slot is a
+        // NULLABLE type, so the auto-bound non-optional parameter is passed through bare — no wrapper
+        // value is constructed, and in particular no java.util.Optional leaks into Kotlin output.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("shop/Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("total: java.math.BigDecimal?,");
+        product.ShouldContain("return Product(id, total)");
+        product.ShouldNotContain("java.util.Optional");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(
+            "an auto-bound non-optional parameter must be assignable straight into an optional-declared "
+            + "member's nullable constructor slot:\n" + string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// The explicit-init half of the same #1531 audit — the branch Rust #1452/PR #1464 and Java
+    /// #1479/PR #1518 fixed. A <c>total -&gt; 5.0</c> initialization of an optional-declared,
+    /// default-less <c>required</c> member yields a non-optional value; Rust/Java must wrap it, Kotlin
+    /// must not, for the same nullable-vs-wrapper reason. Also covers the sibling case an
+    /// already-optional source would exercise: since nothing is ever wrapped, there is no double-wrap
+    /// hazard for Kotlin to guard against at all.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make() {
+                  total -> 5.0
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("shop/Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("total: java.math.BigDecimal?,");
+        product.ShouldContain("""return Product(id, java.math.BigDecimal("5.0"))""");
+        product.ShouldNotContain("java.util.Optional");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(
+            "an explicitly initialized non-optional value must be assignable straight into an "
+            + "optional-declared member's nullable constructor slot:\n" + string.Join("\n", r.Errors));
+    }
+
     /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's sources.</summary>
     private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
     {
