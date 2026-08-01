@@ -346,7 +346,7 @@ public class ScenarioSandboxTests
         RequireFilesystemConfinement();
 
         string outside = Path.Combine(Path.GetTempPath(), "koine-outside-" + Guid.NewGuid().ToString("N") + ".txt");
-        string stub = WriteStub(WriteProbe("inside.txt", outside)
+        string stub = WriteStub(WriteProbe("./inside.txt", outside)
             + Report("inside=" + EnvRef("inside") + " outside=" + EnvRef("outside")));
 
         try
@@ -427,7 +427,7 @@ public class ScenarioSandboxTests
             ? "@set inside=denied\r\n@set outside=denied\r\n"
               + WindowsWriteProbe("inside", inside) + WindowsWriteProbe("outside", outside)
             : "inside=denied; outside=denied\n"
-              + "if ( : > './" + inside + "' ) 2>/dev/null; then inside=allowed; fi\n"
+              + "if ( : > '" + inside + "' ) 2>/dev/null; then inside=allowed; fi\n"
               + "if ( : > '" + outside + "' ) 2>/dev/null; then outside=allowed; fi\n";
 
     /// <summary>
