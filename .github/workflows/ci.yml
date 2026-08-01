@@ -349,3 +349,30 @@ jobs:
         run: |
           dotnet publish src/Koine.Wasm -c Release
           node src/Koine.Wasm/smoke-test.mjs
+
+  # SCRATCH — issue #1782 Task 1: measuring real per-platform cost before committing to the final
+  # shape (draft gate, NuGet cache decision). Deliberately has NO draft/changes gate yet, so it runs
+  # on every push to this PR while it measures. Task 2 replaces this with the final, gated job.
+  sandbox-confinement:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      MSBUILDDISABLENODEREUSE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: ./.github/actions/setup-dotnet-wasm
+        with:
+          install-wasm-workloads: 'false'
+
+      - name: Test
+        run: >-
+          dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj
+          --filter "FullyQualifiedName~ScenarioSandboxTests"
+          -nodereuse:false
