@@ -349,6 +349,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntit
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DivisionByZeroInConstantDefault = "KOI1606" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateApiAnnotation = "KOI1212" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateApiRoute = "KOI1211" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI1007" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EmptyAuthRole = "KOI1210" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
