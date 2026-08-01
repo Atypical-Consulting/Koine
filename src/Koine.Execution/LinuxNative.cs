@@ -34,7 +34,7 @@ internal static class LinuxNative
     /// caller has <c>CAP_SYS_ADMIN</c>, which this one deliberately does not).</summary>
     private const int PrSetNoNewPrivs = 38;
 
-    private static int resolverRegistered;
+    private static int _resolverRegistered;
 
     /// <summary>
     /// Registers the libc resolver once per process. Safe to call from anywhere and any number of times;
@@ -42,7 +42,7 @@ internal static class LinuxNative
     /// </summary>
     internal static void EnsureLibcResolver()
     {
-        if (Interlocked.Exchange(ref resolverRegistered, 1) != 0)
+        if (Interlocked.Exchange(ref _resolverRegistered, 1) != 0)
         {
             return;
         }
