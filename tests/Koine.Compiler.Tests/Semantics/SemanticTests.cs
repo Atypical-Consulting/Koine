@@ -29,6 +29,30 @@ public class SemanticTests
         diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
     }
 
+    [Fact]
+    public void Unknown_type_reference_is_still_reported_in_a_multi_context_model()
+    {
+        // #1715 over-widening guard: ValidateTypeRef now classifies through the reference's own
+        // context (`Classify(resolver.Context, name)`) rather than the flat table. A name declared
+        // in NO context must still come back Unknown and report KOI0101 — context-aware resolution
+        // falls back to the global view, and that fallback must not turn a typo into a resolution.
+        const string src = """
+            context Freight {
+              value Item {
+                p: Nope
+              }
+            }
+
+            context Shipping {
+              value Parcel {
+                weight: Decimal
+              }
+            }
+            """;
+
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownType && d.Message.Contains("'Nope'"));
+    }
+
     [Theory]
     [InlineData("id")]   // collides with the generated identity property
     [InlineData("Id")]
