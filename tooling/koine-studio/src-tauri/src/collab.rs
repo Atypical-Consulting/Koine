@@ -35,6 +35,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+#[cfg(test)]
+use crate::noise::PUBLIC_KEY_HEX_LEN;
+use crate::noise::{decode_public_key, encode_hex, StaticKeypair, PUBLIC_KEY_BYTES};
+
 // --- limits (every one of these bounds something an unauthenticated peer controls) --------------
 
 /// Largest accepted wire frame. A `.koi` model is kilobytes and a Yjs update smaller still; the
@@ -50,7 +54,7 @@ pub const MAX_IDENTITY_FIELD_LEN: usize = 64;
 pub const MAX_SELECTION_RANGES: usize = 64;
 /// Length of the hex-encoded session secret (32 hex chars = 128 bits).
 pub const SECRET_HEX_LEN: usize = 32;
-/// Scheme prefix of a join token: `koine-collab://<host>:<port>/<secret>`.
+/// Scheme prefix of a join token: `koine-collab://<host>:<port>/<secret>/<public-key>`.
 pub const TOKEN_SCHEME: &str = "koine-collab://";
 
 /// Broker-minted handle for one connection. NOT the client's participant id — see the trust model.
@@ -588,14 +592,21 @@ pub fn new_secret() -> String {
     })
 }
 
-pub fn format_token(host: &str, port: u16, secret: &str) -> String {
-    format!("{TOKEN_SCHEME}{host}:{port}/{secret}")
+pub fn format_token(host: &str, port: u16, secret: &str, public_key: &str) -> String {
+    format!("{TOKEN_SCHEME}{host}:{port}/{secret}/{public_key}")
 }
 
-/// Parse `koine-collab://<host>:<port>/<secret>` into its parts. Strict: anything else is `None`.
-pub fn parse_token(token: &str) -> Option<(String, u16, String)> {
+/// Parse `koine-collab://<host>:<port>/<secret>/<public-key>` into its parts. Strict: anything else
+/// is `None`.
+///
+/// The public key is the broker's X25519 static key, and it is what makes the token more than a
+/// password: the joiner pins it through the Noise handshake (#1811, ADR 0017), so a machine in the
+/// middle cannot answer for a broker whose key it does not hold. A token without one is refused
+/// rather than dialled unencrypted — there is no downgrade path.
+pub fn parse_token(token: &str) -> Option<(String, u16, String, [u8; PUBLIC_KEY_BYTES])> {
     let rest = token.trim().strip_prefix(TOKEN_SCHEME)?;
-    let (authority, secret) = rest.split_once('/')?;
+    let (authority, rest) = rest.split_once('/')?;
+    let (secret, public_key) = rest.split_once('/')?;
     if secret.len() != SECRET_HEX_LEN
         || !secret
             .chars()
@@ -603,13 +614,14 @@ pub fn parse_token(token: &str) -> Option<(String, u16, String)> {
     {
         return None;
     }
+    let public_key = decode_public_key(public_key)?;
     // `rsplit_once` so a bracketed IPv6 literal (`[::1]:4321`) keeps its colons.
     let (host, port) = authority.rsplit_once(':')?;
     let port: u16 = port.parse().ok()?;
     if host.is_empty() || port == 0 {
         return None;
     }
-    Some((host.to_string(), port, secret.to_string()))
+    Some((host.to_string(), port, secret.to_string(), public_key))
 }
 
 /// Constant-time secret comparison — no early exit on the first differing byte.
@@ -904,11 +916,14 @@ pub fn host_session(
         .port();
 
     let secret = new_secret();
+    // One X25519 identity per session, minted here and published in the token. Nothing persists it,
+    // so there is no key to protect between sessions and a joiner's pin is scoped to this one.
+    let keypair = StaticKeypair::generate().map_err(|e| e.to_string())?;
     let mut broker = Broker::new();
     let admission = broker
         .create(identity, secret.clone())
         .map_err(|e| e.message().to_string())?;
-    let token = format_token(bind_host, port, &secret);
+    let token = format_token(bind_host, port, &secret, &keypair.public_hex());
 
     let hub = Arc::new(Hub {
         broker: Mutex::new(broker),
@@ -966,6 +981,10 @@ pub fn run_relay(bind_host: &str) -> Result<Relay, String> {
     let addr: SocketAddr = listener
         .local_addr()
         .map_err(|e| format!("could not read the relay address: {e}"))?;
+    // A relay's key is minted once at startup and published in its endpoint, because that endpoint is
+    // what an operator hands out and what a participant pins in `collab.relayUrl`.
+    let keypair = StaticKeypair::generate().map_err(|e| e.to_string())?;
+    let endpoint = format!("{bind_host}:{}/{}", addr.port(), keypair.public_hex());
 
     let hub = Arc::new(Hub {
         broker: Mutex::new(Broker::new()),
@@ -985,7 +1004,7 @@ pub fn run_relay(bind_host: &str) -> Result<Relay, String> {
         hub,
         shutdown,
         accept: Some(accept),
-        endpoint: format!("{bind_host}:{}", addr.port()),
+        endpoint,
     })
 }
 
@@ -1055,39 +1074,45 @@ pub fn join_session(
     identity: Participant,
     sink: Arc<dyn LocalSink>,
 ) -> Result<RemoteSession, String> {
-    let (host, port, secret) =
+    let (host, port, secret, broker_key) =
         parse_token(token).ok_or_else(|| "that is not a valid join token".to_string())?;
     let hello = ClientFrame::Join {
         secret,
         identity: identity.clone(),
     };
-    handshake(&host, port, hello, token.to_string(), sink)
+    handshake(&host, port, broker_key, hello, token.to_string(), sink)
 }
 
 /// Open a session on a user-configured relay: same protocol, `Create` instead of `Join`.
-/// `relay` is `host:port`, optionally with the `koine-collab://` scheme.
+/// `relay` is `host:port/<public-key>`, optionally with the `koine-collab://` scheme.
+///
+/// The key is not optional. A relay is a machine belonging to neither participant, so dialling one
+/// without pinning its key would be exactly the "looks encrypted, authenticates nobody" transport this
+/// change exists to avoid — the relay you reached would be whoever answered.
 pub fn create_via_relay(
     relay: &str,
     identity: Participant,
     sink: Arc<dyn LocalSink>,
 ) -> Result<RemoteSession, String> {
-    let authority = relay
+    const SHAPE: &str = "the collaboration relay must be host:port/<public-key>";
+    let trimmed = relay
         .trim()
         .trim_start_matches(TOKEN_SCHEME)
         .trim_end_matches('/');
+    let (authority, key_hex) = trimmed.split_once('/').ok_or_else(|| SHAPE.to_string())?;
+    let broker_key = decode_public_key(key_hex).ok_or_else(|| SHAPE.to_string())?;
     let (host, port) = authority
         .rsplit_once(':')
-        .ok_or_else(|| "the collaboration relay must be host:port".to_string())?;
-    let port: u16 = port
-        .parse()
-        .map_err(|_| "the collaboration relay must be host:port".to_string())?;
+        .ok_or_else(|| SHAPE.to_string())?;
+    let port: u16 = port.parse().map_err(|_| SHAPE.to_string())?;
     if host.is_empty() || port == 0 {
-        return Err("the collaboration relay must be host:port".to_string());
+        return Err(SHAPE.to_string());
     }
     // The token is composed below, once the relay has minted the secret.
     handshake(
         host,
         port,
+        broker_key,
         ClientFrame::Create { identity },
         String::new(),
         sink,
@@ -1097,6 +1122,7 @@ pub fn create_via_relay(
 fn handshake(
     host: &str,
     port: u16,
+    broker_key: [u8; PUBLIC_KEY_BYTES],
     hello: ClientFrame,
     token: String,
     sink: Arc<dyn LocalSink>,
@@ -1142,7 +1168,8 @@ fn handshake(
         let secret = secret.ok_or_else(|| {
             "the collaboration relay admitted the session without a token".to_string()
         })?;
-        format_token(host, port, &secret)
+        // The invitee has to pin the same relay key we just pinned, so it travels in the token.
+        format_token(host, port, &secret, &encode_hex(&broker_key))
     } else {
         token
     };
@@ -1690,31 +1717,96 @@ mod tests {
     #[test]
     fn a_token_round_trips_through_format_and_parse() {
         let secret = "a".repeat(SECRET_HEX_LEN);
-        let token = format_token("127.0.0.1", 4321, &secret);
-        assert_eq!(token, format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}"));
+        let key_hex = "b".repeat(PUBLIC_KEY_HEX_LEN);
+        let token = format_token("127.0.0.1", 4321, &secret, &key_hex);
+        assert_eq!(
+            token,
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{key_hex}")
+        );
         assert_eq!(
             parse_token(&token),
-            Some(("127.0.0.1".to_string(), 4321, secret))
+            Some((
+                "127.0.0.1".to_string(),
+                4321,
+                secret,
+                decode_public_key(&key_hex).expect("key")
+            ))
         );
     }
 
     #[test]
     fn parse_token_is_strict() {
         let secret = "a".repeat(SECRET_HEX_LEN);
+        let key = "b".repeat(PUBLIC_KEY_HEX_LEN);
         for bad in [
-            "".to_string(),
-            "127.0.0.1:4321/".to_string() + &secret,
-            format!("{TOKEN_SCHEME}127.0.0.1/{secret}"),
-            format!("{TOKEN_SCHEME}127.0.0.1:99999/{secret}"),
-            format!("{TOKEN_SCHEME}127.0.0.1:4321/short"),
+            String::new(),
+            format!("127.0.0.1:4321/{secret}/{key}"),
+            format!("{TOKEN_SCHEME}127.0.0.1/{secret}/{key}"),
+            format!("{TOKEN_SCHEME}127.0.0.1:99999/{secret}/{key}"),
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/short/{key}"),
             format!(
-                "{TOKEN_SCHEME}127.0.0.1:4321/{}",
+                "{TOKEN_SCHEME}127.0.0.1:4321/{}/{key}",
                 "z".repeat(SECRET_HEX_LEN)
             ),
-            format!("{TOKEN_SCHEME}:4321/{secret}"),
+            format!("{TOKEN_SCHEME}:4321/{secret}/{key}"),
+            // The pinned key is what stops a machine in the middle answering for the broker, so a
+            // token missing or mangling it is refused outright — never dialled unencrypted (#1811).
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}"),
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}/"),
+            format!(
+                "{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{}",
+                "b".repeat(PUBLIC_KEY_HEX_LEN - 1)
+            ),
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{key}/extra"),
+            format!(
+                "{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{}",
+                "Z".repeat(PUBLIC_KEY_HEX_LEN)
+            ),
         ] {
             assert_eq!(parse_token(&bad), None, "must reject {bad:?}");
         }
+    }
+
+    #[test]
+    fn a_hosted_session_publishes_a_fresh_public_key_in_its_token() {
+        let (sink_a, _rx_a) = sink();
+        let (sink_b, _rx_b) = sink();
+        let first = host_session("127.0.0.1", participant("ada"), sink_a).expect("host");
+        let second = host_session("127.0.0.1", participant("ada"), sink_b).expect("host");
+
+        let (_, _, _, key_a) = parse_token(&first.info.token).expect("token");
+        let (_, _, _, key_b) = parse_token(&second.info.token).expect("token");
+        assert_ne!(
+            key_a, key_b,
+            "a session key is scoped to its session, so one token never speaks for another"
+        );
+    }
+
+    #[test]
+    fn a_relay_publishes_its_public_key_in_its_endpoint() {
+        let relay = run_relay("127.0.0.1").expect("relay");
+        let (_, key_hex) = relay
+            .endpoint
+            .split_once('/')
+            .expect("endpoint carries a key");
+        assert!(
+            decode_public_key(key_hex).is_some(),
+            "an operator hands this string out; it has to carry what a participant must pin: {}",
+            relay.endpoint
+        );
+    }
+
+    #[test]
+    fn a_relay_address_without_a_pinned_key_is_refused() {
+        let relay = run_relay("127.0.0.1").expect("relay");
+        let (authority, _) = relay.endpoint.split_once('/').expect("endpoint");
+
+        let (guest_sink, _rx) = sink();
+        let err = create_via_relay(authority, participant("ada"), guest_sink).unwrap_err();
+        assert!(
+            err.contains("public-key"),
+            "an unpinned relay is whoever answered, so it is refused rather than dialled: {err}"
+        );
     }
 
     #[test]
@@ -1822,10 +1914,15 @@ mod tests {
     fn a_join_with_the_wrong_token_is_refused() {
         let (host_sink, _host_rx) = sink();
         let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
-        let (_, port, _) = parse_token(&hosted.info.token).expect("token");
+        let (_, port, _, broker_key) = parse_token(&hosted.info.token).expect("token");
 
         let (guest_sink, _guest_rx) = sink();
-        let wrong = format_token("127.0.0.1", port, &"b".repeat(SECRET_HEX_LEN));
+        let wrong = format_token(
+            "127.0.0.1",
+            port,
+            &"b".repeat(SECRET_HEX_LEN),
+            &encode_hex(&broker_key),
+        );
         let err = join_session(&wrong, participant("grace"), guest_sink).unwrap_err();
 
         assert_eq!(err, BrokerError::UnknownSession.message());
@@ -1835,7 +1932,7 @@ mod tests {
     fn a_hosted_session_refuses_a_create_frame_from_the_wire() {
         let (host_sink, _host_rx) = sink();
         let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
-        let (_, port, _) = parse_token(&hosted.info.token).expect("token");
+        let (_, port, _, _) = parse_token(&hosted.info.token).expect("token");
 
         // Reaching someone's listener must not let you open a session on their machine — only a
         // relay honours `Create`.
@@ -1927,7 +2024,12 @@ mod tests {
             }
         });
         (
-            format_token("127.0.0.1", port, &"a".repeat(SECRET_HEX_LEN)),
+            format_token(
+                "127.0.0.1",
+                port,
+                &"a".repeat(SECRET_HEX_LEN),
+                &"a".repeat(PUBLIC_KEY_HEX_LEN),
+            ),
             handle,
         )
     }
@@ -2001,7 +2103,7 @@ mod tests {
             "whoever opened the session owns the document, even on a relay"
         );
         assert_eq!(
-            parse_token(&creator.info.token).map(|(_, _, s)| s.len()),
+            parse_token(&creator.info.token).map(|(_, _, s, _)| s.len()),
             Some(SECRET_HEX_LEN),
             "the relay minted a real join token: {}",
             creator.info.session_id
