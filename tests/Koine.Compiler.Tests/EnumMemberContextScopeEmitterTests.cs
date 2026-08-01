@@ -119,4 +119,30 @@ public class EnumMemberContextScopeEmitterTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1793, Task 1 — the most severe of the three remaining targets: pre-fix, Rust emitted
+    /// <c>if !(crate::a::Status::Red != Flag::Blue)</c>, and <c>cargo check</c> rejected the crate
+    /// outright with <c>error[E0308]: mismatched types … expected `Status`, found `Flag`</c>. The
+    /// <c>CompileRust</c> meta-test below is what makes this a real regression guard rather than a
+    /// string assertion: a wrong qualifier here does not type-check.
+    /// </summary>
+    [Fact]
+    public void Rust_qualifies_both_operands_against_the_referencing_contexts_own_enum()
+    {
+        var result = new KoineCompiler().Compile(CrossContextCollision, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Rust emits one module per bounded context, so `C`'s entity lives in `src/c.rs`.
+        var module = result.Files.Single(f => f.RelativePath.EndsWith("c.rs", StringComparison.Ordinal)).Contents;
+        module.ShouldContain("Flag::Red");
+        module.ShouldContain("Flag::Blue");
+        module.ShouldNotContain("Marker::");
+        module.ShouldNotContain("Signal::");
+        module.ShouldNotContain("Status::");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable cargo toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
