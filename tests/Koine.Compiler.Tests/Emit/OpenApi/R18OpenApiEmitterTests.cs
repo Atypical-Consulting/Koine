@@ -488,4 +488,105 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
         yaml.ShouldContain("operationId: Order_submit");
         yaml.ShouldNotContain("operationId: Order_cancel");
     }
+
+    // ------------------------------------------------------------------
+    // #1748 — a path parameter is typed off its RouteTokenBinding instead of
+    // a blanket `string`: the aggregate identity's own strategy (Guid/
+    // Sequence/Natural), a member's declared type, or `string` for a token
+    // KOI1215 already flags as unbound.
+    // ------------------------------------------------------------------
+
+    /// <summary>A Guid-strategy (the default) aggregate identity types its path parameter as a UUID string.</summary>
+    [Fact]
+    public void An_identity_bound_path_parameter_on_a_guid_entity_is_typed_uuid()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("ordering.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("name: id\n          in: path\n          required: true\n          schema:\n            type: string\n            format: uuid");
+    }
+
+    /// <summary>A token bound to a member parameter is typed off that parameter's own declared type, not the identity.</summary>
+    [Fact]
+    public void A_member_bound_path_parameter_is_typed_off_the_parameters_own_type()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{revision}")
+                  @put
+                  command submit(revision: Int) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("ordering.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("name: revision\n          in: path\n          required: true\n          schema:\n            type: integer");
+        yaml.ShouldNotContain("format: uuid");
+    }
+
+    /// <summary>An unbound token (KOI1215's concern, not this one) still degrades to a bare <c>string</c>, as before #1748.</summary>
+    [Fact]
+    public void An_unbound_path_parameter_stays_typed_string()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{ref}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        // The model carries a KOI1215 warning (an unrelated concern to this test) but Success only
+        // reflects Error-severity diagnostics, so Compile still runs the emitter.
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("ordering.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("name: ref\n          in: path\n          required: true\n          schema:\n            type: string");
+        yaml.ShouldNotContain("format: uuid");
+    }
 }

@@ -194,6 +194,7 @@ public static class DiagnosticCodes
     public const string DuplicateApiAnnotation = "KOI1212";
     public const string VerbAnnotationArgument = "KOI1213";
     public const string VersionAnnotationOnCommand = "KOI1214";
+    public const string UnboundRouteToken = "KOI1215";
 
     // ---- Multi-file, imports, modules (KOI1300–1399) ----------------------
     public const string UnknownContext = "KOI1301";
@@ -403,6 +404,7 @@ public static class DiagnosticCodes
             [DuplicateApiAnnotation] = D(DuplicateApiAnnotation, "A command or query repeats a single-valued API annotation ('@route' or '@auth'); only the last would take effect.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [VerbAnnotationArgument] = D(VerbAnnotationArgument, "An HTTP verb annotation ('@get'/'@post'/'@put'/'@delete'/'@patch') was given an argument; a verb is a bare marker and the argument would be discarded.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [VersionAnnotationOnCommand] = D(VersionAnnotationOnCommand, "A command carries a '@since'/'@deprecated' evolution annotation; those apply to type declarations, and a command is not one, so it would be discarded.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [UnboundRouteToken] = D(UnboundRouteToken, "A '@route' template names a '{token}' that binds to nothing: no parameter/criterion of the declaration is named after it, and (for a command) it is not 'id' either.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Warning),
 
             // ---- Multi-file, imports, modules --------------------------------
             [UnknownContext] = D(UnknownContext, "An import or qualified reference names a context that is not declared.", DiagnosticCategory.MultiFile, DiagnosticSeverity.Error),

@@ -387,7 +387,10 @@ public class R19ApiAnnotationsTests
     /// <summary>
     /// Non-regression, and the reason the check cannot be a naive brace count: constraints, optional and
     /// catch-all parameters, and the <c>{{</c>/<c>}}</c> escape for a literal brace are all legal
-    /// templates that the routing stack accepts, so none of them may be diagnosed.
+    /// templates that the routing stack accepts, so none of them may be diagnosed as KOI1208. Some of
+    /// these ARE unbound tokens under KOI1215 (#1748 — <c>rest</c>/<c>lineId</c> name nothing on
+    /// <see cref="CommandSource"/>'s parameter-less <c>place</c> command); this test only pins the
+    /// well-formedness check, so it filters to that one code.
     /// </summary>
     [Theory]
     [InlineData("/orders/{id}")]
@@ -398,7 +401,70 @@ public class R19ApiAnnotationsTests
     [InlineData("/orders/{id}/lines/{lineId}")]
     [InlineData("/")]
     public void A_well_formed_route_template_is_accepted(string route) =>
-        Diagnose(CommandSource($"""@route("{route}")""")).ShouldBeEmpty();
+        Diagnose(CommandSource($"""@route("{route}")"""))
+            .ShouldNotContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+
+    // ---- KOI1215: an unbound route token (#1748) -----------------------------
+
+    /// <summary>A token naming neither a parameter nor (via the <c>id</c> fallback) the aggregate
+    /// identity is decorative — KOI1215 warns exactly once, on the <c>@route</c> annotation's span.</summary>
+    [Fact]
+    public void A_token_naming_nothing_on_a_command_is_a_KOI1215_warning()
+    {
+        Diagnostic warning = Diagnose(CommandSource("""@route("/orders/{ref}")"""))
+            .ShouldHaveSingleItem();
+
+        warning.Code.ShouldBe(DiagnosticCodes.UnboundRouteToken);
+        warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
+        warning.Line.ShouldBe(7);
+        warning.Message.ShouldContain("{ref}");
+    }
+
+    /// <summary>Non-regression: <c>id</c> resolves via the aggregate-identity fallback, so it is never flagged.</summary>
+    [Fact]
+    public void An_id_token_on_a_command_is_not_flagged() =>
+        Diagnose(CommandSource("""@route("/orders/{id}")""")).ShouldBeEmpty();
+
+    /// <summary>Non-regression: a token that names a real command parameter is never flagged.</summary>
+    [Fact]
+    public void A_token_naming_a_real_parameter_is_not_flagged()
+    {
+        const string src = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{note}")
+                  command place(note: String) {
+                    requires status == Draft "order already placed"
+                    status -> Placed
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    /// <summary>A query has no identity fallback: a token naming no criterion is always unbound.</summary>
+    [Fact]
+    public void A_token_naming_no_criterion_on_a_query_is_a_KOI1215_warning() =>
+        Diagnose(QuerySource("""@route("/orders/{ref}")"""))
+            .ShouldHaveSingleItem().Code.ShouldBe(DiagnosticCodes.UnboundRouteToken);
+
+    /// <summary>A two-token route reports only the token that actually fails to bind.</summary>
+    [Fact]
+    public void A_two_token_route_with_one_bad_token_reports_exactly_one_warning()
+    {
+        Diagnostic warning = Diagnose(CommandSource("""@route("/orders/{id}/lines/{lineId}")"""))
+            .ShouldHaveSingleItem();
+
+        warning.Code.ShouldBe(DiagnosticCodes.UnboundRouteToken);
+        warning.Message.ShouldContain("{lineId}");
+    }
 
     // ---- each annotation is single-valued (#1219 review) --------------------
 

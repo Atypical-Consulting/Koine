@@ -78,36 +78,61 @@ public sealed partial class OpenApiEmitter
     }
 
     /// <summary>
-    /// The <c>in: path</c> parameter objects an operation's route template implies (#1219). OpenAPI
-    /// requires every <c>{token}</c> in a path key to be declared as a required path parameter, so an
-    /// <c>@route("/orders/{id}")</c> that declared none produced a document a real validator rejects
+    /// The <c>in: path</c> parameter objects an operation's route template implies (#1219), each typed
+    /// off its <see cref="RouteTokenBinding"/> (#1748) instead of a blanket <c>string</c>: a
+    /// <see cref="RouteTokenTarget.Member"/> binding gets the schema for the parameter/criterion it
+    /// names; a <see cref="RouteTokenTarget.Identity"/> binding gets <paramref name="entity"/>'s own
+    /// identity schema (<see cref="IdentitySchema"/>); an <see cref="RouteTokenTarget.Unbound"/> token —
+    /// legal pre-#1734, KOI1215's concern rather than this method's — stays <c>string</c> as before.
+    /// OpenAPI requires every <c>{token}</c> in a path key to be declared as a required path parameter, so
+    /// an <c>@route("/orders/{id}")</c> that declared none produced a document a real validator rejects
     /// (<c>openapi-spec-validator</c>: "Path parameter 'id' … was not resolved"; <c>redocly lint</c>:
-    /// <c>path-parameters-defined</c>). Tokens come from the shared <see cref="RouteTemplate"/> walker
-    /// (#1748), in declaration order and de-duplicated. Every token is typed <c>string</c>: the route is
-    /// free text, so nothing here says what the token binds to (see §15.9 of the reference docs).
+    /// <c>path-parameters-defined</c>). Tokens come from <see cref="RouteInfo.TokenBindings"/> (the shared
+    /// <see cref="RouteTemplate"/> walker, #1748), in declaration order and de-duplicated.
     /// </summary>
-    private static YamlArray? PathParameters(string route)
+    /// <param name="entity">The command's owning entity, whose <see cref="EntityDecl.IdStrategy"/> types
+    /// an <see cref="RouteTokenTarget.Identity"/> binding — or <c>null</c> for a query, which never
+    /// resolves one (<c>RouteDerivation.ForQuery</c> has no identity to fall back to).</param>
+    private static YamlArray? PathParameters(RouteInfo route, EntityDecl? entity, ModelIndex index, HashSet<string> emitted)
     {
-        IReadOnlyList<string> names = RouteTemplate.Tokens(route);
-        if (names.Count == 0)
+        if (route.TokenBindings.Count == 0)
         {
             return null;
         }
 
         var parameters = new YamlArray();
-        foreach (var name in names)
+        foreach (RouteTokenBinding binding in route.TokenBindings)
         {
             var parameter = new YamlObject();
-            parameter.Add("name", name);
+            parameter.Add("name", binding.Token);
             parameter.Add("in", "path");
             // A path token is always required — OpenAPI forbids an optional one, even for `{id?}`.
             parameter.Add("required", Yaml.Bool(true));
-            parameter.Add("schema", new YamlObject().Add("type", "string"));
+            parameter.Add("schema", binding.Target switch
+            {
+                RouteTokenTarget.Member => SchemaForType(binding.Type!, index, emitted),
+                RouteTokenTarget.Identity => IdentitySchema(entity!.IdStrategy, entity.IdBackingType),
+                _ => new YamlObject().Add("type", "string"),
+            });
             parameters.Add(parameter);
         }
 
         return parameters;
     }
+
+    /// <summary>
+    /// The OpenAPI schema for an entity's identity value object, by its generation strategy (#1748):
+    /// <c>Guid</c> ⇒ a UUID string (matching the wrapped <c>Guid</c>); <c>Sequence</c> ⇒ a store-assigned
+    /// 64-bit integer; <c>Natural</c> ⇒ its own backing primitive (<c>Int</c> ⇒ 32-bit integer, else the
+    /// natural-string key ⇒ <c>string</c>) — mirroring <c>CSharpEmitter.EmitIdValueObject</c>'s own
+    /// strategy → backing-type mapping so the openapi document and the C# identity type never disagree.
+    /// </summary>
+    private static YamlObject IdentitySchema(IdentityStrategy strategy, string? backingType) => strategy switch
+    {
+        IdentityStrategy.Sequence => Scalar("integer", "int64"),
+        IdentityStrategy.Natural => backingType == "Int" ? Scalar("integer", "int32") : Scalar("string"),
+        _ => Scalar("string", "uuid"),
+    };
 
     /// <summary>
     /// Adds the OpenAPI security-requirement object an <c>@auth("role")</c> annotation implies —
@@ -135,7 +160,7 @@ public sealed partial class OpenApiEmitter
             : Yaml.Str(OneLine(command.Doc!)));
 
         // An `@route` template's `{token}`s must be declared as path parameters or the document is invalid.
-        if (PathParameters(route.Route) is { } pathParameters)
+        if (PathParameters(route, entity, index, emitted) is { } pathParameters)
         {
             operation.Add("parameters", pathParameters);
         }
@@ -182,7 +207,7 @@ public sealed partial class OpenApiEmitter
 
         // Path parameters first (they are part of the URL), then the criteria as query parameters — the
         // two live in one `parameters` array, distinguished by their `in` value.
-        YamlArray? parameters = PathParameters(route.Route);
+        YamlArray? parameters = PathParameters(route, entity: null, index, emitted);
         if (query.Criteria.Count > 0)
         {
             parameters ??= new YamlArray();

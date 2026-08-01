@@ -66,7 +66,8 @@ internal static class EntityBehaviorValidator
             // R19 — the `@route`/verb/`@auth` annotations preceding the command. Shared with queries,
             // so the rules live next to the other CQRS checks.
             CqrsValidator.ValidateApiAnnotations(
-                cmd.ApiAnnotations, cmd.RouteOverride, cmd.AuthRole, $"command '{cmd.Name}'", cmd.Span, diagnostics);
+                cmd.ApiAnnotations, cmd.RouteOverride, cmd.AuthRole, $"command '{cmd.Name}'", cmd.Span, diagnostics,
+                cmd.Parameters, entity.IdentityName);
 
             // Scope: the entity's members, the synthetic `id` (its identity), and the
             // command's parameters.
