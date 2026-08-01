@@ -177,7 +177,8 @@ export interface CollabSessionInfo {
  * Register the `on*` handlers BEFORE `start`, exactly like the terminal and LSP transports.
  */
 export interface CollabTransport {
-  /** Create or join the session, resolving once connected. Rejects on an unknown/expired join token. */
+  /** Create or join the session, resolving once connected. Rejects on an unknown/expired join token.
+   *  Leaves any session this transport is already in first, so a reconnect can simply `start` again. */
   start(request: CollabSessionRequest): Promise<CollabSessionInfo>;
   /** Broadcast an opaque CRDT update to the other participants (never echoed back to the sender). */
   send(update: Uint8Array): Promise<void>;
@@ -191,7 +192,9 @@ export interface CollabTransport {
   onPeerJoin(cb: (peer: CollabParticipant) => void): void;
   /** Register the peer-left handler (their presence must be dropped). */
   onPeerLeave(cb: (participantId: string) => void): void;
-  /** Leave the session and detach listeners. Idempotent; later sends are inert, never a throw. */
+  /** Leave the session: peers are notified and nothing further is delivered. The `on*` handlers stay
+   *  registered so a reconnect can `start` again without re-attaching them. Idempotent; a send after
+   *  leaving is inert, never a throw. */
   stop(): Promise<void>;
 }
 

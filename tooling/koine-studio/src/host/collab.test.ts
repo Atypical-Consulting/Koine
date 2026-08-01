@@ -170,6 +170,113 @@ describe('CollabTransport contract (in-memory reference broker)', () => {
     await host.stop();
   });
 
+  // `identity` is self-asserted by the client and the join token is the only credential, so authority
+  // must key off the member that CREATED the room, never off a participant id anyone can present. Two
+  // participants both believing they own the canonical `.koi` save is a lost-write bug.
+  it('does not grant authority to a joiner presenting the creator’s identity', async () => {
+    const broker = createInMemoryCollabBroker();
+    const host = broker.createTransport();
+    const impostor = broker.createTransport();
+    const { token } = await host.start({ mode: 'create', identity: ada });
+
+    const info = await impostor.start({ mode: 'join', token, identity: { ...ada, displayName: 'Impostor' } });
+
+    expect(info.authority).toBe(false);
+    await host.stop();
+    await impostor.stop();
+  });
+
+  // These handlers end in `view.dispatch`, which CodeMirror can throw out of. One bad participant must
+  // not abort the fan-out loop and silently starve everyone after it — that is permanent divergence once
+  // these frames carry CRDT updates.
+  it('keeps delivering to the remaining peers when one peer’s handler throws', async () => {
+    const broker = createInMemoryCollabBroker();
+    const host = broker.createTransport();
+    const bad = broker.createTransport();
+    const good = broker.createTransport();
+    const { token } = await host.start({ mode: 'create', identity: ada });
+    await bad.start({ mode: 'join', token, identity: linus });
+    await good.start({ mode: 'join', token, identity: { id: 'grace', displayName: 'Grace', color: '#7ac' } });
+
+    bad.onUpdate(() => {
+      throw new Error('this peer’s editor blew up');
+    });
+    const delivered = vi.fn();
+    good.onUpdate(delivered);
+
+    await expect(host.send(Uint8Array.from([7]))).resolves.toBeUndefined(); // never throws at the sender
+    expect(delivered).toHaveBeenCalledTimes(1);
+    await host.stop();
+    await bad.stop();
+    await good.stop();
+  });
+
+  it('does not let a throwing peer-leave handler hide a departure from the other peers', async () => {
+    const broker = createInMemoryCollabBroker();
+    const leaver = broker.createTransport();
+    const bad = broker.createTransport();
+    const good = broker.createTransport();
+    const { token } = await leaver.start({ mode: 'create', identity: ada });
+    await bad.start({ mode: 'join', token, identity: linus });
+    await good.start({ mode: 'join', token, identity: { id: 'grace', displayName: 'Grace', color: '#7ac' } });
+
+    bad.onPeerLeave(() => {
+      throw new Error('boom');
+    });
+    const sawLeave = vi.fn();
+    good.onPeerLeave(sawLeave);
+
+    await expect(leaver.stop()).resolves.toBeUndefined();
+    expect(sawLeave).toHaveBeenCalledWith(ada.id);
+    await bad.stop();
+    await good.stop();
+  });
+
+  // A reconnect that re-`start`s without an intervening `stop` would otherwise leave the member in BOTH
+  // rooms, with `stop()` only ever able to remove it from the newer one.
+  it('leaves the current session when start() is called again, with no ghost membership behind', async () => {
+    const broker = createInMemoryCollabBroker();
+    const first = broker.createTransport();
+    const second = broker.createTransport();
+    const mover = broker.createTransport();
+    const a = await first.start({ mode: 'create', identity: ada });
+    const b = await second.start({ mode: 'create', identity: linus });
+    await mover.start({ mode: 'join', token: a.token, identity: { id: 'grace', displayName: 'Grace', color: '#7ac' } });
+
+    // Re-start into the OTHER session without stopping first.
+    await mover.start({ mode: 'join', token: b.token, identity: { id: 'grace', displayName: 'Grace', color: '#7ac' } });
+
+    const stale = vi.fn();
+    mover.onUpdate(stale);
+    await first.send(Uint8Array.from([1])); // the abandoned room must no longer reach it
+    expect(stale).not.toHaveBeenCalled();
+
+    await mover.stop();
+    await second.send(Uint8Array.from([2])); // …and stop() really removed it from the current room too
+    expect(stale).not.toHaveBeenCalled();
+    await first.stop();
+    await second.stop();
+  });
+
+  it('tells the abandoned session’s peers that the re-starting participant left', async () => {
+    const broker = createInMemoryCollabBroker();
+    const host = broker.createTransport();
+    const other = broker.createTransport();
+    const mover = broker.createTransport();
+    const a = await host.start({ mode: 'create', identity: ada });
+    const b = await other.start({ mode: 'create', identity: linus });
+    await mover.start({ mode: 'join', token: a.token, identity: { id: 'grace', displayName: 'Grace', color: '#7ac' } });
+
+    const left = vi.fn();
+    host.onPeerLeave(left);
+    await mover.start({ mode: 'join', token: b.token, identity: { id: 'grace', displayName: 'Grace', color: '#7ac' } });
+
+    expect(left).toHaveBeenCalledWith('grace');
+    await host.stop();
+    await other.stop();
+    await mover.stop();
+  });
+
   it('is idempotent on stop() and inert on send() after leaving (no throw in the UI path)', async () => {
     const broker = createInMemoryCollabBroker();
     const host = broker.createTransport();

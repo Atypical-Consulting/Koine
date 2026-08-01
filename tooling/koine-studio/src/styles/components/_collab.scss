@@ -40,10 +40,13 @@
   position: relative;
   display: inline-block;
   width: 0;
-  /* Overlay the character cell to the right rather than reflowing the line — a remote caret must not
-     shift the text the local user is editing. */
   border-left: 2px solid var(--koi-presence-color, var(--koi-accent));
+  /* NET-ZERO inline advance: the 2px border box would otherwise contribute to layout, so the two
+     negative margins cancel it (-1 + 2 - 1 = 0). Without this every remote caret nudges the rest of the
+     line 1px, and because a peer's caret moves on every keystroke THEY type, the local user's text
+     jitters while someone else is editing. The bar straddles the character boundary instead. */
   margin-left: -1px;
+  margin-right: -1px;
   pointer-events: none;
 }
 

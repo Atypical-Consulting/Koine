@@ -46,8 +46,14 @@ interface Member {
 interface Session {
   id: string;
   token: string;
-  /** The creator's participant id — the document authority that owns the canonical save. */
-  authorityId: string;
+  /**
+   * The creating MEMBER — the document authority that owns the canonical save. Deliberately the member
+   * object and not its participant id: `identity` is self-asserted by the client and the join token is
+   * the only credential, so comparing ids would let any joiner claim authority just by presenting the
+   * creator's id (and would hand a second authority to the same user opening their own session from a
+   * second window). Two participants both believing they own the canonical save is a lost-write bug.
+   */
+  authorityMember: Member;
   members: Set<Member>;
 }
 
@@ -72,7 +78,15 @@ export function createInMemoryCollabBroker(): CollabBroker {
   ): void {
     for (const member of session.members) {
       if (member === sender) continue; // never echo the originator — that is how update loops start
-      pick(member)?.(payload);
+      try {
+        pick(member)?.(payload);
+      } catch {
+        // One participant's handler must not starve the rest. These callbacks end in `view.dispatch`,
+        // which CodeMirror can throw out of; without this guard a single bad peer aborts the loop and
+        // every participant after it in iteration order silently misses the frame — permanent, silent
+        // divergence once these carry CRDT updates. Swallowed rather than logged: the payload may
+        // contain document text, and a broker must not leak it into a console.
+      }
     }
   }
 
@@ -88,15 +102,32 @@ export function createInMemoryCollabBroker(): CollabBroker {
     // rather than a throw in the UI path.
     let session: Session | null = null;
 
+    /** Remove this member from its current session (if any) and tell the peers. Shared by stop/re-start. */
+    function leaveCurrent(): void {
+      const leaving = session;
+      session = null; // first, so a re-entrant stop() from a peer-leave handler is a no-op
+      if (!leaving) return;
+      leaving.members.delete(member);
+      fanOut(leaving, member, (m) => m.onPeerLeave, member.identity.id);
+      // Reclaim the room once empty, so a stale token can never re-open an abandoned session.
+      if (leaving.members.size === 0) sessions.delete(leaving.token);
+    }
+
     return {
       start(request: CollabSessionRequest): Promise<CollabSessionInfo> {
+        // A transport that is already in a session must LEAVE it before entering the next one —
+        // otherwise the same member object sits in both rooms while `session` points only at the newer,
+        // so the old room keeps delivering to it, `stop()` can never remove it, and the abandoned room's
+        // member count never reaches zero (leaking its token). A reconnect that re-`start`s without an
+        // intervening `stop` hits this on the ordinary path.
+        leaveCurrent();
         member.identity = request.identity;
 
         if (request.mode === 'create') {
           const created: Session = {
             id: nextId('session'),
             token: nextId('token'),
-            authorityId: request.identity.id,
+            authorityMember: member,
             members: new Set([member]),
           };
           sessions.set(created.token, created);
@@ -127,7 +158,9 @@ export function createInMemoryCollabBroker(): CollabBroker {
         return Promise.resolve({
           sessionId: target.id,
           token: target.token,
-          authority: target.authorityId === request.identity.id,
+          // Always false for a joiner: authority is held by the member that CREATED the room, and a
+          // fresh member can never be that one, whatever identity it presents.
+          authority: target.authorityMember === member,
           self: request.identity,
         });
       },
@@ -156,13 +189,7 @@ export function createInMemoryCollabBroker(): CollabBroker {
       },
 
       stop(): Promise<void> {
-        const leaving = session;
-        session = null; // first, so a re-entrant stop() from a peer-leave handler is a no-op
-        if (!leaving) return Promise.resolve();
-        leaving.members.delete(member);
-        fanOut(leaving, member, (m) => m.onPeerLeave, member.identity.id);
-        // Reclaim the room once empty, so a stale token can never re-open an abandoned session.
-        if (leaving.members.size === 0) sessions.delete(leaving.token);
+        leaveCurrent();
         return Promise.resolve();
       },
     };

@@ -44,7 +44,12 @@ describe('buildPresenceDecorations', () => {
     const carets = rows(set).filter((r) => r.widget);
     expect(carets).toHaveLength(1);
     expect(carets[0].from).toBe(6);
-    expect(carets[0].to).toBe(6); // zero-width: a caret must not consume a character cell
+  });
+
+  it('orders a caret AFTER a selection mark starting at the same offset', () => {
+    const set = buildPresenceDecorations([presence('ada', 6, [{ from: 6, to: 11 }])], doc());
+    const at6 = rows(set).filter((r) => r.from === 6);
+    expect(at6.map((r) => r.widget)).toEqual([false, true]); // mark first, then the caret on top
   });
 
   it('paints one selection mark per remote range, in that participant’s colour', () => {
@@ -114,6 +119,53 @@ describe('buildPresenceDecorations', () => {
   it('yields nothing at all for an empty participant list', () => {
     expect(buildPresenceDecorations([], doc())).toBe(Decoration.none);
   });
+
+  // A frame is untrusted wire data authenticated only by a shared token, and the builder runs inside
+  // `presenceField.update` — so a malformed frame that throws would escape `view.dispatch` and wedge the
+  // editor, exactly the failure the numeric guards above exist to prevent.
+  it('survives a frame whose selection is missing entirely, still painting the caret', () => {
+    const malformed = { participantId: 'ada', displayName: 'Ada', color: '#f00', cursor: 4 } as CollabPresence;
+    const set = buildPresenceDecorations([malformed], doc());
+    expect(rows(set).filter((r) => r.widget)).toHaveLength(1);
+  });
+
+  it('survives a frame whose selection is not an array', () => {
+    const malformed = { ...presence('ada', 4), selection: 'nope' } as unknown as CollabPresence;
+    expect(() => buildPresenceDecorations([malformed], doc())).not.toThrow();
+  });
+
+  it('does not interpolate a non-string colour into the style attribute', () => {
+    const malformed = { ...presence('ada', 4, [{ from: 0, to: 5 }]), color: { evil: true } } as unknown as CollabPresence;
+    const marks = rows(buildPresenceDecorations([malformed], doc())).filter((r) => !r.widget);
+    expect(marks[0].color).toBe('--koi-presence-color: ');
+  });
+});
+
+// The widget's DOM is where the participant's name and colour actually reach the user; `rows()` above
+// only sees the decoration SPEC, so without these the label, the caret colour and the aria-hidden
+// treatment could all regress with the whole suite still green.
+describe('PresenceCaretWidget DOM', () => {
+  function caretEl(entry: CollabPresence): HTMLElement {
+    const { view, cleanup } = viewWith();
+    setRemotePresence(view, [entry]);
+    const el = view.dom.querySelector('.cm-presence-caret');
+    cleanup();
+    return el as HTMLElement;
+  }
+
+  it('renders a caret element carrying the participant’s colour', () => {
+    const el = caretEl(presence('ada', 6));
+    expect(el).not.toBeNull();
+    expect(el.style.getPropertyValue('--koi-presence-color')).toBe('#adac01');
+  });
+
+  it('labels the caret with the participant’s display name', () => {
+    expect(caretEl(presence('ada', 6)).querySelector('.cm-presence-label')?.textContent).toBe('ADA');
+  });
+
+  it('hides presence from assistive technology — it is decoration, not content', () => {
+    expect(caretEl(presence('ada', 6)).getAttribute('aria-hidden')).toBe('true');
+  });
 });
 
 /** A view over DOC with the presence extension installed, plus a spy on outbound frames.
@@ -173,6 +225,15 @@ describe('presence field and remote updates', () => {
 });
 
 describe('outbound local presence', () => {
+  // Presence is a snapshot, so silence reads as absence: a participant who attaches and never touches
+  // the keyboard would have no caret on anyone's screen until they happened to move.
+  it('publishes one frame immediately on attach, before any selection change', () => {
+    const { publish, cleanup } = viewWith();
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0][0]).toEqual({ cursor: 0, selection: [] });
+    cleanup();
+  });
+
   it('publishes the local caret and selection whenever the selection changes', () => {
     const { view, publish, cleanup } = viewWith();
     view.dispatch({ selection: EditorSelection.single(6, 11) });
