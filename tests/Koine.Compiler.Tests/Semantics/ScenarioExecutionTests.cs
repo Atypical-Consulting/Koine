@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Semantics.Scenarios;
 using Koine.Compiler.Services;
@@ -940,4 +941,333 @@ public class ScenarioExecutionTests
         // never a swallowed "no state was established" note.
         state.ShouldBeOfType<DownstreamState.Rejected>().Violation.ShouldBeSameAs(violation);
     }
+
+    // ------------------------------------------------------------------------
+    // Fan-out DISPATCH (#1758, decisions D1/D3/D4/D5/D6): the resolved downstream
+    // reaction really RUNS, its steps are attributed to the aggregate that
+    // produced them, its state merges under `<Entity>.<member>` keys, and the
+    // cascade is bounded by BOTH a depth cap and a visited set.
+    // ------------------------------------------------------------------------
+
+    /// <summary>The pizzeria's own cross-aggregate shape (<c>policy PostToLedger when ChargeCaptured then
+    /// Books.record(...)</c>), inline so the downstream aggregate is drivable end to end: the ledger entry
+    /// carries a <c>requires</c> the downstream call can violate, which the pizzeria's does not.</summary>
+    private const string PostingModel = """
+        context Posting {
+          event ChargeCaptured {
+            capturedAmount: Decimal
+          }
+
+          aggregate Billing root Charge {
+            entity Charge identified by ChargeId {
+              amount:  Decimal
+              settled: Bool = false
+
+              command capture {
+                requires !settled   "only an unsettled charge can be captured"
+                settled -> true
+                emit ChargeCaptured(capturedAmount: amount)
+              }
+            }
+          }
+
+          aggregate Books root LedgerEntry {
+            entity LedgerEntry identified by LedgerEntryId {
+              balance: Decimal
+              closed:  Bool = false
+
+              command record(amount: Decimal) {
+                requires !closed   "a closed ledger entry cannot be posted to"
+                balance -> balance + amount
+              }
+            }
+          }
+
+          policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)
+        }
+        """;
+
+    private static Scenario CaptureScenario(params (string Key, ScenarioValue Value)[] downstreamGiven)
+    {
+        var given = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+        {
+            ["amount"] = ScenarioValue.FromDecimal(12m),
+            ["settled"] = ScenarioValue.FromBool(false),
+        };
+        foreach ((string key, ScenarioValue value) in downstreamGiven)
+        {
+            given[key] = value;
+        }
+
+        return new Scenario("Charge", "capture", given, new Dictionary<string, ScenarioValue>(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void A_downstream_policy_reaction_runs_from_a_dotted_given_key_and_reports_its_own_steps()
+    {
+        SemanticModel sema = Build(PostingModel);
+        Scenario scenario = CaptureScenario(
+            ("LedgerEntry.balance", ScenarioValue.FromDecimal(5m)),
+            ("LedgerEntry.closed", ScenarioValue.FromBool(false)));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+
+        // The primary aggregate's own steps stay unattributed (D3: `null` is the primary) …
+        executed.Steps.Where(s => s.Aggregate is null).ShouldNotBeEmpty();
+
+        // … and the fanned-out ones name the aggregate that produced them.
+        var downstream = executed.Steps.Where(s => s.Aggregate == "LedgerEntry").ToList();
+        downstream.ShouldNotBeEmpty();
+        downstream.OfType<ScenarioStep.Precondition>().ShouldContain(
+            p => p.Message == "a closed ledger entry cannot be posted to" && p.Outcome == CheckOutcome.Passed);
+
+        // The downstream command's own write, with the REAL computed value: 5 + 12.
+        ScenarioStep.Transition posted = downstream.OfType<ScenarioStep.Transition>().ShouldHaveSingleItem();
+        posted.Field.ShouldBe("balance");
+        posted.From.ShouldBe("5");
+        posted.To.ShouldBe("17");
+
+        // D4: the downstream post-state merges under `<Entity>.<member>`; the primary's bare keys are
+        // untouched, and no bare key leaks in from the downstream aggregate.
+        executed.ResultingState["LedgerEntry.balance"].ShouldBe("17");
+        executed.ResultingState["LedgerEntry.closed"].ShouldBe("false");
+        executed.ResultingState["settled"].ShouldBe("true");
+        executed.ResultingState["amount"].ShouldBe("12");
+        executed.ResultingState.ContainsKey("balance").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_downstream_invariant_failure_is_a_failed_step_carrying_the_models_real_rule_text()
+    {
+        SemanticModel sema = Build(PostingModel);
+        Scenario scenario = CaptureScenario(
+            ("LedgerEntry.balance", ScenarioValue.FromDecimal(5m)),
+            ("LedgerEntry.closed", ScenarioValue.FromBool(true)));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        // D6: `Ok` answers for the PRIMARY operation, which really did capture the charge.
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+        executed.ResultingState["settled"].ShouldBe("true");
+
+        ScenarioStep.Precondition failed = executed.Steps
+            .OfType<ScenarioStep.Precondition>()
+            .Where(p => p.Outcome == CheckOutcome.Failed)
+            .ShouldHaveSingleItem();
+        failed.Aggregate.ShouldBe("LedgerEntry");
+        failed.Message.ShouldBe("a closed ledger entry cannot be posted to");
+        executed.Notes.ShouldContain(n => n.Contains("a closed ledger entry cannot be posted to"));
+
+        // The guard threw before the write, so nothing was posted — and the downstream state reported is
+        // the one it really started from, never a claimed mutation.
+        executed.Steps.Where(s => s.Aggregate == "LedgerEntry").OfType<ScenarioStep.Transition>().ShouldBeEmpty();
+        executed.ResultingState["LedgerEntry.balance"].ShouldBe("5");
+    }
+
+    /// <summary>A cycle a context map really permits: A's event drives B, B's drives A, A's drives B …</summary>
+    private const string CyclicModel = """
+        context Looping {
+          event Ping { n: Int }
+          event Pong { n: Int }
+
+          aggregate Left root Alpha {
+            entity Alpha identified by AlphaId {
+              count: Int = 0
+
+              command ring(amount: Int) {
+                count -> count + amount
+                emit Ping(n: count)
+              }
+            }
+          }
+
+          aggregate Right root Beta {
+            entity Beta identified by BetaId {
+              count: Int = 0
+
+              command echo(amount: Int) {
+                count -> count + amount
+                emit Pong(n: count)
+              }
+            }
+          }
+
+          policy Forward when Ping then Right.echo(amount: n)
+          policy Back    when Pong then Left.ring(amount: n)
+        }
+        """;
+
+    [Fact]
+    public void A_cyclic_policy_chain_terminates_on_the_visited_set_with_a_note_well_inside_the_wall_clock()
+    {
+        SemanticModel sema = Build(CyclicModel);
+        var scenario = new Scenario(
+            "Alpha",
+            "ring",
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+            {
+                ["count"] = ScenarioValue.FromInt(0),
+                ["Alpha.count"] = ScenarioValue.FromInt(0),
+                ["Beta.count"] = ScenarioValue.FromInt(0),
+            },
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal) { ["amount"] = ScenarioValue.FromInt(1) });
+
+        // The COLD run pays the one-off emit + Roslyn compile + JIT, which has nothing to do with the
+        // cascade — but a cyclic model must still be diagnosed as a cycle rather than killed by the
+        // sandbox's wall clock, so it has to finish inside that budget.
+        var cold = Stopwatch.StartNew();
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+        cold.Stop();
+        cold.Elapsed.ShouldBeLessThan(ScenarioExecutionHost.DefaultTimeout);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+
+        // Alpha -> Beta -> Alpha -> (Beta again): the visited set on (aggregate, event) bites BEFORE the
+        // depth cap does, so a cycle is reported as the cycle it is.
+        executed.Notes.ShouldContain(n => n.Contains("cycle") && n.Contains("Beta") && n.Contains("Ping"));
+        executed.Notes.ShouldNotContain(n => n.Contains("maximum depth"));
+
+        executed.Steps.ShouldContain(s => s.Aggregate == "Beta");
+        executed.Steps.ShouldContain(s => s.Aggregate == "Alpha");
+
+        // Warm, the whole run — cascade included — is far below the 5 s budget.
+        var warm = Stopwatch.StartNew();
+        ScenarioExecutor.Run(sema, scenario);
+        warm.Stop();
+        warm.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2));
+    }
+
+    /// <summary>Five hops, no repetition: only the DEPTH cap can stop this one, so it pins that bound
+    /// separately from the visited set.</summary>
+    private const string DeepChainModel = """
+        context Chaining {
+          event Step1 { n: Int }
+          event Step2 { n: Int }
+          event Step3 { n: Int }
+          event Step4 { n: Int }
+
+          entity Hop1 identified by Hop1Id {
+            count: Int = 0
+            command go(amount: Int) {
+              count -> count + amount
+              emit Step1(n: count)
+            }
+          }
+
+          entity Hop2 identified by Hop2Id {
+            count: Int = 0
+            command go(amount: Int) {
+              count -> count + amount
+              emit Step2(n: count)
+            }
+          }
+
+          entity Hop3 identified by Hop3Id {
+            count: Int = 0
+            command go(amount: Int) {
+              count -> count + amount
+              emit Step3(n: count)
+            }
+          }
+
+          entity Hop4 identified by Hop4Id {
+            count: Int = 0
+            command go(amount: Int) {
+              count -> count + amount
+              emit Step4(n: count)
+            }
+          }
+
+          entity Hop5 identified by Hop5Id {
+            count: Int = 0
+            command go(amount: Int) {
+              count -> count + amount
+            }
+          }
+
+          policy P1 when Step1 then Hop2.go(amount: n)
+          policy P2 when Step2 then Hop3.go(amount: n)
+          policy P3 when Step3 then Hop4.go(amount: n)
+          policy P4 when Step4 then Hop5.go(amount: n)
+        }
+        """;
+
+    [Fact]
+    public void A_deep_non_repeating_policy_chain_stops_at_the_depth_cap_with_a_note()
+    {
+        SemanticModel sema = Build(DeepChainModel);
+        var scenario = new Scenario(
+            "Hop1",
+            "go",
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+            {
+                ["count"] = ScenarioValue.FromInt(0),
+                ["Hop2.count"] = ScenarioValue.FromInt(0),
+                ["Hop3.count"] = ScenarioValue.FromInt(0),
+                ["Hop4.count"] = ScenarioValue.FromInt(0),
+                ["Hop5.count"] = ScenarioValue.FromInt(0),
+            },
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal) { ["amount"] = ScenarioValue.FromInt(1) });
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+
+        // Three downstream hops are explored (the primary's own steps carry no attribution) …
+        executed.Steps.Select(s => s.Aggregate).Distinct().ShouldBe(
+            new string?[] { null, "Hop2", "Hop3", "Hop4" }, ignoreOrder: true);
+
+        // … and the fourth is refused by the DEPTH cap. Nothing repeats, so the visited set never bites.
+        executed.Notes.ShouldContain(n => n.Contains("maximum depth") && n.Contains("Hop5"));
+        executed.Notes.ShouldNotContain(n => n.Contains("cycle"));
+        executed.ResultingState.ContainsKey("Hop5.count").ShouldBeFalse();
+        executed.ResultingState["Hop4.count"].ShouldBe("1");
+    }
+
+    [Fact]
+    public void A_downstream_aggregate_with_no_given_state_is_a_failed_step_and_a_note_never_a_guess()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        var scenario = new Scenario(
+            "Charge",
+            "capture",
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+            {
+                ["order"] = ScenarioValue.FromString("22222222-2222-2222-2222-222222222222"),
+                ["amount"] = ScenarioValue.RecordOf(
+                    ("amount", ScenarioValue.FromDecimal(10m)),
+                    ("currency", ScenarioValue.FromString("EUR"))),
+                ["method"] = ScenarioValue.Enum("Card"),
+                ["status"] = ScenarioValue.Enum("Authorized"),
+            },
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+        executed.Steps.OfType<ScenarioStep.Emit>().ShouldContain(e => e.EventName == "ChargeCaptured");
+
+        // `policy PostToLedger when ChargeCaptured then Books.record(...)` resolves, but the scenario
+        // describes no LedgerEntry — so the run SAYS so instead of inventing an instance.
+        ScenarioStep.Precondition unavailable = executed.Steps
+            .OfType<ScenarioStep.Precondition>()
+            .Where(p => p.Outcome == CheckOutcome.Failed)
+            .ShouldHaveSingleItem();
+        unavailable.Aggregate.ShouldBe("LedgerEntry");
+        executed.Notes.ShouldContain(n => n.Contains("No state was established for LedgerEntry"));
+        executed.Notes.ShouldContain(n => n.Contains("LedgerEntry.<member>"));
+
+        // Nothing was constructed, so no downstream state is claimed.
+        executed.ResultingState.Keys.ShouldNotContain(k => k.StartsWith("LedgerEntry.", StringComparison.Ordinal));
+    }
+
+    // D1's declared-only surface has NO executed-mode test on purpose: a command cannot `emit` an
+    // integration event at all today — `EntityBehaviorValidator.ValidateEmit` resolves the name to an
+    // `EventDecl`, and `integration event X` builds an `IntegrationEventDecl`, so `emit X` is the hard
+    // error KOI0601 "unknown event". A published event therefore never reaches the runner as a RECORDED
+    // runtime event, and the dispatcher's declared-only branch cannot fire from one. The resolution
+    // itself is covered directly, above, by
+    // <see cref="A_published_integration_event_resolves_to_its_subscribers_and_to_no_executable_target"/>.
 }
