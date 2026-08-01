@@ -40,13 +40,17 @@ public sealed partial class JavaEmitter
             }
 
             anyEmitted = true;
+            var publishesEvents = ctx.Publishes.Count > 0;
+
             foreach (AggregateDecl agg in aggregates)
             {
                 files.Add(EmitInMemoryRepository(emit, ctx.Name, agg));
             }
 
+            files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates, publishesEvents));
+
             // Only a PUBLISHING context needs to drain an outbox; a subscribe-only context gets none.
-            if (ctx.Publishes.Count > 0)
+            if (publishesEvents)
             {
                 files.Add(EmitIntegrationEventDispatcher(ctx.Name));
             }
