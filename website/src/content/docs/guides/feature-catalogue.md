@@ -58,6 +58,7 @@ See [commands, events & state](/Koine/reference/commands-events-state/).
 |---|---|---|---|
 | Command | `command submit() { requires …; status -> Placed; emit … }` | a mutating method that checks `requires`, applies `field -> value` transitions, re-checks invariants | `Order.place/cancel`, `Delivery.pickUp/depart/complete`, `Charge.capture/refund` |
 | Command returning a value | `command cancel(): OrderId { …; result id }` | a typed method (`public <T> Name(…)`) that returns the `result` expression as its terminal statement (the create-and-return-id idiom) | — |
+| Command with an HTTP surface | `@route("/orders/{id}") @put @auth("admin") command submit { … }` | the same domain method; the overridden path/verb/authorization is read only by the `api` layer and the `openapi` target (see [API annotations](/Koine/reference/application-cqrs/#159-api-annotations)) | — |
 | Domain event | `event OrderSubmitted { … }` + `emit OrderSubmitted(…)` | a record recorded into the root's `DomainEvents` collection | `OrderOpened`, `OrderPlacedInternally`, `DeliveryScheduled`, `ChargeAuthorized` |
 | State machine | `states { Draft -> Placed; … }` | runtime-checked legal transitions; illegal transition throws | `Order`, `Delivery`, `Charge`, `KitchenTicket` lifecycles |
 
@@ -138,10 +139,18 @@ See [application layer & CQRS](/Koine/reference/application-cqrs/) and the
 | Application service | `service OrderingService { usecase PlaceOrder(…): OrderId }` | `IOrderingService` with one async method per use case (`Task`/`Task<T>`; `List<T>` params → `IReadOnlyList<T>`) | `Ordering.IOrderingService` |
 | Read model + projection | `readmodel OrderSummary from Order { id  customer  lineCount: Int = lines.count }` | a `sealed record` + a static `ToOrderSummary(this Order src)` projection mapper | `Menu.MenuItem`, `Ordering.OrderSummary` |
 | Query object | `query OrdersByStatus(status: OrderStatus): List<OrderSummary>` | a query DTO `record` + the shared `Koine.Runtime.IQueryHandler<TQuery, TResult>` | `PizzasBySize`, `PizzaByCode`, `OrdersByStatus` |
+| API annotations | `@route("/orders/{id}") @put @auth("admin")` before a `command` or `query` | nothing in the domain C#; with `--layers api` the endpoint becomes `endpoints.MapPut("/orders/{id}", …).RequireAuthorization("admin")`, and with `--target openapi` the operation is keyed at that path/verb with a `security` requirement | — |
 
 :::note
 A query's result type is required and must be a read model (or `List<readmodel>`). `IQueryHandler<TQuery, TResult>`
 is emitted exactly once for the whole model.
+:::
+
+:::caution
+`@auth("admin")` names an ASP.NET authorization **policy**, not a role — `RequireAuthorization` takes policy
+names — so the host app must register one called `admin`. And the `openapi` target emits no
+`components/securitySchemes`: the value names a scheme the consuming document declares. See
+[API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations).
 :::
 
 ## Multi-file, imports & modules

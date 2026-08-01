@@ -5,9 +5,15 @@ namespace Koine.Compiler;
 /// <summary>
 /// The shared word-boundary splitter (#1239) behind every emit-target casing helper that needs to
 /// decompose a PascalCase/camelCase/mixed identifier into its constituent words —
-/// <see cref="RouteDerivation.Kebab"/> and the per-language <c>ToSnakeCase</c> helpers
+/// <c>RouteDerivation.Kebab</c> and the per-language <c>ToSnakeCase</c> helpers
 /// (<c>RustNaming</c>, <c>PythonNaming</c>, <c>PhpNaming</c>) all independently coded the same
 /// boundary rule before this extraction; this is now the one place it lives.
+/// <para>It lives in <c>Koine.Compiler</c> rather than <c>Koine.Emit.Common</c> (where it was first
+/// extracted) because the <c>Semantics/</c> layer needs the same rule to reconstruct a command's or
+/// query's <b>conventional</b> HTTP route when checking for route collisions (KOI1211, #1219) — and
+/// <c>Semantics/</c> runs before, and must not reference, any emitter assembly. Keeping one
+/// implementation here is what stops the validator and <c>RouteDerivation</c> from drifting apart;
+/// pure string mechanics, so it carries no target or HTTP concept of its own.</para>
 /// Operates on ASCII letters only (<see cref="char.IsAsciiLetterUpper(char)"/> /
 /// <see cref="char.IsAsciiLetterLower(char)"/>), matching the Koine grammar's identifier rule
 /// (<c>[a-zA-Z_][a-zA-Z0-9_]*</c> — <c>src/Koine.Compiler/Grammar/KoineLexer.g4</c>): a non-ASCII
@@ -27,7 +33,7 @@ public static class IdentifierWords
     /// <c>Import</c>) — or, when <paramref name="splitAfterDigit"/> is <see langword="true"/>, follows
     /// a digit (<c>V2I</c>mport → <c>V2</c> | <c>Import</c>). <paramref name="splitAfterDigit"/> is
     /// explicit rather than defaulted because the four pre-extraction implementations genuinely
-    /// disagreed on it: <see cref="RouteDerivation.Kebab"/> always split after a digit; the per-language
+    /// disagreed on it: <c>RouteDerivation.Kebab</c> always split after a digit; the per-language
     /// <c>ToSnakeCase</c> helpers never did — see #1239's discovery of that divergence. Non-letter
     /// characters (underscores, …) other than a boundary-eligible digit are never boundaries
     /// themselves; they stay attached to whichever word they trail.
