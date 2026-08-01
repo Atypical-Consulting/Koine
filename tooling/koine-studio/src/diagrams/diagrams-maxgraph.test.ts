@@ -373,7 +373,7 @@ describe('click → navigate', () => {
     const container = makeContainer();
     const handle = buildCanvas(mx, container, merged);
     try {
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-node-click', (e) => { detail = (e as CustomEvent).detail; });
       handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('Ordering.Order')));
       expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', file: 'file:///m.koi', line: 3, column: 5, endLine: 3, endColumn: 12 });
@@ -475,21 +475,21 @@ describe('routeContextMapClick', () => {
   const relEdge = { from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' };
 
   test('a context node routes to onContextClick (filter), not onRelationSelect', () => {
-    let ctx: any = 'unset';
-    let rel: any = 'unset';
+    let ctx: DiagramNode | 'unset' = 'unset';
+    let rel: DiagramEdge | null | 'unset' = 'unset';
     routeContextMapClick(ctxNode, { onContextClick: (n) => (ctx = n), onRelationSelect: (e) => (rel = e) });
     expect(ctx).toMatchObject({ qualifiedName: 'Sales' });
     expect(rel).toBe('unset');
   });
 
   test('a relation edge routes to onRelationSelect', () => {
-    let rel: any = 'unset';
+    let rel: DiagramEdge | null | 'unset' = 'unset';
     routeContextMapClick(relEdge, { onRelationSelect: (e) => (rel = e) });
     expect(rel).toMatchObject({ from: 'Sales', to: 'Shipping' });
   });
 
   test('an empty / unknown click clears the selection (onRelationSelect(null))', () => {
-    let rel: any = 'unset';
+    let rel: DiagramEdge | null | 'unset' = 'unset';
     routeContextMapClick(null, { onRelationSelect: (e) => (rel = e) });
     expect(rel).toBeNull();
   });
@@ -705,7 +705,7 @@ describe('node navigation: null-file span', () => {
     const container = makeContainer();
     const handle = buildCanvas(mx, container, merged);
     try {
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-node-click', (e) => { detail = (e as CustomEvent).detail; });
       handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('Ordering.Order')));
       expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', file: null, line: 2, column: 1 });
@@ -727,7 +727,7 @@ describe('editing gestures: rename (double-click) + delete (right-click)', () =>
     const container = makeContainer();
     const handle = buildCanvas(mx, container, merged);
     try {
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-node-edit', (e) => { detail = (e as CustomEvent).detail; });
       handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.DOUBLE_CLICK, 'cell', handle.cells.get('Ordering.Order')));
       await vi.waitFor(() =>
@@ -761,7 +761,7 @@ describe('editing gestures: rename (double-click) + delete (right-click)', () =>
     try {
       // getCellAt needs laid-out geometry (absent headlessly), so stub it to return the node cell.
       handle.graph.getCellAt = (() => handle.cells.get('Ordering.Order')) as typeof handle.graph.getCellAt;
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-node-edit', (e) => { detail = (e as CustomEvent).detail; });
       container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
       await vi.waitFor(() =>
@@ -799,7 +799,7 @@ describe('canvas authoring: connect + disconnect', () => {
     const container = makeContainer();
     const handle = buildCanvas(mx, container, { nodes: [cls('Ordering.Order', 'Order'), cls('Ordering.Line', 'OrderLine')], edges: [] });
     try {
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-connect', (e) => { detail = (e as CustomEvent).detail; });
       // Simulate the ConnectionHandler completing a drag: a fresh edge between the two cells.
       const src = handle.cells.get('Ordering.Order')!;
@@ -829,7 +829,7 @@ describe('canvas authoring: connect + disconnect', () => {
     try {
       const edgeCell = handle.cells.get('Ordering.Order')!.getEdgeAt(0);
       handle.graph.getCellAt = (() => edgeCell) as typeof handle.graph.getCellAt;
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-disconnect', (e) => { detail = (e as CustomEvent).detail; });
       container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
       expect(detail).toMatchObject({ backingMember: 'Ordering.Order.lines', label: 'lines' });
@@ -903,7 +903,7 @@ describe('touch mode: freehand off, tap-to-navigate kept (#221 Task 3)', () => {
     const container = makeContainer();
     const handle = buildCanvas(mx, container, { nodes: [spanned()], edges: [] }, undefined, { touch: true });
     try {
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-node-click', (e) => { detail = (e as CustomEvent).detail; });
       handle.graph.fireEvent(new mx.EventObject(mx.InternalEvent.CLICK, 'cell', handle.cells.get('Ordering.Order')));
       expect(detail).toMatchObject({ qualifiedName: 'Ordering.Order', file: 'file:///m.koi', line: 5, column: 3 });
@@ -1289,7 +1289,7 @@ describe('buildEventFlowCanvas', () => {
     const container = makeContainer();
     const handle = buildEventFlowCanvas(mx, container, EVENT_FLOW);
     try {
-      let detail: any = null;
+      let detail: unknown = null;
       container.addEventListener('koi-diagram-node-click', (e) => {
         detail = (e as CustomEvent).detail;
       });

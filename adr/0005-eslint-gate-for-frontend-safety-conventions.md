@@ -98,9 +98,9 @@ Starting per-rule burn-down (findings at ratchet time; ✅ = enforced by the PR 
 | `no-base-to-string` | 9 ✅ | 0 ✅ |
 | `prefer-promise-reject-errors` | 10 ✅ | 0 ✅ |
 | `no-unsafe-return` | 12 ✅ | 0 ✅ |
-| `no-unsafe-argument` | 50 | 0 ✅ |
+| `no-unsafe-argument` | 50 ✅ | 0 ✅ |
 | `no-explicit-any` | 65 | 1 |
-| `no-unsafe-assignment` | 68 | 0 ✅ |
+| `no-unsafe-assignment` | 68 ✅ | 0 ✅ |
 | `no-unused-vars` | 72 | 1 |
 | `no-unsafe-call` | 129 | 0 ✅ |
 | `no-unnecessary-type-assertion` | 221 | 15 |
@@ -109,9 +109,21 @@ Starting per-rule burn-down (findings at ratchet time; ✅ = enforced by the PR 
 | `unbound-method` | 546 | 22 |
 | *(the other 30 preset rules)* | 0 ✅ | 0 ✅ |
 
-The still-pending counts above are the **post-fix** figures the configs' `RATCHET_PENDING` tables carry
-(1,889 in koine-studio, 39 in koine-ui): typing the seams that the cheap rules forced also removed
-findings from rules that remain off. Re-measure before editing either table.
+`no-unsafe-argument` was burned down in a follow-up PR (#1785); `no-unsafe-assignment` in a further
+follow-up (#1814) — the latter's fix also uncovered and closed a real gap: `koine-studio`'s
+`npm run lint` script had no step generating the git-ignored `src/templates.generated.ts` before
+type-aware linting ran (only `predev`/`prebuild` did), so any file transitively importing from it
+type-checked against an unresolvable module and produced a spurious `error`-typed finding; a
+`prelint` hook (mirroring the existing `predev`/`prebuild` convention) now generates it first.
+
+The still-pending counts above are **stale** (the ratchet-start snapshot) — the configs'
+`RATCHET_PENDING` tables carry the live per-rule figures (each `off` entry's own comment), which is
+what to re-measure from before editing either table. As of #1814 (2026-08-02): koine-studio carries
+**1,691 findings across 7 rules** (`no-explicit-any` 53, `no-unused-vars` 73, `no-unsafe-call` 113,
+`no-unsafe-member-access` 159, `no-unnecessary-type-assertion` 234, `require-await` 490,
+`unbound-method` 569 — some rose or fell from the ratchet-start snapshot as unrelated commits landed
+and as typing the burned-down rules' seams incidentally tightened/loosened others); koine-ui is
+unchanged at 39 across 4 rules.
 
 A rule is burned down across **both** packages in the same PR, so it is never half-enforced across the
 tree — the per-directory ratchet #998 considered and rejected. Two rules carry a non-default *option*

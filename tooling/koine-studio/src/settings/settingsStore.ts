@@ -106,6 +106,15 @@ export interface Settings {
    *  keeps PATH/aliases only in `~/.bashrc` can set `["-l", "-i"]` so an interactive shell sources it.
    *  Desktop-only — the browser host has no shell; the user owns the value (we don't validate args). */
   terminalShellArgs: string[];
+  /** Interface the desktop collaboration broker listens on AND the address advertised in the join token
+   *  (#481). Loopback by default: opening a listener onto the workshop wifi should be a deliberate act,
+   *  not a side effect of starting a session, so invite the LAN in by setting your own address (e.g.
+   *  `192.168.1.42`). Desktop-only — a browser tab cannot listen at all. */
+  collabBindAddress: string;
+  /** Optional `host:port` of a collaboration relay to broker through instead of this machine (#481).
+   *  Blank ⇒ the desktop hosts the session itself. Traffic is only as private as the relay you point
+   *  at, so this is deliberately a user-configured address and never a default public service. */
+  collabRelayUrl: string;
   /** Which view to open on a cold start (no explicit `#/editor` hash or share link). Default `'home'`
    *  preserves the #766 always-Home behaviour for everyone who doesn't change it. `'lastWorkspace'` re-
    *  enables the old auto-resume: opens the editor immediately when a workspace was opened previously.
@@ -142,6 +151,8 @@ export const DEFAULT_SETTINGS: Settings = {
   previewTarget: 'csharp',
   displayName: '',
   terminalShellArgs: [],
+  collabBindAddress: '127.0.0.1',
+  collabRelayUrl: '',
   startupView: 'home',
 };
 
@@ -278,6 +289,18 @@ function coerceShellArgs(v: unknown): string[] {
   return v.filter((a): a is string => typeof a === 'string' && a.length > 0);
 }
 
+/** Validate a stored collaboration address (#481). It reaches the Rust broker, which binds or dials it,
+ *  so anything that is not a plain trimmed `host` / `host:port` string falls back to the default rather
+ *  than being handed to the network layer: whitespace and control characters are the interesting ones,
+ *  since a hand-edited settings.json is the only way these ever get a value. */
+function coerceCollabHost(v: unknown, fallback: string): string {
+  if (typeof v !== 'string') return fallback;
+  const trimmed = v.trim();
+  if (trimmed.length === 0) return fallback;
+  if (trimmed.length > 255 || /[\s\u0000-\u001f]/.test(trimmed)) return fallback;
+  return trimmed;
+}
+
 /** Validate a stored {@link Settings.defaultCanvasZoom}: a number clamped to the diagram zoom band
  *  (10–800), or the default (100) for a missing/non-numeric/garbage value (#762). */
 function coerceDefaultCanvasZoom(v: unknown): number {
@@ -335,6 +358,8 @@ export function loadSettings(): Settings {
       previewTarget: coercePreviewTarget(parsed.previewTarget),
       displayName: typeof parsed.displayName === 'string' ? parsed.displayName : DEFAULT_SETTINGS.displayName,
       terminalShellArgs: coerceShellArgs(parsed.terminalShellArgs),
+      collabBindAddress: coerceCollabHost(parsed.collabBindAddress, DEFAULT_SETTINGS.collabBindAddress),
+      collabRelayUrl: coerceCollabHost(parsed.collabRelayUrl, DEFAULT_SETTINGS.collabRelayUrl),
       startupView: coerceStartupView(parsed.startupView),
     };
   } catch {

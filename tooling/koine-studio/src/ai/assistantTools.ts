@@ -453,7 +453,7 @@ export async function runEditToolStaging(
 ): Promise<string> {
   let args: { relPath?: unknown; contents?: unknown };
   try {
-    args = JSON.parse(argsJson || '{}');
+    args = JSON.parse(argsJson || '{}') as { relPath?: unknown; contents?: unknown };
   } catch {
     return 'Error: the tool arguments were not valid JSON.';
   }

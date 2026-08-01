@@ -18,7 +18,16 @@ import { DEFAULT_SETTINGS, WORKSPACE_SCOPED_KEYS, type Settings } from './persis
 // one-function change to the serializer, since the map already carries the group + key.
 
 /** The VS Code-style namespaces the settings document groups its fields under. */
-export type SettingsGroup = 'appearance' | 'editor' | 'ai' | 'mcp' | 'preview' | 'lsp' | 'account' | 'terminal';
+export type SettingsGroup =
+  | 'appearance'
+  | 'editor'
+  | 'ai'
+  | 'mcp'
+  | 'preview'
+  | 'lsp'
+  | 'account'
+  | 'terminal'
+  | 'collab';
 
 /** One row of the field map: a runtime key placed at `group.docKey` in the JSON document. */
 export interface FieldDef {
@@ -60,6 +69,8 @@ export const SETTINGS_FIELDS: readonly FieldDef[] = [
   { runtimeKey: 'lspTrace', group: 'lsp', docKey: 'trace' },
   { runtimeKey: 'displayName', group: 'account', docKey: 'displayName' },
   { runtimeKey: 'terminalShellArgs', group: 'terminal', docKey: 'shellArgs' },
+  { runtimeKey: 'collabBindAddress', group: 'collab', docKey: 'bindAddress' },
+  { runtimeKey: 'collabRelayUrl', group: 'collab', docKey: 'relayUrl' },
   { runtimeKey: 'startupView', group: 'appearance', docKey: 'startupView' },
 ];
 
@@ -172,6 +183,18 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
     items: { type: 'string', minLength: 1 },
     title: 'Terminal shell args',
     description: 'Arguments for the integrated terminal shell (desktop). Empty uses the default login shell (["-l"]).',
+  },
+  collabBindAddress: {
+    type: 'string',
+    title: 'Collaboration bind address',
+    description:
+      'Address the desktop collaboration broker listens on and advertises in the join token. Loopback (127.0.0.1) keeps the session on this machine; set your LAN address to invite others.',
+  },
+  collabRelayUrl: {
+    type: 'string',
+    title: 'Collaboration relay',
+    description:
+      'Optional host:port of a relay to broker collaboration sessions through instead of this machine. Blank hosts the session locally.',
   },
   startupView: {
     type: 'string',

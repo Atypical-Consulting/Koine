@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { KoineLsp } from '@/lsp/lsp';
 import type { CallHierarchyItem, SyntaxTreeNode } from '@/lsp/lsp';
+import type { Position, Range } from '@/lsp/protocol';
 import type { LspTransport } from '@/host/types';
 
 // Document-sync protocol coverage for KoineLsp, driven through a fake LspTransport that records every
@@ -9,7 +10,18 @@ import type { LspTransport } from '@/host/types';
 // without a real sidecar or WASM server. notify() calls transport.send() synchronously, so a recorded
 // message is observable immediately after the call that triggers it (no awaiting needed).
 
-type Sent = { jsonrpc: string; id?: number; method: string; params: any };
+/** The union of every `params` shape a KoineLsp request/notify call below sends — one message's
+ *  params is only ever a subset of these fields, keyed off `method`, so every field is optional. */
+type SentParams = {
+  textDocument?: { uri: string; version?: number; languageId?: string; text?: string };
+  contentChanges?: { text: string }[];
+  position?: Position;
+  range?: Range;
+  item?: CallHierarchyItem;
+  newName?: string;
+};
+
+type Sent = { jsonrpc: string; id?: number; method: string; params: SentParams };
 
 /** The shape `KoineLsp['handle']` (reached below via bracket access to its private method) expects —
  *  mirrors the `JsonRpcMessage` the client parses off the wire, kept local since that interface isn't
@@ -41,9 +53,8 @@ function harness(trace?: 'off' | 'messages' | 'verbose') {
 
 const byMethod = (sent: Sent[], method: string) => sent.filter((m) => m.method === method);
 
-// `Sent.params` is deliberately `any` (every JSON-RPC method carries its own shape). Read a
-// document-sync message's header back through a real type so mapping over it doesn't hand an `any`
-// out of the callback.
+// A document-sync message's `textDocument` is always present with a version by construction here;
+// narrow `SentParams`'s optional field back to that guarantee for the one caller that maps over it.
 const docParams = (m: Sent) => m.params as { textDocument: { uri: string; version: number } };
 
 const URI = 'file:///a.koi';
@@ -80,7 +91,7 @@ describe('KoineLsp document sync', () => {
     lsp.flush();
     const changes = byMethod(sent, 'textDocument/didChange');
     expect(changes).toHaveLength(1);
-    expect(changes[0].params.textDocument.version).toBe(2);
+    expect(changes[0].params.textDocument!.version).toBe(2);
     expect(changes[0].params.contentChanges).toEqual([{ text: 'v2' }]);
   });
 
@@ -114,7 +125,7 @@ describe('KoineLsp document sync', () => {
     lsp.syncDoc(URI, 'v2');
     const changes = byMethod(sent, 'textDocument/didChange');
     expect(changes).toHaveLength(1);
-    expect(changes[0].params.textDocument.version).toBe(2);
+    expect(changes[0].params.textDocument!.version).toBe(2);
   });
 
   test('reopen() re-sends didOpen for every tracked document with a bumped version', () => {
@@ -125,7 +136,7 @@ describe('KoineLsp document sync', () => {
     lsp.reopen();
     const opens = byMethod(sent, 'textDocument/didOpen');
     expect(opens).toHaveLength(2);
-    expect(opens.every((o) => o.params.textDocument.version === 2)).toBe(true);
+    expect(opens.every((o) => o.params.textDocument!.version === 2)).toBe(true);
   });
 
   test('changeDoc for a second uri flushes the first uri\'s pending didChange instead of dropping it', () => {
@@ -137,9 +148,9 @@ describe('KoineLsp document sync', () => {
     lsp.flush();
     const changes = byMethod(sent, 'textDocument/didChange');
     expect(changes).toHaveLength(2);
-    expect(changes[0].params.textDocument.uri).toBe('file:///a.koi');
+    expect(changes[0].params.textDocument!.uri).toBe('file:///a.koi');
     expect(changes[0].params.contentChanges).toEqual([{ text: 'a2' }]);
-    expect(changes[1].params.textDocument.uri).toBe('file:///b.koi');
+    expect(changes[1].params.textDocument!.uri).toBe('file:///b.koi');
     expect(changes[1].params.contentChanges).toEqual([{ text: 'b2' }]);
   });
 
@@ -168,7 +179,7 @@ describe('KoineLsp document sync', () => {
 // A harness that, unlike the document-sync one above, can ANSWER requests: the fake transport echoes
 // each outgoing request id back through its onMessage handler with a canned `result`, so the request
 // promise resolves. `setActive(URI)` is called so every request method's `textDocument.uri` is filled.
-function responder(reply: (method: string, params: any) => unknown) {
+function responder(reply: (method: string, params: SentParams) => unknown) {
   const sent: Sent[] = [];
   let onMessage: ((json: string) => void) | undefined;
   const transport: LspTransport = {
@@ -279,7 +290,7 @@ describe('KoineLsp call hierarchy', () => {
     const res = await lsp.incomingCalls(ITEM);
     const req = lastReq(sent, 'callHierarchy/incomingCalls');
     expect(req.params).toEqual({ item: ITEM }); // whole item, including its opaque `data`
-    expect(req.params.item.data).toEqual({ chKind: 'Command', owningType: 'Order' });
+    expect(req.params.item!.data).toEqual({ chKind: 'Command', owningType: 'Order' });
     expect(res).toEqual(calls);
   });
 
@@ -294,7 +305,7 @@ describe('KoineLsp call hierarchy', () => {
     const res = await lsp.outgoingCalls(ITEM);
     const req = lastReq(sent, 'callHierarchy/outgoingCalls');
     expect(req.params).toEqual({ item: ITEM });
-    expect(req.params.item.data).toEqual({ chKind: 'Command', owningType: 'Order' });
+    expect(req.params.item!.data).toEqual({ chKind: 'Command', owningType: 'Order' });
     expect(res).toEqual(calls);
   });
 
@@ -412,7 +423,7 @@ describe('KoineLsp trace logging', () => {
     lsp.setTrace('messages');
     lsp.openDoc(URI, 'hello');
     expect(debug).toHaveBeenCalledTimes(1);
-    const [line, ...payload] = debug.mock.calls[0];
+    const [line, ...payload] = debug.mock.calls[0] as [string, ...unknown[]];
     expect(line).toContain('textDocument/didOpen');
     expect(line).toContain('→'); // outgoing
     expect(payload).toHaveLength(0); // method name only — no params at the messages level

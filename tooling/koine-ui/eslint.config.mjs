@@ -11,7 +11,6 @@ import reactHooks from 'eslint-plugin-react-hooks';
 // the whole preset is on, and every rule that still has findings is listed here as 'off' with its
 // live count; each ratchet PR fixes one rule and DELETES its entry. Never re-add an entry.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-explicit-any': 'off', //                 1 finding  / 1 file
   '@typescript-eslint/no-unused-vars': 'off', //                  1 finding  / 1 file
   '@typescript-eslint/no-unnecessary-type-assertion': 'off', //  15 findings / 3 files
   '@typescript-eslint/unbound-method': 'off', //                 22 findings / 5 files
