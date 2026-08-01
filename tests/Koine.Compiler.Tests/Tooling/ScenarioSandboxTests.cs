@@ -753,6 +753,52 @@ public class ScenarioSandboxTests
         }
     }
 
+    // ------------------------------------------------------------------------
+    // Windows Job Object (#1782): 194 lines of kernel32 P/Invoke over three hand-mirrored ABI structs
+    // (field order and widths ARE the ABI) that shipped manually verified on macOS 26 but had never
+    // executed against a real Windows kernel — an invisible-by-construction defect class per ADR 0012.
+    // This is the floor: it asserts the interop itself works, not any behavioural ceiling (that is
+    // Task 4's job, once a Windows stub child exists).
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void The_Windows_Job_Object_creates_and_confines_a_real_child_for_the_first_time_on_a_real_kernel()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The Job Object is a Windows mechanism; this suite is running on "
+                + RuntimeInformation.OSDescription + ".");
+            return;
+        }
+
+        using WindowsJobObject? job = WindowsJobObject.TryCreate(
+            1L << 30, TimeSpan.FromSeconds(30), out string? creationFailure);
+
+        // A generous ceiling pair no trivial child can trip — this proves the ABI structs marshal
+        // correctly and the job accepts them, not that the ceilings themselves are enforced.
+        job.ShouldNotBeNull(creationFailure);
+        creationFailure.ShouldBeNull();
+
+        using Process child = Process.Start(new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            ArgumentList = { "/c", "exit 0" },
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        }) ?? throw new InvalidOperationException("could not start cmd.exe");
+
+        // Assigned immediately after start, mirroring ScenarioExecutionHost.RunDetailed's own ordering
+        // (confinement.Attach(child) right after Process.Start, before any wait) — the same race the
+        // production path accepts (WindowsJobObject's doc comment), exercised for real rather than
+        // assumed safe by never running.
+        bool assigned = job.TryAssign(child, out string? assignFailure);
+
+        child.WaitForExit((int)TimeSpan.FromSeconds(10).TotalMilliseconds);
+
+        assigned.ShouldBeTrue(assignFailure);
+        assignFailure.ShouldBeNull();
+    }
+
     private const string BashPath = "/bin/bash";
 
     /// <summary>What a probing stub reported, carried out in the result tree's <c>result</c> field — the
