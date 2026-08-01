@@ -264,36 +264,52 @@ public static class ScenarioService
             ["notes"] = extraNote is null ? result.Notes.ToArray() : [.. result.Notes, extraNote],
         };
 
-    private static object ShapeStep(ScenarioStep step) => step switch
+    /// <summary>
+    /// Shapes one step. The fan-out attribution (issue #1758, D3) is written ONLY when the step carries
+    /// one: a primary-aggregate step — which is every step interpreted mode ever produces, and every step
+    /// executed mode produced before fan-out — keeps exactly the wire shape it had, rather than gaining a
+    /// null-valued <c>"aggregate"</c> key that would churn every existing result.
+    /// </summary>
+    private static object ShapeStep(ScenarioStep step)
     {
-        ScenarioStep.Precondition p => new Dictionary<string, object?>
+        Dictionary<string, object?> shaped = step switch
         {
-            ["kind"] = p.Kind,
-            ["message"] = p.Message,
-            ["condition"] = p.Condition,
-            ["outcome"] = Outcome(p.Outcome),
-        },
-        ScenarioStep.Transition t => new Dictionary<string, object?>
+            ScenarioStep.Precondition p => new Dictionary<string, object?>
+            {
+                ["kind"] = p.Kind,
+                ["message"] = p.Message,
+                ["condition"] = p.Condition,
+                ["outcome"] = Outcome(p.Outcome),
+            },
+            ScenarioStep.Transition t => new Dictionary<string, object?>
+            {
+                ["kind"] = t.Kind,
+                ["field"] = t.Field,
+                ["from"] = t.From,
+                ["to"] = t.To,
+                ["isInitialization"] = t.IsInitialization,
+            },
+            ScenarioStep.Emit e => new Dictionary<string, object?>
+            {
+                ["kind"] = e.Kind,
+                ["event"] = e.EventName,
+                ["args"] = e.Args.ToDictionary(kv => kv.Key, kv => (object?)kv.Value),
+            },
+            ScenarioStep.Result r => new Dictionary<string, object?>
+            {
+                ["kind"] = r.Kind,
+                ["value"] = r.Value,
+            },
+            _ => new Dictionary<string, object?> { ["kind"] = "unknown" }
+        };
+
+        if (step.Aggregate is { } aggregate)
         {
-            ["kind"] = t.Kind,
-            ["field"] = t.Field,
-            ["from"] = t.From,
-            ["to"] = t.To,
-            ["isInitialization"] = t.IsInitialization,
-        },
-        ScenarioStep.Emit e => new Dictionary<string, object?>
-        {
-            ["kind"] = e.Kind,
-            ["event"] = e.EventName,
-            ["args"] = e.Args.ToDictionary(kv => kv.Key, kv => (object?)kv.Value),
-        },
-        ScenarioStep.Result r => new Dictionary<string, object?>
-        {
-            ["kind"] = r.Kind,
-            ["value"] = r.Value,
-        },
-        _ => new Dictionary<string, object?> { ["kind"] = "unknown" }
-    };
+            shaped["aggregate"] = aggregate;
+        }
+
+        return shaped;
+    }
 
     private static IReadOnlyDictionary<string, object?> ShapeInvariant(InvariantCheck check) => new Dictionary<string, object?>
     {

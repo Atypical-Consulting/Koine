@@ -110,6 +110,51 @@ public class ModelIndexClassifyTests(ITestOutputHelper output)
         index.IsKnownType(null, "Nope").ShouldBeFalse();
     }
 
+    private const string SharedMemberNameAcrossThreeContexts = """
+        context A {
+          enum Status { Red }
+        }
+        context B {
+          enum Status { Green }
+        }
+        context C {
+          enum Flag { Red, Blue }
+          value V {
+            ok: Bool = Red == Blue
+          }
+        }
+        """;
+
+    [Fact]
+    public void Context_aware_EnumsDeclaring_scopes_owners_to_what_is_visible_from_that_context()
+    {
+        var index = IndexOf(SharedMemberNameAcrossThreeContexts);
+
+        // Issue #1739: A's Status also declares Red, but A is neither declared-in nor imported-into C —
+        // so from C's own perspective only its own Flag owns Red. The context-blind overload still
+        // reports both (B's Status doesn't declare Red at all, so it's absent from either list).
+        index.EnumsDeclaring("C", "Red").ShouldBe(new[] { "Flag" });
+        index.EnumsDeclaring("Red").ShouldBe(new[] { "Status", "Flag" });
+    }
+
+    [Fact]
+    public void Context_aware_EnumsDeclaring_with_a_null_context_matches_the_flat_overload()
+    {
+        var index = IndexOf(SharedMemberNameAcrossThreeContexts);
+
+        index.EnumsDeclaring(null, "Red").ShouldBe(index.EnumsDeclaring("Red"));
+    }
+
+    [Fact]
+    public void Context_aware_EnumsDeclaring_agrees_with_the_flat_overload_when_there_is_no_collision()
+    {
+        var index = IndexOf(SharedMemberNameAcrossThreeContexts);
+
+        // Backward compatibility (issue #1739 spec): for a member with no cross-context collision, the
+        // two overloads must agree exactly — "Blue" is declared only by Flag, model-wide.
+        index.EnumsDeclaring("C", "Blue").ShouldBe(index.EnumsDeclaring("Blue"));
+    }
+
     /// <summary>
     /// The load-bearing premise of <c>SemanticValidator.ValidateTypeRef</c>'s context threading
     /// (#1715): the two overloads can disagree about WHICH declaration a name means, but never about

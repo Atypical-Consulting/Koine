@@ -591,10 +591,12 @@ internal sealed class KotlinExpressionTranslator
             return;
         }
 
-        // (3) An enum member reference -> EnumType.Member.
+        // (3) An enum member reference -> EnumType.Member. Owners are scoped to what's visible from
+        // this translator's own context (#1739) so an enum only reachable through an unrelated
+        // context can't win the last-write-wins fallback.
         if (!_memberNames.Contains(name))
         {
-            IReadOnlyList<string> owners = _index.EnumsDeclaring(name);
+            IReadOnlyList<string> owners = _index.EnumsDeclaring(_resolver.Context, name);
             if (owners.Count > 0)
             {
                 var hint = enumHint ?? _expectedEnum;
@@ -602,7 +604,9 @@ internal sealed class KotlinExpressionTranslator
                     ? hint
                     : owners.Count == 1
                         ? owners[0]
-                        : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
+                        : _enumMemberToType.TryGetValue(name, out var fallback) && owners.Contains(fallback)
+                            ? fallback
+                            : owners[0];
                 sb.Append(KotlinNaming.ToTypeName(enumType)).Append('.').Append(KotlinNaming.EscapeIdentifier(name));
                 return;
             }
