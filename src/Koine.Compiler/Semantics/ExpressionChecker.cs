@@ -750,14 +750,19 @@ internal sealed class ExpressionChecker
     /// (<see cref="System.Runtime.CompilerServices.InternalsVisibleToAttribute"/> already exposes this
     /// assembly's internals to the test project). Every diagnostic that consumes this method's return
     /// value (<c>CheckEnumMemberResolvable</c>, <c>ResolveEnumOperand</c>) also depends on
-    /// <see cref="ModelIndex.EnumsDeclaring"/>/<see cref="ModelIndex.EnumMemberToType"/>. Those used to
-    /// be built from the SAME flat, last-write-wins <c>_byName</c>/<c>AllTypes()</c> map this fix
-    /// bypasses, so a same-named collision that exercises this fix also evicted the concrete enum's own
-    /// members from both dictionaries — making the fix's effect unobservable end-to-end, and calling
-    /// this method directly the only way to pin its contract. <b>#1632 removed that eviction</b>
-    /// (<c>AllTypes()</c> now enumerates every per-context declaration), so those dictionaries no longer
-    /// hide the concrete enum. The direct call is kept: it still pins this method's own contract in
-    /// isolation from whatever its consumers do.
+    /// <see cref="ModelIndex.EnumsDeclaring(string)"/>/<see cref="ModelIndex.EnumMemberToType"/>. Those
+    /// used to be built from the SAME flat, last-write-wins <c>_byName</c>/<c>AllTypes()</c> map this
+    /// fix bypasses, so a same-named collision that exercises this fix also evicted the concrete enum's
+    /// own members from both dictionaries — making the fix's effect unobservable end-to-end, and
+    /// calling this method directly the only way to pin its contract. <b>#1632 removed that
+    /// eviction</b> (<c>AllTypes()</c> now enumerates every per-context declaration), so those
+    /// dictionaries no longer hide the concrete enum — but the now-longer walk left them answering
+    /// GLOBALLY for every context, so a bare member's owner list here could include an enum declared by
+    /// a third, unrelated context and never visible from this one. <b>#1739 closed that</b>: the
+    /// <c>owners</c> lookup below now calls the context-aware
+    /// <see cref="ModelIndex.EnumsDeclaring(string?, string)"/> overload, scoped to
+    /// <see cref="TypeResolver.Context"/>. The direct call is kept regardless: it still pins this
+    /// method's own contract in isolation from whatever its consumers do.
     /// </remarks>
     internal TypeRef? ConcreteEnumType(Expr operand, TypeScope scope)
     {
