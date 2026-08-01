@@ -954,4 +954,68 @@ public class R19ApiAnnotationsTests
             "endpoints.MapPut(\"/orders/submit\", async (OrderSubmitRequest request, OrderSubmitHandler handler, CancellationToken ct) =>");
         tokenlessEndpoints.ShouldNotContain("FromRoute");
     }
+
+    // ---- @route token binding into the C# api layer — queries (#1748) -------
+
+    /// <summary>A query criterion named the same as the route token binds the same way a command
+    /// parameter does (#1748): lifted into <c>[FromRoute]</c> ahead of the <c>[AsParameters]</c> query,
+    /// then re-bound into it via <c>with { Id = id }</c>.</summary>
+    [Fact]
+    public void A_query_route_token_binds_to_the_criterion_it_names()
+    {
+        const string src = """
+            context Ordering {
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: String
+                }
+              }
+
+              readmodel OrderSummary from Order {
+                id
+                status
+              }
+
+              @route("/orders/{id}")
+              query OrderById(id: String): OrderSummary
+            }
+            """;
+
+        var endpoints = FileEndingWith(BuildApi(src), "OrderingEndpoints.cs");
+
+        endpoints.ShouldContain(
+            "endpoints.MapGet(\"/orders/{id}\", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = \"id\")] string id, [AsParameters] OrderById query, OrderByIdHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("handler.HandleAsync(query with { Id = id }, ct)");
+    }
+
+    /// <summary>A query has no aggregate identity to fall back to (#1748): a token naming no criterion is
+    /// simply unbound here — the KOI1215 diagnostic for it is Task 5's concern, not the emitter's.</summary>
+    [Fact]
+    public void A_query_route_token_with_no_matching_criterion_emits_no_FromRoute_parameter()
+    {
+        const string src = """
+            context Ordering {
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: String
+                }
+              }
+
+              readmodel OrderSummary from Order {
+                id
+                status
+              }
+
+              @route("/orders/{id}")
+              query OrdersByStatus(status: String): List<OrderSummary>
+            }
+            """;
+
+        var endpoints = FileEndingWith(BuildApi(src), "OrderingEndpoints.cs");
+
+        endpoints.ShouldContain(
+            "endpoints.MapGet(\"/orders/{id}\", async ([AsParameters] OrdersByStatus query, OrdersByStatusHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("handler.HandleAsync(query, ct)");
+        endpoints.ShouldNotContain("FromRoute");
+    }
 }

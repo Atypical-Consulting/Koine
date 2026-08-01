@@ -76,7 +76,7 @@ public sealed partial class CSharpEmitter
 
         foreach (QueryDecl query in ctx.Types.OfType<QueryDecl>())
         {
-            WriteQueryEndpoint(body, ctx, query);
+            WriteQueryEndpoint(body, ctx, query, typeMapper, index);
             any = true;
         }
 
@@ -222,7 +222,7 @@ public sealed partial class CSharpEmitter
 
     /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query
     /// string. Honors the same R19 verb/route/role annotations as a command (#1219).</summary>
-    private void WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query)
+    private void WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query, CSharpTypeMapper typeMapper, ModelIndex index)
     {
         RouteInfo info = RouteDerivation.ForQuery(query);
         // Only a by-identity query returns a wrapped value (nullable/Result<T>) — a list/non-identity
@@ -232,11 +232,39 @@ public sealed partial class CSharpEmitter
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
+        // Route-bindable criteria (#1748): the same lifting WriteMutationEndpoint applies to a command's
+        // request, mirrored onto the [AsParameters] query record. A query has no aggregate identity, so
+        // every RouteTokenTarget here is Member or Unbound (never Identity — RouteDerivation.ForQuery
+        // never resolves one).
+        var routeParams = new StringBuilder();
+        var rebinds = new List<string>();
+        foreach (RouteTokenBinding binding in info.TokenBindings)
+        {
+            if (binding.Target == RouteTokenTarget.Unbound)
+            {
+                continue;
+            }
+
+            if (!IsRouteBindable(binding.Type!, index))
+            {
+                body.Append(i2).Append("// route token '{").Append(binding.Token).Append("}': ")
+                    .Append(binding.Type!.Name).Append(" is not route-bindable\n");
+                continue;
+            }
+
+            routeParams.Append("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"").Append(binding.Token)
+                .Append("\")] ").Append(typeMapper.Map(binding.Type!)).Append(' ').Append(binding.Token).Append(", ");
+            rebinds.Add($"{CSharpNaming.ToPascalCase(binding.Member!.Name)} = {binding.Token}");
+        }
+
         body.Append(i2).Append("endpoints.").Append(MapMethodFor(info.Verb, "MapGet")).Append("(\"")
-            .Append(EscapeCSharpString(info.Route)).Append("\", async ([AsParameters] ").Append(query.Name)
+            .Append(EscapeCSharpString(info.Route)).Append("\", async (").Append(routeParams)
+            .Append("[AsParameters] ").Append(query.Name)
             .Append(" query, ").Append(query.Name).Append("Handler handler, CancellationToken ct) =>\n");
         body.Append(i2).Append("{\n");
-        body.Append(i3).Append("var result = await handler.HandleAsync(query, ct);\n");
+
+        var queryExpr = rebinds.Count > 0 ? $"query with {{ {string.Join(", ", rebinds)} }}" : "query";
+        body.Append(i3).Append("var result = await handler.HandleAsync(").Append(queryExpr).Append(", ct);\n");
         body.Append(i3).Append(HttpResultFor(miss));
         body.Append(i2).Append("})").Append(RequireAuthorizationFor(info.AuthRole)).Append(";\n");
     }
