@@ -53,6 +53,22 @@ public sealed partial class PythonEmitter
         IReadOnlyList<FinderDecl> finders = agg.Repository?.Finders ?? Array.Empty<FinderDecl>();
         var protocol = $"{rootName}Repository";
 
+        // Per-parameter import hint for Assemble (issue #1718, the fourth call site of the
+        // #1701/#1712/#1716 gap): a finder's parameter's own import must resolve against ITS
+        // declared type's context — the parameter's explicit `Context.Type` qualifier when present,
+        // else this repository's own declaring context — not unconditionally this repository's own
+        // context. A repository file isn't tied to one entity's own field set, so it gets its own
+        // dictionary built from scratch (rather than extending an existing one).
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (FinderDecl finder in finders)
+        {
+            foreach (Param p in finder.Parameters)
+            {
+                CollectImportHints(p.Type, context, symbolContext);
+            }
+            CollectImportHints(finder.ResultType, context, symbolContext);
+        }
+
         var sb = new StringBuilder();
         sb.Append("class ").Append(protocol).Append("(Protocol):\n");
         WriteDoc(sb, $"Persistence-ignorant repository contract for the {rootName} aggregate root.", Indent);
@@ -114,7 +130,7 @@ public sealed partial class PythonEmitter
 
         return new EmittedFile(
             PathFor(ns, KindFolder.Repositories, protocol),
-            Assemble(emit, ns, sb.ToString(), protocol),
+            Assemble(emit, ns, sb.ToString(), protocol, symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.Repositories));
     }
 
@@ -163,6 +179,22 @@ public sealed partial class PythonEmitter
         WriteDoc(sb, svc.Doc ?? "A stateless domain service.", Indent);
         sb.Append('\n');
 
+        // Per-parameter import hint for Assemble (issue #1718, the fourth call site of the
+        // #1701/#1712/#1716 gap): an operation's parameter's own import must resolve against ITS
+        // declared type's context — the parameter's explicit `Context.Type` qualifier when present,
+        // else this service's own declaring context — not unconditionally this service's own
+        // context. A service file isn't tied to one entity's own field set, so it gets its own
+        // dictionary built from scratch (rather than extending an existing one).
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (OperationDecl op0 in svc.Operations)
+        {
+            foreach (Param p in op0.Parameters)
+            {
+                CollectImportHints(p.Type, context, symbolContext);
+            }
+            CollectImportHints(op0.ReturnType, context, symbolContext);
+        }
+
         var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
         var first = true;
         foreach (OperationDecl op in svc.Operations)
@@ -209,7 +241,7 @@ public sealed partial class PythonEmitter
         // KindFolder.Root is shared by aggregate roots and services, so tag the stereotype directly.
         return new EmittedFile(
             PathFor(context, KindFolder.Root, svc.Name),
-            Assemble(emit, context, sb.ToString(), name),
+            Assemble(emit, context, sb.ToString(), name, symbolContext.Count > 0 ? symbolContext : null),
             Kind: DddKind.Service);
     }
 
@@ -226,6 +258,25 @@ public sealed partial class PythonEmitter
         sb.Append("class ").Append(name).Append("(Protocol):\n");
         WriteDoc(sb, svc.Doc ?? $"Application-service boundary for the {svc.Name} use cases.", Indent);
         sb.Append('\n');
+
+        // Per-parameter import hint for Assemble (issue #1718, the fourth call site of the
+        // #1701/#1712/#1716 gap): a use case's parameter's own import must resolve against ITS
+        // declared type's context — the parameter's explicit `Context.Type` qualifier when present,
+        // else this service's own declaring context — not unconditionally this service's own
+        // context. A service file isn't tied to one entity's own field set, so it gets its own
+        // dictionary built from scratch (rather than extending an existing one).
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (UseCaseDecl uc0 in svc.UseCases)
+        {
+            foreach (Param p in uc0.Parameters)
+            {
+                CollectImportHints(p.Type, context, symbolContext);
+            }
+            if (uc0.ReturnType is not null)
+            {
+                CollectImportHints(uc0.ReturnType, context, symbolContext);
+            }
+        }
 
         var first = true;
         foreach (UseCaseDecl uc in svc.UseCases)
@@ -250,7 +301,7 @@ public sealed partial class PythonEmitter
         // KindFolder.Root is shared by aggregate roots and services, so tag the stereotype directly.
         return new EmittedFile(
             PathFor(context, KindFolder.Root, svc.Name),
-            Assemble(emit, context, sb.ToString(), name),
+            Assemble(emit, context, sb.ToString(), name, symbolContext.Count > 0 ? symbolContext : null),
             Kind: DddKind.Service);
     }
 }
