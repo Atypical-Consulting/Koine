@@ -43,6 +43,26 @@ public class DerivedMemberInvariantTests
         }
         """;
 
+    /// <summary>
+    /// A <b>diamond</b>: one invariant reaches <c>net</c> twice along two different paths. The visited
+    /// set must scope re-entry to the path currently being expanded, not ban a member for the rest of
+    /// the guard — otherwise the second path degrades to the old dangling name.
+    /// </summary>
+    private const string DiamondFixture = """
+        context Subscription {
+          value Split {
+            gross:   Int
+            rate:    Int
+            net:     Int = gross - rate
+            doubled: Int = net * 2
+            total:   Int = net + doubled
+            overQuota: Bool = net > rate
+            invariant total > 0   "the split total stays positive"
+            invariant overQuota   "the net must exceed the rate"
+          }
+        }
+        """;
+
     /// <summary>An entity carrying the same shape — its guards run after assignment, over properties.</summary>
     private const string EntityFixture = """
         context Subscription {
@@ -101,6 +121,23 @@ public class DerivedMemberInvariantTests
         // gross - rate = -1 -> doubled = -2, so the guard must reject it *before* assignment.
         TargetInvocationException ex = Should.Throw<TargetInvocationException>(
             () => Activator.CreateInstance(ledger, new object[] { 3, 4 }));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
+
+    [Fact]
+    public void A_derived_member_reached_twice_in_one_guard_substitutes_on_both_paths()
+    {
+        Assembly asm = CompileFixture(DiamondFixture);
+        Type split = asm.GetType("Subscription.Split")!;
+
+        // net = 6, doubled = 12, total = 18, overQuota = true.
+        object ok = Activator.CreateInstance(split, new object[] { 10, 4 })!;
+        split.GetProperty("Total")!.GetValue(ok).ShouldBe(18);
+        split.GetProperty("OverQuota")!.GetValue(ok).ShouldBe(true);
+
+        // A bare Bool derived member as the whole guard: net = 1 is not > rate = 9, so this throws.
+        TargetInvocationException ex = Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(split, new object[] { 10, 9 }));
         ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
