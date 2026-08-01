@@ -647,7 +647,7 @@ public sealed class SemanticValidator
                 }
 
                 EntityBehaviorValidator.ValidateVersioning(agg, diagnostics);
-                EntityBehaviorValidator.ValidateRepository(agg, index, diagnostics);
+                EntityBehaviorValidator.ValidateRepository(agg, index, resolver, diagnostics);
                 break;
             case EnumDecl en:
                 // Duplicate enum members produce uncompilable C#.
@@ -675,7 +675,7 @@ public sealed class SemanticValidator
                             $"enum member '{member}' differs from another only by leading-character case and would collapse to one Match/Switch parameter", en.Span));
                     }
                 }
-                ValidateEnumAssociatedData(en, index, diagnostics);
+                ValidateEnumAssociatedData(en, index, resolver, diagnostics);
                 break;
             case EventDecl ev:
                 // Events are validated like value objects but carry no invariants.
@@ -784,7 +784,7 @@ public sealed class SemanticValidator
             }
 
             // 1. Unknown type reference (and its element for List<T>).
-            ValidateTypeRef(m.Type, index, diagnostics);
+            ValidateTypeRef(m.Type, index, resolver, diagnostics);
 
             // 2. Duplicate member, reported at the second occurrence's span.
             if (!seen.Add(m.Name))
@@ -1088,12 +1088,12 @@ public sealed class SemanticValidator
                         $"operation '{op.Name}' collides with its service's name '{svc.Name}'", op.Span));
                 }
 
-                ValidateTypeRef(op.ReturnType, index, diagnostics);
+                ValidateTypeRef(op.ReturnType, index, resolver, diagnostics);
 
                 var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (Param p in op.Parameters)
                 {
-                    ValidateTypeRef(p.Type, index, diagnostics);
+                    ValidateTypeRef(p.Type, index, resolver, diagnostics);
                     if (!seenParams.Add(p.Name))
                     {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -1121,13 +1121,13 @@ public sealed class SemanticValidator
 
                 if (uc.ReturnType is not null)
                 {
-                    ValidateTypeRef(uc.ReturnType, index, diagnostics);
+                    ValidateTypeRef(uc.ReturnType, index, resolver, diagnostics);
                 }
 
                 var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (Param p in uc.Parameters)
                 {
-                    ValidateTypeRef(p.Type, index, diagnostics);
+                    ValidateTypeRef(p.Type, index, resolver, diagnostics);
                     if (!seenParams.Add(p.Name))
                     {
                         diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -1320,7 +1320,7 @@ public sealed class SemanticValidator
     /// per-member arity against the signature, and that each member value is a literal
     /// of a compatible type.
     /// </summary>
-    private static void ValidateEnumAssociatedData(EnumDecl en, ModelIndex index, List<Diagnostic> diagnostics)
+    private static void ValidateEnumAssociatedData(EnumDecl en, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         IReadOnlyList<Param> sig = en.Signature;
 
@@ -1337,7 +1337,7 @@ public sealed class SemanticValidator
         var memberNames = new HashSet<string>(en.MemberNames, StringComparer.Ordinal);
         foreach (Param p in sig)
         {
-            ValidateTypeRef(p.Type, index, diagnostics);
+            ValidateTypeRef(p.Type, index, resolver, diagnostics);
             if (!seenFields.Add(p.Name))
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -1421,7 +1421,7 @@ public sealed class SemanticValidator
         }
     }
 
-    internal static void ValidateTypeRef(TypeRef type, ModelIndex index, List<Diagnostic> diagnostics)
+    internal static void ValidateTypeRef(TypeRef type, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         // Resilient syntax: an empty-named TypeRef is the placeholder the builder fills in for a
         // type reference the parser couldn't recover (e.g. `amount:` with no type). Reporting
@@ -1434,30 +1434,24 @@ public sealed class SemanticValidator
 
         // Classify once: the unknown-type, arity, and Range-orderable checks below all consult it.
         //
-        // #1715 — why this one is NOT a context-blindness bug like its siblings (#1711/#1713/#1709).
-        // The three checks below branch only on (a) whether `kind` is Unknown and (b) whether it is a
-        // built-in generic; none of them reads WHICH declared kind a name resolved to. Both of those
-        // are provably insensitive to a cross-context simple-name collision:
-        //   * Unknown-ness is identical for `Classify(name)` and `Classify(context, name)`.
-        //     `ModelIndex._byName` and `_declsByContext` are populated from the SAME traversal
-        //     (ContextNode.AllTypeDecls), so any name resolvable in a context is also a key in the
-        //     flat table; a collision only OVERWRITES that slot's value (last-write-wins), it never
-        //     removes the key. And `ClassifyDecl` covers all eight `TypeDecl` subtypes, so it never
-        //     returns Unknown for a real declaration. Hence `Classify(ctx, n) == Unknown` iff
-        //     `Classify(n) == Unknown` — which is also all `IsKnownType` (the KOI0907 gate) reduces
-        //     to. `BuiltinOps.IsOrderable` is a pure name test, so it cannot diverge either.
-        //   * List/Set/Map/Range are matched by literal name BEFORE the table lookup, and KOI0908
-        //     (ValidateUniqueTypeNames) already forbids a user type from taking one of those names,
-        //     so no declaration can shadow them.
-        // Measured, not assumed: over all 715 type references in the eight shipped templates plus an
-        // adversarial value/entity, enum/value and enum/readmodel collision matrix, the flat and
-        // context-aware overloads never once disagreed on Unknown-ness or collection-ness (they do
-        // disagree on the concrete kind — e.g. flat Entity vs local Value — which nothing here reads).
-        // If a context is ever threaded through here anyway, guard the two shadowing regressions it
-        // introduces: on an already-invalid model declaring `value List` / `value Range`, the local
-        // declaration would shadow the built-in and silence the KOI0107 arity / KOI0907 orderable
-        // reports that fire today alongside KOI0908.
-        TypeKind kind = index.Classify(type.Name);
+        // #1715 — context is threaded here for family-wide consistency with its siblings
+        // (#1711/#1713/#1709), NOT to fix a live bug: it is defense-in-depth. The three checks below
+        // branch only on (a) whether `kind` is Unknown and (b) whether it is a built-in generic, and
+        // Unknown-ness provably cannot diverge between the two overloads — `_byName` and
+        // `_declsByContext` come from the SAME traversal (ContextNode.AllTypeDecls), so a collision
+        // only overwrites a slot's value, never removes the key, and `ClassifyDecl` covers every
+        // `TypeDecl` subtype. Measured, not assumed: over all 715 type references in the eight shipped
+        // templates plus an adversarial collision matrix, the two overloads never once disagreed on
+        // Unknown-ness or collection-ness.
+        // Built-in names deliberately keep PRECEDENCE over a context-local declaration: KOI0908 already
+        // forbids a type from taking one, so on an already-invalid model declaring `value List` /
+        // `value Range` a plain `Classify(resolver.Context, …)` would let the local declaration shadow
+        // the built-in and silence the KOI0107 arity / KOI0907 orderable reports that fire today
+        // alongside KOI0908. Pinned by R9ValueObjectTests' two `…still_reports_…_alongside_KOI0908` tests.
+        TypeKind flat = index.Classify(type.Name);
+        TypeKind kind = flat is TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range
+            ? flat
+            : index.Classify(resolver.Context, type.Name);
 
         // A qualified `Context.T` is validated by the context-scoping pass (UnknownContext /
         // NotExported); skip the global unknown-type check here to avoid a double report.
@@ -1498,8 +1492,10 @@ public sealed class SemanticValidator
 
         // A Range is ordered, so its element must be an orderable type (Int/Decimal/Instant).
         // Only flag a KNOWN non-orderable element; an unknown element is already KOI0101.
+        // The known-ness gate may use the context-aware overload directly: shadowing can only make a
+        // name MORE known, and `BuiltinOps.IsOrderable` is a pure name test, so neither can regress.
         if (kind == TypeKind.Range && type.Element is not null
-            && index.IsKnownType(type.Element.Name) && !BuiltinOps.IsOrderable(type.Element.Name))
+            && index.IsKnownType(resolver.Context, type.Element.Name) && !BuiltinOps.IsOrderable(type.Element.Name))
         {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.RangeNotOrderable,
                 $"range element type '{type.Element.Name}' is not orderable; ranges require Int, Decimal, or Instant",
@@ -1508,12 +1504,12 @@ public sealed class SemanticValidator
 
         if (type.Element is not null)
         {
-            ValidateTypeRef(type.Element, index, diagnostics);
+            ValidateTypeRef(type.Element, index, resolver, diagnostics);
         }
 
         if (type.Value is not null)
         {
-            ValidateTypeRef(type.Value, index, diagnostics);
+            ValidateTypeRef(type.Value, index, resolver, diagnostics);
         }
     }
 

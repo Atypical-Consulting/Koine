@@ -73,7 +73,7 @@ internal static class EntityBehaviorValidator
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in cmd.Parameters)
             {
-                SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(p.Type, index, resolver, diagnostics);
                 if (!seenParams.Add(p.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -140,7 +140,7 @@ internal static class EntityBehaviorValidator
             // also reported so only a single terminal value is emitted).
             if (cmd.ReturnType is { } returnType)
             {
-                SemanticValidator.ValidateTypeRef(returnType, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(returnType, index, resolver, diagnostics);
                 var resultCount = 0;
                 foreach (var stmt in cmd.Body)
                 {
@@ -258,7 +258,7 @@ internal static class EntityBehaviorValidator
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in factory.Parameters)
             {
-                SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(p.Type, index, resolver, diagnostics);
                 if (!seenParams.Add(p.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -444,7 +444,7 @@ internal static class EntityBehaviorValidator
     /// well-typed with distinct names; and each finder's result type is the
     /// aggregate root or a <c>List</c> of it.
     /// </summary>
-    public static void ValidateRepository(AggregateDecl agg, ModelIndex index, List<Diagnostic> diagnostics)
+    public static void ValidateRepository(AggregateDecl agg, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         if (agg.Repository is not { } repo)
         {
@@ -485,7 +485,7 @@ internal static class EntityBehaviorValidator
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in finder.Parameters)
             {
-                SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(p.Type, index, resolver, diagnostics);
                 if (!seenParams.Add(p.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -503,7 +503,7 @@ internal static class EntityBehaviorValidator
 
             // The result is a single root or a List<root>; anything else can't be a
             // well-typed lookup over this aggregate.
-            SemanticValidator.ValidateTypeRef(finder.ResultType, index, diagnostics);
+            SemanticValidator.ValidateTypeRef(finder.ResultType, index, resolver, diagnostics);
             var elementName = CSharpListElement(finder.ResultType);
             if (elementName != agg.RootName)
             {

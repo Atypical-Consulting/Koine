@@ -173,6 +173,110 @@ public class R9ValueObjectTests
         Diagnose("context C { value V { p: Range } }").ShouldContain(d => d.Code == DiagnosticCodes.GenericArity);
     }
 
+    // ----------------------------------------------------------------------
+    // #1715 — ValidateTypeRef classifies through the reference's own context.
+    // These four pin that the rethreading did not WIDEN anything: a genuinely
+    // bad reference still reports, and a built-in name still beats a
+    // context-local declaration that (illegally) took it.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public void Range_over_a_non_orderable_element_is_still_reported_in_a_multi_context_model()
+    {
+        // #1715 over-widening guard for KOI0907: the orderable gate now asks
+        // `IsKnownType(resolver.Context, element)`. Freight's own `Label` is a known,
+        // non-orderable value object, so the report must still fire.
+        const string src = """
+            context Freight {
+              value Label {
+                text: String
+              }
+              value Band {
+                span: Range<Label>
+              }
+            }
+
+            context Shipping {
+              value Parcel {
+                weight: Decimal
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.RangeNotOrderable);
+    }
+
+    [Fact]
+    public void Generic_arity_is_still_reported_in_a_multi_context_model()
+    {
+        // #1715 over-widening guard for KOI0107: List/Set/Map/Range are matched by literal name
+        // before any table lookup, so threading a context must not stop the arity check firing.
+        const string src = """
+            context Freight {
+              value Bag {
+                items: Map<String>
+              }
+            }
+
+            context Shipping {
+              value Parcel {
+                weight: Decimal
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.GenericArity);
+    }
+
+    [Fact]
+    public void A_context_local_value_named_List_still_reports_generic_arity_alongside_KOI0908()
+    {
+        // #1715 shadowing guard. `ModelIndex.Classify(context, name)` tries the context-local
+        // declaration BEFORE the built-in name checks, so a naive `Classify(resolver.Context, …)`
+        // here would classify `List` as this context's Value and SILENCE the arity report that
+        // fires today. ValidateTypeRef therefore keeps built-ins ahead of a local declaration.
+        // The model is already invalid (KOI0908 forbids the name); both reports must survive.
+        const string src = """
+            context C {
+              value List {
+                x: Int
+              }
+              value V {
+                xs: List
+              }
+            }
+            """;
+
+        var diags = Diagnose(src);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.ReservedTypeName);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.GenericArity);
+    }
+
+    [Fact]
+    public void A_context_local_value_named_Range_still_reports_non_orderable_alongside_KOI0908()
+    {
+        // #1715 shadowing guard, the KOI0907 half: were the local `Range` value object allowed to
+        // shadow the built-in, `kind` would be Value rather than Range and the orderable check
+        // would never run. Both the reserved-name and the non-orderable reports must survive.
+        const string src = """
+            context C {
+              value Range {
+                x: Int
+              }
+              value Label {
+                text: String
+              }
+              value V {
+                p: Range<Label>
+              }
+            }
+            """;
+
+        var diags = Diagnose(src);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.ReservedTypeName);
+        diags.ShouldContain(d => d.Code == DiagnosticCodes.RangeNotOrderable);
+    }
+
     // ======================================================================
     // R9.2 — Quantity value objects with unit-checked arithmetic
     // ======================================================================

@@ -76,7 +76,7 @@ internal static class CqrsValidator
             {
                 // A derived field: the projection resolves over the source; its declared
                 // type must be known and accept the projected value.
-                SemanticValidator.ValidateTypeRef(field.Type!, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(field.Type!, index, resolver, diagnostics);
                 checker.Check(field.Projection, scope, field.Type);
                 var inferred = resolver.Infer(field.Projection, scope);
                 if (inferred is not null && index.IsKnownType(resolver.Context, field.Type!.Name)
@@ -101,7 +101,7 @@ internal static class CqrsValidator
         var seenParams = new HashSet<string>(StringComparer.Ordinal);
         foreach (var p in q.Criteria)
         {
-            SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
+            SemanticValidator.ValidateTypeRef(p.Type, index, resolver, diagnostics);
             if (!seenParams.Add(SemanticValidator.PropertyKey(p.Name)))
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -115,7 +115,7 @@ internal static class CqrsValidator
             }
         }
 
-        SemanticValidator.ValidateTypeRef(q.ResultType, index, diagnostics);
+        SemanticValidator.ValidateTypeRef(q.ResultType, index, resolver, diagnostics);
         var resultName = q.ResultType.Name == ModelIndex.ListTypeName
             ? q.ResultType.Element?.Name
             : q.ResultType.Name;
