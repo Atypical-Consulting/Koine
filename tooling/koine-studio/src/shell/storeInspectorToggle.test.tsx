@@ -24,7 +24,7 @@ describe('storeInspectorToggle', () => {
       diagnosticsByUri: {},
       docViews: {},
       chat: { messages: [], status: 'idle', changeSet: null, workspaceKey: '', turn: null, draft: '' },
-    }) as AppState);
+    }) as unknown as AppState);
 
     // Clean up any existing host from previous tests
     hostElement = document.querySelector('.koi-store-inspector-overlay');

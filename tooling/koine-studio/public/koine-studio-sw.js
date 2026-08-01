@@ -64,7 +64,7 @@
 /**
  * @typedef {object} Deps
  * @property {CacheStorageLike} caches
- * @property {typeof fetch} fetch
+ * @property {(input: string, init?: RequestInit) => Promise<Response>} fetch
  */
 /**
  * @typedef {object} BootManifest
