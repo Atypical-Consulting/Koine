@@ -214,11 +214,9 @@ public class ScenarioSandboxTests
     [Fact]
     public void The_child_is_started_with_the_sandboxs_managed_heap_ceiling()
     {
-        RequireUnixStubs();
-
         // Reported through the result tree rather than a scratch file: filesystem confinement is exactly
         // what would deny the child that file, so a stub that wrote one would be testing itself.
-        string stub = WriteStub(Report("heap=${DOTNET_GCHeapHardLimit-}"));
+        string stub = WriteStub(Report("heap=" + EnvRef("DOTNET_GCHeapHardLimit")));
 
         try
         {
@@ -266,9 +264,7 @@ public class ScenarioSandboxTests
     [Fact]
     public void A_child_that_burns_past_the_processor_ceiling_is_reported_as_a_cap_not_a_timeout()
     {
-        RequireUnixStubs();
-
-        string stub = WriteStub("while :; do :; done\n");
+        string stub = WriteStub(SpinLoop());
         try
         {
             ScenarioChildRun run = RunStub(stub, ScenarioSandboxOptions.Default with { CpuLimit = TightCpuLimit });
@@ -293,11 +289,9 @@ public class ScenarioSandboxTests
     [Fact]
     public void Without_a_processor_ceiling_the_same_child_is_only_stopped_by_the_deadline()
     {
-        RequireUnixStubs();
-
         // The control for the test above: SAME child, confinement off. If it still came back as a cap
         // breach, the cap would be proving nothing — the wall-clock deadline would be doing all the work.
-        string stub = WriteStub("while :; do :; done\n");
+        string stub = WriteStub(SpinLoop());
         try
         {
             ScenarioChildRun run = RunStub(stub, ScenarioSandboxOptions.None, TimeSpan.FromSeconds(3));
@@ -316,8 +310,6 @@ public class ScenarioSandboxTests
     [Fact]
     public void Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run()
     {
-        RequireUnixStubs();
-
         string stub = WriteStub(EchoResult);
         try
         {
@@ -806,23 +798,60 @@ public class ScenarioSandboxTests
     /// is exactly what the confinement is denying.</summary>
     private static string? Probed(ScenarioChildRun run) => run.Result["result"] as string;
 
-    /// <summary>Shell that prints a valid result tree carrying <paramref name="findings"/> as its result.</summary>
-    private static string Report(string findings) =>
-        "printf '{\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
-        + "\"steps\":[],\"resultingState\":{},\"invariants\":[],\"result\":\"%s\",\"notes\":[]}' \""
-        + findings + "\"\n";
+    /// <summary>The POSIX-shell (or, on Windows, batch) form of a reference to environment variable
+    /// <paramref name="name"/> — cmd.exe and POSIX shells spell this differently, and the JSON contract
+    /// the two <see cref="Report"/> forms below produce has to embed whichever is native.</summary>
+    private static string EnvRef(string name) =>
+        OperatingSystem.IsWindows() ? "%" + name + "%" : "${" + name + "}";
 
-    /// <summary>A minimal, valid result tree — everything the protocol reader needs from a stub child.</summary>
-    private const string EchoResult =
-        "printf '%s' '{\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
-        + "\"steps\":[],\"resultingState\":{},\"invariants\":[],\"result\":null,\"notes\":[]}'\n";
+    /// <summary>Shell (or, on Windows, batch) that prints a valid result tree carrying <paramref
+    /// name="findings"/> as its result. Both forms produce byte-identical JSON shapes (issue #1782 Task
+    /// 4) so the assertions that read them are shared, never duplicated per platform.</summary>
+    private static string Report(string findings) =>
+        OperatingSystem.IsWindows()
+            ? "@echo {\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
+              + "\"steps\":[],\"resultingState\":{},\"invariants\":[],\"result\":\"" + findings + "\",\"notes\":[]}\r\n"
+            : "printf '{\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
+              + "\"steps\":[],\"resultingState\":{},\"invariants\":[],\"result\":\"%s\",\"notes\":[]}' \""
+              + findings + "\"\n";
+
+    /// <summary>A minimal, valid result tree — everything the protocol reader needs from a stub child.
+    /// Not a <c>const</c>: which form it renders as depends on the platform running it.</summary>
+    private static string EchoResult =>
+        OperatingSystem.IsWindows()
+            ? "@echo {\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
+              + "\"steps\":[],\"resultingState\":{},\"invariants\":[],\"result\":null,\"notes\":[]}\r\n"
+            : "printf '%s' '{\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
+              + "\"steps\":[],\"resultingState\":{},\"invariants\":[],\"result\":null,\"notes\":[]}'\n";
+
+    /// <summary>The spinning body <see cref="A_child_that_burns_past_the_processor_ceiling_is_reported_as_a_cap_not_a_timeout"/>
+    /// and its control need — a tight loop with no syscall a shell/batch interpreter could block on.</summary>
+    private static string SpinLoop() =>
+        OperatingSystem.IsWindows() ? ":loop\r\ngoto loop\r\n" : "while :; do :; done\n";
 
     /// <summary>Runs a stub child under <paramref name="options"/>, restoring the command override
     /// afterwards so no other test in this class inherits it.</summary>
     private static ScenarioChildRun RunStub(string stub, ScenarioSandboxOptions options, TimeSpan? budget = null)
     {
-        string? previous = Environment.GetEnvironmentVariable(ScenarioExecutionHost.CommandOverrideVariable);
-        Environment.SetEnvironmentVariable(ScenarioExecutionHost.CommandOverrideVariable, stub);
+        string? previousCommand = Environment.GetEnvironmentVariable(ScenarioExecutionHost.CommandOverrideVariable);
+        string? previousArgs = Environment.GetEnvironmentVariable(ScenarioExecutionHost.ArgumentsOverrideVariable);
+        if (OperatingSystem.IsWindows())
+        {
+            // CreateProcess cannot launch a .cmd directly with UseShellExecute false (the sandbox always
+            // spawns that way) — cmd.exe has to be the executable, with the stub as its /c argument. The
+            // leading-argument override exists for exactly this "muxer plus a path" shape. /q turns off
+            // command echo, which is ON by default for a batch file NOT started interactively — without
+            // it, cmd.exe writes its own "<cwd>>command" line to stdout ahead of anything the stub prints,
+            // and the protocol reader sees that instead of JSON.
+            string comspec = Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
+            Environment.SetEnvironmentVariable(ScenarioExecutionHost.CommandOverrideVariable, comspec);
+            Environment.SetEnvironmentVariable(ScenarioExecutionHost.ArgumentsOverrideVariable, "/q /c " + stub);
+        }
+        else
+        {
+            Environment.SetEnvironmentVariable(ScenarioExecutionHost.CommandOverrideVariable, stub);
+        }
+
         try
         {
             return ScenarioExecutionHost.RunDetailed(
@@ -830,33 +859,40 @@ public class ScenarioSandboxTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable(ScenarioExecutionHost.CommandOverrideVariable, previous);
+            Environment.SetEnvironmentVariable(ScenarioExecutionHost.CommandOverrideVariable, previousCommand);
+            Environment.SetEnvironmentVariable(ScenarioExecutionHost.ArgumentsOverrideVariable, previousArgs);
         }
     }
 
-    /// <summary>Writes an executable stub child, POSIX-sh unless a richer shell is asked for.</summary>
+    /// <summary>Writes an executable stub child — POSIX-sh unless a richer shell is asked for, or (on
+    /// Windows) a <c>.cmd</c> invoked BY EXTENSION, never by a shebang line, which means nothing there.</summary>
     private static string WriteStub(string body, string interpreter = "/bin/sh")
     {
+        if (OperatingSystem.IsWindows())
+        {
+            string cmdPath = Path.Combine(Path.GetTempPath(), "koine-stub-" + Guid.NewGuid().ToString("N") + ".cmd");
+            File.WriteAllText(cmdPath, body);
+            return cmdPath;
+        }
+
         string path = Path.Combine(Path.GetTempPath(), "koine-stub-" + Guid.NewGuid().ToString("N") + ".sh");
         File.WriteAllText(path, "#!" + interpreter + "\n" + body);
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        File.SetUnixFileMode(
+            path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
         return path;
     }
 
-    /// <summary>The stub children are POSIX-sh, and the confinement they exercise is the Unix one. Windows
-    /// has its own mechanism (a Job Object) with no shell-scriptable equivalent, so skip rather than
-    /// assert something this platform never promised.</summary>
+    /// <summary>Gates only the genuinely POSIX-specific stub tests — today, just the network probe, which
+    /// needs bash's <c>/dev/tcp</c> pseudo-device. Every other stub-based behavioural assertion now has a
+    /// Windows form too (issue #1782 Task 4): <see cref="WriteStub"/>, <see cref="Report"/> and <see
+    /// cref="EchoResult"/> all branch on platform instead of assuming POSIX.</summary>
     private static void RequireUnixStubs()
     {
         if (OperatingSystem.IsWindows())
         {
-            Assert.Skip("The sandbox's Unix confinement is exercised with POSIX-sh stub children.");
+            Assert.Skip("This probe needs a POSIX shell feature (bash's /dev/tcp) with no Windows equivalent.");
         }
     }
 
