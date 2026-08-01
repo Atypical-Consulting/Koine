@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, waitFor, within } from '@testing-library/preact';
+import { fireEvent, render, type RenderResult, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
 import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, GitUpstream } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
@@ -775,7 +775,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
   });
 
   // Open the ⋮ menu (a REAL createFloatingMenu, mounted on document.body) and return its role="menu".
-  async function openOverflow(view: ReturnType<typeof render>) {
+  async function openOverflow(view: RenderResult) {
     const trigger = (await view.findByRole('button', { name: 'Views and more actions' })) as HTMLButtonElement;
     fireEvent.click(trigger);
     return waitFor(() => {
@@ -1040,7 +1040,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
 
 describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
   // Open the caret menu (a REAL createFloatingMenu on document.body) and return its role="menu".
-  async function openCaret(view: ReturnType<typeof render>) {
+  async function openCaret(view: RenderResult) {
     const trigger = (await view.findByRole('button', { name: 'Commit options' })) as HTMLButtonElement;
     fireEvent.click(trigger);
     return waitFor(() => {
@@ -1365,7 +1365,7 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
   // to-be-pushed. Both now route through the same shared ensureSaved() helper onCommit uses, so they get
   // the identical prompt/decline/failure behavior — these tests mirror the onCommit cases above via the
   // caret menu instead of the split Commit button.
-  async function openCaret(view: ReturnType<typeof render>) {
+  async function openCaret(view: RenderResult) {
     const trigger = (await view.findByRole('button', { name: 'Commit options' })) as HTMLButtonElement;
     fireEvent.click(trigger);
     return waitFor(() => {

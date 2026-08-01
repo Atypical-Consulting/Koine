@@ -252,7 +252,7 @@ describe('SyntaxTreePanel', () => {
   });
 
   test('clicking a row fires onNodeClick with that node and marks it current', async () => {
-    const onNodeClick = vi.fn();
+    const onNodeClick = vi.fn<(node: SyntaxTreeNode) => void>();
     const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} onNodeClick={onNodeClick} />);
 
     const ctx = await view.findByRole('treeitem', { name: /ContextNode Billing/ });
@@ -269,7 +269,7 @@ describe('SyntaxTreePanel', () => {
   });
 
   test('pressing Enter on a row fires onNodeClick + marks it current (keyboard parity with a click)', async () => {
-    const onNodeClick = vi.fn();
+    const onNodeClick = vi.fn<(node: SyntaxTreeNode) => void>();
     const view = render(<SyntaxTreePanel source={makeSource(spannedFixture())} onNodeClick={onNodeClick} />);
 
     // A leaf-ish row: keyboard activation must jump to source too, not just expandable parents (WCAG 2.1.1).
@@ -310,7 +310,7 @@ describe('SyntaxTreePanel', () => {
   // node stays current. Reused source object across render/rerender so the fetch effect doesn't refetch and
   // reset the highlight.
   test('a single click keeps the clicked node selected through its own caret echo (not the parent)', async () => {
-    const onNodeClick = vi.fn();
+    const onNodeClick = vi.fn<(node: SyntaxTreeNode) => void>();
     const source = makeSource(spannedFixture());
     const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
 
@@ -336,7 +336,7 @@ describe('SyntaxTreePanel', () => {
   });
 
   test('Enter keeps the activated node selected through its own caret echo (keyboard parity)', async () => {
-    const onNodeClick = vi.fn();
+    const onNodeClick = vi.fn<(node: SyntaxTreeNode) => void>();
     const source = makeSource(spannedFixture());
     const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
 
@@ -358,7 +358,7 @@ describe('SyntaxTreePanel', () => {
   });
 
   test('a genuine (non-echo) caret move after a click is still honored — the guard only swallows the echo', async () => {
-    const onNodeClick = vi.fn();
+    const onNodeClick = vi.fn<(node: SyntaxTreeNode) => void>();
     const source = makeSource(spannedFixture());
     const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
 
@@ -380,7 +380,7 @@ describe('SyntaxTreePanel', () => {
   });
 
   test('the echo guard is consumed on every caret effect — a stale echo never swallows a later genuine move', async () => {
-    const onNodeClick = vi.fn();
+    const onNodeClick = vi.fn<(node: SyntaxTreeNode) => void>();
     const source = makeSource(spannedFixture());
     const view = render(<SyntaxTreePanel source={source} onNodeClick={onNodeClick} />);
 

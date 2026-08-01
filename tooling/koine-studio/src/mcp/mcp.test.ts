@@ -25,7 +25,8 @@ describe('mcpJsonSnippet', () => {
 
   test('round-trips an arbitrary loopback URL verbatim', () => {
     const url = 'http://localhost:3001/mcp';
-    expect(JSON.parse(mcpJsonSnippet(url)).mcpServers.koine.url).toBe(url);
+    const parsed = JSON.parse(mcpJsonSnippet(url)) as { mcpServers: { koine: { url: string } } };
+    expect(parsed.mcpServers.koine.url).toBe(url);
   });
 });
 

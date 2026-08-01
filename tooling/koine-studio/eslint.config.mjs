@@ -72,8 +72,13 @@ function selectorsExcept(...excluded) {
 //
 // Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on day
 // one; the 8 cheapest of the remaining 17 were fixed and enforced in the PR that opened this table
-// (#1720); `no-unsafe-argument` was the 9th (#1785), `no-unsafe-assignment` the 10th (#1814), and
-// `no-explicit-any` the 11th — each fixed and enforced in its own follow-up PR that removed it).
+// (#1720); `no-unsafe-argument` was the 9th (#1785), `no-unsafe-assignment` the 10th (#1814),
+// `no-explicit-any` the 11th (#1817), and `no-unsafe-call`/`no-unsafe-member-access` the 12th/13th —
+// fixed together since #1817's `no-explicit-any`/`no-unsafe-assignment` fixes had already collapsed
+// their finding counts from the ~1,700-finding day-one measurement down to 5/32 (test-only sites: a
+// `ReturnType<typeof vi.fn>` cast that erased a mock's real parameter types, a couple of bare `vi.fn()`
+// mocks with no signature, and two unannotated `JSON.parse` results) — each fixed and enforced in its
+// own follow-up PR that removed it.
 // Burn-down order is cheapest-first. Counts are LIVE — re-measure before editing this table, with
 // `npx eslint . -f json` under a config that adds the preset with no `off` entries, grouped by rule.
 // Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
@@ -81,9 +86,7 @@ function selectorsExcept(...excluded) {
 // (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
 const RATCHET_PENDING = {
   '@typescript-eslint/no-unused-vars': 'off', //                 73 findings / 29 files
-  '@typescript-eslint/no-unsafe-call': 'off', //                113 findings /  4 files
-  '@typescript-eslint/no-unsafe-member-access': 'off', //       159 findings / 15 files
-  '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 234 findings / 70 files
+  '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 236 findings / 71 files
   '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files
   '@typescript-eslint/unbound-method': 'off', //                569 findings / 62 files
 };

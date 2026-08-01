@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe } from 'vitest-axe';
 import { EditorView } from '@codemirror/view';
-import { DEFAULT_SETTINGS, effectiveSettings } from '@/settings/persistence';
+import { DEFAULT_SETTINGS, effectiveSettings, type Settings } from '@/settings/persistence';
 
 // vi.mock is hoisted above module-scope consts, so the spies must come from vi.hoisted(). loadSettings()
 // returns a COMPLETE Settings incl the live secret `aiApiKey: 'sk-LIVE'` — settingsToJsonDoc must strip
 // it from the JSON seed, and jsonDocToSettings must re-inject it on a valid edit.
 const { saveSettings, loadSettings } = vi.hoisted(() => ({
-  saveSettings: vi.fn(),
-  loadSettings: vi.fn(() => ({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-LIVE' })),
+  saveSettings: vi.fn<(s: Settings) => void>(),
+  loadSettings: vi.fn((): Settings => ({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-LIVE' })),
 }));
 // Partial mock: keep DEFAULT_SETTINGS, patchSettings, whenSecretsReady, … real (mountPreferencesPane
 // needs them) but swap save/load so the page's persist/read path is observable + deterministic.

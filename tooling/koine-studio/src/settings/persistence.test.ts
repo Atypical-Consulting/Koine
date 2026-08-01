@@ -54,6 +54,7 @@ import {
 } from '@/settings/persistence';
 import { DEFAULT_DECK_STATE, isValidDeckState } from '@/store/slices/uiChrome';
 import type { DeckState } from '@/store/slices/uiChrome';
+import type { Settings } from '@/settings/settingsStore';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 import type { ChatMessage } from '@/ai/ai';
@@ -353,7 +354,7 @@ describe('API key secret', () => {
     // The migration ran: the vault has the key, the plaintext blob is scrubbed.
     const rawAfterFirst = localStorage.getItem('koine.studio.settings') ?? '';
     expect(rawAfterFirst).not.toContain('sk-legacy-once');
-    expect(JSON.parse(rawAfterFirst).aiApiKey).toBeUndefined();
+    expect((JSON.parse(rawAfterFirst) as Partial<Settings>).aiApiKey).toBeUndefined();
 
     // A THIRD call, made after resolution, must also return the very same promise and must NOT re-run
     // the migration: re-seed a DIFFERENT legacy key and confirm it survives untouched (proves "exactly

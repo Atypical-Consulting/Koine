@@ -12,6 +12,7 @@ import { createAppStore, type AppState } from '@/store/index';
 import type { StagedEdit } from '@/ai/editSession';
 import type { StoreApi } from 'zustand/vanilla';
 import { ChangeSetPanel } from '@/ai/components/ChangeSetPanel';
+import type { ChangeSetFileState } from '@/store/slices/chat';
 
 const staged: StagedEdit[] = [
   {
@@ -31,7 +32,10 @@ function reviewingStore(diagnostics: string | null = null): StoreApi<AppState> {
   return store;
 }
 
-function mount(store: StoreApi<AppState>, handlers?: { onApply?: () => void; onDiscard?: () => void }) {
+function mount(
+  store: StoreApi<AppState>,
+  handlers?: { onApply?: (accepted: readonly ChangeSetFileState[]) => void; onDiscard?: () => void },
+) {
   return render(
     <ChangeSetPanel
       store={store}
@@ -117,7 +121,7 @@ describe('ChangeSetPanel (#990)', () => {
 
   test('Apply click hands the accepted files to onApply; Discard click calls onDiscard', () => {
     const store = reviewingStore();
-    const onApply = vi.fn();
+    const onApply = vi.fn<(accepted: readonly ChangeSetFileState[]) => void>();
     const onDiscard = vi.fn();
     const { container } = mount(store, { onApply, onDiscard });
 
@@ -339,7 +343,7 @@ describe('colliding relPaths across roots (#472)', () => {
 
   test('Apply forwards the accepted entries with their STAGED keys', () => {
     const store = collidingStore();
-    const onApply = vi.fn();
+    const onApply = vi.fn<(accepted: readonly ChangeSetFileState[]) => void>();
     const { container } = mount(store, { onApply });
     fireEvent.click(applyBtn(container));
     expect(onApply).toHaveBeenCalledOnce();

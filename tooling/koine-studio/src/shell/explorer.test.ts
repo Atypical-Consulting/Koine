@@ -2,7 +2,7 @@
 // The explorer is a focus/keyboard-heavy role=tree widget; these tests rely on jsdom's focus and
 // blur semantics (and its window.prompt/confirm) — the repo default is happy-dom, so this file pins
 // jsdom per-file. (The browser fs tests stay on the happy-dom default.)
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { render as unmountPreact } from 'preact';
 import type { FsEntry } from '@/host';
 import { createExplorer, type ExplorerCallbacks } from '@/shell/explorer';
@@ -128,7 +128,7 @@ describe('explorer', () => {
 
   it('shows a dirty dot for a dirty file', () => {
     const cb = makeCallbacks();
-    (cb.isDirty as ReturnType<typeof vi.fn>).mockImplementation((token: string) => token === 'ROOT/shared.koi');
+    (cb.isDirty as Mock<(fileToken: string) => boolean>).mockImplementation((token: string) => token === 'ROOT/shared.koi');
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
@@ -141,7 +141,8 @@ describe('explorer', () => {
 
   it('shows an error badge for a file with diagnostics errors', () => {
     const cb = makeCallbacks();
-    (cb.diagCounts as ReturnType<typeof vi.fn>).mockImplementation((token: string) =>
+    const diagCounts = cb.diagCounts as Mock<(fileToken: string) => { errors: number; warnings: number }>;
+    diagCounts.mockImplementation((token: string) =>
       token === 'ROOT/orders/order.koi' ? { errors: 2, warnings: 0 } : { errors: 0, warnings: 0 },
     );
     const ex = createExplorer(cb);
@@ -159,7 +160,7 @@ describe('explorer', () => {
 
   it('marks the active file with aria-current', () => {
     const cb = makeCallbacks();
-    (cb.isActive as ReturnType<typeof vi.fn>).mockImplementation((token: string) => token === 'ROOT/shared.koi');
+    (cb.isActive as Mock<(fileToken: string) => boolean>).mockImplementation((token: string) => token === 'ROOT/shared.koi');
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
@@ -198,7 +199,7 @@ describe('explorer', () => {
     input.value = 'common.koi';
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 
-    const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
+    const renamed = (cb.onRename as Mock<(entry: FsEntry, newName: string) => void>).mock.calls[0];
     expect(renamed[0].token).toBe('ROOT/shared.koi');
     expect(renamed[1]).toBe('common.koi');
   });
@@ -265,7 +266,7 @@ describe('explorer', () => {
 
     document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
     await flush();
-    expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+    expect((cb.onDelete as Mock<(entry: FsEntry) => void>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
     expect(confirmShown()).toBe(false); // dialog dismissed
   });
 
@@ -335,7 +336,7 @@ describe('explorer', () => {
 
   it('sets aria-selected on the active treeitem', () => {
     const cb = makeCallbacks();
-    (cb.isActive as ReturnType<typeof vi.fn>).mockImplementation((t: string) => t === 'ROOT/shared.koi');
+    (cb.isActive as Mock<(fileToken: string) => boolean>).mockImplementation((t: string) => t === 'ROOT/shared.koi');
     const ex = createExplorer(cb);
     document.body.appendChild(ex.el);
     ex.render(sampleTree(), 'ROOT');
@@ -388,13 +389,13 @@ describe('explorer', () => {
 
     fileRow(ex, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
     clickMenuItem('Duplicate');
-    expect((cb.onDuplicate as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+    expect((cb.onDuplicate as Mock<(entry: FsEntry) => void>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
 
     fileRow(ex, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
     clickMenuItem('Delete');
     document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
     await flush();
-    expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+    expect((cb.onDelete as Mock<(entry: FsEntry) => void>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
   });
 
   it('ArrowDown moves focus to the next visible row and Enter opens a file', () => {
@@ -511,7 +512,7 @@ describe('explorer', () => {
 
     // Committing the rename replays the deferred render with the fresh tree.
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    expect((cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ren');
+    expect((cb.onRename as Mock<(entry: FsEntry, newName: string) => void>).mock.calls[0][1]).toBe('ren');
     expect(document.querySelector('.explorer-rename')).toBeNull();
   });
 
@@ -737,7 +738,7 @@ describe('explorer', () => {
 
     // `renaming` must have cleared: a subsequent render is NOT deferred, so a freshly-dirtied file
     // picks up its dirty dot. (If renaming were stuck, this render would be queued and never applied.)
-    (cb.isDirty as ReturnType<typeof vi.fn>).mockImplementation((t: string) => t === 'ROOT/shared.koi');
+    (cb.isDirty as Mock<(fileToken: string) => boolean>).mockImplementation((t: string) => t === 'ROOT/shared.koi');
     ex.render(sampleTree(), 'ROOT');
     expect(fileRow(ex, 'shared.koi').querySelector('.tree-dirty')).not.toBeNull();
   });
@@ -774,7 +775,7 @@ describe('explorer', () => {
     fireDrag(dirRow(ex), 'dragover');
     fireDrag(dirRow(ex), 'drop');
 
-    const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = (cb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0];
     expect(call[0].token).toBe('ROOT/shared.koi');
     expect(call[1]).toBe('ROOT/orders');
   });
@@ -797,7 +798,7 @@ describe('explorer', () => {
     // Drop still validates against the live dragLi and fires the move.
     fireDrag(dirRow(ex), 'dragover');
     fireDrag(dirRow(ex), 'drop');
-    expect((cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ROOT/orders');
+    expect((cb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0][1]).toBe('ROOT/orders');
 
     fireDrag(shared, 'dragend'); // replays the deferred render
   });
@@ -822,7 +823,7 @@ describe('explorer', () => {
     fireDrag(fileRow(ex, 'shared.koi'), 'dragstart'); // top-level file
     fireDrag(fileRow(ex, 'order.koi'), 'drop'); // onto a file inside orders/
 
-    const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = (cb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0];
     expect(call[0].token).toBe('ROOT/shared.koi');
     expect(call[1]).toBe('ROOT/orders'); // routed to the file's parent directory, not a no-op
   });
@@ -839,7 +840,7 @@ describe('explorer', () => {
     expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('false');
 
     // order.koi becomes active; a re-render auto-reveals it by re-expanding orders/.
-    (cb.isActive as ReturnType<typeof vi.fn>).mockImplementation((t: string) => t === 'ROOT/orders/order.koi');
+    (cb.isActive as Mock<(fileToken: string) => boolean>).mockImplementation((t: string) => t === 'ROOT/orders/order.koi');
     ex.render(sampleTree(), 'ROOT');
     expect(ex.el.querySelector('li[data-kind="dir"]')!.getAttribute('aria-expanded')).toBe('true');
 
