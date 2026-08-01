@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BrowserPlatform } from '@/host/browser';
+import { TauriPlatform } from '@/host/tauri';
 
 describe('BrowserPlatform host capabilities', () => {
   it('cannot host an MCP sidecar', () => {
@@ -32,5 +33,18 @@ describe('BrowserPlatform host capabilities', () => {
       expect(await p.isAutoRestorableToken('My Project')).toBe(false);
       expect(await p.isAutoRestorableToken('/Users/me/models')).toBe(false);
     });
+  });
+});
+
+// Running a scenario's GENERATED code (#236) means emitting, compiling and running it in a sandboxed
+// child process (ADR 0011) — the desktop host's backend can spawn one, a browser tab cannot. The panel
+// gates its opt-in toggle on this flag alone, so the two hosts must sit on opposite sides of it.
+describe('Platform.supportsScenarioExecution', () => {
+  it('the browser backend cannot execute a scenario', () => {
+    expect(new BrowserPlatform().supportsScenarioExecution).toBe(false);
+  });
+
+  it('the Tauri backend can', () => {
+    expect(new TauriPlatform().supportsScenarioExecution).toBe(true);
   });
 });

@@ -10,18 +10,26 @@ import type {
   ScenarioCatalog,
   ScenarioField,
   ScenarioInvariantCheck,
+  ScenarioMode,
   ScenarioOperation,
   ScenarioResult,
   ScenarioStep,
   ScenarioTarget,
 } from '@/lsp/protocol';
+import type { Platform } from '@/host/types';
 
 /** Just the LSP surface the panel needs — keeps it trivially mockable in tests. */
 export type ScenarioLsp = Pick<KoineLsp, 'scenarioCatalog' | 'runScenario'>;
 
+/** Just the host capabilities the panel needs (same narrowing idiom as {@link ScenarioLsp}): whether
+ *  this host can run the model's emitted code, which is what the executed-mode toggle is gated on. */
+export type ScenarioHost = Pick<Platform, 'supportsScenarioExecution'>;
+
 export interface ScenarioPanelOptions {
   container: HTMLElement;
   lsp: ScenarioLsp;
+  /** The host platform — asked (never the platform `kind`) whether to offer executed mode (#236). */
+  platform: ScenarioHost;
 }
 
 export interface ScenarioPanel {
@@ -31,8 +39,20 @@ export interface ScenarioPanel {
 
 const OUTCOME_ICON: Record<string, string> = { passed: '✓', failed: '✗', indeterminate: '?' };
 
+/** How each engine (#236) is labelled on a result, and what that label promises. */
+const MODE_LABEL: Record<ScenarioMode, { text: string; title: string }> = {
+  executed: {
+    text: 'Executed',
+    title: "Ran this model's generated code, so every value shown was really computed.",
+  },
+  interpreted: {
+    text: 'Interpreted',
+    title: 'Reasoned about the model without running it — a value the interpreter cannot evaluate stays ?.',
+  },
+};
+
 export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
-  const { container, lsp } = opts;
+  const { container, lsp, platform } = opts;
   container.classList.add('koi-scenario');
   container.replaceChildren();
 
@@ -73,13 +93,21 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
   argsArea.setAttribute('aria-label', 'Arguments as JSON');
   const argsField = labelled('Arguments (JSON)', argsArea);
 
+  // Executed mode (#236) is opt-in AND capability-gated: running the model's generated code means
+  // emitting, compiling and running it in a sandboxed child process (ADR 0011), which a browser tab has
+  // no way to spawn — so the toggle exists only on a host that says it can execute. A plain native
+  // checkbox in its own `<label>` (in the tab order, Space-toggled, named by its own text). It defaults
+  // OFF, and the choice lives in the checkbox for the session only — the panel is built once and reused,
+  // and nothing is written to the settings.
+  const execute = platform.supportsScenarioExecution ? executeToggle() : null;
+
   const runBtn = button('Run scenario', 'koi-scenario-run koi-scenario-run-primary');
 
   const results = h('div', 'koi-scenario-results');
   results.setAttribute('role', 'status');
   results.setAttribute('aria-live', 'polite');
 
-  container.append(intro, controls, givenField, argsField, runBtn, results);
+  container.append(intro, controls, givenField, argsField, ...(execute ? [execute.field] : []), runBtn, results);
 
   // --- behaviour ----------------------------------------------------------
 
@@ -152,6 +180,7 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     runBtn.disabled = off;
     givenArea.disabled = off;
     argsArea.disabled = off;
+    if (execute) execute.input.disabled = off;
   }
 
   async function refresh(): Promise<void> {
@@ -195,7 +224,12 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
 
     runBtn.disabled = true;
     try {
-      const result = await lsp.runScenario(target.name, op.name, given, args);
+      // Asking to execute is a REQUEST, not a promise: the backend may still answer with the
+      // interpreter (it can't execute, the model has errors, the sandbox timed out), and the rendered
+      // label reads the result's own `mode` rather than what was asked here.
+      const result = await lsp.runScenario(target.name, op.name, given, args, {
+        execute: execute?.input.checked ?? false,
+      });
       renderResult(result);
     } catch (e) {
       renderMessage(`The scenario failed to run: ${errorText(e)}`, 'error');
@@ -214,11 +248,15 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
   function renderResult(result: ScenarioResult): void {
     results.replaceChildren();
 
+    // The timeline's header: what happened, and — truthfully — which engine produced it. The mode comes
+    // from the RESULT, so a run that asked to execute but was answered by the interpreter says so.
+    const header = h('div', 'koi-scenario-result-header');
     const badge = h('div', `koi-scenario-badge ${result.ok ? 'is-ok' : 'is-rejected'}`);
     badge.textContent = result.ok
       ? `${result.target}.${result.operation} ran`
       : `${result.target}.${result.operation} was rejected`;
-    results.append(badge);
+    header.append(badge, modeChip(result.mode));
+    results.append(header);
 
     if (result.steps.length > 0) {
       results.append(sectionTitle('Timeline'));
@@ -352,6 +390,37 @@ function option(value: string, label: string): HTMLOptionElement {
   o.value = value;
   o.textContent = label;
   return o;
+}
+
+/**
+ * The executed-mode opt-in (#236): a native checkbox wrapped in its own `<label>`, so it is keyboard-
+ * operable and named by its text with no ARIA at all. Returns both halves — the field to mount, and the
+ * input whose `checked` is read at run time (the panel keeps no parallel copy of the state).
+ */
+function executeToggle(): { field: HTMLLabelElement; input: HTMLInputElement } {
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'koi-scenario-execute-input';
+  const field = document.createElement('label');
+  field.className = 'koi-scenario-execute';
+  field.title =
+    "Compiles and runs this model's generated code in a sandboxed child process instead of " +
+    'interpreting it — slower, but derived values are really computed rather than left indeterminate.';
+  const text = h('span', 'koi-scenario-execute-label');
+  text.textContent = 'Execute generated code (high fidelity)';
+  field.append(input, text);
+  return { field, input };
+}
+
+/** The engine that produced a result, as a chip on the timeline header — see {@link MODE_LABEL}. */
+function modeChip(mode: ScenarioMode): HTMLElement {
+  // `mode` crosses the wire as JSON, so a value a mismatched backend invents is read as the
+  // conservative `interpreted` rather than rendering `undefined` under an invented class.
+  const known: ScenarioMode = mode in MODE_LABEL ? mode : 'interpreted';
+  const el = h('span', `koi-scenario-mode is-${known}`);
+  el.textContent = MODE_LABEL[known].text;
+  el.title = MODE_LABEL[known].title;
+  return el;
 }
 
 function labelled(text: string, control: HTMLElement): HTMLLabelElement {
