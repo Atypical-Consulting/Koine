@@ -1104,8 +1104,8 @@ public class TypeScriptConformanceTests
     /// <summary>
     /// Issue #1731: the factory constructor-argument loop matched a same-named factory parameter to
     /// an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>), not via the shared,
-    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already correctly used by the
-    /// C#/Kotlin emitters — which additionally requires matching type shape and that an OPTIONAL
+    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already used by the C#, Kotlin,
+    /// Java and Rust emitters — which additionally requires matching type shape and that an OPTIONAL
     /// parameter never auto-bind to a NON-optional member. This is the reverse direction from the
     /// #1531 audit pinned above (there the MEMBER was optional and the parameter was not); here the
     /// PARAMETER is optional (<c>total: Decimal?</c>) and the member is not (<c>total: Decimal</c>).
@@ -1131,9 +1131,12 @@ public class TypeScriptConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         // Always-on guard (no tsc required): the optional parameter must NOT be passed directly into
-        // the non-optional member's constructor slot.
+        // the non-optional member's constructor slot; instead the ctor-arg loop falls all the way
+        // through to the required-and-unset branch (`undefined as never`) since the member has
+        // neither a factory init nor its own default.
         var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
         product.ShouldNotContain("return new Product(id, total);");
+        product.ShouldContain("return new Product(id, undefined as never);");
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);

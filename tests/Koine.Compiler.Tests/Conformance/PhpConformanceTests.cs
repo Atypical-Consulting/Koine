@@ -1818,8 +1818,8 @@ public class PhpConformanceTests
     /// <summary>
     /// Issue #1731: the factory constructor-argument loop matched a same-named factory parameter to
     /// an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>), not via the shared,
-    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already correctly used by the
-    /// C#/Kotlin/TS/Python emitters — which additionally requires matching type shape and that an
+    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already used by the C#, Kotlin,
+    /// Java and Rust emitters — which additionally requires matching type shape and that an
     /// OPTIONAL parameter never auto-bind to a NON-optional member. This is the reverse direction from
     /// the #1531 audit pinned above (there the MEMBER was optional and the parameter was not); here the
     /// PARAMETER is optional (<c>total: Decimal?</c>) and the member is not (<c>total: Decimal = 0.0</c>).
