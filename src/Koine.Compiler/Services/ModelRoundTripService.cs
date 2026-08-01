@@ -92,6 +92,24 @@ public static partial class ModelRoundTripService
             children.Add(BuildType(type, ctx.Name));
         }
 
+        // The context's behavioural vocabulary (#483) — policies, services, then specifications —
+        // appended after the types so the existing children keep their positions. The read side
+        // (read models, queries) rides `ctx.Types`, so it keeps its own declaration position there.
+        foreach (PolicyDecl policy in ctx.Policies)
+        {
+            children.Add(BuildPolicy(policy, ctx.Name));
+        }
+
+        foreach (ServiceDecl service in ctx.Services)
+        {
+            children.Add(BuildService(service, ctx.Name));
+        }
+
+        foreach (SpecDecl spec in ctx.Specs)
+        {
+            children.Add(BuildSpec(spec, ctx.Name));
+        }
+
         return new ModelNode("context", ctx.Name, ctx.Name, [], children, []);
     }
 
@@ -129,6 +147,17 @@ public static partial class ModelRoundTripService
             IntegrationEventDecl ie => new ModelNode(
                 "integration event", qualified, ie.Name,
                 ie.Members.Select(FieldMember).ToList(), [], []),
+
+            // The read side (R12.3/R12.4, #483): a read model's projected fields, and a query's
+            // criteria followed by the read model it returns.
+            ReadModelDecl rm => new ModelNode(
+                "read-model", qualified, rm.Name,
+                rm.Fields.Select(ReadModelFieldMember).ToList(), [], []),
+
+            QueryDecl q => new ModelNode(
+                "query", qualified, q.Name,
+                [.. q.Criteria.Select(CriterionMember), new ModelMember("result", "result", FormatType(q.ResultType), null)],
+                [], []),
 
             _ => new ModelNode("type", qualified, type.Name, [], [], []),
         };
@@ -186,6 +215,42 @@ public static partial class ModelRoundTripService
         return null;
     }
 
+    /// <summary>
+    /// A policy (R10.3): one <c>reaction</c> member correlating the triggering event with the command
+    /// the policy reacts with — the <c>command → event → policy</c> chain a navigator walks.
+    /// </summary>
+    private static ModelNode BuildPolicy(PolicyDecl policy, string prefix) => new(
+        "policy", prefix + "." + policy.Name, policy.Name,
+        [new ModelMember("reaction", policy.EventName, null, DescribeReaction(policy.Reaction))], [], []);
+
+    /// <summary>Renders a policy's reaction in canonical <c>.koi</c> syntax: <c>Target.command(arg: value, ...)</c>.</summary>
+    private static string DescribeReaction(PolicyReaction reaction) =>
+        $"{reaction.TargetType}.{reaction.CommandName}(" +
+        string.Join(", ", reaction.Args.Select(a => $"{a.Parameter}: {ExprDescriber.Describe(a.Value)}")) + ")";
+
+    /// <summary>
+    /// A service (R10.2/R12.2): one member per pure domain <c>operation</c> — carrying its result
+    /// expression, or none when the operation is a seam — then one per application <c>usecase</c>.
+    /// </summary>
+    private static ModelNode BuildService(ServiceDecl service, string prefix) => new(
+        "service", prefix + "." + service.Name, service.Name,
+        [
+            .. service.Operations.Select(o => new ModelMember(
+                "operation", o.Name, FormatType(o.ReturnType),
+                o.Body is null ? null : ExprDescriber.Describe(o.Body))),
+            .. service.UseCases.Select(u => new ModelMember(
+                "usecase", u.Name, u.ReturnType is null ? null : FormatType(u.ReturnType), null)),
+        ],
+        [], []);
+
+    /// <summary>
+    /// A specification (R10.1): one <c>condition</c> member naming the value/entity the rule is declared
+    /// on, with the boolean condition described target-agnostically.
+    /// </summary>
+    private static ModelNode BuildSpec(SpecDecl spec, string prefix) => new(
+        "spec", prefix + "." + spec.Name, spec.Name,
+        [new ModelMember("condition", spec.TargetType, null, ExprDescriber.Describe(spec.Condition))], [], []);
+
     private static ModelNode BuildContextMap(ContextMapNode map)
     {
         var relations = map.Relations
@@ -205,6 +270,19 @@ public static partial class ModelRoundTripService
     private static ModelMember EnumMemberOf(EnumMember em) => new(
         "enumMember", em.Name, null,
         em.Args.Count == 0 ? null : string.Join(", ", em.Args.Select(ExprDescriber.Describe)));
+
+    /// <summary>
+    /// One read-model field (R12.3). A <em>direct</em> field carries neither type nor value — it maps to
+    /// the source member of the same name; a <em>derived</em> one carries its declared type and the
+    /// described projection, the same way <see cref="FieldMember"/> surfaces a member's derivation.
+    /// </summary>
+    private static ModelMember ReadModelFieldMember(ReadModelField f) => new(
+        "field", f.Name,
+        f.Type is null ? null : FormatType(f.Type),
+        f.Projection is null ? null : ExprDescriber.Describe(f.Projection));
+
+    /// <summary>One query criterion (R12.4): a typed parameter of the emitted query DTO.</summary>
+    private static ModelMember CriterionMember(Param p) => new("criterion", p.Name, FormatType(p.Type), null);
 
     private static string? RelationDetail(ContextRelation r)
     {

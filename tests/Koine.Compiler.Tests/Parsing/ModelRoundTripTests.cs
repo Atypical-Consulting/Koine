@@ -21,6 +21,10 @@ public class ModelRoundTripTests
 
           enum OrderStatus { Draft, Placed, Shipped }
 
+          event OrderSubmitted {
+            orderId: OrderId
+          }
+
           integration event OrderPlaced {
             orderId: OrderId
             total: Decimal
@@ -42,8 +46,29 @@ public class ModelRoundTripTests
                 Draft  -> Placed
                 Placed -> Shipped
               }
+
+              command place {
+                requires status == Draft   "only a draft order can be placed"
+                status -> Placed
+              }
             }
           }
+
+          readmodel OrderSummary from Order {
+            status
+            lineCount: Int = lines.count
+          }
+
+          query OrdersByStatus(status: OrderStatus): List<OrderSummary>
+
+          spec IsShippable on Order = status == Placed
+
+          service Fulfilment {
+            operation Subtotal(unitPrice: Decimal, quantity: Int): Decimal = unitPrice * quantity
+            usecase PlaceOrder(order: OrderId)
+          }
+
+          policy PlaceOnSubmission when OrderSubmitted then Order.place()
         }
         """;
 
@@ -127,6 +152,107 @@ public class ModelRoundTripTests
     public void MembersOf_unknown_name_is_empty()
     {
         ModelRoundTripService.MembersOf(Compile(Sample), "Nope").ShouldBeEmpty();
+    }
+
+    // ---- #483: the context's behavioural vocabulary -----------------------
+
+    [Fact]
+    public void ModelToJson_emits_the_contexts_behavioural_declarations_as_nodes()
+    {
+        ModelNode context = ModelRoundTripService.ModelToJson(Compile(Sample), "Ordering");
+
+        // The read side rides `ctx.Types` (so it keeps its declaration position among the types); the
+        // policy/service/spec lists are appended after them, never reshuffling the existing children.
+        context.Children
+            .Where(c => c.Kind is "policy" or "service" or "spec" or "read-model" or "query")
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldBe(new[]
+            {
+                ("read-model", "OrderSummary", "Ordering.OrderSummary"),
+                ("query", "OrdersByStatus", "Ordering.OrdersByStatus"),
+                ("policy", "PlaceOnSubmission", "Ordering.PlaceOnSubmission"),
+                ("service", "Fulfilment", "Ordering.Fulfilment"),
+                ("spec", "IsShippable", "Ordering.IsShippable"),
+            });
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_read_models_direct_and_derived_fields()
+    {
+        var fields = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.OrderSummary");
+
+        fields.ShouldAllBe(f => f.Kind == "field");
+        // A direct field maps to the source member of the same name: no declared type, no projection.
+        fields[0].Name.ShouldBe("status");
+        fields[0].Type.ShouldBeNull();
+        fields[0].Value.ShouldBeNull();
+        // A derived field carries its declared type and the described projection.
+        fields[1].Name.ShouldBe("lineCount");
+        fields[1].Type.ShouldBe("Int");
+        fields[1].Value.ShouldBe("lines.count");
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_querys_criteria_and_its_result_type()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.OrdersByStatus");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "criterion", "result" });
+        members[0].Name.ShouldBe("status");
+        members[0].Type.ShouldBe("OrderStatus");
+        members[1].Type.ShouldBe("List<OrderSummary>");
+    }
+
+    [Fact]
+    public void MembersOf_describes_a_policys_trigger_and_reaction()
+    {
+        ModelMember reaction = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.PlaceOnSubmission").Single();
+
+        reaction.Kind.ShouldBe("reaction");
+        reaction.Name.ShouldBe("OrderSubmitted");        // the triggering event
+        reaction.Value.ShouldBe("Order.place()");        // the command the policy reacts with
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_services_operations_and_use_cases()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.Fulfilment");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "operation", "usecase" });
+        members[0].Name.ShouldBe("Subtotal");
+        members[0].Type.ShouldBe("Decimal");
+        members[0].Value.ShouldBe("unitPrice * quantity");   // the pure body; null for a seam
+        members[1].Name.ShouldBe("PlaceOrder");
+        members[1].Type.ShouldBeNull();                      // a command-style use case returns nothing
+    }
+
+    [Fact]
+    public void MembersOf_describes_a_specs_condition_over_its_target()
+    {
+        ModelMember condition = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.IsShippable").Single();
+
+        condition.Kind.ShouldBe("condition");
+        condition.Name.ShouldBe("Order");                 // the target type the condition is declared on
+        condition.Value.ShouldBe("status == Placed");
+    }
+
+    [Fact]
+    public void ModelToJson_of_a_behaviour_free_model_projects_the_same_tree_as_before()
+    {
+        // Regression guard (#483): the behavioural kinds are strictly ADDITIVE — a model declaring none
+        // of them projects exactly the children it did before, with no empty placeholder nodes. (The
+        // ordering-starter Verify snapshot below is the byte-level half of the same guard.)
+        const string structural = """
+            context Ordering {
+              value Money { amount: Decimal }
+              enum OrderStatus { Draft, Placed }
+            }
+            """;
+        ModelNode context = ModelRoundTripService.ModelToJson(Compile(structural), "Ordering");
+
+        context.Children.Select(c => (c.Kind, c.Title)).ShouldBe(new[] { ("value", "Money"), ("enum", "OrderStatus") });
+        context.Members.ShouldBeEmpty();
+        context.Transitions.ShouldBeEmpty();
     }
 
     // ---- #1163: transition/command correlation + per-edge fan-out ---------
