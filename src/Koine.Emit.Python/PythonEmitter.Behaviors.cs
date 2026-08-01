@@ -390,16 +390,17 @@ public sealed partial class PythonEmitter
         }
 
         // 3. Construct. Each ctor member draws its value, in priority order, from: an explicit
-        //    `field <- value` init; a same-named factory parameter (auto-bind); the member's own
-        //    default; `None` for an optional field; else omit (required+unset, already flagged
-        //    upstream — the constructor then raises a clear missing-argument error).
+        //    `field <- value` init; a same-named factory parameter (auto-bind, MemberAnalysis.AutoBinds
+        //    — matching type shape and never binding an optional parameter into a non-optional
+        //    member); the member's own default; `None` for an optional field; else omit
+        //    (required+unset, already flagged upstream — the constructor then raises a clear
+        //    missing-argument error).
         var initByField = new Dictionary<string, Expr>(StringComparer.Ordinal);
         foreach (Initialization i in inits)
         {
             initByField.TryAdd(i.Field, i.Value);
         }
 
-        var factoryParams = new HashSet<string>(factory.Parameters.Select(p => p.Name), StringComparer.Ordinal);
         var args = new List<string> { "id=id" };
         foreach (Member m in ctorMembers)
         {
@@ -409,7 +410,7 @@ public sealed partial class PythonEmitter
                 var expectedEnum = index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 args.Add($"{field}={translator.Translate(value, PythonExpressionTranslator.NameMode.Property, expectedEnum)}");
             }
-            else if (factoryParams.Contains(m.Name))
+            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {
                 args.Add($"{field}={field}");
             }
