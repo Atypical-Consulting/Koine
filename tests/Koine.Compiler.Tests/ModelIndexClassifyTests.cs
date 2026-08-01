@@ -155,6 +155,117 @@ public class ModelIndexClassifyTests(ITestOutputHelper output)
         index.EnumsDeclaring("C", "Blue").ShouldBe(index.EnumsDeclaring("Blue"));
     }
 
+    private const string SharedMemberNameViaExplicitQualifier = """
+        context Other {
+          enum Kind { Active, Idle }
+        }
+        context C {
+          enum Flag { Active, Blue }
+          entity Item identified by ItemId {
+            kind: Other.Kind
+            invariant kind == Active "hint must survive context scoping"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1797: an explicit <c>Context.Type</c> qualifier is R13.2's THIRD way to name a foreign
+    /// type — it needs no import and no context-map relationship — and #1739's
+    /// <c>EnumsVisibleFrom</c> modelled only the other two. <c>Other.Kind</c> was therefore scoped OUT
+    /// of <c>C</c>'s owner list, and because the surviving list was non-EMPTY (<c>Flag</c> is local),
+    /// <see cref="ModelIndex.EnumsDeclaring(string?, string)"/>'s "fall back to the flat list when
+    /// nothing is visible" safety valve never fired.
+    /// </summary>
+    [Fact]
+    public void Context_aware_EnumsDeclaring_counts_an_enum_named_by_an_explicit_qualifier()
+    {
+        var index = IndexOf(SharedMemberNameViaExplicitQualifier);
+
+        // C names Other.Kind outright in `kind: Other.Kind`, so Kind is visible from C and must survive
+        // scoping. With both owners present the sibling operand's type can resolve the bare member —
+        // which is exactly what stops the false KOI0210.
+        index.EnumsDeclaring("C", "Active").ShouldBe(new[] { "Flag", "Kind" }, ignoreOrder: true);
+    }
+
+    /// <summary>
+    /// Issue #1797 guard: widening visibility must never SUPPRESS a real collision. A member owned by
+    /// both a local enum and an explicitly-qualified one is genuinely ambiguous from the referencing
+    /// context — both are nameable there — so the scoped list must keep both owners.
+    /// <para>Note this is a case #1739 got WRONG in the opposite direction: by dropping the qualified
+    /// owner it silently narrowed the list to one and made a genuinely ambiguous member look decided.
+    /// The end-to-end counterpart is
+    /// <c>SemanticTests.A_member_shared_by_a_local_and_an_explicitly_qualified_enum_is_still_ambiguous</c>.</para>
+    /// </summary>
+    [Fact]
+    public void A_member_owned_by_a_local_and_an_explicitly_qualified_enum_keeps_both_owners()
+    {
+        const string src = """
+            context Other {
+              enum Kind { Active, Blue }
+            }
+            context C {
+              enum Flag { Active, Blue }
+              entity Item identified by ItemId {
+                kind: Other.Kind
+                tag: Flag
+              }
+            }
+            """;
+        var index = IndexOf(src);
+
+        index.EnumsDeclaring("C", "Active").ShouldBe(new[] { "Flag", "Kind" }, ignoreOrder: true);
+        index.EnumsDeclaring("C", "Blue").ShouldBe(new[] { "Flag", "Kind" }, ignoreOrder: true);
+    }
+
+    /// <summary>
+    /// Issue #1797 guard: a member shared by two enums WITHIN one context stays ambiguous — the
+    /// widened set adds qualified owners, it never removes or merges local ones.
+    /// </summary>
+    [Fact]
+    public void A_member_owned_by_two_enums_in_the_same_context_keeps_both_owners()
+    {
+        const string src = """
+            context C {
+              enum Flag { Red, Blue }
+              enum Marker { Red, Blue }
+            }
+            """;
+        var index = IndexOf(src);
+
+        index.EnumsDeclaring("C", "Red").ShouldBe(new[] { "Flag", "Marker" }, ignoreOrder: true);
+    }
+
+    /// <summary>
+    /// Issue #1797 guard: #1739's core guarantee is untouched. <c>C</c> reaches <c>A</c> by NO means —
+    /// no local declaration, no import, and (unlike <c>Other</c> above) no explicit qualifier anywhere
+    /// in its own source — so <c>A.Status</c> must stay excluded even though the model now also
+    /// contains a context <c>C</c> DOES qualify.
+    /// </summary>
+    [Fact]
+    public void An_enum_this_context_neither_imports_nor_qualifies_stays_excluded()
+    {
+        const string src = """
+            context A {
+              enum Status { Active }
+            }
+            context Other {
+              enum Kind { Active, Idle }
+            }
+            context C {
+              enum Flag { Active, Blue }
+              entity Item identified by ItemId {
+                kind: Other.Kind
+              }
+            }
+            """;
+        var index = IndexOf(src);
+
+        // Kind is qualified by C, so it is in; Status is reachable by no means, so it stays out —
+        // even though the flat overload sees all three.
+        index.EnumsDeclaring("C", "Active").ShouldBe(new[] { "Flag", "Kind" }, ignoreOrder: true);
+        index.EnumsDeclaring("Active").ShouldBe(new[] { "Status", "Kind", "Flag" }, ignoreOrder: true);
+    }
+
     /// <summary>
     /// The load-bearing premise of <c>SemanticValidator.ValidateTypeRef</c>'s context threading
     /// (#1715): the two overloads can disagree about WHICH declaration a name means, but never about

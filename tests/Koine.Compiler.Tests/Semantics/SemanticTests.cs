@@ -601,6 +601,37 @@ public class SemanticTests
     }
 
     /// <summary>
+    /// Issue #1797, the guard on the other side: widening visibility must never SUPPRESS a real
+    /// collision. Here BOTH operands are owned by both the local <c>Flag</c> and the explicitly-qualified
+    /// <c>Other.Kind</c>, so neither one's single-owner short-circuit can rescue the other and there is no
+    /// declared-type hint to fall back on — genuinely ambiguous, and it must be reported.
+    ///
+    /// <para>This is the case #1739 got wrong in the OPPOSITE direction: by dropping the qualified owner
+    /// it narrowed the list to <c>["Flag"]</c>, silently deciding a member the modeller left ambiguous.
+    /// So the fix does not merely un-break the false rejection — it also restores a real diagnostic.</para>
+    /// </summary>
+    [Fact]
+    public void A_member_shared_by_a_local_and_an_explicitly_qualified_enum_is_still_ambiguous()
+    {
+        const string src =
+            """
+            context Other {
+              enum Kind { Active, Blue }
+            }
+
+            context C {
+              enum Flag { Active, Blue }
+              entity Item identified by ItemId {
+                kind: Other.Kind
+                invariant Active != Blue "both operands ambiguous — no hint to resolve either"
+              }
+            }
+            """;
+
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+    }
+
+    /// <summary>
     /// Issue #1655: <c>CheckAggregateSelector</c>'s <c>sum</c>/<c>min</c>/<c>max</c> selector-kind checks
     /// called the context-blind 1-arg <c>ModelIndex.Classify(string)</c> overload directly, instead of the
     /// context-aware <see cref="ModelIndex.Classify(string?, string)"/> overload the way #1634/#1641
