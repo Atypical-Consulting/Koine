@@ -1217,11 +1217,14 @@ public class JavaConformanceTests
     /// to be affected, so a future template hitting the same or a different Java-only gap is caught here
     /// too.
     /// <para>
-    /// <c>saas-subscription</c> and <c>library</c> are skipped here (not asserted green) pending
-    /// issue #1771: fixing #1763's derived-member bug uncovered that both templates ALSO hit a separate,
-    /// pre-existing Java-only defect — a shared enum member (e.g. <c>Active</c>, declared by two
-    /// different contexts' enums) resolves against the wrong one — unrelated to #1763's scope
-    /// (<c>NameMode.Parameter</c> derived-body substitution). Remove this skip once #1771 lands.
+    /// <c>saas-subscription</c> and <c>library</c> were skipped here pending issue #1771: fixing #1763's
+    /// derived-member bug uncovered that both templates ALSO hit a separate, pre-existing Java-only
+    /// defect — a shared enum member (e.g. <c>Active</c>, declared by two
+    /// different contexts' enums) resolved against the wrong one — unrelated to #1763's scope
+    /// (<c>NameMode.Parameter</c> derived-body substitution). #1771 ported
+    /// <c>CSharpExpressionTranslator</c>'s sibling-operand <c>enumHint</c> mechanism into
+    /// <c>JavaExpressionTranslator</c>, so both templates now compile and run through this theory like
+    /// every other template.
     /// </para>
     /// </summary>
     [Theory]
@@ -1229,10 +1232,6 @@ public class JavaConformanceTests
     public void Template_emits_java_that_compiles(string folder)
     {
         string name = Path.GetFileName(folder);
-        if (name is "saas-subscription" or "library")
-        {
-            Assert.Skip($"template '{name}' has a separate, tracked Java-only defect — issue #1771.");
-        }
 
         var sources = Directory
             .EnumerateFiles(folder, "*.koi", SearchOption.AllDirectories)
