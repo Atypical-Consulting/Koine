@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
@@ -43,6 +44,41 @@ internal sealed class CSharpExpressionTranslator
     // a value-object `sum` fold over a numeric Sum) can resolve a parameter's element
     // type — the member-only _scope does not know about command/factory parameters.
     private readonly Dictionary<string, TypeRef> _localTypes = new(StringComparer.Ordinal);
+
+    // Emitted C# identifier for a local whose Koine name collides with a member of the enclosing
+    // type. Absent => the local is emitted verbatim (the common case, and no snapshot churn).
+    private readonly Dictionary<string, string> _localRenames = new(StringComparer.Ordinal);
+
+    /// <summary>The C# identifier a currently-bound local is emitted as.</summary>
+    private string EmittedLocalName(string name) =>
+        _localRenames.TryGetValue(name, out var renamed) ? renamed : CSharpNaming.ToCamelCase(name);
+
+    /// <summary>
+    /// A collision-free emitted name for a binding that shadows a member. Koine's Identifier rule
+    /// (`[a-zA-Z_] [a-zA-Z0-9_]*`) permits a leading underscore, so an author can legally write
+    /// `__rate`; the candidate is checked rather than assumed unique. Built from the camel-cased name
+    /// with any `@` keyword-escape stripped first — <see cref="CSharpNaming.ToCamelCase"/> escapes a
+    /// keyword-spelled name to e.g. `@base`, and prefixing `__` onto THAT yields `__@base`, which is not
+    /// a valid C# identifier (`@` is only legal as the first character). A `__`-prefixed identifier can
+    /// never itself collide with a bare keyword, so no re-escaping is needed after the prefix.
+    /// </summary>
+    private string MangleBinding(string name)
+    {
+        var camelCased = CSharpNaming.ToCamelCase(name);
+        var unescaped = camelCased.Length > 0 && camelCased[0] == '@' ? camelCased[1..] : camelCased;
+        var baseName = "__" + unescaped;
+        var candidate = baseName;
+        for (var n = 2; Collides(candidate); n++)
+        {
+            candidate = baseName + n.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return candidate;
+
+        bool Collides(string c) =>
+            _memberNames.Any(m => string.Equals(CSharpNaming.ToCamelCase(m), c, StringComparison.Ordinal))
+            || _locals.Any(l => string.Equals(EmittedLocalName(l), c, StringComparison.Ordinal));
+    }
 
     /// <summary>Registers a local (e.g. a command/factory parameter) for the body about to be translated.</summary>
     public void PushLocal(string name, TypeRef? type = null)
@@ -723,17 +759,27 @@ internal sealed class CSharpExpressionTranslator
         // Emit each binding as a `var` local, registering it so later bindings and the
         // body render references to it verbatim. Save/restore guards against shadowing
         // an outer local of the same name.
-        var pushed = new List<(string Name, bool WasPresent, TypeRef? Type)>();
+        var pushed = new List<(string Name, bool WasPresent, TypeRef? Type, bool HadRename, string? PriorRename)>();
         foreach (LetBinding b in let.Bindings)
         {
             var wasPresent = _locals.Contains(b.Name);
             TypeRef? prevType = _localTypes.TryGetValue(b.Name, out TypeRef? pt) ? pt : null;
-            sb.Append("var ").Append(CSharpNaming.ToCamelCase(b.Name)).Append(" = ");
+
+            // A binding that shadows a member of the enclosing type is emitted under a mangled
+            // name, freeing the member name for a derived member's substituted body to splice
+            // into (issue #1768) — same hygiene as a lambda parameter (RenderLambda).
+            var hadRename = _localRenames.TryGetValue(b.Name, out var priorRename);
+            if (_memberNames.Contains(b.Name))
+            {
+                _localRenames[b.Name] = MangleBinding(b.Name);
+            }
+
+            sb.Append("var ").Append(EmittedLocalName(b.Name)).Append(" = ");
             sb.Append(Render(b.Value, mode));
             sb.Append("; ");
             // Register only AFTER rendering the value (the value must not see itself).
             PushLocal(b.Name, _resolver.Infer(b.Value, EffectiveScope()));
-            pushed.Add((b.Name, wasPresent, prevType));
+            pushed.Add((b.Name, wasPresent, prevType, hadRename, priorRename));
         }
 
         sb.Append("return ").Append(Render(let.Body, mode)).Append("; }))()");
@@ -741,7 +787,7 @@ internal sealed class CSharpExpressionTranslator
         // Restore the local stack in reverse so an outer binding of the same name survives.
         for (var i = pushed.Count - 1; i >= 0; i--)
         {
-            (var name, var wasPresent, TypeRef? prevType) = pushed[i];
+            (var name, var wasPresent, TypeRef? prevType, var hadRename, var priorRename) = pushed[i];
             if (wasPresent)
             {
                 _locals.Add(name);
@@ -757,6 +803,15 @@ internal sealed class CSharpExpressionTranslator
             else
             {
                 PopLocal(name);
+            }
+
+            if (hadRename)
+            {
+                _localRenames[name] = priorRename!;
+            }
+            else
+            {
+                _localRenames.Remove(name);
             }
         }
     }
@@ -791,10 +846,11 @@ internal sealed class CSharpExpressionTranslator
 
     private void WriteIdentifier(string name, NameMode mode, StringBuilder sb, string? enumHint = null)
     {
-        // Lambda parameter: rendered verbatim (escaped if a C# keyword).
+        // Lambda parameter: rendered verbatim (escaped if a C# keyword), or under its mangled
+        // name if it shadows a member (see EmittedLocalName / MangleBinding).
         if (_locals.Contains(name))
         {
-            sb.Append(CSharpNaming.ToCamelCase(name));
+            sb.Append(EmittedLocalName(name));
             return;
         }
 
@@ -894,13 +950,16 @@ internal sealed class CSharpExpressionTranslator
     /// </para>
     /// <para>
     /// Substitution is also refused where the reference site would <b>capture</b> the derivation's free
-    /// names. A lambda/<c>let</c> binding and a member render into one C# identifier space —
-    /// <c>lines.all(rate =&gt; rate &lt; total)</c> emits a lambda parameter literally named <c>rate</c>, which
-    /// shadows the constructor parameter of the same name — so splicing <c>total = rate * 2</c> in there
-    /// would read the ELEMENT and silently admit an instance violating the very invariant that let it
-    /// through. Bailing out leaves the pre-#1756 bare name and its loud <c>CS0103</c> instead of trading
-    /// a build break for an unsound aggregate. Only an ACTUAL collision refuses; a binding that shadows
-    /// nothing the body needs (<c>lines.all(x =&gt; x &lt; total)</c>) still substitutes.
+    /// names — but only when that capture cannot be fixed by renaming. A lambda/<c>let</c> binding that
+    /// shadows a member of the enclosing type (<c>lines.all(rate =&gt; rate &lt; total)</c>, where the
+    /// lambda's own <c>rate</c> would otherwise shadow the constructor parameter of the same name) is
+    /// itself emitted under a mangled name (issue #1768, <see cref="RenderLambda"/>/<c>WriteLet</c>), so
+    /// the member name stays free and substitution proceeds safely. Only a local the emitter genuinely
+    /// cannot rename — a command/factory/service parameter pushed directly via <see cref="PushLocal"/>,
+    /// whose name IS the emitted public C# signature — still forces the bail-out, leaving the pre-#1756
+    /// bare name and its loud <c>CS0103</c> instead of trading a build break for an unsound aggregate
+    /// (<see cref="WouldBeCaptured"/> draws exactly this line). A binding that shadows nothing the body
+    /// needs (<c>lines.all(x =&gt; x &lt; total)</c>) was never renamed and still substitutes, as before.
     /// </para>
     /// </summary>
     private bool TryWriteDerivedBody(string name, StringBuilder sb)
@@ -921,6 +980,24 @@ internal sealed class CSharpExpressionTranslator
         var outerExpectedEnum = _expectedEnum;
         _expectedEnum = member.ExpectedEnum;
 
+        // member.Body is defined at the enclosing type's OWN top level, so every free name inside it
+        // is a member reference — never a locally-scoped binding. WouldBeCaptured just proved no
+        // UNRENAMED local collides with one of those names, so the only local state that could still
+        // match is a RENAMED lambda/let binding (issue #1768): it is emitted under a DIFFERENT
+        // identifier, which is exactly why the original name is safe to give to the member. But
+        // WriteIdentifier resolves purely by name, with no notion of "this identifier came from a
+        // spliced-in outer body, not the current lambda" — left as-is, a name shared with an active
+        // renamed local would still be rendered under ITS rename (reading the lambda's element, not
+        // the member) here. Suppress the outer local/type/rename scope for the splice so free names in
+        // member.Body resolve as members, then restore it immediately after so the rest of the
+        // surrounding expression keeps seeing the active locals unchanged.
+        var savedLocals = new HashSet<string>(_locals, StringComparer.Ordinal);
+        var savedLocalTypes = new Dictionary<string, TypeRef>(_localTypes, StringComparer.Ordinal);
+        var savedLocalRenames = new Dictionary<string, string>(_localRenames, StringComparer.Ordinal);
+        _locals.Clear();
+        _localTypes.Clear();
+        _localRenames.Clear();
+
         try
         {
             sb.Append('(');
@@ -929,6 +1006,20 @@ internal sealed class CSharpExpressionTranslator
         }
         finally
         {
+            _locals.Clear();
+            _locals.UnionWith(savedLocals);
+            _localTypes.Clear();
+            foreach (KeyValuePair<string, TypeRef> kv in savedLocalTypes)
+            {
+                _localTypes[kv.Key] = kv.Value;
+            }
+
+            _localRenames.Clear();
+            foreach (KeyValuePair<string, string> kv in savedLocalRenames)
+            {
+                _localRenames[kv.Key] = kv.Value;
+            }
+
             _expectedEnum = outerExpectedEnum;
             _inliningDerived.Remove(name);
         }
@@ -938,15 +1029,23 @@ internal sealed class CSharpExpressionTranslator
 
     /// <summary>
     /// Whether any name reachable from <paramref name="body"/> — following references to further derived
-    /// members — is currently bound as a local, i.e. whether splicing the body here would rebind it.
-    /// Deliberately conservative: a name bound by the body's OWN lambda/<c>let</c> also counts, which can
-    /// only refuse a substitution that would have been safe, never allow one that isn't.
+    /// members — is currently bound as a local THE EMITTER COULD NOT RENAME, i.e. whether splicing the
+    /// body here would rebind it. A local the emitter renamed (a lambda/<c>let</c> binding shadowing a
+    /// member, mangled by <see cref="RenderLambda"/>/<c>WriteLet</c>, issue #1768) is emitted under a
+    /// different identifier, so it can no longer capture anything — only a local present in
+    /// <see cref="_locals"/> with no entry in <see cref="_localRenames"/> (an externally
+    /// <see cref="PushLocal"/>'d command/factory/service parameter, whose name is a public signature and
+    /// so is never renamed) still forces a refusal.
     /// </summary>
     private bool WouldBeCaptured(Expr body, HashSet<string> visited)
     {
         foreach (var referenced in MemberAnalysis.ReferencedIdentifiers(body))
         {
-            if (_locals.Contains(referenced))
+            // A local the emitter renamed (a lambda/let binding shadowing a member) is emitted under a
+            // mangled name, so it can no longer capture the derivation's free names. Only a local the
+            // emitter cannot rename — a command/factory parameter, whose name is a public signature —
+            // still forces the loud refusal.
+            if (_locals.Contains(referenced) && !_localRenames.ContainsKey(referenced))
             {
                 return true;
             }
@@ -1222,6 +1321,15 @@ internal sealed class CSharpExpressionTranslator
         var hadType = _localTypes.TryGetValue(lambda.Parameter, out TypeRef? priorType);
         _locals.Add(lambda.Parameter);
 
+        // A parameter that shadows a member of the enclosing type is emitted under a mangled
+        // name, freeing the member name so a derived member's substituted body (TryWriteDerivedBody)
+        // can splice in without this lambda's own binding capturing it (issue #1768).
+        var hadRename = _localRenames.TryGetValue(lambda.Parameter, out var priorRename);
+        if (_memberNames.Contains(lambda.Parameter))
+        {
+            _localRenames[lambda.Parameter] = MangleBinding(lambda.Parameter);
+        }
+
         // Register the lambda parameter's element type so a spec call on it
         // (`os.any(o => o.IsLarge())`) resolves its receiver the same way the validator does.
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
@@ -1231,6 +1339,10 @@ internal sealed class CSharpExpressionTranslator
         }
 
         var body = Render(lambda.Body, mode);
+
+        // Capture the emitted header name BEFORE restoring — the restore below drops the
+        // rename mapping the header needs.
+        var emittedParameter = EmittedLocalName(lambda.Parameter);
 
         if (!wasPresent)
         {
@@ -1246,7 +1358,16 @@ internal sealed class CSharpExpressionTranslator
             _localTypes.Remove(lambda.Parameter);
         }
 
-        return $"{CSharpNaming.ToCamelCase(lambda.Parameter)} => {body}";
+        if (hadRename)
+        {
+            _localRenames[lambda.Parameter] = priorRename!;
+        }
+        else
+        {
+            _localRenames.Remove(lambda.Parameter);
+        }
+
+        return $"{emittedParameter} => {body}";
     }
 
     private static void WriteLiteral(LiteralExpr lit, StringBuilder sb)
