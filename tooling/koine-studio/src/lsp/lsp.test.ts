@@ -11,12 +11,24 @@ import type { LspTransport } from '@/host/types';
 
 type Sent = { jsonrpc: string; id?: number; method: string; params: any };
 
+/** The shape `KoineLsp['handle']` (reached below via bracket access to its private method) expects —
+ *  mirrors the `JsonRpcMessage` the client parses off the wire, kept local since that interface isn't
+ *  exported. */
+type IncomingMessage = {
+  jsonrpc?: string;
+  id?: number | string | null;
+  method?: string;
+  params?: unknown;
+  result?: unknown;
+  error?: { code: number; message: string };
+};
+
 function harness(trace?: 'off' | 'messages' | 'verbose') {
   const sent: Sent[] = [];
   const transport: LspTransport = {
     start: () => Promise.resolve(),
     send: (m: string) => {
-      sent.push(JSON.parse(m));
+      sent.push(JSON.parse(m) as Sent);
       return Promise.resolve();
     },
     onMessage: () => {},
@@ -180,7 +192,7 @@ function responder(reply: (method: string, params: any) => unknown) {
     stop: () => Promise.resolve(),
   };
   // start() attaches the onMessage handler; do it directly here (no handshake needed).
-  transport.onMessage((json) => lsp['handle'](JSON.parse(json)));
+  transport.onMessage((json) => lsp['handle'](JSON.parse(json) as IncomingMessage));
   const lsp = new KoineLsp(transport);
   lsp.setActive(URI);
   return { lsp, sent };
@@ -209,7 +221,7 @@ function errorResponder(code: number, message: string) {
     onRestart: () => {},
     stop: () => Promise.resolve(),
   };
-  transport.onMessage((json) => lsp['handle'](JSON.parse(json)));
+  transport.onMessage((json) => lsp['handle'](JSON.parse(json) as IncomingMessage));
   const lsp = new KoineLsp(transport);
   lsp.setActive(URI);
   return { lsp, sent };

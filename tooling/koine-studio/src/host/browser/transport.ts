@@ -8,10 +8,44 @@ import { loadWasmApi, getWasmWorkerClient, mapWorkerCallError, type KoineWasmApi
 import { CancelledError } from '@/host/browser/workerClient';
 import { markCompileEnd, markCompileStart } from '@/host/browser/compileActivity';
 
+interface JsonRpcPosition {
+  line?: number;
+  character?: number;
+}
+
+interface JsonRpcRange {
+  start?: JsonRpcPosition;
+  end?: JsonRpcPosition;
+}
+
+/** The union of every `params` shape a handler in `handle()` below reads — one message's params is
+ * only ever a subset of these fields, keyed off `method`, so every field is optional. */
+interface JsonRpcParams {
+  textDocument?: { uri?: string; text?: string };
+  position?: JsonRpcPosition;
+  contentChanges?: { text?: string }[];
+  query?: string;
+  target?: string;
+  qualifiedName?: string | null;
+  edit?: unknown;
+  id?: string;
+  text?: string;
+  operation?: string;
+  given?: unknown;
+  args?: unknown;
+  execute?: boolean;
+  newName?: string;
+  range?: JsonRpcRange;
+  context?: { diagnostics?: unknown[] };
+  item?: unknown;
+  baselineSources?: unknown[];
+  positions?: unknown;
+}
+
 interface JsonRpc {
   id?: number | string | null;
   method?: string;
-  params?: any;
+  params?: JsonRpcParams;
 }
 
 export class WasmLspTransport implements LspTransport {
@@ -140,7 +174,7 @@ export class WasmLspTransport implements LspTransport {
         return [];
 
       case 'textDocument/didOpen':
-        if (uri != null) this.docs.set(uri, td.text ?? '');
+        if (uri != null) this.docs.set(uri, td?.text ?? '');
         return await this.diagnostics(api);
 
       case 'textDocument/didChange': {
