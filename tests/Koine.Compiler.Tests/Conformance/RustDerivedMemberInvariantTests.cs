@@ -136,6 +136,87 @@ public class RustDerivedMemberInvariantTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    // The HYGIENE case (mirrors the C# sibling's LambdaCaptureFixture, DerivedMemberInvariantTests.cs):
+    // the lambda binds `rate`, the same name `total`'s derivation reads. A lambda parameter and a
+    // constructor parameter share one Rust identifier space, so splicing `rate * 2` here would read the
+    // ELEMENT — quietly admitting an instance that violates the invariant that let it through. `.amount`
+    // (not a bare `Int`) sidesteps the unrelated, pre-existing `List<Int>` comparison-vs-scalar E0308 gap
+    // (issue #1775) that a raw-scalar-list fixture would otherwise trip here.
+    private const string LambdaCaptureModel = """
+        context Shop {
+          value LineItem {
+            amount: Decimal
+          }
+          value Cart {
+            rate:  Decimal
+            lines: List<LineItem>
+            total: Decimal = rate * 2
+            invariant lines.all(rate => rate.amount < total) "every line stays below the total"
+          }
+        }
+        """;
+
+    /// <summary>The same shape with a lambda binding that shadows nothing — this one must substitute.</summary>
+    private const string LambdaNoCaptureModel = """
+        context Shop {
+          value LineItem {
+            amount: Decimal
+          }
+          value Basket {
+            rate:  Decimal
+            lines: List<LineItem>
+            total: Decimal = rate * 2
+            invariant lines.all(line => line.amount < total) "every line stays below the total"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The capture/shadow guard (<c>WouldBeCaptured</c>) is the OTHER safety mechanism this fix
+    /// introduces alongside the cycle guard, and is otherwise untested: a lambda parameter that shares
+    /// a name with a free identifier the derivation reads must NOT get substituted — that would
+    /// silently read the lambda's element instead of the outer constructor parameter, admitting an
+    /// instance that violates the very invariant meant to reject it. The emitter must refuse instead,
+    /// leaving the pre-fix dangling name (and its loud, pre-existing E0425) rather than trade a compile
+    /// error for a silently unsound guard.
+    /// </summary>
+    [Fact]
+    public void A_lambda_binding_that_would_capture_the_derivation_is_not_substituted()
+    {
+        var result = new KoineCompiler().Compile(LambdaCaptureModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var shop = result.Files.Single(f => f.RelativePath.EndsWith("shop.rs", StringComparison.Ordinal));
+
+        // The emitted lambda parameter is literally `rate`, so a substituted `rate * 2` inside it would
+        // read the element. It must NOT appear — the guard keeps the bare (dangling) `total` instead.
+        shop.Contents.ShouldNotContain("rate.amount() < ((rate * Decimal::from(2i64)))");
+        shop.Contents.ShouldContain("rate.amount() < total");
+
+        // …which is a KNOWN, LOUD limitation: this model does not compile, exactly as before #1764.
+        // Silently mis-binding the invariant would be strictly worse. Hygienic renaming is tracked
+        // separately (C# sibling: #1768); the guarantee asserted here is "never silently wrong".
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeFalse();
+        r.Errors.ShouldContain(e => e.Contains("E0425", StringComparison.Ordinal) && e.Contains("total", StringComparison.Ordinal));
+    }
+
+    /// <summary>The mirror case: a lambda binding that shadows nothing the derivation reads must still
+    /// substitute and compile — the capture guard must not be so conservative it refuses safe cases.</summary>
+    [Fact]
+    public void A_lambda_binding_that_shadows_nothing_still_substitutes()
+    {
+        var result = new KoineCompiler().Compile(LambdaNoCaptureModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     // The repro's own invariant (`overage >= 0`) is a TAUTOLOGY given the clamping `if/then/else` —
     // `overage` can mathematically never be negative for any `Int` input, so it can never actually be
     // rejected at runtime. The behavioral proof needs a derived-member invariant that a real input CAN
