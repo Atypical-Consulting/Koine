@@ -1,0 +1,190 @@
+# TEMPORARY — issue #1781, Task 1. Surveys what confinement mechanisms an unprivileged process can
+# actually use on `ubuntu-latest`, so ADR 0012's "Linux gets network only, and often not even that"
+# consequence can be retired against evidence rather than assumption. Deleted in the same PR once the
+# findings are recorded.
+name: Linux userns survey (temporary, #1781)
+
+on:
+  push:
+    branches: ['feat/1781-**']
+
+permissions:
+  contents: read
+
+jobs:
+  survey:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Host facts
+        run: |
+          set +e
+          echo "## uname"; uname -a
+          echo "## os-release"; cat /etc/os-release | head -3
+          echo "## id"; id
+          echo "## capabilities"; cat /proc/self/status | grep -i '^Cap'
+          echo "## apparmor_restrict_unprivileged_userns"
+          cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>&1
+          echo "## unprivileged_userns_clone"
+          cat /proc/sys/kernel/unprivileged_userns_clone 2>&1
+          echo "## apparmor enabled"
+          cat /sys/module/apparmor/parameters/enabled 2>&1
+
+      - name: unshare variants
+        run: |
+          set +e
+          echo "## unshare --user --map-root-user --net (what ScenarioSandbox ships today)"
+          unshare --user --map-root-user --net /usr/bin/true; echo "exit=$?"
+          echo "## unshare --net (no --user)"
+          unshare --net /usr/bin/true; echo "exit=$?"
+          echo "## unshare --user (alone)"
+          unshare --user /usr/bin/true; echo "exit=$?"
+
+      - name: bubblewrap
+        run: |
+          set +e
+          which bwrap; echo "which-exit=$?"
+          sudo apt-get install -y bubblewrap >/dev/null 2>&1; echo "apt-exit=$?"
+          which bwrap
+          echo "## bwrap read-only-root probe, unprivileged"
+          bwrap --ro-bind / / --dev /dev --proc /proc -- /usr/bin/true; echo "exit=$?"
+
+      - name: Landlock ABI + a real write-confinement probe
+        run: |
+          set +e
+          cat > /tmp/landlock.c <<'EOF'
+          #define _GNU_SOURCE
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <errno.h>
+          #include <unistd.h>
+          #include <fcntl.h>
+          #include <sys/syscall.h>
+          #include <sys/prctl.h>
+          #include <linux/types.h>
+
+          #ifndef __NR_landlock_create_ruleset
+          #define __NR_landlock_create_ruleset 444
+          #define __NR_landlock_add_rule 445
+          #define __NR_landlock_restrict_self 446
+          #endif
+
+          struct ll_attr { __u64 handled_access_fs; };
+          struct ll_beneath { __u64 allowed_access; __s32 parent_fd; };
+
+          #define LL_VERSION (1U << 0)
+          #define A_EXECUTE       (1ULL << 0)
+          #define A_WRITE_FILE    (1ULL << 1)
+          #define A_READ_FILE     (1ULL << 2)
+          #define A_READ_DIR      (1ULL << 3)
+          #define A_REMOVE_DIR    (1ULL << 4)
+          #define A_REMOVE_FILE   (1ULL << 5)
+          #define A_MAKE_CHAR     (1ULL << 6)
+          #define A_MAKE_DIR      (1ULL << 7)
+          #define A_MAKE_REG      (1ULL << 8)
+          #define A_MAKE_SOCK     (1ULL << 9)
+          #define A_MAKE_FIFO     (1ULL << 10)
+          #define A_MAKE_BLOCK    (1ULL << 11)
+          #define A_MAKE_SYM      (1ULL << 12)
+          #define A_REFER         (1ULL << 13)
+          #define A_TRUNCATE      (1ULL << 14)
+          #define A_IOCTL_DEV     (1ULL << 15)
+
+          int main(int argc, char **argv) {
+            int abi = syscall(__NR_landlock_create_ruleset, NULL, 0, LL_VERSION);
+            fprintf(stderr, "landlock abi = %d (errno %d %s)\n", abi, errno, abi < 0 ? strerror(errno) : "");
+            if (argc < 3) return abi < 0 ? 1 : 0;
+
+            unsigned long long all =
+              A_EXECUTE|A_WRITE_FILE|A_READ_FILE|A_READ_DIR|A_REMOVE_DIR|A_REMOVE_FILE|
+              A_MAKE_CHAR|A_MAKE_DIR|A_MAKE_REG|A_MAKE_SOCK|A_MAKE_FIFO|A_MAKE_BLOCK|A_MAKE_SYM;
+            if (abi >= 2) all |= A_REFER;
+            if (abi >= 3) all |= A_TRUNCATE;
+            if (abi >= 5) all |= A_IOCTL_DEV;
+
+            struct ll_attr attr = { .handled_access_fs = all };
+            int rs = syscall(__NR_landlock_create_ruleset, &attr, sizeof(attr), 0);
+            if (rs < 0) { fprintf(stderr, "create_ruleset failed: %s\n", strerror(errno)); return 1; }
+
+            unsigned long long ro = A_EXECUTE|A_READ_FILE|A_READ_DIR;
+            int root = open("/", O_PATH | O_CLOEXEC);
+            struct ll_beneath r1 = { .allowed_access = ro, .parent_fd = root };
+            if (syscall(__NR_landlock_add_rule, rs, 1 /*PATH_BENEATH*/, &r1, 0) < 0) {
+              fprintf(stderr, "add_rule / failed: %s\n", strerror(errno)); return 1; }
+
+            int run = open(argv[1], O_PATH | O_CLOEXEC);
+            if (run < 0) { fprintf(stderr, "open run dir failed: %s\n", strerror(errno)); return 1; }
+            struct ll_beneath r2 = { .allowed_access = all, .parent_fd = run };
+            if (syscall(__NR_landlock_add_rule, rs, 1, &r2, 0) < 0) {
+              fprintf(stderr, "add_rule run failed: %s\n", strerror(errno)); return 1; }
+
+            if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
+              fprintf(stderr, "no_new_privs failed: %s\n", strerror(errno)); return 1; }
+            if (syscall(__NR_landlock_restrict_self, rs, 0)) {
+              fprintf(stderr, "restrict_self failed: %s\n", strerror(errno)); return 1; }
+            fprintf(stderr, "restrict_self OK, exec %s\n", argv[2]);
+            execv(argv[2], &argv[2]);
+            fprintf(stderr, "execv failed: %s\n", strerror(errno));
+            return 127;
+          }
+          EOF
+          gcc -O0 -o /tmp/landlock /tmp/landlock.c; echo "gcc-exit=$?"
+          echo "## ABI probe only"
+          /tmp/landlock; echo "exit=$?"
+
+          mkdir -p /tmp/run
+          cat > /tmp/probe.sh <<'EOF'
+          #!/bin/sh
+          inside=denied; outside=allowed
+          if : > /tmp/run/inside.txt 2>/dev/null; then inside=allowed; fi
+          if : > /tmp/outside.txt 2>/dev/null; then outside=allowed; else outside=denied; fi
+          echo "inside=${inside} outside=${outside}"
+          EOF
+          chmod +x /tmp/probe.sh
+          echo "## control, unconfined"; /tmp/probe.sh; rm -f /tmp/outside.txt /tmp/run/inside.txt
+          echo "## under Landlock (writes confined to /tmp/run)"
+          /tmp/landlock /tmp/run /tmp/probe.sh; echo "exit=$?"
+
+          echo "## .NET starts under Landlock?"
+          /tmp/landlock /tmp/run "$(which dotnet)" --version; echo "exit=$?"
+
+      - name: seccomp socket denial
+        run: |
+          set +e
+          cat > /tmp/nosock.c <<'EOF'
+          #define _GNU_SOURCE
+          #include <stdio.h>
+          #include <string.h>
+          #include <errno.h>
+          #include <unistd.h>
+          #include <stddef.h>
+          #include <sys/prctl.h>
+          #include <sys/syscall.h>
+          #include <linux/filter.h>
+          #include <linux/seccomp.h>
+          #include <linux/audit.h>
+          int main(int argc, char **argv) {
+            struct sock_filter f[] = {
+              BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+              BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 1, 0),
+              BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+              BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EACCES & SECCOMP_RET_DATA)),
+            };
+            struct sock_fprog p = { .len = sizeof(f)/sizeof(f[0]), .filter = f };
+            if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
+              fprintf(stderr, "no_new_privs failed: %s\n", strerror(errno)); return 1; }
+            if (syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER, 0, &p)) {
+              fprintf(stderr, "seccomp failed: %s\n", strerror(errno)); return 1; }
+            fprintf(stderr, "seccomp installed\n");
+            if (argc > 1) { execv(argv[1], &argv[1]); fprintf(stderr, "execv failed\n"); return 127; }
+            return 0;
+          }
+          EOF
+          gcc -O0 -o /tmp/nosock /tmp/nosock.c; echo "gcc-exit=$?"
+          cat > /tmp/net.sh <<'EOF'
+          #!/bin/bash
+          if (exec 3<>/dev/tcp/127.0.0.1/22) 2>/dev/null; then echo network=allowed; else echo network=denied; fi
+          EOF
+          chmod +x /tmp/net.sh
+          echo "## control"; /tmp/net.sh
+          echo "## under seccomp"; /tmp/nosock /tmp/net.sh; echo "exit=$?"
