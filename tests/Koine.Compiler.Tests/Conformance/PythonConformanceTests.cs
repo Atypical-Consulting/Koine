@@ -1448,6 +1448,23 @@ public class PythonConformanceTests
         product.ShouldContain("instance = cls(id=id, total=total)");
 
         AssertStrictlyTypeChecks(result.Files);
+
+        // ...and the value must actually LAND as a bare Decimal at runtime — a wrapper-shaped
+        // representation would surface here as `total` comparing unequal to the passed value.
+        const string driver = """
+            from decimal import Decimal
+            from shop.entities.product import Product
+
+            product = Product.make(Decimal("5.0"))
+            assert product.total == Decimal("5.0"), \
+                f"auto-bound parameter must land unwrapped in the optional field, got {product.total!r}"
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "an auto-bound non-optional parameter must land unwrapped in the optional field at runtime:\n"
+            + string.Join("\n", run.Errors));
     }
 
     /// <summary>
@@ -1480,6 +1497,21 @@ public class PythonConformanceTests
         product.ShouldContain("""instance = cls(id=id, total=Decimal("5.0"))""");
 
         AssertStrictlyTypeChecks(result.Files);
+
+        const string driver = """
+            from decimal import Decimal
+            from shop.entities.product import Product
+
+            product = Product.make()
+            assert product.total == Decimal("5.0"), \
+                f"explicitly initialized value must land unwrapped in the optional field, got {product.total!r}"
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "an explicitly initialized value must land unwrapped in the optional field at runtime:\n"
+            + string.Join("\n", run.Errors));
     }
 
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>

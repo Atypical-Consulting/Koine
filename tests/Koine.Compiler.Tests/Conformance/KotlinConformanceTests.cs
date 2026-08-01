@@ -736,9 +736,8 @@ public class KotlinConformanceTests
     /// The explicit-init half of the same #1531 audit — the branch Rust #1452/PR #1464 and Java
     /// #1479/PR #1518 fixed. A <c>total -&gt; 5.0</c> initialization of an optional-declared,
     /// default-less <c>required</c> member yields a non-optional value; Rust/Java must wrap it, Kotlin
-    /// must not, for the same nullable-vs-wrapper reason. Also covers the sibling case an
-    /// already-optional source would exercise: since nothing is ever wrapped, there is no double-wrap
-    /// hazard for Kotlin to guard against at all.
+    /// must not, for the same nullable-vs-wrapper reason. Since nothing is ever wrapped, the
+    /// double-wrap hazard the Rust/Java fixes had to guard against cannot arise here at all.
     /// </summary>
     [Fact]
     public void Factory_explicit_init_of_an_optional_declared_required_member_needs_no_wrap()

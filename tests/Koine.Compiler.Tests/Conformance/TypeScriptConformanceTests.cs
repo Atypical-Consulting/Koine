@@ -1052,7 +1052,7 @@ public class TypeScriptConformanceTests
         // Always-on guard (no tsc required): the optional-declared member's constructor slot is a
         // `T | undefined` UNION, so the auto-bound non-optional parameter is passed through bare.
         var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
-        product.ShouldContain("total: Decimal | undefined");
+        product.ShouldContain("total: Decimal | undefined = undefined)");
         product.ShouldContain("return new Product(id, total);");
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
@@ -1089,7 +1089,7 @@ public class TypeScriptConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
-        product.ShouldContain("total: Decimal | undefined");
+        product.ShouldContain("total: Decimal | undefined = undefined)");
         product.ShouldContain("return new Product(id, new Decimal('5.0'));");
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
