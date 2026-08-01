@@ -20,6 +20,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0008](0008-release-assets-in-release-please-run.md) | Release assets built inside the release-please run | Proposed |
 | [0009](0009-active-context-scope-is-the-workbench-spine.md) | The active bounded-context scope is the workbench spine | Proposed |
 | [0010](0010-adopt-madr-4.0-for-architecture-decision-records.md) | Adopt MADR 4.0 for architecture decision records | Proposed |
+| [0011](0011-scenario-execution-sandbox.md) | Scenario execution runs in a killable child process | Proposed |
 
 ## When to write one
 
