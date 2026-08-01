@@ -215,6 +215,87 @@ public class TypeScriptDerivedMemberInvariantTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    private const string DiamondFixture = """
+        context Subscription {
+          value Split {
+            gross:     Int
+            rate:      Int
+            net:       Int = gross - rate
+            doubled:   Int = net * 2
+            total:     Int = net + doubled
+            overQuota: Bool = net > rate
+            invariant total > 0   "the split total stays positive"
+            invariant overQuota   "the net must exceed the rate"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// A DIAMOND: one invariant reaches <c>net</c> twice along two different paths (directly via
+    /// <c>overQuota</c>, and indirectly through <c>doubled</c> inside <c>total</c>). The visited set
+    /// must scope re-entry to the path currently being expanded, not ban a member for the rest of the
+    /// guard — otherwise the second path would degrade to the old dangling name.
+    /// </summary>
+    [Fact]
+    public void A_derived_member_reached_twice_in_one_guard_substitutes_on_both_paths()
+    {
+        var result = new KoineCompiler().Compile(DiamondFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var vo = result.Files
+            .Single(f => f.RelativePath.EndsWith("value-objects/Split.ts", StringComparison.Ordinal))
+            .Contents;
+
+        vo.ShouldNotContain("if (total ");
+        vo.ShouldNotContain("if (!(overQuota");
+        vo.ShouldNotContain("if (!(doubled");
+        vo.ShouldNotContain("if (!(net");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    private const string SharedEnumMemberFixture = """
+        context Shop {
+          enum Grade { Low
+                       High }
+          enum Rank  { Low
+                       Top }
+          value Card {
+            score: Int
+            grade: Grade = if score > 10 then High else Low
+            invariant grade == High   "a card must be high grade"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// An enum-typed derived member whose branches name members SHARED with another enum (both
+    /// declare <c>Low</c>), so the substituted body needs the same expected-enum hint the derived
+    /// getter's own body gets — otherwise the two ternary arms could qualify to different enums.
+    /// </summary>
+    [Fact]
+    public void An_enum_typed_derived_member_keeps_its_expected_enum_when_substituted()
+    {
+        var result = new KoineCompiler().Compile(SharedEnumMemberFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var card = result.Files
+            .Single(f => f.RelativePath.EndsWith("value-objects/Card.ts", StringComparison.Ordinal))
+            .Contents;
+
+        // Both ternary arms (the substituted guard AND the getter) must qualify to the SAME enum
+        // (Grade, not a mix of Grade/Rank).
+        card.ShouldContain("Grade.High");
+        card.ShouldContain("Grade.Low");
+        card.ShouldNotContain("Rank.Low");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>
     /// The regression that was missing: <c>templates/saas-subscription</c> (<c>UsageMeter</c>) and
     /// <c>templates/library</c> (<c>LoanTerm</c>) both carry an invariant over a derived member, and
