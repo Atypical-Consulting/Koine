@@ -21,6 +21,10 @@ public class ModelRoundTripTests
 
           enum OrderStatus { Draft, Placed, Shipped }
 
+          event OrderSubmitted {
+            orderId: OrderId
+          }
+
           integration event OrderPlaced {
             orderId: OrderId
             total: Decimal
@@ -42,8 +46,34 @@ public class ModelRoundTripTests
                 Draft  -> Placed
                 Placed -> Shipped
               }
+
+              command place {
+                requires status == Draft   "only a draft order can be placed"
+                status -> Placed
+                emit OrderSubmitted(orderId: id)
+              }
+
+              create draft(orderId: OrderId, lines: List<OrderLine>) {
+                emit OrderSubmitted(orderId: id)
+              }
             }
           }
+
+          readmodel OrderSummary from Order {
+            status
+            lineCount: Int = lines.count
+          }
+
+          query OrdersByStatus(status: OrderStatus): List<OrderSummary>
+
+          spec IsShippable on Order = status == Placed
+
+          service Fulfilment {
+            operation Subtotal(unitPrice: Decimal, quantity: Int): Decimal = unitPrice * quantity
+            usecase PlaceOrder(order: OrderId)
+          }
+
+          policy PlaceOnSubmission when OrderSubmitted then Order.place()
         }
         """;
 
@@ -127,6 +157,368 @@ public class ModelRoundTripTests
     public void MembersOf_unknown_name_is_empty()
     {
         ModelRoundTripService.MembersOf(Compile(Sample), "Nope").ShouldBeEmpty();
+    }
+
+    // ---- #483: the context's behavioural vocabulary -----------------------
+
+    [Fact]
+    public void ModelToJson_emits_the_contexts_behavioural_declarations_as_nodes()
+    {
+        ModelNode context = ModelRoundTripService.ModelToJson(Compile(Sample), "Ordering");
+
+        // Asserted UNFILTERED (like the aggregate-/entity-level tests below), so it also pins that the
+        // pre-existing type children keep their positions relative to the appended behavioural ones: the
+        // read side rides `ctx.Types` (so it keeps its declaration position among the types), and the
+        // policy/service/spec lists are appended after them, never reshuffling the existing children.
+        // Policies and specs are namespaced (`.policies.` / `.specs.`) because their names are NOT
+        // reserved against the type namespace — see the collision guard below.
+        context.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldBe(new[]
+            {
+                ("value", "Money", "Ordering.Money"),
+                ("enum", "OrderStatus", "Ordering.OrderStatus"),
+                ("event", "OrderSubmitted", "Ordering.OrderSubmitted"),
+                ("integration event", "OrderPlaced", "Ordering.OrderPlaced"),
+                ("aggregate", "Order", "Ordering.Order"),
+                ("read-model", "OrderSummary", "Ordering.OrderSummary"),
+                ("query", "OrdersByStatus", "Ordering.OrdersByStatus"),
+                ("policy", "PlaceOnSubmission", "Ordering.policies.PlaceOnSubmission"),
+                ("service", "Fulfilment", "Ordering.Fulfilment"),
+                ("spec", "IsShippable", "Ordering.specs.IsShippable"),
+            });
+    }
+
+    /// <summary>
+    /// A legal, diagnostic-free model in which a specification and a value object share a name. Nothing
+    /// in the language reserves a policy's or a spec's name against the type namespace (only a
+    /// <c>service</c> shares it, via <c>ValidateUniqueTypeNames</c>), so the projection MUST namespace
+    /// them — a flat <c>&lt;Context&gt;.&lt;Name&gt;</c> would emit two children at the same address and
+    /// the depth-first <c>Find</c> (types first) would make the spec unreachable for selection and
+    /// <c>koine/modelMembers</c>.
+    /// </summary>
+    private const string NameCollisionSample = """
+        context Ordering {
+          value Priority { level: Int }
+
+          event OrderRushed { orderId: OrderId }
+
+          entity Order identified by OrderId {
+            rush: Bool
+
+            command escalate {
+              requires rush   "only a rush order can escalate"
+              emit OrderRushed(orderId: id)
+            }
+          }
+
+          spec Priority on Order = rush
+
+          policy OrderRushed when OrderRushed then Order.escalate()
+        }
+        """;
+
+    [Fact]
+    public void ModelToJson_namespaces_a_spec_that_shares_a_types_name()
+    {
+        // The premise of the guard: this model is LEGAL — no diagnostic forbids the shared name, so the
+        // projection cannot lean on the validator to keep the two addresses apart.
+        new KoineCompiler().DiagnoseWorkspace(Files(NameCollisionSample))
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ShouldBeEmpty();
+
+        KoineModel model = Compile(NameCollisionSample);
+        ModelNode context = ModelRoundTripService.ModelToJson(model, "Ordering");
+
+        // Same title, distinct addresses — no two children may share a qualifiedName.
+        context.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldContain(("value", "Priority", "Ordering.Priority"));
+        context.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldContain(("spec", "Priority", "Ordering.specs.Priority"));
+
+        var qualifiedNames = Flatten(context).Select(n => n.QualifiedName).ToList();
+        qualifiedNames.ShouldBeUnique();
+
+        // Each address resolves to its OWN declaration, not to whichever the depth-first walk hits first.
+        ModelRoundTripService.ModelToJson(model, "Ordering.specs.Priority").Kind.ShouldBe("spec");
+        ModelRoundTripService.ModelToJson(model, "Ordering.Priority").Kind.ShouldBe("value");
+
+        ModelMember condition = ModelRoundTripService.MembersOf(model, "Ordering.specs.Priority").Single();
+        condition.Kind.ShouldBe("condition");
+        condition.Name.ShouldBe("Order");
+        condition.Value.ShouldBe("rush");
+
+        ModelRoundTripService.MembersOf(model, "Ordering.Priority").Single().Name.ShouldBe("level");
+    }
+
+    [Fact]
+    public void ModelToJson_namespaces_a_policy_that_shares_a_types_name()
+    {
+        KoineModel model = Compile(NameCollisionSample);
+
+        // `policy OrderRushed` shares its name with `event OrderRushed`: each keeps its own address.
+        ModelRoundTripService.ModelToJson(model, "Ordering.policies.OrderRushed").Kind.ShouldBe("policy");
+        ModelRoundTripService.ModelToJson(model, "Ordering.OrderRushed").Kind.ShouldBe("event");
+
+        ModelMember reaction = ModelRoundTripService.MembersOf(model, "Ordering.policies.OrderRushed").Single();
+        reaction.Kind.ShouldBe("reaction");
+        reaction.Name.ShouldBe("OrderRushed");
+        reaction.Value.ShouldBe("Order.escalate()");
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_read_models_direct_and_derived_fields()
+    {
+        var fields = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.OrderSummary");
+
+        fields.ShouldAllBe(f => f.Kind == "field");
+        // A direct field maps to the source member of the same name: no declared type, no projection.
+        fields[0].Name.ShouldBe("status");
+        fields[0].Type.ShouldBeNull();
+        fields[0].Value.ShouldBeNull();
+        // A derived field carries its declared type and the described projection.
+        fields[1].Name.ShouldBe("lineCount");
+        fields[1].Type.ShouldBe("Int");
+        fields[1].Value.ShouldBe("lines.count");
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_querys_criteria_and_its_result_type()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.OrdersByStatus");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "criterion", "result" });
+        members[0].Name.ShouldBe("status");
+        members[0].Type.ShouldBe("OrderStatus");
+        members[1].Type.ShouldBe("List<OrderSummary>");
+    }
+
+    [Fact]
+    public void MembersOf_describes_a_policys_trigger_and_reaction()
+    {
+        ModelMember reaction = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.policies.PlaceOnSubmission").Single();
+
+        reaction.Kind.ShouldBe("reaction");
+        reaction.Name.ShouldBe("OrderSubmitted");        // the triggering event
+        reaction.Value.ShouldBe("Order.place()");        // the command the policy reacts with
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_services_operations_and_use_cases()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.Fulfilment");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "operation", "usecase" });
+        members[0].Name.ShouldBe("Subtotal");
+        members[0].Type.ShouldBe("Decimal");
+        members[0].Value.ShouldBe("unitPrice * quantity");   // the pure body; null for a seam
+        members[1].Name.ShouldBe("PlaceOrder");
+        members[1].Type.ShouldBeNull();                      // a command-style use case returns nothing
+    }
+
+    [Fact]
+    public void MembersOf_describes_a_specs_condition_over_its_target()
+    {
+        ModelMember condition = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.specs.IsShippable").Single();
+
+        condition.Kind.ShouldBe("condition");
+        condition.Name.ShouldBe("Order");                 // the target type the condition is declared on
+        condition.Value.ShouldBe("status == Placed");
+    }
+
+    [Fact]
+    public void ModelToJson_of_a_behaviour_free_model_projects_the_same_tree_as_before()
+    {
+        // Regression guard (#483): the behavioural kinds are strictly ADDITIVE — a model declaring none
+        // of them projects exactly the children it did before, with no empty placeholder nodes.
+        //
+        // This is a structural assertion over the context node only (kind/title/qualifiedName of each
+        // child, and the node's own empty members/transitions), NOT a byte comparison of the payload. The
+        // ordering-starter Verify snapshot further down is not the byte-level half of this guard either:
+        // that starter declares three commands, so it is not behaviour-free and its snapshot did grow the
+        // new `command` children. Byte-level stability for a behaviour-free model is what this test's
+        // exhaustive `ShouldBe` over the whole child list stands in for.
+        const string structural = """
+            context Ordering {
+              value Money { amount: Decimal }
+              enum OrderStatus { Draft, Placed }
+            }
+            """;
+        ModelNode context = ModelRoundTripService.ModelToJson(Compile(structural), "Ordering");
+
+        context.Kind.ShouldBe("context");
+        context.QualifiedName.ShouldBe("Ordering");
+        context.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldBe(new[]
+            {
+                ("value", "Money", "Ordering.Money"),
+                ("enum", "OrderStatus", "Ordering.OrderStatus"),
+            });
+        // No behavioural node sneaks in as a grandchild either (an empty `repository`/`states` placeholder).
+        context.Children.SelectMany(c => c.Children).ShouldBeEmpty();
+        context.Members.ShouldBeEmpty();
+        context.Transitions.ShouldBeEmpty();
+    }
+
+    // ---- #483: the aggregate's and entity's behavioural vocabulary --------
+
+    /// <summary>
+    /// An aggregate carrying the behaviour the aggregate-level projection surfaces: a repository
+    /// contract (a tuned operations set plus a declarative finder), an aggregate-scoped rule, and a
+    /// value-returning command over the root. Kept apart from <see cref="Sample"/>, whose aggregate has
+    /// to stay repository-free for the "add a repository" edit tests further down.
+    /// </summary>
+    private const string AggregateBehaviourSample = """
+        context Shipping {
+          enum ParcelStatus { Packed, Dispatched }
+
+          event ParcelDispatched { parcel: ParcelId }
+
+          aggregate Deliveries root Parcel {
+            entity Parcel identified by ParcelId {
+              status: ParcelStatus = Packed
+
+              states status {
+                Packed -> Dispatched
+              }
+
+              command dispatch(carrier: String): ParcelId {
+                requires status == Packed   "only a packed parcel can be dispatched"
+                status -> Dispatched
+                emit ParcelDispatched(parcel: id)
+                result id
+              }
+            }
+
+            repository {
+              operations: getById, add
+              find byStatus(status: ParcelStatus): List<Parcel>
+            }
+
+            spec IsDispatched on Parcel = status == Dispatched
+          }
+        }
+        """;
+
+    [Fact]
+    public void ModelToJson_emits_an_aggregates_repository_and_rules_as_nodes()
+    {
+        ModelNode aggregate = ModelRoundTripService.ModelToJson(Compile(AggregateBehaviourSample), "Shipping.Deliveries");
+
+        // The nested types keep their positions; the repository contract (at most one) and the
+        // aggregate-scoped rules are appended after them.
+        aggregate.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldBe(new[]
+            {
+                ("entity", "Parcel", "Shipping.Deliveries.Parcel"),
+                ("repository", "repository", "Shipping.Deliveries.repository"),
+                ("spec", "IsDispatched", "Shipping.Deliveries.specs.IsDispatched"),
+            });
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_repositorys_operations_and_finders()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(AggregateBehaviourSample), "Shipping.Deliveries.repository");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "operation", "operation", "finder" });
+        members[0].Name.ShouldBe("getById");
+        members[1].Name.ShouldBe("add");
+        members[2].Name.ShouldBe("byStatus");
+        members[2].Type.ShouldBe("List<Parcel>");            // the finder's result type
+        members[2].Value.ShouldBe("status: ParcelStatus");   // its parameter list, rendered canonically
+    }
+
+    [Fact]
+    public void MembersOf_of_an_aggregate_scoped_rule_describes_its_condition_over_the_root()
+    {
+        ModelMember condition = ModelRoundTripService
+            .MembersOf(Compile(AggregateBehaviourSample), "Shipping.Deliveries.specs.IsDispatched").Single();
+
+        condition.Kind.ShouldBe("condition");
+        condition.Name.ShouldBe("Parcel");
+        condition.Value.ShouldBe("status == Dispatched");
+    }
+
+    [Fact]
+    public void ModelToJson_emits_an_entitys_commands_and_factories_beside_its_state_machines()
+    {
+        ModelNode entity = ModelRoundTripService.ModelToJson(Compile(Sample), "Ordering.Order.Order");
+
+        entity.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldBe(new[]
+            {
+                ("states", "status", "Ordering.Order.Order.states.status"),
+                ("command", "place", "Ordering.Order.Order.commands.place"),
+                ("factory", "draft", "Ordering.Order.Order.factories.draft"),
+            });
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_commands_preconditions_and_emitted_events()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.Order.Order.commands.place");
+
+        // The state edge the command drives is not repeated here — it is already surfaced, correlated
+        // by `Via`, on the owning entity's transitions.
+        members.Select(m => m.Kind).ShouldBe(new[] { "requires", "emit" });
+        // A precondition is named by its described condition, with the author's message as its value.
+        members[0].Name.ShouldBe("status == Draft");
+        members[0].Value.ShouldBe("only a draft order can be placed");
+        // An emitted event is named by the event, with its payload arguments rendered canonically.
+        members[1].Name.ShouldBe("OrderSubmitted");
+        members[1].Value.ShouldBe("orderId: id");
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_commands_parameters_and_its_result()
+    {
+        var members = ModelRoundTripService.MembersOf(
+            Compile(AggregateBehaviourSample), "Shipping.Deliveries.Parcel.commands.dispatch");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "param", "requires", "emit", "result" });
+        members[0].Name.ShouldBe("carrier");
+        members[0].Type.ShouldBe("String");
+        members[3].Type.ShouldBe("ParcelId");   // the declared return type
+        members[3].Value.ShouldBe("id");        // the described `result` expression
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_factorys_parameters_and_creation_events()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.Order.Order.factories.draft");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "param", "param", "emit" });
+        members[0].Name.ShouldBe("orderId");                 // the explicit identity parameter
+        members[0].Type.ShouldBe("OrderId");
+        members[1].Name.ShouldBe("lines");
+        members[1].Type.ShouldBe("List<OrderLine>");
+        members[2].Name.ShouldBe("OrderSubmitted");
+        members[2].Value.ShouldBe("orderId: id");
+    }
+
+    [Fact]
+    public void ModelToJson_of_a_behaviour_free_entity_projects_only_its_state_machines()
+    {
+        // The same additive guard as the context-level one above, one level down: an entity declaring
+        // no command and no factory keeps exactly the children it had before.
+        const string structural = """
+            context Ordering {
+              enum OrderStatus { Draft, Placed }
+              entity Order identified by OrderId {
+                status: OrderStatus = Draft
+                states status { Draft -> Placed }
+              }
+            }
+            """;
+        ModelNode entity = ModelRoundTripService.ModelToJson(Compile(structural), "Ordering.Order");
+
+        entity.Children.Select(c => c.Kind).ShouldBe(new[] { "states" });
     }
 
     // ---- #1163: transition/command correlation + per-edge fan-out ---------

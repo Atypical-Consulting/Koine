@@ -656,6 +656,8 @@ describe('renderContextMapGraph', () => {
       bidirectional: false,
       sharedTypes: ['Money'],
       acl: [{ upstreamContext: 'Gateway', upstreamType: 'GatewayResult', localContext: 'Payment', localType: 'PaymentReceipt' }],
+      upstreamRole: 'Upstream',
+      downstreamRole: 'Anti-Corruption Layer',
     };
     // Mirrors the real contextMapTooltip (contextMapPanel.tsx): a bidirectional arrow, a Shared line only
     // when non-empty, and every ACL entry via the shared formatAclMapping helper (not just the first).

@@ -336,6 +336,8 @@ describe('createContextMapPanel — hover tooltip composition (#1211)', () => {
       bidirectional: false,
       sharedTypes: ['Money'],
       acl: [{ upstreamContext: 'Gateway', upstreamType: 'GatewayResult', localContext: 'Payment', localType: 'PaymentReceipt' }],
+      upstreamRole: 'Upstream',
+      downstreamRole: 'Anti-Corruption Layer',
     };
     expect(hooks!.tooltip!(edge)).toBe(
       'AntiCorruptionLayer: Gateway → Payment\nShared: Money\nACL: Gateway.GatewayResult → Payment.PaymentReceipt',
@@ -364,6 +366,7 @@ describe('createContextMapPanel — hover tooltip composition (#1211)', () => {
     const edge: ContextMapEdge = {
       from: 'Kitchen', to: 'Delivery', label: 'Partnership', arrowKind: 'bidirectional',
       bidirectional: true, sharedTypes: [], acl: [],
+      upstreamRole: null, downstreamRole: null, // symmetric — neither peer has a distinct role (#483)
     };
     // Only the kind + direction line — no spurious "Shared: " / "ACL: " lines, and the bidirectional arrow.
     expect(hooks!.tooltip!(edge)).toBe('Partnership: Kitchen ↔ Delivery');
@@ -386,6 +389,7 @@ describe('createContextMapPanel — hover tooltip composition (#1211)', () => {
     const edge: ContextMapEdge = {
       from: '<A>', to: 'B&C', label: 'Rel<x>', arrowKind: 'association',
       bidirectional: false, sharedTypes: ['<Shared>'], acl: [],
+      upstreamRole: null, downstreamRole: null,
     };
     // maxGraph renders the tooltip via `.innerHTML =`, so every fragment must be escaped — a name containing
     // markup must never reach the DOM unescaped (the tooltip is otherwise an HTML-injection point).

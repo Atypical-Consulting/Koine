@@ -750,12 +750,14 @@ internal sealed class ExpressionChecker
     /// (<see cref="System.Runtime.CompilerServices.InternalsVisibleToAttribute"/> already exposes this
     /// assembly's internals to the test project). Every diagnostic that consumes this method's return
     /// value (<c>CheckEnumMemberResolvable</c>, <c>ResolveEnumOperand</c>) also depends on
-    /// <see cref="ModelIndex.EnumsDeclaring"/>/<see cref="ModelIndex.EnumMemberToType"/>, which are
-    /// built from the SAME flat, last-write-wins <c>_byName</c>/<c>AllTypes()</c> map this fix bypasses
-    /// — so a same-named collision that exercises this fix always also evicts the concrete enum's own
-    /// members from those two dictionaries (#1632, explicitly out of this issue's scope), making the
-    /// fix's effect unobservable through any end-to-end diagnostic today. Calling this method directly
-    /// is the only way to pin its own contract in isolation.
+    /// <see cref="ModelIndex.EnumsDeclaring"/>/<see cref="ModelIndex.EnumMemberToType"/>. Those used to
+    /// be built from the SAME flat, last-write-wins <c>_byName</c>/<c>AllTypes()</c> map this fix
+    /// bypasses, so a same-named collision that exercises this fix also evicted the concrete enum's own
+    /// members from both dictionaries — making the fix's effect unobservable end-to-end, and calling
+    /// this method directly the only way to pin its contract. <b>#1632 removed that eviction</b>
+    /// (<c>AllTypes()</c> now enumerates every per-context declaration), so those dictionaries no longer
+    /// hide the concrete enum. The direct call is kept: it still pins this method's own contract in
+    /// isolation from whatever its consumers do.
     /// </remarks>
     internal TypeRef? ConcreteEnumType(Expr operand, TypeScope scope)
     {
@@ -949,9 +951,9 @@ internal sealed class ExpressionChecker
         // Qualified enum reference `EnumType.Member`: validate the member, don't treat the enum
         // type name as a field. Resolved context-first via the same ResolveDecl(...) every other
         // lookup in this file uses (R13.2), so a same-named type legally declared in another
-        // context neither misclassifies this context's own enum nor hides its member set (the
-        // flat, global ModelIndex.EnumsDeclaring index can miss a shadowed enum's members —
-        // #1632 — but ResolveDecl's per-context lookup isn't built off that shadowed index).
+        // context neither misclassifies this context's own enum nor hides its member set. This path
+        // is why #1632's reported KOI0106 symptom stopped reproducing before that issue was fixed:
+        // ResolveDecl's per-context lookup was never built off the then-shadowed global index.
         if (ma.Target is IdentifierExpr typeId && ResolveDecl(new TypeRef(typeId.Name)) is EnumDecl enumDecl)
         {
             if (!enumDecl.MemberNames.Contains(ma.MemberName))

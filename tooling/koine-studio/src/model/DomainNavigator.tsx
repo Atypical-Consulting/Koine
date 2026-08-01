@@ -3,10 +3,21 @@
 // first (the bounded contexts and the doorways into the cross-context views) and drill into TACTICAL (a
 // context's aggregates and their internals) on demand.
 //
+// The strategic level's `⤳ Context Map` doorway opens a THIRD level in the rail (#483): the context map
+// as a graph — the bounded contexts as nodes, the typed relationships as edges badged with the DDD role
+// each END plays (Supplier/Customer, Upstream/Conformist, …). It shapes its data with the SHARED
+// `buildContextMapGraph` the inspector's maxGraph canvas uses, and falls back to the caller's docs
+// hand-off when the model declares no relationships (nothing to graph). The rail level is a SUMMARY, not
+// a replacement: the center-deck view still owns the maxGraph canvas, the Graph/Table toggle and the
+// shared-types / anti-corruption detail strip, so the level carries its own `Open full Context Map` row
+// that hands off there — the doorway is a two-way street, not a one-way trip away from the rich view.
+//
 // SHAPE (a container/presenter split, like GlossaryPanel + inspectorController): the pure levels render
-// as keyed JSX sub-components (`StrategicLevel` / `TacticalView`), and the live `mountDomainNavigator`
-// FACADE owns the data-fetch + the single synchronous `store.subscribe` that drives re-renders and the
-// altitude-reset invariant. The facade renders synchronously (a top-level Preact `render()` per store
+// as keyed JSX sub-components (`StrategicLevel` / `TacticalView` / `ContextMapView`), and the live
+// `mountDomainNavigator` FACADE owns the data-fetch + the single synchronous `store.subscribe` that
+// drives re-renders and the altitude-reset invariant (and the view-local Context Map toggle, which is
+// scoped to one instance and so has no business in the store). The facade renders synchronously (a
+// top-level Preact `render()` per store
 // change), so a scope/filter write is reflected in the DOM within the same tick — preserving the
 // microtask-flush + synchronous-assertion contract the existing suites pin (see domainNavigator.test.ts /
 // .a11y.test.ts). The store subscription lives in the facade (not a `useAppStore` effect) so `unmount()`
@@ -20,9 +31,10 @@
 // panel-specific ContextMenu affordance.
 import { render } from 'preact';
 import type { ComponentChildren, VNode } from 'preact';
-import type { ContextMapResult, GlossaryModel, ModelNode } from '@/lsp/lsp';
+import type { ContextMapResult, DiagramNode, GlossaryModel, ModelNode } from '@/lsp/lsp';
 import { constructForKind, constructIcon, countsByContext, type ModelOutlineHandlers } from '@/model/modelOutline';
 import { filterGlossaryModel, isAllContexts, type ContextScope } from '@/model/activeContext';
+import { buildContextMapGraph, type ContextMapEdge } from '@/diagrams/contextMapGraph';
 import { createFloatingMenu } from '@atypical/koine-ui';
 import { createRovingTabIndex, handleTreeKeydown, type RovingTabIndexHelper, type RovingTreeNav } from '@/shell/rovingTreeNav';
 import { createLifecycleGuard } from '@/shared/lifecycleGuard';
@@ -35,7 +47,8 @@ import type { NavAltitude } from '@/store/slices/activeContext';
 export interface StrategicHandlers {
   /** Drill into a bounded context's tactical view (its aggregates and internals). */
   onOpenContext(ctx: string): void;
-  /** Open the Context Map view (the cross-context relationship graph). */
+  /** Open the Context Map view (the cross-context relationship graph) — the navigator's own graph level
+   *  when the model declares relationships, else the caller's docs hand-off (#483). */
   onOpenContextMap(): void;
   /** Open the Glossary (the ubiquitous language) view. */
   onOpenGlossary(): void;
@@ -149,13 +162,15 @@ function DoorwayRow({
 
 // --- keyboard model: the WAI-ARIA tree pattern (roving tabindex) (#453) -----------------------------
 // Both levels are `role="tree"`s of `role="treeitem"` rows, navigated with Arrow/Home/End and a SINGLE
-// tab stop (roving tabindex). The navigator's trees never collapse a branch (aggregates render expanded;
-// the filter removes non-matching rows from the DOM), so every rendered treeitem is visible and DOM order
-// IS visual order. The key ROUTING is the shared `handleTreeKeydown` (rovingTreeNav.ts, #1105); the
+// tab stop (roving tabindex). The navigator's trees never collapse a branch (every branch row — an
+// aggregate, or an owning entity below it (#483) — renders expanded; the filter removes non-matching rows
+// from the DOM), so every rendered treeitem is visible AT ANY DEPTH and DOM order IS visual order — which
+// is why the item source stays a plain `querySelectorAll('[role="treeitem"]')` even now that the tree
+// nests. The key ROUTING is the shared `handleTreeKeydown` (rovingTreeNav.ts, #1105); the
 // seed-the-tab-stop/resolve-event-to-treeitem glue is the shared `createRovingTabIndex`
 // (rovingTreeNav.ts, #1365) — this file supplies only the item source (via a ref helper) and the
 // panel-specific ContextMenu affordance. `nestedButtonSelector: 'button'` pulls this navigator's inner
-// controls (the leaf activator, the ⋯ overflow, the aggregate head) out of the tab order — mouse clicks
+// controls (the leaf activator, the ⋯ overflow, a branch head) out of the tab order — mouse clicks
 // still work, and keyboard activation is forwarded from the focused treeitem.
 
 /** A {@link RovingTreeNav} over `rovingTabIndex`'s live treeitems, built per keydown so it can read the
@@ -177,13 +192,16 @@ function treeNav(rovingTabIndex: RovingTabIndexHelper, ev: KeyboardEvent): Rovin
     },
     activate: () => {
       // A `<button>` treeitem activates natively (leave the key to the browser); a wrapper row (the
-      // tactical rows) forwards Enter/Space to the primary control inside it.
+      // tactical rows) forwards Enter/Space to the primary control inside it. A wrapper row with NO
+      // control to forward to — the context-map relation rows, which are pure information — reports the
+      // key UNCONSUMED so the router leaves it to the browser: claiming it would `preventDefault()` and
+      // silently swallow Space's native scroll while doing nothing at all.
       const current = rovingTabIndex.currentTreeItem(ev);
-      if (current && current.tagName !== 'BUTTON') {
-        current.querySelector<HTMLElement>('button')?.click();
-        return true;
-      }
-      return false;
+      if (!current || current.tagName === 'BUTTON') return false;
+      const inner = current.querySelector<HTMLElement>('button');
+      if (!inner) return false;
+      inner.click();
+      return true;
     },
   };
 }
@@ -208,8 +226,9 @@ function wireTreeNav(tree: HTMLElement): void {
     // `⋯` button (which roving tabindex keeps out of the tab order).
     if (ev.key === 'ContextMenu' || (ev.shiftKey && ev.key === 'F10')) {
       // Only the row's OWN ⋯ qualifies (a leaf row appends it as a direct child). A bare descendant
-      // lookup on an aggregate treeitem would descend into its nested group and open the first owned
-      // leaf's menu — a wrongly-targeted action; an aggregate has no overflow, so the key no-ops there.
+      // lookup on a BRANCH treeitem (an aggregate, or an owning entity below it) would descend into its
+      // nested group and open the first owned leaf's menu — a wrongly-targeted action; a branch row has
+      // no overflow of its own, so the key no-ops there.
       const more = rovingTabIndex.currentTreeItem(ev)?.querySelector<HTMLElement>(':scope > .koi-tactical-more');
       if (more) {
         ev.preventDefault();
@@ -365,7 +384,8 @@ export interface DomainNavigatorHandle {
   unmount(): void;
 }
 
-/** One tactical leaf — an owned construct (under an aggregate) or a context-level peer. The row IS the
+/** One tactical leaf — a construct that owns nothing itself, at any depth (under an aggregate or an
+ * entity below it) or as a context-level peer. The row IS the
  * `treeitem`; inside it the activation button (`.koi-tactical-leaf`, carrying `data-construct` + `data-name`
  * so a click resolves to the model element + cross-highlights) selects-and-jumps, and a trailing `⋯`
  * overflow opens the cross-axis menu ("Reveal in Files", #453). Icon first, then the name text, so
@@ -407,44 +427,76 @@ function TacticalLeaf({ node, handlers }: { node: ModelNode; handlers: TacticalH
   );
 }
 
-/** One aggregate node: a head row (the aggregate glyph + name, carrying the aggregate's qualified name)
- * with its owned constructs nested beneath in a {@link TacticalLeaf} spine, so ownership reads as
- * containment. The container carries `data-qname` for the cross-highlight; the head is the selectable row
- * for the aggregate itself. */
-function AggregateNode({ agg, handlers }: { agg: ModelNode; handlers: TacticalHandlers }): VNode {
-  const { slug } = constructForKind(agg.kind);
+/** One OWNING node — an aggregate, or anything below it that owns constructs of its own (an entity with
+ * its state machines / commands / factories, #483): a head row (the construct glyph + name, carrying the
+ * node's qualified name) with its children nested beneath in a spine, so ownership reads as containment.
+ * The container carries `data-qname` for the cross-highlight; the head is the selectable row for the node
+ * itself, and each child recurses through {@link TacticalNode} so depth is unbounded rather than fixed at
+ * aggregate → leaf. `nested` marks a branch BELOW an aggregate, which tightens its spacing (`_model.scss`)
+ * so the aggregate stays the visually dominant boundary. */
+function TacticalBranch({
+  node,
+  handlers,
+  nested = false,
+}: {
+  node: ModelNode;
+  handlers: TacticalHandlers;
+  nested?: boolean;
+}): VNode {
+  const { slug } = constructForKind(node.kind);
   return (
-    // Isolate the accessible name to the aggregate title — otherwise it concatenates every owned child's
-    // text (the nested role="group" spine) into the aggregate's announced name.
-    <div class="koi-agg" data-qname={agg.qualifiedName} role="treeitem" aria-expanded="true" aria-label={agg.title}>
+    // Isolate the accessible name to this node's title — otherwise it concatenates every owned child's
+    // text (the nested role="group" spine) into the node's announced name.
+    <div
+      class={'koi-agg' + (nested ? ' koi-agg--nested' : '')}
+      data-qname={node.qualifiedName}
+      role="treeitem"
+      aria-expanded="true"
+      aria-label={node.title}
+    >
       <button
         type="button"
         class="koi-agg-head"
         data-construct={slug}
+        data-name={node.title}
         onClick={() => {
-          handlers.onSelect(agg);
-          handlers.goto(agg);
+          handlers.onSelect(node);
+          handlers.goto(node);
         }}
       >
         <ConstructIcon slug={slug} />
-        <span class="koi-agg-name">{agg.title}</span>
+        <span class="koi-agg-name">{node.title}</span>
       </button>
-      {/* The owned constructs, nested in a bracketed spine that makes the aggregate's boundary visible. */}
+      {/* The owned constructs, nested in a bracketed spine that makes the owner's boundary visible. */}
       <div class="koi-agg-spine" role="group">
-        {agg.children.map((child) => (
-          <TacticalLeaf key={child.qualifiedName} node={child} handlers={handlers} />
+        {node.children.map((child) => (
+          <TacticalNode key={child.qualifiedName} node={child} handlers={handlers} />
         ))}
       </div>
     </div>
   );
 }
 
+/** One tactical row, leaf-or-branch: a node that owns nothing renders as a {@link TacticalLeaf} (with its
+ * cross-axis `⋯` overflow); a node that owns constructs renders as a {@link TacticalBranch} so its
+ * children get their own treeitem rows instead of being dropped. This is what lights up the behavioural
+ * vocabulary (#483) — an entity's `states`/`command`/`factory` children, and any future owned depth. */
+function TacticalNode({ node, handlers }: { node: ModelNode; handlers: TacticalHandlers }): VNode {
+  return node.children.length ? (
+    <TacticalBranch node={node} handlers={handlers} nested />
+  ) : (
+    <TacticalLeaf node={node} handlers={handlers} />
+  );
+}
+
 /**
- * The TACTICAL body for a bounded context — aggregate-centric: each `aggregate` child becomes a node with
- * its owned constructs nested beneath ({@link AggregateNode}); every OTHER top-level child (a value object,
- * enum, event, … declared at the context level rather than inside an aggregate) is a peer under a quiet
- * `context` divider — no orphan "Aggregates" header. A `null`/empty `ctxNode` (loading, or a context with
- * no declarations) renders an empty body, not a crash.
+ * The TACTICAL body for a bounded context — aggregate-centric: each `aggregate` child becomes a branch
+ * node with its owned constructs nested beneath ({@link TacticalBranch}); every OTHER top-level child (a
+ * value object, enum, event, or a behavioural `policy`/`service`/`spec`/`read-model`/`query`, declared at
+ * the context level rather than inside an aggregate) is a peer under a quiet `context` divider — no orphan
+ * "Aggregates" header. Both spines recurse through {@link TacticalNode}, so an owner at ANY depth (an
+ * entity's commands/factories/state machines, #483) gets its children as rows rather than dropping them.
+ * A `null`/empty `ctxNode` (loading, or a context with no declarations) renders an empty body, not a crash.
  */
 export function TacticalLevel({
   ctxNode,
@@ -475,13 +527,14 @@ export function TacticalLevel({
       aria-label={ctxNode ? `${ctxNode.title} aggregates` : undefined}
       ref={(el) => { if (el) wireTreeNav(el); }}
     >
+      {/* An aggregate is ALWAYS a branch — the boundary owner reads as one even when it owns nothing. */}
       {aggregates.map((agg) => (
-        <AggregateNode key={agg.qualifiedName} agg={agg} handlers={handlers} />
+        <TacticalBranch key={agg.qualifiedName} node={agg} handlers={handlers} />
       ))}
       {peers.length ? (
         <div class="koi-ctx-peers" role="group">
           {peers.map((peer) => (
-            <TacticalLeaf key={peer.qualifiedName} node={peer} handlers={handlers} />
+            <TacticalNode key={peer.qualifiedName} node={peer} handlers={handlers} />
           ))}
         </div>
       ) : null}
@@ -521,6 +574,185 @@ function TacticalView({
   );
 }
 
+// --- the STRATEGIC Context Map graph, behind the `⤳ Context Map` doorway (#483) ---------------------
+// A context map read the way DDD teaches it: the bounded contexts as nodes, and the typed relationships
+// between them as edges whose BOTH ends carry the role that end plays (Supplier/Customer,
+// Upstream/Conformist, Open Host Service/Downstream, …). The roles are derived ONCE, server-side
+// (`ContextRelationRoles`, #483 Task 3) and ride the payload, so every surface badges a relation
+// identically.
+//
+// REUSE, not a second renderer: the ContextMapResult → `{ nodes, edges }` shaping is the SHARED
+// `buildContextMapGraph` (`@/diagrams/contextMapGraph`) the inspector's maxGraph canvas already feeds
+// from — same node set (declared contexts + any dangling relation endpoint), same declaration spans
+// (#290), same edge metadata. Only the PRESENTATION differs: the canvas mounts a maxGraph diagram, while
+// the left rail needs a light, keyboard-navigable DOM tree that costs nothing to paint in a 260px rail.
+// So the mapper is shared and only the DOM is navigator-specific — a relation can't be badged one way
+// here and another way there.
+
+/** Wiring for the strategic Context Map graph — what a context node does when activated. */
+export interface ContextMapHandlers {
+  /** Jump the editor to a 1-based line/column: the navigator's EXISTING jump-to-declaration seam
+   *  ({@link ModelOutlineHandlers.goto}, already wired to `editor.goto`), fed from the context's
+   *  declaration span in `contextSpans` (#290). A span-less context stays inert. */
+  goto(line: number, column: number): void;
+  /** Hand off to the caller's FULL Context Map view — the center-deck destination
+   *  ({@link StrategicHandlers.onOpenContextMap}) with the maxGraph canvas, the Graph/Table toggle and
+   *  the shared-types / anti-corruption detail strip this 260px rail level deliberately summarizes away.
+   *  Wired to the level's own `Open full Context Map` row, so the richer view stays one step from here. */
+  openFullMap(): void;
+}
+
+/** One bounded-context node. The whole row IS the button (and the treeitem), like {@link ContextRow};
+ * clicking it jumps to the context's `.koi` declaration. A node with no span (a dangling relation
+ * endpoint, or a recovered parse) still renders — the map never dangles — but stays inert to navigation. */
+function ContextMapNode({ node, handlers }: { node: DiagramNode; handlers: ContextMapHandlers }): VNode {
+  const span = node.sourceSpan;
+  return (
+    <button
+      type="button"
+      class="koi-domain-ctxmap-node"
+      data-ctxmap-node={node.qualifiedName}
+      role="treeitem"
+      aria-label={span ? `${node.label}, go to declaration` : node.label}
+      onClick={() => {
+        if (span) handlers.goto(span.line, span.column);
+      }}
+    >
+      <Glyph symbol="◈" />
+      <span class="koi-ctx-name">{node.label}</span>
+    </button>
+  );
+}
+
+/** The DDD role one END of a relation plays. A `null` role — the SYMMETRIC patterns (partnership /
+ * shared kernel), where the two contexts are peers — renders NO badge at all, rather than an empty pill
+ * or the string "null". */
+function RoleBadge({ end, role }: { end: 'upstream' | 'downstream'; role: string | null }): VNode | null {
+  return role ? (
+    <span class="koi-domain-ctxmap-role" data-role-end={end}>
+      {role}
+    </span>
+  ) : null;
+}
+
+/** One typed relationship: `‹upstream› [role] → ‹downstream› [role]` plus the relationship kind. The
+ * arrow glyph is decorative (`↔` for a symmetric relation), so the row carries an explicit accessible
+ * name that reads the same information in words — "Sales as Supplier to Shipping as Customer,
+ * Customer/Supplier" — instead of concatenating the badge fragments.
+ *
+ * `data-ctxmap-edge` addresses the row as `‹from›→‹to›#‹index›`: a context PAIR alone is ambiguous (two
+ * contexts may declare several relations), so the declaration index disambiguates it — the same key the
+ * list renders each row with. */
+function ContextMapEdgeRow({ edge, index }: { edge: ContextMapEdge; index: number }): VNode {
+  const kind = edge.label ?? 'relation';
+  const end = (name: string, role: string | null): string => (role ? `${name} as ${role}` : name);
+  const label = `${end(edge.from, edge.upstreamRole)} ${edge.bidirectional ? 'and' : 'to'} ${end(
+    edge.to,
+    edge.downstreamRole,
+  )}, ${kind}`;
+  return (
+    <div
+      class="koi-domain-ctxmap-edge"
+      data-ctxmap-edge={`${edge.from}→${edge.to}#${String(index)}`}
+      role="treeitem"
+      aria-label={label}
+    >
+      <span class="koi-domain-ctxmap-end">
+        <span class="koi-domain-ctxmap-end-name">{edge.from}</span>
+        <RoleBadge end="upstream" role={edge.upstreamRole} />
+      </span>
+      <Glyph symbol={edge.bidirectional ? '↔' : '→'} />
+      <span class="koi-domain-ctxmap-end">
+        <span class="koi-domain-ctxmap-end-name">{edge.to}</span>
+        <RoleBadge end="downstream" role={edge.downstreamRole} />
+      </span>
+      <span class="koi-domain-ctxmap-kind">{kind}</span>
+    </div>
+  );
+}
+
+/**
+ * The Context Map GRAPH body: one node row per bounded context, then the typed relations as edge rows
+ * under a quiet group, and last the `Open full Context Map` door — the same `role="tree"` +
+ * roving-tabindex keyboard model as the navigator's other levels (so the whole rail navigates
+ * identically), with the context nodes and that door as the focusable, activatable rows. An empty map
+ * renders a quiet note, NOT an empty `role="tree"` (which would break aria-required-children and leave a
+ * keyboard-unreachable tree) — mirroring {@link TacticalLevel}.
+ *
+ * The closing door is deliberate: this level SUMMARIZES the map for a 260px rail (nodes + role-badged
+ * edges), while the center-deck Context Map view owns the maxGraph canvas, the Graph/Table toggle and the
+ * shared-types / anti-corruption detail strip. Without it, opening the rail level would strand a reader
+ * away from the richer view — so it's a row here, in the same tree, reachable by the same keyboard model.
+ */
+export function ContextMapLevel({ map, handlers }: { map: ContextMapResult; handlers: ContextMapHandlers }): VNode {
+  const graph = buildContextMapGraph(map);
+
+  if (!graph.nodes.length) {
+    return (
+      <div class="koi-domain-ctxmap-body" role="note">
+        <p class="muted koi-tactical-empty">No context map declared.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      class="koi-domain-ctxmap-body"
+      role="tree"
+      aria-label="Context map"
+      ref={(el) => {
+        if (el) wireTreeNav(el);
+      }}
+    >
+      {graph.nodes.map((n) => (
+        <ContextMapNode key={n.id} node={n} handlers={handlers} />
+      ))}
+      {graph.edges.length ? (
+        <div class="koi-domain-ctxmap-edges" role="group">
+          {graph.edges.map((e, i) => (
+            <ContextMapEdgeRow key={`${e.from}→${e.to}#${String(i)}`} edge={e} index={i} />
+          ))}
+        </div>
+      ) : null}
+      {/* The way OUT to the richer view — reusing the strategic level's {@link DoorwayRow} idiom so it
+          looks, reads and keyboards like every other door in the rail (a `treeitem` button in this same
+          tree, with the destination woven into its accessible name via `hint`). Owned by a group for the
+          same reason the strategic doors are, and last so the map itself stays the level's headline. */}
+      <div class="koi-domain-ctxmap-doors" role="group">
+        <DoorwayRow
+          door="contextmap-full"
+          symbol="⤢"
+          label="Open full Context Map"
+          hint="the canvas, table and shared-type details"
+          onOpen={handlers.openFullMap}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** The Context Map VIEW: the breadcrumb that climbs back to the strategic context list (the same row the
+ * tactical view uses, so both doors out of a level look and behave alike), then the graph body. */
+function ContextMapView({
+  map,
+  handlers,
+  onBack,
+}: {
+  map: ContextMapResult;
+  handlers: ContextMapHandlers;
+  onBack: () => void;
+}): VNode {
+  return (
+    <div class="koi-domain koi-domain-ctxmap">
+      <button type="button" class="koi-breadcrumb-back" aria-label="Back to all contexts (in Context Map)" onClick={onBack}>
+        <Glyph symbol="‹" />
+        <span class="koi-breadcrumb-back-name">Context Map</span>
+      </button>
+      <ContextMapLevel map={map} handlers={handlers} />
+    </div>
+  );
+}
+
 // --- pure-DOM builder facades (kept for direct-call tests + the public API) --------------------------
 // `renderStrategic` / `renderTactical` render the level component into a detached host and return the
 // concrete `role="tree"` element — so callers that want a one-shot DOM tree (the characterization tests,
@@ -547,6 +779,24 @@ export function renderTactical(ctxNode: ModelNode | null | undefined, h: Tactica
   return host.firstElementChild as HTMLElement;
 }
 
+/**
+ * Build the strategic Context Map LEVEL as a detached DOM tree (see {@link ContextMapLevel}): one node
+ * per bounded context, one edge per typed relation badged with the role each END plays, and the
+ * `Open full Context Map` door.
+ *
+ * Named for the rail LEVEL it builds — a sibling of {@link renderStrategic} / {@link renderTactical} —
+ * and deliberately not `renderContextMapGraph`, which `@/diagrams/diagrams-maxgraph` already exports for
+ * the interactive canvas mount. Two same-named exports would collide on the `domainNavigator.ts` barrel's
+ * `export *`, which ESM resolves by silently DROPPING the ambiguous name rather than erroring. Both
+ * surfaces still shape their data with the SAME `buildContextMapGraph` mapper, so they can never disagree
+ * about a relation; only the rendering differs.
+ */
+export function renderContextMapLevel(map: ContextMapResult, h: ContextMapHandlers): HTMLElement {
+  const host = document.createElement('div');
+  render(<ContextMapLevel map={map} handlers={h} />, host);
+  return host.firstElementChild as HTMLElement;
+}
+
 /** Find the bounded-context node for `context` in the model graph: the root's `kind: 'context'` child
  * whose name matches. The graph names a context by both `title` and `qualifiedName`, so match either. */
 function findContextNode(root: ModelNode | null | undefined, context: string): ModelNode | null {
@@ -556,25 +806,21 @@ function findContextNode(root: ModelNode | null | undefined, context: string): M
 }
 
 /** Narrow a context node to the constructs whose name matches a free-text query (case-insensitive
- * substring) — the TACTICAL counterpart of {@link filterGlossaryModel}. An aggregate survives when it
- * matches OR owns a surviving construct (keeping all of its children when the aggregate name itself is
- * the hit); a context-level peer survives on its own match. A blank query is the identity. */
+ * substring) — the TACTICAL counterpart of {@link filterGlossaryModel}. An OWNING node (an aggregate, or
+ * an entity owning commands/factories/state machines — #483) survives when it matches OR owns a surviving
+ * descendant, keeping ALL of its children when its own name is the hit; a node that owns nothing survives
+ * on its own match. Prunes at every depth (not just aggregate → child), so a behavioural row keeps its
+ * whole ownership chain visible. A blank query is the identity. */
 function filterContextNode(ctx: ModelNode | null, query: string): ModelNode | null {
   if (!ctx) return ctx;
   const q = query.trim().toLowerCase();
   if (!q) return ctx;
-  const matches = (n: ModelNode): boolean => n.title.toLowerCase().includes(q);
-  const children: ModelNode[] = [];
-  for (const child of ctx.children) {
-    if (child.kind === 'aggregate') {
-      const selfMatch = matches(child);
-      const keptKids = selfMatch ? child.children : child.children.filter(matches);
-      if (selfMatch || keptKids.length) children.push({ ...child, children: keptKids });
-    } else if (matches(child)) {
-      children.push(child);
-    }
-  }
-  return { ...ctx, children };
+  const prune = (n: ModelNode): ModelNode | null => {
+    if (n.title.toLowerCase().includes(q)) return n; // a self-match keeps the node's whole subtree
+    const children = n.children.map(prune).filter((c): c is ModelNode => c !== null);
+    return children.length ? { ...n, children } : null;
+  };
+  return { ...ctx, children: ctx.children.map(prune).filter((c): c is ModelNode => c !== null) };
 }
 
 /** A muted status/empty line for the navigator host (loading / no-model states). */
@@ -588,6 +834,10 @@ interface NavCache {
   model: GlossaryModel;
   relLinks: number;
   tree: ModelNode | null;
+  /** The fetched context map (#483) — what the `⤳ Context Map` doorway graphs in-navigator; `relLinks`
+   *  above stays the doorway's count badge. Optional/`null` for a hand-built cache (the presenter tests)
+   *  and for a failed fetch: with no map to draw, the doorway falls back to the caller's docs hand-off. */
+  contextMap?: ContextMapResult | null;
 }
 
 /**
@@ -610,6 +860,8 @@ export function DomainNavigator({
   contentToken,
   handlers,
   tacticalHandlers,
+  contextMapOpen = false,
+  onSetContextMapOpen,
 }: {
   store: StoreApi<AppState>;
   navAltitude: NavAltitude;
@@ -620,6 +872,13 @@ export function DomainNavigator({
   contentToken: number;
   handlers: DomainNavigatorHandlers;
   tacticalHandlers: TacticalHandlers;
+  /** Whether the strategic Context Map graph is the open level (#483). A view-local toggle owned by the
+   *  facade — NOT store state: it is scoped to one navigator instance and never outlives an altitude or
+   *  scope move. Defaults to closed, so an existing caller is unaffected. */
+  contextMapOpen?: boolean;
+  /** Open/close the Context Map graph level. Omitted (a bare presenter render) ⇒ the doorway always falls
+   *  back to the caller's `onOpenContextMap` hand-off, exactly as it did before #483. */
+  onSetContextMapOpen?: (open: boolean) => void;
 }): VNode {
   // Drilling in is one gesture across two store fields: narrow the scope AND descend to tactical. The
   // facade's subscription repaints the navigator; because a drill always starts from the STRATEGIC level,
@@ -632,8 +891,28 @@ export function DomainNavigator({
       s.setActiveContext(ctx);
       s.setNavAltitude('tactical');
     },
-    onOpenContextMap: () => handlers.onOpenContextMap?.(),
+    // The doorway has TWO destinations (#483). A model that actually declares relationships opens the
+    // navigator's OWN strategic graph (nodes + role-badged edges) — the rail is where you read the map
+    // while you navigate. With no relations there is no graph to draw, so it keeps the pre-#483 hand-off
+    // to the caller's docs/center-deck Context Map view, which owns the "no context map declared" story
+    // (and the dense table + canvas). Same fallback when the map failed to fetch or the presenter was
+    // rendered without the open/close seam. Opening the rail level is never a dead end either way: the
+    // level's own `Open full Context Map` row hands off to that same center-deck view (see
+    // `contextMapHandlers.openFullMap` below).
+    onOpenContextMap: () => {
+      const map = cache?.contextMap;
+      if (map && map.relations.length > 0 && onSetContextMapOpen) onSetContextMapOpen(true);
+      else handlers.onOpenContextMap?.();
+    },
     onOpenGlossary: () => handlers.onOpenGlossary?.(),
+  };
+
+  /** The graph's jump-to-declaration, routed through the navigator's existing `goto(line, col)` seam,
+   *  plus the level's escape hatch to the caller's FULL Context Map view — the SAME hand-off the doorway
+   *  falls back to when there's nothing to graph, so the richer destination is reachable either way. */
+  const contextMapHandlers: ContextMapHandlers = {
+    goto: (line, column) => handlers.goto?.(line, column),
+    openFullMap: () => handlers.onOpenContextMap?.(),
   };
 
   let filterHidden: boolean;
@@ -652,6 +931,18 @@ export function DomainNavigator({
         store={store}
         ctxNode={ctxNode}
         handlers={tacticalHandlers}
+      />
+    );
+  } else if (contextMapOpen && cache?.contextMap) {
+    // The strategic Context Map graph (#483). The per-level filter narrows constructs BY NAME, which a
+    // cross-context relationship graph has none of — so it hides here, like it does while loading.
+    filterHidden = true;
+    level = (
+      <ContextMapView
+        key={`contextmap:${contentToken}`}
+        map={cache.contextMap}
+        handlers={contextMapHandlers}
+        onBack={() => onSetContextMapOpen?.(false)}
       />
     );
   } else if (!cache) {
@@ -742,6 +1033,10 @@ export function mountDomainNavigator(
   // the first content paint) lands focus on the freshly-mounted level (WCAG 2.4.3).
   let paintedAltitude = store.getState().navAltitude;
 
+  // Whether the strategic Context Map graph is the open level (#483). View-local, not store state: it
+  // belongs to THIS navigator instance and never survives an altitude / scope move (see the subscription).
+  let contextMapOpen = false;
+
   function renderNow(): void {
     closeLeafMenu(false); // a re-render orphans any open ⋯ menu; drop it (its trigger is about to be torn down)
     const s = store.getState();
@@ -755,15 +1050,28 @@ export function mountDomainNavigator(
         contentToken={contentToken}
         handlers={handlers}
         tacticalHandlers={tacticalHandlers}
+        contextMapOpen={contextMapOpen}
+        onSetContextMapOpen={setContextMapOpen}
       />,
       host,
     );
   }
 
-  // A drill / climb (and ONLY that — not a filter keystroke or the first content paint) plays the
-  // reduced-motion-guarded zoom entrance on the freshly-mounted level, and lands focus on its first row.
-  // Runs AFTER renderNow(), when the new level is already committed as `.koi-domain-body`'s child.
-  function onAltitudeChanged(): void {
+  /** Open / close the strategic Context Map graph. A level swap like a drill / climb, so it repaints and
+   *  then runs the same focus-continuity step (the door row it was activated from is torn down by the
+   *  repaint, which would otherwise drop keyboard focus to `<body>` — WCAG 2.4.3). */
+  function setContextMapOpen(open: boolean): void {
+    if (contextMapOpen === open) return;
+    contextMapOpen = open;
+    renderNow();
+    onLevelChanged();
+  }
+
+  // A LEVEL swap — a drill / climb, or opening / closing the Context Map graph (#483), and ONLY that,
+  // not a filter keystroke or the first content paint — plays the reduced-motion-guarded zoom entrance on
+  // the freshly-mounted level, and lands focus on its first row. Runs AFTER renderNow(), when the new
+  // level is already committed as `.koi-domain-body`'s child.
+  function onLevelChanged(): void {
     const body = host.querySelector<HTMLElement>('.koi-domain-body');
     const level = body?.firstElementChild as HTMLElement | null;
     // Tag the fresh level `koi-domain-enter` (the zoom entrance) — CSS, gated behind
@@ -805,10 +1113,20 @@ export function mountDomainNavigator(
     ) {
       return;
     }
+    // The Context Map graph (#483) is a STRATEGIC-level view of the whole model, so it must not survive a
+    // move to another altitude or scope (a drill from elsewhere, the top-bar switcher): reset it BEFORE
+    // the repaint, so the fresh paint shows the level `navAltitude` actually names.
+    const closedContextMap =
+      contextMapOpen && (s.navAltitude !== prev.navAltitude || s.activeContext !== prev.activeContext);
+    if (closedContextMap) contextMapOpen = false;
     renderNow();
     if (s.navAltitude !== paintedAltitude) {
       paintedAltitude = s.navAltitude;
-      onAltitudeChanged();
+      onLevelChanged();
+    } else if (closedContextMap) {
+      // The graph gave way WITHOUT an altitude change (an external scope switch made while reading it):
+      // it's still a level swap, so the focused row was torn down — recover focus the same way.
+      onLevelChanged();
     }
   });
 
@@ -829,10 +1147,19 @@ export function mountDomainNavigator(
         seed ? seed.model : lsp.model().catch(() => null),
       ]);
       if (!isCurrent()) return;
-      cache = { model, relLinks: contextMap.relations.length, tree };
+      // The whole context map is cached (not just its relation count) so the doorway can graph it
+      // in-navigator without a second fetch (#483).
+      cache = { model, relLinks: contextMap.relations.length, tree, contextMap };
     } catch {
       if (!isCurrent()) return;
-      cache = { model: { entries: [] }, relLinks: 0, tree: null }; // best-effort: render the empty strategic state
+      // best-effort: render the empty strategic state (and, with no map, a doorway that hands off)
+      cache = { model: { entries: [] }, relLinks: 0, tree: null, contextMap: null };
+      // …and CLOSE the Context Map level with it (#483 review). With `cache.contextMap` null the
+      // presenter's `contextMapOpen && cache?.contextMap` guard falls through anyway, so leaving the flag
+      // set would keep an invisible "open" state: no graph, no breadcrumb — and then the next SUCCESSFUL
+      // reload would silently re-enter the level nobody asked for, with no entrance animation or focus
+      // continuity (doFetch never runs onLevelChanged). Dropping it here keeps flag and paint in step.
+      contextMapOpen = false;
     }
     contentToken += 1;
     renderNow();

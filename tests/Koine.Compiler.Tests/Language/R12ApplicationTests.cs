@@ -353,6 +353,65 @@ public class R12ApplicationTests
         rm.ShouldContain(".Sum(");
     }
 
+    // ---- R12.3 — read-model field types under a cross-context name collision (#1715) ----
+
+    // `Status` is declared in BOTH contexts, with DIFFERENT kinds: an ENUM in `Ordering` (where the
+    // read model lives) and a VALUE OBJECT in `Shipping`. R13.2 makes that legal — type-name
+    // uniqueness is enforced per context, not globally — but the index's flat, context-blind type
+    // table keeps one slot per simple name (last write wins), so `Shipping.Status`, declared second,
+    // owns the global slot. The KOI1204 field-type gate must judge `label` against ORDERING's
+    // `Status` all the same: neither silently skipped nor spuriously raised.
+    private const string ShadowedStatusMatching = """
+        context Ordering {
+          enum Status { Open Closed }
+          value Order { total: Int  state: Status }
+          readmodel OrderView from Order { label: Status = state }
+        }
+        context Shipping {
+          value Status { code: Int }
+        }
+        """;
+
+    // Same collision; the projection is a genuine mismatch (`total` is an Int, the field is declared
+    // `Status`), so the gate must still fire.
+    private const string ShadowedStatusMismatching = """
+        context Ordering {
+          enum Status { Open Closed }
+          value Order { total: Int  state: Status }
+          readmodel OrderView from Order { label: Status = total }
+        }
+        context Shipping {
+          value Status { code: Int }
+        }
+        """;
+
+    [Fact]
+    public void Read_model_field_typed_by_a_context_shadowed_name_is_accepted()
+    {
+        // The field's declared `Status` resolves to Ordering's enum, which is exactly what the
+        // projection yields — no KOI1204, even though a differently-kinded `Shipping.Status` owns
+        // the global name slot.
+        // Regression pin: this passes on `main` too — the KOI1204 gate consumes only a boolean
+        // (`IsKnownType`) whose value provably can't diverge between the two Classify overloads, and
+        // `MemberAnalysis.IsAssignable` is pure name-shape matching. The diff-sensitive guards for
+        // #1715 are R9ValueObjectTests' two `…_alongside_KOI0908` tests.
+        Diagnose(ShadowedStatusMatching).ShouldNotContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
+    }
+
+    [Fact]
+    public void Read_model_field_type_mismatch_is_reported_under_a_context_shadowed_name()
+    {
+        // The KOI1204 gate is guarded by `IsKnownType(<declared type>)`: the mismatch is only
+        // reported when the declared type resolves. A cross-context collision on `Status` must not
+        // suppress it.
+        // Regression pin: this passes on `main` too — the gate consumes only that boolean, whose
+        // value provably can't diverge between the two Classify overloads, and the mismatch itself is
+        // decided by `MemberAnalysis.IsAssignable`, pure name-shape matching that is wholly
+        // context-insensitive. The diff-sensitive guards for #1715 are R9ValueObjectTests' two
+        // `…_alongside_KOI0908` tests.
+        Diagnose(ShadowedStatusMismatching).ShouldContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
+    }
+
     // ---- R12.4 — query objects --------------------------------------------
 
     [Fact]

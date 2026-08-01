@@ -671,12 +671,56 @@ public sealed class ModelIndex
     public static bool IsIdConvention(string name) =>
         name.Length > 2 && name.EndsWith("Id", StringComparison.Ordinal) && char.IsUpper(name[0]);
 
-    /// <summary>Every declared type across all contexts and aggregates.</summary>
+    /// <summary>
+    /// Every declared type across all contexts and aggregates.
+    /// </summary>
+    /// <remarks>
+    /// Enumerates the per-context registry (<c>_declsByContext</c>) rather than the flat,
+    /// last-write-wins <c>_byName</c> view, because R13.2 lets two bounded contexts each legally
+    /// declare a type with the same simple name (uniqueness is enforced PER CONTEXT, not globally).
+    /// Walking <c>_byName</c> made the losing context's declaration <b>entirely invisible</b> — so
+    /// every index built by iterating this method (chiefly <see cref="EnumsDeclaring"/> /
+    /// <c>_enumMemberToType</c>) silently dropped it (issue #1632).
+    /// For a model with no cross-context name collision this yields exactly the same declarations in
+    /// the same order as before: <c>_byName</c> is filled by <see cref="IndexType"/> walking
+    /// <c>ctx.Types</c> pre-order into each aggregate, <c>_declsByContext</c> by
+    /// <c>ctx.AllTypeDecls()</c> doing the identical walk, over the same <c>model.Contexts</c>
+    /// sequence — so only a genuine collision adds an entry. (Both the old and the new enumeration
+    /// order rest on <see cref="Dictionary{TKey,TValue}"/> enumerating in insertion order, which holds
+    /// absent removals — there are none — but is an implementation detail rather than a contract; the
+    /// snapshot suite is the real guard.)
+    /// <para><b>Ordering requirement:</b> this reads <c>_declsByContext</c>, so it must not be called
+    /// from the constructor before step 1b has filled it. Today's two in-constructor callers (steps 2
+    /// and 4) both run after.</para>
+    /// </remarks>
     public IEnumerable<TypeDecl> AllTypes()
     {
+        // Reference equality, not the record's structural Equals: two contexts can legally declare
+        // identically-shaped types, and collapsing those would reintroduce the very drop this fixes.
+        var seen = new HashSet<TypeDecl>(ReferenceEqualityComparer.Instance);
+        foreach (Dictionary<string, TypeDecl> declsByType in _declsByContext.Values)
+        {
+            foreach (TypeDecl decl in declsByType.Values)
+            {
+                if (seen.Add(decl))
+                {
+                    yield return decl;
+                }
+            }
+        }
+
+        // Unreachable for any model the compiler itself builds — KoineCompilation.Merge folds
+        // same-named contexts into one, so `_declsByContext[ctx.Name]` can't clobber and it covers
+        // exactly what `_byName` does. It IS reachable for a hand-built KoineModel carrying two
+        // ContextNodes with the same Name (the public `new ModelIndex(model)` /
+        // `SemanticValidator.Validate(model)` entry points don't go through Merge), where the loop
+        // above would keep only the last. Cheap insurance that this can only ever ADD visibility.
         foreach (TypeDecl decl in _byName.Values)
         {
-            yield return decl;
+            if (seen.Add(decl))
+            {
+                yield return decl;
+            }
         }
     }
 
@@ -1369,8 +1413,19 @@ public sealed class ModelIndex
 
     private static readonly RefResolution Ok = new(RefKind.Resolved, Array.Empty<string>());
 
-    /// <summary>Classifies a type by its simple name.</summary>
-    public TypeKind Classify(string typeName)
+    /// <summary>
+    /// The built-in half of <see cref="Classify(string)"/>: the kind of a language built-in (a
+    /// primitive or one of the generic collection/range names), or <see langword="null"/> when the
+    /// name is not a built-in and must be looked up among the declared types.
+    /// <para>
+    /// Factored out so this set has ONE definition. Callers that must keep built-ins ahead of a
+    /// context-local declaration of the same name — <c>SemanticValidator.ValidateTypeRef</c>, on an
+    /// already-invalid model where KOI0908 forbids the shadowing declaration — ask this directly
+    /// instead of hand-copying the list, so adding a sixth built-in here cannot silently change
+    /// their precedence.
+    /// </para>
+    /// </summary>
+    internal static TypeKind? ClassifyBuiltIn(string typeName)
     {
         if (Primitives.Contains(typeName))
         {
@@ -1395,6 +1450,17 @@ public sealed class ModelIndex
         if (typeName == RangeTypeName)
         {
             return TypeKind.Range;
+        }
+
+        return null;
+    }
+
+    /// <summary>Classifies a type by its simple name.</summary>
+    public TypeKind Classify(string typeName)
+    {
+        if (ClassifyBuiltIn(typeName) is { } builtIn)
+        {
+            return builtIn;
         }
 
         if (_byName.TryGetValue(typeName, out TypeDecl? decl))
@@ -1441,4 +1507,12 @@ public sealed class ModelIndex
 
     /// <summary>True when a type reference resolves to a known type.</summary>
     public bool IsKnownType(string typeName) => Classify(typeName) != TypeKind.Unknown;
+
+    /// <summary>
+    /// True when a type reference resolves to a known type with <paramref name="context"/>-aware type
+    /// resolution (R13.2): the named type is resolved in that context's scope first (local, then an
+    /// unambiguous import), falling back to the global view — so a reference site is judged against the
+    /// declaration its own context actually sees.
+    /// </summary>
+    public bool IsKnownType(string? context, string typeName) => Classify(context, typeName) != TypeKind.Unknown;
 }
