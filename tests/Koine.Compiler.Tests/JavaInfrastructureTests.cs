@@ -19,7 +19,11 @@ namespace Koine.Compiler.Tests;
 /// </summary>
 public class JavaInfrastructureTests
 {
-    /// <summary>A publishing context with an aggregate + declarative finders, and a subscribing context.</summary>
+    /// <summary>
+    /// A publishing context with TWO aggregates + declarative finders (so the unit of work's field-per-root
+    /// shape is exercised), and a subscribing, NON-publishing context with its own aggregate (so the unit
+    /// of work's no-outbox shape is exercised too).
+    /// </summary>
     internal const string Fixture = """
         contextmap {
           Sales -> Shipping : customer-supplier
@@ -44,13 +48,21 @@ public class JavaInfrastructureTests
               orderRef: String
             }
           }
+
+          aggregate Accounts root Customer {
+            entity Customer identified by CustomerId {
+              name: String
+            }
+          }
         }
 
         context Shipping {
           subscribes Sales.OrderPlaced
 
-          entity Shipment identified by ShipmentId {
-            orderRef: String
+          aggregate Fulfillment root Shipment {
+            entity Shipment identified by ShipmentId {
+              orderRef: String
+            }
           }
         }
         """;
@@ -160,5 +172,198 @@ public class JavaInfrastructureTests
         // A subscribe-only context publishes nothing, so it gets no dispatcher.
         result.Files.ShouldNotContain(f =>
             f.RelativePath == "koine/generated/shipping/IntegrationEventDispatcher.java");
+    }
+
+    /// <summary>
+    /// Every context with at least one entity-rooted aggregate gets a concrete <c>UnitOfWork</c>: one
+    /// repository field per root (declaration order, pluralized — <c>Order</c> → <c>orders</c>), each
+    /// defaulting to a fresh <c>InMemory&lt;Root&gt;Repository</c> when the no-arg constructor is used, and
+    /// an injectable constructor accepting every repository as a parameter (so a future composition helper
+    /// can hand it the very same instances it built elsewhere).
+    /// </summary>
+    [Fact]
+    public void Infrastructure_layer_emits_a_unit_of_work_with_a_field_per_root()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var uow = result.Files
+            .Single(f => f.RelativePath == "koine/generated/sales/UnitOfWork.java").Contents;
+
+        uow.ShouldContain("public final class UnitOfWork {");
+        uow.ShouldContain("private final OrderRepository orders;");
+        uow.ShouldContain("private final CustomerRepository customers;");
+
+        // No-arg convenience constructor defaults each field to its concrete in-memory repository.
+        uow.ShouldContain("public UnitOfWork() {");
+        uow.ShouldContain("this(new InMemoryOrderRepository(), new InMemoryCustomerRepository()");
+
+        // The injectable constructor takes every repository as a parameter.
+        uow.ShouldContain("public UnitOfWork(OrderRepository orders, CustomerRepository customers");
+        uow.ShouldContain("this.orders = orders;");
+        uow.ShouldContain("this.customers = customers;");
+    }
+
+    /// <summary>
+    /// A PUBLISHING context's unit of work is also the producer half of the transactional outbox:
+    /// <c>enqueue</c> buffers an integration event, and <c>saveChanges</c> flushes each buffered event to
+    /// the outbox (as an <c>OutboxMessage</c>) and clears the buffer.
+    /// </summary>
+    [Fact]
+    public void Publishing_context_unit_of_work_enqueues_and_flushes_to_the_outbox()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var uow = result.Files
+            .Single(f => f.RelativePath == "koine/generated/sales/UnitOfWork.java").Contents;
+
+        uow.ShouldContain("private final koine.runtime.OutboxStore outbox;");
+        uow.ShouldContain("public void enqueue(Object integrationEvent) {");
+        uow.ShouldContain("this.pending.add(integrationEvent);");
+        uow.ShouldContain("public java.util.concurrent.CompletableFuture<Void> saveChanges() {");
+        uow.ShouldContain("this.outbox.add(koine.runtime.OutboxMessage.of(integrationEvent));");
+        uow.ShouldContain("this.pending.clear();");
+        uow.ShouldContain("return java.util.concurrent.CompletableFuture.completedFuture(null);");
+    }
+
+    /// <summary>
+    /// A NON-publishing context still gets a unit of work (repository fields, both constructors) — but no
+    /// outbox wiring at all: no <c>outbox</c> field, no <c>enqueue</c> seam, and <c>saveChanges</c> is a
+    /// no-op (still present and callable, so a caller does not need to branch on whether the context
+    /// publishes).
+    /// </summary>
+    [Fact]
+    public void Non_publishing_context_unit_of_work_has_no_outbox_wiring()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var uow = result.Files
+            .Single(f => f.RelativePath == "koine/generated/shipping/UnitOfWork.java").Contents;
+
+        uow.ShouldContain("public final class UnitOfWork {");
+        uow.ShouldContain("private final ShipmentRepository shipments;");
+        uow.ShouldContain("public UnitOfWork() {");
+        uow.ShouldContain("this(new InMemoryShipmentRepository());");
+        uow.ShouldContain("public UnitOfWork(ShipmentRepository shipments) {");
+        uow.ShouldContain("public java.util.concurrent.CompletableFuture<Void> saveChanges() {");
+        uow.ShouldContain("return java.util.concurrent.CompletableFuture.completedFuture(null);");
+
+        uow.ShouldNotContain("outbox");
+        uow.ShouldNotContain("enqueue");
+        uow.ShouldNotContain("pending");
+    }
+
+    /// <summary>
+    /// Every context with a unit of work also gets a <c>Behaviors</c> class carrying the validation and
+    /// transaction pipeline behaviors — a small functional interface plus composable static factories,
+    /// Java's idiom for the C#/Python MediatR-style decorator stack. The shared
+    /// <c>koine.runtime.PipelineBehavior</c>/<c>Validator</c>/<c>ValidationError</c> primitives ship once.
+    /// </summary>
+    [Fact]
+    public void Infrastructure_layer_emits_validation_and_transaction_pipeline_behaviors()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        result.Files.ShouldContain(f => f.RelativePath == "koine/runtime/PipelineBehavior.java");
+        result.Files.ShouldContain(f => f.RelativePath == "koine/runtime/Validator.java");
+        result.Files.ShouldContain(f => f.RelativePath == "koine/runtime/ValidationError.java");
+
+        var behaviors = result.Files
+            .Single(f => f.RelativePath == "koine/generated/sales/Behaviors.java").Contents;
+
+        behaviors.ShouldContain("public final class Behaviors {");
+        behaviors.ShouldContain("private Behaviors() {");
+
+        behaviors.ShouldContain(
+            "public static <TRequest, TResponse> koine.runtime.PipelineBehavior<TRequest, TResponse> validationBehavior() {");
+        behaviors.ShouldContain("return validationBehavior(java.util.List.of());");
+        behaviors.ShouldContain(
+            "public static <TRequest, TResponse> koine.runtime.PipelineBehavior<TRequest, TResponse> "
+            + "validationBehavior(java.util.List<koine.runtime.Validator<TRequest>> validators) {");
+        behaviors.ShouldContain(".flatMap(validator -> validator.validate(request).stream())");
+        behaviors.ShouldContain("failed.completeExceptionally(new koine.runtime.ValidationError(errors));");
+        behaviors.ShouldContain("return next.get();");
+
+        behaviors.ShouldContain(
+            "public static <TRequest, TResponse> koine.runtime.PipelineBehavior<TRequest, TResponse> "
+            + "transactionBehavior(UnitOfWork unitOfWork) {");
+        behaviors.ShouldContain(".thenCompose(response -> unitOfWork.saveChanges().thenApply(ignored -> response));");
+    }
+
+    /// <summary>
+    /// A NON-publishing context still gets a <c>Behaviors</c> class — its <c>transactionBehavior</c> just
+    /// commits a unit of work whose <c>saveChanges</c> happens to be a no-op, so a caller never has to
+    /// branch on whether the context publishes.
+    /// </summary>
+    [Fact]
+    public void Non_publishing_context_still_gets_behaviors()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var behaviors = result.Files
+            .Single(f => f.RelativePath == "koine/generated/shipping/Behaviors.java").Contents;
+
+        behaviors.ShouldContain("public final class Behaviors {");
+        behaviors.ShouldContain("transactionBehavior(UnitOfWork unitOfWork) {");
+    }
+
+    /// <summary>
+    /// A PUBLISHING context's composition helper — <c>&lt;Context&gt;Infrastructure</c> — wires every
+    /// repository, the unit of work, the outbox, and its dispatcher in one <c>create(handler)</c> call
+    /// (the handler is the one piece only the caller can supply, matching the Python/TypeScript emitters'
+    /// own <c>create_*_infrastructure(handler)</c>).
+    /// </summary>
+    [Fact]
+    public void Publishing_context_composition_helper_wires_repositories_uow_outbox_and_dispatcher()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var provider = result.Files
+            .Single(f => f.RelativePath == "koine/generated/sales/SalesInfrastructure.java").Contents;
+
+        provider.ShouldContain("public final class SalesInfrastructure {");
+        provider.ShouldContain("public final OrderRepository orders;");
+        provider.ShouldContain("public final CustomerRepository customers;");
+        provider.ShouldContain("public final UnitOfWork unitOfWork;");
+        provider.ShouldContain("public final koine.runtime.OutboxStore outbox;");
+        provider.ShouldContain("public final IntegrationEventDispatcher dispatcher;");
+
+        provider.ShouldContain("public static SalesInfrastructure create(koine.runtime.IntegrationEventHandler handler) {");
+        provider.ShouldContain("var orders = new InMemoryOrderRepository();");
+        provider.ShouldContain("var customers = new InMemoryCustomerRepository();");
+        provider.ShouldContain("var outbox = new koine.runtime.InMemoryOutboxStore();");
+        provider.ShouldContain("var unitOfWork = new UnitOfWork(orders, customers, outbox);");
+        provider.ShouldContain("var dispatcher = new IntegrationEventDispatcher(outbox, handler);");
+        provider.ShouldContain("return new SalesInfrastructure(orders, customers, unitOfWork, outbox, dispatcher);");
+    }
+
+    /// <summary>
+    /// A NON-publishing context's composition helper takes NO arguments at all (there is no handler to
+    /// supply) and wires only repositories + the unit of work — no outbox, no dispatcher field.
+    /// </summary>
+    [Fact]
+    public void Non_publishing_context_composition_helper_takes_no_arguments_and_skips_the_outbox()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var provider = result.Files
+            .Single(f => f.RelativePath == "koine/generated/shipping/ShippingInfrastructure.java").Contents;
+
+        provider.ShouldContain("public final class ShippingInfrastructure {");
+        provider.ShouldContain("public final ShipmentRepository shipments;");
+        provider.ShouldContain("public final UnitOfWork unitOfWork;");
+        provider.ShouldContain("public static ShippingInfrastructure create() {");
+        provider.ShouldContain("var shipments = new InMemoryShipmentRepository();");
+        provider.ShouldContain("var unitOfWork = new UnitOfWork(shipments);");
+        provider.ShouldContain("return new ShippingInfrastructure(shipments, unitOfWork);");
+
+        provider.ShouldNotContain("outbox");
+        provider.ShouldNotContain("dispatcher");
     }
 }
