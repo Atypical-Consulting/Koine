@@ -121,8 +121,9 @@ readmodelDecl  : READMODEL Identifier FROM typeName LBRACE readmodelField* RBRAC
 
 readmodelField : softName ( COLON typeRef ASSIGN expression )? ;
 
-// A query object: typed criteria over a read model, single or list result.
-queryDecl      : QUERY Identifier LPAREN paramList? RPAREN COLON typeRef ;
+// A query object: typed criteria over a read model, single or list result. Leading
+// annotations carry the optional HTTP surface (`@route(...)`, `@get`, `@auth(...)`).
+queryDecl      : annotation* QUERY Identifier LPAREN paramList? RPAREN COLON typeRef ;
 
 // A policy: react to a domain event with a command on another aggregate (a seam).
 policyDecl     : POLICY Identifier WHEN Identifier THEN policyReaction ;
@@ -157,7 +158,8 @@ stateRule      : Identifier ( RARROW Identifier ( COMMA Identifier )* )? ( WHEN 
 
 // ---- Commands (state-changing operations on an entity) ---------------------
 
-commandDecl    : COMMAND Identifier ( LPAREN paramList? RPAREN )? ( COLON typeRef )? LBRACE commandStmt* RBRACE ;
+// Leading annotations carry the optional HTTP surface (`@route(...)`, `@put`, `@auth(...)`).
+commandDecl    : annotation* COMMAND Identifier ( LPAREN paramList? RPAREN )? ( COLON typeRef )? LBRACE commandStmt* RBRACE ;
 
 paramList      : param ( COMMA param )* ;
 
