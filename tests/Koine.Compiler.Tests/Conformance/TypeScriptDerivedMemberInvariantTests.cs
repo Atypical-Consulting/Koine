@@ -121,4 +121,96 @@ public class TypeScriptDerivedMemberInvariantTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    private const string ChainedFixture = """
+        context Subscription {
+          value Ledger {
+            gross:   Int
+            rate:    Int
+            net:     Int = gross - rate
+            doubled: Int = net * 2
+            invariant doubled > 0   "doubled net stays positive"
+          }
+        }
+        """;
+
+    /// <summary>A derived member defined over ANOTHER derived member — substitution must recurse.</summary>
+    [Fact]
+    public void Derived_member_defined_over_another_derived_member_recurses()
+    {
+        var result = new KoineCompiler().Compile(ChainedFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var vo = result.Files
+            .Single(f => f.RelativePath.EndsWith("value-objects/Ledger.ts", StringComparison.Ordinal))
+            .Contents;
+
+        vo.ShouldNotContain("if (doubled ");
+        vo.ShouldNotContain("if (net ");
+        vo.ShouldContain("gross - rate");   // the inner derivation reached the guard
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The guard must fire on a violating construction and stay silent on a valid one — proving the
+    /// substituted expression is evaluated over the parameters, not over unassigned fields.
+    /// </summary>
+    [Fact]
+    public void Substituted_guard_evaluates_the_derivation_at_runtime()
+    {
+        var result = new KoineCompiler().Compile(UsageMeterFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            import { UsageMeter } from './Subscription/value-objects/UsageMeter';
+            const ok = new UsageMeter(100, 130);
+            console.log('overage=' + ok.overage);
+            """;
+
+        TestSupport.NodeRun run = TestSupport.RunTypeScript(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoToolchainNotice);
+
+        run.Ok.ShouldBeTrue(run.Stdout + string.Join("\n", run.Errors));
+        run.Stdout.ShouldContain("overage=30");
+    }
+
+    private const string EntityFixture = """
+        context Subscription {
+          aggregate Metering root Meter {
+            entity Meter identified by MeterId {
+              includedQuota: Int
+              consumed:      Int
+              overage:       Int = if consumed > includedQuota then consumed - includedQuota else 0
+              invariant overage >= 0   "overage can never be negative"
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// An entity's guards run in <c>checkInvariants()</c> AFTER assignment, in NameMode.Property —
+    /// <c>this.overage</c> resolves and computes correctly there, so the fix must leave that path
+    /// untouched.
+    /// </summary>
+    [Fact]
+    public void Entity_invariant_over_a_derived_member_still_reads_the_property()
+    {
+        var result = new KoineCompiler().Compile(EntityFixture, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Meter is the aggregate's ROOT entity, so it emits directly under the namespace folder
+        // (KindFolder.Root == "") rather than under `entities/`.
+        var entity = result.Files
+            .Single(f => f.RelativePath.Equals("Subscription/Meter.ts", StringComparison.Ordinal))
+            .Contents;
+
+        entity.ShouldContain("this.overage");   // NOT inlined — Property mode is unchanged
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
