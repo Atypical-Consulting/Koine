@@ -84,6 +84,15 @@
   it recurs and starts to matter), check the job's own step timings via
   `gh api repos/{owner}/{repo}/actions/jobs/<jobId> --jq '.steps[]'` before assuming it's just the
   duplicate-run artifact — a genuine step-level hang reads identically until you look.
+- **`sandbox-confinement` (issue #1782) is ADVISORY, not required — same reasoning as `Koine Studio`
+  above.** A new top-level job in `ci.yml`, matrix `[macos-latest, windows-latest]`, filtered to
+  `ScenarioSandboxTests`, carrying the identical `needs: changes` + draft/front-end-only `if:` shape as
+  `build-and-test` (so the #1530/#1616/#1486 rules above apply to it under its own name too — resolve its
+  status via the check-runs API, one check-run per matrix leg named `sandbox-confinement (macos-latest)` /
+  `sandbox-confinement (windows-latest)`). Not a required status check (`main` has no branch protection).
+  A red `sandbox-confinement (windows-latest)` alone should not block a merge by itself — cross-reference
+  against known tracked flakes (e.g. #1791, a pre-existing intermittent failure in a memory-ceiling test
+  unrelated to this job's own plumbing) before treating it as a genuine blocker.
 
 ## Integration style
 - **Merge mode:** squash

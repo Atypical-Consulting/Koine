@@ -231,3 +231,45 @@ implementing PR, rather than reasoned about:
   to run the *scenario* with (in the tests, a shell stub), and a stub knows nothing about
   `sandbox-landlock`. An embedder reachable only through that override gets an honest degradation note
   instead of a wrapper pointed at a program that cannot honour it.
+
+## Amendment — macOS and Windows join CI; the Job Object interop executes for the first time (issue #1782)
+
+*Added 2026-08-01. The **decision** above is unchanged. What changes is the Consequences bullet "CI covers
+one of the three platforms" — a targeted `sandbox-confinement` job (`.github/workflows/ci.yml`, matrix
+`[macos-latest, windows-latest]`, filtered to `ScenarioSandboxTests`, additive alongside `build-and-test`)
+now runs on every .NET-touching push/PR, so the macOS `sandbox-exec` path and the Windows Job Object path
+are CI-verified, not just manually verified once.*
+
+**What CI now executes, per platform.**
+
+- **Linux (`build-and-test`, unchanged):** the whole suite, unfiltered — Landlock write confinement, the
+  `unshare --user --net` network denial, and everything platform-agnostic.
+- **macOS (new):** 11 of 16 `ScenarioSandboxTests` execute for real (only the 4 Linux-only Landlock tests
+  and the Windows Job Object floor test skip) — `sandbox-exec` filesystem *and* network confinement,
+  exercised through `RequireFilesystemConfinement`/`RequireNetworkConfinement`'s fail-don't-skip rule, so a
+  regression here reddens CI rather than reading as a platform fact.
+- **Windows (new, and the headline result):** skip count dropped from 10/16 (measured on an early,
+  ungated scratch job) to 6/16. `WindowsJobObject.TryCreate`/`TryAssign` — the 194 lines of `kernel32`
+  P/Invoke over three hand-mirrored ABI structs this ADR's Consequences called "not CI-verified" — **have
+  now executed against a real Windows kernel and passed**, with no struct-layout or `LimitFlags` defect
+  found. The CPU-ceiling behavioural test (a spinning child stopped by the Job Object's time limit,
+  reported via `ScenarioConfinement.DescribeExit`'s `STATUS_QUOTA_EXCEEDED`/`ERROR_NOT_ENOUGH_QUOTA`
+  branch as a cap breach, not a timeout) now runs for real too, via a Windows `.cmd` form of the stub
+  children (`WriteStub`, invoked through `cmd.exe /q /c <stub>` — `CreateProcess` cannot launch a `.cmd`
+  directly under the `UseShellExecute=false` the sandbox always uses, and `/q` suppresses cmd.exe's
+  default command echo, which otherwise corrupts the child's JSON answer on stdout).
+- **What remains manually verified, not CI-verified:** Windows filesystem and network confinement — this
+  ADR's `WindowsJobObject` covers only the resource ceilings (memory, processor time); tracked separately
+  as issue #1780. Two tests stay POSIX-only and are the ones `RequireUnixStubs()` still gates:
+  `A_confined_child_cannot_open_a_network_connection` (needs bash's `/dev/tcp`) and
+  `A_confined_child_may_write_inside_its_run_directory_and_nowhere_else` (its POSIX-shell write probe was
+  not given a Windows form, and is moot on Windows today regardless — `RequireFilesystemConfinement`
+  already skips it there until #1780 lands).
+
+**One real (pre-existing) defect this surfaced, not fixed here.**
+`A_run_that_exhausts_the_memory_ceiling_names_it_instead_of_reporting_a_generic_fault` — a test that
+predates this ADR — fails intermittently on the Windows leg (3 of 4 observed CI runs): a race between
+`DOTNET_GCHeapHardLimit` (the CLR heap ceiling) and `WindowsJobObject`'s own `JobMemoryLimit` (both sized
+identically), where only the former is currently recognised by `ScenarioSandbox.ResourceCeilingNote`.
+Unrelated to the Job Object interop itself (which this amendment's new floor test proves sound) — tracked
+as issue #1791.

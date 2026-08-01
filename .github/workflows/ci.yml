@@ -349,3 +349,57 @@ jobs:
         run: |
           dotnet publish src/Koine.Wasm -c Release
           node src/Koine.Wasm/smoke-test.mjs
+
+  # ADR 0012 records CI covering only ubuntu-latest as an accepted-but-unsolved trade-off: the macOS
+  # `sandbox-exec` path and the whole Windows Job Object path (src/Koine.Execution/WindowsJobObject.cs
+  # — kernel32 P/Invoke over three hand-mirrored ABI structs) shipped manually verified, never CI-run
+  # (issue #1782). ScenarioSandboxTests already gates itself per-mechanism (RequireUnixStubs,
+  # RequireFilesystemConfinement, RequireNetworkConfinement — the last two FAIL rather than skip on
+  # macOS, since the mechanism they need ships with the OS), so this job only has to run it, not change
+  # it. Targeted rather than a full `build-and-test` matrix, deliberately: (1) filtered to
+  # `ScenarioSandboxTests` — the rest of the suite is target-agnostic compiler work `build-and-test`
+  # already proves on Linux; (2) scoped to the TEST PROJECT, not `Koine.slnx` — the solution also
+  # carries `src/Koine.Wasm` (browser-wasm RID), which would need the wasm workloads installed on two
+  # more OSes for a project this job never touches; (3) `KOINE_REQUIRE_CONFORMANCE` is deliberately
+  # UNSET — it hard-fails on any missing target toolchain (php/phpstan/python/mypy/rust), none of which
+  # this job installs or needs. Measured cost (issue #1782 PR, second/clean run): ~76s wall-clock on
+  # macOS, ~143s on Windows — both well under the 20-minute backstop below, so no NuGet cache tuning
+  # beyond what the composite action already does.
+  #
+  # Carries the same `needs: changes` + draft/front-end-only `if:` shape as build-and-test, verbatim —
+  # a new draft-gated job name reproduces #1481/#1486's failure modes under a new name if it doesn't.
+  # NOT a required status check (`main` has no branch protection); this repo resolves CI status via the
+  # check-runs API (see the repo profile), not `gh pr checks`.
+  sandbox-confinement:
+    needs: changes
+    if: >-
+      !cancelled()
+      && (github.event_name != 'pull_request'
+          || (github.event.pull_request.draft == false
+              && needs.changes.outputs.dotnet != 'false'))
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # A backstop well above the ~1-2 minute measured cost (see above), same rationale as build-and-test.
+    timeout-minutes: 20
+    env:
+      MSBUILDDISABLENODEREUSE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Reuses the same composite action as build-and-test, with the wasm workloads skipped: this job's
+      # filtered test run never touches Koine.Wasm, and installing the workloads on two more OSes would
+      # dominate the job's cost for nothing this job tests.
+      - name: Setup .NET
+        uses: ./.github/actions/setup-dotnet-wasm
+        with:
+          install-wasm-workloads: 'false'
+
+      - name: Test
+        run: >-
+          dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj
+          --filter "FullyQualifiedName~ScenarioSandboxTests"
+          -nodereuse:false
