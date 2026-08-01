@@ -25,6 +25,7 @@
     <Project Path="src/Koine.Emit.Python/Koine.Emit.Python.csproj" />
     <Project Path="src/Koine.Emit.Rust/Koine.Emit.Rust.csproj" />
     <Project Path="src/Koine.Emit.TypeScript/Koine.Emit.TypeScript.csproj" />
+    <Project Path="src/Koine.Execution/Koine.Execution.csproj" />
     <Project Path="src/Koine.Mcp/Koine.Mcp.csproj" />
     <Project Path="src/Koine.Wasm/Koine.Wasm.csproj" />
   </Folder>

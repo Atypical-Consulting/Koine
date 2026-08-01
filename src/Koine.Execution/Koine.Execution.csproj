@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Roslyn compile-and-load harness for emitted C# (issue #236), lifted out of the test
+       project's TestSupport so executing generated code is a product capability rather than a
+       test-only trick. Deliberately NOT packable and NOT under the public-API contract gate: it is
+       an internal building block for the scenario runner, not a shipped surface — the Koine.Emit.props
+       import (which carries that gate) is for emitter projects only. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+  </ItemGroup>
+
+</Project>
