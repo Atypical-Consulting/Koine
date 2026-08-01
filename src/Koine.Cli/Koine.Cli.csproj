@@ -3,6 +3,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
     <ProjectReference Include="..\Koine.Emit.All\Koine.Emit.All.csproj" />
+    <!-- `koine scenario-exec` is the sandbox child of the executed scenario runner (#236, ADR 0011):
+         it runs the model's emitted C# in this disposable process instead of in the editor backend.
+         That pulls Roslyn (Microsoft.CodeAnalysis.CSharp) into the shipped tool — the cost the ADR
+         accepts for reusing one binary rather than shipping a second executable. -->
+    <ProjectReference Include="..\Koine.Execution\Koine.Execution.csproj" />
     <!-- `koine mcp` hosts the MCP server in-process by reusing Koine.Mcp's StdioHost / HttpHost
          (one implementation, shared with the standalone koine-mcp tool). This pulls in the ASP.NET
          Core framework reference transitively, used only by the HTTP host. -->

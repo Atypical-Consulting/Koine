@@ -181,6 +181,9 @@ export class TauriPlatform implements Platform {
   readonly persistsWorkspace = true;
   // The desktop shell brokers a real PTY (see TauriTerminalTransport / the Rust pty_* commands).
   readonly canRunShell = true;
+  // The brokered `koine lsp` child can spawn the sandboxed `koine scenario-exec` grandchild (ADR 0011),
+  // so the scenario runner may offer executed mode (#236).
+  readonly supportsScenarioExecution = true;
   // The desktop shell shells out to a real `git` (see the Rust git_* commands), so the Source Control
   // panel (issue #272) is available. A CONSTANT capability flag — "this host CAN do git" — not a
   // per-folder probe: whether the *opened* folder is actually a work tree is decided at runtime, where

@@ -267,29 +267,38 @@ public static partial class CompilerInterop
     /// invariant-checks</c> timeline. Mirrors <c>koine/runScenario</c>; shares the exact response shape
     /// with the LSP backend via <see cref="ScenarioService"/>. A null/broken model yields a not-ok
     /// result carrying an explanatory note.
+    ///
+    /// <para><paramref name="execute"/> is the browser end of the executed-mode opt-in (#236). This host
+    /// CANNOT execute: running the model's emitted code means emitting, Roslyn-compiling and running it
+    /// in a sandbox child process (ADR 0011), and a browser has no process to spawn. So the request is
+    /// honoured as far as it can be — the interpreter answers — and the response says so: <c>mode</c>
+    /// stays <c>interpreted</c> and one note explains that execution was unavailable. Every response
+    /// carries <c>mode</c>, so a client never has to guess which engine produced it.</para>
     /// </summary>
     [JSExport]
-    public static string RunScenario(string filesJson, string target, string operation, string givenJson, string argsJson)
+    public static string RunScenario(
+        string filesJson, string target, string operation, string givenJson, string argsJson, bool execute)
     {
         try
         {
             var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
-                return ScenarioService.WriteJson(
-                    ScenarioErrorTree(target, operation, "The model has errors; fix them before running a scenario."));
+                return ScenarioService.WriteJson(ScenarioErrorTree(
+                    target, operation, "The model has errors; fix them before running a scenario.", execute));
             }
 
             using JsonDocument givenDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(givenJson) ? "{}" : givenJson);
             using JsonDocument argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
             var semantic = comp.SemanticModel;
             return ScenarioService.WriteJson(
-                ScenarioService.Run(semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement));
+                ScenarioService.Run(
+                    semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement, executionRequested: execute));
         }
         catch
         {
-            return ScenarioService.WriteJson(
-                ScenarioErrorTree(target, operation, "The scenario could not be run against this model."));
+            return ScenarioService.WriteJson(ScenarioErrorTree(
+                target, operation, "The scenario could not be run against this model.", execute));
         }
     }
 
@@ -319,9 +328,16 @@ public static partial class CompilerInterop
     }
 
     /// <summary>The not-ok scenario result for the failure paths — delegates to <see cref="ScenarioService"/>
-    /// so the wire shape lives in exactly one place (shared with the LSP backend).</summary>
-    private static IReadOnlyDictionary<string, object?> ScenarioErrorTree(string target, string operation, string note) =>
-        ScenarioService.Error(target, operation, note);
+    /// so the wire shape lives in exactly one place (shared with the LSP backend).
+    ///
+    /// <para><paramref name="execute"/> carries the caller's opt-in through the FAILURE paths too: a
+    /// browser user who asked to execute and hit a broken model would otherwise be told only that the
+    /// model has errors, never that execution was unavailable here — the very hint the success path
+    /// gives.</para></summary>
+    private static IReadOnlyDictionary<string, object?> ScenarioErrorTree(
+        string target, string operation, string note, bool execute) =>
+        ScenarioService.Error(
+            target, operation, note, ScenarioService.InterpretedMode, executionUnavailable: execute);
 
     // ---- diagram-graph mapping (issue #93) -----------------------------------
     // Mirrors LspServer.MapDiagram et al.: the W* DTOs serialize (source-gen CamelCase) to a wire

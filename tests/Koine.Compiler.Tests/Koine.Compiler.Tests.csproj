@@ -69,6 +69,9 @@
          brings all nine + Common transitively, and each emitter grants InternalsVisibleTo to this test
          project so the emitter-option and naming internals stay reachable. -->
     <ProjectReference Include="..\..\src\Koine.Emit.All\Koine.Emit.All.csproj" />
+    <!-- The Roslyn compile-and-load harness the meta-tests run generated C# through now lives here
+         (issue #236); TestSupport.Compile is a thin forwarder onto GeneratedAssemblyCompiler. -->
+    <ProjectReference Include="..\..\src\Koine.Execution\Koine.Execution.csproj" />
     <ProjectReference Include="..\..\src\Koine.Cli\Koine.Cli.csproj" />
     <!-- Referenced so the unified-emitter test can read Koine.Mcp's EmitterFactory.Targets and
          prove the CLI and MCP target lists no longer drift (issue #69, Task 5). -->

@@ -1,7 +1,9 @@
 # Scenario runner spike & scope (#149)
 
 > **Status: SCOPED — Approach B (model-level interpreter) chosen for v1; Approach A (WASM
-> emit-and-execute) is a flagged follow-up.** This note is the design contract the rest of
+> emit-and-execute) is a flagged follow-up.** *(Since 2026-08-01, Approach A has shipped as an opt-in,
+> desktop/CLI-only execute mode — see the [addendum](#addendum-2026-08-01--a-shipped-as-the-opt-in-execute-mode-236)
+> at the end of this note; the browser path is still a follow-up.)* This note is the design contract the rest of
 > [#149](https://github.com/Atypical-Consulting/Koine/issues/149) is built against: what the existing
 > semantic layer can already compute, the scenario shape, and the honest gap between interpreting the
 > model (B) and executing the emitted code (A).
@@ -177,3 +179,66 @@ Keep **B as the default** runner. Pursue **A as an opt-in mode** ("execute gener
 **CLI/Tauri-first** behind a flag, reusing the Roslyn meta-test harness; treat the browser path as a
 later, separately-gated step. Prioritise A only if users hit gaps **#1/#2** (derived values and
 value-object validation) in practice — those are the gaps most visible in the timeline today.
+
+### Addendum (2026-08-01) — A shipped as the opt-in execute mode ([#236](https://github.com/Atypical-Consulting/Koine/issues/236))
+
+The recommendation above is what shipped, unchanged in shape: **B remains the default**, A is a per-run
+opt-in on the hosts that can run it, and — the addition the spike did not foresee — **every** response
+now names the engine that produced it, so the two modes can never be confused for one another.
+
+#### Invocation surface
+
+| Layer | What shipped |
+|---|---|
+| LSP | `koine/runScenario` gained two optional params: **`execute`** (boolean, default `false`) and **`timeoutMs`** (number, default **5000**, clamped to **100 ms – 60 s**). Every response — both engines, both hosts, success *and* failure — carries **`"mode": "executed" \| "interpreted"`**. Executed runs are serialized per workspace by a `SemaphoreSlim(1,1)` in `LspServer`, so two quick `execute: true` requests run in sequence rather than as two concurrent Roslyn compiles inside the editor backend. |
+| Engine | `src/Koine.Execution/` (new, non-packable): `GeneratedAssemblyCompiler` (the Roslyn compile-and-load harness, lifted out of the test project's `TestSupport` — exactly the reuse the spike predicted), `ScenarioValueBinder`, `ScenarioExecutor` (emit → compile into a collectible `AssemblyLoadContext` → drive the real types reflectively → **B's own `ScenarioResult` contract**), and `ScenarioExecutionHost` (spawn / drain / deadline / kill / cleanup). |
+| CLI | A **hidden** `koine scenario-exec` verb (`src/Koine.Cli/Commands/ScenarioExecCommand.cs`): one JSON request on stdin, one result tree on stdout, **always exit 0** — every failure is reported *inside* the tree as `ok: false` plus a note. It is a protocol endpoint spoken by `ScenarioExecutionHost`, not a command a human runs. |
+| Studio | A capability-gated checkbox **"Execute generated code (high fidelity)"** on the scenario panel, rendered only where the new `Platform.supportsScenarioExecution` capability is true (Tauri `true`, browser `false`). Default **OFF**, session-only — nothing is written to settings. The timeline header carries a mode chip read from **`result.mode`** (what actually happened), never from what was requested. |
+| Browser | `execute: true` reaching the WASM backend is answered by the interpreter with `mode: "interpreted"` **plus a note that execution is not available on this host** — degraded and explicitly so, never a silently interpreted answer wearing an executed label. The flag is still forwarded, so the degradation is stated by the one component that knows it. |
+
+#### Sandbox contract ([ADR 0011](../../../adr/0011-scenario-execution-sandbox.md))
+
+The spike flagged "an arbitrary-code-execution surface that needs sandboxing"; ADR 0011 is the answer,
+and it is deliberately narrower than the word "sandbox" suggests:
+
+- **A killable child process, not a thread.** `ScenarioExecutionHost` spawns the hidden verb of the very
+  `koine` binary the host is already running (no second artifact to package or version-match), streams the
+  request in over stdin, drains stdout and stderr concurrently, and enforces a **wall-clock deadline**
+  (`ScenarioExecutionHost.DefaultTimeout`, 5 s). On expiry it kills the child **and its whole process
+  tree** and returns a not-ok tree carrying a timeout note. .NET cannot abort a runaway managed thread, so
+  a process is the only thing that can actually *stop* a non-terminating derived member.
+- **The boundary is drawn before emit, not after compile.** The request carries the model's `.koi`
+  **sources**, so parse → emit → Roslyn-compile → execute all happen in the child; the editor host runs
+  **zero** model-derived work in its own process — not even the compile. (This is stronger than the
+  sketch in #236, which passed a pre-built assembly path.)
+- **Housekeeping on every path.** The child runs with a **scrubbed environment** (an allow-list — it
+  inherits none of the host's tokens, proxies or build state) and a working directory set to a **per-run
+  temp directory deleted on success, failure and kill alike**.
+- **It is not an OS-level sandbox, and does not pretend to be.** No seccomp filter, no macOS
+  `sandbox-exec` profile, no Windows Job Object, no filesystem or network denial. Its job is to protect
+  the **editor host** from hangs, crashes and resource exhaustion — not to contain a hostile model
+  author. ADR 0011 states that trust model plainly and requires revisiting *before* Koine ever executes a
+  model authored by someone other than the operator (a hosted playground, a CI bot running a PR's model).
+
+#### Fidelity gaps, revisited
+
+Rows **#1–#4** of the gap table above are **closed in executed mode**; **#5 remains out** — the executor
+drives *one* aggregate, exactly like B. Each closed row is pinned by a test in
+`tests/Koine.Compiler.Tests/Semantics/ScenarioExecutionTests.cs`, over the pizzeria `Ordering` fixture:
+
+| # | Construct | Status in executed mode |
+|---|---|---|
+| 1 | Derived members / value-object arithmetic | **Closed** — `total = lines.sum(l => l.payable)` is the real emitted `Money`, where B returns `Indeterminate`. |
+| 2 | Value-object construction & its invariants | **Closed** — a negative `Money` in the given state is rejected by the emitted constructor; the failure is reported as a failed invariant check resolved back to the *declared* invariant, not as a runner error. |
+| 3 | State-machine legality | **Closed** — an illegal `status -> X` is a failed step; the transition and everything after it never happen. |
+| 4 | Exact failure semantics / messages | **Closed** — the real `DomainInvariantViolationException` rule text, the real ordering and short-circuit behaviour of the shipped code. |
+| 5 | Cross-aggregate / integration-event fan-out | **Still out** — one aggregate in isolation, unchanged from B. |
+
+Two consequences worth stating, because they are visible in the timeline:
+
+- The happy-path timeline is **shape-compatible** with the interpreter's — same steps, same order, same
+  kinds — with one deliberate divergence: a `placedAt -> now` transition prints B's unpinned marker `now`
+  in interpreted mode and the real clock stamp in executed mode.
+- Executed mode pays process startup **plus a full parse/emit/Roslyn-compile per run**, which is why it
+  is opt-in, per-run, and off by default. Caching the compiled assembly across runs is a later
+  optimisation the protocol leaves room for.

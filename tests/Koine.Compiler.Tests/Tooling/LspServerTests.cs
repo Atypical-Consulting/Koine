@@ -1157,13 +1157,29 @@ public class LspServerTests
         }
         """;
 
-    private static byte[] RunScenario(string uri, string target, string operation, object given, object args) =>
+    private static byte[] RunScenario(
+        string uri, string target, string operation, object given, object args, int id = 36) =>
         Frame(JsonSerializer.Serialize(new
         {
             jsonrpc = "2.0",
-            id = 36,
+            id,
             method = "koine/runScenario",
             @params = new { textDocument = new { uri }, target, operation, given, args },
+        }));
+
+    /// <summary>
+    /// A <c>koine/runScenario</c> request that opts in to EXECUTED mode (#236): the server runs the
+    /// model's emitted C# in the sandbox child instead of interpreting the model.
+    /// <paramref name="timeoutMs"/> is the wall-clock budget the client asks for.
+    /// </summary>
+    private static byte[] RunScenarioExecuted(
+        string uri, string target, string operation, object given, object args, int timeoutMs, int id) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id,
+            method = "koine/runScenario",
+            @params = new { textDocument = new { uri }, target, operation, given, args, execute = true, timeoutMs },
         }));
 
     [Fact]
@@ -1180,6 +1196,289 @@ public class LspServerTests
         output.ShouldContain("\"lineCount\":\"2\"");
         output.ShouldContain("\"id\":36");
     }
+
+    // ---- executed mode (#236): `execute: true` + the truthful `mode` field ----
+
+    /// <summary>
+    /// The same domain as <see cref="ScenarioDoc"/> plus the one thing the interpreter cannot do:
+    /// <c>total</c> sums a DERIVED member of a value object, so Approach B degrades it to <c>?</c> while
+    /// executed mode runs the emitted property and computes a real number. That difference is what makes
+    /// <c>mode</c> observable rather than a label to be taken on trust.
+    /// </summary>
+    private const string ScenarioDerivedDoc = """
+        context Ordering {
+          enum OrderStatus { Draft, Placed }
+          aggregate Sales root Order {
+            event OrderPlaced { orderId: OrderId  lineCount: Int }
+            value OrderLine {
+              quantity:  Int
+              unitPrice: Decimal
+              payable:   Decimal = unitPrice * quantity
+            }
+            entity Order identified by OrderId {
+              lines:  List<OrderLine>
+              status: OrderStatus = Draft
+              total:  Decimal = lines.sum(l => l.payable)
+              states status { Draft -> Placed }
+              command place {
+                requires status == Draft   "only a draft order can be placed"
+                requires !lines.isEmpty    "cannot place an empty order"
+                status -> Placed
+                emit OrderPlaced(orderId: id, lineCount: lines.count)
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>Two lines worth 10x2 + 5x1 = 25.</summary>
+    private static object DerivedOrderGiven() => new
+    {
+        status = "Draft",
+        lines = new[]
+        {
+            new { quantity = 2, unitPrice = 10 },
+            new { quantity = 1, unitPrice = 5 },
+        },
+    };
+
+    /// <summary>The wall-clock budget the executed-mode tests ask for: a cold child process has to parse,
+    /// emit, Roslyn-compile and run this model, so it is generous — but it is the server's clamp ceiling,
+    /// so nothing here can wait longer than a minute.</summary>
+    private const int ExecuteBudgetMs = 60_000;
+
+    [Fact]
+    public void RunScenario_without_execute_reports_interpreted_mode()
+    {
+        var given = new { status = "Draft", lines = new[] { new { product = "P1", quantity = 2 } } };
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+
+        // Today's interpreted answer, unchanged…
+        output.ShouldContain("\"ok\":true");
+        output.ShouldContain("\"event\":\"OrderPlaced\"");
+        // …plus the new field that says which engine produced it.
+        output.ShouldContain("\"mode\":\"interpreted\"");
+        output.ShouldNotContain("\"mode\":\"executed\"");
+    }
+
+    [Fact]
+    public void RunScenario_with_execute_reports_executed_mode_and_computes_the_derived_value()
+    {
+        var given = DerivedOrderGiven();
+
+        // Interpreted: `total` sums a derived member of a value object, which Approach B cannot evaluate.
+        var interpreted = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+        interpreted.ShouldContain("\"mode\":\"interpreted\"");
+        interpreted.ShouldContain("\"total\":\"?\"");
+
+        // Executed: the emitted `Total` property really runs, so the value is computed.
+        var executed = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", given, new { }, ExecuteBudgetMs, id: 36));
+
+        executed.ShouldContain("\"mode\":\"executed\"");
+        executed.ShouldNotContain("\"mode\":\"interpreted\"");
+        executed.ShouldContain("\"ok\":true");
+        executed.ShouldNotContain("\"total\":\"?\"");
+        executed.ShouldContain("\"total\":\"25");
+        executed.ShouldContain("\"id\":36");
+    }
+
+    [Fact]
+    public void RunScenario_that_blows_its_deadline_is_reported_and_the_server_survives()
+    {
+        // 100 ms is the clamp floor and no child can start, compile and run inside it — so the watchdog
+        // path is deterministic rather than timing-sensitive.
+        var transcript = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, 100, id: 36),
+            RunScenario("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, id: 37));
+
+        var timedOut = ResponseWithId(transcript, 36);
+        timedOut.ShouldContain("\"ok\":false");
+        timedOut.ShouldContain("timed out");
+        // The failed attempt is still an executed-mode answer — nothing was interpreted.
+        timedOut.ShouldContain("\"mode\":\"executed\"");
+
+        // …and the server answered the NEXT request normally, proving the host survived the kill.
+        var afterwards = ResponseWithId(transcript, 37);
+        afterwards.ShouldContain("\"ok\":true");
+        afterwards.ShouldContain("\"mode\":\"interpreted\"");
+        afterwards.ShouldContain("\"event\":\"OrderPlaced\"");
+    }
+
+    /// <summary>
+    /// The message loop must keep answering WHILE an executed run is in flight (ADR 0011's
+    /// "the editor backend keeps … its responsiveness"). The loop is single-threaded, so the only way to
+    /// observe that is ordering: the executed request is sent FIRST, and the cheap interpreted one that
+    /// follows must be answered first anyway. Run inline on the loop thread, the executed answer would
+    /// necessarily come first — a spawned child that parses, emits, Roslyn-compiles and runs a model
+    /// cannot finish in the microseconds it takes the loop to read the next frame.
+    /// </summary>
+    [Fact]
+    public void An_executed_run_does_not_block_the_message_loop()
+    {
+        var transcript = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, ExecuteBudgetMs, id: 50),
+            RunScenario("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, id: 51));
+
+        ResponseWithId(transcript, 50).ShouldContain("\"mode\":\"executed\"");
+        ResponseWithId(transcript, 51).ShouldContain("\"mode\":\"interpreted\"");
+        IndexOfResponse(transcript, 51).ShouldBeLessThan(IndexOfResponse(transcript, 50));
+    }
+
+    /// <summary>
+    /// The concurrency gate is only real if it is RELEASED. One session, two <c>execute: true</c>
+    /// requests: the second one blocks on the semaphore the first holds, and only a release lets it
+    /// through. A leaked permit would leave the second id-bearing request unanswered forever — an editor
+    /// hang, not a slow answer — so this asserts both ids came back.
+    /// </summary>
+    [Fact]
+    public void Two_executed_runs_in_one_session_both_get_answered()
+    {
+        var transcript = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, ExecuteBudgetMs, id: 60),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, ExecuteBudgetMs, id: 61));
+
+        foreach (var id in new[] { 60, 61 })
+        {
+            var response = ResponseWithId(transcript, id);
+            response.ShouldContain("\"mode\":\"executed\"");
+            response.ShouldContain("\"ok\":true");
+            response.ShouldContain("\"total\":\"25");
+        }
+    }
+
+    // ---- the timeoutMs clamp and the param readers ----
+
+    /// <summary>
+    /// A budget below the floor is raised to it, not honoured. Observable in the note: the clamped
+    /// deadline is what the message quotes, so a dropped floor would say "after 0ms" instead.
+    /// </summary>
+    [Fact]
+    public void RunScenario_clamps_a_timeout_below_the_floor()
+    {
+        var transcript = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, 0, id: 62));
+
+        var response = ResponseWithId(transcript, 62);
+        response.ShouldContain("\"ok\":false");
+        response.ShouldContain("timed out after 100ms");
+        response.ShouldContain("\"mode\":\"executed\"");
+    }
+
+    /// <summary>
+    /// A budget far above the ceiling is answered on the server's terms, well inside the clamp — a client
+    /// cannot buy itself an hour-long hold on the gate. (The ceiling's own arithmetic can only be
+    /// observed with a model that never terminates, which no test should ship: what is pinned here is the
+    /// contract a client sees — an absurd ask still returns promptly and correctly.)
+    /// </summary>
+    [Fact]
+    public void RunScenario_clamps_a_timeout_above_the_ceiling()
+    {
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var transcript = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, 5_000_000, id: 63));
+        elapsed.Stop();
+
+        var response = ResponseWithId(transcript, 63);
+        response.ShouldContain("\"mode\":\"executed\"");
+        response.ShouldContain("\"ok\":true");
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(60_000));
+    }
+
+    /// <summary>
+    /// <c>timeoutMs</c> of the wrong JSON type is not a number, so it falls back to the default budget —
+    /// never to zero (an instant guaranteed timeout) and never to a throw.
+    /// </summary>
+    [Fact]
+    public void RunScenario_ignores_a_non_numeric_timeout()
+    {
+        var request = Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 64,
+            method = "koine/runScenario",
+            @params = new
+            {
+                textDocument = new { uri = "file:///t.koi" },
+                target = "Order",
+                operation = "place",
+                given = DerivedOrderGiven(),
+                args = new { },
+                execute = true,
+                timeoutMs = "5000",   // a STRING, not a number
+            },
+        }));
+
+        var response = ResponseWithId(
+            RunSession(Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc), request), 64);
+
+        response.ShouldContain("\"mode\":\"executed\"");
+        response.ShouldNotContain("could not be run");
+        response.ShouldNotContain("timed out after 0ms");
+    }
+
+    /// <summary>
+    /// <c>execute</c> of the wrong JSON type is not the opt-in: only a real JSON <c>true</c> buys a
+    /// process, a compile and a wall-clock budget, so a client that sends the string <c>"true"</c> gets
+    /// the interpreter — the conservative reading of an opt-in flag.
+    /// </summary>
+    [Fact]
+    public void RunScenario_treats_a_non_boolean_execute_as_not_opted_in()
+    {
+        var request = Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = 65,
+            method = "koine/runScenario",
+            @params = new
+            {
+                textDocument = new { uri = "file:///t.koi" },
+                target = "Order",
+                operation = "place",
+                given = DerivedOrderGiven(),
+                args = new { },
+                execute = "true",   // a STRING, not a boolean
+            },
+        }));
+
+        var response = ResponseWithId(
+            RunSession(Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc), request), 65);
+
+        response.ShouldContain("\"mode\":\"interpreted\"");
+        response.ShouldContain("\"total\":\"?\"");   // the interpreter really answered
+    }
+
+    /// <summary>The framed JSON-RPC bodies of a transcript, in order.</summary>
+    private static IEnumerable<string> Bodies(string transcript)
+    {
+        foreach (var chunk in transcript.Split("Content-Length: ", StringSplitOptions.RemoveEmptyEntries))
+        {
+            var start = chunk.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+            if (start >= 0)
+            {
+                yield return chunk[(start + 4)..];
+            }
+        }
+    }
+
+    /// <summary>The single framed response carrying <c>"id":&lt;id&gt;</c>.</summary>
+    private static string ResponseWithId(string transcript, int id) =>
+        Bodies(transcript).Single(b => b.Contains($"\"id\":{id}", StringComparison.Ordinal));
+
+    /// <summary>Where that response sits in the transcript — responses are not owed in request order
+    /// once a request is answered off the message-loop thread.</summary>
+    private static int IndexOfResponse(string transcript, int id) =>
+        Bodies(transcript).ToList().FindIndex(b => b.Contains($"\"id\":{id}", StringComparison.Ordinal));
 
     [Fact]
     public void RunScenario_rejects_a_non_draft_order_with_a_failed_precondition()
