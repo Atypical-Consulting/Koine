@@ -14,6 +14,8 @@ Koine.Compiler.IdentifierWords
 Koine.Compiler.MarkdownDoc
 Koine.Compiler.RouteDerivation
 Koine.Compiler.RouteInfo
+Koine.Compiler.RouteInfo.AuthRole.get -> string?
+Koine.Compiler.RouteInfo.AuthRole.init -> void
 Koine.Compiler.RouteInfo.OperationId.get -> string!
 Koine.Compiler.RouteInfo.OperationId.init -> void
 Koine.Compiler.RouteInfo.RequestShape.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
@@ -23,7 +25,7 @@ Koine.Compiler.RouteInfo.ResponseShape.init -> void
 Koine.Compiler.RouteInfo.Route.get -> string!
 Koine.Compiler.RouteInfo.Route.init -> void
 Koine.Compiler.RouteInfo.RouteInfo() -> void
-Koine.Compiler.RouteInfo.RouteInfo(string! Verb, string! Route, string! OperationId, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, Koine.Compiler.Ast.TypeRef? ResponseShape) -> void
+Koine.Compiler.RouteInfo.RouteInfo(string! Verb, string! Route, string! OperationId, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, Koine.Compiler.Ast.TypeRef? ResponseShape, string? AuthRole) -> void
 Koine.Compiler.RouteInfo.Verb.get -> string!
 Koine.Compiler.RouteInfo.Verb.init -> void
 static Koine.Compiler.FactoryIdBinding.ResolveFactoryId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory, System.Func<string!, string!>! emitParamName) -> Koine.Compiler.FactoryIdBinding
@@ -47,7 +49,7 @@ static Koine.Compiler.FactoryIdBinding.operator !=(Koine.Compiler.FactoryIdBindi
 static Koine.Compiler.FactoryIdBinding.operator ==(Koine.Compiler.FactoryIdBinding left, Koine.Compiler.FactoryIdBinding right) -> bool
 ~override Koine.Compiler.FactoryIdBinding.Equals(object obj) -> bool
 ~override Koine.Compiler.FactoryIdBinding.ToString() -> string
-Koine.Compiler.RouteInfo.Deconstruct(out string! Verb, out string! Route, out string! OperationId, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, out Koine.Compiler.Ast.TypeRef? ResponseShape) -> void
+Koine.Compiler.RouteInfo.Deconstruct(out string! Verb, out string! Route, out string! OperationId, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, out Koine.Compiler.Ast.TypeRef? ResponseShape, out string? AuthRole) -> void
 Koine.Compiler.RouteInfo.Equals(Koine.Compiler.RouteInfo other) -> bool
 override Koine.Compiler.RouteInfo.GetHashCode() -> int
 static Koine.Compiler.RouteInfo.operator !=(Koine.Compiler.RouteInfo left, Koine.Compiler.RouteInfo right) -> bool
