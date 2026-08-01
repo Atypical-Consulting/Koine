@@ -70,9 +70,23 @@ internal sealed class ScenarioValueBinder
                 error = $"indeterminate value ({unknown.Reason})";
                 return false;
 
-            case ScenarioValue.Bool b when underlying == typeof(bool):
-                bound = b.Value;
-                return true;
+            // Every scalar kind takes the same two steps: the direct conversion, then — on a miss — the
+            // generated single-field wrapper around it (`value Approved { flag: Bool }` is as much a
+            // wrapper as `value Price { amount: Decimal }`), so no kind is arbitrarily less bindable.
+            case ScenarioValue.Bool b:
+                if (underlying == typeof(bool))
+                {
+                    bound = b.Value;
+                    return true;
+                }
+
+                if (TryBindThroughSingleArgConstructor(value, underlying, depth, out bound, out _))
+                {
+                    return true;
+                }
+
+                error = $"cannot bind bool value '{value.Display()}' to '{Describe(target)}'";
+                return false;
 
             case ScenarioValue.Num num:
                 if (TryBindNumber(num, underlying, out bound))
@@ -96,6 +110,13 @@ internal sealed class ScenarioValueBinder
                     return true;
                 }
 
+                if (TryBindThroughSingleArgConstructor(value, underlying, depth, out bound, out _))
+                {
+                    return true;
+                }
+
+                // The wrapper attempt's own error would be less informative than naming the enum, so the
+                // specific diagnosis is the one that survives.
                 error = $"'{member.Member}' is not a member of '{Describe(underlying)}'";
                 return false;
 
@@ -109,6 +130,11 @@ internal sealed class ScenarioValueBinder
                 if (underlying == typeof(DateTime))
                 {
                     bound = DateTime.UtcNow;
+                    return true;
+                }
+
+                if (TryBindThroughSingleArgConstructor(value, underlying, depth, out bound, out _))
+                {
                     return true;
                 }
 
@@ -290,6 +316,16 @@ internal sealed class ScenarioValueBinder
 
         if (!target.IsInstanceOfType(typed) && target != typeof(object))
         {
+            // A Koine `Set<T>` maps to IReadOnlySet<T> (CSharpTypeMapper), which a List<T> does NOT
+            // satisfy — without this every set-valued member and parameter is undrivable.
+            Type setType = typeof(HashSet<>).MakeGenericType(element);
+            if (target.IsAssignableFrom(setType)
+                && setType.GetConstructor([typeof(IEnumerable<>).MakeGenericType(element)]) is { } setCtor)
+            {
+                bound = setCtor.Invoke([typed]);
+                return true;
+            }
+
             // e.g. an array-typed parameter: the emitted code uses IReadOnlyList<T>/List<T>, but stay honest
             // rather than silently handing over a shape the member cannot accept.
             if (!target.IsArray)
@@ -468,6 +504,16 @@ internal sealed class ScenarioValueBinder
         if (readable.Length == 1)
         {
             return DisplayCore(ReadProperty(value, readable[0].Name), depth + 1);
+        }
+
+        // A composite with no Koine declaration behind it: the built-in `Range<T>` a Koine `Range` maps to,
+        // or the KeyValuePair a `Map<K, V>` enumerates as. Neither has a ToString() worth showing — the
+        // first prints its raw CLR type name, the second formats numbers in the CURRENT culture — so render
+        // the parts, in the same `{name: value}` shape a declared composite uses.
+        if (readable.Length > 1)
+        {
+            return "{" + string.Join(", ", readable.Select(p =>
+                $"{p.Name}: {DisplayCore(ReadProperty(value, p.Name), depth + 1)}")) + "}";
         }
 
         return value.ToString() ?? "?";

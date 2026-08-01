@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.Loader;
 using Koine.Compiler;
 using Koine.Compiler.Ast;
+using Koine.Compiler.Ast.Bound;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Semantics.Scenarios;
 
@@ -237,8 +238,15 @@ internal sealed class ScenarioExecutor
 
     /// <summary>
     /// Locates the emitted CLR type for a Koine type name. The emitter namespaces types by bounded
-    /// context, so a name declared in several contexts (a per-context <c>Money</c>) is disambiguated by
-    /// the declaring context of the scenario's entity.
+    /// context, so several CLR types can share a simple name; the candidates are narrowed to the context
+    /// that DECLARES <paramref name="koineName"/> — which disambiguates a name the emitter also re-emits
+    /// per context (a re-exported shared-kernel type), but NOT a name genuinely declared in more than one
+    /// context.
+    /// <para>That second case is reported as ambiguous rather than guessed at. Resolving it would need the
+    /// scenario's target qualifier (<c>Payment.Order</c>), which <see cref="ResolveEntity"/> deliberately
+    /// strips — <see cref="ScenarioInterpreter"/> (Approach B) resolves a target by simple name too, and
+    /// the two runners must pick the SAME entity for the same scenario, so qualifier support belongs in
+    /// both at once, not here alone.</para>
     /// </summary>
     private bool TryResolveType(Assembly assembly, string koineName, out Type? type)
     {
@@ -599,17 +607,33 @@ internal sealed class ScenarioExecutor
     {
         IReadOnlyDictionary<string, string> state = instance is null ? NoState : Snapshot(instance, recordNotes: false);
 
-        if (!TryReadViolation(ex, out string typeName, out string rule) || typeName != _entity.Name)
+        if (!TryReadViolation(ex, out string typeName, out string rule))
         {
             _notes.Add($"'{s.Operation}' threw {Describe(ex)}; the failure could not be attributed to a "
                        + "modelled precondition, transition or invariant.");
             return new ScenarioResult(false, _entity.Name, s.Operation, [], state, [], null, _notes);
         }
 
+        if (typeName != _entity.Name)
+        {
+            // A value object the command REBUILT rejected its new value (a `Money` driven negative by a
+            // discount). It belongs to no statement of this entity's body, but it is the same domain rule
+            // the same violation in the given state resolves — so it renders identically (gap #2), never
+            // discarded into a bare prose note.
+            _notes.Add($"'{s.Operation}' was rejected by '{typeName}': {rule}");
+            return new ScenarioResult(
+                false, _entity.Name, s.Operation, [], state, [InvariantFor(typeName, rule)], null, _notes);
+        }
+
         var steps = new List<ScenarioStep>();
         bool mutated = false;
 
-        foreach (CommandStmt stmt in body)
+        // The emitter hoists EVERY `requires` ahead of the first write (CSharpEmitter.WriteCommand),
+        // while the grammar (`commandStmt*`) lets one be written after a transition. Walking the body in
+        // declaration order would then invent a transition for a write the guard prevented, and blame the
+        // missing invariant sweep on it — so walk the guards first, exactly as the emitted code runs them.
+        // (OrderBy is a STABLE sort, so each group keeps its declaration order.)
+        foreach (CommandStmt stmt in body.OrderBy(stmt => stmt is RequiresClause ? 0 : 1))
         {
             switch (stmt)
             {
@@ -683,7 +707,7 @@ internal sealed class ScenarioExecutor
         foreach (Invariant invariant in _entity.Invariants)
         {
             string condition = invariant.Condition.ToFullString();
-            if ((invariant.Message ?? condition) == rule)
+            if (RuleOf(invariant) == rule)
             {
                 checks.Add(new InvariantCheck(invariant.Message, condition, CheckOutcome.Failed));
                 _notes.Add($"'{operation}' left '{_entity.Name}' violating an invariant: {rule}");
@@ -706,35 +730,68 @@ internal sealed class ScenarioExecutor
     }
 
     /// <summary>The failed check for a violation raised OUTSIDE the scenario's entity (a value object
-    /// building the given state), resolved back to its declaration so the condition text is the modelled
-    /// one; falls back to the emitted rule when the violation is a synthesized guard.</summary>
+    /// building the given state, or one the command rebuilt), resolved back to its declaration so the
+    /// condition text is the modelled one; falls back to the emitted rule when the violation is a
+    /// synthesized guard (the built-in <c>Range&lt;T&gt;</c>, a quantity's unit check).</summary>
     private InvariantCheck InvariantFor(string typeName, string rule)
     {
-        foreach (KoineNode node in NodeWalker.Descendants(_sema.Model))
+        foreach (Invariant invariant in InvariantsDeclaredOn(typeName))
         {
-            IReadOnlyList<Invariant> invariants = node switch
+            if (RuleOf(invariant) == rule)
             {
-                ValueObjectDecl vo when vo.Name == typeName => vo.Invariants,
-                EntityDecl entity when entity.Name == typeName => entity.Invariants,
-                _ => []
-            };
-
-            foreach (Invariant invariant in invariants)
-            {
-                string condition = invariant.Condition.ToFullString();
-                if ((invariant.Message ?? condition) == rule)
-                {
-                    return new InvariantCheck(invariant.Message, condition, CheckOutcome.Failed);
-                }
+                return new InvariantCheck(invariant.Message, invariant.Condition.ToFullString(), CheckOutcome.Failed);
             }
         }
 
         return new InvariantCheck(rule, rule, CheckOutcome.Failed);
     }
 
+    /// <summary>
+    /// The invariants declared on <paramref name="typeName"/>, resolved from the bounded context of the
+    /// scenario's ENTITY rather than by a walk over the whole model: the pizzeria declares two distinct
+    /// <c>Money</c> value objects (Ordering's carries a <c>Currency</c>, Payment's a <c>String</c>), and a
+    /// flat by-name walk would resolve a Payment violation against Ordering's declaration purely by walk
+    /// order. Falls back to the flat lookup for a type no context claims (a shared kernel entry).
+    /// </summary>
+    private IReadOnlyList<Invariant> InvariantsDeclaredOn(string typeName)
+    {
+        foreach (string context in _index.DeclaringContextsOf(_entity.Name))
+        {
+            if (_index.TryGetDeclIn(context, typeName, out TypeDecl scoped))
+            {
+                return InvariantsOf(scoped);
+            }
+        }
+
+        return _index.TryGetDecl(typeName, out TypeDecl decl) ? InvariantsOf(decl) : [];
+    }
+
+    private static IReadOnlyList<Invariant> InvariantsOf(TypeDecl decl) => decl switch
+    {
+        ValueObjectDecl vo => vo.Invariants,
+        EntityDecl entity => entity.Invariants,
+        _ => []
+    };
+
     /// <summary>The rule string the C# emitter gives a <c>requires</c> guard: its message, or the
     /// condition's source text when it has none.</summary>
-    private static string RuleOf(RequiresClause requires) => requires.Message ?? requires.Condition.ToFullString();
+    private static string RuleOf(RequiresClause requires) => requires.Message ?? RuleTextOf(requires.Condition);
+
+    /// <summary>The rule string the C# emitter gives an <c>invariant</c>: its message, or the condition's
+    /// source text when it has none.</summary>
+    private static string RuleOf(Invariant invariant) => invariant.Message ?? RuleTextOf(invariant.Condition);
+
+    /// <summary>
+    /// Renders a message-less guard/invariant's condition the way the C# emitter does when it synthesizes
+    /// the rule the thrown <c>DomainInvariantViolationException</c> carries — the emitter's
+    /// <c>SynthesizeMessage</c> IS <see cref="Lowerer.SourceText"/>. It must not be confused with
+    /// <see cref="KoineNode.ToFullString"/>, which concatenates child NODES only: Koine has no
+    /// <c>SyntaxToken</c> layer, so a tree walk drops every operator (<c>status == Draft</c> comes back as
+    /// <c>" status Draft"</c>, issue #1752) and could therefore never equal the emitted rule. The step's
+    /// DISPLAYED condition text stays on <c>ToFullString()</c>, which is what
+    /// <see cref="ScenarioInterpreter"/> renders — only the MATCHING moves here.
+    /// </summary>
+    private static string RuleTextOf(Expr condition) => Lowerer.SourceText(condition);
 
     /// <summary>
     /// Recognizes the emitted invariant exception BY TYPE NAME and reads its payload reflectively — the

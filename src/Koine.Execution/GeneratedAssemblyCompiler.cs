@@ -33,16 +33,10 @@ public static class GeneratedAssemblyCompiler
             .Select(f => CSharpSyntaxTree.ParseText(f.Contents, path: f.RelativePath))
             .ToList();
 
-        var tpa = (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Where(p => p.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
-            .ToList();
-
         Compilation compilation = CSharpCompilation.Create(
             assemblyName: "KoineGenerated_" + Guid.NewGuid().ToString("N"),
             syntaxTrees: trees,
-            references: tpa,
+            references: _frameworkReferences.Value,
             options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable));
 
@@ -83,6 +77,23 @@ public static class GeneratedAssemblyCompiler
     // runner) hit this concurrently, so a plain resolve-and-cache pair could let one thread observe
     // "resolved" before the generator field was assigned.
     private static readonly Lazy<ISourceGenerator?> _regexGenerator = new(ResolveRegexGenerator);
+
+    /// <summary>
+    /// The running framework's reference set, read from disk ONCE. It is the same 150–250 DLLs on every
+    /// call, and a <see cref="MetadataReference"/> is immutable and explicitly safe to share across
+    /// compilations and load contexts — re-materializing it per <see cref="Compile"/> is pure I/O the
+    /// interactive "run scenario" path pays on top of a full emit and a full Roslyn compile. Same
+    /// thread-safety reasoning as <see cref="_regexGenerator"/>.
+    /// </summary>
+    private static readonly Lazy<IReadOnlyList<MetadataReference>> _frameworkReferences =
+        new(LoadFrameworkReferences);
+
+    private static IReadOnlyList<MetadataReference> LoadFrameworkReferences() =>
+        (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(p => p.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
+            .ToList();
 
     /// <summary>
     /// Loads the in-box <c>System.Text.RegularExpressions.Generator</c> source generator from the .NET
