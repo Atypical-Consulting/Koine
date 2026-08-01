@@ -44,10 +44,14 @@ internal sealed class WindowsJobObject : IDisposable
     /// <paramref name="failure"/>. Both ceilings are optional; a job with neither is not worth creating,
     /// so that combination returns <c>null</c> without a failure note.
     /// </summary>
-    public static WindowsJobObject? TryCreate(long? memoryLimitBytes, TimeSpan? cpuLimit, out string? failure)
+    /// <param name="jobCommitLimitBytes">The cap on the job's TOTAL COMMITTED memory — runtime, JIT,
+    /// loader heaps and thread stacks included. This is <b>not</b> the sandbox's managed-heap ceiling and
+    /// must never be passed one directly: see <see cref="ScenarioConfinement.WindowsJobCommitLimitFor"/>,
+    /// which derives this from it and explains why equating the two breaks the sandbox (issue #1791).</param>
+    public static WindowsJobObject? TryCreate(long? jobCommitLimitBytes, TimeSpan? cpuLimit, out string? failure)
     {
         failure = null;
-        if (memoryLimitBytes is null && cpuLimit is null)
+        if (jobCommitLimitBytes is null && cpuLimit is null)
         {
             return null;
         }
@@ -69,10 +73,14 @@ internal sealed class WindowsJobObject : IDisposable
             information.BasicLimitInformation.LimitFlags =
                 JobObjectLimitKillOnJobClose | JobObjectLimitDieOnUnhandledException;
 
-            if (memoryLimitBytes is { } bytes and > 0)
+            if (jobCommitLimitBytes is { } bytes and > 0)
             {
                 information.BasicLimitInformation.LimitFlags |= JobObjectLimitJobMemory;
-                information.JobMemoryLimit = (nuint)bytes;
+
+                // Clamped rather than cast: nuint is 32-bit in a 32-bit process, where an unclamped cast
+                // would wrap a large cap around to a tiny one — the exact failure this file's caller works
+                // to avoid.
+                information.JobMemoryLimit = (nuint)Math.Min((ulong)bytes, (ulong)nuint.MaxValue);
             }
 
             if (cpuLimit is { } cpu && cpu > TimeSpan.Zero)

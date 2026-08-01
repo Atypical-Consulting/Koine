@@ -111,7 +111,8 @@ internal sealed class ScenarioConfinement : IDisposable
             return;
         }
 
-        _job = WindowsJobObject.TryCreate(_options.MemoryLimitBytes, _options.CpuLimit, out string? failure);
+        _job = WindowsJobObject.TryCreate(
+            WindowsJobCommitLimitFor(_options.MemoryLimitBytes), _options.CpuLimit, out string? failure);
         if (_job is null)
         {
             if (failure is not null)
@@ -155,9 +156,12 @@ internal sealed class ScenarioConfinement : IDisposable
         }
 
         // Deliberately NOT a memory diagnosis: a JOB_OBJECT_LIMIT_JOB_MEMORY breach makes the offending
-        // COMMIT fail (the child sees an OutOfMemoryException and reports the ceiling itself) — it never
-        // terminates the process. The only ceiling that terminates a job is the TIME one, so that is the
-        // only ceiling this exit code can honestly be attributed to.
+        // COMMIT fail rather than terminating the job, so it does not produce these exit codes. (It is not
+        // as harmless as "the child sees an OutOfMemoryException and reports the ceiling itself" — WHICH
+        // commit fails decides that, and a stack guard page fails as an uncatchable STATUS_STACK_OVERFLOW
+        // instead. See WindowsJobCommitLimitFor, which keeps the job cap clear of the heap ceiling so that
+        // case stays unreachable — issue #1791.) The only ceiling that terminates a job is the TIME one,
+        // so that is the only ceiling this exit code can honestly be attributed to.
         if (OperatingSystem.IsWindows()
             && exitCode is WindowsQuotaExceededExitCode or WindowsNotEnoughQuotaExitCode
             && _options.CpuLimit is { } jobTime)
@@ -186,4 +190,47 @@ internal sealed class ScenarioConfinement : IDisposable
 
     internal static string Mebibytes(long bytes) =>
         (bytes / (double)(1L << 20)).ToString("0.##", CultureInfo.InvariantCulture) + " MiB";
+
+    /// <summary>
+    /// How much committed memory the Job Object allows the child ON TOP OF the sandbox's managed-heap
+    /// ceiling — everything a .NET child commits that is not the managed heap: the runtime image, JIT'd
+    /// code, the loader heaps (Roslyn's are the large ones here), and every thread's stack.
+    ///
+    /// <para>Generous on purpose. Too small and the OS cap fires before the heap ceiling — the defect this
+    /// constant exists to prevent (issue #1791) — while too large costs only the difference between two
+    /// figures a runaway child reaches in the same instant either way.</para>
+    /// </summary>
+    private const long WindowsRuntimeCommitAllowanceBytes = 256L << 20;
+
+    /// <summary>
+    /// Translates the sandbox's MANAGED-HEAP ceiling into the JOB COMMIT cap that enforces it from
+    /// outside. The two are not the same quantity and must not be set to the same number: <c>
+    /// DOTNET_GCHeapHardLimit</c> bounds the managed heap alone, while <c>JOB_OBJECT_LIMIT_JOB_MEMORY</c>
+    /// bounds every committed page in the job — runtime, JIT, loader heaps and thread stacks included.
+    ///
+    /// <para><b>Why the gap is load-bearing (issue #1791).</b> Starting a .NET child at all costs far more
+    /// committed memory than a small ceiling — before a line of model-derived code runs. So setting the job
+    /// cap AT the heap ceiling never meant "this much model allocation"; it meant "no further commit at
+    /// all", and which page the child asked for next decided how it died: a GC heap commit surfaces as the
+    /// <see cref="OutOfMemoryException"/> the sandbox knows how to name, but a STACK GUARD PAGE surfaces as
+    /// <c>STATUS_STACK_OVERFLOW</c> — uncatchable, no result tree, and the ceiling goes unreported. On
+    /// <c>windows-latest</c> that coin came up stack overflow about five times in six.</para>
+    ///
+    /// <para>The margin only got MORE load-bearing with issue #1780: <see cref="TryLaunch"/> now starts the
+    /// child suspended so <see cref="Attach"/> joins it to the job before its first instruction. That closes
+    /// a real race, but it also means the job charges the child's ENTIRE footprint rather than only what it
+    /// commits after being joined — so the startup cost this allowance covers is now inside the cap on the
+    /// confined path, not outside it.</para>
+    ///
+    /// <para>So the OS cap is deliberately the BACKSTOP and never the reporting path: the heap ceiling
+    /// binds first and reports itself, and the job cap survives to stop the growth the GC cannot see —
+    /// native allocations and runaway stacks — which is the reason it exists (issue #1759). A backstop
+    /// that fires before the thing it backs up is not a backstop.</para>
+    /// </summary>
+    internal static long? WindowsJobCommitLimitFor(long? heapCeilingBytes) =>
+        heapCeilingBytes is not { } ceiling || ceiling <= 0
+            ? heapCeilingBytes
+            : ceiling > long.MaxValue - WindowsRuntimeCommitAllowanceBytes
+                ? long.MaxValue
+                : ceiling + WindowsRuntimeCommitAllowanceBytes;
 }
