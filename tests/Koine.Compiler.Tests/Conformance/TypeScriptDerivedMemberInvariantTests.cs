@@ -1,3 +1,4 @@
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests.Conformance;
@@ -212,5 +213,51 @@ public class TypeScriptDerivedMemberInvariantTests
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The regression that was missing: <c>templates/saas-subscription</c> (<c>UsageMeter</c>) and
+    /// <c>templates/library</c> (<c>LoanTerm</c>) both carry an invariant over a derived member, and
+    /// both emitted non-compiling TypeScript. Mirrors the C#/Java counterparts
+    /// (<c>Template_emits_csharp_that_compiles</c> / <c>Template_emits_java_that_compiles</c>).
+    /// </summary>
+    [Theory]
+    [InlineData("saas-subscription")]
+    [InlineData("library")]
+    public void Shipped_templates_emit_typechecking_typescript(string template)
+    {
+        string root = TemplatesRoot();
+        var sources = Directory
+            .EnumerateFiles(Path.Combine(root, template), "*.koi", SearchOption.AllDirectories)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .Select(p => new SourceFile(p, File.ReadAllText(p)))
+            .ToList();
+
+        var result = new KoineCompiler().Compile(sources, new TypeScriptEmitter());
+        var errors = result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        errors.ShouldBeEmpty(
+            $"template '{template}' did not compile cleanly for the typescript target:\n" +
+            string.Join("\n", errors.Select(d => $"{d.File}:{d.Line}:{d.Column}: {d.Code}: {d.Message}")));
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            $"templates/{template} must emit TypeScript that type-checks:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>Locates <c>templates/</c> by walking up to the directory containing <c>Koine.slnx</c>.</summary>
+    private static string TemplatesRoot()
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Koine.slnx")))
+            {
+                return Path.Combine(dir.FullName, "templates");
+            }
+        }
+
+        throw new DirectoryNotFoundException(
+            $"could not locate the repo root (a directory containing Koine.slnx) from {AppContext.BaseDirectory}");
     }
 }
