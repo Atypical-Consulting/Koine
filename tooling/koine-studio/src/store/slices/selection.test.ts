@@ -33,7 +33,9 @@ describe('selection slice', () => {
   test('subscribers see every change with the new selection state', () => {
     const s = make();
     const fn = vi.fn();
-    s.subscribe((state) => fn(state.selection));
+    s.subscribe((state) => {
+      fn(state.selection);
+    });
     s.getState().setSelection({ qualifiedName: 'Ordering.Order', context: 'Ordering' });
     s.getState().setSelection({ qualifiedName: 'Inventory.Stock', context: 'Inventory' });
     expect(fn).toHaveBeenCalledTimes(2);

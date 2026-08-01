@@ -19,7 +19,9 @@ describe('activeContext slice', () => {
   test('subscribers see every change with the new scope', () => {
     const s = make();
     const fn = vi.fn();
-    s.subscribe((state) => fn(state.activeContext));
+    s.subscribe((state) => {
+      fn(state.activeContext);
+    });
     s.getState().setActiveContext('Sales');
     s.getState().setActiveContext('Inventory');
     expect(fn).toHaveBeenCalledTimes(2);
@@ -77,7 +79,9 @@ describe('activeContext slice', () => {
   test('setNavAltitude with the same altitude does not notify (no churn)', () => {
     const s = make();
     const fn = vi.fn();
-    s.subscribe((state) => fn(state.navAltitude));
+    s.subscribe((state) => {
+      fn(state.navAltitude);
+    });
     s.getState().setNavAltitude('strategic'); // already strategic = no-op
     expect(fn).not.toHaveBeenCalled();
     s.getState().setNavAltitude('tactical'); // a real change notifies

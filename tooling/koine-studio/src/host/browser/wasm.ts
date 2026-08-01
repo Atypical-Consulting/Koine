@@ -274,7 +274,9 @@ export function mapWorkerCallError(err: unknown): Error {
 export function guardWasmSurface(raw: Record<string, unknown>): KoineWasmApi {
   return new Proxy(raw, {
     get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver);
+      // `unknown`, not Reflect.get's `any` — the trap hands this straight back to the caller, and the
+      // two narrowings below (`typeof value === 'function'`) are all this code actually needs of it.
+      const value: unknown = Reflect.get(target, prop, receiver);
       // Only a *known* export name (one this studio build calls — {@link HOST_DECLARED_EXPORTS}) that
       // didn't resolve to a function is treated as a stale-bundle call site. Everything else passes
       // through untouched — crucially `then`: the Promise that resolves to this proxy probes `proxy.then`

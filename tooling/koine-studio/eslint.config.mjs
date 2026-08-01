@@ -62,7 +62,66 @@ function selectorsExcept(...excluded) {
   return ALL_SELECTORS.filter((s) => !excluded.includes(s));
 }
 
+// ── #998: the tseslint.configs.recommendedTypeChecked ratchet ────────────────────────────────────
+// ADR 0005 deferred the full type-checked preset (measured at ~1,300 findings at #993 time; 1,961 on
+// a fresh 2026-07-31 measurement) because adopting it wholesale would have been an unreviewable PR.
+// #998 adopts it as an INVERTED ALLOW-LIST instead: the whole preset is on, and every rule that still
+// has findings is listed here as 'off' with its live count. Each ratchet PR fixes one rule's findings
+// and DELETES its entry — the table only ever shrinks, so the gate monotonically tightens and the
+// remaining debt is visible in the config itself rather than in a wiki nobody reads.
+//
+// Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on day
+// one; the 8 cheapest of the remaining 17 were fixed and enforced in the same PR that opened this).
+// Burn-down order is cheapest-first. Counts are LIVE — re-measure before editing this table, with
+// `npx eslint . -f json` under a config that adds the preset with no `off` entries, grouped by rule.
+// Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
+// down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
+// (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
+const RATCHET_PENDING = {
+  '@typescript-eslint/no-unsafe-argument': 'off', //             50 findings /  7 files
+  '@typescript-eslint/no-explicit-any': 'off', //                65 findings /  9 files
+  '@typescript-eslint/no-unsafe-assignment': 'off', //           68 findings / 22 files
+  '@typescript-eslint/no-unused-vars': 'off', //                 72 findings / 28 files
+  '@typescript-eslint/no-unsafe-call': 'off', //                129 findings /  5 files
+  '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 221 findings / 68 files
+  '@typescript-eslint/no-unsafe-member-access': 'off', //       261 findings / 26 files
+  '@typescript-eslint/require-await': 'off', //                 477 findings / 61 files
+  '@typescript-eslint/unbound-method': 'off', //                546 findings / 57 files
+};
+
 export default tseslint.config(
+  // scripts/generate-templates.mjs writes this 180KB machine-generated module into src/ (git-ignored,
+  // regenerated on every dev/build/test). It happens to be clean under the preset today, but it is not
+  // hand-maintained code and a generator change must never be able to fail the lint gate — and CI runs
+  // `npm run lint` right after `npm ci`, i.e. before the file even exists, so linting it locally-only
+  // would make the gate depend on build order. Excluded outright.
+  { ignores: ['src/templates.generated.ts'] },
+  // The full type-checked preset, minus the still-pending rules above. Placed first so the narrow
+  // #978 gate below stays the last word on the rules it names explicitly.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      ...RATCHET_PENDING,
+      // `with-single-extends` (not the default `never`) is the rule's own sanctioned allowance for
+      // declaration-MERGING interfaces: src/vitest-axe.d.ts augments vitest's `Assertion` /
+      // `AsymmetricMatchersContaining` with the vitest-axe matchers, and augmentation only works
+      // through an interface — a type alias doesn't merge — so the body is necessarily empty. The rule
+      // stays 'error' for genuinely empty declarations; this is a narrowing, not a ratchet exemption.
+      '@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
+      // `ignoreReadBeforeAssign` (off by default) exempts the forward-declaration idiom this codebase
+      // uses for mutually-referencing controllers — `let workspace: WorkspaceController;` read by a
+      // thunk defined above its single assignment (ide.tsx, inspectorController.tsx,
+      // workspaceController.ts, scopeKit.ts, wasm.ts). Those CANNOT be `const`: the declaration and the
+      // assignment are deliberately separated, so the default rule demands an impossible edit (and its
+      // autofix would produce code that doesn't compile). Genuinely-const `let`s are still reported.
+      'prefer-const': ['error', { ignoreReadBeforeAssign: true }],
+    },
+  },
   {
     files: ['src/**/*.{ts,tsx}'],
     languageOptions: {

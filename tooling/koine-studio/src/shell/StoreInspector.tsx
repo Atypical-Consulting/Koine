@@ -100,11 +100,13 @@ function makeRawSnapshot(state: AppState): RawSnapshot {
     state,
     text: JSON.stringify(
       state,
-      (_key, value) => {
+      // `unknown` rather than the replacer signature's `any`, so nothing this returns is an `any`
+      // escaping into the snapshot text — the two branches below are all the narrowing it needs.
+      (_key: string, value: unknown): unknown => {
         if (typeof value === 'function') return undefined; // drop the setters — only data shows
         // The store-owned buffer set is a Map (#982); JSON.stringify renders a Map as `{}`, so expand it to
         // a plain object so the raw dump keeps showing the open buffers keyed by uri.
-        if (value instanceof Map) return Object.fromEntries(value);
+        if (value instanceof Map) return Object.fromEntries(value as Map<unknown, unknown>);
         return value;
       },
       2,
