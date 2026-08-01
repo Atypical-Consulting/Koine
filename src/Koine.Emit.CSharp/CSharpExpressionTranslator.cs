@@ -191,6 +191,14 @@ internal sealed class CSharpExpressionTranslator
     private readonly IReadOnlyDictionary<string, Expr> _specBodies;
     private readonly HashSet<string> _inliningSpecs = new(StringComparer.Ordinal);
 
+    // Derived members of the current type (`name: T = <expr over siblings>`) and their defining
+    // expressions. A derived member has NO constructor parameter — it is emitted as a get-only
+    // property computed from the stored ones — so in NameMode.Parameter a reference to one is
+    // inlined the way a spec reference is, rather than rendered as a camelCase name that binds to
+    // nothing (issue #1756). Empty for a type with no derived members.
+    private readonly IReadOnlyDictionary<string, Expr> _derivedBodies;
+    private readonly HashSet<string> _inliningDerived = new(StringComparer.Ordinal);
+
     // When set, member identifiers render as `<receiver>.Member` (used inside the
     // generated static specification methods, where members hang off a parameter `x`).
     private readonly string? _memberReceiver;
@@ -252,10 +260,25 @@ internal sealed class CSharpExpressionTranslator
         _options = options ?? CSharpEmitterOptions.Empty;
         _resolver = new TypeResolver(index, context);
         _scope = TypeScope.FromMembers(members, index);
-        _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
+        var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
+        _memberNames = memberNames;
         _enumMemberToType = enumMemberToType;
         _specBodies = specBodies ?? EmptySpecs;
         _memberReceiver = memberReceiver;
+
+        // Classified with the SAME MemberAnalysis.IsDerived the lowerer uses to build
+        // BoundField.Kind, so the translator and the emitted property set never disagree
+        // about which members are computed (issue #1756).
+        Dictionary<string, Expr>? derived = null;
+        foreach (Member m in members)
+        {
+            if (m.Initializer is not null && MemberAnalysis.IsDerived(m, memberNames))
+            {
+                (derived ??= new Dictionary<string, Expr>(StringComparer.Ordinal))[m.Name] = m.Initializer;
+            }
+        }
+
+        _derivedBodies = derived ?? EmptySpecs;
     }
 
     private static readonly IReadOnlyDictionary<string, Expr> EmptySpecs = new Dictionary<string, Expr>();
@@ -771,6 +794,10 @@ internal sealed class CSharpExpressionTranslator
             {
                 sb.Append(_memberReceiver).Append('.').Append(CSharpNaming.ToPascalCase(name));
             }
+            else if (mode == NameMode.Parameter && TryWriteDerivedBody(name, mode, sb))
+            {
+                // Substituted the derivation over the constructor parameters (issue #1756).
+            }
             else
             {
                 sb.Append(mode == NameMode.Parameter
@@ -794,6 +821,47 @@ internal sealed class CSharpExpressionTranslator
 
         // Unknown identifier: emit as-is (best effort).
         sb.Append(name);
+    }
+
+    /// <summary>
+    /// Substitutes a <b>derived</b> member's defining expression at its reference site, parenthesized
+    /// and translated in the same (parameter) scope, returning <c>false</c> when
+    /// <paramref name="name"/> is not derived.
+    /// <para>
+    /// Issue #1756. A value object's <c>invariant</c> guards are emitted at the TOP of the constructor,
+    /// before the backing fields are assigned — deliberately, so an invalid instance is never even
+    /// partially constructed — and every member reference in them renders as the constructor parameter
+    /// of the same name. That is exact for a <em>stored</em> field, which IS a parameter, but a derived
+    /// member has neither a parameter nor an assigned property to read at that point: the guard used to
+    /// emit a bare name that bound to nothing (<c>CS0103</c>). Inlining the derivation over the
+    /// parameters keeps the validate-before-assign ordering and evaluates exactly what the property
+    /// will later compute.
+    /// </para>
+    /// <para>
+    /// Substitution recurses (a derived member may be defined over another one) and is bounded by a
+    /// visited set, so a cyclic derivation — which the semantic layer already rejects — degrades to the
+    /// former bare-name rendering instead of recursing forever.
+    /// </para>
+    /// </summary>
+    private bool TryWriteDerivedBody(string name, NameMode mode, StringBuilder sb)
+    {
+        if (!_derivedBodies.TryGetValue(name, out Expr? body) || !_inliningDerived.Add(name))
+        {
+            return false;
+        }
+
+        try
+        {
+            sb.Append('(');
+            Write(body, mode, sb);
+            sb.Append(')');
+        }
+        finally
+        {
+            _inliningDerived.Remove(name);
+        }
+
+        return true;
     }
 
     /// <summary>
