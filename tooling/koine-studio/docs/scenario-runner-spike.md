@@ -156,7 +156,7 @@ is a *documented* gap — the interpreter surfaces it as `Indeterminate` + a not
 | 2 | Value-object construction & its invariants — e.g. a `Money { amount < 0 }` supplied in given-state | accepted as data (B never constructs the VO, so its `invariant amount >= 0` does not run) | the emitted VO constructor throws `DomainInvariantViolationException` |
 | 3 | State-machine legality — a `status -> X` not allowed by the `states` block | applied and shown (legality is not enforced) | the emitted transition guard throws |
 | 4 | Exact failure semantics / messages | a precondition `Failed` halts; messages mirror the source | the real exceptions, ordering and short-circuit behaviour of the shipped code |
-| 5 | Cross-aggregate / integration-event fan-out | out of scope (one aggregate in isolation) | could run the real downstream handlers |
+| 5 | Cross-aggregate / integration-event fan-out | out of scope (one aggregate in isolation) | could run the real downstream reaction of a `policy … then Target.member(…)` — but a cross-context `publishes`/`subscribes` pair gets only a bodiless handler seam from every emitter, so there is nothing there for *any* approach to run (see [Fan-out](#fan-out-what-the-model-says-happens-next-1758)) |
 
 The existing **Roslyn meta-test** (`tests/Koine.Compiler.Tests`, which compiles *and executes* the
 emitted C#) is effectively Approach A already, in a test harness — proof that A is feasible and the
@@ -247,9 +247,14 @@ and it is deliberately narrower than the word "sandbox" suggests:
 
 #### Fidelity gaps, revisited
 
-Rows **#1–#4** of the gap table above are **closed in executed mode**; **#5 remains out** — the executor
-drives *one* aggregate, exactly like B. Each closed row is pinned by a test in
-`tests/Koine.Compiler.Tests/Semantics/ScenarioExecutionTests.cs`, over the pizzeria `Ordering` fixture:
+Rows **#1–#4** of the gap table above are **closed in executed mode**. Row **#5 is closed for the
+cross-aggregate case and honestly reported — not executed — for the cross-context one**
+([#1758](https://github.com/Atypical-Consulting/Koine/issues/1758), [ADR
+0014](../../../adr/0014-scenario-fan-out-by-reflective-in-process-dispatch.md)): a `policy` reaction is
+really dispatched onto the aggregate it names, while a `publishes`/`subscribes` pair has no handler body
+in any emitter to dispatch *to*, so it is named in the notes instead of simulated. Each row is pinned by
+tests in `tests/Koine.Compiler.Tests/Semantics/ScenarioExecutionTests.cs` — #1–#4 over the pizzeria
+`Ordering` fixture, #5 over a `Charge`/`LedgerEntry` posting model:
 
 | # | Construct | Status in executed mode |
 |---|---|---|
@@ -257,7 +262,7 @@ drives *one* aggregate, exactly like B. Each closed row is pinned by a test in
 | 2 | Value-object construction & its invariants | **Closed** — a negative `Money` in the given state is rejected by the emitted constructor; the failure is reported as a failed invariant check resolved back to the *declared* invariant, not as a runner error. |
 | 3 | State-machine legality | **Closed** — an illegal `status -> X` is a failed step; the transition and everything after it never happen. |
 | 4 | Exact failure semantics / messages | **Closed** — the real `DomainInvariantViolationException` rule text, the real ordering and short-circuit behaviour of the shipped code. |
-| 5 | Cross-aggregate / integration-event fan-out | **Still out** — one aggregate in isolation, unchanged from B. |
+| 5 | Cross-aggregate / integration-event fan-out | **Closed for cross-aggregate; reported, not executed, for cross-context** — a `policy P when E then T.m(…)` reaction is really dispatched, its steps attributed to `T` and its state merged under `<Entity>.<member>` keys. A cross-context `publishes`/`subscribes` pair is resolved and named in the notes as *declared with no executable handler*, never fabricated into steps. See [Fan-out](#fan-out-what-the-model-says-happens-next-1758). |
 
 Two consequences worth stating, because they are visible in the timeline:
 
@@ -267,3 +272,58 @@ Two consequences worth stating, because they are visible in the timeline:
 - Executed mode pays process startup **plus a full parse/emit/Roslyn-compile per run**, which is why it
   is opt-in, per-run, and off by default. Caching the compiled assembly across runs is a later
   optimisation the protocol leaves room for.
+
+#### Fan-out: what the model says happens next ([#1758](https://github.com/Atypical-Consulting/Koine/issues/1758))
+
+An `emit` is the *start* of a story, not its end. Executed mode therefore keeps going past the operation
+under test: every event the emitted code really recorded is resolved against what the model declares
+downstream, and the executable half of that is **dispatched reflectively inside the sandbox child that is
+already running** — one emit, one compile, one process ([ADR
+0014](../../../adr/0014-scenario-fan-out-by-reflective-in-process-dispatch.md)). Executed mode only:
+interpreted mode (B) is untouched and keeps single-aggregate semantics.
+
+Koine has exactly two downstream surfaces, and the runner treats them differently *because they differ in
+kind*:
+
+- **`policy P when E then Target.member(args)`** — in-context, cross-aggregate. `member` is a real
+  emitted method, so the reaction is **really run**: the steps it produces are appended to the same
+  timeline, each carrying the downstream entity's name, and its post-state merges into `resultingState`.
+- **`publishes E` / `subscribes Publisher.E`** — cross-context. Every emitter produces only a bodiless
+  handler seam (C#: `IHandle<E>`), so there is nothing to run. The subscribing contexts are **resolved and
+  named in `notes`** ("the model declares a subscription and no executable handler"), never fabricated
+  into steps. As the language stands this branch is also unreachable from a *recorded* event —
+  `emit X` resolves `X` to an `EventDecl`, so emitting an integration event is a hard validator error
+  (`KOI0601`, "unknown event") — which is why the pizzeria publishes `OrderPlaced` and emits
+  `OrderPlacedInternally`. The resolver answers the question anyway, so the day `emit` accepts an
+  integration event the runner reports it honestly instead of pretending the boundary was crossed.
+
+**Attribution.** Steps gained one additive, optional property: `aggregate`. It is written **only** on a
+fanned-out step — a primary-aggregate step (i.e. every step interpreted mode ever produces, and every step
+executed mode produced before #1758) omits the key entirely, so an older result keeps exactly the wire
+shape it had. Studio renders it as a chip naming the aggregate, on a step indented under the one that
+triggered it.
+
+**Downstream starting state — by rule, never by guess.** The scenario's `given` describes the *primary*
+aggregate, so a downstream one needs its own. In priority order: a **per-aggregate `given`** — a key of
+the form `<Entity>.<member>` (or `<Aggregate>.<member>`; both spellings reach the same root entity),
+routed to that entity and built through its own emitted constructor; a **factory** target, which builds
+its own instance and needs no prior state; otherwise **nothing is invented** — the run reports a failed
+step attributed to that aggregate plus a note naming the exact key that would have driven it. A bare
+(undotted) key is always the primary aggregate's and never leaks downstream.
+
+```jsonc
+// given, for `Charge.capture` with `policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)`
+{ "amount": 12, "settled": false, "LedgerEntry.balance": 5, "LedgerEntry.closed": false }
+// → resultingState: { "settled": "true", "amount": "12", "LedgerEntry.balance": "17", … }
+```
+
+**Bounds.** The cascade is bounded twice, because one bound cannot do the job alone: a **visited set** over
+`(aggregate, event)` pairs terminates a cyclic model, and a **depth cap of 3** truncates a genuinely deep,
+non-repeating chain a visited set can never see. Both bite far inside the sandbox's wall clock, so such a
+model is diagnosed as *cyclic* or *truncated* rather than misreported as a timeout — and hitting either is
+always a note in `notes`, never a silent stop.
+
+**`ok` still reports the primary operation.** A downstream invariant failure is a *failed step attributed
+to that aggregate*, carrying the emitted code's real rule text, plus a note — it does not flip `ok`,
+because the primary command really did succeed and saying otherwise would misreport it. `Ok: true` beside a
+failed downstream step is the designed behaviour, not a bug (ADR 0014, D6).
