@@ -1722,4 +1722,96 @@ public class PhpConformanceTests
         order.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
         order.ShouldContain("public static function place(int $quantity, Status $newStatus): self");
     }
+
+    /// <summary>
+    /// Issue #1531 (audit, Task 4) — the Rust (#1467/PR #1476) and Java (#1480/PR #1521) emitters both
+    /// shipped the identical bug in their factory constructor-argument loop's auto-bound branch: a
+    /// <c>required</c>-bucket member declared optional but carrying no member-level default
+    /// (<c>total: Decimal?</c>), auto-bound to a NON-optional same-named factory parameter
+    /// (<c>create make(total: Decimal)</c>), had its bare value passed straight into a constructor slot
+    /// typed <c>Option&lt;T&gt;</c>/<c>Optional&lt;T&gt;</c> — a real <c>rustc</c> E0308 / <c>javac</c>
+    /// "incompatible types" error, fixed by wrapping in <c>Some(…)</c>/<c>Optional.of(…)</c>.
+    /// <para>
+    /// PHP's <c>WriteFactory</c> likewise passes the bare value — but it maps <c>T?</c> to the NULLABLE
+    /// type <c>?T</c> (<c>PhpTypeMapper</c>), not to a wrapper value, and a non-null <c>T</c> is
+    /// directly assignable to a <c>?T</c> parameter. There is no wrap construct to apply and none is
+    /// needed. This test records that negative audit result and locks it in: it asserts the
+    /// nullable-typed constructor slot AND the bare, unwrapped argument, then proves with a real
+    /// <c>phpstan analyse --level max</c> run (plus the always-on <c>php -l</c> gate) that the pair
+    /// type-checks.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Factory_autobound_parameter_binding_to_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(total: Decimal) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no phpstan required): the optional-declared member's constructor slot is a
+        // NULLABLE `?T`, so the auto-bound non-optional parameter is passed through bare.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("?\\Koine\\Runtime\\Decimal $total = null");
+        product.ShouldContain("$instance = new self($id, $total);");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "an auto-bound non-optional parameter must be assignable straight into an optional-declared "
+            + "member's `?T` constructor slot:\n" + string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// The explicit-init half of the same #1531 audit — the branch Rust #1452/PR #1464 and Java
+    /// #1479/PR #1518 fixed. A <c>total -&gt; 5.0</c> initialization of an optional-declared,
+    /// default-less <c>required</c> member yields a non-optional value; Rust/Java must wrap it, PHP must
+    /// not, for the same nullable-vs-wrapper reason. Since nothing is ever wrapped, the double-wrap
+    /// hazard the Rust/Java fixes had to guard against cannot arise here at all.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make() {
+                  total -> 5.0
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("?\\Koine\\Runtime\\Decimal $total = null");
+        product.ShouldContain("$instance = new self($id, new \\Koine\\Runtime\\Decimal('5.0'));");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "an explicitly initialized non-optional value must be assignable straight into an "
+            + "optional-declared member's `?T` constructor slot:\n" + string.Join("\n", types.Errors));
+    }
 }
