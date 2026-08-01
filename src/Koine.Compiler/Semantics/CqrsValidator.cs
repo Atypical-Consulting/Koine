@@ -9,6 +9,10 @@ namespace Koine.Compiler.Semantics;
 /// <see cref="ValidateQuery"/> are dispatched from the type-validation switch in
 /// the same order as before, preserving diagnostic codes, messages, and emission
 /// order. (Use cases, which co-emit with services, stay in the services pass.)
+///
+/// <para><see cref="ValidateApiAnnotations"/> (R19) is shared: queries reach it from
+/// <see cref="ValidateQuery"/>, commands from <c>EntityBehaviorValidator.ValidateCommands</c>,
+/// so both surfaces of the API annotations obey one set of rules.</para>
 /// </summary>
 internal static class CqrsValidator
 {
@@ -127,7 +131,70 @@ internal static class CqrsValidator
                 $"query '{q.Name}' must return a read model or 'List<readmodel>', not '{q.ResultType.Name}'",
                 q.Span));
         }
+
+        ValidateApiAnnotations(q.ApiAnnotations, q.RouteOverride, q.AuthRole, $"query '{q.Name}'", q.Span, diagnostics);
     }
+
+    /// <summary>
+    /// Validates the API annotations preceding a command or query (R19): <c>@route</c> must name an
+    /// absolute path, at most one verb annotation may precede a declaration (one declaration is one
+    /// endpoint), and <c>@auth</c> must name a non-blank role. An argument-less <c>@route</c>/<c>@auth</c>
+    /// is diagnosed too — it configures nothing, and the reader deliberately keeps its span so it fails
+    /// loudly here instead of being silently dropped. Each diagnostic lands on its own annotation.
+    /// </summary>
+    /// <param name="subject">How the declaration reads in the message, e.g. <c>command 'place'</c>.</param>
+    public static void ValidateApiAnnotations(
+        ApiAnnotationInfo? api,
+        string? route,
+        string? authRole,
+        string subject,
+        SourceSpan declSpan,
+        List<Diagnostic> diagnostics)
+    {
+        if (api is null)
+        {
+            return;
+        }
+
+        if (!api.RouteSpan.IsNone)
+        {
+            if (route is null)
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidRouteOverride,
+                    $"'@route' on {subject} names no path; give it one, e.g. @route(\"/orders\")",
+                    At(api.RouteSpan, declSpan)));
+            }
+            else if (!route.StartsWith('/'))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidRouteOverride,
+                    $"route override '{route}' on {subject} must be an absolute path starting with '/'",
+                    At(api.RouteSpan, declSpan)));
+            }
+        }
+
+        if (api.VerbCount > 1)
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.MultipleVerbAnnotations,
+                $"{subject} carries {api.VerbCount} HTTP verb annotations; a declaration is one endpoint, so at most one is allowed",
+                At(api.VerbSpan, declSpan)));
+        }
+
+        if (!api.AuthSpan.IsNone && string.IsNullOrWhiteSpace(authRole))
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmptyAuthRole,
+                authRole is null
+                    ? $"'@auth' on {subject} names no role; give it one, e.g. @auth(\"admin\")"
+                    : $"'@auth' on {subject} names a blank role",
+                At(api.AuthSpan, declSpan)));
+        }
+    }
+
+    /// <summary>
+    /// The annotation's own span when the reader placed it, the declaration's otherwise — a safety net,
+    /// since every annotation the checks above can reach comes with a span today.
+    /// </summary>
+    private static SourceSpan At(SourceSpan annotation, SourceSpan declaration) =>
+        annotation.IsNone ? declaration : annotation;
 
     /// <summary>
     /// The members a read model can project from its source (entities add the synthetic

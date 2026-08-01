@@ -187,6 +187,9 @@ public static class DiagnosticCodes
     public const string DuplicateReadModelField = "KOI1205";
     public const string QueryResultNotReadModel = "KOI1206";
     public const string ReservedRecordMember = "KOI1207";
+    public const string InvalidRouteOverride = "KOI1208";
+    public const string MultipleVerbAnnotations = "KOI1209";
+    public const string EmptyAuthRole = "KOI1210";
 
     // ---- Multi-file, imports, modules (KOI1300–1399) ----------------------
     public const string UnknownContext = "KOI1301";
@@ -389,6 +392,9 @@ public static class DiagnosticCodes
             [DuplicateReadModelField] = D(DuplicateReadModelField, "A read model declares the same field name more than once.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [QueryResultNotReadModel] = D(QueryResultNotReadModel, "A query's result type is not a declared read model (or a list of one).", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [ReservedRecordMember] = D(ReservedRecordMember, "A read-model field, query criterion, or event field collides with a record-synthesized member (Equals/GetHashCode/…).", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [InvalidRouteOverride] = D(InvalidRouteOverride, "A command's or query's '@route' names no path, or one that is not absolute (it must start with '/').", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [MultipleVerbAnnotations] = D(MultipleVerbAnnotations, "A command or query carries more than one HTTP verb annotation ('@get'/'@post'/'@put'/'@delete'/'@patch').", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [EmptyAuthRole] = D(EmptyAuthRole, "A command's or query's '@auth' names no role, or a blank one.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
 
             // ---- Multi-file, imports, modules --------------------------------
             [UnknownContext] = D(UnknownContext, "An import or qualified reference names a context that is not declared.", DiagnosticCategory.MultiFile, DiagnosticSeverity.Error),

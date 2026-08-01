@@ -251,4 +251,97 @@ public class R19ApiAnnotationsTests
         api.VerbSpan.IsNone.ShouldBeTrue();
         api.AuthSpan.IsNone.ShouldBeFalse();
     }
+
+    // ---- validation ---------------------------------------------------------
+
+    /// <summary>A route override is a path template: it must be absolute, so a relative one is rejected.</summary>
+    [Fact]
+    public void A_route_override_without_a_leading_slash_is_rejected_on_a_command() =>
+        Diagnose(CommandSource("""@route("orders")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+
+    [Fact]
+    public void A_route_override_without_a_leading_slash_is_rejected_on_a_query() =>
+        Diagnose(QuerySource("""@route("orders")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+
+    /// <summary>An empty path is no more absolute than a relative one.</summary>
+    [Fact]
+    public void An_empty_route_override_is_rejected() =>
+        Diagnose(CommandSource("""@route("")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+
+    /// <summary>
+    /// A bare <c>@route</c> names no path at all, so it can only be a mistake — the parser keeps its
+    /// span precisely so this is diagnosable rather than silently ignored.
+    /// </summary>
+    [Fact]
+    public void An_argument_less_route_annotation_is_rejected() =>
+        Diagnose(CommandSource("@route"))
+            .ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+
+    /// <summary>One declaration maps to one endpoint, so it may carry at most one verb.</summary>
+    [Fact]
+    public void Two_verb_annotations_are_rejected_on_a_command() =>
+        Diagnose(CommandSource("@get", "@post"))
+            .ShouldContain(d => d.Code == DiagnosticCodes.MultipleVerbAnnotations);
+
+    [Fact]
+    public void Two_verb_annotations_are_rejected_on_a_query() =>
+        Diagnose(QuerySource("@get", "@post"))
+            .ShouldContain(d => d.Code == DiagnosticCodes.MultipleVerbAnnotations);
+
+    /// <summary>Repeating the same verb is still two annotations, and still a mistake.</summary>
+    [Fact]
+    public void The_same_verb_annotated_twice_is_rejected() =>
+        Diagnose(CommandSource("@put", "@put"))
+            .ShouldContain(d => d.Code == DiagnosticCodes.MultipleVerbAnnotations);
+
+    /// <summary>A role that is blank guards nothing, so it is rejected rather than emitted as-is.</summary>
+    [Fact]
+    public void A_whitespace_only_auth_role_is_rejected_on_a_command() =>
+        Diagnose(CommandSource("""@auth("   ")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.EmptyAuthRole);
+
+    [Fact]
+    public void A_whitespace_only_auth_role_is_rejected_on_a_query() =>
+        Diagnose(QuerySource("""@auth("   ")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.EmptyAuthRole);
+
+    /// <summary>A bare <c>@auth</c> names no role — same reasoning as a bare <c>@route</c>.</summary>
+    [Fact]
+    public void An_argument_less_auth_annotation_is_rejected() =>
+        Diagnose(QuerySource("@auth"))
+            .ShouldContain(d => d.Code == DiagnosticCodes.EmptyAuthRole);
+
+    /// <summary>The diagnostic points at the offending annotation, not at the whole declaration.</summary>
+    [Fact]
+    public void Each_api_diagnostic_points_at_its_own_annotation()
+    {
+        // Annotations start on line 7 (see CommandSource): @route, then @get, @post, then @auth.
+        IReadOnlyList<Diagnostic> diagnostics =
+            Diagnose(CommandSource("""@route("orders")""", "@get", "@post", """@auth(" ")"""));
+
+        diagnostics.Single(d => d.Code == DiagnosticCodes.InvalidRouteOverride).Line.ShouldBe(7);
+        diagnostics.Single(d => d.Code == DiagnosticCodes.MultipleVerbAnnotations).Line.ShouldBe(9);
+        diagnostics.Single(d => d.Code == DiagnosticCodes.EmptyAuthRole).Line.ShouldBe(10);
+    }
+
+    /// <summary>Non-regression: a well-formed annotation set is silent on both a command and a query.</summary>
+    [Fact]
+    public void A_valid_route_verb_and_auth_produce_no_diagnostics()
+    {
+        Diagnose(CommandSource("""@route("/orders/{id}")""", "@put", """@auth("admin")"""))
+            .ShouldBeEmpty();
+        Diagnose(QuerySource("""@route("/orders/{id}")""", "@get", """@auth("admin")"""))
+            .ShouldBeEmpty();
+    }
+
+    /// <summary>Non-regression: an unannotated command/query is never touched by the API checks.</summary>
+    [Fact]
+    public void An_unannotated_command_and_query_produce_no_api_diagnostics()
+    {
+        Diagnose(CommandSource()).ShouldBeEmpty();
+        Diagnose(QuerySource()).ShouldBeEmpty();
+    }
 }
