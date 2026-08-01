@@ -119,4 +119,93 @@ public class EnumMemberContextScopeEmitterTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1793, Task 1 — the most severe of the three remaining targets: pre-fix, Rust emitted
+    /// <c>if !(crate::a::Status::Red != Flag::Blue)</c>, and <c>cargo check</c> rejected the crate
+    /// outright with <c>error[E0308]: mismatched types … expected `Status`, found `Flag`</c>. The
+    /// <c>CompileRust</c> meta-test below is what makes this a real regression guard rather than a
+    /// string assertion: a wrong qualifier here does not type-check.
+    /// </summary>
+    [Fact]
+    public void Rust_qualifies_both_operands_against_the_referencing_contexts_own_enum()
+    {
+        var result = new KoineCompiler().Compile(CrossContextCollision, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Rust emits one module per bounded context, so `C`'s entity lives in `src/c.rs`.
+        var module = result.Files.Single(f => f.RelativePath.EndsWith("c.rs", StringComparison.Ordinal)).Contents;
+        module.ShouldContain("Flag::Red");
+        module.ShouldContain("Flag::Blue");
+        module.ShouldNotContain("Marker::");
+        module.ShouldNotContain("Signal::");
+        module.ShouldNotContain("Status::");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable cargo toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1793, Task 2 — pre-fix, Python emitted <c>if not (Status.RED != Flag.BLUE)</c> plus a
+    /// matching <c>from a.enums.status import Status</c>, i.e. importable, runnable, silently wrong
+    /// code: the guard compares an unrelated context's enum member and can therefore never hold.
+    /// </summary>
+    [Fact]
+    public void Python_qualifies_both_operands_against_the_referencing_contexts_own_enum()
+    {
+        var result = new KoineCompiler().Compile(CrossContextCollision, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("item.py", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Flag.RED");
+        item.ShouldContain("Flag.BLUE");
+        item.ShouldNotContain("Marker.");
+        item.ShouldNotContain("Signal.");
+        item.ShouldNotContain("Status.");
+        // The wrong qualifier also dragged in an import of the wrong context's enum module; a
+        // correctly scoped resolution leaves `C`'s entity with no dependency on `A`/`D`/`E` at all.
+        item.ShouldNotContain("from a.enums");
+        item.ShouldNotContain("from d.enums");
+        item.ShouldNotContain("from e.enums");
+
+        // Syntax-only (`python -m py_compile`), not TestSupport.TypeCheckPython/mypy, for exactly the
+        // reason the PHP sibling above uses `php -l`: the fixture's invariant deliberately compares two
+        // literal enum members with no other-operand hint (the shape that exercises this fix's fallback
+        // branch), and mypy's `comparison-overlap` rule correctly — but irrelevantly — rejects THAT as a
+        // non-overlapping equality check regardless of which enum qualifies it, both before and after
+        // the fix. Real-world code hitting this bug compares a runtime FIELD against a bare member
+        // (e.g. `status == Active`), which mypy cannot fold; this fixture isolates the no-hint path
+        // deliberately, at the cost of being unrepresentative of realistic Python.
+        var check = TestSupport.SyntaxCheckPython(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable python toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1793, Task 3 — Java already carried #1771's (PR #1778) sibling-operand <c>enumHint</c>,
+    /// but that only threads through binary <c>==</c>/<c>!=</c> comparisons whose OTHER operand types
+    /// to an enum. This fixture's invariant compares two bare members, so neither operand can hint the
+    /// other and resolution fell through to the context-blind owners list, emitting an unqualified
+    /// <c>Status.Red</c> from context <c>A</c> inside <c>koine.generated.c</c>. The <c>enumHint</c>
+    /// path is untouched by this fix and still wins when it resolves — <see
+    /// cref="JavaEnumMemberDisambiguationTests"/> pins that.
+    /// </summary>
+    [Fact]
+    public void Java_qualifies_both_operands_against_the_referencing_contexts_own_enum()
+    {
+        var result = new KoineCompiler().Compile(CrossContextCollision, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.java", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Flag.Red");
+        item.ShouldContain("Flag.Blue");
+        item.ShouldNotContain("Marker.");
+        item.ShouldNotContain("Signal.");
+        item.ShouldNotContain("Status.");
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
