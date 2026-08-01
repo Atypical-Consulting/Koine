@@ -209,6 +209,69 @@ public class EnumMemberContextScopeEmitterTests
     }
 
     /// <summary>
+    /// Issue #1802 — the sibling of <see cref="CrossContextQualifiedEnum"/>: the modeller writes the
+    /// enum-TYPE qualifier explicitly (<c>Kind.Active</c>) rather than leaving it bare. #1799 fixed the
+    /// bare-member branch, which resolves an owner via <c>ModelIndex.EnumsDeclaring(context, member)</c>;
+    /// an explicit <c>Kind.Active</c> never reaches that branch — <c>Kind</c> is a TYPE name, not a
+    /// member name, so <c>EnumsDeclaring</c> returns empty and control falls through to each
+    /// translator's separate enum-<em>type</em>-identifier branch, which appended the simple name
+    /// verbatim with no namespace/package qualification.
+    /// </summary>
+    private const string CrossContextExplicitEnumQualifier = """
+        context Other {
+          enum Kind { Active, Idle }
+        }
+
+        context C {
+          entity Item identified by ItemId {
+            status: Other.Kind
+            invariant status == Kind.Active "explicit enum-type qualifier on a foreign enum"
+          }
+        }
+        """;
+
+    [Fact]
+    public void CSharp_namespace_qualifies_an_explicitly_typed_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextExplicitEnumQualifier, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.cs", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Other.Kind.Active");
+
+        (System.Reflection.Assembly? assembly, IReadOnlyList<string> errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Java_package_qualifies_an_explicitly_typed_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextExplicitEnumQualifier, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.java", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("koine.generated.other.Kind.Active");
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Kotlin_package_qualifies_an_explicitly_typed_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextExplicitEnumQualifier, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.kt", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("koine.generated.other.Kind.Active");
+
+        var check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// The four targets the issue's audit found already correct — each routes the enum through its own
     /// import/qualification machinery. Pinned here so the C#/Java/Kotlin fix can't silently churn them:
     /// unlike the C#-family fixtures above, this fixture compares a runtime FIELD against a bare member,
