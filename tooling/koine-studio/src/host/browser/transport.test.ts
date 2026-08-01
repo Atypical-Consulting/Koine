@@ -164,8 +164,8 @@ describe('WasmLspTransport — supersede stale diagnostics (#353)', () => {
     const transport = new WasmLspTransport();
     const published: { uri: string; diagnostics: { code?: string }[] }[] = [];
     transport.onMessage((json) => {
-      const m = JSON.parse(json);
-      if (m.method === 'textDocument/publishDiagnostics') published.push(m.params);
+      const m = JSON.parse(json) as { method?: string; params?: { uri: string; diagnostics: { code?: string }[] } };
+      if (m.method === 'textDocument/publishDiagnostics' && m.params) published.push(m.params);
     });
     await transport.start();
 
@@ -212,8 +212,8 @@ describe('WasmLspTransport — supersede stale diagnostics (#353)', () => {
     const transport = new WasmLspTransport();
     const published: { uri: string; diagnostics: { code?: string }[] }[] = [];
     transport.onMessage((json) => {
-      const m = JSON.parse(json);
-      if (m.method === 'textDocument/publishDiagnostics') published.push(m.params);
+      const m = JSON.parse(json) as { method?: string; params?: { uri: string; diagnostics: { code?: string }[] } };
+      if (m.method === 'textDocument/publishDiagnostics' && m.params) published.push(m.params);
     });
     await transport.start();
 

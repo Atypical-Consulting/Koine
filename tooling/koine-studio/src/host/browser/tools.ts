@@ -8,6 +8,8 @@ import {
   normalizeCompileTarget,
   runEditToolStaging,
   stagedWorkspaceFiles,
+  type WEmitPreviewResult,
+  type WFileDiagnostics,
 } from '@/ai/assistantTools';
 import type { EditSession } from '@/ai/editSession';
 import { loadWasmApi } from '@/host/browser/wasm';
@@ -37,9 +39,11 @@ export async function runWasmTool(name: string, argsJson: string): Promise<strin
   const api = await loadWasmApi();
   switch (name) {
     case 'koine_validate':
-      return formatValidate(JSON.parse(await api.DiagnoseWorkspace(filesJson(source))));
+      return formatValidate(JSON.parse(await api.DiagnoseWorkspace(filesJson(source))) as WFileDiagnostics[]);
     case 'koine_compile':
-      return formatCompile(JSON.parse(await api.EmitPreview(filesJson(source), normalizeCompileTarget(args.target))));
+      return formatCompile(
+        JSON.parse(await api.EmitPreview(filesJson(source), normalizeCompileTarget(args.target))) as WEmitPreviewResult,
+      );
     case 'koine_format': {
       // Format returns LSP TextEdits: either [] (already canonical) or a single whole-document edit
       // whose newText IS the formatted source.
@@ -78,5 +82,7 @@ export function runEditTool(name: string, argsJson: string, session: EditSession
  * unchanged from the former per-write closure.
  */
 export async function validateStagedWorkspace(session: EditSession): Promise<string> {
-  return formatValidate(JSON.parse(await (await loadWasmApi()).DiagnoseWorkspace(workspaceEnvelope(session))));
+  return formatValidate(
+    JSON.parse(await (await loadWasmApi()).DiagnoseWorkspace(workspaceEnvelope(session))) as WFileDiagnostics[],
+  );
 }

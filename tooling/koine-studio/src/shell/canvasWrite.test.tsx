@@ -12,7 +12,12 @@ vi.mock('@/review/CommentComposer', () => ({
 }));
 
 import { createCanvasWrite, type CanvasWriteDeps } from '@/shell/canvasWrite';
-import { DIAGRAM_ANNOTATION_CREATE_EVENT, EMPTY_STATE_PICK_EVENT, isDiagramTouchMode } from '@/diagrams/diagramContract';
+import {
+  DIAGRAM_ANNOTATION_CREATE_EVENT,
+  EMPTY_STATE_PICK_EVENT,
+  isDiagramTouchMode,
+  type DiagramAnnotationCreateDetail,
+} from '@/diagrams/diagramContract';
 import { BP_NARROW } from '@/shared/breakpoint';
 import { appStore, createAppStore } from '@/store/index';
 
@@ -65,7 +70,11 @@ describe('canvasWrite', () => {
   it('createCanvasAnnotation dispatches a DIAGRAM_ANNOTATION_CREATE event carrying the kind', () => {
     const { cw } = build();
     const seen: string[] = [];
-    document.addEventListener(DIAGRAM_ANNOTATION_CREATE_EVENT, (e) => seen.push((e as CustomEvent).detail.kind), { once: true });
+    document.addEventListener(
+      DIAGRAM_ANNOTATION_CREATE_EVENT,
+      (e) => seen.push((e as CustomEvent<DiagramAnnotationCreateDetail>).detail.kind),
+      { once: true },
+    );
     cw.createCanvasAnnotation('note' as never);
     expect(seen).toEqual(['note']);
   });

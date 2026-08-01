@@ -71,14 +71,14 @@ function selectorsExcept(...excluded) {
 // remaining debt is visible in the config itself rather than in a wiki nobody reads.
 //
 // Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on day
-// one; the 8 cheapest of the remaining 17 were fixed and enforced in the same PR that opened this).
+// one; the 8 cheapest of the remaining 17 were fixed and enforced in the PR that opened this table
+// (#1720); `no-unsafe-argument` was the 9th, fixed and enforced in the follow-up PR that removed it).
 // Burn-down order is cheapest-first. Counts are LIVE — re-measure before editing this table, with
 // `npx eslint . -f json` under a config that adds the preset with no `off` entries, grouped by rule.
 // Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
 // down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
 // (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-unsafe-argument': 'off', //             50 findings /  7 files
   '@typescript-eslint/no-explicit-any': 'off', //                65 findings /  9 files
   '@typescript-eslint/no-unsafe-assignment': 'off', //           68 findings / 22 files
   '@typescript-eslint/no-unused-vars': 'off', //                 72 findings / 28 files

@@ -220,7 +220,8 @@ export class KoineLsp {
       return;
     }
     if (msg.method === 'textDocument/publishDiagnostics') {
-      this.onDiagnostics?.(msg.params.uri, msg.params.diagnostics ?? []);
+      const params = msg.params as { uri: string; diagnostics?: LspDiagnostic[] };
+      this.onDiagnostics?.(params.uri, params.diagnostics ?? []);
     }
     // Other server->client requests/notifications (window/logMessage, etc.) ignored.
   }
