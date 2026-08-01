@@ -274,11 +274,29 @@ are CI-verified, not just manually verified once.*
 
 **One real (pre-existing) defect this surfaced, not fixed here.**
 `A_run_that_exhausts_the_memory_ceiling_names_it_instead_of_reporting_a_generic_fault` — a test that
-predates this ADR — fails intermittently on the Windows leg (3 of 4 observed CI runs): a race between
-`DOTNET_GCHeapHardLimit` (the CLR heap ceiling) and `WindowsJobObject`'s own `JobMemoryLimit` (both sized
-identically), where only the former is currently recognised by `ScenarioSandbox.ResourceCeilingNote`.
-Unrelated to the Job Object interop itself (which this amendment's new floor test proves sound) — tracked
-as issue #1791.
+predates this ADR — fails on the Windows leg (3 of 4 observed CI runs at the time of writing; 10 of 12
+once the whole job history was counted). Unrelated to the Job Object interop itself, which this
+amendment's new floor test proves sound — tracked as issue #1791.
+
+> **Resolved by #1791, and the root cause guessed here was wrong** — recorded because the wrong guess is
+> the instructive part. This was read as "a race where only `DOTNET_GCHeapHardLimit` is recognised by
+> `ScenarioSandbox.ResourceCeilingNote`", i.e. a *misclassified exception*. There was no exception at all:
+> the child died of `STATUS_STACK_OVERFLOW` (`0xC00000FD`), which .NET cannot catch, so no handler ran and
+> no result tree came back. The two ceilings were sized identically, but they do not measure the same
+> thing — `DOTNET_GCHeapHardLimit` bounds the **managed heap**, `JOB_OBJECT_LIMIT_JOB_MEMORY` bounds
+> **every committed page in the job**, thread stacks included. Setting them equal therefore did not mean
+> "this much model allocation"; it meant "no further commit at all", and whichever page the child asked
+> for next decided how it died — a heap commit as the catchable `OutOfMemoryException` the sandbox names,
+> a stack guard page as an uncatchable process kill.
+>
+> **The durable rule this leaves:** the OS-level cap is the *backstop* and must never be the reporting
+> path, so it is sized a documented distance ABOVE the managed-heap ceiling
+> (`ScenarioConfinement.WindowsJobCommitLimitFor`) — enough to cover the runtime's own committed
+> footprint. A backstop that fires before the ceiling it backs up is not a backstop. Enforcement is
+> undiminished: native growth the GC cannot see still meets the job cap. Note this became *load-bearing*
+> with #1780 above, which starts the child suspended and joins it to the job before its first
+> instruction — so the job now charges the child's entire footprint, not just what it commits after
+> `Attach`.
 
 ## Amendment — Windows confines writes with a low-integrity token; the network stays open, and says so (issue #1780)
 
