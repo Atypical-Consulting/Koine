@@ -226,7 +226,13 @@ const LINE_BUDGETS: readonly LineBudget[] = [
   // keymaps the editor actually loads (searchKeymap/defaultKeymap/Mod-Alt-h) instead of a hand-maintained
   // table that could drift. It lives here by design — editor.ts is where those keymaps are composed, so a
   // second module would just re-import them. Measured end-state (1025), no headroom; #986 owns the split.
-  { file: 'src/editor/editor.ts', maxLines: 1025 },
+  // Raised 1025 → 1040: #481's presence layer (Phase 2 collaboration) adds the `presence` Compartment,
+  // its one-line `presence.of([])` slot in the extension list, and the `setPresenceEnabled` method +
+  // its interface declaration — ~13 LOC net. The layer's own logic lives in `src/editor/presence.ts`
+  // (builder, StateField, publisher); only the compartment wiring can live here, because a compartment
+  // has to be declared inside `createKoineEditor` to be reconfigurable. Measured end-state (1038) plus
+  // a little headroom; #986 still owns the split.
+  { file: 'src/editor/editor.ts', maxLines: 1040 },
   // Frozen 2026-07-09 at 113 LOC, ceil(113 × 1.02) = 116. Guards the #986 split's new sibling from
   // regrowing unguarded — see #981/#757.
   { file: 'src/editor/cmTheme.ts', maxLines: 116 },

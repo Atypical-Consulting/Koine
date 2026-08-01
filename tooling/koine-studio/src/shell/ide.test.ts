@@ -208,6 +208,7 @@ class FakePlatform implements Platform {
   readonly canOpenFolders = true;
   readonly canSaveProjects = true;
   readonly canRunShell = false;
+  readonly canCollaborate = false;
   readonly supportsScenarioExecution = false;
   readonly canUseGit = false;
   readonly canRevealInFileManager = false;

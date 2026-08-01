@@ -223,11 +223,13 @@ and it is deliberately narrower than the word "sandbox" suggests:
     the timeout note — so "it allocated" is never reported as "it loops".
   - *macOS:* a `sandbox-exec` profile that **denies the network** and **denies writes outside the per-run
     directory**.
-  - *Linux:* an unprivileged user + network namespace (`unshare --user --map-root-user --net`) that
-    **denies the network** — but only where the distribution permits unprivileged user namespaces
-    (Ubuntu 24.04's AppArmor policy does not, which is why this repo's own CI runner degrades to a note).
-    No write confinement — Landlock needs a hook .NET does not offer, and bubblewrap is a dependency an
-    editor feature cannot assume.
+  - *Linux:* a **Landlock** ruleset that **denies writes outside the per-run directory** (kernel 5.13+;
+    installed by a hidden `koine sandbox-landlock` launcher that `exec`s the child, since the ruleset has
+    to be installed by the process it confines — [#1781](https://github.com/Atypical-Consulting/Koine/issues/1781)),
+    plus an unprivileged user + network namespace (`unshare --user --map-root-user --net`) that **denies
+    the network** — the latter only where the distribution permits unprivileged user namespaces (Ubuntu
+    24.04's AppArmor policy does not, which is why this repo's own CI runner degrades to a note for the
+    network half; Landlock needs no privileges, so the write half holds there).
   - *Windows:* a **Job Object** carrying the memory and CPU ceilings (and killing the child if the host
     dies). No filesystem or network confinement — a restricted token needs `CreateProcessAsUser`.
   - **Reads stay unrestricted everywhere** (the child must load the runtime and its own assemblies), and
@@ -235,8 +237,9 @@ and it is deliberately narrower than the word "sandbox" suggests:
     and surfaced on `ScenarioChildRun.SandboxNotes`; **a scenario never fails because confinement is
     unavailable.**
 - **It is still not a containment boundary against a hostile actor.** The confinement above is defence in
-  depth: it makes the emitter's "no I/O primitives" premise an *enforced* property on macOS rather than a
-  stated one, and bounds the resource attacks that are the realistic failure. Its job remains protecting
+  depth: it makes the emitter's "no I/O primitives" premise an *enforced* property on macOS and on a
+  Landlock-capable Linux rather than a stated one, and bounds the resource attacks that are the realistic
+  failure. Its job remains protecting
   the **editor host** from hangs, crashes and resource exhaustion. ADR 0011 states that trust model
   plainly and requires revisiting *before* Koine ever executes a model authored by someone other than the
   operator (a hosted playground, a CI bot running a PR's model) — ADR 0012 does not change that, and

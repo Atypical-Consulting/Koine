@@ -35,7 +35,13 @@ internal static class ScenarioSandbox
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>How many probes one <see cref="Plan"/> can run in the worst case: the filesystem/network
-    /// wrapper for this platform, and the shell for the processor-time ceiling.</summary>
+    /// wrapper for this platform, and the shell for the processor-time ceiling.
+    ///
+    /// <para>Unchanged by the Linux write confinement added in issue #1781: <see cref="LandlockAvailable"/>
+    /// asks the KERNEL directly (a <c>landlock_create_ruleset</c> version query, microseconds, no child)
+    /// and then only checks that the launcher verb resolves to a file. Nothing is spawned, so the published
+    /// latency promise below does not move — deliberately, since a mechanism that made every first Linux
+    /// run a second slower would be paid by every host, including the ones it cannot help.</para></summary>
     private const int MaxProbesPerPlan = 2;
 
     /// <summary>
@@ -70,13 +76,39 @@ internal static class ScenarioSandbox
     private static readonly Lazy<bool> UnshareAvailable = new(() =>
         UnsharePath.Value is { } unshare && Probe(unshare, [.. UnshareArguments, TruePath()]));
 
+    /// <summary>The hidden <c>koine</c> verb that installs a Landlock ruleset on itself and then
+    /// <c>exec</c>s the real command (issue #1781). Named here rather than in the CLI because the sandbox
+    /// is what COMPOSES the invocation; the command class binds its own name to this constant.</summary>
+    internal const string LandlockLauncherVerb = "sandbox-landlock";
+
+    /// <summary>How to invoke this same binary as the Landlock launcher, or <c>null</c> where that cannot
+    /// be resolved (an embedder whose <c>koine</c> is reachable only through the host's command
+    /// override — see <see cref="ScenarioExecutionHost.ResolveSelfCommand"/>).</summary>
+    private static readonly Lazy<(string FileName, IReadOnlyList<string> Arguments)?> LandlockLauncher =
+        new(() => OperatingSystem.IsLinux()
+            ? ScenarioExecutionHost.ResolveSelfCommand(LandlockLauncherVerb)
+            : null);
+
+    /// <summary>
+    /// Whether this Linux can confine the child's writes. Both halves are necessary and neither is assumed:
+    /// the KERNEL must speak Landlock (ABI v1, 5.13+, not disabled through <c>lsm=</c>, on an architecture
+    /// whose syscall numbers are known), and the launcher that installs the ruleset must be resolvable.
+    /// Unlike an unprivileged network namespace, Landlock needs no privileges and no user namespace at all,
+    /// so this stays true on the AppArmor-restricted hosts where <see cref="UnshareAvailable"/> is false.
+    /// </summary>
+    private static readonly Lazy<bool> LandlockAvailable = new(() =>
+        OperatingSystem.IsLinux() && LandlockLauncher.Value is { } launcher
+        && File.Exists(launcher.FileName) && LinuxLandlock.AbiVersion >= 1);
+
     /// <summary>
     /// Whether this platform can confine the child's WRITES to its run directory. False does not mean the
     /// scenario will not run — it means the run will carry a note saying so (see
     /// <see cref="ScenarioConfinement.Degradations"/>). Exposed so the sandbox's own tests can assert the
     /// enforced behaviour where it exists and skip — rather than fail — where it does not.
     /// </summary>
-    public static bool FilesystemConfinementAvailable => OperatingSystem.IsMacOS() && MacSandboxAvailable.Value;
+    public static bool FilesystemConfinementAvailable =>
+        (OperatingSystem.IsMacOS() && MacSandboxAvailable.Value)
+        || (OperatingSystem.IsLinux() && LandlockAvailable.Value);
 
     /// <summary>Whether this platform can deny the child the network. See
     /// <see cref="FilesystemConfinementAvailable"/> for what a <c>false</c> means.</summary>
@@ -107,6 +139,20 @@ internal static class ScenarioSandbox
             {
                 // Hexadecimal, no 0x prefix — that is the format the runtime's config reader expects.
                 environment[HeapHardLimitVariable] = bytes.ToString("X", CultureInfo.InvariantCulture);
+            }
+
+            if (options.RestrictFilesystem && FilesystemConfinementAvailable)
+            {
+                // The child's temp directory has to sit INSIDE the only place it may write. The host's
+                // scrub keeps TMPDIR, which names the PARENT of the run directory — so a runtime that
+                // wants a temp path (Directory.CreateTempSubdirectory, a lock file, a shadow copy) would
+                // put it exactly where the confinement says no, and get an UnauthorizedAccessException for
+                // a reason that has nothing to do with the model. Pointing it at the run directory makes
+                // that write legal and, as a bonus, inside what the host deletes when the run ends.
+                foreach (string name in (string[])["TMPDIR", "TMP", "TEMP"])
+                {
+                    environment[name] = runDirectory;
+                }
             }
 
             if (!OperatingSystem.IsWindows())
@@ -212,14 +258,25 @@ internal static class ScenarioSandbox
 
         if (OperatingSystem.IsLinux())
         {
+            // INNERMOST FIRST, and the order is load-bearing. The Landlock launcher must sit INSIDE the
+            // network namespace: a ruleset is irrevocable once installed and denies the mount and /proc
+            // writes `unshare` needs to build its namespaces, so confining first would break the wrapper
+            // that has not run yet. It must equally sit inside the `ulimit` shell added by PlanUnix.
             if (options.RestrictFilesystem)
             {
-                // A write confinement on Linux needs Landlock (a ruleset the CHILD must install between
-                // fork and exec — no hook for it from .NET) or a helper like bubblewrap (a dependency an
-                // editor feature cannot assume). Reads are unrestricted here in any case.
-                degradations.Add("Filesystem confinement was not applied: this Linux host offers no "
-                    + "mechanism the sandbox can apply without a helper, so nothing stopped the executed "
-                    + "code from reading or writing files outside its run directory.");
+                if (LandlockAvailable.Value && LandlockLauncher.Value is { } launcher)
+                {
+                    Wrap(ref file, args, launcher.FileName,
+                        [.. launcher.Arguments, "--run", runDirectory, "--"]);
+                }
+                else
+                {
+                    // Reads are unrestricted here in any case (ADR 0012): the child must load the .NET
+                    // shared framework, which does not live in its run directory.
+                    degradations.Add("Filesystem confinement was not applied: this Linux host offers no "
+                        + "mechanism the sandbox can apply without a helper, so nothing stopped the executed "
+                        + "code from reading or writing files outside its run directory.");
+                }
             }
 
             if (!options.DenyNetwork)
@@ -231,7 +288,9 @@ internal static class ScenarioSandbox
             {
                 degradations.Add("Network confinement was not applied: an unprivileged network namespace "
                     + "could not be created here (unshare is missing, or unprivileged user namespaces are "
-                    + "disabled), so nothing stopped the executed code from opening a connection.");
+                    + "disabled — Ubuntu 23.10 and later restrict them by default through AppArmor's "
+                    + "kernel.apparmor_restrict_unprivileged_userns), so nothing stopped the executed code "
+                    + "from opening a connection.");
                 return;
             }
 
