@@ -190,4 +190,54 @@ public class RustDerivedMemberInvariantTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Task 4 — the regression fence for the issue's own impact statement: both shipped templates that
+    /// carry an invariant over a derived member (<c>saas-subscription</c>'s <c>UsageMeter.overage</c>,
+    /// <c>library</c>'s <c>LoanTerm.fineCents</c>) must emit compiling Rust, not just the hand-authored
+    /// fixtures above. Before the fix both failed <c>cargo check</c> with E0425.
+    /// </summary>
+    [Theory]
+    [InlineData("saas-subscription")]
+    [InlineData("library")]
+    public void Template_with_derived_member_invariant_emits_compiling_rust(string folder)
+    {
+        if (FindTemplateDir(folder) is not { } sources)
+        {
+            Assert.Skip($"Template '{folder}' not found from the test assembly; compile not run.");
+            return;
+        }
+
+        var result = new KoineCompiler().Compile(sources, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's
+    /// sources — mirrors <c>RustSnapshotTests.FindTemplateDir</c>.</summary>
+    private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
+    {
+        for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!Directory.Exists(Path.Combine(dir.FullName, ".git")) && !File.Exists(Path.Combine(dir.FullName, ".git")))
+            {
+                continue;
+            }
+
+            var templateDir = Path.Combine(dir.FullName, "templates", folder);
+            return Directory.Exists(templateDir)
+                ? Directory
+                    .EnumerateFiles(templateDir, "*.koi", SearchOption.AllDirectories)
+                    .OrderBy(p => p, StringComparer.Ordinal)
+                    .Select(p => new SourceFile(p, File.ReadAllText(p)))
+                    .ToList()
+                : null;
+        }
+
+        return null;
+    }
 }
