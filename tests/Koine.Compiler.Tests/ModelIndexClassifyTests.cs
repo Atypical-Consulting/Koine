@@ -13,7 +13,7 @@ namespace Koine.Compiler.Tests;
 /// overload's contract: try local-to-context (then an unambiguous import) first, and only fall back to
 /// the global (last-write-wins) view when that fails.
 /// </summary>
-public class ModelIndexClassifyTests
+public class ModelIndexClassifyTests(ITestOutputHelper output)
 {
     private static ModelIndex IndexOf(string source)
     {
@@ -93,5 +93,93 @@ public class ModelIndexClassifyTests
         // Gamma doesn't declare Money locally — it imports it from Alpha. TryGetDeclIn already resolves
         // this (local, then unambiguous import); Classify(context, typeName) must go through the same path.
         index.Classify("Gamma", "Money").ShouldBe(TypeKind.Value);
+    }
+
+    [Fact]
+    public void Context_aware_is_known_type_tracks_the_context_aware_classification()
+    {
+        var index = IndexOf(SameNameDifferentKinds);
+
+        // IsKnownType(context, name) is defined as "Classify(context, name) is not Unknown", so it must
+        // answer for the same declarations the context-aware Classify resolves — including a name only
+        // reachable through the global fallback — and stay false for a name no context declares.
+        index.IsKnownType("Billing", "Status").ShouldBeTrue();
+        index.IsKnownType("Shipping", "Status").ShouldBeTrue();
+        index.IsKnownType(null, "Status").ShouldBeTrue();
+        index.IsKnownType("Billing", "Nope").ShouldBeFalse();
+        index.IsKnownType(null, "Nope").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The load-bearing premise of <c>SemanticValidator.ValidateTypeRef</c>'s context threading
+    /// (#1715): the two overloads can disagree about WHICH declaration a name means, but never about
+    /// whether the name is known at all. That holds because <c>_byName</c> and <c>_declsByContext</c>
+    /// are filled by two INDEPENDENT traversals (<c>ModelIndex.IndexType</c> over <c>ctx.Types</c>
+    /// with its own aggregate recursion, and <c>ContextNode.AllTypeDecls()</c>) that happen to
+    /// enumerate the same declaration set — so a name resolvable in a context is always a key in the
+    /// flat table too. Nothing in the type system enforces that; this test does, over every type
+    /// reference in every shipped template, so the day the two traversals drift apart it fails here
+    /// rather than silently changing which diagnostics <c>ValidateTypeRef</c> reports.
+    /// </summary>
+    [Fact]
+    public void Context_aware_and_flat_Classify_never_disagree_on_unknown_ness_across_all_templates()
+    {
+        var folders = TemplatesValidationTests.TemplateFolders()
+            .Select(data => (string)data[0])
+            .ToList();
+        folders.ShouldNotBeEmpty("templates/ must contain at least one folder with a template.json");
+
+        int total = 0;
+        foreach (string folder in folders)
+        {
+            string name = Path.GetFileName(folder);
+            KoineModel model = CompileTemplateModel(folder);
+            ModelIndex index = new SemanticModel(model).Index;
+
+            int perTemplate = 0;
+            foreach (ContextNode ctx in model.Contexts)
+            {
+                foreach (TypeRef type in NodeWalker.Descendants(ctx).OfType<TypeRef>())
+                {
+                    bool contextAwareUnknown = index.Classify(ctx.Name, type.Name) == TypeKind.Unknown;
+                    bool flatUnknown = index.Classify(type.Name) == TypeKind.Unknown;
+
+                    contextAwareUnknown.ShouldBe(
+                        flatUnknown,
+                        $"template '{name}', context '{ctx.Name}', type reference '{type.Name}' at " +
+                        $"{type.Span.Line}:{type.Span.Column}: Classify(context, name) says " +
+                        $"{(contextAwareUnknown ? "Unknown" : "known")} but Classify(name) says " +
+                        $"{(flatUnknown ? "Unknown" : "known")} — the flat and per-context type tables " +
+                        "have drifted apart, so ValidateTypeRef's built-in-first classification is no " +
+                        "longer a no-op for the KOI0101 unknown-type report");
+                    perTemplate++;
+                }
+            }
+
+            // A template that contributes nothing would make this test vacuously green.
+            perTemplate.ShouldBeGreaterThan(0, $"template '{name}' yielded no type references to check");
+            total += perTemplate;
+        }
+
+        output.WriteLine($"checked {total} type references across {folders.Count} templates");
+    }
+
+    /// <summary>
+    /// Compiles a template folder in directory mode — every <c>.koi</c> under it as one model, so
+    /// cross-file imports and context maps resolve — exactly as <see cref="TemplatesValidationTests"/>
+    /// does, and returns the bound model.
+    /// </summary>
+    private static KoineModel CompileTemplateModel(string folder)
+    {
+        var sources = Directory
+            .EnumerateFiles(folder, "*.koi", SearchOption.AllDirectories)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .Select(p => new SourceFile(p, File.ReadAllText(p)))
+            .ToList();
+
+        sources.ShouldNotBeEmpty($"template '{Path.GetFileName(folder)}' has no .koi files to compile");
+        var result = new KoineCompiler().Compile(sources, new CSharpEmitter());
+        result.Model.ShouldNotBeNull($"template '{Path.GetFileName(folder)}' produced no model");
+        return result.Model!;
     }
 }
