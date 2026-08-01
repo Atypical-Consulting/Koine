@@ -24,6 +24,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0012](0012-scenario-sandbox-os-confinement.md) | Scenario sandbox confinement uses each platform's native mechanism, best-effort | Proposed |
 | [0013](0013-crdt-over-host-brokered-transport-for-studio-collaboration.md) | Studio real-time collaboration uses a CRDT over a host-brokered transport | Proposed |
 | [0014](0014-scenario-fan-out-by-reflective-in-process-dispatch.md) | Scenario fan-out dispatches downstream reactions reflectively, inside the existing sandbox child | Proposed |
+| [0015](0015-yjs-as-the-crdt-runtime-with-a-studio-owned-codemirror-binding.md) | Yjs is the CRDT runtime, with a Studio-owned CodeMirror binding | Proposed |
 
 ## When to write one
 

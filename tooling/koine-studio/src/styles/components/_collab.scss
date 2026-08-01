@@ -33,6 +33,133 @@
   line-height: 1.5;
 }
 
+/* --- The session panel (#481 Task 4) ---------------------------------------------
+   Start / join / leave, the participant list, the invitation, and the save-authority line. Rendered
+   inside `.koi-collab` on a host that can broker, so it inherits the shell's padding and gap. */
+.koi-collab-session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+  font-size: 0.82rem;
+}
+
+.koi-collab-status {
+  margin: 0;
+  color: var(--koi-muted);
+}
+
+.koi-collab-participants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--koi-space-1-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.koi-collab-participant {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+}
+
+/* The participant's presence colour, so the name in this list and their caret in the buffer read as
+   the same person. Same custom property the decorations use. */
+.koi-collab-swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--koi-presence-color, var(--koi-accent));
+  flex: none;
+}
+
+.koi-collab-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-1);
+}
+
+.koi-collab-label {
+  color: var(--koi-muted);
+  font-size: 0.75rem;
+}
+
+.koi-collab-input {
+  min-width: 0;
+  padding: var(--koi-space-1) var(--koi-space-1-5);
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  background: var(--koi-paper);
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.koi-collab-input:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.koi-collab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--koi-space-1-5);
+}
+
+.koi-collab-btn {
+  border: 1px solid var(--koi-line);
+  border-radius: var(--koi-radius-sm);
+  padding: var(--koi-space-0-5) var(--koi-space-3);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.koi-collab-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.koi-collab-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.koi-collab-btn:focus-visible {
+  outline: 2px solid var(--koi-accent);
+  outline-offset: 1px;
+}
+
+.koi-collab-btn-primary {
+  background: var(--koi-accent);
+  border-color: var(--koi-accent);
+  color: var(--koi-on-accent, #fff);
+}
+
+.koi-collab-btn-danger {
+  border-color: var(--koi-danger, var(--koi-line));
+  color: var(--koi-danger, inherit);
+}
+
+/* Who owns the canonical save. Stated on both sides and never styled away, because a participant who
+   is wrong about this loses work. */
+.koi-collab-authority {
+  margin: 0;
+  padding: var(--koi-space-1-5);
+  border-left: 3px solid var(--koi-line);
+  color: var(--koi-muted);
+  line-height: 1.5;
+}
+.koi-collab-authority.is-authority {
+  border-left-color: var(--koi-accent);
+  color: inherit;
+}
+
+.koi-collab-error {
+  margin: 0;
+  padding: var(--koi-space-1-5);
+  border-left: 3px solid var(--koi-danger, var(--koi-accent));
+  color: var(--koi-danger, inherit);
+  line-height: 1.5;
+}
+
 /* --- Remote presence decorations -------------------------------------------------
    A remote caret is a zero-width widget, so it can't be painted with a background: it is an absolutely
    positioned 2px bar drawn in the participant's colour, with the name label riding above it. */
