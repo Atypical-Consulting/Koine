@@ -1012,4 +1012,92 @@ public class TypeScriptConformanceTests
             "a read model's direct field must classify the SOURCE type's own bare member reference against "
             + "the source's own owning context, not the read model's:\n" + string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1531 (audit, Task 2) — the Rust (#1467/PR #1476) and Java (#1480/PR #1521) emitters both
+    /// shipped the identical bug in their factory constructor-argument loop's auto-bound branch: a
+    /// <c>required</c>-bucket member declared optional but carrying no member-level default
+    /// (<c>total: Decimal?</c>), auto-bound to a NON-optional same-named factory parameter
+    /// (<c>create make(total: Decimal)</c>), had its bare value passed straight into a constructor slot
+    /// typed <c>Option&lt;T&gt;</c>/<c>Optional&lt;T&gt;</c> — a real <c>rustc</c> E0308 / <c>javac</c>
+    /// "incompatible types" error, fixed by wrapping in <c>Some(…)</c>/<c>Optional.of(…)</c>.
+    /// <para>
+    /// TypeScript's <c>WriteFactory</c> likewise passes the bare value — but it maps <c>T?</c> to the
+    /// UNION <c>T | undefined</c> (<c>TypeScriptTypeMapper</c>), not to a wrapper value, and <c>T</c> is
+    /// a member of that union, so the assignment is already well-typed. There is no wrap construct to
+    /// apply and none is needed. This test records that negative audit result and locks it in: it
+    /// asserts the union-typed constructor slot AND the bare, unwrapped argument, then proves with a
+    /// real <c>tsc --noEmit --strict</c> run that the pair type-checks. Were the TypeScript backend ever
+    /// to move to a wrapper-typed optional representation, this test fails and the Rust/Java wrap
+    /// becomes required.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Factory_autobound_parameter_binding_to_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(total: Decimal) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no tsc required): the optional-declared member's constructor slot is a
+        // `T | undefined` UNION, so the auto-bound non-optional parameter is passed through bare.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("total: Decimal | undefined");
+        product.ShouldContain("return new Product(id, total);");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "an auto-bound non-optional parameter must be assignable straight into an optional-declared "
+            + "member's `T | undefined` constructor slot:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The explicit-init half of the same #1531 audit — the branch Rust #1452/PR #1464 and Java
+    /// #1479/PR #1518 fixed. A <c>total -&gt; 5.0</c> initialization of an optional-declared,
+    /// default-less <c>required</c> member yields a non-optional value; Rust/Java must wrap it,
+    /// TypeScript must not, for the same union-vs-wrapper reason. Since nothing is ever wrapped, the
+    /// double-wrap hazard the Rust/Java fixes had to guard against cannot arise here at all.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make() {
+                  total -> 5.0
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("total: Decimal | undefined");
+        product.ShouldContain("return new Product(id, new Decimal('5.0'));");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "an explicitly initialized non-optional value must be assignable straight into an "
+            + "optional-declared member's `T | undefined` constructor slot:\n"
+            + string.Join("\n", check.Errors));
+    }
 }
