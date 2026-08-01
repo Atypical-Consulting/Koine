@@ -363,6 +363,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.QuantityTypeMismatch = "KOI0218
 const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.VerbAnnotationArgument = "KOI1213" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.VersionAnnotationOnCommand = "KOI1214" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.UnboundRouteToken = "KOI1215" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.UnaryOperandTypeMismatch = "KOI0222" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectMulDivMismatch = "KOI0221" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!
@@ -1587,3 +1588,6 @@ virtual Koine.Compiler.Emit.EmitTargetInfo.PrintMembers(System.Text.StringBuilde
 ~override Koine.Compiler.Services.SemanticToken.ToString() -> string
 ~override Koine.Compiler.Services.SourceFile.Equals(object obj) -> bool
 ~override Koine.Compiler.Services.SourceFile.ToString() -> string
+Koine.Compiler.Ast.RouteTemplate
+static Koine.Compiler.Ast.RouteTemplate.ParameterName(string! token) -> string!
+static Koine.Compiler.Ast.RouteTemplate.Tokens(string! route) -> System.Collections.Generic.IReadOnlyList<string!>!

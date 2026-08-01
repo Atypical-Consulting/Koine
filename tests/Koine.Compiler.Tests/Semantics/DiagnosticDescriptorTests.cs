@@ -34,6 +34,7 @@ public class DiagnosticDescriptorTests
         DiagnosticCodes.AnnotationVersionAboveContext, // SemanticValidator.cs:86,96
         DiagnosticCodes.AggregateNameMatchesRoot,      // SemanticValidator.cs (AggregateDecl case)
         DiagnosticCodes.AmbiguousMultiOwnerReference,  // CrossContextTypeValidator.cs
+        DiagnosticCodes.UnboundRouteToken,             // CqrsValidator.cs (ValidateRouteTokenBindings, #1748)
     };
 
     [Fact]
