@@ -1998,4 +1998,54 @@ public class PhpConformanceTests
             "an explicitly initialized non-optional value must be assignable straight into an "
             + "optional-declared member's `?T` constructor slot:\n" + string.Join("\n", types.Errors));
     }
+
+    /// <summary>
+    /// Issue #1731: the factory constructor-argument loop matched a same-named factory parameter to
+    /// an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>), not via the shared,
+    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already used by the C#, Kotlin,
+    /// Java and Rust emitters — which additionally requires matching type shape and that an
+    /// OPTIONAL parameter never auto-bind to a NON-optional member. This is the reverse direction from
+    /// the #1531 audit pinned above (there the MEMBER was optional and the parameter was not); here the
+    /// PARAMETER is optional (<c>total: Decimal?</c>) and the member is not (<c>total: Decimal = 0.0</c>).
+    /// Before the fix, the optional parameter was bound straight into the non-optional constructor
+    /// slot — a real <c>phpstan --level max</c> error (<c>Decimal|null</c> is not assignable to
+    /// <c>Decimal</c>). The member carries its own literal default so that, once <c>AutoBinds</c>
+    /// correctly rejects the auto-bind, the ctor-arg loop falls through to a real, working branch (the
+    /// member's own default) instead of the unrelated "required field left uninitialized" gap a
+    /// default-less member would hit (an omitted/missing-argument error, which would prove nothing
+    /// about this fix).
+    /// </summary>
+    [Fact]
+    public void Optional_parameter_does_not_auto_bind_a_non_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal = 0.0
+
+                create make(total: Decimal?) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no phpstan required): the optional parameter must NOT be passed directly
+        // into the non-optional member's constructor slot.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldNotContain("$instance = new self($id, $total);");
+        product.ShouldContain("$instance = new self($id, new \\Koine\\Runtime\\Decimal('0.0'));");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "an optional factory parameter must not auto-bind into a non-optional member's constructor "
+            + "slot:\n" + string.Join("\n", types.Errors));
+    }
 }

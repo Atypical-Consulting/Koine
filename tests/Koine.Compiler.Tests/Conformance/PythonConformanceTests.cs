@@ -1702,6 +1702,49 @@ public class PythonConformanceTests
             + string.Join("\n", run.Errors));
     }
 
+    /// <summary>
+    /// Issue #1731: the factory constructor-argument loop matched a same-named factory parameter to
+    /// an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>), not via the shared,
+    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already used by the C#, Kotlin,
+    /// Java and Rust emitters — which additionally requires matching type shape and that an OPTIONAL
+    /// parameter never auto-bind to a NON-optional member. This is the reverse direction from the
+    /// #1531 audit pinned above (there the MEMBER was optional and the parameter was not); here the
+    /// PARAMETER is optional (<c>total: Decimal?</c>) and the member is not (<c>total: Decimal = 0.0</c>).
+    /// Before the fix, the optional parameter was bound straight into the non-optional constructor
+    /// slot — a real <c>mypy --strict</c> error (<c>Decimal | None</c> is not assignable to
+    /// <c>Decimal</c>). The member carries its own literal default so that, once <c>AutoBinds</c>
+    /// correctly rejects the auto-bind, the ctor-arg loop falls through to a real, working branch
+    /// (the member's own default) instead of the unrelated "required field left uninitialized"
+    /// (KOI0806) gap that a default-less member would hit.
+    /// </summary>
+    [Fact]
+    public void Optional_parameter_does_not_auto_bind_a_non_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal = 0.0
+
+                create make(total: Decimal?) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no mypy required): the optional parameter must NOT be passed directly into
+        // the non-optional member's constructor slot; instead the ctor-arg loop falls through to the
+        // member's own literal default (`total: Decimal = 0.0`), rendered via the same Decimal(...)
+        // literal formatting as an explicit `field -> value` initialization.
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldNotContain("instance = cls(id=id, total=total)");
+        product.ShouldContain("""instance = cls(id=id, total=Decimal("0.0"))""");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

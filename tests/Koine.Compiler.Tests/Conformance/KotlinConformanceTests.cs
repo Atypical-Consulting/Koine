@@ -770,6 +770,59 @@ public class KotlinConformanceTests
             + "optional-declared member's nullable constructor slot:\n" + string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1731 (Task 4, the control). The TS/Python/PHP emitters (Tasks 1-3) each matched a
+    /// same-named factory parameter to an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>),
+    /// not via the shared, target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate — so an OPTIONAL
+    /// parameter could wrongly auto-bind to a NON-optional member. Kotlin's own
+    /// <c>BuildFactoryCtorArgs</c> (<see cref="KotlinEmitter"/>) already calls
+    /// <c>factory.Parameters.Any(p =&gt; MemberAnalysis.AutoBinds(p, m))</c> and was never wrong.
+    /// <para>
+    /// <b>This is NOT a red-green regression test — it passes immediately, before and after Tasks
+    /// 1-3.</b> It exists purely as a control: it pins Kotlin's already-correct fall-through so that
+    /// a future regression in the shared <c>AutoBinds</c> predicate itself (rather than in one
+    /// emitter's call site) gets caught here too, not just on the three emitters that needed fixing.
+    /// </para>
+    /// <para>
+    /// The member (<c>total: Decimal</c>) is non-optional and default-less; the factory parameter
+    /// (<c>total: Decimal?</c>) is optional. <c>AutoBinds</c> correctly refuses the match (an optional
+    /// parameter must never auto-bind to a non-optional member), so <c>BuildFactoryCtorArgs</c> falls
+    /// through past the auto-bind branch and the unset-optional branch to the benign type-default
+    /// branch, emitting <c>java.math.BigDecimal.ZERO</c> for the member's constructor slot.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Optional_parameter_does_not_auto_bind_a_non_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make(total: Decimal?) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no kotlinc required): the optional parameter must NOT auto-bind into the
+        // non-optional member's constructor slot — the ctor arg must fall through to the benign
+        // type default instead.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("shop/Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldNotContain("return Product(id, total)");
+        product.ShouldContain("return Product(id, java.math.BigDecimal.ZERO)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(
+            "an optional factory parameter must not auto-bind into a non-optional member's "
+            + "constructor slot:\n" + string.Join("\n", r.Errors));
+    }
+
     /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's sources.</summary>
     private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
     {
