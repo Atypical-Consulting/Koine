@@ -213,6 +213,100 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return (since, deprecated);
     }
 
+    /// <summary>
+    /// Reads the <c>@route("…")</c> / <c>@get</c>|<c>@post</c>|<c>@put</c>|<c>@delete</c>|<c>@patch</c> /
+    /// <c>@auth("…")</c> API annotations preceding a command or query declaration (R19). A verb annotation
+    /// becomes its uppercased HTTP method. Unknown annotation names are ignored, exactly as
+    /// <see cref="ReadAnnotations"/> does.
+    ///
+    /// <para>The parser reads, it never rejects: a repeated annotation keeps the LAST one's value but
+    /// records every occurrence in the matching <see cref="ApiAnnotationInfo"/> count, an argument on a
+    /// verb annotation contributes <see cref="ApiAnnotationInfo.VerbArgumentSpan"/>, and an
+    /// argument-less or malformed <c>@route</c>/<c>@auth</c> still contributes its span — so
+    /// <c>Semantics/</c> can diagnose all of it at the offending annotation. The returned info is
+    /// <c>null</c> when no API annotation is present.</para>
+    /// </summary>
+    private (string? Route, string? Verb, string? Auth, ApiAnnotationInfo? Info) ReadApiAnnotations(
+        IReadOnlyList<KoineParser.AnnotationContext> annotations)
+    {
+        string? route = null;
+        string? verb = null;
+        string? auth = null;
+        SourceSpan routeSpan = SourceSpan.None;
+        SourceSpan verbSpan = SourceSpan.None;
+        SourceSpan authSpan = SourceSpan.None;
+        SourceSpan verbArgumentSpan = SourceSpan.None;
+        var routeCount = 0;
+        var verbCount = 0;
+        var authCount = 0;
+
+        for (var i = 0; i < annotations.Count; i++)
+        {
+            KoineParser.AnnotationContext a = annotations[i];
+            var name = a.Identifier().GetText();
+            switch (name)
+            {
+                case "route":
+                    routeSpan = SpanOf(a);
+                    routeCount++;
+                    route = a.StringLiteral() is { } rv ? UnescapeString(StripQuotes(rv.GetText())) : null;
+                    break;
+                case "get" or "post" or "put" or "delete" or "patch":
+                    verbSpan = SpanOf(a);
+                    verb = name.ToUpperInvariant();
+                    verbCount++;
+                    // A verb is a bare marker; an argument on one configures nothing, so keep the first
+                    // offender's span rather than dropping the argument without a word.
+                    if (verbArgumentSpan.IsNone && (a.StringLiteral() is not null || a.IntLiteral() is not null))
+                    {
+                        verbArgumentSpan = verbSpan;
+                    }
+
+                    break;
+                case "auth":
+                    authSpan = SpanOf(a);
+                    authCount++;
+                    auth = a.StringLiteral() is { } av ? UnescapeString(StripQuotes(av.GetText())) : null;
+                    break;
+            }
+        }
+
+        ApiAnnotationInfo? info = routeSpan.IsNone && verbSpan.IsNone && authSpan.IsNone
+            ? null
+            : new ApiAnnotationInfo
+            {
+                RouteSpan = routeSpan,
+                VerbSpan = verbSpan,
+                AuthSpan = authSpan,
+                VerbArgumentSpan = verbArgumentSpan,
+                RouteCount = routeCount,
+                VerbCount = verbCount,
+                AuthCount = authCount
+            };
+
+        return (route, verb, auth, info);
+    }
+
+    /// <summary>
+    /// The span of the first <c>@since</c>/<c>@deprecated</c> annotation in <paramref name="annotations"/>,
+    /// or <see cref="SourceSpan.None"/> when there is none (R19 / #1219). Used by the command reader:
+    /// <c>commandDecl</c> gained a leading <c>annotation*</c> for the API annotations, which also made the
+    /// evolution annotations parse there — but a command is not a type declaration and has nowhere to hold
+    /// them, so their span is recorded for <c>Semantics/</c> to reject rather than dropped in silence.
+    /// </summary>
+    private SourceSpan UnsupportedVersionAnnotationSpan(IReadOnlyList<KoineParser.AnnotationContext> annotations)
+    {
+        for (var i = 0; i < annotations.Count; i++)
+        {
+            if (annotations[i].Identifier().GetText() is "since" or "deprecated")
+            {
+                return SpanOf(annotations[i]);
+            }
+        }
+
+        return SourceSpan.None;
+    }
+
     // ---- Context map & integration-event wiring (R14) ----------------------
 
     private ContextRelation BuildRelation(KoineParser.RelationDeclContext ctx)
@@ -472,13 +566,21 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         List<Param> criteria = ctx.paramList() is { } pl
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
-        return new QueryDecl(NameOf(ctx.Identifier()), criteria, BuildTypeRef(ctx.typeRef()))
+        var (route, verb, auth, api) = ReadApiAnnotations(ctx.annotation());
+        // A query is a TypeDecl, so the same leading annotation list also carries the R15.1 evolution
+        // annotations — read them here too, or `@deprecated("…") query Q(…)` would parse and vanish.
+        var (since, deprecated) = ReadAnnotations(ctx.annotation());
+
+        return new QueryDecl(NameOf(ctx.Identifier()), criteria, BuildTypeRef(ctx.typeRef()), route, verb, auth)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
-            TrailingTrivia = TrailingTriviaFor(ctx)
+            TrailingTrivia = TrailingTriviaFor(ctx),
+            Since = since,
+            Deprecated = deprecated,
+            ApiAnnotations = api
         };
     }
 
@@ -713,14 +815,22 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             : new List<Param>();
         var body = Map(ctx.commandStmt(), BuildCommandStmt);
         TypeRef? returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
+        var (route, verb, auth, api) = ReadApiAnnotations(ctx.annotation());
+        // A command is not a TypeDecl: it has no Since/Deprecated to hold an evolution annotation, so
+        // record where one sat and let Semantics/ reject it (KOI1214) instead of dropping it silently.
+        if (UnsupportedVersionAnnotationSpan(ctx.annotation()) is { IsNone: false } versionSpan)
+        {
+            api = (api ?? new ApiAnnotationInfo()) with { UnsupportedVersionSpan = versionSpan };
+        }
 
-        return new CommandDecl(NameOf(ctx.Identifier()), parameters, body, returnType)
+        return new CommandDecl(NameOf(ctx.Identifier()), parameters, body, returnType, route, verb, auth)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
-            TrailingTrivia = TrailingTriviaFor(ctx)
+            TrailingTrivia = TrailingTriviaFor(ctx),
+            ApiAnnotations = api
         };
     }
 

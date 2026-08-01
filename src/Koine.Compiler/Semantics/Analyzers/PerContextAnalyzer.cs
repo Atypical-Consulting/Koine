@@ -5,7 +5,7 @@ namespace Koine.Compiler.Semantics;
 /// <summary>
 /// Built-in analyzer (issue #69): the per-bounded-context semantic pass. It drives — IN ORDER, one
 /// whole context at a time — context scoping, annotation-version checks, per-type validation, specs,
-/// services, policies, and integration events. This interleaving is load-bearing: compiler
+/// services, policies, integration events, and API-route collisions. This interleaving is load-bearing: compiler
 /// diagnostics are emitted in raw append order (they are NOT position-sorted before
 /// snapshotting/output), so all of context A's diagnostics must precede all of context B's, exactly
 /// as the pre-refactor <c>SemanticValidator.Validate</c> produced them. Splitting these concerns into
@@ -40,6 +40,10 @@ internal sealed class PerContextAnalyzer : IModelAnalyzer
             SemanticValidator.ValidateServices(ctx, index, resolver, enumMembers, diagnostics);
             SemanticValidator.ValidatePolicies(ctx, index, resolver, enumMembers, diagnostics);
             IntegrationEventValidator.Validate(ctx, index, context.Model.ContextMap is not null, diagnostics);
+
+            // Last: the only R19 API-annotation rule that is a property of the whole context rather than
+            // of one declaration — two commands/queries resolving to the same HTTP route AND verb (#1219).
+            CqrsValidator.ValidateApiRoutes(ctx, diagnostics);
         }
     }
 }

@@ -115,15 +115,15 @@ Koine **never** emits `.csproj`/`PackageReference`/`Directory.Packages.props` �
 
 Request/response **records** need not be re-derived — reuse the Application layer's already-emitted command request records + read-model DTOs; the `api` layer emits only the binding.
 
-**Scope of what's generated (honest acceptance).** v1 generates the *mechanical* binding skeleton — the uniform command→POST / query→GET wiring that's identical for every operation and therefore high-value to codegen and error-prone to hand-maintain. App-specific policy — authentication, non-default status codes, cookies, content negotiation — stays hand-annotated: it's genuinely per-app and stays out of v1 until the `@auth`/`@route`/status annotations land (v2). This is a convention-first layer with annotation escape hatches as the maturation path, not a gap to be closed before shipping.
+**Scope of what's generated (honest acceptance).** v1 generates the *mechanical* binding skeleton — the uniform command→POST / query→GET wiring that's identical for every operation and therefore high-value to codegen and error-prone to hand-maintain. App-specific policy — authentication, non-default status codes, cookies, content negotiation — stayed hand-written in v1. The `@route`/verb/`@auth` escape hatches have since landed (#1219), so route, verb and authorization are now declarable; non-default status codes, cookies and content negotiation still stay hand-written. This is a convention-first layer with annotation escape hatches as the maturation path, not a gap to be closed before shipping.
 
 **Sequencing (recommended, not required).** The `api` layer binds to the Application layer's *already-emitted* command request records and read-model DTOs, which exist today independent of W1. W1 only improves the *returned* shape (`HandlerResult=readModel`, `NotFound→404`), so it is a quality precedent that makes the generated endpoints cleaner — not a compile-time blocker. Sequence W2 after W1 by preference, not necessity.
 
-**Grammar:** none for v1 (ship on the OpenApi convention). Optional `@route`/`@auth`/status annotations are the v2 override axis — see *Grammar note* (one small change adds `annotation*` to the `command`/`query` decl rules).
+**Grammar:** none for v1 (ship on the OpenApi convention). ✅ **v2 override axis landed (#1219).** `commandDecl` (`KoineParser.g4:162`) and `queryDecl` (`:126`) now carry an `annotation*` prefix, and three independent annotations override the convention per declaration: `@route("/orders/{id}")` (the path, verbatim; must be absolute), one of `@get`/`@post`/`@put`/`@delete`/`@patch` (the verb), and `@auth("admin")` (an authorization requirement). They read off the shared `RouteInfo`, so the `api` layer emits the per-verb `endpoints.MapPut(…).RequireAuthorization("admin")` and the `openapi` target keys the operation at the same path/verb with a `security` requirement — the two can't disagree. New diagnostics: `KOI1208` `InvalidRouteOverride`, `KOI1209` `MultipleVerbAnnotations`, `KOI1210` `EmptyAuthRole`, `KOI1211` `DuplicateApiRoute`, `KOI1212` `DuplicateApiAnnotation`, `KOI1213` `VerbAnnotationArgument`, `KOI1214` `VersionAnnotationOnCommand`. **Status codes are still convention-only** — that axis remains unbuilt.
 
 **Packages:** consumer adds `<FrameworkReference Include="Microsoft.AspNetCore.App" />` (per the package policy — Koine emits no csproj/PackageReference; the code references ASP.NET types by FQN).
 
-**Acceptance.** Regenerates the uniform GET/POST binding in Linelo's `Endpoints.cs` — the 8 GET (query→GET) + 17 POST (command→POST) of its 149 LOC — plus the DTO half of `Contracts.cs`. The remaining 1 PUT (a non-default verb) and Linelo's bespoke cookie-auth glue stay hand-written until the verb/`@route` and `@auth` annotations land — the expected v1/v2 seam, not a shortfall.
+**Acceptance.** Regenerates the uniform GET/POST binding in Linelo's `Endpoints.cs` — the 8 GET (query→GET) + 17 POST (command→POST) of its 149 LOC — plus the DTO half of `Contracts.cs`. The remaining 1 PUT (a non-default verb) is now declarable with `@put`/`@route` (#1219), and `@auth` marks an endpoint as requiring an authorization policy; Linelo's bespoke cookie-auth glue — registering that policy and the authentication scheme behind it — stays hand-written, since Koine models *which* operations require authorization, never *how* you authenticate.
 
 ---
 
@@ -189,14 +189,14 @@ Implementation is **contained**, not broad: layout is a single chokepoint — re
 
 ---
 
-## Grammar note (shared by W2/W3, deferred)
+## Grammar note (shared by W2/W3 — W2's half landed in #1219)
 
-Annotations today take a **single int/string arg** (`KoineParser.g4:99`) and only `@since`/`@deprecated` are consumed (`Nodes.cs:399-403`). They attach to type-level decls **and to fields/members** (`member : annotation* …`, `KoineParser.g4:226`). Crucially, `integrationEventDecl` (`:94`) and `eventDecl` (`:222`) **already carry an `annotation*` prefix** — only `command` (`:160`), `query` (`:125`), and `usecase` (`:114`) do not. So the override surface splits cleanly:
+Annotations take a **single int/string arg** (`KoineParser.g4:99`), and the annotation arg rule was **not** widened — the verb annotations are argument-less, which the existing rule already allows. They attach to type-level decls **and to fields/members** (`member : annotation* …`). `integrationEventDecl` and `eventDecl` **already carried an `annotation*` prefix**; `command` and `query` gained one in #1219, leaving only `usecase` without. So the override surface splits cleanly:
 
 - **`@broadcast("groupKey")` on an integration event (W3) needs no grammar change** — integration events already accept annotations; it is a builder-visitor + validator + emitter addition only.
-- **`@route("…")`/`@get`/`@post`/`@auth("role")` on commands/queries (W2)** need **one** grammar change — add `annotation*` to the `command`/`query`/`usecase` decl rules (plus a widening of the annotation arg rule at `:99` only if a non-int/string arg is ever wanted).
+- **`@route("…")`/`@get`…`@patch`/`@auth("role")` on commands/queries (W2)** ✅ **Done (#1219)** — one grammar change (`annotation*` on `commandDecl` `:162` / `queryDecl` `:126`), read in `KoineModelBuilderVisitor.ReadApiAnnotations`, validated in `CqrsValidator.ValidateApiAnnotations` (`KOI1208`–`KOI1210`, `KOI1212`–`KOI1214`) plus the context-level `CqrsValidator.ValidateApiRoutes` (`KOI1211`, route+verb collisions), and consumed by both HTTP targets off the shared `RouteInfo`. `usecase` was left alone: it has no HTTP surface to override.
 
-**Not needed for v1** — both emitters ship on convention first. A first-class `endpoint`/`hub` block is the richer alternative but a large grammar+AST+validator+all-emitter surface; not recommended for v1.
+**Neither was needed for v1** — both emitters ship on convention first, the annotations refine it. A first-class `endpoint`/`hub` block is the richer alternative but a large grammar+AST+validator+all-emitter surface; still not recommended.
 
 **Prior-art check:** repo-wide grep found no existing intent toward a web/http/endpoint/controller/SignalR/realtime C# emitter — both are genuinely new surface, no collision risk.
 

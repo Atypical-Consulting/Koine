@@ -21,7 +21,7 @@ for the enclosing `aggregate` grammar). The relevant productions are:
 
 ```ebnf
 commandDecl
-    : 'command' Identifier ( '(' paramList? ')' )? ( ':' type_ref )? '{' commandStmt* '}'
+    : annotation* 'command' Identifier ( '(' paramList? ')' )? ( ':' type_ref )? '{' commandStmt* '}'
     ;
 
 paramList
@@ -77,7 +77,8 @@ stateRule
 ```
 
 A `commandDecl` names the operation, optionally takes `paramList` parameters in parentheses, optionally declares
-a return `type_ref` after `:`, and lists `commandStmt`s in braces. Each `commandStmt` is one of:
+a return `type_ref` after `:`, and lists `commandStmt`s in braces. The leading `annotation*` carries the optional
+HTTP surface (`@route`, a verb, `@auth` — see [§11.3.4](#1134-api-annotations)). Each `commandStmt` is one of:
 
 - **`requiresClause`** — a precondition guard (`requires <expr> "message"`).
 - **`transition`** — a field assignment (`field -> value`).
@@ -185,6 +186,28 @@ Rules:
 This mirrors what [factories (§12)](/Koine/reference/factories/) (which already `return` the aggregate) and
 [use-cases (§15)](/Koine/reference/application-cqrs/) (which already take an optional `: Type` mapping to `Task<T>`)
 have always done. Commands without a return type are unchanged — they stay `public void`.
+
+### 11.3.4 API annotations
+
+A command is also one HTTP operation, derived by convention as `POST /{entity}/{command}` (kebab-cased) by both
+the `openapi` target and the C# api layer. Three optional annotations override that convention — `@route("…")`
+for the path, one of `@get`/`@post`/`@put`/`@delete`/`@patch` for the verb, and `@auth("…")` to require
+authorization:
+
+```koine
+@route("/orders/{id}")
+@put
+@auth("admin")
+command submit(note: String) {
+  requires status == Draft "only a draft order can be submitted"
+  status -> Submitted
+}
+```
+
+The annotations change nothing about the emitted domain method — `Submit(string note)` is byte-identical
+either way. They are read only when you ask for an HTTP surface (`--layers api`, `--target openapi`). Queries take
+the same three; the full rules, the emitted shapes, and the `KOI1208`–`KOI1214` diagnostics live with them in
+[API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations).
 
 ## 11.4 Translation to C#
 
@@ -435,3 +458,4 @@ context Payments version 1 {
   `policy … when Event then Target.command(…)`.
 - [Invariants (§10)](/Koine/reference/invariants/) — the guard expression grammar shared with `requires` and `invariant`.
 - [Expressions (§9)](/Koine/reference/expressions/) — the expression grammar used in `requires`, `transition`, and `emit` payloads.
+- [Application layer & CQRS (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) — the `@route`/verb/`@auth` annotations a command shares with a `query`.
