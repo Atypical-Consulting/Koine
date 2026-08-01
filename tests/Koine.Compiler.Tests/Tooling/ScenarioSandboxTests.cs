@@ -19,6 +19,7 @@ namespace Koine.Compiler.Tests;
 /// outlives its deadline is killed and reported as a not-ok result with a timeout note, and the per-run
 /// temp directory is gone afterwards even on the kill path.</para>
 /// </summary>
+[Collection(ScenarioSandboxCollection.Name)]
 public class ScenarioSandboxTests
 {
     /// <summary>A generous budget for the honest round-trip: the child parses, emits, Roslyn-compiles and
@@ -212,9 +213,9 @@ public class ScenarioSandboxTests
     {
         RequireUnixStubs();
 
-        string report = Path.Combine(Path.GetTempPath(), "koine-heap-" + Guid.NewGuid().ToString("N") + ".txt");
-        string stub = WriteStub(
-            "printf '%s' \"${DOTNET_GCHeapHardLimit-}\" > '" + report + "'\n" + EchoResult);
+        // Reported through the result tree rather than a scratch file: filesystem confinement is exactly
+        // what would deny the child that file, so a stub that wrote one would be testing itself.
+        string stub = WriteStub(Report("heap=${DOTNET_GCHeapHardLimit-}"));
 
         try
         {
@@ -224,14 +225,12 @@ public class ScenarioSandboxTests
 
             // The ceiling reached the child THROUGH the environment scrub — the scrub clears the block
             // wholesale, so a confinement variable set before it would silently vanish.
-            File.Exists(report).ShouldBeTrue(report);
-            File.ReadAllText(report).ShouldBe(
-                ScenarioSandboxOptions.DefaultMemoryLimitBytes.ToString("X", CultureInfo.InvariantCulture));
+            Probed(run).ShouldBe(
+                "heap=" + ScenarioSandboxOptions.DefaultMemoryLimitBytes.ToString("X", CultureInfo.InvariantCulture));
         }
         finally
         {
             Forget(stub);
-            Forget(report);
         }
     }
 
@@ -310,6 +309,139 @@ public class ScenarioSandboxTests
         }
     }
 
+    // ------------------------------------------------------------------------
+    // OS-level confinement (#1759): filesystem and network, where the platform has a mechanism.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void A_confined_child_may_write_inside_its_run_directory_and_nowhere_else()
+    {
+        RequireUnixStubs();
+        if (!ScenarioSandbox.FilesystemConfinementAvailable)
+        {
+            Assert.Skip("This platform has no filesystem confinement mechanism; degradation is asserted "
+                + "by " + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
+                + ".");
+        }
+
+        string outside = Path.Combine(Path.GetTempPath(), "koine-outside-" + Guid.NewGuid().ToString("N") + ".txt");
+        string stub = WriteStub(
+            "inside=denied; outside=allowed\n"
+            + "if : > ./inside.txt 2>/dev/null; then inside=allowed; fi\n"
+            + "if : > '" + outside + "' 2>/dev/null; then outside=allowed; else outside=denied; fi\n"
+            + Report("inside=${inside} outside=${outside}"));
+
+        try
+        {
+            ScenarioChildRun run = RunStub(stub, ScenarioSandboxOptions.Default);
+
+            // The run directory is the child's scratch space and must stay writable — a confinement that
+            // also broke the legitimate write would be indistinguishable from a broken sandbox.
+            Probed(run).ShouldBe("inside=allowed outside=denied");
+            File.Exists(outside).ShouldBeFalse(outside);
+        }
+        finally
+        {
+            Forget(stub);
+            Forget(outside);
+        }
+    }
+
+    [Fact]
+    public void A_confined_child_cannot_open_a_network_connection()
+    {
+        RequireUnixStubs();
+        if (!ScenarioSandbox.NetworkConfinementAvailable)
+        {
+            Assert.Skip("This platform has no network confinement mechanism; degradation is asserted by "
+                + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
+                + ".");
+        }
+
+        if (!File.Exists(BashPath))
+        {
+            // /bin/sh is dash on most Linuxes, and only bash speaks the /dev/tcp pseudo-device this probe
+            // needs. Skipping is honest; asserting a connection succeeded would not be.
+            Assert.Skip("The network probe needs " + BashPath + ".");
+        }
+
+        // 203.0.113.0/24 is TEST-NET-3 (RFC 5737): reserved for documentation, so an UNCONFINED attempt
+        // fails by timing out rather than by reaching anything — and the confined one fails INSTANTLY,
+        // which is what the short shell timeout below distinguishes.
+        string stub = WriteStub(
+            "network=allowed\n"
+            + "if ! (exec 3<>/dev/tcp/203.0.113.1/80) 2>/dev/null; then network=denied; fi\n"
+            + Report("network=${network}"),
+            BashPath);
+
+        try
+        {
+            ScenarioChildRun run = RunStub(stub, ScenarioSandboxOptions.Default, TimeSpan.FromSeconds(20));
+            Probed(run).ShouldBe("network=denied");
+        }
+        finally
+        {
+            Forget(stub);
+        }
+    }
+
+    [Fact]
+    public void A_plan_reports_a_degradation_for_exactly_what_this_platform_cannot_enforce()
+    {
+        string runDirectory = Path.Combine(Path.GetTempPath(), "koine-plan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runDirectory);
+        try
+        {
+            using ScenarioConfinement full = ScenarioSandbox.Plan(
+                "koine", ["scenario-exec"], runDirectory, ScenarioSandboxOptions.Default);
+
+            bool everything = ScenarioSandbox.FilesystemConfinementAvailable
+                && ScenarioSandbox.NetworkConfinementAvailable;
+            if (everything)
+            {
+                full.Degradations.ShouldBeEmpty();
+            }
+            else
+            {
+                full.Degradations.ShouldNotBeEmpty(
+                    "a platform that cannot enforce everything must SAY which part it dropped");
+            }
+
+            // Nothing requested, nothing to degrade — and the command comes back untouched, which is what
+            // makes "confinement off" a real state rather than a differently-worded confinement.
+            using ScenarioConfinement none = ScenarioSandbox.Plan(
+                "koine", ["scenario-exec"], runDirectory, ScenarioSandboxOptions.None);
+            none.Degradations.ShouldBeEmpty();
+            none.FileName.ShouldBe("koine");
+            none.Arguments.ShouldBe(["scenario-exec"]);
+            none.Environment.ShouldBeEmpty();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(runDirectory, recursive: true);
+            }
+            catch (Exception)
+            {
+                // A leftover temp directory is not a test failure.
+            }
+        }
+    }
+
+    private const string BashPath = "/bin/bash";
+
+    /// <summary>What a probing stub reported, carried out in the result tree's <c>result</c> field — the
+    /// one channel a confined child is guaranteed to have, since every file it might otherwise write to
+    /// is exactly what the confinement is denying.</summary>
+    private static string? Probed(ScenarioChildRun run) => run.Result["result"] as string;
+
+    /// <summary>Shell that prints a valid result tree carrying <paramref name="findings"/> as its result.</summary>
+    private static string Report(string findings) =>
+        "printf '{\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
+        + "\"steps\":[],\"resultingState\":{},\"invariants\":[],\"result\":\"%s\",\"notes\":[]}' \""
+        + findings + "\"\n";
+
     /// <summary>A minimal, valid result tree — everything the protocol reader needs from a stub child.</summary>
     private const string EchoResult =
         "printf '%s' '{\"ok\":true,\"target\":\"Stub\",\"operation\":\"stub\",\"mode\":\"executed\","
@@ -332,11 +464,11 @@ public class ScenarioSandboxTests
         }
     }
 
-    /// <summary>Writes an executable POSIX-sh stub child.</summary>
-    private static string WriteStub(string body)
+    /// <summary>Writes an executable stub child, POSIX-sh unless a richer shell is asked for.</summary>
+    private static string WriteStub(string body, string interpreter = "/bin/sh")
     {
         string path = Path.Combine(Path.GetTempPath(), "koine-stub-" + Guid.NewGuid().ToString("N") + ".sh");
-        File.WriteAllText(path, "#!/bin/sh\n" + body);
+        File.WriteAllText(path, "#!" + interpreter + "\n" + body);
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(

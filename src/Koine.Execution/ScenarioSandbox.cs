@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 
 namespace Koine.Execution;
 
@@ -34,6 +35,41 @@ internal static class ScenarioSandbox
 
     private const string ShellPath = "/bin/sh";
 
+    /// <summary>macOS's own sandbox launcher. Deprecated by Apple and still the only mechanism a plain
+    /// process can apply to itself without an App Sandbox entitlement — which a command-line tool run
+    /// from an editor does not have.</summary>
+    private const string SandboxExecPath = "/usr/bin/sandbox-exec";
+
+    /// <summary>Linux network denial: a network namespace with no interfaces in it. Wrapped in a USER
+    /// namespace (<c>--map-root-user</c>) because creating a network namespace otherwise needs
+    /// <c>CAP_SYS_ADMIN</c>, which an editor backend does not have and must not want.</summary>
+    private static readonly string[] UnshareArguments = ["--user", "--map-root-user", "--net"];
+
+    private static readonly Lazy<bool> MacSandboxAvailable = new(() =>
+        OperatingSystem.IsMacOS()
+        && File.Exists(SandboxExecPath)
+        && Probe(SandboxExecPath, ["-p", MacProfile(Path.GetTempPath(), ScenarioSandboxOptions.Default), TruePath()]));
+
+    private static readonly Lazy<string?> UnsharePath = new(() =>
+        OperatingSystem.IsLinux() ? Locate("unshare") : null);
+
+    private static readonly Lazy<bool> UnshareAvailable = new(() =>
+        UnsharePath.Value is { } unshare && Probe(unshare, [.. UnshareArguments, TruePath()]));
+
+    /// <summary>
+    /// Whether this platform can confine the child's WRITES to its run directory. False does not mean the
+    /// scenario will not run — it means the run will carry a note saying so (see
+    /// <see cref="ScenarioConfinement.Degradations"/>). Exposed so the sandbox's own tests can assert the
+    /// enforced behaviour where it exists and skip — rather than fail — where it does not.
+    /// </summary>
+    public static bool FilesystemConfinementAvailable => OperatingSystem.IsMacOS() && MacSandboxAvailable.Value;
+
+    /// <summary>Whether this platform can deny the child the network. See
+    /// <see cref="FilesystemConfinementAvailable"/> for what a <c>false</c> means.</summary>
+    public static bool NetworkConfinementAvailable =>
+        (OperatingSystem.IsMacOS() && MacSandboxAvailable.Value)
+        || (OperatingSystem.IsLinux() && UnshareAvailable.Value);
+
     /// <summary>
     /// The confinement to run <paramref name="fileName"/> <paramref name="arguments"/> under, for a child
     /// whose working directory is <paramref name="runDirectory"/>. Never throws and never returns
@@ -61,11 +97,17 @@ internal static class ScenarioSandbox
 
             if (!OperatingSystem.IsWindows())
             {
-                PlanUnix(ref file, args, options, degradations);
+                PlanUnix(ref file, args, runDirectory, options, degradations);
             }
-            else if (options.MemoryLimitBytes is null && options.CpuLimit is null)
+            else if (options.DenyNetwork || options.RestrictFilesystem)
             {
-                // Nothing for the Job Object to carry; Attach will not create one either.
+                // Windows CAN confine a child this way — a restricted or low-integrity token — but only
+                // through CreateProcessAsUser, which means abandoning Process.Start and hand-plumbing all
+                // three redirected pipes. Until that exists, say so rather than let the caps imply it.
+                degradations.Add("Filesystem and network confinement were not applied: the sandbox has no "
+                    + "Windows mechanism for them yet, so this run kept its resource ceilings, its process "
+                    + "isolation and its wall-clock deadline, and nothing stopped the executed code from "
+                    + "reading or writing files.");
             }
         }
         catch (Exception ex)
@@ -91,8 +133,20 @@ internal static class ScenarioSandbox
     /// The heap hard limit in <see cref="Plan"/> is the cap that actually works here.</para>
     /// </summary>
     private static void PlanUnix(
-        ref string file, List<string> args, ScenarioSandboxOptions options, List<string> degradations)
+        ref string file,
+        List<string> args,
+        string runDirectory,
+        ScenarioSandboxOptions options,
+        List<string> degradations)
     {
+        // Innermost first: the filesystem/network confiner execs into the real command, and the ulimit
+        // shell below then wraps the confiner — so RLIMIT_CPU is in force for both, and the confinement
+        // is in force for everything the command goes on to do.
+        if (options.DenyNetwork || options.RestrictFilesystem)
+        {
+            PlanUnixIsolation(ref file, args, runDirectory, options, degradations);
+        }
+
         if (options.CpuLimit is not { } cpu || cpu <= TimeSpan.Zero)
         {
             return;
@@ -113,11 +167,201 @@ internal static class ScenarioSandbox
         string script = "ulimit -t " + seconds.ToString(CultureInfo.InvariantCulture)
             + " 2>/dev/null || true; exec \"$0\" \"$@\"";
 
-        List<string> wrapped = ["-c", script, file, .. args];
+        Wrap(ref file, args, ShellPath, ["-c", script]);
+    }
+
+    /// <summary>
+    /// Applies this Unix's filesystem/network confinement by making the child BE the confining launcher,
+    /// which execs into the real command: macOS has <c>sandbox-exec</c>, which does both; Linux has a
+    /// network namespace, which does one of the two. Anything neither covers is reported, not enforced.
+    /// </summary>
+    private static void PlanUnixIsolation(
+        ref string file,
+        List<string> args,
+        string runDirectory,
+        ScenarioSandboxOptions options,
+        List<string> degradations)
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            if (!MacSandboxAvailable.Value)
+            {
+                degradations.Add("Filesystem and network confinement were not applied: " + SandboxExecPath
+                    + " is unavailable or rejected the sandbox's profile, so this run kept its resource "
+                    + "ceilings, its process isolation and its wall-clock deadline.");
+                return;
+            }
+
+            Wrap(ref file, args, SandboxExecPath, ["-p", MacProfile(runDirectory, options)]);
+            return;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            if (options.RestrictFilesystem)
+            {
+                // A write confinement on Linux needs Landlock (a ruleset the CHILD must install between
+                // fork and exec — no hook for it from .NET) or a helper like bubblewrap (a dependency an
+                // editor feature cannot assume). Reads are unrestricted here in any case.
+                degradations.Add("Filesystem confinement was not applied: this Linux host offers no "
+                    + "mechanism the sandbox can apply without a helper, so nothing stopped the executed "
+                    + "code from reading or writing files outside its run directory.");
+            }
+
+            if (!options.DenyNetwork)
+            {
+                return;
+            }
+
+            if (!UnshareAvailable.Value)
+            {
+                degradations.Add("Network confinement was not applied: an unprivileged network namespace "
+                    + "could not be created here (unshare is missing, or unprivileged user namespaces are "
+                    + "disabled), so nothing stopped the executed code from opening a connection.");
+                return;
+            }
+
+            Wrap(ref file, args, UnsharePath.Value!, UnshareArguments);
+            return;
+        }
+
+        degradations.Add("Filesystem and network confinement were not applied: this platform has no "
+            + "mechanism the sandbox knows how to use, so the run kept its resource ceilings, its process "
+            + "isolation and its wall-clock deadline.");
+    }
+
+    /// <summary>Makes <paramref name="launcher"/> the command, with the previous command and its arguments
+    /// appended after <paramref name="launcherArguments"/> — the shape every one of these wrappers takes.</summary>
+    private static void Wrap(
+        ref string file, List<string> args, string launcher, IReadOnlyList<string> launcherArguments)
+    {
+        List<string> wrapped = [.. launcherArguments, file, .. args];
         args.Clear();
         args.AddRange(wrapped);
-        file = ShellPath;
+        file = launcher;
     }
+
+    /// <summary>
+    /// The macOS sandbox profile: everything stays allowed except the two things the trust model cannot
+    /// vouch for. Reads are DELIBERATELY untouched — the child must load the .NET runtime, its own
+    /// assemblies and the shared framework, all of which live outside the run directory, and a read
+    /// restriction tight enough to matter would stop the runtime starting.
+    /// </summary>
+    private static string MacProfile(string runDirectory, ScenarioSandboxOptions options)
+    {
+        var profile = new StringBuilder();
+        profile.Append("(version 1)\n(allow default)\n");
+
+        if (options.DenyNetwork)
+        {
+            profile.Append("(deny network*)\n");
+        }
+
+        if (options.RestrictFilesystem)
+        {
+            profile.Append("(deny file-write*)\n");
+            foreach (string writable in Writable(runDirectory))
+            {
+                profile.Append("(allow file-write* (subpath ").Append(Literal(writable)).Append("))\n");
+            }
+
+            // The character devices a process legitimately writes to without touching the filesystem.
+            profile.Append("(allow file-write-data (literal \"/dev/null\") (literal \"/dev/zero\") ")
+                .Append("(literal \"/dev/random\") (literal \"/dev/urandom\") ")
+                .Append("(literal \"/dev/dtracehelper\"))\n")
+                .Append("(allow file-ioctl (literal \"/dev/dtracehelper\"))\n");
+        }
+
+        return profile.ToString();
+    }
+
+    /// <summary>
+    /// The run directory as the profile must name it. A sandbox rule is matched against the path the
+    /// KERNEL resolved, so a directory reached through a symlink — which every macOS temp directory is,
+    /// <c>/var</c> being a link to <c>/private/var</c> — has to be listed canonically or the rule silently
+    /// matches nothing. Both forms are emitted rather than one, so a resolution that fails still leaves a
+    /// working rule.
+    /// </summary>
+    private static IEnumerable<string> Writable(string runDirectory)
+    {
+        var paths = new List<string> { runDirectory };
+        if (Canonical(runDirectory) is { } canonical && !paths.Contains(canonical, StringComparer.Ordinal))
+        {
+            paths.Add(canonical);
+        }
+
+        return paths;
+    }
+
+    /// <summary>Resolves every symlinked segment of <paramref name="path"/>, or <c>null</c> if it cannot.</summary>
+    private static string? Canonical(string path)
+    {
+        try
+        {
+            string current = Path.DirectorySeparatorChar.ToString();
+            foreach (string segment in Path.GetFullPath(path)
+                         .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, segment);
+                if (new DirectoryInfo(current).ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                {
+                    current = target.FullName;
+                }
+            }
+
+            return current;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A path as a Scheme string literal for the profile.</summary>
+    private static string Literal(string path) =>
+        "\"" + path.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+
+    /// <summary>The absolute path of a program on this Unix, searched where the base system keeps them
+    /// and then on PATH — never a bare name, which would let the OS pick the search order.</summary>
+    private static string? Locate(string name)
+    {
+        foreach (string directory in (string[])["/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+        {
+            string candidate = Path.Combine(directory, name);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        if (Environment.GetEnvironmentVariable("PATH") is not { Length: > 0 } path)
+        {
+            return null;
+        }
+
+        foreach (string entry in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            try
+            {
+                string candidate = Path.Combine(entry.Trim('"'), name);
+                if (File.Exists(candidate))
+                {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+            catch (Exception)
+            {
+                // A malformed PATH entry is skipped, not fatal.
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The no-op program the availability probes run: the cheapest command that proves a wrapper
+    /// can launch something at all.</summary>
+    private static string TruePath() => Locate("true") ?? "/usr/bin/true";
 
     /// <summary>
     /// Runs <paramref name="fileName"/> <paramref name="arguments"/> once, with no stdio and a short
