@@ -55,6 +55,8 @@ public sealed partial class JavaEmitter
             {
                 files.Add(EmitIntegrationEventDispatcher(ctx.Name));
             }
+
+            files.Add(EmitInfrastructureProvider(ctx.Name, aggregates, publishesEvents));
         }
 
         if (!anyEmitted)
@@ -248,6 +250,92 @@ public sealed partial class JavaEmitter
         sb.Append(Indent).Append(Indent).Append(Indent).Append("this.handler.handle(message);\n");
         sb.Append(Indent).Append(Indent).Append(Indent).Append("this.outbox.markProcessed(message);\n");
         sb.Append(Indent).Append(Indent).Append("}\n");
+        sb.Append(Indent).Append("}\n");
+
+        sb.Append("}\n");
+        return TypeFile(context, className, sb.ToString());
+    }
+
+    /// <summary>
+    /// Emits the context's composition helper — <c>&lt;Context&gt;Infrastructure</c> — the Java analogue
+    /// of C#'s <c>Add&lt;Context&gt;Infrastructure</c> DI extension and Python's
+    /// <c>create_&lt;context&gt;_infrastructure</c> factory: a final class holding every wired repository,
+    /// the unit of work, and — for a publishing context — the outbox and its dispatcher, built by a single
+    /// static <c>create()</c> over the in-memory defaults. A publishing context's <c>create</c> takes the
+    /// one argument only the caller can supply — the <c>IntegrationEventHandler</c> the dispatcher
+    /// delivers to (matching the Python/TypeScript emitters' own <c>create_*_infrastructure(handler)</c>);
+    /// a non-publishing context's <c>create()</c> takes none.
+    /// </summary>
+    private EmittedFile EmitInfrastructureProvider(
+        string context, IReadOnlyList<AggregateDecl> aggregates, bool publishesEvents)
+    {
+        var className = JavaNaming.Type(context) + "Infrastructure";
+        var roots = aggregates
+            .Select(a => JavaNaming.Type(a.RootEntity()!.Name))
+            .Select(root => (Root: root, Field: JavaNaming.Member(Pluralize(root))))
+            .ToList();
+
+        var fields = roots.Select(r => (Type: r.Root + "Repository", Name: r.Field)).ToList();
+        fields.Add(("UnitOfWork", "unitOfWork"));
+        if (publishesEvents)
+        {
+            fields.Add(($"{JavaRuntime.Package}.OutboxStore", "outbox"));
+            fields.Add(("IntegrationEventDispatcher", "dispatcher"));
+        }
+
+        var sb = new StringBuilder();
+        WriteJavadoc(
+            sb,
+            $"The assembled {context} infrastructure: every repository, the unit of work"
+            + (publishesEvents ? ", the outbox, and its dispatcher." : "."),
+            string.Empty);
+        sb.Append("public final class ").Append(className).Append(" {\n");
+        foreach (var (type, name) in fields)
+        {
+            sb.Append(Indent).Append("public final ").Append(type).Append(' ').Append(name).Append(";\n");
+        }
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("private ").Append(className).Append('(')
+          .Append(string.Join(", ", fields.Select(f => $"{f.Type} {f.Name}"))).Append(") {\n");
+        foreach (var (_, name) in fields)
+        {
+            sb.Append(Indent).Append(Indent).Append("this.").Append(name).Append(" = ").Append(name).Append(";\n");
+        }
+
+        sb.Append(Indent).Append("}\n");
+
+        sb.Append('\n');
+        WriteJavadoc(
+            sb,
+            $"Composition root for the {context} context: wires the in-memory defaults in one call — "
+            + "inject persistent stores by constructing the pieces yourself instead.",
+            Indent);
+        sb.Append(Indent).Append("public static ").Append(className).Append(" create(")
+          .Append(publishesEvents ? $"{JavaRuntime.Package}.IntegrationEventHandler handler" : string.Empty)
+          .Append(") {\n");
+        foreach (var (root, field) in roots)
+        {
+            sb.Append(Indent).Append(Indent).Append("var ").Append(field).Append(" = new InMemory")
+              .Append(root).Append("Repository();\n");
+        }
+
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append(Indent).Append("var outbox = new ").Append(JavaRuntime.Package)
+              .Append(".InMemoryOutboxStore();\n");
+        }
+
+        sb.Append(Indent).Append(Indent).Append("var unitOfWork = new UnitOfWork(")
+          .Append(string.Join(", ", roots.Select(r => r.Field).Concat(publishesEvents ? new[] { "outbox" } : [])))
+          .Append(");\n");
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append(Indent).Append("var dispatcher = new IntegrationEventDispatcher(outbox, handler);\n");
+        }
+
+        sb.Append(Indent).Append(Indent).Append("return new ").Append(className).Append('(')
+          .Append(string.Join(", ", fields.Select(f => f.Name))).Append(");\n");
         sb.Append(Indent).Append("}\n");
 
         sb.Append("}\n");

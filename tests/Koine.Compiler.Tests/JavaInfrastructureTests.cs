@@ -310,4 +310,60 @@ public class JavaInfrastructureTests
         behaviors.ShouldContain("public final class Behaviors {");
         behaviors.ShouldContain("transactionBehavior(UnitOfWork unitOfWork) {");
     }
+
+    /// <summary>
+    /// A PUBLISHING context's composition helper — <c>&lt;Context&gt;Infrastructure</c> — wires every
+    /// repository, the unit of work, the outbox, and its dispatcher in one <c>create(handler)</c> call
+    /// (the handler is the one piece only the caller can supply, matching the Python/TypeScript emitters'
+    /// own <c>create_*_infrastructure(handler)</c>).
+    /// </summary>
+    [Fact]
+    public void Publishing_context_composition_helper_wires_repositories_uow_outbox_and_dispatcher()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var provider = result.Files
+            .Single(f => f.RelativePath == "koine/generated/sales/SalesInfrastructure.java").Contents;
+
+        provider.ShouldContain("public final class SalesInfrastructure {");
+        provider.ShouldContain("public final OrderRepository orders;");
+        provider.ShouldContain("public final CustomerRepository customers;");
+        provider.ShouldContain("public final UnitOfWork unitOfWork;");
+        provider.ShouldContain("public final koine.runtime.OutboxStore outbox;");
+        provider.ShouldContain("public final IntegrationEventDispatcher dispatcher;");
+
+        provider.ShouldContain("public static SalesInfrastructure create(koine.runtime.IntegrationEventHandler handler) {");
+        provider.ShouldContain("var orders = new InMemoryOrderRepository();");
+        provider.ShouldContain("var customers = new InMemoryCustomerRepository();");
+        provider.ShouldContain("var outbox = new koine.runtime.InMemoryOutboxStore();");
+        provider.ShouldContain("var unitOfWork = new UnitOfWork(orders, customers, outbox);");
+        provider.ShouldContain("var dispatcher = new IntegrationEventDispatcher(outbox, handler);");
+        provider.ShouldContain("return new SalesInfrastructure(orders, customers, unitOfWork, outbox, dispatcher);");
+    }
+
+    /// <summary>
+    /// A NON-publishing context's composition helper takes NO arguments at all (there is no handler to
+    /// supply) and wires only repositories + the unit of work — no outbox, no dispatcher field.
+    /// </summary>
+    [Fact]
+    public void Non_publishing_context_composition_helper_takes_no_arguments_and_skips_the_outbox()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var provider = result.Files
+            .Single(f => f.RelativePath == "koine/generated/shipping/ShippingInfrastructure.java").Contents;
+
+        provider.ShouldContain("public final class ShippingInfrastructure {");
+        provider.ShouldContain("public final ShipmentRepository shipments;");
+        provider.ShouldContain("public final UnitOfWork unitOfWork;");
+        provider.ShouldContain("public static ShippingInfrastructure create() {");
+        provider.ShouldContain("var shipments = new InMemoryShipmentRepository();");
+        provider.ShouldContain("var unitOfWork = new UnitOfWork(shipments);");
+        provider.ShouldContain("return new ShippingInfrastructure(shipments, unitOfWork);");
+
+        provider.ShouldNotContain("outbox");
+        provider.ShouldNotContain("dispatcher");
+    }
 }
