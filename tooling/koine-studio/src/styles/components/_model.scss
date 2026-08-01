@@ -315,6 +315,13 @@
   margin-bottom: var(--koi-space-2);
 }
 
+/* A branch BELOW an aggregate — an entity owning its state machines / commands / factories (#483). Same
+   head + spine shape (ownership reads as containment at every depth), just tighter vertical rhythm so the
+   aggregate stays the visually dominant boundary and a deep spine doesn't sprawl. */
+.koi-agg--nested {
+  margin-bottom: var(--koi-space-0-5);
+}
+
 /* Roving-tabindex focus lands on the aggregate treeitem (the container); ring just its HEAD row, not the
    whole nested block, so the focus indicator reads as "this aggregate row" (WCAG 2.4.7). */
 .koi-agg:focus-visible {

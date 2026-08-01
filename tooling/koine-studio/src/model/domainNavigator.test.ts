@@ -138,6 +138,122 @@ describe('renderTactical', () => {
   });
 });
 
+// --- the behavioural vocabulary (#483): the rows the model graph now carries below an aggregate -----
+// The round-trip graph emits an aggregate's `repository`/`spec` and an ENTITY's `states`/`command`/
+// `factory` children, plus the context-level `policy`/`service`/`spec`/`read-model`/`query` peers. The
+// tactical tree used to descend only aggregate → leaf, so everything an entity owned was silently
+// dropped; each of these rows must now render with the slug `constructForKind` resolves for its kind.
+const behaviouralCtx = (): ModelNode =>
+  ctxNode('Ordering', [
+    aggNode('Order', [
+      modelNode('entity', 'OrderLine', [
+        modelNode('states', 'status'),
+        modelNode('command', 'place'),
+        modelNode('factory', 'draft'),
+      ]),
+      modelNode('repository', 'repository'),
+      modelNode('spec', 'Overdue'),
+    ]),
+    modelNode('policy', 'NotifyOnPlaced'),
+    modelNode('service', 'PricingService'),
+    modelNode('read-model', 'OrderSummary'),
+    modelNode('query', 'FindOpenOrders'),
+    modelNode('spec', 'HighValue'),
+  ]);
+
+/** The activation control addressing `name` (a leaf's button, or a branch node's head row). */
+const rowFor = (el: HTMLElement, name: string) => el.querySelector<HTMLElement>(`[data-name="${name}"]`);
+
+/** Every rendered `treeitem` in DOM order, named by the control it OWNS (its direct child) — so a branch
+ *  row reports its own name, not the first name in its nested spine. */
+const rowNames = (el: HTMLElement): (string | undefined)[] =>
+  [...el.querySelectorAll<HTMLElement>('[role="treeitem"]')].map(
+    (r) => r.querySelector<HTMLElement>(':scope > [data-name]')?.dataset.name,
+  );
+
+describe('renderTactical — behavioural vocabulary (#483)', () => {
+  it('renders the entity-owned states/command/factory rows with their construct slugs', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    const agg = el.querySelector<HTMLElement>('[data-qname="Ordering.Order"]')!;
+    // The entity is no longer a dead-end leaf: it owns a nested branch of behavioural rows.
+    const entityRow = agg.querySelector<HTMLElement>('[role="treeitem"][data-qname="OrderLine"]')!;
+    expect(entityRow).toBeTruthy();
+
+    expect(rowFor(entityRow, 'status')?.getAttribute('data-construct')).toBe('state-machine');
+    expect(rowFor(entityRow, 'place')?.getAttribute('data-construct')).toBe('command');
+    expect(rowFor(entityRow, 'draft')?.getAttribute('data-construct')).toBe('factory');
+    // Each is its own treeitem row (not just decoration inside the entity's row).
+    for (const name of ['status', 'place', 'draft']) {
+      expect(rowFor(entityRow, name)!.parentElement!.getAttribute('role')).toBe('treeitem');
+    }
+  });
+
+  it('renders the aggregate-owned repository/spec rows with their construct slugs', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    const agg = el.querySelector<HTMLElement>('[data-qname="Ordering.Order"]')!;
+    expect(rowFor(agg, 'repository')?.getAttribute('data-construct')).toBe('repository');
+    expect(rowFor(agg, 'Overdue')?.getAttribute('data-construct')).toBe('spec');
+  });
+
+  it('renders the context-level policy/service/read-model/query/spec peers with their construct slugs', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    const peers = el.querySelector<HTMLElement>('.koi-ctx-peers')!;
+    expect(rowFor(peers, 'NotifyOnPlaced')?.getAttribute('data-construct')).toBe('policy');
+    expect(rowFor(peers, 'PricingService')?.getAttribute('data-construct')).toBe('service');
+    expect(rowFor(peers, 'OrderSummary')?.getAttribute('data-construct')).toBe('read-model');
+    expect(rowFor(peers, 'FindOpenOrders')?.getAttribute('data-construct')).toBe('query');
+    expect(rowFor(peers, 'HighValue')?.getAttribute('data-construct')).toBe('spec');
+  });
+
+  it('preserves declaration order across the added depth', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    expect(rowNames(el)).toEqual([
+      'Order',
+      'OrderLine',
+      'status',
+      'place',
+      'draft',
+      'repository',
+      'Overdue',
+      'NotifyOnPlaced',
+      'PricingService',
+      'OrderSummary',
+      'FindOpenOrders',
+      'HighValue',
+    ]);
+  });
+
+  it('keeps every added row reachable by the roving-tabindex tree keyboard model', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    document.body.appendChild(el);
+    const items = [...el.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    expect(items.length).toBe(12);
+
+    // A single tab stop, seeded on the first row (the nested rows must not steal or duplicate it).
+    expect(items.filter((it) => it.tabIndex === 0)).toEqual([items[0]]);
+
+    // ArrowDown walks EVERY row in DOM order — including the entity's nested behavioural rows.
+    items[0].focus();
+    for (let i = 1; i < items.length; i++) {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      expect(document.activeElement).toBe(items[i]);
+    }
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }));
+    expect(document.activeElement).toBe(items[0]);
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    expect(document.activeElement).toBe(items[items.length - 1]);
+  });
+
+  it('selecting a nested behavioural row selects + jumps to it', () => {
+    const onSelect = vi.fn();
+    const goto = vi.fn();
+    const el = renderTactical(behaviouralCtx(), { onSelect, goto, reveal: vi.fn(), setAxis: vi.fn() });
+    (rowFor(el, 'place') as HTMLButtonElement).click();
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: 'command', title: 'place' }));
+    expect(goto).toHaveBeenCalledWith(expect.objectContaining({ kind: 'command', title: 'place' }));
+  });
+});
+
 // --- cross-axis leaf actions: select → goto + the "Reveal in Files" overflow (Task 5, #453) --------
 describe('renderTactical — cross-axis leaf actions', () => {
   const ctxWithLeaf = (): ModelNode => ctxNode('Ordering', [value('Currency')]);
@@ -563,6 +679,44 @@ describe('DomainNavigator component (props-driven)', () => {
     // A `undefined` component would make Preact render the literal "[object Object]" with no error.
     expect(container.textContent).not.toContain('[object Object]');
     expect(container.querySelectorAll('.koi-ctx-row').length).toBe(2);
+  });
+
+  // The tactical filter must reach the depth the behavioural vocabulary added (#483): a nested row that
+  // matches keeps its OWNING chain visible, and a branch that matches by name keeps its whole subtree.
+  function tacticalWithFilter(outlineFilter: string): HTMLElement {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'tactical',
+        activeContext: 'Ordering',
+        outlineFilter,
+        cache: { ...cache, tree: modelNode('model', '', [behaviouralCtx()]) },
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+      }),
+    );
+    return container as HTMLElement;
+  }
+
+  it('a matching nested behavioural row keeps its aggregate + entity ancestors visible', () => {
+    const el = tacticalWithFilter('draft');
+    expect(rowFor(el, 'draft')).toBeTruthy();
+    expect(el.querySelector('[data-qname="Ordering.Order"]')).toBeTruthy(); // the owning aggregate survives…
+    expect(el.querySelector('[data-qname="OrderLine"]')).toBeTruthy(); // …and so does the owning entity
+    // Only the matching chain survives: the row's non-matching siblings, the aggregate's other owned
+    // constructs, and every context-level peer are pruned.
+    expect(rowNames(el)).toEqual(['Order', 'OrderLine', 'draft']);
+  });
+
+  it('a matching entity keeps its whole behavioural subtree', () => {
+    const el = tacticalWithFilter('OrderLine');
+    expect(rowNames(el)).toEqual(['Order', 'OrderLine', 'status', 'place', 'draft']);
+  });
+
+  it('a matching context-level behavioural peer shows on its own', () => {
+    const el = tacticalWithFilter('Pricing');
+    expect(rowNames(el)).toEqual(['PricingService']);
   });
 
   it('the filter input is controlled by the outlineFilter prop', () => {

@@ -122,6 +122,43 @@ describe('Domain navigator a11y — tactical', () => {
     expect(document.activeElement).toBe(items[1]);
   });
 
+  // The behavioural vocabulary (#483) added a THIRD level to the tactical tree — an entity branch owning
+  // its state machines / commands / factories, i.e. a `treeitem` nested inside a `group` inside a
+  // `treeitem`. Audit that depth explicitly: the WAI-ARIA tree pattern must still hold (aria-required-
+  // parent/children, no nested-interactive violation from the head buttons), and every added row must
+  // stay reachable by the single-tab-stop roving model.
+  it('the entity-owned behavioural depth is axe-clean and every added row is keyboard-reachable', async () => {
+    const el = renderTactical(
+      node('context', 'Ordering', [
+        {
+          ...node('aggregate', 'Order', [
+            node('entity', 'OrderLine', [node('states', 'status'), node('command', 'place'), node('factory', 'draft')]),
+            node('repository', 'repository'),
+            node('spec', 'Overdue'),
+          ]),
+          qualifiedName: 'Ordering.Order',
+        },
+        node('policy', 'NotifyOnPlaced'),
+        node('service', 'PricingService'),
+      ]),
+      noopTacticalHandlers(),
+    );
+    document.body.appendChild(el);
+
+    expect(await axe(el)).toHaveNoViolations();
+
+    const items = treeitems(el);
+    expect(items).toHaveLength(9);
+    expect(items.filter((it) => it.tabIndex === 0)).toEqual([items[0]]); // still ONE tab stop
+
+    // ArrowDown reaches every row, including the ones two levels deep in the aggregate's spine.
+    items[0].focus();
+    for (let i = 1; i < items.length; i++) {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      expect(document.activeElement).toBe(items[i]);
+    }
+  });
+
   it('the ContextMenu / Shift+F10 key opens the focused leaf row’s ⋯ overflow (keyboard-reachable)', () => {
     const el = renderTactical(orderingCtxNode(), noopTacticalHandlers());
     document.body.appendChild(el); // the ⋯ menu mounts to document.body; afterEach clears it

@@ -149,13 +149,15 @@ function DoorwayRow({
 
 // --- keyboard model: the WAI-ARIA tree pattern (roving tabindex) (#453) -----------------------------
 // Both levels are `role="tree"`s of `role="treeitem"` rows, navigated with Arrow/Home/End and a SINGLE
-// tab stop (roving tabindex). The navigator's trees never collapse a branch (aggregates render expanded;
-// the filter removes non-matching rows from the DOM), so every rendered treeitem is visible and DOM order
-// IS visual order. The key ROUTING is the shared `handleTreeKeydown` (rovingTreeNav.ts, #1105); the
+// tab stop (roving tabindex). The navigator's trees never collapse a branch (every branch row — an
+// aggregate, or an owning entity below it (#483) — renders expanded; the filter removes non-matching rows
+// from the DOM), so every rendered treeitem is visible AT ANY DEPTH and DOM order IS visual order — which
+// is why the item source stays a plain `querySelectorAll('[role="treeitem"]')` even now that the tree
+// nests. The key ROUTING is the shared `handleTreeKeydown` (rovingTreeNav.ts, #1105); the
 // seed-the-tab-stop/resolve-event-to-treeitem glue is the shared `createRovingTabIndex`
 // (rovingTreeNav.ts, #1365) — this file supplies only the item source (via a ref helper) and the
 // panel-specific ContextMenu affordance. `nestedButtonSelector: 'button'` pulls this navigator's inner
-// controls (the leaf activator, the ⋯ overflow, the aggregate head) out of the tab order — mouse clicks
+// controls (the leaf activator, the ⋯ overflow, a branch head) out of the tab order — mouse clicks
 // still work, and keyboard activation is forwarded from the focused treeitem.
 
 /** A {@link RovingTreeNav} over `rovingTabIndex`'s live treeitems, built per keydown so it can read the
@@ -208,8 +210,9 @@ function wireTreeNav(tree: HTMLElement): void {
     // `⋯` button (which roving tabindex keeps out of the tab order).
     if (ev.key === 'ContextMenu' || (ev.shiftKey && ev.key === 'F10')) {
       // Only the row's OWN ⋯ qualifies (a leaf row appends it as a direct child). A bare descendant
-      // lookup on an aggregate treeitem would descend into its nested group and open the first owned
-      // leaf's menu — a wrongly-targeted action; an aggregate has no overflow, so the key no-ops there.
+      // lookup on a BRANCH treeitem (an aggregate, or an owning entity below it) would descend into its
+      // nested group and open the first owned leaf's menu — a wrongly-targeted action; a branch row has
+      // no overflow of its own, so the key no-ops there.
       const more = rovingTabIndex.currentTreeItem(ev)?.querySelector<HTMLElement>(':scope > .koi-tactical-more');
       if (more) {
         ev.preventDefault();
@@ -365,7 +368,8 @@ export interface DomainNavigatorHandle {
   unmount(): void;
 }
 
-/** One tactical leaf — an owned construct (under an aggregate) or a context-level peer. The row IS the
+/** One tactical leaf — a construct that owns nothing itself, at any depth (under an aggregate or an
+ * entity below it) or as a context-level peer. The row IS the
  * `treeitem`; inside it the activation button (`.koi-tactical-leaf`, carrying `data-construct` + `data-name`
  * so a click resolves to the model element + cross-highlights) selects-and-jumps, and a trailing `⋯`
  * overflow opens the cross-axis menu ("Reveal in Files", #453). Icon first, then the name text, so
@@ -407,44 +411,76 @@ function TacticalLeaf({ node, handlers }: { node: ModelNode; handlers: TacticalH
   );
 }
 
-/** One aggregate node: a head row (the aggregate glyph + name, carrying the aggregate's qualified name)
- * with its owned constructs nested beneath in a {@link TacticalLeaf} spine, so ownership reads as
- * containment. The container carries `data-qname` for the cross-highlight; the head is the selectable row
- * for the aggregate itself. */
-function AggregateNode({ agg, handlers }: { agg: ModelNode; handlers: TacticalHandlers }): VNode {
-  const { slug } = constructForKind(agg.kind);
+/** One OWNING node — an aggregate, or anything below it that owns constructs of its own (an entity with
+ * its state machines / commands / factories, #483): a head row (the construct glyph + name, carrying the
+ * node's qualified name) with its children nested beneath in a spine, so ownership reads as containment.
+ * The container carries `data-qname` for the cross-highlight; the head is the selectable row for the node
+ * itself, and each child recurses through {@link TacticalNode} so depth is unbounded rather than fixed at
+ * aggregate → leaf. `nested` marks a branch BELOW an aggregate, which tightens its spacing (`_model.scss`)
+ * so the aggregate stays the visually dominant boundary. */
+function TacticalBranch({
+  node,
+  handlers,
+  nested = false,
+}: {
+  node: ModelNode;
+  handlers: TacticalHandlers;
+  nested?: boolean;
+}): VNode {
+  const { slug } = constructForKind(node.kind);
   return (
-    // Isolate the accessible name to the aggregate title — otherwise it concatenates every owned child's
-    // text (the nested role="group" spine) into the aggregate's announced name.
-    <div class="koi-agg" data-qname={agg.qualifiedName} role="treeitem" aria-expanded="true" aria-label={agg.title}>
+    // Isolate the accessible name to this node's title — otherwise it concatenates every owned child's
+    // text (the nested role="group" spine) into the node's announced name.
+    <div
+      class={'koi-agg' + (nested ? ' koi-agg--nested' : '')}
+      data-qname={node.qualifiedName}
+      role="treeitem"
+      aria-expanded="true"
+      aria-label={node.title}
+    >
       <button
         type="button"
         class="koi-agg-head"
         data-construct={slug}
+        data-name={node.title}
         onClick={() => {
-          handlers.onSelect(agg);
-          handlers.goto(agg);
+          handlers.onSelect(node);
+          handlers.goto(node);
         }}
       >
         <ConstructIcon slug={slug} />
-        <span class="koi-agg-name">{agg.title}</span>
+        <span class="koi-agg-name">{node.title}</span>
       </button>
-      {/* The owned constructs, nested in a bracketed spine that makes the aggregate's boundary visible. */}
+      {/* The owned constructs, nested in a bracketed spine that makes the owner's boundary visible. */}
       <div class="koi-agg-spine" role="group">
-        {agg.children.map((child) => (
-          <TacticalLeaf key={child.qualifiedName} node={child} handlers={handlers} />
+        {node.children.map((child) => (
+          <TacticalNode key={child.qualifiedName} node={child} handlers={handlers} />
         ))}
       </div>
     </div>
   );
 }
 
+/** One tactical row, leaf-or-branch: a node that owns nothing renders as a {@link TacticalLeaf} (with its
+ * cross-axis `⋯` overflow); a node that owns constructs renders as a {@link TacticalBranch} so its
+ * children get their own treeitem rows instead of being dropped. This is what lights up the behavioural
+ * vocabulary (#483) — an entity's `states`/`command`/`factory` children, and any future owned depth. */
+function TacticalNode({ node, handlers }: { node: ModelNode; handlers: TacticalHandlers }): VNode {
+  return node.children.length ? (
+    <TacticalBranch node={node} handlers={handlers} nested />
+  ) : (
+    <TacticalLeaf node={node} handlers={handlers} />
+  );
+}
+
 /**
- * The TACTICAL body for a bounded context — aggregate-centric: each `aggregate` child becomes a node with
- * its owned constructs nested beneath ({@link AggregateNode}); every OTHER top-level child (a value object,
- * enum, event, … declared at the context level rather than inside an aggregate) is a peer under a quiet
- * `context` divider — no orphan "Aggregates" header. A `null`/empty `ctxNode` (loading, or a context with
- * no declarations) renders an empty body, not a crash.
+ * The TACTICAL body for a bounded context — aggregate-centric: each `aggregate` child becomes a branch
+ * node with its owned constructs nested beneath ({@link TacticalBranch}); every OTHER top-level child (a
+ * value object, enum, event, or a behavioural `policy`/`service`/`spec`/`read-model`/`query`, declared at
+ * the context level rather than inside an aggregate) is a peer under a quiet `context` divider — no orphan
+ * "Aggregates" header. Both spines recurse through {@link TacticalNode}, so an owner at ANY depth (an
+ * entity's commands/factories/state machines, #483) gets its children as rows rather than dropping them.
+ * A `null`/empty `ctxNode` (loading, or a context with no declarations) renders an empty body, not a crash.
  */
 export function TacticalLevel({
   ctxNode,
@@ -475,13 +511,14 @@ export function TacticalLevel({
       aria-label={ctxNode ? `${ctxNode.title} aggregates` : undefined}
       ref={(el) => { if (el) wireTreeNav(el); }}
     >
+      {/* An aggregate is ALWAYS a branch — the boundary owner reads as one even when it owns nothing. */}
       {aggregates.map((agg) => (
-        <AggregateNode key={agg.qualifiedName} agg={agg} handlers={handlers} />
+        <TacticalBranch key={agg.qualifiedName} node={agg} handlers={handlers} />
       ))}
       {peers.length ? (
         <div class="koi-ctx-peers" role="group">
           {peers.map((peer) => (
-            <TacticalLeaf key={peer.qualifiedName} node={peer} handlers={handlers} />
+            <TacticalNode key={peer.qualifiedName} node={peer} handlers={handlers} />
           ))}
         </div>
       ) : null}
@@ -556,25 +593,21 @@ function findContextNode(root: ModelNode | null | undefined, context: string): M
 }
 
 /** Narrow a context node to the constructs whose name matches a free-text query (case-insensitive
- * substring) — the TACTICAL counterpart of {@link filterGlossaryModel}. An aggregate survives when it
- * matches OR owns a surviving construct (keeping all of its children when the aggregate name itself is
- * the hit); a context-level peer survives on its own match. A blank query is the identity. */
+ * substring) — the TACTICAL counterpart of {@link filterGlossaryModel}. An OWNING node (an aggregate, or
+ * an entity owning commands/factories/state machines — #483) survives when it matches OR owns a surviving
+ * descendant, keeping ALL of its children when its own name is the hit; a node that owns nothing survives
+ * on its own match. Prunes at every depth (not just aggregate → child), so a behavioural row keeps its
+ * whole ownership chain visible. A blank query is the identity. */
 function filterContextNode(ctx: ModelNode | null, query: string): ModelNode | null {
   if (!ctx) return ctx;
   const q = query.trim().toLowerCase();
   if (!q) return ctx;
-  const matches = (n: ModelNode): boolean => n.title.toLowerCase().includes(q);
-  const children: ModelNode[] = [];
-  for (const child of ctx.children) {
-    if (child.kind === 'aggregate') {
-      const selfMatch = matches(child);
-      const keptKids = selfMatch ? child.children : child.children.filter(matches);
-      if (selfMatch || keptKids.length) children.push({ ...child, children: keptKids });
-    } else if (matches(child)) {
-      children.push(child);
-    }
-  }
-  return { ...ctx, children };
+  const prune = (n: ModelNode): ModelNode | null => {
+    if (n.title.toLowerCase().includes(q)) return n; // a self-match keeps the node's whole subtree
+    const children = n.children.map(prune).filter((c): c is ModelNode => c !== null);
+    return children.length ? { ...n, children } : null;
+  };
+  return { ...ctx, children: ctx.children.map(prune).filter((c): c is ModelNode => c !== null) };
 }
 
 /** A muted status/empty line for the navigator host (loading / no-model states). */
