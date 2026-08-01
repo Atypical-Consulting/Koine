@@ -204,6 +204,24 @@ public sealed partial class CSharpEmitter : IEmitter
         if (HasEvents(model))
         {
             files.Add(EmitDomainEventInterface(emit));
+
+            // The dispatcher contract is referenced only by the Application-layer handlers under
+            // --app-dispatch-events (W1, #1721), and only makes sense where domain events exist at
+            // all — so emit it exactly when both hold, keeping every other configuration
+            // byte-identical. Same gating shape as Result<T> below.
+            if (_options.EmitApplication && _options.DispatchEvents)
+            {
+                files.Add(EmitDomainEventDispatcherInterface(emit));
+
+                // MediatR mode defers the commit to TransactionBehavior, which never sees an
+                // aggregate — so the handler parks its events in a scoped accumulator the behavior
+                // drains post-commit. Plain handlers dispatch inline and need no accumulator.
+                if (_options.ApplicationMediatr)
+                {
+                    files.Add(EmitDomainEventAccumulatorInterface(emit));
+                    files.Add(EmitDomainEventAccumulator(emit));
+                }
+            }
         }
 
         if (HasIntegrationEvents(model))

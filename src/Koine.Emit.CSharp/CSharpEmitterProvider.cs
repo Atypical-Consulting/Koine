@@ -33,7 +33,8 @@ public sealed class CSharpEmitterProvider : IEmitterProvider
             && !options.ReferenceOnly && options.Layers is null
             && !options.ApplicationMediatr && options.ApplicationMapping is null
             && options.RegexMatchTimeoutMs is null && !isSourceGeneratedRegex
-            && options.ApplicationHandlerResult is null && options.ApplicationNotFound is null)
+            && options.ApplicationHandlerResult is null && options.ApplicationNotFound is null
+            && !options.ApplicationDispatchEvents)
         {
             return CSharpEmitterOptions.Empty;
         }
@@ -58,7 +59,8 @@ public sealed class CSharpEmitterProvider : IEmitterProvider
         return new CSharpEmitterOptions(
             options.NamespaceMap, instant, options.EmitSourceMaps, options.ReferenceOnly,
             ParseLayers(options.Layers), options.ApplicationMediatr, mapping,
-            options.RegexMatchTimeoutMs ?? 1000, regexMode, handlerResult, notFound);
+            options.RegexMatchTimeoutMs ?? 1000, regexMode, handlerResult, notFound,
+            options.ApplicationDispatchEvents);
     }
 
     /// <summary>

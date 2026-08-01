@@ -70,10 +70,10 @@ describe('concurrent device-key creation (issue #634)', () => {
         };
         tx.onerror = () => {
           db.close();
-          reject(tx.error);
+          reject(tx.error ?? new Error('IndexedDB transaction failed'));
         };
       };
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'));
     });
     vi.resetModules();
   }

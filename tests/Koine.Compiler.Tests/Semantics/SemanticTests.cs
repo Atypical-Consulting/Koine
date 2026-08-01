@@ -29,6 +29,30 @@ public class SemanticTests
         diags.ShouldContain(d => d.Code == DiagnosticCodes.UnknownType);
     }
 
+    [Fact]
+    public void Unknown_type_reference_is_still_reported_in_a_multi_context_model()
+    {
+        // #1715 over-widening guard: ValidateTypeRef now classifies through the reference's own
+        // context (`Classify(resolver.Context, name)`) rather than the flat table. A name declared
+        // in NO context must still come back Unknown and report KOI0101 — context-aware resolution
+        // falls back to the global view, and that fallback must not turn a typo into a resolution.
+        const string src = """
+            context Freight {
+              value Item {
+                p: Nope
+              }
+            }
+
+            context Shipping {
+              value Parcel {
+                weight: Decimal
+              }
+            }
+            """;
+
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.UnknownType && d.Message.Contains("'Nope'"));
+    }
+
     [Theory]
     [InlineData("id")]   // collides with the generated identity property
     [InlineData("Id")]
@@ -320,17 +344,16 @@ public class SemanticTests
     /// <c>IsEnumType("Status")</c> answers for Shipping's declaration and wrongly says <c>status</c> is NOT
     /// enum-typed.
     ///
-    /// <para>This can't be pinned as an end-to-end diagnostic: every diagnostic that consumes
-    /// <c>ConcreteEnumType</c>'s return value (<c>CheckEnumMemberResolvable</c>, <c>ResolveEnumOperand</c>,
-    /// reached via comparison/conditional/coalesce) also depends on <c>ModelIndex.EnumsDeclaring</c>/
-    /// <c>EnumMemberToType</c> — built from the SAME flat <c>_byName</c>/<c>AllTypes()</c> map. Any model
-    /// that collides Billing's <c>Status</c> enum by name (to trigger THIS bug) necessarily also evicts
-    /// Billing's <c>Status</c> from those two dictionaries (#1632, explicitly out of this issue's scope),
-    /// so the surrounding checks stay blind regardless of this fix. Verified empirically: extending this
-    /// exact model with a genuinely ambiguous bare member still mis-reports KOI0210 identically whether or
-    /// not <c>ConcreteEnumType</c> is fixed, because <c>EnumsDeclaring</c> never lists the evicted
-    /// <c>Status</c> as an owner either way. So this test calls <c>ConcreteEnumType</c> directly (made
-    /// <c>internal</c> for exactly this) to pin its own contract in isolation from #1632.</para>
+    /// <para>When this test was written it could not be pinned as an end-to-end diagnostic: every
+    /// diagnostic consuming <c>ConcreteEnumType</c>'s return value (<c>CheckEnumMemberResolvable</c>,
+    /// <c>ResolveEnumOperand</c>, reached via comparison/conditional/coalesce) also depends on
+    /// <c>ModelIndex.EnumsDeclaring</c>/<c>EnumMemberToType</c> — then built from the SAME flat
+    /// <c>_byName</c>/<c>AllTypes()</c> map — so any model colliding Billing's <c>Status</c> by name
+    /// also evicted it from those dictionaries and the surrounding checks stayed blind either way.
+    /// <b>#1632 has since removed that eviction</b> (<c>AllTypes()</c> enumerates every per-context
+    /// declaration), so the dictionaries no longer hide the shadowed enum. This test still calls
+    /// <c>ConcreteEnumType</c> directly (made <c>internal</c> for exactly this) — pinning its own
+    /// contract in isolation from its consumers remains the point.</para>
     /// </summary>
     [Fact]
     public void ConcreteEnumType_resolves_every_operand_form_context_first_despite_a_same_named_type_elsewhere()

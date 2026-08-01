@@ -412,6 +412,397 @@ public class R18CSharpApplicationTests
     }
 
     // ------------------------------------------------------------------
+    // W1 — --app-dispatch-events: dispatch each recorded domain event AFTER
+    // the transaction commits, then clear the aggregate's list. Off by
+    // default (byte-identical); the seam a SignalR broadcast rides (#1039).
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void Dispatch_events_off_emits_no_dispatcher_contract()
+    {
+        var files = Emit(AppOn);
+        files.ShouldNotContain(f => f.RelativePath.EndsWith("IDomainEventDispatcher.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Dispatch_events_default_off_is_byte_identical_to_app_on()
+    {
+        // The new option's default value must not perturb the Application-layer output.
+        var explicitOff = Emit(AppOn with { DispatchEvents = false });
+        TestSupport.Render(explicitOff).ShouldBe(TestSupport.Render(Emit(AppOn)));
+    }
+
+    [Fact]
+    public void Dispatch_events_emits_the_domain_event_dispatcher_contract()
+    {
+        var contract = File(Emit(AppOn with { DispatchEvents = true }), "IDomainEventDispatcher.cs").Contents;
+
+        // A contract only — the consumer supplies the implementation, exactly as with IUnitOfWork.
+        contract.ShouldContain("public interface IDomainEventDispatcher");
+        contract.ShouldContain("Task DispatchAsync(IDomainEvent domainEvent, CancellationToken ct = default);");
+        contract.ShouldContain("namespace Koine.Runtime");
+    }
+
+    /// <summary>The index of <paramref name="needle"/> in <paramref name="haystack"/>, asserted present.</summary>
+    private static int IndexOfOrFail(string haystack, string needle)
+    {
+        var at = haystack.IndexOf(needle, StringComparison.Ordinal);
+        at.ShouldBeGreaterThanOrEqualTo(0, $"expected to find: {needle}");
+        return at;
+    }
+
+    [Fact]
+    public void Dispatch_events_injects_the_dispatcher_into_a_command_handler()
+    {
+        var handler = File(Emit(AppOn with { DispatchEvents = true }), "OrderPlaceHandler.cs").Contents;
+
+        handler.ShouldContain("private readonly IDomainEventDispatcher _dispatcher;");
+        handler.ShouldContain("public OrderPlaceHandler(IUnitOfWork unitOfWork, IDomainEventDispatcher dispatcher)");
+        handler.ShouldContain("_dispatcher = dispatcher;");
+    }
+
+    [Fact]
+    public void Dispatch_events_loops_after_the_commit_then_clears_in_a_command_handler()
+    {
+        var handler = File(Emit(AppOn with { DispatchEvents = true }), "OrderPlaceHandler.cs").Contents;
+
+        handler.ShouldContain("foreach (var domainEvent in aggregate.DomainEvents)");
+        handler.ShouldContain("await _dispatcher.DispatchAsync(domainEvent, ct);");
+        handler.ShouldContain("aggregate.ClearDomainEvents();");
+
+        // Post-commit is the whole point: an event dispatched BEFORE the commit could announce a
+        // transaction that then rolled back. And the list is cleared only after the loop completes,
+        // so a mid-dispatch throw leaves the events visible for a retry rather than dropping them.
+        var commit = IndexOfOrFail(handler, "await _unitOfWork.SaveChangesAsync(ct);");
+        var loop = IndexOfOrFail(handler, "foreach (var domainEvent in aggregate.DomainEvents)");
+        var clear = IndexOfOrFail(handler, "aggregate.ClearDomainEvents();");
+        commit.ShouldBeLessThan(loop);
+        loop.ShouldBeLessThan(clear);
+    }
+
+    [Fact]
+    public void Dispatch_events_loops_after_the_commit_in_a_factory_handler()
+    {
+        var handler = File(Emit(AppOn with { DispatchEvents = true }), "OrderOpenHandler.cs").Contents;
+
+        handler.ShouldContain("public OrderOpenHandler(IUnitOfWork unitOfWork, IDomainEventDispatcher dispatcher)");
+        var commit = IndexOfOrFail(handler, "await _unitOfWork.SaveChangesAsync(ct);");
+        var loop = IndexOfOrFail(handler, "foreach (var domainEvent in aggregate.DomainEvents)");
+        var clear = IndexOfOrFail(handler, "aggregate.ClearDomainEvents();");
+        var ret = IndexOfOrFail(handler, "return aggregate;");
+        commit.ShouldBeLessThan(loop);
+        loop.ShouldBeLessThan(clear);
+        clear.ShouldBeLessThan(ret);
+    }
+
+    [Fact]
+    public void Dispatch_events_emits_no_loop_for_a_root_that_records_no_events()
+    {
+        // DerivedReadModelFixture's Order has neither an emitting command nor an emitting factory, so
+        // it carries no DomainEvents member — emitting the loop there would not compile.
+        var files = Emit(AppOn with { DispatchEvents = true }, DerivedReadModelFixture);
+
+        var handler = File(files, "OrderOpenHandler.cs").Contents;
+        handler.ShouldNotContain("DomainEvents");
+        handler.ShouldNotContain("_dispatcher");
+        files.ShouldNotContain(f => f.RelativePath.EndsWith("IDomainEventDispatcher.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Dispatch_events_sits_between_the_commit_and_the_return_under_read_model_results()
+    {
+        // The handler returns a projection, but must still dispatch and clear off the AGGREGATE —
+        // so the loop belongs after the commit and before the `return`, in every result branch.
+        var handler = File(
+            Emit(AppOn with { DispatchEvents = true, HandlerResult = CSharpHandlerResult.ReadModel }),
+            "OrderPlaceHandler.cs").Contents;
+
+        var commit = IndexOfOrFail(handler, "await _unitOfWork.SaveChangesAsync(ct);");
+        var clear = IndexOfOrFail(handler, "aggregate.ClearDomainEvents();");
+        var ret = IndexOfOrFail(handler, "return aggregate.ToOrderSummary();");
+        commit.ShouldBeLessThan(clear);
+        clear.ShouldBeLessThan(ret);
+    }
+
+
+    /// <summary>
+    /// The dispatch machinery must be gated on whether the context actually <i>records</i> events, not
+    /// on the option alone. The runtime contracts (<c>IDomainEventDispatcher</c>,
+    /// <c>IDomainEventAccumulator</c>) are emitted only for a model that has events — so a model with
+    /// none, built with the option on, must not emit a <c>TransactionBehavior</c> or a DI registration
+    /// referencing types that were never generated. Caught during review of #1721.
+    /// </summary>
+    [Fact]
+    public void Dispatch_events_on_a_model_that_records_no_events_still_compiles()
+    {
+        var files = Emit(MediatrDispatchOn, DerivedReadModelFixture);
+
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+
+        var behavior = File(files, "TransactionBehavior.cs").Contents;
+        behavior.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork)");
+        behavior.ShouldNotContain("IDomainEventAccumulator");
+
+        var di = File(files, "SalesApplicationServiceCollectionExtensions.cs").Contents;
+        di.ShouldNotContain("IDomainEventAccumulator");
+    }
+
+    /// <summary>The Application layer on in MediatR mode with post-commit dispatch requested.</summary>
+    internal static CSharpEmitterOptions MediatrDispatchOn =>
+        AppOn with { ApplicationMediatr = true, DispatchEvents = true };
+
+    [Fact]
+    public void Dispatch_events_mediatr_emits_the_accumulator_and_its_scoped_default()
+    {
+        var files = Emit(MediatrDispatchOn);
+
+        var contract = File(files, "IDomainEventAccumulator.cs").Contents;
+        contract.ShouldContain("public interface IDomainEventAccumulator");
+        contract.ShouldContain("void AddRange(IReadOnlyList<IDomainEvent> domainEvents);");
+        contract.ShouldContain("IReadOnlyList<IDomainEvent> Drain();");
+
+        // A leading slash keeps the suffix match off IDomainEventAccumulator.cs.
+        var impl = File(files, "/DomainEventAccumulator.cs").Contents;
+        impl.ShouldContain("public sealed class DomainEventAccumulator : IDomainEventAccumulator");
+        impl.ShouldContain("var drained = _domainEvents.ToArray();");
+    }
+
+    [Fact]
+    public void Dispatch_events_mediatr_accumulates_in_the_handler_without_dispatching()
+    {
+        // In MediatR mode the commit is deferred to TransactionBehavior, so the handler has no
+        // post-commit moment — it hands the events off and lets the behavior dispatch them.
+        var handler = File(Emit(MediatrDispatchOn), "OrderPlaceHandler.cs").Contents;
+
+        handler.ShouldContain("public OrderPlaceHandler(IUnitOfWork unitOfWork, IDomainEventAccumulator accumulator)");
+        handler.ShouldContain("_accumulator.AddRange(aggregate.DomainEvents);");
+        handler.ShouldContain("aggregate.ClearDomainEvents();");
+        handler.ShouldNotContain("DispatchAsync");
+    }
+
+    [Fact]
+    public void Dispatch_events_mediatr_drains_and_dispatches_after_the_commit()
+    {
+        var behavior = File(Emit(MediatrDispatchOn), "TransactionBehavior.cs").Contents;
+
+        behavior.ShouldContain("then dispatches the domain events the handlers recorded");
+        behavior.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork, IDomainEventAccumulator accumulator, IDomainEventDispatcher dispatcher)");
+        var commit = IndexOfOrFail(behavior, "await _unitOfWork.SaveChangesAsync(cancellationToken);");
+        var drain = IndexOfOrFail(behavior, "foreach (var domainEvent in _accumulator.Drain())");
+        var dispatch = IndexOfOrFail(behavior, "await _dispatcher.DispatchAsync(domainEvent, cancellationToken);");
+        var ret = IndexOfOrFail(behavior, "return response;");
+        commit.ShouldBeLessThan(drain);
+        drain.ShouldBeLessThan(dispatch);
+        dispatch.ShouldBeLessThan(ret);
+    }
+
+    [Fact]
+    public void Dispatch_events_off_leaves_the_mediatr_transaction_behavior_byte_identical()
+    {
+        var off = File(Emit(AppOn with { ApplicationMediatr = true }), "TransactionBehavior.cs").Contents;
+        off.ShouldContain("public TransactionBehavior(IUnitOfWork unitOfWork)");
+        off.ShouldNotContain("IDomainEventAccumulator");
+        off.ShouldNotContain("DispatchAsync");
+    }
+
+    [Fact]
+    public void Dispatch_events_registers_the_accumulator_but_never_the_dispatcher()
+    {
+        var di = File(Emit(MediatrDispatchOn), "SalesApplicationServiceCollectionExtensions.cs").Contents;
+
+        // Scoped, so one accumulator spans a request and its events cannot leak into another's.
+        di.ShouldContain("services.AddScoped<IDomainEventAccumulator, DomainEventAccumulator>();");
+
+        // The dispatcher is a CONTRACT Koine emits but never implements — registering a binding for
+        // it would either fail at resolve time or silently shadow the consumer's own registration.
+        di.ShouldNotContain("IDomainEventDispatcher,");
+        di.ShouldNotContain("AddScoped<IDomainEventDispatcher");
+        di.ShouldNotContain("AddTransient<IDomainEventDispatcher");
+
+        // …and the generated code says so itself, so a consumer reading only the output knows.
+        di.ShouldContain("Supply your own IDomainEventDispatcher registration");
+    }
+
+    [Fact]
+    public void Dispatch_events_registers_no_accumulator_in_plain_mode()
+    {
+        // Plain handlers dispatch inline, so there is nothing to accumulate.
+        var di = File(Emit(AppOn with { DispatchEvents = true }), "SalesApplicationServiceCollectionExtensions.cs").Contents;
+        di.ShouldNotContain("IDomainEventAccumulator");
+    }
+
+    /// <summary>A recording <c>IDomainEventDispatcher</c> plus a unit of work that logs its commit, so a
+    /// test can assert the emitted handler dispatches <b>after</b> committing and not before.</summary>
+    private const string RecordingDispatcherSource = """
+        namespace Sales;
+
+        public sealed class RecordingDispatcher : Koine.Runtime.IDomainEventDispatcher
+        {
+            public static readonly System.Collections.Generic.List<string> Log = new();
+
+            public System.Threading.Tasks.Task DispatchAsync(Koine.Runtime.IDomainEvent domainEvent, System.Threading.CancellationToken ct = default)
+            {
+                Log.Add("dispatch:" + domainEvent.GetType().Name);
+                return System.Threading.Tasks.Task.CompletedTask;
+            }
+        }
+
+        public sealed class RecordingUnitOfWork : IUnitOfWork
+        {
+            public RecordingUnitOfWork(IOrderRepository orders) => Orders = orders;
+
+            public IOrderRepository Orders { get; }
+
+            public System.Threading.Tasks.Task<int> SaveChangesAsync(System.Threading.CancellationToken ct = default)
+            {
+                RecordingDispatcher.Log.Add("commit");
+                return System.Threading.Tasks.Task.FromResult(0);
+            }
+        }
+        """;
+
+    [Fact]
+    public void Dispatch_events_plain_output_compiles()
+    {
+        var files = Emit(AppOn with { DispatchEvents = true }, CommandsOnlyFixture)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .Append(new EmittedFile("RecordingDispatcher.cs", RecordingDispatcherSource))
+            .ToList();
+
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Dispatch_events_mediatr_output_compiles()
+    {
+        var files = Emit(MediatrDispatchOn, CommandsOnlyFixture)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .Append(new EmittedFile("RecordingDispatcher.cs", RecordingDispatcherSource))
+            .ToList();
+
+        var (assembly, errors) = TestSupport.Compile(files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    /// <summary>Boots the emitted api layer with post-commit dispatch on, wiring the recording
+    /// dispatcher through the emitted DI extension so a real HTTP call exercises the whole path.</summary>
+    private const string DispatchingApiHostDriver = """
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Hosting;
+        using Microsoft.AspNetCore.TestHost;
+        using Microsoft.Extensions.DependencyInjection;
+        using Microsoft.Extensions.Hosting;
+
+        namespace Sales;
+
+        public static class ApiHostDriver
+        {
+            public static WebApplication Build()
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.WebHost.UseTestServer();
+                builder.Services.AddSalesApplication();
+
+                var repository = new FakeOrderRepository();
+                builder.Services.AddSingleton<IUnitOfWork>(new RecordingUnitOfWork(repository));
+
+                // The consumer supplies the dispatcher implementation — Koine emits only the contract.
+                builder.Services.AddSingleton<Koine.Runtime.IDomainEventDispatcher, RecordingDispatcher>();
+
+                var app = builder.Build();
+                app.MapSalesEndpoints();
+
+                // Surfaces the recorded ordering so the test can read it over the same HTTP hop.
+                app.MapGet("/__log", () => RecordingDispatcher.Log);
+
+                app.Start();
+                return app;
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task Dispatch_events_dispatches_a_real_event_after_the_commit_over_http()
+    {
+        // Each RunApi compiles a fresh assembly, so RecordingDispatcher.Log starts empty.
+        var files = Emit(ApiOn with { DispatchEvents = true }, CommandsOnlyFixture)
+            .Append(new EmittedFile("FakeOrderRepository.cs", FakeOrderRepositorySource.Source))
+            .Append(new EmittedFile("RecordingDispatcher.cs", RecordingDispatcherSource));
+
+        using var harness = TestSupport.RunApi(files, DispatchingApiHostDriver);
+
+        var response = await harness.Client.PostAsJsonAsync(
+            "/order/open",
+            new { customer = new { value = Guid.NewGuid() }, total = new { amount = 42.50m, currency = "USD" } },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // The factory's `emit OrderPlaced` reached a real dispatcher — and only after the commit.
+        var log = await harness.Client.GetFromJsonAsync<string[]>(
+            "/__log", TestContext.Current.CancellationToken);
+        log.ShouldBe(new[] { "commit", "dispatch:OrderPlaced" });
+    }
+
+    [Fact]
+    public void Config_parses_application_dispatch_events()
+    {
+        var opts = KoineConfig
+            .Parse("targets.csharp.application.dispatchEvents = true\n")
+            .OptionsFor("csharp");
+        opts.ApplicationDispatchEvents.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void App_dispatch_events_flag_resolves_onto_the_plan()
+    {
+        var settings = new BuildSettings { Path = "x.koi", AppDispatchEvents = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.ApplicationDispatchEvents.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void App_dispatch_events_flag_implies_the_application_layer()
+    {
+        // Issue #618's rule: a sub-option can never be a silent no-op because the layers defaulted
+        // to domain-only.
+        var settings = new BuildSettings { Path = "x.koi", AppDispatchEvents = true };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+    }
+
+    [Fact]
+    public void Config_supplied_dispatch_events_applies_and_upgrades_layers_without_a_flag()
+    {
+        // Bool sub-options are flag-OR-config (the --app-mediatr precedent), not flag-overrides-config:
+        // there is no "explicitly false" to express, so a config `true` stands on its own.
+        var configPath = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"koine-{System.Guid.NewGuid():N}.toml");
+        System.IO.File.WriteAllText(configPath, "targets.csharp.application.dispatchEvents = true\n");
+        try
+        {
+            var settings = new BuildSettings { Path = "x.koi", Config = configPath };
+            settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+            plan.Options.ApplicationDispatchEvents.ShouldBeTrue();
+            plan.Options.Layers.ShouldBe(new[] { "domain", "application" });
+        }
+        finally
+        {
+            System.IO.File.Delete(configPath);
+        }
+    }
+
+    [Fact]
+    public void App_dispatch_events_absent_still_maps_to_the_empty_options_bag()
+    {
+        var settings = new BuildSettings { Path = "x.koi" };
+        settings.TryResolve(out var plan, out var error).ShouldBeTrue(error);
+        plan.Options.ApplicationDispatchEvents.ShouldBeFalse();
+    }
+
+    // ------------------------------------------------------------------
     // W4 — --app-mapping mapperly: emit a Riok.Mapperly source-generated
     // projection instead of the hand-rolled To<RM>() mapper. plain (the
     // default) is unchanged / byte-identical.

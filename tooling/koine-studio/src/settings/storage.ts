@@ -32,7 +32,7 @@ export function readJsonObject(storageKey: string): Record<string, unknown> {
  * A `null` value DELETES the field; any other value sets it. Reads the current blob via
  * {@link readJsonObject} (so a corrupt/array blob starts fresh) and persists best-effort.
  */
-export function patchJsonBlob(storageKey: string, field: string, value: unknown | null): void {
+export function patchJsonBlob(storageKey: string, field: string, value: unknown): void {
   const blob = readJsonObject(storageKey);
   if (value === null) {
     delete blob[field];

@@ -242,10 +242,12 @@ export class KoineLsp {
         reject(new Error(`LSP request '${method}' timed out`));
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
-      this.send({ jsonrpc: '2.0', id, method, params }).catch((e) => {
+      this.send({ jsonrpc: '2.0', id, method, params }).catch((e: unknown) => {
         clearTimeout(timer);
         this.pending.delete(id);
-        reject(e);
+        // A transport failure is normally already an Error; wrap anything else so every rejection
+        // this method produces carries a stack (the timeout path above already does).
+        reject(e instanceof Error ? e : new Error(String(e)));
       });
     });
   }

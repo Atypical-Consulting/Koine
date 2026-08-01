@@ -2,6 +2,15 @@ import { describe, expect, test } from 'vitest';
 import { mcpCall, mcpJsonSnippet, mcpStdioSnippet, MCP_CLIENTS, parseToolsList, probeMcp } from '@/mcp/mcp';
 import { BrowserPlatform } from '@/host/browser';
 
+/**
+ * Read a `fetch` stub's request body as the JSON-RPC envelope the MCP client sends. `RequestInit['body']`
+ * is the whole `BodyInit` union (Blob, FormData, streams…), so stringifying it would risk a default
+ * `[object Object]`; every stub below sends a JSON string, so read it as one and give the two fields the
+ * stubs actually branch on a real type instead of `any`.
+ */
+const rpcBody = (init?: RequestInit): { method?: string; params?: unknown } =>
+  JSON.parse(init?.body as string) as { method?: string; params?: unknown };
+
 describe('mcpJsonSnippet', () => {
   test('wraps the endpoint URL in the mcp.json a client pastes', () => {
     const url = 'http://127.0.0.1:50286/mcp';
@@ -52,7 +61,7 @@ describe('MCP probe', () => {
 
   test('probeMcp reports ok + tools from a JSON-bodied server', async () => {
     const fetchFn = ((_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
+      const body = rpcBody(init);
       const payload =
         body.method === 'initialize'
           ? { result: { serverInfo: { name: 'koine' } } }
@@ -69,7 +78,7 @@ describe('MCP probe', () => {
 
   test('probeMcp reads a tools/list delivered as an SSE stream', async () => {
     const fetchFn = ((_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
+      const body = rpcBody(init);
       const payload =
         body.method === 'initialize'
           ? { result: { serverInfo: { name: 'koine' } } }
@@ -102,7 +111,7 @@ describe('MCP probe', () => {
     // A server that accepts the handshake but rejects tools/list (stale session, protocol mismatch…)
     // must read as "Not reachable", not "Connected — 0 tools".
     const fetchFn = ((_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
+      const body = rpcBody(init);
       return body.method === 'initialize'
         ? Promise.resolve(
             new Response(JSON.stringify({ result: { serverInfo: { name: 'koine' } } }), {
@@ -122,8 +131,8 @@ describe('mcpCall', () => {
   test('initializes, calls the tool with the session, and extracts the text result', async () => {
     const seen: string[] = [];
     const fetchFn = ((_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
-      seen.push(body.method);
+      const body = rpcBody(init);
+      seen.push(body.method ?? '(no method)'); // a method-less envelope shows up in the toEqual diff below
       if (body.method === 'initialize') {
         return Promise.resolve(
           new Response(JSON.stringify({ result: { serverInfo: { name: 'koine' } } }), {
@@ -155,7 +164,7 @@ describe('mcpCall', () => {
 
   test('reads an SSE-framed tool result', async () => {
     const fetchFn = ((_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
+      const body = rpcBody(init);
       const payload =
         body.method === 'initialize'
           ? { result: { serverInfo: { name: 'koine' } } }
@@ -172,7 +181,7 @@ describe('mcpCall', () => {
 
   test('marks an isError tool result so the model treats it as a failure', async () => {
     const fetchFn = ((_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
+      const body = rpcBody(init);
       const payload =
         body.method === 'initialize'
           ? { result: {} }
@@ -187,7 +196,7 @@ describe('mcpCall', () => {
 
   test('rejects on a non-2xx tools/call', async () => {
     const fetchFn = ((_url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body));
+      const body = rpcBody(init);
       return body.method === 'initialize'
         ? Promise.resolve(
             new Response(JSON.stringify({ result: {} }), { status: 200, headers: { 'content-type': 'application/json' } }),

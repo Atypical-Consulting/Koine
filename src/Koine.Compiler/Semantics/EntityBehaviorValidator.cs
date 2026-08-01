@@ -73,7 +73,7 @@ internal static class EntityBehaviorValidator
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in cmd.Parameters)
             {
-                SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(p.Type, index, resolver, diagnostics);
                 if (!seenParams.Add(p.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -140,7 +140,7 @@ internal static class EntityBehaviorValidator
             // also reported so only a single terminal value is emitted).
             if (cmd.ReturnType is { } returnType)
             {
-                SemanticValidator.ValidateTypeRef(returnType, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(returnType, index, resolver, diagnostics);
                 var resultCount = 0;
                 foreach (var stmt in cmd.Body)
                 {
@@ -258,7 +258,7 @@ internal static class EntityBehaviorValidator
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in factory.Parameters)
             {
-                SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(p.Type, index, resolver, diagnostics);
                 if (!seenParams.Add(p.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -444,7 +444,7 @@ internal static class EntityBehaviorValidator
     /// well-typed with distinct names; and each finder's result type is the
     /// aggregate root or a <c>List</c> of it.
     /// </summary>
-    public static void ValidateRepository(AggregateDecl agg, ModelIndex index, List<Diagnostic> diagnostics)
+    public static void ValidateRepository(AggregateDecl agg, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)
     {
         if (agg.Repository is not { } repo)
         {
@@ -485,7 +485,7 @@ internal static class EntityBehaviorValidator
             var seenParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in finder.Parameters)
             {
-                SemanticValidator.ValidateTypeRef(p.Type, index, diagnostics);
+                SemanticValidator.ValidateTypeRef(p.Type, index, resolver, diagnostics);
                 if (!seenParams.Add(p.Name))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateParameter,
@@ -503,7 +503,7 @@ internal static class EntityBehaviorValidator
 
             // The result is a single root or a List<root>; anything else can't be a
             // well-typed lookup over this aggregate.
-            SemanticValidator.ValidateTypeRef(finder.ResultType, index, diagnostics);
+            SemanticValidator.ValidateTypeRef(finder.ResultType, index, resolver, diagnostics);
             var elementName = CSharpListElement(finder.ResultType);
             if (elementName != agg.RootName)
             {
@@ -526,17 +526,17 @@ internal static class EntityBehaviorValidator
     /// state of that enum, flags a target that NO rule can reach (always-illegal).
     /// </summary>
     /// <remarks>
-    /// The <c>index.Classify(resolver.Context, ...)</c> call below is context-threaded per #1711, but
-    /// this specific site cannot be pinned end-to-end: the guard also calls
+    /// The <c>index.Classify(resolver.Context, ...)</c> call below is context-threaded per #1711. This
+    /// site USED to be unpinnable end-to-end, because the guard also calls
     /// <see cref="ModelIndex.EnumsDeclaring"/>, which is populated by walking
-    /// <see cref="ModelIndex.AllTypes"/> — the SAME flat, last-write-wins <c>_byName</c> map
-    /// <c>Classify</c>'s single-arg overload used to read from. Any model that collides the bound
-    /// field's enum by name (to trigger the ORIGINAL bug this fix closes) necessarily also evicts that
-    /// enum from <c>AllTypes()</c>, so <c>EnumsDeclaring</c> stays blind to it regardless of this fix
-    /// (#1632, explicitly out of this issue's scope — see #1644 for the same fusion in
-    /// <c>ConcreteEnumType</c>'s consumers). Verified empirically: the collision repro that proves the
-    /// sibling <see cref="ValidateStates"/> fix (whose guard does NOT consult <c>EnumsDeclaring</c>)
-    /// still returns early here every time, with or without this fix.
+    /// <see cref="ModelIndex.AllTypes"/> — then the SAME flat, last-write-wins <c>_byName</c> map
+    /// <c>Classify</c>'s single-arg overload read from. Any model colliding the bound field's enum by
+    /// name also evicted that enum from <c>AllTypes()</c>, so <c>EnumsDeclaring</c> stayed blind and
+    /// this guard returned early EVERY time — silently suppressing the diagnostic below.
+    /// <b>#1632 fixed that</b>: <c>AllTypes()</c> now enumerates every per-context declaration, so a
+    /// shadowed enum's members are registered and this check runs on a colliding model as it should.
+    /// Pinned by <c>ModelIndexAllTypesTests.Unreachable_transition_is_detected_through_a_shadowed_same_name_enum</c>.
+    /// (See #1644 for the same former fusion in <c>ConcreteEnumType</c>'s consumers.)
     /// </remarks>
     private static void CheckTransitionReachable(
         EntityDecl entity, Transition tr, Member target, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)

@@ -1,3 +1,4 @@
+using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests.Conformance;
@@ -128,6 +129,169 @@ public class JavaSnapshotTests
     public void Java_entities_and_events_compile()
     {
         var result = new KoineCompiler().Compile(EntityEventFixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 1) — the application/CQRS layer: a <c>service</c> with use cases, a
+    /// <c>readmodel</c> with direct and derived fields (so the projection has real behavior), and a
+    /// <c>query</c>. The snapshot is the review of the emitted application interface, the read-model
+    /// record + its static <c>from</c> projection, and the query record + its <c>QueryHandler</c> seam.
+    /// Shares <see cref="JavaCqrsTests.Fixture"/> so the string assertions there and this reviewed
+    /// snapshot can never drift apart.
+    /// </summary>
+    [Fact]
+    public Task Java_cqrs_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaCqrsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The CQRS emit must be real Java: the record + static projection, the
+    /// <c>CompletableFuture</c>-returning service boundary, and the <c>QueryHandler</c> specialization all
+    /// have to type-check against a real <c>javac --release 17</c> — a string/snapshot assertion alone
+    /// cannot see, say, a generic argument left as an unboxable primitive.
+    /// </summary>
+    [Fact]
+    public void Java_cqrs_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaCqrsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 2) — a cross-aggregate <c>policy</c>: the reviewed snapshot locks the
+    /// emitted <c>&lt;Name&gt;Policy</c> reactor interface and, crucially, the reaction sketch that
+    /// translates the triggering event's fields into the target command's named arguments.
+    /// </summary>
+    [Fact]
+    public Task Java_policy_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaPoliciesTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The policy emit must be real Java — in particular the Javadoc sketch, which interpolates a
+    /// translated expression and so is the one place an emitted comment could be malformed enough to
+    /// break the parse.
+    /// </summary>
+    [Fact]
+    public void Java_policy_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaPoliciesTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 3) — an entity <c>states</c> machine: the reviewed snapshot locks the
+    /// reachability guard preceding each governed transition (a multi-source target, a <c>when</c>-guarded
+    /// rule, and the single-source guard suppressed because a <c>requires</c> already states it).
+    /// </summary>
+    [Fact]
+    public Task Java_state_machine_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaBehaviorsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The reachability guards must be real Java: a <c>when</c> guard is a translated boolean expression
+    /// spliced into an <c>if</c>, which is exactly the kind of shape a string assertion can accept and
+    /// <c>javac</c> reject (an unboxed <c>Optional</c>, a missing paren, a non-boolean operand).
+    /// </summary>
+    [Fact]
+    public void Java_state_machine_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaBehaviorsTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 4) — an <c>anti-corruption-layer</c> context-map relation: the reviewed
+    /// snapshot locks the translator interface emitted into the downstream package, including the
+    /// package-qualified upstream parameter types.
+    /// </summary>
+    [Fact]
+    public Task Java_acl_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(JavaAclTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The ACL translator is where cross-package references are unavoidable — the downstream package
+    /// names an upstream type — so <c>javac</c> is the only check that proves the qualification is right;
+    /// a bare simple name would read fine in a string assertion and fail to resolve for real.
+    /// </summary>
+    [Fact]
+    public void Java_acl_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(JavaAclTests.Fixture, new JavaEmitter());
+        result.Success.ShouldBeTrue();
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Phase 2 (issue #1090, Task 5) — the full wiring slice under <c>--layers infrastructure</c>: the
+    /// reviewed snapshot locks the in-memory repository (its finders included), the outbox dispatcher, the
+    /// subscriber delivery seam, and the shared infrastructure runtime types.
+    /// </summary>
+    [Fact]
+    public Task Java_infrastructure_fixture_emits_expected_java()
+    {
+        var result = new KoineCompiler().Compile(
+            JavaInfrastructureTests.Fixture,
+            new JavaEmitterProvider().Create(EmitterOptions.Empty with { Layers = "domain,infrastructure" }));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// The infrastructure layer is the one Phase-2 slice with real implementation bodies — generics,
+    /// <c>@Override</c>s that must actually match the contract, a method reference, and stream pipelines —
+    /// so <c>javac</c> is doing genuine work here, not just parsing.
+    /// </summary>
+    [Fact]
+    public void Java_infrastructure_fixture_compiles()
+    {
+        var result = new KoineCompiler().Compile(
+            JavaInfrastructureTests.Fixture,
+            new JavaEmitterProvider().Create(EmitterOptions.Empty with { Layers = "domain,infrastructure" }));
         result.Success.ShouldBeTrue();
 
         var check = TestSupport.CompileJava(result.Files);

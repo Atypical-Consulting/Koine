@@ -60,13 +60,15 @@ Koine.Compiler.Emit.EmitterOptions.ApplicationHandlerResult.get -> string?
 Koine.Compiler.Emit.EmitterOptions.ApplicationHandlerResult.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.get -> string?
 Koine.Compiler.Emit.EmitterOptions.ApplicationMapping.init -> void
+Koine.Compiler.Emit.EmitterOptions.ApplicationDispatchEvents.get -> bool
+Koine.Compiler.Emit.EmitterOptions.ApplicationDispatchEvents.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.get -> bool
 Koine.Compiler.Emit.EmitterOptions.ApplicationMediatr.init -> void
 Koine.Compiler.Emit.EmitterOptions.ApplicationNotFound.get -> string?
 Koine.Compiler.Emit.EmitterOptions.ApplicationNotFound.init -> void
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.get -> bool
 Koine.Compiler.Emit.EmitterOptions.EmitSourceMaps.init -> void
-Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null, string? RegexMode = null, string? ApplicationHandlerResult = null, string? ApplicationNotFound = null) -> void
+Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null, string? RegexMode = null, string? ApplicationHandlerResult = null, string? ApplicationNotFound = null, bool ApplicationDispatchEvents = false) -> void
 Koine.Compiler.Emit.EmitterOptions.Layers.get -> string?
 Koine.Compiler.Emit.EmitterOptions.Layers.init -> void
 Koine.Compiler.Emit.EmitterOptions.ReferenceOnly.get -> bool
@@ -362,6 +364,7 @@ Koine.Compiler.Ast.ModelIndex.OwnerResolution.WasAmbiguous.init -> void
 Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution
 Koine.Compiler.Ast.ModelIndex.ResolveOwner(string! koineName, string? qualifier, string! referencingContext) -> Koine.Compiler.Ast.ModelIndex.OwnerResolution
 Koine.Compiler.Ast.ModelIndex.Classify(string? context, string! typeName) -> Koine.Compiler.Ast.TypeKind
+Koine.Compiler.Ast.ModelIndex.IsKnownType(string? context, string! typeName) -> bool
 Koine.Compiler.Ast.ModelIndex.TryGetDecl(string? context, string! typeName, out Koine.Compiler.Ast.TypeDecl! decl) -> bool
 Koine.Compiler.Ast.AclMapping.Deconstruct(out string! UpstreamContext, out string! UpstreamType, out string! LocalContext, out string! LocalType) -> void
 Koine.Compiler.Ast.AclMapping.Equals(Koine.Compiler.Ast.AclMapping? other) -> bool
@@ -560,7 +563,7 @@ Koine.Compiler.Emit.EmittedFile.<Clone>$() -> Koine.Compiler.Emit.EmittedFile!
 Koine.Compiler.Emit.EmittedFile.Deconstruct(out string! RelativePath, out string! Contents, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.SourceMapSegment!>? SourceMap, out string? Kind) -> void
 Koine.Compiler.Emit.EmittedFile.Equals(Koine.Compiler.Emit.EmittedFile? other) -> bool
 Koine.Compiler.Emit.EmitterOptions.<Clone>$() -> Koine.Compiler.Emit.EmitterOptions!
-Koine.Compiler.Emit.EmitterOptions.Deconstruct(out System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, out string? InstantMode, out string? Layout, out bool EmitSourceMaps, out bool ReferenceOnly, out string? Layers, out bool ApplicationMediatr, out string? ApplicationMapping, out int? RegexMatchTimeoutMs, out string? RegexMode, out string? ApplicationHandlerResult, out string? ApplicationNotFound) -> void
+Koine.Compiler.Emit.EmitterOptions.Deconstruct(out System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, out string? InstantMode, out string? Layout, out bool EmitSourceMaps, out bool ReferenceOnly, out string? Layers, out bool ApplicationMediatr, out string? ApplicationMapping, out int? RegexMatchTimeoutMs, out string? RegexMode, out string? ApplicationHandlerResult, out string? ApplicationNotFound, out bool ApplicationDispatchEvents) -> void
 Koine.Compiler.Emit.EmitterOptions.Equals(Koine.Compiler.Emit.EmitterOptions? other) -> bool
 Koine.Compiler.Emit.Glossary.GlossaryEntry.<Clone>$() -> Koine.Compiler.Emit.Glossary.GlossaryEntry!
 Koine.Compiler.Emit.Glossary.GlossaryEntry.Deconstruct(out string! Id, out string! Name, out string! Kind, out string! Context, out string! QualifiedName, out string? Doc, out Koine.Compiler.Ast.SourceSpan NameSpan) -> void

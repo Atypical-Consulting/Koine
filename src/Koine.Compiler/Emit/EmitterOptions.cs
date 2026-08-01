@@ -39,7 +39,8 @@ public sealed record EmitterOptions(
     int? RegexMatchTimeoutMs = null,
     string? RegexMode = null,
     string? ApplicationHandlerResult = null,
-    string? ApplicationNotFound = null)
+    string? ApplicationNotFound = null,
+    bool ApplicationDispatchEvents = false)
 {
     /// <summary>An options bag with no remapping and all defaults — the parameterless path.</summary>
     public static readonly EmitterOptions Empty =

@@ -33,10 +33,12 @@ public sealed partial class JavaEmitter : IEmitter
     public string TargetName => "java";
 
     /// <summary>
-    /// Encodes the Java options that change emitted bytes (the base package and the sorted package remap
-    /// pairs) so toggling either busts <see cref="Services.KoineCompiler"/>'s emit cache. Without this
-    /// override the default (type-name-only) discriminator would let two emits of the same source under
-    /// different <see cref="JavaEmitterOptions"/> collide.
+    /// Encodes every Java option that changes emitted bytes (the base package, the sorted package remap
+    /// pairs, and the selected layers) so toggling any of them busts
+    /// <see cref="Services.KoineCompiler"/>'s emit cache. Without this override the default
+    /// (type-name-only) discriminator would let two emits of the same source under different
+    /// <see cref="JavaEmitterOptions"/> collide — including a domain-only emit shadowing an
+    /// <c>--layers infrastructure</c> one.
     /// </summary>
     public string CacheDiscriminator
     {
@@ -47,7 +49,15 @@ public sealed partial class JavaEmitter : IEmitter
                 _options.PackageMap
                     .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                     .Select(kv => kv.Key + "=" + kv.Value));
-            return string.Join("|", GetType().FullName, "base=" + _options.BasePackage, "packages=" + map);
+            var layers = _options.Layers is null
+                ? ""
+                : string.Join(",", _options.Layers.Select(l => l.ToString()).OrderBy(s => s, StringComparer.Ordinal));
+            return string.Join(
+                "|",
+                GetType().FullName,
+                "base=" + _options.BasePackage,
+                "layers=" + layers,
+                "packages=" + map);
         }
     }
 
@@ -73,6 +83,14 @@ public sealed partial class JavaEmitter : IEmitter
             new(JavaRuntime.RangeFileName, JavaRuntime.RangeSource + "\n"),
         };
 
+        // The generic QueryHandler<Q, R> seam each emitted `<Query>Handler` specializes — gated on the
+        // model actually declaring a query, so a query-free model's output stays byte-identical to
+        // Phase 1's (unlike DomainException/Range, which any field type can demand).
+        if (HasQueries(model))
+        {
+            files.Add(new EmittedFile(JavaRuntime.QueryHandlerFileName, JavaRuntime.QueryHandlerSource + "\n"));
+        }
+
         // Phase 1 tactical core — value objects, generated IDs, smart enums, entities, aggregates,
         // events, and repositories — is emitted one public type per file by the split partials
         // (JavaEmitter.ValueObjects.cs, .Enums.cs, .Entities.cs, .Aggregates.cs, .Events.cs),
@@ -86,7 +104,44 @@ public sealed partial class JavaEmitter : IEmitter
                 EmitType(emit, files, ctx.Name, type);
             }
 
+            // A `service` lives on ContextNode.Services (not in Types), so iterate it separately: each
+            // emits ONE interface carrying its pure domain operations and its application use cases
+            // (Phase 2, JavaEmitter.Cqrs.cs).
+            foreach (ServiceDecl svc in ctx.Services)
+            {
+                if (EmitService(emit, ctx.Name, svc) is { } service)
+                {
+                    files.Add(service);
+                }
+            }
+
+            // Policies (R10.3) also live outside `Types`, on ContextNode.Policies: each emits a reactor
+            // interface seam (JavaEmitter.Policies.cs) the consumer wires.
+            foreach (PolicyDecl policy in ctx.Policies)
+            {
+                files.Add(EmitPolicy(emit, ctx.Name, policy));
+            }
+
+            // Integration-event subscriptions (R14.3) live on ContextNode.Subscribes: each emits a
+            // `Handle<Event>` delivery seam into THIS (the subscribing) context — JavaEmitter.Integration.cs.
+            foreach (SubscribeDecl sub in ctx.Subscribes)
+            {
+                files.Add(EmitIntegrationEventHandler(emit, ctx.Name, sub));
+            }
+
             EmitContextExtras(emit, files, ctx);
+        }
+
+        // Anti-corruption-layer translator seams (R14.2): one interface per ACL relation carrying a
+        // mapping block, emitted into the DOWNSTREAM context (JavaEmitter.Acl.cs). Model-wide rather
+        // than per-context, since the relations live on the context map.
+        EmitAclTranslators(emit, model, files);
+
+        // The opt-in Infrastructure layer (issue #241): concrete in-memory repositories and the
+        // transactional outbox. Off by default, so the domain output above is byte-identical without it.
+        if (_options.EmitsInfrastructure)
+        {
+            EmitInfrastructure(emit, model, files);
         }
 
         return files;
@@ -123,7 +178,16 @@ public sealed partial class JavaEmitter : IEmitter
             case IntegrationEventDecl iev:
                 files.Add(EmitEvent(emit, context, iev.Name, iev.Doc, iev.Members));
                 break;
-            // ReadModelDecl / QueryDecl are the Phase-2 application/CQRS layer — deliberately skipped here.
+            // The Phase-2 application/CQRS layer (JavaEmitter.Cqrs.cs): a read model emits a record + its
+            // static projection; a query emits its criteria record AND a named `<Q>Handler` seam (two
+            // public types, so two files under Java's one-public-type-per-file rule).
+            case ReadModelDecl rm:
+                files.Add(EmitReadModel(emit, context, rm));
+                break;
+            case QueryDecl q:
+                files.Add(EmitQuery(emit, context, q));
+                files.Add(EmitQueryHandler(emit, context, q));
+                break;
             default:
                 break;
         }

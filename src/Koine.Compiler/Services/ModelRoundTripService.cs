@@ -45,7 +45,16 @@ public static partial class ModelRoundTripService
     /// <see cref="ModelNode.Children"/> the bounded contexts (then the strategic context map, when
     /// present) in declaration order. With a qualified name only the matching subtree is returned —
     /// the scoped read an editor uses to drive a single form/canvas — or an empty <c>unknown</c> node
-    /// when nothing resolves. Declaration-order stable, so editors never reshuffle.
+    /// when nothing resolves.
+    ///
+    /// <para><b>Order is stable per list, not per source line.</b> The Ast stores a declaration's kinds in
+    /// separate lists (a context's types / policies / services / specs; an entity's state machines /
+    /// commands / factories; a service's operations / use cases), so the projection concatenates those
+    /// lists in a fixed order and each keeps its own declaration order within the group. Source
+    /// interleaving across two groups is therefore not preserved — a policy written above a service still
+    /// projects after it. What the contract guarantees is that the sequence is deterministic and that new
+    /// groups are <em>appended</em>, never spliced in, so an editor re-reading the tree never sees existing
+    /// children reshuffle.</para>
     /// </summary>
     public static ModelNode ModelToJson(KoineModel model, string? qualifiedName = null)
     {
@@ -62,7 +71,7 @@ public static partial class ModelRoundTripService
     /// Enumerates the editable children (<see cref="ModelNode.Members"/>) of the node addressed by
     /// <paramref name="qualifiedName"/> — a value/entity's fields, an enum's members, a state machine's
     /// transitions, the context map's relations — with their kinds and current values. Empty when the
-    /// name does not resolve. Declaration-order stable.
+    /// name does not resolve. Order is stable per list, in the sense <see cref="ModelToJson"/> documents.
     /// </summary>
     public static IReadOnlyList<ModelMember> MembersOf(KoineModel model, string qualifiedName) =>
         Find(BuildRoot(model), qualifiedName)?.Members ?? [];
@@ -92,6 +101,26 @@ public static partial class ModelRoundTripService
             children.Add(BuildType(type, ctx.Name));
         }
 
+        // The context's behavioural vocabulary (#483) — policies, services, then specifications —
+        // appended after the types so the existing children keep their positions. The read side
+        // (read models, queries) rides `ctx.Types`, so it keeps its own declaration position there.
+        // Policies and specs get their own `.policies.` / `.specs.` name segment because, unlike a
+        // service, their names are not reserved against the type namespace: see BuildPolicy/BuildSpec.
+        foreach (PolicyDecl policy in ctx.Policies)
+        {
+            children.Add(BuildPolicy(policy, ctx.Name));
+        }
+
+        foreach (ServiceDecl service in ctx.Services)
+        {
+            children.Add(BuildService(service, ctx.Name));
+        }
+
+        foreach (SpecDecl spec in ctx.Specs)
+        {
+            children.Add(BuildSpec(spec, ctx.Name));
+        }
+
         return new ModelNode("context", ctx.Name, ctx.Name, [], children, []);
     }
 
@@ -100,19 +129,9 @@ public static partial class ModelRoundTripService
         var qualified = prefix + "." + type.Name;
         return type switch
         {
-            // The state machine lives on the ENTITY, not the aggregate — an aggregate node has no
-            // `States` of its own, so it gets `[]`; the transitions surface on its root entity child.
-            AggregateDecl agg => new ModelNode(
-                "aggregate", qualified, agg.Name, [],
-                agg.Types.Select(t => BuildType(t, qualified)).ToList(), []),
+            AggregateDecl agg => BuildAggregate(agg, qualified),
 
-            EntityDecl entity => new ModelNode(
-                "entity", qualified, entity.Name,
-                entity.Members.Select(FieldMember).ToList(),
-                entity.States.Select(s => BuildStates(entity, s, qualified)).ToList(),
-                // The flattened per-edge transitions across all the entity's state machines, surfaced
-                // on the owner so a consumer needn't parse the nested `.states.<field>` qualifiedName.
-                entity.States.SelectMany(s => TransitionMembers(entity, s)).ToList()),
+            EntityDecl entity => BuildEntity(entity, qualified),
 
             ValueObjectDecl vo => new ModelNode(
                 vo.IsQuantity ? "quantity" : "value", qualified, vo.Name,
@@ -130,8 +149,79 @@ public static partial class ModelRoundTripService
                 "integration event", qualified, ie.Name,
                 ie.Members.Select(FieldMember).ToList(), [], []),
 
+            // The read side (R12.3/R12.4, #483): a read model's projected fields, and a query's
+            // criteria followed by the read model it returns.
+            ReadModelDecl rm => new ModelNode(
+                "read-model", qualified, rm.Name,
+                rm.Fields.Select(ReadModelFieldMember).ToList(), [], []),
+
+            QueryDecl q => new ModelNode(
+                "query", qualified, q.Name,
+                [.. q.Criteria.Select(CriterionMember), new ModelMember("result", "result", FormatType(q.ResultType), null)],
+                [], []),
+
             _ => new ModelNode("type", qualified, type.Name, [], [], []),
         };
+    }
+
+    /// <summary>
+    /// An aggregate: its nested types, then its behavioural vocabulary (#483) — the repository contract
+    /// (at most one) and the aggregate-scoped specifications — appended after them so the existing
+    /// children keep their declaration positions. The state machine lives on the ENTITY, not the
+    /// aggregate: an aggregate node has no <c>States</c> of its own, so its transitions are <c>[]</c>;
+    /// they surface on its root entity child.
+    /// </summary>
+    private static ModelNode BuildAggregate(AggregateDecl agg, string qualified)
+    {
+        var children = new List<ModelNode>();
+        foreach (TypeDecl type in agg.Types)
+        {
+            children.Add(BuildType(type, qualified));
+        }
+
+        if (agg.Repository is { } repository)
+        {
+            children.Add(BuildRepository(repository, qualified));
+        }
+
+        foreach (SpecDecl spec in agg.Specs)
+        {
+            children.Add(BuildSpec(spec, qualified));
+        }
+
+        return new ModelNode("aggregate", qualified, agg.Name, [], children, []);
+    }
+
+    /// <summary>
+    /// An entity: its fields as members, then its state machines followed by its behavioural vocabulary
+    /// (#483) — the commands and the factories — appended after them so the existing <c>states</c>
+    /// children keep their positions.
+    /// </summary>
+    private static ModelNode BuildEntity(EntityDecl entity, string qualified)
+    {
+        var children = new List<ModelNode>();
+        foreach (StatesDecl states in entity.States)
+        {
+            children.Add(BuildStates(entity, states, qualified));
+        }
+
+        foreach (CommandDecl command in entity.Commands)
+        {
+            children.Add(BuildCommand(command, qualified));
+        }
+
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            children.Add(BuildFactory(factory, qualified));
+        }
+
+        return new ModelNode(
+            "entity", qualified, entity.Name,
+            entity.Members.Select(FieldMember).ToList(),
+            children,
+            // The flattened per-edge transitions across all the entity's state machines, surfaced
+            // on the owner so a consumer needn't parse the nested `.states.<field>` qualifiedName.
+            entity.States.SelectMany(s => TransitionMembers(entity, s)).ToList());
     }
 
     private static ModelNode BuildStates(EntityDecl owner, StatesDecl states, string entityQualified)
@@ -186,6 +276,136 @@ public static partial class ModelRoundTripService
         return null;
     }
 
+    /// <summary>
+    /// An aggregate's repository contract (R11.3): one <c>operation</c> member per explicitly declared
+    /// mutating operation — none when the aggregate takes the default set — then one <c>finder</c> per
+    /// declarative finder, carrying its result type and its rendered parameter list. An aggregate holds
+    /// at most one repository, so the node's name is the fixed <c>.repository</c> segment.
+    /// </summary>
+    private static ModelNode BuildRepository(RepositoryDecl repository, string aggregateQualified) => new(
+        "repository", aggregateQualified + ".repository", "repository",
+        [
+            .. (repository.Operations ?? []).Select(op => new ModelMember("operation", op, null, null)),
+            .. repository.Finders.Select(f => new ModelMember(
+                "finder", f.Name, FormatType(f.ResultType), DescribeParams(f.Parameters))),
+        ],
+        [], []);
+
+    /// <summary>
+    /// An entity command (R5/R6): its typed <c>param</c>s, then its body's <c>requires</c> preconditions
+    /// and the events it <c>emit</c>s in declaration order, then — for a value-returning command — its
+    /// <c>result</c> (the terminal statement, so projected last). The state edges the command drives are
+    /// not repeated here: they already surface on the owning entity, correlated back to this command by
+    /// <see cref="ModelMember.Via"/>.
+    /// </summary>
+    private static ModelNode BuildCommand(CommandDecl command, string entityQualified)
+    {
+        var members = new List<ModelMember>(command.Parameters.Select(ParamMember));
+        members.AddRange(command.Body.Select(BehaviourStmtMember).OfType<ModelMember>());
+
+        ResultClause? result = command.Body.OfType<ResultClause>().FirstOrDefault();
+        if (command.ReturnType is not null || result is not null)
+        {
+            members.Add(new ModelMember(
+                "result", "result",
+                command.ReturnType is null ? null : FormatType(command.ReturnType),
+                result is null ? null : ExprDescriber.Describe(result.Value)));
+        }
+
+        return new ModelNode(
+            "command", entityQualified + ".commands." + command.Name, command.Name, members, [], []);
+    }
+
+    /// <summary>
+    /// A factory (R8): the intention-revealing creation operation's typed <c>param</c>s, then its body's
+    /// <c>requires</c> preconditions and creation <c>emit</c>s in declaration order. Identity is
+    /// generated, and the field initializations are the emitters' concern, so neither is projected.
+    /// </summary>
+    private static ModelNode BuildFactory(FactoryDecl factory, string entityQualified) => new(
+        "factory", entityQualified + ".factories." + factory.Name, factory.Name,
+        [
+            .. factory.Parameters.Select(ParamMember),
+            .. factory.Body.Select(BehaviourStmtMember).OfType<ModelMember>(),
+        ],
+        [], []);
+
+    /// <summary>
+    /// The member for one command/factory body statement, or <c>null</c> for a statement this projection
+    /// does not surface as its own row — a <see cref="Transition"/> (already surfaced, correlated, on the
+    /// owning entity), an <see cref="Initialization"/>, or a <see cref="ResultClause"/> (folded into the
+    /// command's single <c>result</c> member, which also carries the declared return type).
+    /// </summary>
+    private static ModelMember? BehaviourStmtMember(CommandStmt stmt) => stmt switch
+    {
+        // A precondition is named by its described condition, with the author's message as its value.
+        RequiresClause requires => new ModelMember(
+            "requires", ExprDescriber.Describe(requires.Condition), null, requires.Message),
+
+        EmitClause emit => new ModelMember("emit", emit.EventName, null, DescribeEmitArgs(emit)),
+
+        _ => null,
+    };
+
+    /// <summary>One typed parameter of a command/factory — the same shape as a query's <c>criterion</c>.</summary>
+    private static ModelMember ParamMember(Param p) => new("param", p.Name, FormatType(p.Type), null);
+
+    /// <summary>Renders a parameter list in canonical <c>.koi</c> syntax (<c>name: Type, ...</c>); null when empty.</summary>
+    private static string? DescribeParams(IReadOnlyList<Param> parameters) =>
+        parameters.Count == 0
+            ? null
+            : string.Join(", ", parameters.Select(p => $"{p.Name}: {FormatType(p.Type)}"));
+
+    /// <summary>Renders an emitted event's payload in canonical <c>.koi</c> syntax (<c>field: value, ...</c>); null when empty.</summary>
+    private static string? DescribeEmitArgs(EmitClause emit) =>
+        emit.Args.Count == 0
+            ? null
+            : string.Join(", ", emit.Args.Select(a => $"{a.Field}: {ExprDescriber.Describe(a.Value)}"));
+
+    /// <summary>
+    /// A policy (R10.3): one <c>reaction</c> member correlating the triggering event with the command
+    /// the policy reacts with — the <c>command → event → policy</c> chain a navigator walks.
+    ///
+    /// <para>Addressed under a <c>.policies.</c> segment rather than <c><paramref name="prefix"/>.Name</c>:
+    /// nothing in the language reserves a policy's name against the type namespace (only a
+    /// <em>service</em> shares it — see <see cref="Semantics.SemanticValidator.ValidateUniqueTypeNames"/>),
+    /// so a legal model may declare a policy and a type of the same name, and a flat qualified name would
+    /// make the two children collide and shadow one another in <see cref="Find"/>.</para>
+    /// </summary>
+    private static ModelNode BuildPolicy(PolicyDecl policy, string prefix) => new(
+        "policy", prefix + ".policies." + policy.Name, policy.Name,
+        [new ModelMember("reaction", policy.EventName, null, DescribeReaction(policy.Reaction))], [], []);
+
+    /// <summary>Renders a policy's reaction in canonical <c>.koi</c> syntax: <c>Target.command(arg: value, ...)</c>.</summary>
+    private static string DescribeReaction(PolicyReaction reaction) =>
+        $"{reaction.TargetType}.{reaction.CommandName}(" +
+        string.Join(", ", reaction.Args.Select(a => $"{a.Parameter}: {ExprDescriber.Describe(a.Value)}")) + ")";
+
+    /// <summary>
+    /// A service (R10.2/R12.2): one member per pure domain <c>operation</c> — carrying its result
+    /// expression, or none when the operation is a seam — then one per application <c>usecase</c>.
+    /// </summary>
+    private static ModelNode BuildService(ServiceDecl service, string prefix) => new(
+        "service", prefix + "." + service.Name, service.Name,
+        [
+            .. service.Operations.Select(o => new ModelMember(
+                "operation", o.Name, FormatType(o.ReturnType),
+                o.Body is null ? null : ExprDescriber.Describe(o.Body))),
+            .. service.UseCases.Select(u => new ModelMember(
+                "usecase", u.Name, u.ReturnType is null ? null : FormatType(u.ReturnType), null)),
+        ],
+        [], []);
+
+    /// <summary>
+    /// A specification (R10.1): one <c>condition</c> member naming the value/entity the rule is declared
+    /// on, with the boolean condition described target-agnostically. Addressed under a <c>.specs.</c>
+    /// segment — at context scope under the context, at aggregate scope under the aggregate — for the
+    /// same reason as <see cref="BuildPolicy"/>: a spec's name is not reserved against the type
+    /// namespace, so a flat qualified name would collide with a same-named type's node.
+    /// </summary>
+    private static ModelNode BuildSpec(SpecDecl spec, string prefix) => new(
+        "spec", prefix + ".specs." + spec.Name, spec.Name,
+        [new ModelMember("condition", spec.TargetType, null, ExprDescriber.Describe(spec.Condition))], [], []);
+
     private static ModelNode BuildContextMap(ContextMapNode map)
     {
         var relations = map.Relations
@@ -205,6 +425,19 @@ public static partial class ModelRoundTripService
     private static ModelMember EnumMemberOf(EnumMember em) => new(
         "enumMember", em.Name, null,
         em.Args.Count == 0 ? null : string.Join(", ", em.Args.Select(ExprDescriber.Describe)));
+
+    /// <summary>
+    /// One read-model field (R12.3). A <em>direct</em> field carries neither type nor value — it maps to
+    /// the source member of the same name; a <em>derived</em> one carries its declared type and the
+    /// described projection, the same way <see cref="FieldMember"/> surfaces a member's derivation.
+    /// </summary>
+    private static ModelMember ReadModelFieldMember(ReadModelField f) => new(
+        "field", f.Name,
+        f.Type is null ? null : FormatType(f.Type),
+        f.Projection is null ? null : ExprDescriber.Describe(f.Projection));
+
+    /// <summary>One query criterion (R12.4): a typed parameter of the emitted query DTO.</summary>
+    private static ModelMember CriterionMember(Param p) => new("criterion", p.Name, FormatType(p.Type), null);
 
     private static string? RelationDetail(ContextRelation r)
     {

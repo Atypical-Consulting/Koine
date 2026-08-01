@@ -30,7 +30,79 @@ public class ContextMapWireParityTests
         }
         """;
 
+    /// <summary>
+    /// One relation of every <see cref="Koine.Compiler.Ast.ContextRelationKind"/>, so the additive
+    /// <c>upstreamRole</c>/<c>downstreamRole</c> projection (#483) is exercised for all seven kinds on
+    /// both wires. A context map allows only ONE relation per unordered pair, hence the eight contexts.
+    /// </summary>
+    private const string RolesFixture = """
+        context Alpha   { value A { v: String } }
+        context Bravo   { value B { v: String } }
+        context Charlie { value C { v: String } }
+        context Delta   { value D { v: String } }
+        context Echo    { value E { v: String } }
+        context Foxtrot { value F { v: String } }
+        context Golf    { value G { v: String } }
+        context Hotel   { value H { v: String } }
+
+        contextmap {
+          Alpha   <-> Bravo   : partnership
+          Charlie <-> Delta   : shared-kernel
+          Echo    ->  Foxtrot : customer-supplier
+          Golf    ->  Hotel   : conformist
+          Alpha   ->  Charlie : anti-corruption-layer
+            acl { Alpha.A -> Charlie.C }
+          Bravo   ->  Delta   : open-host
+          Echo    ->  Golf    : published-language
+        }
+        """;
+
     private const string Uri = "file:///ordering.koi";
+
+    /// <summary>
+    /// The strategic-DDD role each relation kind gives its two ends (#483). <c>null</c> for the two
+    /// symmetric patterns — partnership and shared kernel put both contexts on an equal footing, so
+    /// neither end plays an upstream/downstream role.
+    /// </summary>
+    public static TheoryData<string, string?, string?> ExpectedRoles => new()
+    {
+        { "Partnership", null, null },
+        { "SharedKernel", null, null },
+        { "CustomerSupplier", "Supplier", "Customer" },
+        { "Conformist", "Upstream", "Conformist" },
+        { "AntiCorruptionLayer", "Upstream", "Anti-Corruption Layer" },
+        { "OpenHost", "Open Host Service", "Downstream" },
+        { "PublishedLanguage", "Published Language", "Downstream" },
+    };
+
+    [Theory]
+    [MemberData(nameof(ExpectedRoles))]
+    public void Both_backends_type_each_relation_end_with_its_strategic_role(
+        string kind, string? upstreamRole, string? downstreamRole)
+    {
+        foreach (var result in new[] { LspContextMap(RolesFixture), WasmContextMap(RolesFixture) })
+        {
+            var relation = result["relations"]!.AsArray()
+                .Single(r => (string?)r!["kind"] == kind)!
+                .AsObject();
+
+            // The keys are always present (even when the role is null) so the Studio badge renderer
+            // can distinguish "symmetric relation" from "an older backend that doesn't emit roles".
+            relation.ContainsKey("upstreamRole").ShouldBeTrue();
+            relation.ContainsKey("downstreamRole").ShouldBeTrue();
+            ((string?)relation["upstreamRole"]).ShouldBe(upstreamRole);
+            ((string?)relation["downstreamRole"]).ShouldBe(downstreamRole);
+        }
+    }
+
+    [Fact]
+    public void Both_backends_serialize_the_relation_roles_identically()
+    {
+        // The whole `relations` array — roles included — must serialize field-for-field identically
+        // over the two backends; a drift between them is a bug.
+        Canonical(LspContextMap(RolesFixture)["relations"])
+            .ShouldBe(Canonical(WasmContextMap(RolesFixture)["relations"]));
+    }
 
     [Fact]
     public void Both_backends_carry_a_declaration_source_span_for_each_context()
@@ -83,8 +155,8 @@ public class ContextMapWireParityTests
     // ---- backend drivers ------------------------------------------------------
 
     /// <summary>Drives the real stdio LSP wire (<c>koine/contextMap</c>) and returns its <c>result</c>.</summary>
-    private static JsonObject LspContextMap() =>
-        LspResult(Uri, Fixture, "koine/contextMap", new { })!.AsObject();
+    private static JsonObject LspContextMap(string? source = null) =>
+        LspResult(Uri, source ?? Fixture, "koine/contextMap", new { })!.AsObject();
 
     /// <summary>
     /// Drives the WASM JSExport <c>ContextMap</c> surface (the in-browser backend) and returns its result.
@@ -93,9 +165,9 @@ public class ContextMapWireParityTests
     /// the CA1416 suppression.
     /// </summary>
 #pragma warning disable CA1416 // ContextMap has no JS-interop in its body; safe to call off-browser in a parity test.
-    private static JsonObject WasmContextMap()
+    private static JsonObject WasmContextMap(string? source = null)
     {
-        var filesJson = JsonSerializer.Serialize(new[] { new { uri = Uri, text = Fixture } });
+        var filesJson = JsonSerializer.Serialize(new[] { new { uri = Uri, text = source ?? Fixture } });
         var json = CompilerInterop.ContextMap(filesJson);
         return JsonNode.Parse(json)!.AsObject();
     }

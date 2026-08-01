@@ -177,7 +177,7 @@ describe('TauriPlatform legacy workspace migration (#915)', () => {
       }
       if (cmd === 'move_entry') {
         moves.push(payload);
-        return `${payload.destFolder}/${payload.newRelPath}`;
+        return `${String(payload.destFolder)}/${String(payload.newRelPath)}`;
       }
       if (cmd === 'list_koi_files') return []; // defaultWorkspace then seeds a fresh Untitled
       return undefined; // create_file etc.

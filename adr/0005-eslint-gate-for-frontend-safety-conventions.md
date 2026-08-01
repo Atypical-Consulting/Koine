@@ -72,3 +72,59 @@ We will adopt a **narrow, flat-config ESLint gate** over both front-end packages
 
 This is Tier 1 of the imperative-island migration arc (#979 / #980 / #985 / #987 / #989–#992): those issues
 assume this gate exists and shrink its allow-list as they land.
+
+## Addendum (2026-07-31) — the deferred `recommendedTypeChecked` ratchet is under way (#998)
+
+The "deferred ratchet" this decision left open is now in progress. `tseslint.configs.recommendedTypeChecked`
+is **on** in both `eslint.config.mjs` files, adopted as an **inverted allow-list**: the whole preset applies,
+and each rule that still has findings is listed in that config's `RATCHET_PENDING` map as `'off'` with its
+live finding count. Every subsequent ratchet PR fixes one rule's findings and **deletes** its entry, so the
+table only ever shrinks and the remaining debt is visible in the config itself. Entries are never re-added,
+and no finding is ever cleared with a blanket `eslint-disable`.
+
+The preset turns on 47 rules. A fresh measurement on 2026-07-31 (the `~1,300` figure above was the #993-time
+snapshot of a since-grown codebase) found **1,961 findings across 17 rules in `koine-studio`** and **41
+across 5 rules in `koine-ui`** — so **30 of the 47 rules were already clean** and went straight to `error`.
+
+Starting per-rule burn-down (findings at ratchet time; ✅ = enforced by the PR that opened the ratchet):
+
+| Rule | koine-studio | koine-ui |
+|---|---:|---:|
+| `no-empty-object-type` | 2 ✅ | 2 ✅ |
+| `no-redundant-type-constituents` | 2 ✅ | 0 ✅ |
+| `restrict-template-expressions` | 2 ✅ | 0 ✅ |
+| `await-thenable` | 5 ✅ | 0 ✅ |
+| `prefer-const` | 8 ✅ | 0 ✅ |
+| `no-base-to-string` | 9 ✅ | 0 ✅ |
+| `prefer-promise-reject-errors` | 10 ✅ | 0 ✅ |
+| `no-unsafe-return` | 12 ✅ | 0 ✅ |
+| `no-unsafe-argument` | 50 | 0 ✅ |
+| `no-explicit-any` | 65 | 1 |
+| `no-unsafe-assignment` | 68 | 0 ✅ |
+| `no-unused-vars` | 72 | 1 |
+| `no-unsafe-call` | 129 | 0 ✅ |
+| `no-unnecessary-type-assertion` | 221 | 15 |
+| `no-unsafe-member-access` | 261 | 0 ✅ |
+| `require-await` | 477 | 0 ✅ |
+| `unbound-method` | 546 | 22 |
+| *(the other 30 preset rules)* | 0 ✅ | 0 ✅ |
+
+The still-pending counts above are the **post-fix** figures the configs' `RATCHET_PENDING` tables carry
+(1,889 in koine-studio, 39 in koine-ui): typing the seams that the cheap rules forced also removed
+findings from rules that remain off. Re-measure before editing either table.
+
+A rule is burned down across **both** packages in the same PR, so it is never half-enforced across the
+tree — the per-directory ratchet #998 considered and rejected. Two rules carry a non-default *option*
+(both still `error`, neither an exemption): `no-empty-object-type: { allowInterfaces: 'with-single-extends' }`,
+because a `declare module` augmentation only merges through an interface, so `vitest-axe.d.ts`'s body is
+necessarily empty; and `prefer-const: { ignoreReadBeforeAssign: true }`, because the codebase's
+forward-declaration idiom for mutually-referencing controllers (`let workspace: WorkspaceController;`,
+read by a thunk defined above its single assignment) *cannot* be `const` — the default rule demands an
+edit that does not compile.
+
+`src/templates.generated.ts` (koine-studio) is excluded from the gate outright: it is a ~180KB
+machine-generated, git-ignored module, and CI runs `npm run lint` before the generator has produced it — so
+linting it would make the gate depend on build order.
+
+This addendum records the ratchet's **start**; the decision above stands unchanged until the last
+`RATCHET_PENDING` entry is gone, at which point #998's closeout amends it to record full adoption.

@@ -891,7 +891,7 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, 1);
     req.onupgradeneeded = () => req.result.createObjectStore(STORE);
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'));
   });
   return dbPromise;
 }
@@ -903,7 +903,7 @@ async function idbPut(key: string, value: FsDirHandle): Promise<void> {
       const tx = db.transaction(STORE, 'readwrite');
       tx.objectStore(STORE).put(value, key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
     });
   } catch {
     // persistence is best-effort; recents simply won't survive a reload
@@ -931,7 +931,7 @@ async function idbDelete(key: string): Promise<void> {
       const tx = db.transaction(STORE, 'readwrite');
       tx.objectStore(STORE).delete(key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
     });
   } catch {
     // best-effort, mirrors idbPut — a failed delete just means the dead root lingers until re-picked
@@ -983,7 +983,7 @@ export async function __clearDbForTest(): Promise<void> {
       const tx = db.transaction(STORE, 'readwrite');
       tx.objectStore(STORE).clear();
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
     });
   } catch {
     // DB not available or error clearing

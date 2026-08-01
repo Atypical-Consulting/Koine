@@ -25,7 +25,12 @@ const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 // real zustand equality semantics. `routeCallback` reads it back off the deps it was handed.
 function routeCallback(deps: LifecycleBootDeps): (s: { route: string }, prev: { route: string }) => void {
   const sub = vi.mocked((deps.store as unknown as { subscribe: ReturnType<typeof vi.fn> }).subscribe);
-  return sub.mock.calls[sub.mock.calls.length - 1][0];
+  // The fake's `subscribe` is an untyped vi.fn(), so its recorded argument comes back as `any` —
+  // assert it to this function's declared return type at the seam instead of leaking the `any` out.
+  return sub.mock.calls[sub.mock.calls.length - 1][0] as (
+    s: { route: string },
+    prev: { route: string },
+  ) => void;
 }
 
 function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
@@ -352,7 +357,8 @@ describe('lifecycleBoot', () => {
   describe('recovery re-dispatch after a failed boot (#973)', () => {
     function restartCallback(deps: LifecycleBootDeps): () => void {
       const fn = deps.lsp.onServerRestart as unknown as ReturnType<typeof vi.fn>;
-      return fn.mock.calls[0][0];
+      // Same seam as routeCallback above: an untyped vi.fn()'s recorded argument is `any`.
+      return fn.mock.calls[0][0] as () => void;
     }
 
     function makeRejectingDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
