@@ -140,6 +140,54 @@
                   ],
                   "children": [],
                   "transitions": []
+                },
+                {
+                  "kind": "command",
+                  "qualifiedName": "Ordering.Sales.Order.commands.place",
+                  "title": "place",
+                  "members": [
+                    {
+                      "kind": "requires",
+                      "name": "status == Draft",
+                      "type": null,
+                      "value": "only a draft order can be placed",
+                      "via": null
+                    }
+                  ],
+                  "children": [],
+                  "transitions": []
+                },
+                {
+                  "kind": "command",
+                  "qualifiedName": "Ordering.Sales.Order.commands.ship",
+                  "title": "ship",
+                  "members": [
+                    {
+                      "kind": "requires",
+                      "name": "status == Placed",
+                      "type": null,
+                      "value": "only a placed order can be shipped",
+                      "via": null
+                    }
+                  ],
+                  "children": [],
+                  "transitions": []
+                },
+                {
+                  "kind": "command",
+                  "qualifiedName": "Ordering.Sales.Order.commands.cancel",
+                  "title": "cancel",
+                  "members": [
+                    {
+                      "kind": "requires",
+                      "name": "status == Placed",
+                      "type": null,
+                      "value": "only a placed order can be cancelled",
+                      "via": null
+                    }
+                  ],
+                  "children": [],
+                  "transitions": []
                 }
               ],
               "transitions": [

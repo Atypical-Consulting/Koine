@@ -371,12 +371,20 @@ public static partial class CompilerInterop
         return spans;
     }
 
+    /// <summary>
+    /// Projects one context-map relation. The trailing <c>upstreamRole</c>/<c>downstreamRole</c> are
+    /// additive (#483): the strategic-DDD role each end plays under the relation's kind, derived by the
+    /// shared <see cref="ContextRelationRoles"/> helper the stdio LSP host also calls, so both wires
+    /// carry the same labels.
+    /// </summary>
     private static WContextRelation MapRelation(ContextRelation r) => new(
         r.Upstream,
         r.Downstream,
         r.Kind.ToString(),
         r.IsBidirectional,
         r.SharedTypes.ToArray(),
-        r.AclMappings.Select(a => new WAclMapping(a.UpstreamContext, a.UpstreamType, a.LocalContext, a.LocalType)).ToArray());
+        r.AclMappings.Select(a => new WAclMapping(a.UpstreamContext, a.UpstreamType, a.LocalContext, a.LocalType)).ToArray(),
+        ContextRelationRoles.UpstreamRole(r),
+        ContextRelationRoles.DownstreamRole(r));
 
 }

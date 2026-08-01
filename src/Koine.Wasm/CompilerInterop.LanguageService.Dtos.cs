@@ -43,9 +43,14 @@ public sealed record WGlossaryResult(string Markdown);
 /// <summary>An anti-corruption-layer mapping in the context map.</summary>
 public sealed record WAclMapping(string UpstreamContext, string UpstreamType, string LocalContext, string LocalType);
 
-/// <summary>One context-map relation.</summary>
+/// <summary>One context-map relation. <see cref="UpstreamRole"/>/<see cref="DownstreamRole"/> are
+/// additive (#483): the strategic-DDD role each end plays under <see cref="Kind"/>, derived by
+/// <see cref="Koine.Compiler.Services.ContextRelationRoles"/> (both <c>null</c> for the symmetric
+/// partnership/shared-kernel patterns). Source-gen serializes them to the wire keys
+/// <c>upstreamRole</c>/<c>downstreamRole</c>, always written — never omitted when null.</summary>
 public sealed record WContextRelation(
-    string Upstream, string Downstream, string Kind, bool Bidirectional, string[] SharedTypes, WAclMapping[] Acl);
+    string Upstream, string Downstream, string Kind, bool Bidirectional, string[] SharedTypes, WAclMapping[] Acl,
+    string? UpstreamRole = null, string? DownstreamRole = null);
 
 /// <summary>Strategic context map: contexts + relations. <c>ContextSpans</c> is additive (#290): a
 /// name → declaration source span map (the raw 1-based span over the <c>context</c> name token, null on
