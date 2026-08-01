@@ -250,4 +250,117 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
 
         check.Ok.ShouldBeTrue("expected the emitted OpenAPI document to validate:\n" + string.Join("\n", check.Errors));
     }
+
+    // ------------------------------------------------------------------
+    // R19 (#1219) — the openapi document reflects the @route / @get|@post|
+    // @put|@delete|@patch / @auth annotations, via the shared RouteDerivation.
+    // The three axes are independent, so an un-annotated model's document
+    // (the OrderingFixture snapshot above) stays byte-identical.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// The §annotated fixture points two commands at the same overridden path under different verbs — so
+    /// the emitted <c>paths</c> must merge them under one key — while the query carries only
+    /// <c>@auth</c> and therefore keeps its conventional <c>GET /orders-by-status</c>.
+    /// </summary>
+    private const string AnnotatedOrderingFixture = """
+        context Ordering {
+          enum OrderStatus { Draft, Submitted, Cancelled }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              /// Submit a draft order for fulfilment.
+              @route("/orders/{id}")
+              @put
+              @auth("admin")
+              command submit(note: String) {
+                requires status == Draft "only a draft order can be submitted"
+                status -> Submitted
+              }
+
+              /// Cancel an order that has not shipped yet.
+              @route("/orders/{id}")
+              @delete
+              command cancel {
+                requires status == Submitted "only a submitted order can be cancelled"
+                status -> Cancelled
+              }
+            }
+          }
+
+          readmodel OrderRow from Order {
+            status
+          }
+
+          /// All orders in a given lifecycle state.
+          @auth("analyst")
+          query OrdersByStatus(status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    [Fact]
+    public Task Paths_honor_the_route_verb_and_auth_annotations()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", AnnotatedOrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // The overridden path replaces the conventional one, and the verb key follows @put/@delete.
+        yaml.ShouldContain("\"/orders/{id}\":");
+        yaml.ShouldNotContain("/order/submit:");
+        yaml.ShouldNotContain("/order/cancel:");
+        yaml.ShouldContain("put:");
+        yaml.ShouldContain("delete:");
+        yaml.ShouldNotContain("post:");
+
+        // @auth("role") becomes an OpenAPI security-requirement object on the operation.
+        yaml.ShouldContain("security:");
+        yaml.ShouldContain("- admin: []");
+
+        // The query moved neither path nor verb — only its role axis was annotated.
+        yaml.ShouldContain("/orders-by-status:");
+        yaml.ShouldContain("get:");
+        yaml.ShouldContain("- analyst: []");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// Two commands overriding to the same <c>@route</c> must merge under a single path key carrying both
+    /// verbs — a second entry for the same key would be a duplicate YAML mapping key, and an overwrite
+    /// would silently drop an operation.
+    /// </summary>
+    [Fact]
+    public void Commands_sharing_an_overridden_route_merge_under_one_path_key()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", AnnotatedOrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        var lines = yaml.Split('\n');
+
+        lines.Count(l => l.Trim() == "\"/orders/{id}\":").ShouldBe(1);
+        lines.Count(l => l.Trim() == "put:").ShouldBe(1);
+        lines.Count(l => l.Trim() == "delete:").ShouldBe(1);
+
+        // Both operations survived the merge.
+        yaml.ShouldContain("operationId: Order_submit");
+        yaml.ShouldContain("operationId: Order_cancel");
+    }
+
+    /// <summary>An un-annotated operation gains no <c>security</c> block — the role axis is opt-in.</summary>
+    [Fact]
+    public void Unannotated_operations_carry_no_security_block()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", OrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        result.Files.ShouldHaveSingleItem().Contents.ShouldNotContain("security:");
+    }
 }
