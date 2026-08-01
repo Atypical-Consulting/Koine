@@ -14,12 +14,14 @@ import { CollabSessionPanel } from '@/collab/SessionPanel';
 import type { CollabSession } from '@/editor/collab/session';
 
 /**
- * Why a host can't collaborate, in the user's terms. Names both remedies the spec allows — the desktop
- * shell, or pointing Studio at a relay — so the placeholder is actionable rather than a dead end.
+ * Why a host can't collaborate, in the user's terms — and what to do about it. A browser tab can neither
+ * listen for peers nor dial one, so the remedy is the desktop shell; the relay is named because it is
+ * what the desktop points at when the two participants can't reach each other directly (#481 Task 5).
  */
 const PLACEHOLDER_TEXT =
-  'Live collaboration needs a host that can broker a session. Open this workspace in the Koine Studio ' +
-  'desktop app, or configure a collaboration relay, to co-edit a model with someone else.';
+  'Live collaboration needs a host that can broker a session, which a browser tab cannot do. Open this ' +
+  'workspace in the Koine Studio desktop app to co-edit a model with someone else — it brokers the ' +
+  'session itself, or through a relay you configure.';
 
 /** Shown to a broker-capable host that was handed neither a session nor a custom `renderSession`. */
 const NOT_WIRED_TEXT = 'This host can broker a session. Session controls are not wired up yet.';

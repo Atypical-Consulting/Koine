@@ -38,15 +38,13 @@ describe('Platform.canCollaborate (the capability gate)', () => {
     expect(browserHost().createCollabTransport).toBeUndefined();
   });
 
-  // The desktop CAN broker in principle (it already brokers a PTY and the LSP child), but the Rust
-  // session broker is Task 5 of #481 and is not implemented yet. Reporting `true` before the factory
-  // exists would break the Platform convention "the optional method exists iff the flag is true" and
-  // hand the UI an affordance that cannot work — so the desktop sits behind the same honest gate until
-  // the broker lands, at which point THIS assertion flips alongside it.
-  it('is false on the desktop until the session broker ships (#481 Task 5)', () => {
+  // The desktop brokers the session itself as of #481 Task 5 (the Rust `collab_*` commands), so the
+  // flag and its factory are both present here. The bridged transport's own behaviour — wire contract
+  // and a two-participant round trip — is covered in tauriCollab.test.ts.
+  it('is true on the desktop, which brokers the session (#481 Task 5)', () => {
     const tauri = desktopHost();
-    expect(tauri.canCollaborate).toBe(false);
-    expect(tauri.createCollabTransport).toBeUndefined();
+    expect(tauri.canCollaborate).toBe(true);
+    expect(tauri.createCollabTransport).toBeDefined();
   });
 
   it('keeps flag and factory consistent on every host (flag true iff factory present)', () => {

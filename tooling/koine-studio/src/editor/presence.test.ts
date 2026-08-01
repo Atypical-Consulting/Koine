@@ -10,12 +10,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EditorState, EditorSelection, Compartment } from '@codemirror/state';
 import { EditorView, Decoration, type DecorationSet } from '@codemirror/view';
-import { buildPresenceDecorations, presenceExtension, setRemotePresence, presenceField } from './presence';
+import {
+  buildPresenceDecorations,
+  presenceExtension,
+  safePresenceColor,
+  setRemotePresence,
+  presenceField,
+} from './presence';
 import type { CollabPresence } from '@/host/types';
 
 //   offsets: 'value' 0..5, 'Money' 6..11, '\n' 11, line 1 starts at 12 ('  amount Int'), …
 const DOC = 'value Money\n  amount Int\nenum Status\n';
 
+// Ids are picked so `#<id>c01` is real hex — the renderer bounds a presence colour to an actual colour
+// syntax now (safePresenceColor, #481 Task 5's CSS-injection fix), so a fixture colour has to be one.
 function presence(id: string, cursor: number, selection: { from: number; to: number }[] = []): CollabPresence {
   return { participantId: id, displayName: id.toUpperCase(), color: `#${id}c01`, cursor, selection };
 }
@@ -37,6 +45,32 @@ function rows(set: DecorationSet): { from: number; to: number; cls?: string; wid
 }
 
 const doc = () => EditorState.create({ doc: DOC }).doc;
+
+describe('safePresenceColor (CSS-injection guard, #481)', () => {
+  it('keeps a real colour and drops anything that could escape the declaration', () => {
+    expect(safePresenceColor('#adac01')).toBe('#adac01');
+    expect(safePresenceColor('#fff')).toBe('#fff');
+    expect(safePresenceColor('rebeccapurple')).toBe('rebeccapurple');
+
+    // A peer holding the join token controls this string, and it lands in a `style` attribute — which
+    // parses a whole declaration list, in a webview with no CSP.
+    expect(safePresenceColor('red;background-image:url(http://evil.example/p)')).toBe('');
+    expect(safePresenceColor('red;position:fixed;inset:0;z-index:9999')).toBe('');
+    expect(safePresenceColor('#fff;color:red')).toBe('');
+    expect(safePresenceColor(42)).toBe('');
+    expect(safePresenceColor(undefined)).toBe('');
+  });
+
+  it('paints nothing rather than something hostile in a decoration', () => {
+    const set = buildPresenceDecorations(
+      [{ ...presence('ada', 0, [{ from: 0, to: 5 }]), color: 'red;background-image:url(http://evil.example/p)' }],
+      doc(),
+    );
+    for (const row of rows(set)) {
+      expect(row.color ?? '').not.toContain('background-image');
+    }
+  });
+});
 
 describe('buildPresenceDecorations', () => {
   it('places a caret widget at each remote cursor offset', () => {
@@ -62,13 +96,13 @@ describe('buildPresenceDecorations', () => {
 
   it('renders every participant, keeping each one’s own colour', () => {
     const set = buildPresenceDecorations(
-      [presence('ada', 0, [{ from: 0, to: 5 }]), presence('lin', 12, [{ from: 12, to: 18 }])],
+      [presence('ada', 0, [{ from: 0, to: 5 }]), presence('bee', 12, [{ from: 12, to: 18 }])],
       doc(),
     );
     const colors = rows(set)
       .filter((r) => !r.widget)
       .map((r) => r.color);
-    expect(colors).toEqual([expect.stringContaining('#adac01'), expect.stringContaining('#linc01')]);
+    expect(colors).toEqual([expect.stringContaining('#adac01'), expect.stringContaining('#beec01')]);
   });
 
   it('handles a bare caret with no selection (caret widget only, no marks)', () => {
@@ -196,7 +230,7 @@ describe('presence field and remote updates', () => {
 
   it('a later frame REPLACES the previous set rather than accumulating stale carets', () => {
     const { view, cleanup } = viewWith();
-    setRemotePresence(view, [presence('ada', 6), presence('lin', 12)]);
+    setRemotePresence(view, [presence('ada', 6), presence('bee', 12)]);
     setRemotePresence(view, [presence('ada', 8)]); // lin left / went quiet
 
     const carets = rows(view.state.field(presenceField)).filter((r) => r.widget);

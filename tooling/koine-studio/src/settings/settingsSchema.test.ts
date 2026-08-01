@@ -73,7 +73,17 @@ describe('settingsSchema', () => {
 
   it('serializes settings into namespaced groups (#750)', () => {
     const doc = JSON.parse(settingsToJsonDoc(withKey)) as Record<string, Record<string, unknown>>;
-    expect(Object.keys(doc).sort()).toEqual(['account', 'ai', 'appearance', 'editor', 'lsp', 'mcp', 'preview', 'terminal']);
+    expect(Object.keys(doc).sort()).toEqual([
+      'account',
+      'ai',
+      'appearance',
+      'collab',
+      'editor',
+      'lsp',
+      'mcp',
+      'preview',
+      'terminal',
+    ]);
     expect(doc.appearance.theme).toBe(DEFAULT_SETTINGS.theme);
     expect(doc.editor.minimap).toBe(DEFAULT_SETTINGS.enableMinimap); // runtime enableMinimap → doc editor.minimap
     expect(doc.editor.defaultCanvasZoom).toBe(DEFAULT_SETTINGS.defaultCanvasZoom); // diagram canvas default zoom (#762)

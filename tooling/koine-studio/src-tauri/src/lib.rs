@@ -14,6 +14,8 @@
 // suppresses the restart so teardown stays clean. `lsp://exit` is emitted only once
 // the retry budget is exhausted (or after a clean stop).
 
+mod collab;
+
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -2346,6 +2348,139 @@ fn pty_stop(state: State<'_, PtyState>) -> Result<(), String> {
     Ok(())
 }
 
+// --- real-time collaboration (#481) -----------------------------------------------------------
+//
+// The session broker itself lives in `collab.rs` (pure registry + fan-out, plus the TCP plumbing
+// that carries frames between machines). This is only the Tauri skin over it: one command per
+// `CollabTransport` method in `src/host/types.ts`, and one `collab://*` event per callback, exactly
+// as `pty_*`/`pty://*` front the PTY.
+
+/// The one collaboration session this window is in, if any.
+enum ActiveCollab {
+    /// This process brokers the session and owns the canonical document.
+    Hosted(collab::HostedSession),
+    /// Someone else brokers it — the session creator's desktop, or a configured relay.
+    Remote(collab::RemoteSession),
+}
+
+#[derive(Default)]
+struct CollabState {
+    session: Mutex<Option<ActiveCollab>>,
+}
+
+/// Turns the frames addressed to this participant into the `collab://*` events the frontend listens
+/// on. `Admitted`/`Rejected` never arrive here — they are the handshake, and the handshake is the
+/// `collab_start` command's return value.
+struct CollabEventSink {
+    app: AppHandle,
+}
+
+impl collab::LocalSink for CollabEventSink {
+    fn deliver(&self, frame: collab::ServerFrame) {
+        let _ = match frame {
+            collab::ServerFrame::Update { update } => self.app.emit("collab://update", update),
+            collab::ServerFrame::Presence { presence } => {
+                self.app.emit("collab://presence", presence)
+            }
+            collab::ServerFrame::PeerJoin { peer } => self.app.emit("collab://peer-join", peer),
+            collab::ServerFrame::PeerLeave { participant_id } => {
+                self.app.emit("collab://peer-leave", participant_id)
+            }
+            collab::ServerFrame::Admitted { .. } | collab::ServerFrame::Rejected { .. } => Ok(()),
+        };
+    }
+}
+
+fn end_collab_session(state: &CollabState) {
+    // Take it out under the lock and drop it OUTSIDE, so teardown (which joins threads that may
+    // themselves want the broker) never runs while this lock is held.
+    let taken = state.session.lock().ok().and_then(|mut g| g.take());
+    drop(taken);
+}
+
+/// Create or join a collaboration session. `mode` is `create` or `join`, mirroring
+/// `CollabSessionRequest.mode`; re-starting an existing session is how the frontend reconnects, so
+/// any session already open is torn down first.
+///
+/// `bind_address` is the interface the session listens on AND the address advertised in the join
+/// token — it defaults to loopback, so inviting the LAN in is a deliberate act, never a side effect
+/// of clicking "start session". When `relay` is set, that relay brokers instead of this host.
+#[tauri::command]
+fn collab_start(
+    app: AppHandle,
+    state: State<'_, CollabState>,
+    mode: String,
+    token: Option<String>,
+    identity: collab::Participant,
+    bind_address: Option<String>,
+    relay: Option<String>,
+) -> Result<collab::SessionInfo, String> {
+    end_collab_session(&state);
+
+    let sink: Arc<dyn collab::LocalSink> = Arc::new(CollabEventSink { app });
+    let relay = relay.map(|r| r.trim().to_string()).filter(|r| !r.is_empty());
+
+    let session = match mode.as_str() {
+        "create" => match relay {
+            Some(relay) => ActiveCollab::Remote(collab::create_via_relay(&relay, identity, sink)?),
+            None => {
+                let bind = bind_address
+                    .map(|b| b.trim().to_string())
+                    .filter(|b| !b.is_empty())
+                    .unwrap_or_else(|| "127.0.0.1".to_string());
+                ActiveCollab::Hosted(collab::host_session(&bind, identity, sink)?)
+            }
+        },
+        // A join always dials the broker the token names — which is the relay's address when the
+        // session was opened on one, so there is nothing to branch on here.
+        "join" => {
+            let token = token.unwrap_or_default();
+            ActiveCollab::Remote(collab::join_session(&token, identity, sink)?)
+        }
+        _ => return Err("unknown collaboration mode".to_string()),
+    };
+
+    let info = match &session {
+        ActiveCollab::Hosted(hosted) => hosted.info.clone(),
+        ActiveCollab::Remote(remote) => remote.info.clone(),
+    };
+    if let Ok(mut guard) = state.session.lock() {
+        *guard = Some(session);
+    }
+    Ok(info)
+}
+
+#[tauri::command]
+fn collab_send(state: State<'_, CollabState>, update: Vec<u8>) -> Result<(), String> {
+    match state.session.lock().ok().as_deref() {
+        Some(Some(ActiveCollab::Hosted(hosted))) => hosted.send_update(update),
+        Some(Some(ActiveCollab::Remote(remote))) => remote.send_update(update),
+        // Sending outside a session is inert, not an error: the transport contract says a stopped
+        // transport swallows sends rather than throwing at the editor.
+        _ => {}
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn collab_send_presence(
+    state: State<'_, CollabState>,
+    presence: collab::Presence,
+) -> Result<(), String> {
+    match state.session.lock().ok().as_deref() {
+        Some(Some(ActiveCollab::Hosted(hosted))) => hosted.send_presence(presence),
+        Some(Some(ActiveCollab::Remote(remote))) => remote.send_presence(presence),
+        _ => {}
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn collab_leave(state: State<'_, CollabState>) -> Result<(), String> {
+    end_collab_session(&state);
+    Ok(())
+}
+
 /// Return the application version (from Cargo metadata) so the About panel can
 /// display it.
 #[tauri::command]
@@ -2361,6 +2496,7 @@ pub fn run() {
         .manage(LspState::default())
         .manage(McpState::default())
         .manage(PtyState::default())
+        .manage(CollabState::default())
         .setup(|app| {
             // Make the Koine logo show in the macOS Dock even under `tauri dev`
             // (an unbundled run has no Info.plist/icns to source it from).
@@ -2401,6 +2537,10 @@ pub fn run() {
             pty_pause,
             pty_resume,
             pty_stop,
+            collab_start,
+            collab_send,
+            collab_send_presence,
+            collab_leave,
             app_version,
             list_koi_files,
             read_text_file,
@@ -2440,6 +2580,9 @@ pub fn run() {
             // keep holding its loopback port across Studio restarts. (A SIGKILL/crash can't be
             // intercepted here — the OS reaps it instead.)
             if let tauri::RunEvent::Exit = event {
+                // Drop any live collaboration session so its listener and peer sockets close with
+                // the app rather than outliving the window that opened them.
+                end_collab_session(&app_handle.state::<CollabState>());
                 // Take the child out in one statement so the lock guard (which borrows `state`) is
                 // released before `state` is dropped, then kill the now-owned process.
                 let taken = app_handle

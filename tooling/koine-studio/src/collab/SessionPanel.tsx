@@ -14,6 +14,7 @@
 //     because the session drops it from its state.
 import { useEffect, useState } from 'preact/hooks';
 import type { CollabSession, CollabSessionState } from '@/editor/collab/session';
+import { safePresenceColor } from '@/editor/presence';
 
 /** What the authority sees. Phrased as ownership because that is what it is. */
 const AUTHORITY_SAVE_TEXT = 'You own the canonical save for this session — saving writes the model to disk.';
@@ -43,7 +44,13 @@ function ParticipantList({ participants }: { participants: CollabSessionState['p
     <ul class="koi-collab-participants">
       {participants.map((p) => (
         <li key={p.id} class="koi-collab-participant">
-          <span class="koi-collab-swatch" style={`--koi-presence-color: ${p.color}`} aria-hidden="true" />
+          {/* The colour is peer-supplied and lands in a style attribute, so it is bounded to an actual
+              colour syntax first — see safePresenceColor. */}
+          <span
+            class="koi-collab-swatch"
+            style={`--koi-presence-color: ${safePresenceColor(p.color)}`}
+            aria-hidden="true"
+          />
           {p.displayName}
         </li>
       ))}
