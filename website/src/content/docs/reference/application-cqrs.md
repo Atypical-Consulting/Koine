@@ -391,9 +391,7 @@ The three axes are **independent**: each falls back to the convention on its own
 
 A `@route` path is pasted into the host's route table verbatim, so it is checked as a **route template**, not just as a string: `{}` parameters must be balanced, named, and un-nested, and the path may not contain whitespace or control characters. Constraints, optional and catch-all parameters, and the `{{`/`}}` escape for a literal brace are all accepted — `/orders/{id:int}`, `/orders/{id?}`, `/files/{*path}`, `/a/{{literal}}`. A malformed template such as `/orders/{id` would otherwise compile fine and then throw `RoutePatternException` when the host builds its routes, so it is a `KOI1208` error instead.
 
-:::caution[A route token is not bound into the handler — yet]
-A `{token}` in a `@route` path shapes the **URL** and is declared as an OpenAPI [path parameter](#1592-translation-to-openapi), but Koine does **not** bind it to anything in the generated C#. The handler still receives its `<Behavior>Request` / query record exactly as the un-annotated endpoint did, so `{id}` in `@route("/orders/{id}")` is carried by the URL while the command's own arguments keep coming from the request body (a query's criteria from the query string). Read the token yourself — for example from `HttpContext` in a filter, or by hand-writing that one endpoint — until the axis that binds it lands.
-:::
+A `{token}` in a `@route` path is also **bound**: it resolves by name against the declaration's own parameters/criteria, or — for a command, when the token is `id` and nothing else claims it — the aggregate identity. A bound token is lifted into an explicit `[FromRoute]` parameter in the generated C# and re-bound into the request/query record with a non-destructive `with { … }`, so the URL and the value the handler actually uses can never silently disagree. See [§15.9.1](#1591-translation-to-c---layers-api) for the emitted shape and [§15.9.3](#1593-rules-and-diagnostics) for `KOI1215`, the diagnostic that catches a token naming nothing at all.
 
 ```koine
 context Ordering {
@@ -434,17 +432,17 @@ context Ordering {
 
 ### 15.9.1 Translation to C# (`--layers api`)
 
-The annotated command maps through ASP.NET's per-verb Minimal-API method at the overridden path, and its chain gains `.RequireAuthorization(...)`:
+The annotated command maps through ASP.NET's per-verb Minimal-API method at the overridden path, and its chain gains `.RequireAuthorization(...)`. The route's `{id}` token names no parameter of `submit`, so it resolves to the aggregate identity: a fully-qualified `[FromRoute]` parameter is lifted ahead of the request, and the request is re-bound from it with `with { Id = id }` before the handler ever sees it:
 
 ```csharp
-endpoints.MapPut("/orders/{id}", async (OrderSubmitRequest request, OrderSubmitHandler handler, CancellationToken ct) =>
+endpoints.MapPut("/orders/{id}", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = "id")] OrderId id, OrderSubmitRequest request, OrderSubmitHandler handler, CancellationToken ct) =>
 {
-    await handler.HandleAsync(request, ct);
+    await handler.HandleAsync(request with { Id = id }, ct);
     return Results.Ok();
 }).RequireAuthorization("admin");
 ```
 
-Note what the handler lambda takes: `OrderSubmitRequest request` — the same body-bound record the conventional `POST /order/submit` endpoint bound. The `{id}` token in the route moved the endpoint's **address**; it did not become a handler argument, and `note` still arrives in the request body. Nothing in the emitted code reads `{id}`.
+`request` is still the same generated `OrderSubmitRequest` the conventional `POST /order/submit` endpoint would have bound — `note` still arrives in the body — but its `Id` property now comes from the URL, not from whatever the caller happened to put in the JSON. This works because every emitted identity value object carries a `TryParse(string?, out T?)` satisfying ASP.NET's Minimal-API binding convention, and a request record is a positional `record`, so `with { … }` compiles without touching the Application layer's contract.
 
 `@auth` on its own moves nothing. The query keeps the conventional `MapGet` at the conventional route and only gains the call:
 
@@ -456,17 +454,19 @@ endpoints.MapGet("/orders-by-status", async ([AsParameters] OrdersByStatus query
 }).RequireAuthorization("analyst");
 ```
 
-A command mapped through a **body-less verb** — `@get` or `@delete` — still binds its generated `<Behavior>Request` record, so Koine marks the parameter `[FromBody]` explicitly:
+A command mapped through a **body-less verb** — `@get` or `@delete` — still binds its generated `<Behavior>Request` record, so Koine marks the parameter `[FromBody]` explicitly. The `{id}` token's `[FromRoute]` parameter comes first, ahead of it, exactly as in the `PUT` case above:
 
 ```csharp
-endpoints.MapDelete("/orders/{id}", async ([Microsoft.AspNetCore.Mvc.FromBody] OrderCancelRequest request, OrderCancelHandler handler, CancellationToken ct) =>
+endpoints.MapDelete("/orders/{id}", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = "id")] OrderId id, [Microsoft.AspNetCore.Mvc.FromBody] OrderCancelRequest request, OrderCancelHandler handler, CancellationToken ct) =>
 {
-    await handler.HandleAsync(request, ct);
+    await handler.HandleAsync(request with { Id = id }, ct);
     return Results.Ok();
 });
 ```
 
 ASP.NET only *infers* a complex parameter as the request body for verbs that define body semantics; for `GET`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE`/`CONNECT` inferred-body binding is disabled, and an endpoint that relies on it throws `InvalidOperationException: Body was inferred but the method does not allow inferred body parameters` when the route table is built — at startup, not at compile time. The explicit attribute overrides that restriction. It is written by fully-qualified name, so the endpoints file needs no extra `using`. The body-taking verbs are untouched and keep the inferred binding.
+
+A token resolves by name against the declaration's own parameters/criteria first — `OrdinalIgnoreCase`, mirroring ASP.NET's own route-value binding — and only falls back to the aggregate identity for a bare `id` on a command with no `id`-named parameter of its own. A command parameter *named* `id` therefore wins the match: the token binds to it, not the identity, and the identity's own request property is pushed to `AggregateId` instead of colliding with it (`CSharpNaming.CommandIdProperty`, shared by the handler and the endpoint so the two can never disagree). Only a **route-bindable** type lifts into `[FromRoute]` — a scalar (`String`/`Int`/`Decimal`/`Bool`/`Instant`), an enum, or an identity value object, all `TryParse`-able. A token that matches a parameter typed as a general value object stays unbound, with an explanatory `// route token '{x}': <Type> is not route-bindable` comment in the emitted lambda rather than code that would not compile or would compile and fail to bind at request time. A query has no aggregate identity to fall back to, so only its criteria can ever bind one of its tokens.
 
 :::caution
 `@auth("admin")` names an authorization **policy**, not a role. ASP.NET's `RequireAuthorization(params string[])` takes policy names, so the host app has to register a policy literally called `admin`:
@@ -502,6 +502,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       # …
       security:
         - admin: []
@@ -514,10 +515,11 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       # …
 ```
 
-Every `{token}` in the path becomes a required `in: path` parameter — OpenAPI requires it, and a document that declares a templated path without them is rejected by validators. The token's ASP.NET syntax is stripped down to the bare name (`{id:int}`, `{id?}`, `{*rest}` are declared as `id`, `id`, `rest`) and each token is typed `string`, since the route is free text and the model says nothing about what the token holds. On a query, path parameters come first and the criteria follow as `in: query` ones in the same array. Remember that [none of these are bound into the C# handler](#159-api-annotations) — the operation documents the URL's shape, not a handler argument.
+Every `{token}` in the path becomes a required `in: path` parameter — OpenAPI requires it, and a document that declares a templated path without them is rejected by validators. The token's ASP.NET syntax is stripped down to the bare name (`{id:int}`, `{id?}`, `{*rest}` are declared as `id`, `id`, `rest`) and each token is typed off what it resolves to — the same resolution the C# `api` layer binds ([§15.9.1](#1591-translation-to-c---layers-api)), so the two can never disagree: a token bound to a parameter/criterion gets that member's own schema, `{id}` here gets the aggregate identity's schema (a `Guid`-strategy identity ⇒ `type: string, format: uuid`; `Sequence` ⇒ `type: integer, format: int64`; a `Natural` key ⇒ its backing primitive), and an unbound token — `KOI1215`'s concern, not the document's — still falls back to a bare `type: string`. On a query, path parameters come first and the criteria follow as `in: query` ones in the same array.
 
 Two declarations may point `@route` at the same path as long as their **verbs differ** — OpenAPI keys a path item by path and then by verb, so they merge under one key rather than colliding. Sharing a path *and* a verb is a `KOI1211` error: the document would carry the same verb key twice under one path (a duplicate YAML mapping key, which no parser will read), and the C# `api` layer would register two indistinguishable endpoints, which ASP.NET rejects with `AmbiguousMatchException` at request time.
 
@@ -536,6 +538,7 @@ Koine emits no `components/securitySchemes`. The `@auth` value names a scheme th
 | a declaration repeats `@route` or `@auth` | `KOI1212` `DuplicateApiAnnotation` |
 | a verb annotation is given an argument (`@get("/orders")`) | `KOI1213` `VerbAnnotationArgument` |
 | a `command` carries `@since`/`@deprecated` | `KOI1214` `VersionAnnotationOnCommand` |
+| a `@route` `{token}` names neither a parameter/criterion of the declaration nor (for a command) the aggregate identity — a *warning*, since a purely decorative token was legal before this axis bound anything at all | `KOI1215` `UnboundRouteToken` |
 
 - The annotations attach to `command` and `query` only. A [factory (§12)](/Koine/reference/factories/) keeps the conventional `POST /{entity}/{factory}`, and a `usecase` has no HTTP surface to override.
 - Every axis is single-valued. Repeating one would quietly keep the last and drop the rest, so it is an error rather than a silent last-one-wins.

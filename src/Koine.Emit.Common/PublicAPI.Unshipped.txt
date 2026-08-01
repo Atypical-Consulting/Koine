@@ -24,9 +24,26 @@ Koine.Compiler.RouteInfo.ResponseShape.init -> void
 Koine.Compiler.RouteInfo.Route.get -> string!
 Koine.Compiler.RouteInfo.Route.init -> void
 Koine.Compiler.RouteInfo.RouteInfo() -> void
-Koine.Compiler.RouteInfo.RouteInfo(string! Verb, string! Route, string! OperationId, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, Koine.Compiler.Ast.TypeRef? ResponseShape, string? AuthRole) -> void
+Koine.Compiler.RouteInfo.RouteInfo(string! Verb, string! Route, string! OperationId, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, Koine.Compiler.Ast.TypeRef? ResponseShape, string? AuthRole, System.Collections.Generic.IReadOnlyList<Koine.Compiler.RouteTokenBinding>! TokenBindings) -> void
+Koine.Compiler.RouteInfo.TokenBindings.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.RouteTokenBinding>!
+Koine.Compiler.RouteInfo.TokenBindings.init -> void
 Koine.Compiler.RouteInfo.Verb.get -> string!
 Koine.Compiler.RouteInfo.Verb.init -> void
+Koine.Compiler.RouteTokenBinding
+Koine.Compiler.RouteTokenBinding.Member.get -> Koine.Compiler.Ast.Param?
+Koine.Compiler.RouteTokenBinding.Member.init -> void
+Koine.Compiler.RouteTokenBinding.RouteTokenBinding() -> void
+Koine.Compiler.RouteTokenBinding.RouteTokenBinding(string! Token, Koine.Compiler.RouteTokenTarget Target, Koine.Compiler.Ast.Param? Member, Koine.Compiler.Ast.TypeRef? Type) -> void
+Koine.Compiler.RouteTokenBinding.Target.get -> Koine.Compiler.RouteTokenTarget
+Koine.Compiler.RouteTokenBinding.Target.init -> void
+Koine.Compiler.RouteTokenBinding.Token.get -> string!
+Koine.Compiler.RouteTokenBinding.Token.init -> void
+Koine.Compiler.RouteTokenBinding.Type.get -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.RouteTokenBinding.Type.init -> void
+Koine.Compiler.RouteTokenTarget
+Koine.Compiler.RouteTokenTarget.Identity = 2 -> Koine.Compiler.RouteTokenTarget
+Koine.Compiler.RouteTokenTarget.Member = 1 -> Koine.Compiler.RouteTokenTarget
+Koine.Compiler.RouteTokenTarget.Unbound = 0 -> Koine.Compiler.RouteTokenTarget
 static Koine.Compiler.FactoryIdBinding.ResolveFactoryId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory, System.Func<string!, string!>! emitParamName) -> Koine.Compiler.FactoryIdBinding
 static Koine.Compiler.MarkdownDoc.Cell(string? doc) -> string!
 static Koine.Compiler.MarkdownDoc.EnumValues(Koine.Compiler.Ast.EnumDecl! en) -> string!
@@ -47,10 +64,17 @@ static Koine.Compiler.FactoryIdBinding.operator !=(Koine.Compiler.FactoryIdBindi
 static Koine.Compiler.FactoryIdBinding.operator ==(Koine.Compiler.FactoryIdBinding left, Koine.Compiler.FactoryIdBinding right) -> bool
 ~override Koine.Compiler.FactoryIdBinding.Equals(object obj) -> bool
 ~override Koine.Compiler.FactoryIdBinding.ToString() -> string
-Koine.Compiler.RouteInfo.Deconstruct(out string! Verb, out string! Route, out string! OperationId, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, out Koine.Compiler.Ast.TypeRef? ResponseShape, out string? AuthRole) -> void
+Koine.Compiler.RouteInfo.Deconstruct(out string! Verb, out string! Route, out string! OperationId, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! RequestShape, out Koine.Compiler.Ast.TypeRef? ResponseShape, out string? AuthRole, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.RouteTokenBinding>! TokenBindings) -> void
 Koine.Compiler.RouteInfo.Equals(Koine.Compiler.RouteInfo other) -> bool
 override Koine.Compiler.RouteInfo.GetHashCode() -> int
 static Koine.Compiler.RouteInfo.operator !=(Koine.Compiler.RouteInfo left, Koine.Compiler.RouteInfo right) -> bool
 static Koine.Compiler.RouteInfo.operator ==(Koine.Compiler.RouteInfo left, Koine.Compiler.RouteInfo right) -> bool
 ~override Koine.Compiler.RouteInfo.Equals(object obj) -> bool
 ~override Koine.Compiler.RouteInfo.ToString() -> string
+Koine.Compiler.RouteTokenBinding.Deconstruct(out string! Token, out Koine.Compiler.RouteTokenTarget Target, out Koine.Compiler.Ast.Param? Member, out Koine.Compiler.Ast.TypeRef? Type) -> void
+Koine.Compiler.RouteTokenBinding.Equals(Koine.Compiler.RouteTokenBinding other) -> bool
+override Koine.Compiler.RouteTokenBinding.GetHashCode() -> int
+static Koine.Compiler.RouteTokenBinding.operator !=(Koine.Compiler.RouteTokenBinding left, Koine.Compiler.RouteTokenBinding right) -> bool
+static Koine.Compiler.RouteTokenBinding.operator ==(Koine.Compiler.RouteTokenBinding left, Koine.Compiler.RouteTokenBinding right) -> bool
+~override Koine.Compiler.RouteTokenBinding.Equals(object obj) -> bool
+~override Koine.Compiler.RouteTokenBinding.ToString() -> string

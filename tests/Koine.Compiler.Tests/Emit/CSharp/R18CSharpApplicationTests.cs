@@ -2054,12 +2054,18 @@ public class R18CSharpApplicationTests
         }
         """;
 
+    /// <summary>
+    /// The route's <c>{id}</c> token has no matching command parameter, so it binds to the aggregate
+    /// identity (#1748) — an explicit <c>[FromRoute]</c> parameter ahead of the request, re-bound into
+    /// it via <c>with { Id = id }</c> so the URL and the loaded aggregate can never disagree.
+    /// </summary>
     [Fact]
     public void Api_layer_maps_an_annotated_command_to_its_overridden_verb_and_route()
     {
         var endpoints = File(Emit(ApiOn, AnnotatedApiFixture), "SalesEndpoints.cs").Contents;
         endpoints.ShouldContain(
-            "endpoints.MapPut(\"/orders/{id}\", async (OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
+            "endpoints.MapPut(\"/orders/{id}\", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = \"id\")] OrderId id, OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("handler.HandleAsync(request with { Id = id }, ct)");
         endpoints.ShouldNotContain("MapPost");
         endpoints.ShouldNotContain("/order/place");
     }
@@ -2140,8 +2146,10 @@ public class R18CSharpApplicationTests
     {
         var endpoints = File(Emit(ApiOn, BodylessVerbFixture(verb)), "SalesEndpoints.cs").Contents;
 
+        // The route's {id} token binds to the aggregate identity (#1748) — its [FromRoute] parameter
+        // comes first, ahead of the still-explicit [FromBody] request the body-less verb needs.
         endpoints.ShouldContain(
-            $"endpoints.{mapMethod}(\"/orders/{{id}}\", async ([Microsoft.AspNetCore.Mvc.FromBody] OrderCancelRequest request, OrderCancelHandler handler, CancellationToken ct) =>");
+            $"endpoints.{mapMethod}(\"/orders/{{id}}\", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = \"id\")] OrderId id, [Microsoft.AspNetCore.Mvc.FromBody] OrderCancelRequest request, OrderCancelHandler handler, CancellationToken ct) =>");
     }
 
     /// <summary>
@@ -2164,11 +2172,14 @@ public class R18CSharpApplicationTests
     public void Api_layer_leaves_a_body_taking_verbs_request_binding_untouched()
     {
         File(Emit(ApiOn, AnnotatedApiFixture), "SalesEndpoints.cs").Contents
-            .ShouldContain("endpoints.MapPut(\"/orders/{id}\", async (OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
+            .ShouldContain("endpoints.MapPut(\"/orders/{id}\", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = \"id\")] OrderId id, OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
 
+        // The conventional (unannotated) route carries no {token}, so it stays untouched by both
+        // FromBody (body-taking verb) and FromRoute (#1748: no route override, no bindings).
         var conventional = File(Emit(ApiOn), "SalesEndpoints.cs").Contents;
         conventional.ShouldContain("endpoints.MapPost(\"/order/place\", async (OrderPlaceRequest request,");
         conventional.ShouldNotContain("FromBody");
+        conventional.ShouldNotContain("FromRoute");
     }
 
     /// <summary>And it still has to compile against the ASP.NET shared framework.</summary>
