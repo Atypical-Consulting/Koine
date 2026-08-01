@@ -1,0 +1,76 @@
+/* --- Real-time collaboration (issue #481, Phase 2 of #259) ---
+   Two surfaces: the capability gate's placeholder (shown wherever the host can't broker a session) and
+   the in-editor PRESENCE decorations that paint remote participants' carets and selections. Presence is
+   a Studio-only VIEW concern — it never round-trips into the `.koi` model or the emitted output.
+
+   Every presence colour arrives per participant at runtime, so the rules below carry only geometry and
+   opacity; the colour itself comes in as the `--koi-presence-color` custom property set on each
+   decoration by `presence.ts`. That keeps one class doing the work for N participants and avoids
+   injecting a stylesheet rule per peer. */
+
+/* The affordance shell — shared by both branches of the gate so panel padding stays consistent. */
+.koi-collab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--koi-space-2);
+  padding: var(--koi-space-2);
+  font-family: var(--koi-font-body);
+}
+
+/* Host can't broker: the same muted, centred, italic treatment as the terminal's desktop-only note. */
+.koi-collab-placeholder {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.koi-collab-placeholder-text,
+.koi-collab-note {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--koi-muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* --- Remote presence decorations -------------------------------------------------
+   A remote caret is a zero-width widget, so it can't be painted with a background: it is an absolutely
+   positioned 2px bar drawn in the participant's colour, with the name label riding above it. */
+.cm-presence-caret {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  border-left: 2px solid var(--koi-presence-color, var(--koi-accent));
+  /* NET-ZERO inline advance: the 2px border box would otherwise contribute to layout, so the two
+     negative margins cancel it (-1 + 2 - 1 = 0). Without this every remote caret nudges the rest of the
+     line 1px, and because a peer's caret moves on every keystroke THEY type, the local user's text
+     jitters while someone else is editing. The bar straddles the character boundary instead. */
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+}
+
+/* The participant's name, floated above the caret. `pointer-events: none` throughout: presence is
+   decoration, never a hit target — clicking through to the buffer must keep working. */
+.cm-presence-label {
+  position: absolute;
+  top: -1.15em;
+  left: -1px;
+  padding: 0 4px;
+  border-radius: var(--koi-radius-1, 3px);
+  background: var(--koi-presence-color, var(--koi-accent));
+  color: var(--koi-on-accent, #fff);
+  font-family: var(--koi-font-body);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* A remote selection range: the participant's colour at low alpha so the underlying token colours stay
+   readable through it, and so two overlapping selections remain individually visible. */
+.cm-presence-selection {
+  background-color: color-mix(in srgb, var(--koi-presence-color, var(--koi-accent)) 26%, transparent);
+  border-radius: 2px;
+}

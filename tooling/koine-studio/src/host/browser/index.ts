@@ -37,6 +37,11 @@ export class BrowserPlatform implements Platform {
   // A browser tab cannot spawn a host shell, so there is no integrated terminal: the panel shows a
   // graceful "desktop only" placeholder. `createTerminal` is deliberately omitted (not implemented).
   readonly canRunShell = false;
+
+  // A browser tab can neither listen as a server nor dial a peer, so it cannot broker a co-editing
+  // session (#481): `createCollabTransport` is deliberately omitted and the collaboration affordance
+  // renders its "desktop only / configure a relay" placeholder (see src/collab/CollabGate.tsx).
+  readonly canCollaborate = false;
   // Executed mode (#236) emits, compiles and RUNS the model's code in a sandbox child process (ADR
   // 0011) — a tab has none to spawn, so the in-process WASM backend can only interpret. The panel hides
   // the toggle here; a request that arrives anyway is answered by the interpreter, labelled

@@ -88,6 +88,7 @@ import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
 // Review-comment rendering (#259): the StateField+gutter that paint review threads over the buffer, plus
 // the helper that repaints them after a store change. A Studio-only view concern — never touches the model.
 import { reviewDecorationsExtension, dispatchReviewRefresh } from '@/review/reviewDecorations';
+import { presenceExtension, type PresenceSource } from '@/editor/presence';
 import type { ReviewThread } from '@/review/reviewStore';
 // The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
 // view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
@@ -451,6 +452,13 @@ export interface KoineEditor {
   addCommentAtSelection(): void;
   /** Repaint the review-thread decorations after the store changed (dispatches the refresh effect). */
   refreshReviewDecorations(): void;
+  /**
+   * Attach or detach the collaboration presence layer (#481): remote participants' carets and
+   * selections. Reconfigures a compartment, so a session can start and end mid-edit with no state loss
+   * and no view rebuild. Attaching with a {@link PresenceSource} also publishes the LOCAL selection on
+   * every change; detaching drops every remote caret. Idempotent.
+   */
+  setPresenceEnabled(on: boolean, source?: PresenceSource): void;
   destroy(): void;
 }
 
@@ -736,6 +744,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   // onChange before a reload's coerceTabSize would round it) renders a sane integer indent and keeps
   // live-apply == reload (#734) — never an empty indent unit from `' '.repeat(0)`.
   const indent = new Compartment();
+  // Collaboration presence (#481) lives in its own compartment so a session can attach and detach the
+  // remote-caret layer live — starting or leaving a co-editing session must never rebuild the view or
+  // lose undo history. Empty until setPresenceEnabled turns it on, so a solo editor pays nothing.
+  const presence = new Compartment();
   const indentConfig = (n: number): Extension => {
     const width = Math.max(1, Math.round(n));
     return [indentUnit.of(' '.repeat(width)), EditorState.tabSize.of(width)];
@@ -844,6 +856,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         ...(opts.onSemanticTokens ? [semanticTokensExtension(opts.onSemanticTokens)] : []),
         // Review-comment marks + gutter (#259), wired only when a thread provider is supplied.
         ...(opts.getReviewThreads ? [reviewDecorationsExtension(opts.getReviewThreads), reviewTheme] : []),
+        // Collaboration presence (#481) — empty until a session attaches it via setPresenceEnabled.
+        presence.of([]),
         lintGutter(),
         ...(opts.onHover ? [koineHoverTooltip(opts.onHover)] : []),
         sharedTheme,
@@ -944,6 +958,9 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     addCommentAtSelection,
     refreshReviewDecorations() {
       dispatchReviewRefresh(view);
+    },
+    setPresenceEnabled(on: boolean, source?: PresenceSource) {
+      view.dispatch({ effects: presence.reconfigure(on ? presenceExtension(source) : []) });
     },
     destroy() {
       viewDestroyed = true; // stop any queued caret-reveal frame from touching a torn-down view

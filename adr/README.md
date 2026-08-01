@@ -22,6 +22,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0010](0010-adopt-madr-4.0-for-architecture-decision-records.md) | Adopt MADR 4.0 for architecture decision records | Proposed |
 | [0011](0011-scenario-execution-sandbox.md) | Scenario execution runs in a killable child process | Proposed |
 | [0012](0012-scenario-sandbox-os-confinement.md) | Scenario sandbox confinement uses each platform's native mechanism, best-effort | Proposed |
+| [0013](0013-crdt-over-host-brokered-transport-for-studio-collaboration.md) | Studio real-time collaboration uses a CRDT over a host-brokered transport | Proposed |
 
 ## When to write one
 
