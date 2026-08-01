@@ -308,7 +308,7 @@ public sealed partial class PhpEmitter
                 // reference as `$this->member` ("Cannot use $this in a static method"). Use
                 // Parameter mode so a bare member renders as `$member` (the factory's params and
                 // synthetic `id` are pushed as locals and take precedence anyway).
-                args.Add(translator.Translate(value, PhpExpressionTranslator.NameMode.Parameter, expectedEnum));
+                args.Add(translator.TranslateReconciled(value, PhpExpressionTranslator.NameMode.Parameter, expectedEnum, m.Type));
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {

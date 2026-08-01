@@ -663,7 +663,7 @@ public sealed partial class TypeScriptEmitter
         {
             if (inits.TryGetValue(m.Name, out Expr? value))
             {
-                args.Add(translator.Translate(value, EnumExpected(m, index, context)));
+                args.Add(translator.TranslateReconciled(value, EnumExpected(m, index, context), m.Type));
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {
