@@ -154,14 +154,34 @@ public sealed class ModelIndex
     private readonly Dictionary<string, HashSet<string>> _visibleEnumNamesByContext = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Enum type names visible from <paramref name="context"/>: locally declared, or imported by name
-    /// (wildcard or explicit) — the same <c>_declsByContext</c>/<c>_importsByContext</c> registries
-    /// <see cref="TryGetDeclIn"/> resolves through, but looser on an ambiguous import: <c>TryGetDeclIn</c>
-    /// requires a SINGLE import owner to resolve a name at all, while this method treats the name as
-    /// visible if ANY of the import's owner contexts declares it as an enum — appropriate here, since
-    /// this only widens which of <see cref="EnumsDeclaring(string)"/>'s already-known owners survive
-    /// scoping, never invents a new one; a genuinely ambiguous import is reported by the separate
-    /// unqualified-import diagnostic, not by this method.
+    /// Enum type names visible from <paramref name="context"/> — R13.2's three ways a context can name a
+    /// type, all of which <see cref="ResolveReference"/> already accepts:
+    /// <list type="number">
+    ///   <item><b>declared locally</b> (<c>_declsByContext</c>);</item>
+    ///   <item><b>imported by name</b>, wildcard or explicit (<c>_importsByContext</c>) — the same
+    ///   registries <see cref="TryGetDeclIn"/> resolves through, but looser on an ambiguous import:
+    ///   <c>TryGetDeclIn</c> requires a SINGLE import owner to resolve a name at all, while this method
+    ///   treats the name as visible if ANY of the import's owner contexts declares it as an enum —
+    ///   appropriate here, since this only widens which of <see cref="EnumsDeclaring(string)"/>'s
+    ///   already-known owners survive scoping, never invents a new one; a genuinely ambiguous import is
+    ///   reported by the separate unqualified-import diagnostic, not by this method;</item>
+    ///   <item><b>named outright by an explicit <c>Context.Type</c> qualifier</b> (#1797) — which needs
+    ///   neither an import nor a context-map relationship, and which #1739 originally left out.</item>
+    /// </list>
+    ///
+    /// <para>#1797: omitting (3) was a strict regression. <c>kind: Other.Kind</c> is legal with no import,
+    /// but scoped <c>Kind</c> OUT of the owner list for a bare member compared against that field, so
+    /// <c>ExpressionChecker.ResolveEnumOperand</c> declined to resolve it and a false, build-blocking
+    /// <c>KOI0210</c> fired. Note the scoped list in that case is non-EMPTY (the local enum survives), so
+    /// <see cref="EnumsDeclaring(string?, string)"/>'s "fall back to the flat list when nothing is
+    /// visible" safety valve does not fire — which is what made the blind spot reachable.</para>
+    ///
+    /// <para>Because a qualifier lives on a <em>reference</em>, not on the context's own header, (3) is
+    /// answered by walking the context's own type references (<see cref="AllTypeRefsIn"/>) and keeping the
+    /// qualified ones that name an enum. That deliberately keeps #1739's guarantee intact: an enum in a
+    /// context this one never imports AND never qualifies stays excluded, because nothing in this
+    /// context's source names it. The walk is memoized per context alongside (1)/(2) and only ever runs
+    /// for a member with ≥2 model-wide owners, so unambiguous models never pay for it.</para>
     /// </summary>
     private HashSet<string> EnumsVisibleFrom(string context)
     {
@@ -198,8 +218,52 @@ public sealed class ModelIndex
             }
         }
 
+        // (3) #1797: enums this context names outright, by an explicit `Context.Type` qualifier. Guarded
+        // by DeclaresType/_declsByContext on the QUALIFIER, so a stale or unknown qualifier adds nothing
+        // (ResolveReference reports those as UnknownContext/NotExported); Contexts is scanned by name
+        // rather than indexed because a hand-built KoineModel may carry two same-named ContextNodes that
+        // KoineCompilation.Merge would otherwise have folded (see AllTypes()).
+        foreach (ContextNode ctx in Model.Contexts)
+        {
+            if (!string.Equals(ctx.Name, context, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (TypeRef tr in AllTypeRefsIn(ctx))
+            {
+                NoteQualifiedEnumsIn(tr, visible);
+            }
+        }
+
         _visibleEnumNamesByContext[context] = visible;
         return visible;
+    }
+
+    /// <summary>
+    /// Adds every explicitly-qualified enum <paramref name="tr"/> names to <paramref name="visible"/>,
+    /// recursing through <see cref="TypeRef.Element"/>/<see cref="TypeRef.Value"/> so a qualified enum
+    /// buried in a collection (<c>List&lt;Other.Kind&gt;</c>, <c>Map&lt;K, Other.Kind&gt;</c>) counts too —
+    /// <see cref="AllTypeRefsIn"/> yields only the outermost reference (#1797).
+    /// </summary>
+    private void NoteQualifiedEnumsIn(TypeRef tr, HashSet<string> visible)
+    {
+        if (tr.Qualifier is { } qualifier
+            && _declsByContext.TryGetValue(qualifier, out Dictionary<string, TypeDecl>? theirs)
+            && theirs.TryGetValue(tr.Name, out TypeDecl? decl) && decl is EnumDecl)
+        {
+            visible.Add(tr.Name);
+        }
+
+        if (tr.Element is not null)
+        {
+            NoteQualifiedEnumsIn(tr.Element, visible);
+        }
+
+        if (tr.Value is not null)
+        {
+            NoteQualifiedEnumsIn(tr.Value, visible);
+        }
     }
 
     /// <summary>True when <paramref name="name"/> is the name of a declared enum type.</summary>
