@@ -61,6 +61,30 @@ internal sealed class JavaExpressionTranslator
     private readonly string _memberReceiver;
     private readonly bool _membersAsAccessors;
 
+    /// <summary>
+    /// A derived member's defining expression, plus the enum type it is expected to produce when the
+    /// member is enum-typed (<c>null</c> otherwise) — the same hint its accessor's own Property-mode
+    /// translation receives (via the emitter's <c>EnumExpected</c>).
+    /// </summary>
+    private readonly record struct DerivedMember(Expr Body, string? ExpectedEnum);
+
+    // Derived members of the current type (`name: T = <expr over siblings>`), keyed to their defining
+    // expression. A derived member has no compact-/defaulting-constructor parameter — only an accessor
+    // method, callable only once the record's components are assigned — so a NameMode.Parameter
+    // reference to one is inlined here rather than rendered as a bare name that binds to nothing
+    // (issue #1763). Empty for a type with no derived members.
+    private readonly IReadOnlyDictionary<string, DerivedMember> _derivedBodies;
+    private readonly HashSet<string> _inliningDerived = new(StringComparer.Ordinal);
+
+    // Names currently bound by a lambda parameter or a `let` binding — as opposed to a stored member
+    // registered as a compact-/defaulting-constructor parameter (`PushLocal`, called externally by
+    // JavaEmitter.ValueObjects.cs before translating any invariant/initializer). `_locals` below (and
+    // its `IsLocal`) is, by design (#1536), true for BOTH, so it cannot alone tell "a lambda/let
+    // genuinely shadows this name" apart from "this is just the record's own compact-constructor
+    // parameter" — the distinction the derived-body substitution's capture check needs (issue #1763;
+    // mirrors CSharpExpressionTranslator's own `_locals`, which has no member-registration use at all).
+    private readonly HashSet<string> _lambdaOrLetLocals = new(StringComparer.Ordinal);
+
     // Per-name shadow stack: pushing a name that's already bound stacks the new binding on top rather
     // than evicting the outer one, so popping it back off restores whatever was there before (#1497).
     private readonly LocalScopeStack _locals = new();
@@ -114,10 +138,31 @@ internal sealed class JavaExpressionTranslator
         _derivedMembers = new HashSet<string>(
             members.Where(m => MemberAnalysis.IsDerived(m, _memberNames)).Select(m => m.Name),
             StringComparer.Ordinal);
+
+        // Classified with the SAME MemberAnalysis.IsDerived just used to build `_derivedMembers`, so the
+        // translator and the emitted accessor set never disagree about which members are computed
+        // (issue #1763).
+        Dictionary<string, DerivedMember>? derived = null;
+        foreach (Member m in members)
+        {
+            if (m.Initializer is not null && MemberAnalysis.IsDerived(m, _memberNames))
+            {
+                var expectedEnum = index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum
+                    ? m.Type.Name
+                    : null;
+                (derived ??= new Dictionary<string, DerivedMember>(StringComparer.Ordinal))[m.Name] =
+                    new DerivedMember(m.Initializer, expectedEnum);
+            }
+        }
+
+        _derivedBodies = derived ?? EmptyDerived;
     }
 
     private static readonly IReadOnlyDictionary<string, string> EmptyEnumMap =
         new Dictionary<string, string>(StringComparer.Ordinal);
+
+    private static readonly IReadOnlyDictionary<string, DerivedMember> EmptyDerived =
+        new Dictionary<string, DerivedMember>(StringComparer.Ordinal);
 
     /// <summary>
     /// Registers a local (a lambda / command / factory parameter, or a <c>let</c> binding) for the body
@@ -655,8 +700,11 @@ internal sealed class JavaExpressionTranslator
                     sb.Append("()");
                 }
             }
-            else
+            else if (!TryWriteDerivedBody(name, sb))
             {
+                // A stored field IS the compact-/defaulting-constructor parameter of the same name; a
+                // derived member is not a parameter at all, so its derivation is substituted instead
+                // (issue #1763) — this branch is only reached when that substitution declines.
                 sb.Append(JavaNaming.Member(name));
             }
 
@@ -673,6 +721,101 @@ internal sealed class JavaExpressionTranslator
 
         // (6) Unknown identifier (includes the `null` literal): emit as written.
         sb.Append(name);
+    }
+
+    /// <summary>
+    /// Substitutes a <b>derived</b> member's defining expression at its reference site, parenthesized
+    /// and translated in the current (parameter) scope, returning <c>false</c> when <paramref name="name"/>
+    /// is not derived.
+    /// <para>
+    /// Issue #1763 (the Java counterpart of #1756/PR #1760). A value object's <c>invariant</c> guards are
+    /// emitted at the TOP of the record's compact constructor, before the (implicit) component
+    /// assignments — deliberately, so an invalid instance is never even partially constructed — and
+    /// every member reference in them renders as the bare compact-constructor parameter of the same
+    /// name. That is exact for a <em>stored</em> component, which IS a parameter, but a derived member
+    /// has neither a parameter nor an assigned accessor to call at that point: the guard used to emit a
+    /// bare name that bound to nothing (<c>cannot find symbol</c>). Inlining the derivation over the
+    /// parameters keeps the validate-before-assign ordering and evaluates exactly what the accessor will
+    /// later return.
+    /// </para>
+    /// <para>
+    /// Substitution recurses (a derived member may be defined over another one) and is bounded by a
+    /// visited set. The set is scoped to the path currently being expanded — released in the
+    /// <c>finally</c> — so a diamond (one guard reaching a derivation along two paths) substitutes on
+    /// both, and only genuine re-entry, i.e. a <em>cyclic</em> derivation, hits the bail-out. A cycle is
+    /// not rejected upstream today (the only cycle validator is <c>KOI1003</c>, for specs), so that
+    /// bail-out degrades to the pre-#1763 bare name and its loud compile error rather than recursing
+    /// forever — a failure on a model that is already broken (it also emits mutually-recursive accessor
+    /// methods). Tracked separately; this method's job here is only to not hang.
+    /// </para>
+    /// <para>
+    /// Substitution is also refused where the reference site would <b>capture</b> the derivation's free
+    /// names. A lambda/<c>let</c> binding and a member render into one Java identifier space —
+    /// <c>lines.all(rate -&gt; rate &lt; total)</c> emits a lambda parameter literally named <c>rate</c>,
+    /// which shadows the constructor parameter of the same name — so splicing <c>total = rate * 2</c> in
+    /// there would read the ELEMENT and silently admit an instance violating the very invariant that let
+    /// it through. Bailing out leaves the pre-#1763 bare name and its loud compile error instead of
+    /// trading a build break for an unsound aggregate. Only an ACTUAL collision refuses; a binding that
+    /// shadows nothing the body needs (<c>lines.all(x -&gt; x &lt; total)</c>) still substitutes.
+    /// </para>
+    /// </summary>
+    private bool TryWriteDerivedBody(string name, StringBuilder sb)
+    {
+        if (!_derivedBodies.TryGetValue(name, out DerivedMember member) || !_inliningDerived.Add(name))
+        {
+            return false;
+        }
+
+        if (_lambdaOrLetLocals.Count > 0 && WouldBeCaptured(member.Body, new HashSet<string>(StringComparer.Ordinal)))
+        {
+            _inliningDerived.Remove(name);
+            return false;
+        }
+
+        // A derived member of enum type expects its own enum, exactly as its accessor body does, so a
+        // bare shared enum member qualifies correctly once substituted.
+        var outerExpectedEnum = _expectedEnum;
+        _expectedEnum = member.ExpectedEnum;
+
+        try
+        {
+            sb.Append('(');
+            Write(member.Body, sb);
+            sb.Append(')');
+        }
+        finally
+        {
+            _expectedEnum = outerExpectedEnum;
+            _inliningDerived.Remove(name);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether any name reachable from <paramref name="body"/> — following references to further derived
+    /// members — is currently bound by a lambda/<c>let</c> local, i.e. whether splicing the body here
+    /// would rebind it. Deliberately conservative: a name bound by the body's OWN lambda/<c>let</c> also
+    /// counts, which can only refuse a substitution that would have been safe, never allow one that isn't.
+    /// </summary>
+    private bool WouldBeCaptured(Expr body, HashSet<string> visited)
+    {
+        foreach (var referenced in MemberAnalysis.ReferencedIdentifiers(body))
+        {
+            if (_lambdaOrLetLocals.Contains(referenced))
+            {
+                return true;
+            }
+
+            if (_derivedBodies.TryGetValue(referenced, out DerivedMember nested)
+                && visited.Add(referenced)
+                && WouldBeCaptured(nested.Body, visited))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void WriteMemberAccess(MemberAccessExpr ma, StringBuilder sb)
@@ -871,11 +1014,13 @@ internal sealed class JavaExpressionTranslator
         // element type leaked into the outer binding — #1497.)
         TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
         PushLocal(lambda.Parameter, element);
+        _lambdaOrLetLocals.Add(lambda.Parameter);
 
         sb.Append(_locals.RenderedNameOf(lambda.Parameter)).Append(" -> ");
         WriteTopLevel(lambda.Body, sb);
 
         PopLocal(lambda.Parameter);
+        _lambdaOrLetLocals.Remove(lambda.Parameter);
     }
 
     /// <summary>The inferred type a collection call's lambda selector produces (for choosing the sum fold shape).</summary>
@@ -932,6 +1077,7 @@ internal sealed class JavaExpressionTranslator
             WriteTopLevel(b.Value, sb);
             sb.Append("; ");
             _locals.PushLocal(b.Name, _resolver.Infer(b.Value, EffectiveScope()), rendered);
+            _lambdaOrLetLocals.Add(b.Name);
             pushed.Add(b.Name);
         }
 
@@ -942,6 +1088,7 @@ internal sealed class JavaExpressionTranslator
         for (var i = pushed.Count - 1; i >= 0; i--)
         {
             PopLocal(pushed[i]);
+            _lambdaOrLetLocals.Remove(pushed[i]);
         }
     }
 
