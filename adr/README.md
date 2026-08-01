@@ -25,6 +25,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0013](0013-crdt-over-host-brokered-transport-for-studio-collaboration.md) | Studio real-time collaboration uses a CRDT over a host-brokered transport | Proposed |
 | [0014](0014-scenario-fan-out-by-reflective-in-process-dispatch.md) | Scenario fan-out dispatches downstream reactions reflectively, inside the existing sandbox child | Proposed |
 | [0015](0015-yjs-as-the-crdt-runtime-with-a-studio-owned-codemirror-binding.md) | Yjs is the CRDT runtime, with a Studio-owned CodeMirror binding | Proposed |
+| [0016](0016-collaboration-broker-is-a-loopback-first-tcp-server-with-connection-bound-authority.md) | The collaboration broker is a loopback-first TCP server with connection-bound authority | Proposed |
 
 ## When to write one
 

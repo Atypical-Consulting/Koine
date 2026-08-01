@@ -40,7 +40,9 @@ export class BrowserPlatform implements Platform {
 
   // A browser tab can neither listen as a server nor dial a peer, so it cannot broker a co-editing
   // session (#481): `createCollabTransport` is deliberately omitted and the collaboration affordance
-  // renders its "desktop only / configure a relay" placeholder (see src/collab/CollabGate.tsx).
+  // renders its "desktop only" placeholder (see src/collab/CollabGate.tsx). A CONFIGURED RELAY does not
+  // change this — the desktop reaches one over TCP, which a sandboxed tab still cannot open; a browser
+  // relay path would need a WebSocket client on both ends and is not part of Task 5.
   readonly canCollaborate = false;
   // Executed mode (#236) emits, compiles and RUNS the model's code in a sandbox child process (ADR
   // 0011) — a tab has none to spawn, so the in-process WASM backend can only interpret. The panel hides

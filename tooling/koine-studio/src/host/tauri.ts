@@ -15,6 +15,11 @@ import type {
   GitNumstatEntry,
   GitStatus,
   KoiFile,
+  CollabParticipant,
+  CollabPresence,
+  CollabSessionInfo,
+  CollabSessionRequest,
+  CollabTransport,
   LspTransport,
   McpEndpoint,
   Platform,
@@ -154,6 +159,90 @@ class TauriTerminalTransport implements TerminalTransport {
   }
 }
 
+/**
+ * The desktop {@link CollabTransport} (#481 Task 5): a thin bridge from the `CollabTransport` shape onto
+ * the Rust session broker's `collab_*` commands and `collab://*` events, exactly as
+ * {@link TauriTerminalTransport} bridges the PTY. It moves OPAQUE bytes — merge logic lives in the CRDT
+ * binding and authority is whatever the broker says, never anything decided here.
+ *
+ * Which broker it talks to is the Rust side's business: the embedded sidecar by default, or the relay in
+ * `collabRelayUrl` when one is configured. Both speak the same protocol, so nothing branches here.
+ */
+class TauriCollabTransport implements CollabTransport {
+  private updateCb?: (update: Uint8Array) => void;
+  private presenceCb?: (presence: CollabPresence) => void;
+  private joinCb?: (peer: CollabParticipant) => void;
+  private leaveCb?: (participantId: string) => void;
+  private unlisten: UnlistenFn[] = [];
+
+  onUpdate(cb: (update: Uint8Array) => void): void {
+    this.updateCb = cb;
+  }
+
+  onPresence(cb: (presence: CollabPresence) => void): void {
+    this.presenceCb = cb;
+  }
+
+  onPeerJoin(cb: (peer: CollabParticipant) => void): void {
+    this.joinCb = cb;
+  }
+
+  onPeerLeave(cb: (participantId: string) => void): void {
+    this.leaveCb = cb;
+  }
+
+  async start(request: CollabSessionRequest): Promise<CollabSessionInfo> {
+    // Subscribe BEFORE the invoke that opens the session: a peer that joins in the same tick would
+    // otherwise deliver its frames into the void. Prior handles are dropped first so a re-start
+    // (which is how the session layer reconnects) doesn't stack listeners.
+    await this.detach();
+    this.unlisten.push(
+      await listen<number[]>('collab://update', (e) => this.updateCb?.(Uint8Array.from(e.payload ?? []))),
+      await listen<CollabPresence>('collab://presence', (e) => this.presenceCb?.(e.payload)),
+      await listen<CollabParticipant>('collab://peer-join', (e) => this.joinCb?.(e.payload)),
+      await listen<string>('collab://peer-leave', (e) => this.leaveCb?.(e.payload)),
+    );
+
+    const settings = loadSettings();
+    try {
+      return await invoke<CollabSessionInfo>('collab_start', {
+        mode: request.mode,
+        // camelCase JS keys map onto the Rust snake_case params (bindAddress → bind_address).
+        token: request.mode === 'join' ? (request.token ?? '') : null,
+        identity: request.identity,
+        bindAddress: settings.collabBindAddress,
+        relay: settings.collabRelayUrl,
+      });
+    } catch (err) {
+      // A failed start leaves no session, so it must leave no listeners either.
+      await this.detach();
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  send(update: Uint8Array): Promise<void> {
+    // `Array.from` because Tauri IPC carries JSON, not binary — the Rust side reads it back as Vec<u8>.
+    return invoke('collab_send', { update: Array.from(update) }) as Promise<void>;
+  }
+
+  sendPresence(presence: CollabPresence): Promise<void> {
+    return invoke('collab_send_presence', { presence }) as Promise<void>;
+  }
+
+  async stop(): Promise<void> {
+    await this.detach();
+    try {
+      await invoke('collab_leave');
+    } catch {
+      /* best effort — leaving a session that is already gone is not an error */
+    }
+  }
+
+  private async detach(): Promise<void> {
+    for (const unlisten of this.unlisten.splice(0)) unlisten();
+  }
+}
+
 // The LEGACY app-data subdirectory under which desktop workspaces materialized before #915
 // (`<appData>/workspaces/<id>`). New workspaces now live under `<documentDir>/Koine` (see
 // workspacesRoot); this constant survives so isAutoRestorableToken still recognizes pre-existing tokens
@@ -181,13 +270,11 @@ export class TauriPlatform implements Platform {
   readonly persistsWorkspace = true;
   // The desktop shell brokers a real PTY (see TauriTerminalTransport / the Rust pty_* commands).
   readonly canRunShell = true;
-  // Real-time co-editing (#481) needs a session broker to relay CRDT updates and presence between
-  // machines. The desktop shell is the host that CAN run one — it already brokers a PTY and the `koine
-  // lsp` child — but that broker is #481 Task 5 and has not shipped, so the flag stays false and
-  // `createCollabTransport` stays absent: the Platform convention is that the optional factory exists
-  // iff its flag is true, and claiming a capability the UI can't exercise is worse than not having it.
-  // This flips to `true` in the same change that lands the Rust broker.
-  readonly canCollaborate = false;
+  // Real-time co-editing (#481). The desktop shell brokers the session itself — the Rust `collab_*`
+  // commands bind a listener and fan CRDT updates and presence between participants — so the capability
+  // is unconditionally available here, exactly like the PTY. A configured relay changes WHICH broker
+  // carries the frames (see `collabRelayUrl`), not whether the host can collaborate at all.
+  readonly canCollaborate = true;
   // The brokered `koine lsp` child can spawn the sandboxed `koine scenario-exec` grandchild (ADR 0011),
   // so the scenario runner may offer executed mode (#236).
   readonly supportsScenarioExecution = true;
@@ -203,6 +290,10 @@ export class TauriPlatform implements Platform {
 
   createTerminal(): TerminalTransport {
     return new TauriTerminalTransport();
+  }
+
+  createCollabTransport(): CollabTransport {
+    return new TauriCollabTransport();
   }
 
   appVersion(): Promise<string> {
