@@ -314,4 +314,107 @@ describe('scenarioPanel', () => {
       container.remove();
     });
   });
+
+  // --- fan-out attribution (#1758): whose aggregate did this step happen on? --------------
+  describe('fanned-out steps', () => {
+    // Executed mode explores what the model says happens NEXT: a `policy P when E then T.m(...)`
+    // reaction is really dispatched, and the steps it produces come back attributed to the DOWNSTREAM
+    // aggregate. The primary aggregate's own steps carry no `aggregate` at all — the key is written
+    // only when there is an attribution to make, so an older result still renders unchanged.
+    const FANNED_OUT: ScenarioResult = {
+      ok: true,
+      target: 'Payment',
+      operation: 'capture',
+      mode: 'executed',
+      steps: [
+        { kind: 'transition', field: 'status', from: 'Authorized', to: 'Captured', isInitialization: false },
+        { kind: 'emit', event: 'ChargeCaptured', args: { amount: '12.50' } },
+        {
+          kind: 'transition',
+          field: 'amount',
+          from: null,
+          to: '12.50',
+          isInitialization: true,
+          aggregate: 'LedgerEntry',
+        },
+        { kind: 'emit', event: 'EntryRecorded', args: { amount: '12.50' }, aggregate: 'LedgerEntry' },
+        {
+          kind: 'requires',
+          message: 'a statement can only absorb a posted entry',
+          condition: 'entry.posted',
+          outcome: 'passed',
+          aggregate: 'Statement',
+        },
+      ],
+      resultingState: { status: 'Captured', 'LedgerEntry.amount': '12.50' },
+      invariants: [],
+      result: null,
+      notes: [],
+    };
+
+    it('attributes a fanned-out step to the aggregate the backend named', async () => {
+      const container = document.createElement('div');
+      const lsp = mockLsp({ runScenario: vi.fn(async () => FANNED_OUT) });
+      const panel = createScenarioPanel({ container, lsp, platform: CAN_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      const steps = Array.from(container.querySelectorAll('.koi-scenario-step'));
+      expect(steps).toHaveLength(5);
+
+      // The two primary steps stay unattributed; the three fanned-out ones carry both the modifier
+      // class CSS hangs off and a chip naming their aggregate.
+      expect(steps.slice(0, 2).map((s) => s.classList.contains('is-downstream'))).toEqual([false, false]);
+      expect(steps.slice(2).map((s) => s.classList.contains('is-downstream'))).toEqual([true, true, true]);
+
+      const chips = steps.map((s) => s.querySelector('.koi-scenario-tag-aggregate'));
+      expect(chips[0]).toBeNull();
+      expect(chips[1]).toBeNull();
+      expect(chips[2]!.textContent).toContain('LedgerEntry');
+      expect(chips[3]!.textContent).toContain('LedgerEntry');
+      expect(chips[4]!.textContent).toContain('Statement');
+
+      // Announced, not colour-only: the attribution is spelled out in text for assistive tech.
+      expect(chips[2]!.querySelector('.koi-sr-only')?.textContent).toContain('downstream aggregate');
+      expect(chips[2]!.getAttribute('title')).toContain('LedgerEntry');
+    });
+
+    it('renders a step with no aggregate exactly as before — no stray attribution', async () => {
+      // PLACED predates fan-out: no step carries an `aggregate`, so nothing about it may change.
+      const container = document.createElement('div');
+      const panel = createScenarioPanel({ container, lsp: mockLsp(), platform: NO_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      const steps = Array.from(container.querySelectorAll('.koi-scenario-step'));
+      expect(steps).toHaveLength(3);
+      expect(container.querySelector('.koi-scenario-tag-aggregate')).toBeNull();
+      expect(container.querySelector('.koi-scenario-step.is-downstream')).toBeNull();
+      // The step contents themselves are untouched.
+      expect(steps[0].querySelector('.koi-scenario-step-text')!.textContent).toBe(
+        'only a draft order can be placed',
+      );
+      expect(steps[1].querySelector('.koi-scenario-step-text')!.textContent).toBe('status: Draft → Placed');
+      expect(steps[2].querySelector('.koi-scenario-step-text')!.textContent).toBe('OrderPlaced');
+    });
+
+    it('has no axe violations on a timeline mixing the primary and several downstream aggregates', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const lsp = mockLsp({ runScenario: vi.fn(async () => FANNED_OUT) });
+      const panel = createScenarioPanel({ container, lsp, platform: CAN_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      expect(container.querySelectorAll('.koi-scenario-step.is-downstream')).toHaveLength(3);
+      expect(await axe(container)).toHaveNoViolations();
+      container.remove();
+    });
+  });
 });

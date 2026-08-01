@@ -187,6 +187,26 @@
   color: var(--koi-accent);
   border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
 }
+/* Fan-out attribution (#1758): a step executed mode dispatched onto ANOTHER aggregate, because a
+   policy in the model reacts to the event above it. The chip names that aggregate — colour and the
+   indent rule below only reinforce what the text already says (and a visually-hidden "downstream
+   aggregate" prefix states it for assistive tech), so the attribution survives a monochrome theme,
+   a colour-blind reader and a screen reader alike. */
+.koi-scenario-tag-aggregate {
+  text-transform: none; /* an aggregate is a type NAME — its casing is the model's, not the chip's */
+  letter-spacing: 0;
+  font-family: var(--koi-font-mono);
+  color: var(--koi-fg);
+  background: color-mix(in srgb, var(--koi-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 30%, transparent);
+}
+/* Indented under the step that triggered them, with a rule down the left, so a cascade reads as a
+   cascade rather than as a flat list that silently changes subject. */
+.koi-scenario-step.is-downstream {
+  margin-left: var(--koi-space-2);
+  padding-left: var(--koi-space-2);
+  border-left: 2px solid color-mix(in srgb, var(--koi-accent) 30%, transparent);
+}
 .koi-scenario-args {
   display: inline-flex;
   flex-wrap: wrap;

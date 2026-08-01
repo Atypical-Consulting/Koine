@@ -354,6 +354,15 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
         break;
       }
     }
+    // Whose aggregate was this? Only a step executed mode fanned out to carries an answer (#1758) —
+    // a primary-aggregate step carries none and renders exactly as it always did. The chip is
+    // PREPENDED, not appended: in a timeline that switches aggregates the attribution is what a
+    // reader needs first, and it reads the same way to a screen reader ("downstream aggregate
+    // LedgerEntry: …") as it does on screen.
+    if (step.aggregate) {
+      li.classList.add('is-downstream');
+      li.prepend(aggregateChip(step.aggregate));
+    }
     return li;
   }
 
@@ -461,6 +470,28 @@ function codeChip(text: string): HTMLElement {
 function tag(text: string): HTMLElement {
   const el = h('span', `koi-scenario-tag koi-scenario-tag-${text}`);
   el.textContent = text;
+  return el;
+}
+
+/**
+ * The aggregate a FANNED-OUT step happened on (#1758) — one of the same `koi-scenario-tag` chips the
+ * timeline already uses for `set` / `event` / `result`, so a switch of aggregate reads as part of the
+ * step rather than as a second design idiom.
+ *
+ * The attribution is carried by TEXT, never by the chip's colour alone: a visually-hidden "downstream
+ * aggregate" prefix says what the name means, so assistive tech hears "downstream aggregate
+ * LedgerEntry" where the eye sees a chip. The class is fixed (`koi-scenario-tag-aggregate`) rather
+ * than derived from the name — {@link tag} derives its modifier from a closed set of literals, while
+ * an aggregate name crosses the wire, and a backend must not get to pick a CSS class.
+ */
+function aggregateChip(aggregate: string): HTMLElement {
+  const el = h('span', 'koi-scenario-tag koi-scenario-tag-aggregate');
+  const label = h('span', 'koi-sr-only');
+  label.textContent = 'downstream aggregate ';
+  el.append(label, aggregate);
+  el.title =
+    `This step ran on ${aggregate}, not on the aggregate under test: a policy in the model reacts ` +
+    'to the event above by invoking it.';
   return el;
 }
 

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.Loader;
 using Koine.Compiler;
@@ -39,13 +40,38 @@ internal sealed class ScenarioExecutor
     /// <summary>How many Roslyn errors a failed compile reports before the note is truncated.</summary>
     private const int MaxReportedCompileErrors = 5;
 
+    /// <summary>
+    /// How many levels of policy reaction a run explores past the operation under test (issue #1758,
+    /// decision D5). Three, because: the shipped templates' deepest declared chain is ONE hop, so three
+    /// truncates nothing real; three levels still show a chain's *shape* (the trigger, its reaction, and
+    /// that reaction's own reaction) rather than only its first step, which is what makes a cascade legible
+    /// at all; and every level multiplies the timeline a human has to read while the visited set — not the
+    /// cap — is what actually catches cycles. The cap exists to bound the pathological case a visited set
+    /// cannot see (a genuinely deep, non-repeating chain), and it must bite far inside
+    /// <c>ScenarioExecutionHost.DefaultTimeout</c> so such a model is diagnosed as truncated rather than
+    /// reported as "your model may loop". Hitting it is always a note, never a silent stop.
+    /// </summary>
+    private const int MaxFanOutDepth = 3;
+
     private static readonly IReadOnlyDictionary<string, string> NoState =
         new Dictionary<string, string>(StringComparer.Ordinal);
 
     private readonly SemanticModel _sema;
     private readonly ModelIndex _index;
     private readonly ScenarioValueBinder _binder;
+    private readonly ScenarioFanOutResolver _fanOut;
     private readonly List<string> _notes = [];
+
+    /// <summary>
+    /// The state established for each fanned-out aggregate, by entity name — so ONE aggregate is one
+    /// object for the whole run (issue #1758). A second reaction reaching the same aggregate (two
+    /// policies on one event, or two rungs of a chain) continues from the state the first left it in,
+    /// rather than from a second instance rebuilt out of the same <c>given</c>: two instances would make
+    /// the timeline contradict itself, since the merged <c>&lt;Entity&gt;.&lt;member&gt;</c> state would
+    /// report the LAST reaction's post-state while the steps above it show the first one's write.
+    /// Factory targets never consult or populate it — a factory builds its own instance every time.
+    /// </summary>
+    private readonly Dictionary<string, DownstreamState> _downstream = new(StringComparer.Ordinal);
 
     private EntityDecl _entity = null!;
 
@@ -54,6 +80,7 @@ internal sealed class ScenarioExecutor
         _sema = sema;
         _index = sema.Index;
         _binder = new ScenarioValueBinder(_index);
+        _fanOut = new ScenarioFanOutResolver(sema);
     }
 
     /// <summary>Runs <paramref name="scenario"/> against the code <paramref name="sema"/> emits, and
@@ -174,7 +201,7 @@ internal sealed class ScenarioExecutor
         object? instance = null;
         if (!isFactory)
         {
-            if (!TryConstructGivenState(entityType, s, out instance, out Exception? constructionFailure))
+            if (!TryConstructGivenState(_entity, entityType, s.Given, out instance, out Exception? constructionFailure))
             {
                 return constructionFailure is null ? Failed(s) : GivenStateViolation(s, constructionFailure);
             }
@@ -184,7 +211,7 @@ internal sealed class ScenarioExecutor
             _notes.Add($"'{s.Operation}' is a factory: it builds the instance itself, so the given state was not applied.");
         }
 
-        IReadOnlyDictionary<string, string> before = instance is null ? NoState : Snapshot(instance, recordNotes: false);
+        IReadOnlyDictionary<string, string> before = instance is null ? NoState : Snapshot(_entity, instance, recordNotes: false);
 
         object? returned;
         try
@@ -214,9 +241,26 @@ internal sealed class ScenarioExecutor
             return Failed(s);
         }
 
-        IReadOnlyDictionary<string, string> after = Snapshot(subject, recordNotes: true);
+        Dictionary<string, string> after = Snapshot(_entity, subject, recordNotes: true);
         string? result = null;
         List<ScenarioStep> steps = SuccessSteps(body, before, after, subject, returned, ref result);
+
+        // The primary operation SUCCEEDED, so what the model says happens next is worth exploring
+        // (#1758). Only on the success path: a failed primary emitted nothing to fan out from, and
+        // #1738's short-circuit semantics — nothing past the failing statement happened — must hold.
+        // Wrapped on its own so a fan-out failure degrades to a note instead of costing the primary
+        // result, which Run's catch-all would otherwise discard.
+        try
+        {
+            FanOut(assembly, s, _entity, subject, steps, after, [], depth: 0);
+        }
+        catch (Exception ex)
+        {
+            Exception failure = Unwrap(ex);
+            _notes.Add(ScenarioSandbox.ResourceCeilingNote(failure)
+                       ?? $"The downstream reactions could not be explored: {Describe(failure)}. The primary "
+                          + "operation's own result is unaffected.");
+        }
 
         // The emitted operation ran its own CheckInvariants() and did not throw, so every declared
         // invariant holds against the post-command state — proven, not assumed.
@@ -307,13 +351,22 @@ internal sealed class ScenarioExecutor
     // ------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds the aggregate's given state through its own (emitter-generated, often private) all-args
-    /// constructor, so the constructor's <c>CheckInvariants()</c> and every value object it builds really
-    /// run. Returns <c>false</c> with <paramref name="violation"/> set when the emitted code REJECTED the
-    /// state (a domain outcome to report, not an error), or with it <c>null</c> when a value simply could
-    /// not be bound.
+    /// Builds <paramref name="entity"/>'s given state through its own (emitter-generated, often private)
+    /// all-args constructor, so the constructor's <c>CheckInvariants()</c> and every value object it builds
+    /// really run. Returns <c>false</c> with <paramref name="violation"/> set when the emitted code REJECTED
+    /// the state (a domain outcome to report, not an error), or with it <c>null</c> when a value simply
+    /// could not be bound.
+    ///
+    /// <para>The entity and its <c>given</c> map are PARAMETERS rather than the scenario's own, because
+    /// fan-out (issue #1758) establishes the very same way for a DOWNSTREAM aggregate, from the slice of
+    /// the scenario's given state routed to it — see <see cref="ScenarioDownstreamState"/>.</para>
     /// </summary>
-    private bool TryConstructGivenState(Type entityType, Scenario s, out object? instance, out Exception? violation)
+    private bool TryConstructGivenState(
+        EntityDecl entity,
+        Type entityType,
+        IReadOnlyDictionary<string, ScenarioValue> given,
+        out object? instance,
+        out Exception? violation)
     {
         instance = null;
         violation = null;
@@ -336,7 +389,7 @@ internal sealed class ScenarioExecutor
             var args = new object?[parameters.Length];
             for (int i = 0; i < parameters.Length; i++)
             {
-                if (!TryBindConstructorParameter(entityType, s, parameters[i], out args[i]))
+                if (!TryBindConstructorParameter(entity, entityType, given, parameters[i], out args[i]))
                 {
                     return false;
                 }
@@ -352,18 +405,23 @@ internal sealed class ScenarioExecutor
         }
     }
 
-    private bool TryBindConstructorParameter(Type entityType, Scenario s, ParameterInfo parameter, out object? bound)
+    private bool TryBindConstructorParameter(
+        EntityDecl entity,
+        Type entityType,
+        IReadOnlyDictionary<string, ScenarioValue> given,
+        ParameterInfo parameter,
+        out object? bound)
     {
         bound = null;
         string name = parameter.Name ?? string.Empty;
 
-        Member? member = _entity.Members.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
+        Member? member = entity.Members.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
         if (member is null)
         {
             // The synthetic identity the emitter threads through as `id`.
             if (string.Equals(name, "id", StringComparison.OrdinalIgnoreCase))
             {
-                return TryBindIdentity(s, parameter, out bound);
+                return TryBindIdentity(given, parameter, out bound);
             }
 
             if (parameter.HasDefaultValue)
@@ -377,9 +435,9 @@ internal sealed class ScenarioExecutor
             return false;
         }
 
-        if (s.Given.TryGetValue(member.Name, out ScenarioValue? given))
+        if (given.TryGetValue(member.Name, out ScenarioValue? supplied))
         {
-            if (_binder.TryBind(given, parameter.ParameterType, out bound, out string? error))
+            if (_binder.TryBind(supplied, parameter.ParameterType, out bound, out string? error))
             {
                 return true;
             }
@@ -402,17 +460,20 @@ internal sealed class ScenarioExecutor
         }
 
         _notes.Add($"No 'given' value for required field '{member.Name}'; the runner will not guess one, "
-                   + $"so '{_entity.Name}' could not be constructed.");
+                   + $"so '{entity.Name}' could not be constructed.");
         return false;
     }
 
-    private bool TryBindIdentity(Scenario s, ParameterInfo parameter, out object? bound)
+    private bool TryBindIdentity(
+        IReadOnlyDictionary<string, ScenarioValue> given,
+        ParameterInfo parameter,
+        out object? bound)
     {
         bound = null;
 
-        if (s.Given.TryGetValue("id", out ScenarioValue? given))
+        if (given.TryGetValue("id", out ScenarioValue? supplied))
         {
-            if (_binder.TryBind(given, parameter.ParameterType, out bound, out string? error))
+            if (_binder.TryBind(supplied, parameter.ParameterType, out bound, out string? error))
             {
                 return true;
             }
@@ -469,20 +530,607 @@ internal sealed class ScenarioExecutor
     }
 
     // ------------------------------------------------------------------------
+    // Fan-out: the downstream aggregate's starting state (#1758, decision D2)
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Establishes the state one fanned-out <paramref name="target"/> would run from, by wiring D2's rule
+    /// (<see cref="ScenarioDownstreamState.Establish"/>) to the REAL emitted constructor: the routed
+    /// per-aggregate <c>given</c> slice is built through the downstream entity's own all-args constructor,
+    /// so its value objects and invariants fire exactly as the primary aggregate's do.
+    ///
+    /// <para>Every outcome is honest. A factory needs no prior instance; a rejected given state comes back
+    /// as <see cref="DownstreamState.Rejected"/> carrying the real
+    /// <c>DomainInvariantViolationException</c> so it can be reported as the failed step it is; anything
+    /// else is <see cref="DownstreamState.Unavailable"/> with a reason. No path invents an instance.</para>
+    ///
+    /// <para>Established at most ONCE per aggregate per run (see <see cref="_downstream"/>): a second
+    /// reaction reaching the same aggregate reuses the live instance the first one left, so a timeline
+    /// that visits an aggregate twice reads — and merges — as one story about one object. A factory
+    /// target is exempt: it builds its own instance on every call, so there is nothing to cache.</para>
+    ///
+    /// <para>Dispatching the target from that state is deliberately NOT done here — this seam only
+    /// establishes it.</para>
+    /// </summary>
+    internal DownstreamState EstablishDownstreamState(Assembly assembly, Scenario s, FanOutTarget target)
+    {
+        if (!target.IsFactory && _downstream.TryGetValue(target.EntityName, out DownstreamState? established))
+        {
+            return established;
+        }
+
+        DownstreamState state = EstablishDownstreamStateCore(assembly, s, target);
+        if (!target.IsFactory)
+        {
+            _downstream[target.EntityName] = state;
+        }
+
+        return state;
+    }
+
+    private DownstreamState EstablishDownstreamStateCore(Assembly assembly, Scenario s, FanOutTarget target)
+    {
+        EntityDecl? entity = ResolveEntity(target.EntityName);
+        if (entity is null)
+        {
+            return new DownstreamState.Unavailable(
+                $"No state was established for {target.EntityName}: the model declares no entity by that name.");
+        }
+
+        return ScenarioDownstreamState.Establish(target, _entity?.Name ?? s.Target, s.Given, routed =>
+        {
+            // Resolved inside the construction, so a target that needs no instance never pays for it —
+            // and never fails on a type-resolution note it did not need.
+            if (!TryResolveType(assembly, entity.Name, out Type? entityType))
+            {
+                return new DownstreamState.Unavailable(
+                    $"No state was established for {entity.Name}: its emitted type could not be located.");
+            }
+
+            if (TryConstructGivenState(entity, entityType!, routed, out object? instance, out Exception? violation))
+            {
+                return new DownstreamState.Instance(instance!);
+            }
+
+            return violation is not null
+                ? new DownstreamState.Rejected(violation)
+                : new DownstreamState.Unavailable(
+                    $"No state was established for {entity.Name}: the given state routed to it could not be "
+                    + "built (see the notes above for the value that failed to bind).");
+        });
+    }
+
+    // ------------------------------------------------------------------------
+    // Fan-out: dispatching the downstream reactions (#1758, decisions D1/D3–D6)
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Explores what the model says happens NEXT, from the events <paramref name="subject"/> really
+    /// recorded: each is resolved to its declared downstream (<see cref="ScenarioFanOutResolver"/>), the
+    /// executable reactions are dispatched into <paramref name="steps"/> attributed to the aggregate that
+    /// produced them, their post-state merges into <paramref name="state"/> under
+    /// <c>&lt;Entity&gt;.&lt;member&gt;</c> keys (D4), and each dispatched target is recursed on.
+    ///
+    /// <para>The cascade is bounded twice over (D5), because one bound cannot do the job alone:
+    /// <paramref name="visited"/> — the REACTIONS already dispatched, identified by
+    /// <c>(aggregate, member, policy, event)</c> — terminates a CYCLIC model no matter how the cap is
+    /// set, and <see cref="MaxFanOutDepth"/> truncates a genuinely deep, non-repeating chain a visited
+    /// set can never see. Hitting either is a note naming which bound bit and what was left unexplored;
+    /// neither ever stops silently.</para>
+    ///
+    /// <para>The key identifies the REACTION rather than only the <c>(aggregate, event)</c> pair it
+    /// lands on, because those are not the same question: two policies reacting to one event on one
+    /// aggregate ("post it, and audit it") are two distinct declared reactions, and a coarser key would
+    /// run whichever sorted first and refuse the other as a cycle it is not. Termination is unaffected —
+    /// the key space is still finite (a model has finitely many policies), and every dispatch consumes a
+    /// key that is never released.</para>
+    ///
+    /// <para><paramref name="alreadyRecorded"/> is how many events <paramref name="subject"/> carried
+    /// BEFORE the invocation this call follows: an aggregate reached twice keeps its earlier events, and
+    /// re-reading them would re-resolve a cascade that already happened.</para>
+    /// </summary>
+    private void FanOut(
+        Assembly assembly,
+        Scenario s,
+        EntityDecl subjectEntity,
+        object subject,
+        List<ScenarioStep> steps,
+        Dictionary<string, string> state,
+        HashSet<(string Aggregate, string Member, string Policy, string Event)> visited,
+        int depth,
+        int alreadyRecorded = 0)
+    {
+        List<object> events = DomainEventsOf(subject);
+        if (events.Count <= alreadyRecorded)
+        {
+            return;
+        }
+
+        string context = ContextOf(subjectEntity.Name) ?? string.Empty;
+
+        foreach (object recorded in events.Skip(alreadyRecorded))
+        {
+            // The RUNTIME event object's type name, not a re-reading of the body's `emit` clauses: an
+            // event the emitted code really recorded is higher fidelity than one the model merely says
+            // it would record.
+            string eventName = recorded.GetType().Name;
+            FanOutResolution resolution = _fanOut.Resolve(context, eventName);
+            if (resolution.IsEmpty)
+            {
+                continue;
+            }
+
+            // D1: a cross-context subscription is DECLARED and not executable — every emitter gives it
+            // only a bodiless handler seam — so it is said out loud and never fabricated into a step.
+            //
+            // Unreachable from a RECORDED event as the language stands: `emit X` resolves X to an
+            // `EventDecl` (EntityBehaviorValidator.ValidateEmit), and `integration event X` builds an
+            // `IntegrationEventDecl`, so no command can emit a published event today — which is why the
+            // shipped templates publish `OrderPlaced` and emit `OrderPlacedInternally`. Kept because the
+            // resolver answers this question either way (and is tested doing so): the day `emit` accepts
+            // an integration event, the runner already reports it honestly instead of silently pretending
+            // the boundary was crossed.
+            if (resolution.DeclaredOnly.Count > 0)
+            {
+                _notes.Add($"'{eventName}' crosses a context boundary to "
+                           + $"{Join(resolution.DeclaredOnly.Select(sub => sub.Context).ToList())}, which the model "
+                           + "declares a subscription for and no executable handler (the emitter produces only a "
+                           + "handler seam), so no downstream step was run for it.");
+            }
+
+            foreach (FanOutTarget target in resolution.Executable)
+            {
+                if (depth >= MaxFanOutDepth)
+                {
+                    _notes.Add($"Fan-out stopped at the maximum depth of {MaxFanOutDepth}: the reaction to "
+                               + $"'{eventName}' declared by policy '{target.PolicyName}' "
+                               + $"({target.EntityName}.{target.MemberName}) was not explored.");
+                    continue;
+                }
+
+                if (!visited.Add((target.EntityName, target.MemberName, target.PolicyName, eventName)))
+                {
+                    // Said as what it IS — a reaction that already ran — rather than as "your model has a
+                    // cycle": the same bound also fires when one reaction is reached twice by different
+                    // routes (a diamond re-converging, or one command emitting the same event twice), and
+                    // naming that a cycle would send a reader hunting for a loop that is not there.
+                    _notes.Add($"Fan-out did not repeat a reaction: policy '{target.PolicyName}' "
+                               + $"({target.EntityName}.{target.MemberName}) has already run for "
+                               + $"'{eventName}' on '{target.EntityName}' in this run, so it was not "
+                               + "dispatched again — that bound is what terminates a cycle in a policy "
+                               + "chain.");
+                    continue;
+                }
+
+                Dispatch(assembly, s, eventName, recorded, target, steps, state, visited, depth);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs ONE resolved reaction: establish the downstream aggregate's state (D2), invoke the reaction's
+    /// emitted member on it with arguments read off the upstream event, record the steps it produced —
+    /// attributed to that aggregate — and recurse on the events it in turn recorded.
+    ///
+    /// <para>Every outcome the run cannot drive is honest: an unavailable state, an unbindable argument
+    /// and a reaction that no emitted method backs are notes (plus, for the first, the failed
+    /// <see cref="ScenarioStep.Precondition"/> D2's clause 3 calls for); a violation is a failed step
+    /// carrying the emitted code's real message. Nothing here invents an instance or a value.</para>
+    /// </summary>
+    private void Dispatch(
+        Assembly assembly,
+        Scenario s,
+        string eventName,
+        object eventObject,
+        FanOutTarget target,
+        List<ScenarioStep> steps,
+        Dictionary<string, string> state,
+        HashSet<(string Aggregate, string Member, string Policy, string Event)> visited,
+        int depth)
+    {
+        EntityDecl? entity = ResolveEntity(target.EntityName);
+        if (entity is null)
+        {
+            _notes.Add($"Policy '{target.PolicyName}' reacts to '{eventName}' on '{target.EntityName}', for which "
+                       + "the model declares no entity; the reaction could not be driven.");
+            return;
+        }
+
+        CommandDecl? command = entity.Commands.FirstOrDefault(c => c.Name == target.MemberName);
+        FactoryDecl? factory = command is null
+            ? entity.Factories.FirstOrDefault(f => f.Name == target.MemberName)
+            : null;
+        if (command is null && factory is null)
+        {
+            _notes.Add($"Policy '{target.PolicyName}' invokes '{target.EntityName}.{target.MemberName}', which is "
+                       + "neither a command nor a factory; the reaction could not be driven.");
+            return;
+        }
+
+        object? instance;
+        switch (EstablishDownstreamState(assembly, s, target))
+        {
+            case DownstreamState.Instance live:
+                instance = live.Value;
+                break;
+
+            case DownstreamState.StaticTarget:
+                // A factory builds its own instance. Dead for any model that validates — a policy
+                // reaction may only name a `command` today (KOI1032) — see FanOutTarget.IsFactory.
+                instance = null;
+                break;
+
+            case DownstreamState.Rejected rejected:
+                steps.Add(DownstreamGivenViolation(target, rejected.Violation));
+                return;
+
+            case DownstreamState.Unavailable unavailable:
+                // D2 clause 3: a failed precondition attributed to the aggregate, plus the reason —
+                // which names the exact `<Entity>.<member>` key that would have driven it. The step is
+                // per REACTION (it names the policy that could not be driven); the reason is per
+                // AGGREGATE, so several reactions onto one undescribed aggregate say it once.
+                NoteOnce(unavailable.Reason);
+                steps.Add(new ScenarioStep.Precondition(
+                    $"no state was established for {target.EntityName}, so '{target.MemberName}' could not be driven",
+                    $"policy {target.PolicyName}: when {eventName} then {target.AggregateName}.{target.MemberName}",
+                    CheckOutcome.Failed)
+                {
+                    Aggregate = target.EntityName,
+                });
+                return;
+
+            default:
+                return;
+        }
+
+        if (!TryResolveType(assembly, entity.Name, out Type? entityType))
+        {
+            return;
+        }
+
+        IReadOnlyList<CommandStmt> body = command?.Body ?? factory!.Body;
+        IReadOnlyList<Param> parameters = command?.Parameters ?? factory!.Parameters;
+        bool isFactory = factory is not null;
+        string pascal = ScenarioValueBinder.Pascal(target.MemberName);
+
+        MethodInfo? method = entityType!
+            .GetMethods(BindingFlags.Public | (isFactory ? BindingFlags.Static : BindingFlags.Instance))
+            .FirstOrDefault(m => m.Name == pascal && m.GetParameters().Length == parameters.Count);
+        if (method is null)
+        {
+            _notes.Add($"The emitted '{entityType.Name}' has no {(isFactory ? "static factory" : "method")} "
+                       + $"'{pascal}' taking {parameters.Count} argument(s), so policy '{target.PolicyName}' "
+                       + "could not be driven.");
+            return;
+        }
+
+        if (!TryBindPolicyArguments(method, target, eventObject, out object?[] args))
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<string, string> before =
+            instance is null ? NoState : Snapshot(entity, instance, recordNotes: false);
+
+        // What this aggregate had already recorded before this reaction ran. An aggregate reached twice
+        // keeps its earlier events, so both the `emit` step payloads below and the recursion after them
+        // must read only the ones THIS invocation added.
+        int alreadyRecorded = instance is null ? 0 : DomainEventsOf(instance).Count;
+
+        object? returned;
+        try
+        {
+            returned = method.Invoke(instance, args);
+        }
+        catch (Exception ex)
+        {
+            Exception failure = Unwrap(ex);
+
+            // A sandbox ceiling is not the reaction failing, so it is reported by name and stops the
+            // cascade rather than being dressed up as a domain outcome (#1759).
+            if (ScenarioSandbox.ResourceCeilingNote(failure) is { } ceiling)
+            {
+                _notes.Add(ceiling);
+                return;
+            }
+
+            steps.AddRange(DownstreamFailureSteps(entity, target, failure, body, before, instance));
+            if (instance is not null)
+            {
+                Merge(state, entity, Snapshot(entity, instance, recordNotes: false));
+            }
+
+            return;
+        }
+
+        object? downstream = isFactory ? returned : instance;
+        if (downstream is null)
+        {
+            _notes.Add($"Policy '{target.PolicyName}' invoked '{target.EntityName}.{target.MemberName}', which "
+                       + "returned no instance to read the resulting state from.");
+            return;
+        }
+
+        Dictionary<string, string> after = Snapshot(entity, downstream, recordNotes: true);
+        string? unusedResult = null;
+        foreach (ScenarioStep step in
+                 SuccessSteps(body, before, after, downstream, returned, ref unusedResult, alreadyRecorded))
+        {
+            steps.Add(step with { Aggregate = entity.Name });
+        }
+
+        Merge(state, entity, after);
+
+        // The reaction may itself have emitted: keep going, under the same two bounds.
+        FanOut(assembly, s, entity, downstream, steps, state, visited, depth + 1, alreadyRecorded);
+    }
+
+    /// <summary>Adds a note unless that exact sentence is already recorded — a fact about an AGGREGATE
+    /// (its state could not be established) is worth saying once however many reactions reach it, while
+    /// the per-reaction detail stays in the steps, which name the policy.</summary>
+    private void NoteOnce(string note)
+    {
+        if (!_notes.Contains(note, StringComparer.Ordinal))
+        {
+            _notes.Add(note);
+        }
+    }
+
+    /// <summary>D4: a downstream aggregate's state merges under <c>&lt;Entity&gt;.&lt;member&gt;</c> keys, so
+    /// the primary aggregate keeps its bare member names and nothing collides.</summary>
+    private static void Merge(
+        Dictionary<string, string> state,
+        EntityDecl entity,
+        IReadOnlyDictionary<string, string> downstream)
+    {
+        foreach ((string member, string value) in downstream)
+        {
+            state[$"{entity.Name}.{member}"] = value;
+        }
+    }
+
+    /// <summary>
+    /// Binds the reaction's arguments from the UPSTREAM event object. A <see cref="PolicyArg"/>'s value is
+    /// an <see cref="Expr"/>, and the shape the language produces here is overwhelmingly a plain identifier
+    /// naming one of the event's fields (<c>then Books.record(amount: capturedAmount)</c>), read straight
+    /// off the recorded instance. Anything the runner cannot evaluate is refused with a note naming the
+    /// policy and the argument — it does not evaluate half an expression and call the result a fact.
+    /// </summary>
+    private bool TryBindPolicyArguments(MethodInfo method, FanOutTarget target, object eventObject, out object?[] args)
+    {
+        ParameterInfo[] parameters = method.GetParameters();
+        args = new object?[parameters.Length];
+
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            ParameterInfo parameter = parameters[i];
+            string name = parameter.Name ?? string.Empty;
+            PolicyArg? supplied = target.Args
+                .FirstOrDefault(a => string.Equals(a.Parameter, name, StringComparison.OrdinalIgnoreCase));
+
+            if (supplied is null)
+            {
+                if (parameter.HasDefaultValue)
+                {
+                    args[i] = parameter.DefaultValue;
+                    continue;
+                }
+
+                _notes.Add($"Policy '{target.PolicyName}' supplies no argument for parameter '{name}' of "
+                           + $"'{target.EntityName}.{target.MemberName}'; the reaction was not dispatched.");
+                return false;
+            }
+
+            if (!TryReadEventValue(supplied.Value, eventObject, out object? value))
+            {
+                _notes.Add($"Policy '{target.PolicyName}' binds '{supplied.Parameter}' from "
+                           + $"\"{Lowerer.SourceText(supplied.Value)}\", which the runner cannot evaluate against "
+                           + $"'{eventObject.GetType().Name}'; the reaction was not dispatched rather than driven "
+                           + "with a guessed value.");
+                return false;
+            }
+
+            if (!TryCoerce(value, parameter.ParameterType, out args[i]))
+            {
+                _notes.Add($"Policy '{target.PolicyName}' binds '{supplied.Parameter}' to a value of type "
+                           + $"'{value?.GetType().Name ?? "null"}', which does not fit parameter '{name}' of type "
+                           + $"'{ScenarioValueBinder.Describe(parameter.ParameterType)}'; the reaction was not "
+                           + "dispatched.");
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Reads a policy argument's expression off the recorded event: an identifier naming one of
+    /// its fields, or a member access rooted in one. Returns <c>false</c> — never a null passed off as a
+    /// value — for a field the event does not carry or a shape this cannot evaluate.</summary>
+    private static bool TryReadEventValue(Expr expr, object eventObject, out object? value)
+    {
+        value = null;
+
+        switch (expr)
+        {
+            case IdentifierExpr id:
+                {
+                    string property = ScenarioValueBinder.Pascal(id.Name);
+                    if (eventObject.GetType().GetProperty(property, BindingFlags.Public | BindingFlags.Instance) is null)
+                    {
+                        return false;
+                    }
+
+                    value = ScenarioValueBinder.ReadProperty(eventObject, property);
+                    return true;
+                }
+
+            case MemberAccessExpr access:
+                {
+                    if (!TryReadEventValue(access.Target, eventObject, out object? owner) || owner is null)
+                    {
+                        return false;
+                    }
+
+                    string property = ScenarioValueBinder.Pascal(access.MemberName);
+                    if (owner.GetType().GetProperty(property, BindingFlags.Public | BindingFlags.Instance) is null)
+                    {
+                        return false;
+                    }
+
+                    value = ScenarioValueBinder.ReadProperty(owner, property);
+                    return true;
+                }
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Fits an event's field onto the reaction parameter it drives: assignable as-is, or through
+    /// the framework's own conversion for the numeric widening a model expresses freely (an <c>Int</c>
+    /// field into a <c>Decimal</c> parameter). A value neither route accepts is refused, not forced.</summary>
+    private static bool TryCoerce(object? value, Type target, out object? coerced)
+    {
+        coerced = value;
+
+        if (value is null)
+        {
+            return !target.IsValueType || Nullable.GetUnderlyingType(target) is not null;
+        }
+
+        Type underlying = Nullable.GetUnderlyingType(target) ?? target;
+        if (underlying.IsInstanceOfType(value))
+        {
+            return true;
+        }
+
+        try
+        {
+            coerced = Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException or ArgumentException)
+        {
+            coerced = null;
+            return false;
+        }
+    }
+
+    /// <summary>The state routed to a downstream aggregate was REJECTED by the emitted code — a real domain
+    /// outcome, reported with its real message exactly the way <see cref="GivenStateViolation"/> reports the
+    /// primary aggregate's own.</summary>
+    private ScenarioStep DownstreamGivenViolation(FanOutTarget target, Exception violation)
+    {
+        // The note is a fact about the AGGREGATE's state, so it is said once however many reactions reach
+        // it — the same treatment the unavailable case gets.
+        if (!TryReadViolation(violation, out string typeName, out string rule))
+        {
+            NoteOnce($"The given state routed to '{target.EntityName}' could not be built: {Describe(violation)}");
+            return new ScenarioStep.Precondition(violation.Message, Describe(violation), CheckOutcome.Failed)
+            {
+                Aggregate = target.EntityName,
+            };
+        }
+
+        NoteOnce($"The given state routed to '{target.EntityName}' was rejected by '{typeName}': {rule}");
+        return new ScenarioStep.Precondition(rule, rule, CheckOutcome.Failed) { Aggregate = target.EntityName };
+    }
+
+    /// <summary>
+    /// A downstream reaction THREW. Attributed with the very same taxonomy the primary path uses
+    /// (<see cref="TryReadViolation"/> + <see cref="WalkToViolation"/>), so a fanned-out guard, illegal
+    /// transition or invariant renders identically to the primary aggregate's — only attributed to the
+    /// aggregate that raised it. An unattributable throw is reported verbatim, never guessed at.
+    /// </summary>
+    private List<ScenarioStep> DownstreamFailureSteps(
+        EntityDecl entity,
+        FanOutTarget target,
+        Exception failure,
+        IReadOnlyList<CommandStmt> body,
+        IReadOnlyDictionary<string, string> before,
+        object? instance)
+    {
+        string where = $"{target.EntityName}.{target.MemberName}";
+
+        if (!TryReadViolation(failure, out string typeName, out string rule))
+        {
+            _notes.Add($"The downstream '{where}' (policy '{target.PolicyName}') threw {Describe(failure)}; the "
+                       + "failure could not be attributed to a modelled precondition, transition or invariant.");
+            return
+            [
+                new ScenarioStep.Precondition(failure.Message, Describe(failure), CheckOutcome.Failed)
+                {
+                    Aggregate = entity.Name,
+                }
+            ];
+        }
+
+        if (typeName != entity.Name)
+        {
+            // A value object the reaction rebuilt rejected its new value — the same domain rule, rendered
+            // the way the primary path renders the same case.
+            _notes.Add($"The downstream '{where}' (policy '{target.PolicyName}') was rejected by '{typeName}': {rule}");
+            return [new ScenarioStep.Precondition(rule, rule, CheckOutcome.Failed) { Aggregate = entity.Name }];
+        }
+
+        IReadOnlyDictionary<string, string> after =
+            instance is null ? NoState : Snapshot(entity, instance, recordNotes: false);
+        ViolationWalk walk = WalkToViolation(rule, body, before, after);
+
+        if (walk.Source == ViolationSource.InvariantSweep)
+        {
+            // Nothing in the body claimed the rule: the emitted post-command sweep rejected the mutated
+            // state. Resolve it back to the declared invariant so the step carries the modelled text.
+            Invariant? violated = entity.Invariants.FirstOrDefault(i => RuleOf(i) == rule);
+            walk.Steps.Add(new ScenarioStep.Precondition(
+                violated?.Message ?? rule,
+                violated?.Condition.ToFullString() ?? rule,
+                CheckOutcome.Failed));
+        }
+
+        _notes.Add(walk.Source switch
+        {
+            ViolationSource.Precondition =>
+                $"The downstream '{where}' (policy '{target.PolicyName}') was rejected by a precondition: {rule}",
+            ViolationSource.StateMachine =>
+                $"The downstream '{where}' (policy '{target.PolicyName}') was rejected by the '{walk.Field}' "
+                + $"state machine: {rule}",
+            _ => $"The downstream '{where}' (policy '{target.PolicyName}') left '{entity.Name}' violating an "
+                 + $"invariant: {rule}"
+        });
+
+        return walk.Steps.Select(step => step with { Aggregate = entity.Name }).ToList();
+    }
+
+    /// <summary>"A", "A and B", "A, B and C".</summary>
+    private static string Join(IReadOnlyList<string> names) => names.Count switch
+    {
+        0 => "no context",
+        1 => names[0],
+        2 => $"{names[0]} and {names[1]}",
+        _ => $"{string.Join(", ", names.Take(names.Count - 1))} and {names[^1]}"
+    };
+
+    // ------------------------------------------------------------------------
     // The timeline
     // ------------------------------------------------------------------------
 
+    /// <summary><paramref name="fromEvent"/> is where this invocation's own events start on
+    /// <paramref name="subject"/>: an aggregate a second reaction reached still carries the first
+    /// reaction's events, and matching an <c>emit</c> clause against one of those would report a
+    /// stale payload as if this command had just produced it.</summary>
     private List<ScenarioStep> SuccessSteps(
         IReadOnlyList<CommandStmt> body,
         IReadOnlyDictionary<string, string> before,
         IReadOnlyDictionary<string, string> after,
         object subject,
         object? returned,
-        ref string? result)
+        ref string? result,
+        int fromEvent = 0)
     {
         var steps = new List<ScenarioStep>();
         List<object> events = DomainEventsOf(subject);
-        int cursor = 0;
+        int cursor = fromEvent;
 
         foreach (CommandStmt stmt in body)
         {
@@ -561,12 +1209,13 @@ internal sealed class ScenarioExecutor
             : [];
     }
 
-    /// <summary>Reads every declared member off the live instance — including the DERIVED ones, whose
-    /// values the emitted code actually computed (gap #1).</summary>
-    private Dictionary<string, string> Snapshot(object instance, bool recordNotes)
+    /// <summary>Reads every member declared on <paramref name="entity"/> off the live instance — including
+    /// the DERIVED ones, whose values the emitted code actually computed (gap #1). The entity is a
+    /// parameter so a fanned-out downstream aggregate (issue #1758) is read exactly the same way.</summary>
+    private Dictionary<string, string> Snapshot(EntityDecl entity, object instance, bool recordNotes)
     {
         var state = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Member member in _entity.Members)
+        foreach (Member member in entity.Members)
         {
             try
             {
@@ -619,7 +1268,7 @@ internal sealed class ScenarioExecutor
         IReadOnlyList<CommandStmt> body,
         IReadOnlyDictionary<string, string> before)
     {
-        IReadOnlyDictionary<string, string> state = instance is null ? NoState : Snapshot(instance, recordNotes: false);
+        IReadOnlyDictionary<string, string> state = instance is null ? NoState : Snapshot(_entity, instance, recordNotes: false);
 
         if (!TryReadViolation(ex, out string typeName, out string rule))
         {
@@ -639,23 +1288,79 @@ internal sealed class ScenarioExecutor
                 false, _entity.Name, s.Operation, [], state, [InvariantFor(typeName, rule)], null, _notes);
         }
 
+        ViolationWalk walk = WalkToViolation(rule, body, before, state);
+
+        switch (walk.Source)
+        {
+            case ViolationSource.Precondition:
+                _notes.Add($"'{s.Operation}' was rejected by a precondition: {rule}");
+                return new ScenarioResult(
+                    false, _entity.Name, s.Operation, walk.Steps, state, InvariantsAfterHalt(walk.Mutated), null, _notes);
+
+            case ViolationSource.StateMachine:
+                _notes.Add($"'{s.Operation}' was rejected by the '{walk.Field}' state machine: {rule}");
+                return new ScenarioResult(
+                    false, _entity.Name, s.Operation, walk.Steps, state, InvariantsAfterHalt(walk.Mutated), null, _notes);
+
+            default:
+                // No guard matched: the post-command invariant sweep rejected the mutated state.
+                return new ScenarioResult(
+                    false, _entity.Name, s.Operation, walk.Steps, state, InvariantsUpTo(rule, s.Operation), null, _notes);
+        }
+    }
+
+    /// <summary>Which modelled statement a thrown violation's rule turned out to belong to.</summary>
+    private enum ViolationSource
+    {
+        /// <summary>A <c>requires</c> guard's own rule (gap #4).</summary>
+        Precondition,
+
+        /// <summary>A state-machine reachability guard refused the write (gap #3).</summary>
+        StateMachine,
+
+        /// <summary>No statement claimed it: the post-command invariant sweep threw.</summary>
+        InvariantSweep
+    }
+
+    /// <summary>The outcome of walking a command body against a thrown violation: the steps that really
+    /// ran (ending at the failing one, when a statement claimed the rule), what claimed it, whether any
+    /// write happened first, and — for <see cref="ViolationSource.StateMachine"/> — the field guarded.</summary>
+    private readonly record struct ViolationWalk(
+        List<ScenarioStep> Steps,
+        ViolationSource Source,
+        bool Mutated,
+        string Field);
+
+    /// <summary>
+    /// Walks <paramref name="body"/> the way the EMITTED code runs it and attributes
+    /// <paramref name="rule"/> to the statement that raised it. Shared by the primary path
+    /// (<see cref="OperationFailure"/>) and by fan-out (<see cref="DownstreamFailureSteps"/>), so a
+    /// downstream failure gets the same taxonomy rather than a second, drifting one.
+    ///
+    /// <para>The emitter hoists EVERY <c>requires</c> ahead of the first write
+    /// (<c>CSharpEmitter.WriteCommand</c>), while the grammar (<c>commandStmt*</c>) lets one be written
+    /// after a transition. Walking in declaration order would then invent a transition for a write the
+    /// guard prevented, and blame the missing invariant sweep on it — so the guards are walked first,
+    /// exactly as the emitted code runs them. (<c>OrderBy</c> is a STABLE sort, so each group keeps its
+    /// declaration order.) <c>emit</c> and <c>result</c> only run after the emitted
+    /// <c>CheckInvariants()</c> sweep, so nothing past a violation happened on a failing run.</para>
+    /// </summary>
+    private static ViolationWalk WalkToViolation(
+        string rule,
+        IReadOnlyList<CommandStmt> body,
+        IReadOnlyDictionary<string, string> before,
+        IReadOnlyDictionary<string, string> after)
+    {
         var steps = new List<ScenarioStep>();
         bool mutated = false;
 
-        // The emitter hoists EVERY `requires` ahead of the first write (CSharpEmitter.WriteCommand),
-        // while the grammar (`commandStmt*`) lets one be written after a transition. Walking the body in
-        // declaration order would then invent a transition for a write the guard prevented, and blame the
-        // missing invariant sweep on it — so walk the guards first, exactly as the emitted code runs them.
-        // (OrderBy is a STABLE sort, so each group keeps its declaration order.)
         foreach (CommandStmt stmt in body.OrderBy(stmt => stmt is RequiresClause ? 0 : 1))
         {
             switch (stmt)
             {
                 case RequiresClause req when RuleOf(req) == rule:
                     steps.Add(new ScenarioStep.Precondition(req.Message, req.Condition.ToFullString(), CheckOutcome.Failed));
-                    _notes.Add($"'{s.Operation}' was rejected by a precondition: {rule}");
-                    return new ScenarioResult(
-                        false, _entity.Name, s.Operation, steps, state, InvariantsAfterHalt(mutated), null, _notes);
+                    return new ViolationWalk(steps, ViolationSource.Precondition, mutated, string.Empty);
 
                 case RequiresClause req:
                     steps.Add(new ScenarioStep.Precondition(req.Message, req.Condition.ToFullString(), CheckOutcome.Passed));
@@ -666,33 +1371,26 @@ internal sealed class ScenarioExecutor
                     // recorded as the failed GUARD it is rather than as a transition that did not occur.
                     steps.Add(new ScenarioStep.Precondition(
                         rule, $"{t.Field} -> {t.Value.ToFullString().Trim()}", CheckOutcome.Failed));
-                    _notes.Add($"'{s.Operation}' was rejected by the '{t.Field}' state machine: {rule}");
-                    return new ScenarioResult(
-                        false, _entity.Name, s.Operation, steps, state, InvariantsAfterHalt(mutated), null, _notes);
+                    return new ViolationWalk(steps, ViolationSource.StateMachine, mutated, t.Field);
 
                 case Transition t:
                     steps.Add(new ScenarioStep.Transition(
                         t.Field,
                         before.GetValueOrDefault(t.Field, "∅"),
-                        state.GetValueOrDefault(t.Field, "∅"),
+                        after.GetValueOrDefault(t.Field, "∅"),
                         IsInitialization: false));
                     mutated = true;
                     break;
 
                 case Initialization init:
                     steps.Add(new ScenarioStep.Transition(
-                        init.Field, From: null, state.GetValueOrDefault(init.Field, "∅"), IsInitialization: true));
+                        init.Field, From: null, after.GetValueOrDefault(init.Field, "∅"), IsInitialization: true));
                     mutated = true;
                     break;
-
-                    // `emit` and `result` only run AFTER the emitted CheckInvariants() sweep, so nothing past
-                    // this point happened on a failing run.
             }
         }
 
-        // No guard matched: the post-command invariant sweep rejected the mutated state.
-        return new ScenarioResult(
-            false, _entity.Name, s.Operation, steps, state, InvariantsUpTo(rule, s.Operation), null, _notes);
+        return new ViolationWalk(steps, ViolationSource.InvariantSweep, mutated, string.Empty);
     }
 
     /// <summary>The invariant outcomes after a guard halted the command BEFORE any mutation: the state is
