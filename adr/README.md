@@ -21,6 +21,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0009](0009-active-context-scope-is-the-workbench-spine.md) | The active bounded-context scope is the workbench spine | Proposed |
 | [0010](0010-adopt-madr-4.0-for-architecture-decision-records.md) | Adopt MADR 4.0 for architecture decision records | Proposed |
 | [0011](0011-scenario-execution-sandbox.md) | Scenario execution runs in a killable child process | Proposed |
+| [0012](0012-scenario-sandbox-os-confinement.md) | Scenario sandbox confinement uses each platform's native mechanism, best-effort | Proposed |
 
 ## When to write one
 

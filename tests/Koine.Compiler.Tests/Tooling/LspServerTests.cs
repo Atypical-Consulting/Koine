@@ -7,6 +7,7 @@ using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
 
+[Collection(ScenarioSandboxCollection.Name)]
 public class LspServerTests
 {
     // ---- KoineCompiler.Diagnose ------------------------------------------
