@@ -422,7 +422,7 @@ public sealed partial class KotlinEmitter
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
                 var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-                args.Add(translator.Translate(value, KotlinExpressionTranslator.NameMode.Property, expectedEnum));
+                args.Add(translator.TranslateReconciled(value, KotlinExpressionTranslator.NameMode.Property, expectedEnum, m.Type));
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {

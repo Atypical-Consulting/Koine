@@ -1100,4 +1100,429 @@ public class TypeScriptConformanceTests
             + "optional-declared member's `T | undefined` constructor slot:\n"
             + string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1731: the factory constructor-argument loop matched a same-named factory parameter to
+    /// an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>), not via the shared,
+    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already used by the C#, Kotlin,
+    /// Java and Rust emitters — which additionally requires matching type shape and that an OPTIONAL
+    /// parameter never auto-bind to a NON-optional member. This is the reverse direction from the
+    /// #1531 audit pinned above (there the MEMBER was optional and the parameter was not); here the
+    /// PARAMETER is optional (<c>total: Decimal?</c>) and the member is not (<c>total: Decimal</c>).
+    /// Before the fix, the optional parameter was bound straight into the non-optional constructor
+    /// slot — a real <c>tsc --strict</c> TS2345 (<c>Decimal | undefined</c> is not assignable to
+    /// <c>Decimal</c>).
+    /// </summary>
+    [Fact]
+    public void Optional_parameter_does_not_auto_bind_a_non_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make(total: Decimal?) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no tsc required): the optional parameter must NOT be passed directly into
+        // the non-optional member's constructor slot; instead the ctor-arg loop falls all the way
+        // through to the required-and-unset branch (`undefined as never`) since the member has
+        // neither a factory init nor its own default.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldNotContain("return new Product(id, total);");
+        product.ShouldContain("return new Product(id, undefined as never);");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(
+            "an optional factory parameter must not auto-bind into a non-optional member's "
+            + "constructor slot:\n" + string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1732: the explicit-init branch of <c>WriteFactory</c>'s ctor-args loop never reconciled
+    /// the value's inferred type against the member's declared type, so an <c>Int</c> literal
+    /// initializing a <c>Decimal</c> member emitted a bare <c>number</c> where the runtime <c>Decimal</c>
+    /// class is required — a real <c>tsc --strict</c> TS2345 "Argument of type 'number' is not
+    /// assignable to parameter of type 'Decimal'" error. Mirrors Kotlin's #1732 fix.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_an_int_literal_is_decimal_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no tsc required): the Int-typed initializer must be widened to Decimal to
+        // match the constructor's Decimal parameter, not passed through as a bare number literal.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("return new Product(id, Decimal.fromInt(5));");
+        product.ShouldNotContain("return new Product(id, 5);");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard: a <c>Decimal</c>-typed value explicit-initializing a
+    /// <c>Decimal</c>-declared member must be unaffected by #1732's coercion — no extra
+    /// <c>Decimal.fromInt(...)</c> wrap added around an already-<c>Decimal</c> value.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_decimal_literal_is_unaffected()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5.0\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("return new Product(id, new Decimal('5.0'));");
+        product.ShouldNotContain("Decimal.fromInt(new Decimal");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard for the coalesce double-widen trap: a <c>CoalesceExpr</c> whose own
+    /// effective type ALREADY matches the declared member (both <c>Decimal</c>-shaped) must be left
+    /// entirely unwrapped by <c>TranslateReconciled</c>'s <c>InferCtorArgValueType</c> guard — pins that
+    /// the guard degrades to "no reconciliation needed" rather than wrapping the whole
+    /// <c>(a ?? b)</c> in a <c>Decimal.fromInt(...)</c> call that would not type-check against a
+    /// <c>Decimal</c>-typed right operand.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_matching_coalesce_is_unaffected()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Decimal) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("return new Product(id, (a ?? b));");
+        product.ShouldNotContain("Decimal.fromInt(");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1732: an ALREADY-optional <c>number | undefined</c> initializing expression (a factory
+    /// parameter) that is ALSO numerically mismatched against an optional-declared <c>Decimal?</c>
+    /// member needs the null-check-and-widen shell (<see cref="WriteOptionalMap"/>) — a bare
+    /// <c>Decimal.fromInt(...)</c> wrap around a possibly-<c>undefined</c> value does not type-check.
+    /// Mirrors Kotlin's #1732 fix and Java's #1519 follow-up.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_decimal_member_from_an_already_optional_int_source_is_null_check_widened()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(discount: Int?) {\n" +
+            "      total -> discount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no tsc required): the already-optional number value must be null-check-and-
+        // widened, never bare-wrapped (a real tsc --strict "not assignable" error).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("Decimal.fromInt(__v)");
+        product.ShouldNotContain("return new Product(id, discount);");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1762: a coalesce (<c>??</c>) whose two operands are optional but of DIFFERENT numeric
+    /// types (<c>Int?</c> vs <c>Decimal?</c>) must reconcile that mismatch before emitting TypeScript's
+    /// nullish-coalescing <c>??</c> — unreconciled, the expression's static type is the union
+    /// <c>number | Decimal | undefined</c>, a real <c>tsc --strict</c> TS2345/TS2322 wherever a
+    /// <c>Decimal | undefined</c> is expected. The narrower <c>Int?</c> left operand must
+    /// null-check-and-widen (<see cref="WriteOptionalMap"/>'s shell around
+    /// <c>Decimal.fromInt(__v)</c>) before the <c>??</c>, mirroring Kotlin's <c>WriteCoalesce</c>
+    /// (#1615) and Java's <c>Optional.or</c>/<c>.orElse</c> fix (#1548).
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_between_nullable_operands()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Int?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no tsc required): the narrower Int? operand is null-check-and-widened before
+        // the `??`, so both sides agree on `Decimal | undefined`.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("Decimal.fromInt(__v)");
+        product.ShouldContain(")(a) ?? b)");
+        product.ShouldNotContain("(a ?? b)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// #1762's symmetric operand order: the LEFT operand is already the wider <c>Decimal?</c> (no widen
+    /// needed), while the narrower <c>Int?</c> RIGHT operand must null-check-and-widen after the
+    /// <c>??</c> — each side is classified against the OTHER'S type independently, exactly as Kotlin's
+    /// <c>WriteCoalesce</c> does.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_symmetric_operand_order()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Int?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("(a ?? ((__v");
+        product.ShouldContain("Decimal.fromInt(__v)");
+        product.ShouldNotContain("(a ?? b)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard for #1762: a coalesce whose two operands ALREADY agree in numeric
+    /// type (the common, already-correct case) must keep emitting a bare <c>??</c> with no widening
+    /// wrap — byte-identical to the pre-fix output.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_same_typed_nullable_operands_emits_unchanged()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("return new Product(id, (a ?? b));");
+        product.ShouldNotContain("Decimal.fromInt(");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// #1762 edge case 2 (the shape #1615's own code review caught for Kotlin): a nested coalesce as the
+    /// RIGHT operand must stay atomized when the widen attaches, so the widen covers the WHOLE nested
+    /// coalesce rather than only its innermost operand. TypeScript's own <c>Write</c> already
+    /// parenthesizes a <c>CoalesceExpr</c> and <see cref="WriteOptionalMap"/> parenthesizes its argument
+    /// slot, so the widen composes safely — this pins that.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_a_numeric_type_mismatch_against_a_nested_coalesce_right_operand()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Decimal?, x: Int?, y: Int?) {\n" +
+            "      total -> a ?? (x ?? y)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The widen wraps the whole `(x ?? y)`, not just `x` or just `y`.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("Decimal.fromInt(__v)");
+        product.ShouldContain("))((x ?? y))");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// #1762: a nested coalesce as the LEFT operand is the case that forces the effective-type helper to
+    /// RECURSE. <c>TypeResolver.VisitCoalesce</c> reports <c>(x ?? b)</c>'s type as <c>x</c>'s own
+    /// <c>Int?</c>, but the fixed rendering widens <c>x</c>, so the nested coalesce actually renders as
+    /// <c>Decimal | undefined</c>. Classifying the outer operands against the RAW resolver types would
+    /// therefore see <c>Int?</c> vs <c>Int?</c>, leave the outer right operand unwidened, and emit a
+    /// <c>Decimal | number | undefined</c> union — the very TS2322 this issue exists to fix.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_against_a_nested_coalesce_left_operand_s_widened_type()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(x: Int?, b: Decimal?, c: Int?) {\n" +
+            "      total -> (x ?? b) ?? c\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Both the inner `x` and the outer `c` must be widened — two independent shells.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(")(x) ?? b) ?? ");
+        product.ShouldContain(")(c))");
+        product.ShouldNotContain("?? c)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// #1762 edge case 4: the fix lives in the shared <c>CoalesceExpr</c> case, not a narrower call
+    /// site, so a command-body state transition and a derived-member body get the reconciliation for
+    /// free. Mirrors Java's #1548 Task 2 coverage.
+    /// </summary>
+    [Fact]
+    public void Coalesce_reconciles_in_a_state_transition_and_a_derived_member()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "    fallback: Decimal?\n" +
+            "    hint: Int?\n" +
+            "    best: Decimal? = hint ?? fallback\n" +
+            "\n" +
+            "    command adjust(a: Int?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(")(this.hint) ?? this.fallback)");   // derived member
+        product.ShouldContain(")(a) ?? b)");                        // command transition
+        product.ShouldNotContain("(this.hint ?? this.fallback)");
+        product.ShouldNotContain("(a ?? b)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// #1762 × #1732 regression: #1732's <c>InferCtorArgValueType</c> guard exists so the factory
+    /// ctor-arg wrap does NOT misfire on a coalesce. Now that the coalesce rendering itself reconciles,
+    /// the guard must still see the coalesce's own (joined) type and add NO second widen on top —
+    /// exactly one <c>Decimal.fromInt(__v)</c> shell (the operand's), never a
+    /// <c>Decimal.fromInt((… ?? …))</c> wrapped around the whole thing.
+    /// </summary>
+    [Fact]
+    public void Factory_ctor_arg_guard_does_not_double_widen_a_reconciled_coalesce()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Int?, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        var factory = product.Split('\n').Single(l => l.Contains("return new Product(", StringComparison.Ordinal));
+
+        // Exactly one widen shell — the reconciled LEFT operand's — and no outer wrap around the coalesce.
+        factory.Split("Decimal.fromInt(__v)").Length.ShouldBe(2);
+        factory.ShouldNotContain("Decimal.fromInt((");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }

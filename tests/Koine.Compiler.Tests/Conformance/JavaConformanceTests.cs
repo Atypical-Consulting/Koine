@@ -1,3 +1,4 @@
+using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
@@ -1202,5 +1203,51 @@ public class JavaConformanceTests
         TestSupport.RequireOrSkip(r2.ToolchainAvailable, NoToolchainNotice);
 
         r2.Ok.ShouldBeTrue(string.Join("\n", r2.Errors));
+    }
+
+    /// <summary>
+    /// Every shipped template must emit Java that actually <b>compiles</b>, not merely Java the
+    /// compiler was willing to write out. Issue #1763: <c>templates/saas-subscription</c>
+    /// (<c>UsageMeter.overage</c>) and <c>templates/library</c> (<c>FinePolicy.fineCents</c>) both
+    /// shipped emitted Java containing an invariant over a derived member — a dangling
+    /// <c>cannot find symbol</c> — because <see cref="TemplatesValidationTests.Template_compiles_green_in_directory_mode"/>
+    /// only proves the MODEL is valid and the Java snapshot suites only proved the emitted text was
+    /// STABLE; nothing ran it through <c>javac</c>. Mirrors the C# counterpart added by #1756/PR #1760
+    /// (<c>Template_emits_csharp_that_compiles</c>), over every template rather than just the two known
+    /// to be affected, so a future template hitting the same or a different Java-only gap is caught here
+    /// too.
+    /// <para>
+    /// <c>saas-subscription</c> and <c>library</c> are skipped here (not asserted green) pending
+    /// issue #1771: fixing #1763's derived-member bug uncovered that both templates ALSO hit a separate,
+    /// pre-existing Java-only defect — a shared enum member (e.g. <c>Active</c>, declared by two
+    /// different contexts' enums) resolves against the wrong one — unrelated to #1763's scope
+    /// (<c>NameMode.Parameter</c> derived-body substitution). Remove this skip once #1771 lands.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TemplatesValidationTests.TemplateFolders), MemberType = typeof(TemplatesValidationTests))]
+    public void Template_emits_java_that_compiles(string folder)
+    {
+        string name = Path.GetFileName(folder);
+        if (name is "saas-subscription" or "library")
+        {
+            Assert.Skip($"template '{name}' has a separate, tracked Java-only defect — issue #1771.");
+        }
+
+        var sources = Directory
+            .EnumerateFiles(folder, "*.koi", SearchOption.AllDirectories)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .Select(p => new SourceFile(p, File.ReadAllText(p)))
+            .ToList();
+
+        var result = new KoineCompiler().Compile(sources, new JavaEmitter());
+        var errors = result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        errors.ShouldBeEmpty(
+            $"template '{name}' did not compile cleanly for the java target:\n" +
+            string.Join("\n", errors.Select(d => $"{d.File}:{d.Line}:{d.Column}: {d.Code}: {d.Message}")));
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+        r.Ok.ShouldBeTrue($"template '{name}' emitted Java that does not compile:\n" + string.Join("\n", r.Errors));
     }
 }

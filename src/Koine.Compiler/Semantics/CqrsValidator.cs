@@ -134,7 +134,8 @@ internal static class CqrsValidator
                 q.Span));
         }
 
-        ValidateApiAnnotations(q.ApiAnnotations, q.RouteOverride, q.AuthRole, $"query '{q.Name}'", q.Span, diagnostics);
+        ValidateApiAnnotations(q.ApiAnnotations, q.RouteOverride, q.AuthRole, $"query '{q.Name}'", q.Span, diagnostics,
+            q.Criteria, identityTypeName: null);
     }
 
     /// <summary>
@@ -147,13 +148,20 @@ internal static class CqrsValidator
     /// diagnostic lands on its own annotation.
     /// </summary>
     /// <param name="subject">How the declaration reads in the message, e.g. <c>command 'place'</c>.</param>
+    /// <param name="members">The declaration's own parameters (a command) or criteria (a query) — what a
+    /// route token can name-match (#1748).</param>
+    /// <param name="identityTypeName">The aggregate identity's type name when <paramref name="subject"/>
+    /// is a command on an entity, so an <c>id</c> token with no matching parameter still resolves; <c>null</c>
+    /// for a query, which has no identity fallback (#1748).</param>
     public static void ValidateApiAnnotations(
         ApiAnnotationInfo? api,
         string? route,
         string? authRole,
         string subject,
         SourceSpan declSpan,
-        List<Diagnostic> diagnostics)
+        List<Diagnostic> diagnostics,
+        IReadOnlyList<Param> members,
+        string? identityTypeName)
     {
         if (api is null)
         {
@@ -173,6 +181,10 @@ internal static class CqrsValidator
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.InvalidRouteOverride,
                     $"route override '{route}' on {subject} {problem}",
                     At(api.RouteSpan, declSpan)));
+            }
+            else
+            {
+                ValidateRouteTokenBindings(route, members, identityTypeName, subject, At(api.RouteSpan, declSpan), diagnostics);
             }
         }
 
@@ -224,6 +236,37 @@ internal static class CqrsValidator
                     $"{subject} carries {count} '{annotation}' annotations; it may carry at most one",
                     At(span, declSpan)));
             }
+        }
+    }
+
+    /// <summary>
+    /// KOI1215 (warning): a <c>@route</c> <c>{token}</c> that names neither a parameter/criterion of the
+    /// declaration nor (for a command) the aggregate identity binds to nothing (#1748). The resolution
+    /// order mirrors <c>Koine.Emit.Common/RouteDerivation</c>'s — a member name-match
+    /// (<see cref="StringComparison.OrdinalIgnoreCase"/>), else <c>id</c> → the identity, else unbound —
+    /// but is reimplemented here rather than calling into <c>RouteDerivation</c> because <c>Semantics/</c>
+    /// may not depend on an emitter assembly (the dependency runs the other way: emit → compiler). A
+    /// <b>warning</b>, not an error: a purely decorative token was legal before #1734 gave <c>@route</c>
+    /// any binding meaning at all, so turning it into a hard error would break existing models on upgrade.
+    /// </summary>
+    private static void ValidateRouteTokenBindings(
+        string route, IReadOnlyList<Param> members, string? identityTypeName, string subject, SourceSpan span,
+        List<Diagnostic> diagnostics)
+    {
+        foreach (var token in RouteTemplate.Tokens(route))
+        {
+            var boundToMember = members.Any(m => string.Equals(m.Name, token, StringComparison.OrdinalIgnoreCase));
+            var boundToIdentity = !boundToMember && identityTypeName is not null
+                && string.Equals(token, "id", StringComparison.OrdinalIgnoreCase);
+            if (boundToMember || boundToIdentity)
+            {
+                continue;
+            }
+
+            diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.UnboundRouteToken,
+                $"route override '{route}' on {subject} names a token '{{{token}}}' that binds to nothing; " +
+                "name it after a parameter of the declaration, or 'id' for the aggregate identity",
+                span));
         }
     }
 
@@ -332,8 +375,9 @@ internal static class CqrsValidator
         {
             var c = route[i];
 
-            // `{{` / `}}` escape a literal brace — consume both characters, delimiting nothing.
-            if ((c == '{' || c == '}') && i + 1 < route.Length && route[i + 1] == c)
+            // `{{` / `}}` escape a literal brace — consume both characters, delimiting nothing. The
+            // escape check itself is the one piece of this walk RouteTemplate.Tokens (#1748) shares.
+            if ((c == '{' || c == '}') && RouteTemplate.IsEscapedBrace(route, i, c))
             {
                 parameterLength += 2;
                 i++;

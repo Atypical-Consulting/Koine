@@ -49,6 +49,11 @@
          helper instead of drifting further. -->
     <InternalsVisibleTo Include="Koine.Cli" />
     <InternalsVisibleTo Include="Koine.Wasm" />
+    <!-- Koine.Execution's scenario runner (issue #236) drives the emitted C# and maps the outcome back
+         onto the scenario contract (Scenario/ScenarioValue/ScenarioStep/ScenarioResult in
+         Semantics/Scenarios), which is deliberately internal. Granting IVT keeps that contract shared
+         with the executed runner without widening Koine.Compiler's public API. -->
+    <InternalsVisibleTo Include="Koine.Execution" />
   </ItemGroup>
 
   <ItemGroup>

@@ -169,15 +169,10 @@ public sealed partial class CSharpEmitter
         // Result<T>.NotFound() on a miss (no nullable reference, no exception).
         string Ok(string expr) => resultNotFound ? $"Result<{baseResult}>.Ok({expr})" : expr;
 
-        // Request: the aggregate identity to load, then the command's parameters. The identity
-        // property is normally "Id", but a command parameter named `id` (allowed for commands, only
-        // factories reserve it) would PascalCase to a colliding "Id" — so pick a non-colliding name.
-        var paramProps = cmd.Parameters.Select(p => CSharpNaming.ToPascalCase(p.Name)).ToHashSet(StringComparer.Ordinal);
-        var idProp = "Id";
-        while (paramProps.Contains(idProp))
-        {
-            idProp = "Aggregate" + idProp;
-        }
+        // Request: the aggregate identity to load, then the command's parameters. CommandIdProperty
+        // (#1748) picks a non-colliding name when a command parameter is itself named `id`, and the
+        // api layer's route-token binding calls the same helper so the two can never disagree.
+        var idProp = CSharpNaming.CommandIdProperty(cmd);
 
         var fields = new List<(string Type, string Prop)> { (root.IdentityName, idProp) };
         fields.AddRange(cmd.Parameters.Select(p => (typeMapper.Map(p.Type), CSharpNaming.ToPascalCase(p.Name))));

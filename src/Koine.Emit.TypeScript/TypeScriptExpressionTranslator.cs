@@ -140,6 +140,77 @@ internal sealed class TypeScriptExpressionTranslator
     }
 
     /// <summary>
+    /// Issue #1732: like <see cref="Translate(Expr,string?)"/>, but reconciles <paramref name="value"/>'s
+    /// inferred type against the <paramref name="declared"/> type of the member it initializes — the
+    /// factory ctor-arg counterpart of <see cref="WriteReconciledBranch"/> (#1344), reusing the same
+    /// shared <see cref="BranchReconciliation.Classify"/> decision (#1368) and the same
+    /// <c>Decimal.fromInt(...)</c>/<see cref="WriteOptionalMap"/> renderings, so a factory's explicit
+    /// <c>field -&gt; expr</c> initialization emits a <c>tsc --strict</c>-clean value instead of a bare
+    /// mismatched literal (mirrors Java's #1519 <c>ReconcileFactoryCtorArg</c>/Kotlin's #1732 counterpart).
+    /// Type inference stays entirely inside the translator — <c>_resolver.Infer</c> is never exposed.
+    /// </summary>
+    internal string TranslateReconciled(Expr value, string? expectedEnum, TypeRef declared)
+    {
+        var prevMode = _mode;
+        _mode = NameMode.Property;
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+
+        TypeRef? valueType = InferRenderedType(value);
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        if (needs.NeedsWiden)
+        {
+            sb.Append("Decimal.fromInt(");
+            Write(value, sb);
+            sb.Append(')');
+        }
+        else if (needs.NeedsOptionalWiden)
+        {
+            WriteOptionalMap(value, valueType!, mapped => mapped.Append("Decimal.fromInt(__v)"), sb);
+        }
+        else
+        {
+            Write(value, sb);
+        }
+
+        _expectedEnum = null;
+        _mode = prevMode;
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// An expression's type AS THIS TRANSLATOR RENDERS IT — the type any surrounding reconciliation
+    /// (<see cref="TranslateReconciled"/>'s ctor-arg wrap, <see cref="WriteCoalesce"/>'s per-operand
+    /// widen) must classify against. For most expressions this is just <c>_resolver.Infer(value, ...)</c>
+    /// — but a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic,
+    /// shared across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened
+    /// against the right operand, whereas <see cref="WriteCoalesce"/> widens the narrower operand's
+    /// RENDERED text to match the wider one (#1762, mirroring Kotlin's #1615). Classifying against the
+    /// raw resolver type would therefore be wrong in both directions: it would DOUBLE-WIDEN an
+    /// already-widened coalesce (wrapping the whole <c>(a ?? b)</c> in <c>Decimal.fromInt(...)</c> when
+    /// the right operand is already <c>Decimal</c>-shaped — the trap #1732 built this guard for), and it
+    /// would UNDER-widen a coalesce's sibling (an <c>Int?</c>-reported nested coalesce that in fact
+    /// renders as <c>Decimal | undefined</c>). Recursive for exactly that second reason: a nested
+    /// coalesce's own effective type is the join of ITS operands, not its leftmost leaf's.
+    /// </summary>
+    private TypeRef? InferRenderedType(Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return _resolver.Infer(value, EffectiveScope());
+        }
+
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
+
+        // Matches the nullish-coalescing result type: the coalesce stays possibly-undefined only when
+        // the right (fallback) operand is itself possibly-undefined.
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
+    }
+
+    /// <summary>
     /// Renders the logical negation of a boolean condition, for guard emission where the
     /// assertion's failure is tested. Mirrors the C# translator: peel a leading <c>!</c>,
     /// flip a top-level comparison, else wrap once in <c>!(...)</c>.
@@ -264,11 +335,7 @@ internal sealed class TypeScriptExpressionTranslator
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
-                sb.Append('(');
-                Write(co.Left, sb);
-                sb.Append(" ?? ");
-                Write(co.Right, sb);
-                sb.Append(')');
+                WriteCoalesce(co, sb);
                 break;
             case MemberAccessExpr ma:
                 WriteMemberAccess(ma, sb);
@@ -349,6 +416,36 @@ internal sealed class TypeScriptExpressionTranslator
     /// passed in rather than re-inferred here — <c>Then</c>/<c>Else</c> would otherwise each be walked
     /// twice per conditional (#1369).
     /// </summary>
+    /// <summary>
+    /// Issue #1762: renders a coalesce as <c>(&lt;left&gt; ?? &lt;right&gt;)</c> with each operand
+    /// numerically reconciled against the OTHER'S type — the coalesce counterpart of
+    /// <see cref="WriteReconciledBranch"/>, mirroring Kotlin's <c>WriteCoalesce</c> (#1615) and Java's
+    /// <c>Optional.or</c>/<c>.orElse</c> widening (#1548). <c>TypeResolver.VisitCoalesce</c> reports the
+    /// coalesce's type as its LEFT operand's own, unreconciled against the right (the same latitude
+    /// <c>VisitConditional</c> takes, #975), so reconciling the operands is the RENDERING's job: an
+    /// unreconciled <c>Int?</c>/<c>Decimal?</c> pair emits a <c>number | Decimal | undefined</c> union,
+    /// a real <c>tsc --strict</c> TS2345/TS2322 wherever the coalesce's value is consumed.
+    /// <para>Each side is classified INDEPENDENTLY against the other (<c>Classify(left, right)</c> and
+    /// <c>Classify(right, left)</c>) rather than the whole expression being wrapped once, because a
+    /// single outer wrap is wrong precisely when the operands render to different runtime shapes — a
+    /// bare <c>number</c> on one side and a <c>Decimal</c> object on the other is exactly what needs
+    /// fixing.</para>
+    /// <para>Operand types come from <see cref="InferRenderedType"/>, not the raw resolver, so a NESTED
+    /// coalesce operand is classified by what it actually renders as (its own joined type) rather than
+    /// by its leftmost leaf.</para>
+    /// </summary>
+    private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
+    {
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
+
+        sb.Append('(');
+        WriteReconciledBranch(co.Left, leftType, rightType, sb);
+        sb.Append(" ?? ");
+        WriteReconciledBranch(co.Right, rightType, leftType, sb);
+        sb.Append(')');
+    }
+
     private void WriteReconciledBranch(Expr branch, TypeRef? branchType, TypeRef? siblingType, StringBuilder sb)
     {
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);

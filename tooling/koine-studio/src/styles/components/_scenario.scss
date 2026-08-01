@@ -56,6 +56,20 @@
   border: 1px solid var(--koi-line);
   border-radius: var(--koi-radius-sm);
 }
+/* The executed-mode opt-in (#236), desktop-only — a native checkbox with its own label. */
+.koi-scenario-execute {
+  display: flex;
+  align-items: center;
+  gap: var(--koi-space-1);
+  font-family: var(--koi-font-body);
+  font-size: var(--koi-text-sm);
+  color: var(--koi-muted);
+  cursor: pointer;
+}
+.koi-scenario-execute-input {
+  accent-color: var(--koi-accent);
+  cursor: pointer;
+}
 .koi-scenario-refresh,
 .koi-scenario-run {
   font-family: var(--koi-font-body);
@@ -91,6 +105,25 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--koi-muted);
+}
+/* The timeline header: the outcome badge plus the engine that produced it (#236). */
+.koi-scenario-result-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--koi-space-1-25);
+}
+.koi-scenario-mode {
+  padding: var(--koi-space-0-75) var(--koi-space-1-5);
+  border-radius: var(--koi-radius);
+  font-size: var(--koi-text-sm);
+  border: 1px solid var(--koi-line);
+  color: var(--koi-muted);
+}
+.koi-scenario-mode.is-executed {
+  background: color-mix(in srgb, var(--koi-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
+  color: var(--koi-fg);
 }
 .koi-scenario-badge {
   align-self: flex-start;

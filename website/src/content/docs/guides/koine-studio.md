@@ -122,6 +122,13 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
   persist per workspace in a committable `koine.layout.json` (alongside hand-dragged node positions), so
   they travel with the repo and diff cleanly. Double-click to edit, right-click to delete; a group draws
   a labelled region behind its member nodes and follows them as they move.
+- **Scenario runner** — exercise the domain without leaving the editor: pick an aggregate command or
+  factory, give it a starting state and arguments as JSON, and run it to see the
+  `command → events → invariant-checks` timeline. It lives in the **Scenarios** view of the **Code**
+  surface (or command palette → *Show Scenario Runner*). Two engines can answer a run — the model
+  **interpreter** (the default, everywhere) and, on the desktop, the model's own **generated code** —
+  and every result says which one did. See [Scenario runner: interpreted vs
+  executed](#scenario-runner-interpreted-vs-executed).
 - **Hover & navigation** — type/member hover cards and go-to-definition, served by the same LSP that
   powers the editors.
 - **Syntax tree** — a right-rail panel (the tree glyph in the tool stripe, beside Properties / AI Chat /
@@ -165,6 +172,70 @@ Koine Studio surfaces the **enriched** language server, the same one the VS Code
 :::note
 Studio is an MVP. The feature set above is what the shared language server provides and what the app
 wires up today — it is not a full replacement for a general-purpose editor.
+:::
+
+## Scenario runner: interpreted vs executed
+
+The scenario runner answers "if I place this draft order, what happens?" against the live `.koi`. Two
+engines can produce that answer, and **every result is labelled with the one that actually ran** —
+`Interpreted` or `Executed`, as a chip on the timeline header:
+
+| | **Interpreted** (default) | **Executed** (opt-in, desktop only) |
+|---|---|---|
+| What runs | The model itself — Koine walks the command body and evaluates its expressions | The model's **generated C#**: emitted, compiled with Roslyn, and driven for real |
+| Where | Both editions (browser and desktop) | Desktop only — it needs a child process |
+| Speed | Immediate | Process start **plus a full emit and compile on every run** |
+| Fidelity | High for the modelled subset; anything it cannot evaluate is shown as `?` rather than guessed | Exactly what ships — derived values are really computed |
+
+**Interpreted is the default and stays the default.** It is fast, it works in the browser, and it never
+runs anything. Reach for executed mode when the interpreter's `?` is the answer you actually needed —
+typically a derived value object (`total = lines.sum(l => l.payable)`), a value object's own invariant
+firing on the given state, an illegal state transition, or the exact wording of a domain-invariant
+failure. Those four are precisely what executed mode adds. What it does **not** add: cross-aggregate
+effects — the runner still exercises *one* aggregate in isolation, in either mode.
+
+### Turning it on
+
+On the **desktop** edition the scenario panel shows a checkbox — **"Execute generated code (high
+fidelity)"** — under the arguments box. It is **off by default** and lasts for the session only:
+nothing is written to your settings, so every new window starts interpreted.
+
+In the **browser** edition the checkbox is simply absent, because a tab has no process to run generated
+code in. If a request for executed mode reaches the browser backend anyway, it is answered by the
+interpreter and labelled `interpreted`, with a note saying execution was unavailable on this host — a
+degraded answer that says so, never a silent one. Bringing executed mode to the browser would mean a
+second Roslyn compile-and-load *inside the tab*, which runs into the per-tab memory ceilings tracked in
+[#219](https://github.com/Atypical-Consulting/Koine/issues/219).
+
+Asking to execute is a **request, not a promise**: a host that cannot execute, a model that does not
+compile, or a run that overruns its budget all come back honestly labelled. Read the chip, not the
+checkbox.
+
+### Timeouts, and what a runaway model costs you
+
+An executed run happens in a **child process with a wall-clock deadline — 5 seconds by default**. When
+the deadline expires the child *and its whole process tree* are killed, and the run comes back as a
+failed result carrying a note saying it timed out: the emitted code may simply not terminate (an
+unbounded loop or runaway allocation in a derived member or invariant). Nothing of that run survives —
+but your editor, its diagnostics and its open documents are untouched. The run happens *off* the
+language server's message loop, so the editor keeps answering — diagnostics, hover and completion carry
+on while a scenario is compiling and running. A client can ask for a different budget (the `timeoutMs`
+parameter of `koine/runScenario`), clamped to **100 ms – 60 s**.
+
+Executed runs are also **serialized per window**: fire two in quick succession and they run one after
+the other, rather than putting two Roslyn compiles inside the editor backend at once.
+
+:::caution[The child process is isolation, not a security sandbox]
+Running a scenario in a killable child process protects the **editor** from the generated code — a hang,
+a crash, or an allocation storm costs you one dead child process and an honest error, not your session.
+It is **not** an OS-level sandbox: there is no `seccomp` filter, no macOS sandbox profile, no Windows Job
+Object, and **no filesystem or network denial** in this first version.
+
+That is a deliberate, documented boundary, and it rests on the fact that you are running **your own
+model on your own machine** — code you could equally have produced with `koine build` and run yourself.
+Do not treat it as a containment boundary for a model you do not trust. The reasoning, the trust model
+and the follow-up hardening are recorded in
+[ADR 0011 — Scenario execution runs in a killable child process](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0011-scenario-execution-sandbox.md).
 :::
 
 ## Relationship to the VS Code extension

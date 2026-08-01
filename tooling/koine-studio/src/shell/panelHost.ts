@@ -257,6 +257,8 @@ export function createPanelHost(deps: PanelHostDeps): PanelHost {
     scenarios = createScenarioPanel({
       container: scenariosView,
       lsp: deps.lsp,
+      // The host decides whether executed mode (#236) is on the menu — desktop yes, browser no.
+      platform: deps.platform,
     });
     return scenarios;
   }

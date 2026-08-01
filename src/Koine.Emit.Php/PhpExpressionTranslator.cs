@@ -127,6 +127,129 @@ internal sealed class PhpExpressionTranslator
     }
 
     /// <summary>
+    /// Issue #1732: like <see cref="Translate(Expr,NameMode,string?)"/>, but reconciles
+    /// <paramref name="value"/>'s inferred type against the <paramref name="declared"/> type of the
+    /// member it initializes — the factory ctor-arg counterpart of the ternary/coalesce reconciliation
+    /// the other four code emitters already have (#1344), reusing the same shared
+    /// <see cref="BranchReconciliation.Classify"/> decision (#1368) — mirroring Java's #1519
+    /// <c>ReconcileFactoryCtorArg</c>, Rust's #1438/#1543, and Kotlin's/TypeScript's/Python's #1732
+    /// counterparts. Unlike Kotlin/TypeScript/Python, PHP
+    /// has no existing <c>WriteReconciledBranch</c> to route through, so <c>NeedsWiden</c> reuses the
+    /// existing <see cref="WriteAsDecimal"/> arithmetic-operand primitive (its int-literal and generic
+    /// fallthrough arms already produce exactly this widening, PHP-8.1-floor-safe parenthesisation
+    /// included), and <c>NeedsOptionalWiden</c> is a new null-check-and-widen arrow-function shell —
+    /// PHP's <c>??</c> cannot itself transform a present value, so this follows the same immediately-
+    /// invoked-closure idiom <see cref="WriteLet"/> already uses.
+    /// </summary>
+    internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
+    {
+        var prevMode = _mode;
+        _mode = mode;
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+
+        TypeRef? valueType = InferRenderedType(value);
+        WriteReconciled(value, BranchReconciliation.Classify(valueType, declared), sb);
+
+        _expectedEnum = null;
+        _mode = prevMode;
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Writes <paramref name="expr"/> widened to a runtime <c>Decimal</c> as <paramref name="needs"/>
+    /// dictates — the single rendering half PHP's two reconciliation sites share
+    /// (<see cref="TranslateReconciled"/>'s factory ctor arg, #1732; <see cref="WriteCoalesce"/>'s
+    /// operands, #1762). <c>NeedsWiden</c> reuses the existing <see cref="WriteAsDecimal"/>
+    /// arithmetic-operand primitive (its int-literal and generic fallthrough arms already produce
+    /// exactly this widening, PHP-8.1-floor-safe parenthesisation included); <c>NeedsOptionalWiden</c>
+    /// uses the null-check-and-widen arrow-function shell #1732 introduced — PHP has no
+    /// <c>Option.map</c> and <c>??</c> cannot itself transform a present value, so this follows the same
+    /// immediately-invoked-closure idiom <see cref="WriteLet"/> already uses. The shell parenthesises
+    /// its own argument slot, so a compound operand (a nested coalesce) composes safely.
+    /// <c>NeedsSomeWrap</c> is ignored: PHP's optional is a plain <c>?T</c> nullable, which needs no
+    /// lift (the same conclusion TypeScript/Kotlin/Python reach for their union-shaped optionals).
+    /// </summary>
+    private void WriteReconciled(Expr expr, BranchReconciliation needs, StringBuilder sb)
+    {
+        if (needs.NeedsWiden)
+        {
+            WriteAsDecimal(expr, sb);
+        }
+        else if (needs.NeedsOptionalWiden)
+        {
+            sb.Append(@"(fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))(");
+            Write(expr, sb);
+            sb.Append(')');
+        }
+        else
+        {
+            Write(expr, sb);
+        }
+    }
+
+    /// <summary>
+    /// Issue #1762: renders a coalesce as <c>(&lt;left&gt; ?? &lt;right&gt;)</c> with each operand
+    /// numerically reconciled against the OTHER'S type, mirroring Kotlin's <c>WriteCoalesce</c> (#1615)
+    /// and Java's <c>Optional.or</c>/<c>.orElse</c> widening (#1548).
+    /// <c>TypeResolver.VisitCoalesce</c> reports the coalesce's type as its LEFT operand's own,
+    /// unreconciled against the right (the same latitude <c>VisitConditional</c> takes, #975), so
+    /// reconciling the operands is the RENDERING's job: an unreconciled <c>Int?</c>/<c>Decimal?</c> pair
+    /// emits an <c>int|Decimal|null</c>, a real <c>phpstan analyse --level max</c> error wherever the
+    /// coalesce's value is consumed.
+    /// <para>Each side is classified INDEPENDENTLY against the other rather than the whole expression
+    /// being wrapped once, because a single outer wrap is wrong precisely when the operands render to
+    /// different runtime shapes — a bare <c>int</c> on one side and a <c>Decimal</c> object on the other
+    /// is exactly what needs fixing.</para>
+    /// <para>Operand types come from <see cref="InferRenderedType"/>, not the raw resolver, so a NESTED
+    /// coalesce operand is classified by what it actually renders as (its own joined type) rather than
+    /// by its leftmost leaf.</para>
+    /// </summary>
+    private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
+    {
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
+
+        sb.Append('(');
+        WriteReconciled(co.Left, BranchReconciliation.Classify(leftType, rightType), sb);
+        sb.Append(" ?? ");
+        WriteReconciled(co.Right, BranchReconciliation.Classify(rightType, leftType), sb);
+        sb.Append(')');
+    }
+
+    /// <summary>
+    /// An expression's type AS THIS TRANSLATOR RENDERS IT — the type any surrounding reconciliation
+    /// (<see cref="TranslateReconciled"/>'s ctor-arg wrap, <see cref="WriteCoalesce"/>'s per-operand
+    /// widen) must classify against. For most expressions this is just <see cref="InferType"/> — but a
+    /// <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic, shared
+    /// across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened against
+    /// the right operand, whereas <see cref="WriteCoalesce"/> widens the narrower operand's RENDERED
+    /// text to match the wider one (#1762, mirroring Kotlin's #1615). Classifying against the raw
+    /// resolver type would therefore be wrong in both directions: it would DOUBLE-WIDEN an
+    /// already-widened coalesce (wrapping the whole <c>($a ?? $b)</c> when the right operand is already
+    /// <c>Decimal</c>-shaped — the trap #1732 built this guard for), and it would UNDER-widen a
+    /// coalesce's sibling (an <c>Int?</c>-reported nested coalesce that in fact renders as
+    /// <c>?Decimal</c>). Recursive for exactly that second reason: a nested coalesce's own effective
+    /// type is the join of ITS operands, not its leftmost leaf's.
+    /// </summary>
+    private TypeRef? InferRenderedType(Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return InferType(value);
+        }
+
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
+
+        // Matches PHP's own `??` result: the coalesce stays possibly-null only when the right
+        // (fallback) operand is itself possibly-null.
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
+    }
+
+    /// <summary>
     /// Renders the logical negation of a boolean condition, for guard emission where the
     /// assertion's failure is tested. Peels a leading <c>!</c>, flips a top-level comparison,
     /// simplifies a bool-literal ternary, else wraps once in <c>!(...)</c>.
@@ -239,12 +362,8 @@ internal sealed class PhpExpressionTranslator
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
-                // PHP null-coalescing operator: `($l ?? $r)`.
-                sb.Append('(');
-                Write(co.Left, sb);
-                sb.Append(" ?? ");
-                Write(co.Right, sb);
-                sb.Append(')');
+                // PHP null-coalescing operator: `($l ?? $r)`, each operand numerically reconciled.
+                WriteCoalesce(co, sb);
                 break;
             case MemberAccessExpr ma:
                 WriteMemberAccess(ma, sb);

@@ -46,6 +46,22 @@ internal sealed class RustExpressionTranslator
     private readonly ISet<string> _constantDefaultedMembers;
     private readonly bool _membersAsAccessors;
 
+    /// <summary>A derived member's defining expression, plus the enum type it is expected to produce when
+    /// the member is enum-typed (<c>null</c> otherwise) — the same hint <c>WriteDerived</c> passes its own
+    /// accessor-body translation.</summary>
+    private readonly record struct DerivedMember(Expr Body, string? ExpectedEnum);
+
+    // Derived members of the current type, keyed by name (`name: T = <expr over siblings>`). A derived
+    // member has NO constructor parameter — it is emitted as an accessor computed from the stored ones —
+    // so in NameMode.Parameter a reference to one is substituted by its defining expression instead of
+    // rendered as a bare snake_case name that binds to nothing (issue #1764, the Rust sibling of #1756).
+    // Empty for a type with no derived members.
+    private readonly IReadOnlyDictionary<string, DerivedMember> _derivedBodies;
+    private readonly HashSet<string> _inliningDerived = new(StringComparer.Ordinal);
+
+    private static readonly IReadOnlyDictionary<string, DerivedMember> EmptyDerived =
+        new Dictionary<string, DerivedMember>();
+
     private string? _expectedEnum;
 
     public RustExpressionTranslator(
@@ -74,6 +90,19 @@ internal sealed class RustExpressionTranslator
         _derivedMembers = new HashSet<string>(
             members.Where(m => MemberAnalysis.IsDerived(m, _memberNames)).Select(m => m.Name),
             StringComparer.Ordinal);
+        // Same classification, keyed by name -> (body, enum hint), so a NameMode.Parameter reference to a
+        // derived member (issue #1764) can substitute its defining expression instead of a dangling name.
+        Dictionary<string, DerivedMember>? derived = null;
+        foreach (Member m in members)
+        {
+            if (_derivedMembers.Contains(m.Name))
+            {
+                (derived ??= new Dictionary<string, DerivedMember>(StringComparer.Ordinal))[m.Name] =
+                    new DerivedMember(m.Initializer!, typeMapper.IsEnum(m.Type) ? m.Type.Name : null);
+            }
+        }
+
+        _derivedBodies = derived ?? EmptyDerived;
         // A constant-defaulted member (has an initializer that is NOT derived from siblings, e.g.
         // `taxRate: Decimal? = 2`) is unconditionally resolved to a bare value by the smart
         // constructor's `unwrap_or_else` before its invariant guards run (the `Some(...)` re-wrap, for
@@ -886,7 +915,12 @@ internal sealed class RustExpressionTranslator
                 }
                 else
                 {
-                    sb.Append(RustNaming.Field(name));
+                    // A stored field IS the constructor parameter of the same name; a derived member is
+                    // not a parameter at all, so its derivation is substituted instead (issue #1764).
+                    if (!TryWriteDerivedBody(name, sb))
+                    {
+                        sb.Append(RustNaming.Field(name));
+                    }
                 }
             });
             return;
@@ -902,6 +936,98 @@ internal sealed class RustExpressionTranslator
 
         // (6) Unknown identifier: best-effort snake.
         sb.Append(RustNaming.Field(name));
+    }
+
+    /// <summary>
+    /// Substitutes a <b>derived</b> member's defining expression at its reference site, parenthesized and
+    /// translated in the current (parameter) scope, returning <c>false</c> when <paramref name="name"/> is
+    /// not derived.
+    /// <para>
+    /// Issue #1764, the Rust sibling of #1756/#1760 (C#). A value object's/entity's <c>invariant</c>
+    /// guards are emitted at the TOP of the smart constructor, before <c>Ok(Self { .. })</c> — so an
+    /// invalid instance is never even partially constructed — and every member reference there renders as
+    /// the constructor parameter of the same name (<see cref="NameMode.Parameter"/>). That is exact for a
+    /// <em>stored</em> field, which IS a parameter, but a derived member has neither a parameter nor a
+    /// constructed <c>self</c> to read at that point: the guard used to emit a bare name that bound to
+    /// nothing (<c>rustc</c> E0425). Inlining the derivation over the parameters keeps the
+    /// validate-before-construct ordering and evaluates exactly what the accessor will later compute.
+    /// </para>
+    /// <para>
+    /// Substitution recurses (a derived member may be defined over another one) and is bounded by
+    /// <see cref="_inliningDerived"/>, a visited set scoped to the path currently being expanded and
+    /// released in the <c>finally</c> — so a diamond (one guard reaching a derivation along two paths)
+    /// substitutes on both, and only genuine re-entry, i.e. a <em>cyclic</em> derivation, hits the
+    /// bail-out. A cycle is not rejected upstream today (the only cycle validator is <c>KOI1003</c>, for
+    /// specs), so that bail-out degrades to the pre-fix bare name and its E0425 rather than recursing
+    /// forever — a loud failure on a model that is already broken.
+    /// </para>
+    /// <para>
+    /// Substitution is also refused where the reference site would <b>capture</b> the derivation's free
+    /// names (<see cref="WouldBeCaptured"/>): a lambda/<c>let</c> binding and a member render into one
+    /// Rust identifier space, so splicing a derivation whose body reads a name currently shadowed by such a
+    /// binding would silently read the WRONG value. Bailing out leaves the pre-fix bare name and its loud
+    /// E0425 instead of trading a build break for an unsound guard.
+    /// </para>
+    /// </summary>
+    private bool TryWriteDerivedBody(string name, StringBuilder sb)
+    {
+        if (!_derivedBodies.TryGetValue(name, out DerivedMember member) || !_inliningDerived.Add(name))
+        {
+            return false;
+        }
+
+        if (WouldBeCaptured(member.Body, new HashSet<string>(StringComparer.Ordinal)))
+        {
+            _inliningDerived.Remove(name);
+            return false;
+        }
+
+        // A derived member of enum type expects its own enum, exactly as its accessor body does
+        // (WriteDerived's EnumExpectedRef), so a bare shared variant reference qualifies correctly.
+        var outerExpectedEnum = _expectedEnum;
+        _expectedEnum = member.ExpectedEnum;
+
+        try
+        {
+            sb.Append('(');
+            Write(member.Body, sb, null);
+            sb.Append(')');
+        }
+        finally
+        {
+            _expectedEnum = outerExpectedEnum;
+            _inliningDerived.Remove(name);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether any FREE name reachable from <paramref name="body"/> — following references to further
+    /// derived members — is currently bound as a local in the ENCLOSING scope where substitution would
+    /// happen, i.e. whether splicing the body here would silently rebind such a name to a lambda/<c>let</c>
+    /// parameter instead of the constructor parameter it means. <see cref="MemberAnalysis.ReferencedIdentifiers"/>
+    /// already excludes names <paramref name="body"/> binds itself (its own lambda parameters/let names),
+    /// so this can only refuse a substitution that would have been safe, never allow one that isn't.
+    /// </summary>
+    private bool WouldBeCaptured(Expr body, HashSet<string> visited)
+    {
+        foreach (var referenced in MemberAnalysis.ReferencedIdentifiers(body))
+        {
+            if (_locals.IsLocal(referenced))
+            {
+                return true;
+            }
+
+            if (_derivedBodies.TryGetValue(referenced, out DerivedMember nested)
+                && visited.Add(referenced)
+                && WouldBeCaptured(nested.Body, visited))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

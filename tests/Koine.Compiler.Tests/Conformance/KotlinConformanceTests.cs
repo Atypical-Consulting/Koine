@@ -770,6 +770,161 @@ public class KotlinConformanceTests
             + "optional-declared member's nullable constructor slot:\n" + string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1731 (Task 4, the control). The TS/Python/PHP emitters (Tasks 1-3) each matched a
+    /// same-named factory parameter to an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>),
+    /// not via the shared, target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate — so an OPTIONAL
+    /// parameter could wrongly auto-bind to a NON-optional member. Kotlin's own
+    /// <c>BuildFactoryCtorArgs</c> (<see cref="KotlinEmitter"/>) already calls
+    /// <c>factory.Parameters.Any(p =&gt; MemberAnalysis.AutoBinds(p, m))</c> and was never wrong.
+    /// <para>
+    /// <b>This is NOT a red-green regression test — it passes immediately, before and after Tasks
+    /// 1-3.</b> It exists purely as a control: it pins Kotlin's already-correct fall-through so that
+    /// a future regression in the shared <c>AutoBinds</c> predicate itself (rather than in one
+    /// emitter's call site) gets caught here too, not just on the three emitters that needed fixing.
+    /// </para>
+    /// <para>
+    /// The member (<c>total: Decimal</c>) is non-optional and default-less; the factory parameter
+    /// (<c>total: Decimal?</c>) is optional. <c>AutoBinds</c> correctly refuses the match (an optional
+    /// parameter must never auto-bind to a non-optional member), so <c>BuildFactoryCtorArgs</c> falls
+    /// through past the auto-bind branch and the unset-optional branch to the benign type-default
+    /// branch, emitting <c>java.math.BigDecimal.ZERO</c> for the member's constructor slot.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Optional_parameter_does_not_auto_bind_a_non_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make(total: Decimal?) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no kotlinc required): the optional parameter must NOT auto-bind into the
+        // non-optional member's constructor slot — the ctor arg must fall through to the benign
+        // type default instead.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("shop/Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldNotContain("return Product(id, total)");
+        product.ShouldContain("return Product(id, java.math.BigDecimal.ZERO)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(
+            "an optional factory parameter must not auto-bind into a non-optional member's "
+            + "constructor slot:\n" + string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1732: the explicit-init branch of <c>BuildFactoryCtorArgs</c> never reconciled the
+    /// value's inferred type against the member's declared type, so an <c>Int</c> literal initializing a
+    /// <c>Decimal</c> member emitted a bare <c>Long</c> where <c>java.math.BigDecimal</c> is required — a
+    /// real <c>kotlinc</c> "argument type mismatch" error. Mirrors Java's #1519 fix
+    /// (<c>Factory_explicit_init_of_a_decimal_member_from_an_int_literal_is_bigdecimal_coerced</c>).
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_an_int_literal_is_bigdecimal_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no kotlinc required): the Int-typed initializer must be widened to BigDecimal
+        // to match the constructor's BigDecimal parameter, not passed through as a bare Long literal.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("shop/Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("return Product(id, java.math.BigDecimal.valueOf(5L))");
+        product.ShouldNotContain("return Product(id, 5L)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard: a <c>Decimal</c>-typed value explicit-initializing a
+    /// <c>Decimal</c>-declared member must be unaffected by #1732's coercion — no extra
+    /// <c>BigDecimal.valueOf(...)</c> wrap added around an already-<c>BigDecimal</c> value.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_decimal_literal_is_unaffected()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make() {\n" +
+            "      total -> 5.0\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("shop/Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("""return Product(id, java.math.BigDecimal("5.0"))""");
+        product.ShouldNotContain("BigDecimal.valueOf(java.math.BigDecimal");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1732: an ALREADY-nullable <c>Int?</c> initializing expression (a factory parameter) that is
+    /// ALSO numerically mismatched against an optional-declared <c>Decimal?</c> member needs the
+    /// null-safe-map widen (<c>?.let { java.math.BigDecimal.valueOf(it) }</c>) — a bare
+    /// <c>java.math.BigDecimal.valueOf(...)</c> wrap around a <c>Long?</c> receiver does not compile.
+    /// Mirrors Java's #1519 code-review follow-up
+    /// (<c>Factory_explicit_init_of_an_optional_decimal_member_from_an_already_optional_int_source_is_map_coerced</c>).
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_decimal_member_from_an_already_optional_int_source_is_null_safe_map_coerced()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(discount: Int?) {\n" +
+            "      total -> discount\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no kotlinc required): the already-nullable Long? value must be null-safe-map
+        // widened, never bare-wrapped (a real kotlinc "type mismatch" against BigDecimal?).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("shop/Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("return Product(id, discount?.let { java.math.BigDecimal.valueOf(it) })");
+        product.ShouldNotContain("return Product(id, discount)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's sources.</summary>
     private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
     {

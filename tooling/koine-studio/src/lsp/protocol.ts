@@ -187,6 +187,13 @@ export interface SetDocResult {
 // `outcome` is 'passed' | 'failed' | 'indeterminate' (the last when an expression couldn't be
 // evaluated — surfaced, never hidden).
 export type ScenarioOutcome = 'passed' | 'failed' | 'indeterminate';
+// Which engine produced a result (#236). `interpreted` is the model-level interpreter above (Approach
+// B): nothing is compiled or run, so a value it cannot evaluate stays `?`. `executed` means the model's
+// emitted code was compiled and RUN in a sandbox child (Approach A, ADR 0011), so every derived value is
+// really computed. Every response carries it — including a degraded one, where a host that was asked to
+// execute but cannot (the browser has no process to spawn) answers `interpreted` plus an explanatory
+// note — so the panel never has to guess which engine answered, and never labels a run it didn't get.
+export type ScenarioMode = 'executed' | 'interpreted';
 export interface ScenarioPreconditionStep {
   kind: 'requires';
   message: string | null;
@@ -223,6 +230,8 @@ export interface ScenarioResult {
   ok: boolean;
   target: string;
   operation: string;
+  /** Which engine actually produced this result — see {@link ScenarioMode}. Never what was asked for. */
+  mode: ScenarioMode;
   steps: ScenarioStep[];
   resultingState: Record<string, string>;
   invariants: ScenarioInvariantCheck[];

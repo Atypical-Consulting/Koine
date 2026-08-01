@@ -226,4 +226,146 @@ public class RouteDerivationTests
     [InlineData("V2Import", "v2-import")]
     public void Kebab_splits_after_a_digit(string name, string expected) =>
         RouteDerivation.Kebab(name).ShouldBe(expected);
+
+    // ---- @route token resolution (#1748) -------------------------------------
+
+    [Fact]
+    public void ForCommand_binds_an_id_token_to_the_aggregate_identity_when_no_parameter_matches()
+    {
+        var entity = Order();
+        var command = new CommandDecl(
+            "Submit",
+            Parameters: [new Param("note", new TypeRef("String"))],
+            Body: [],
+            ReturnType: null,
+            RouteOverride: "/orders/{id}");
+
+        RouteTokenBinding binding = RouteDerivation.ForCommand(entity, command).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Token.ShouldBe("id");
+        binding.Target.ShouldBe(RouteTokenTarget.Identity);
+        binding.Member.ShouldBeNull();
+        binding.Type.ShouldNotBeNull().Name.ShouldBe("OrderId");
+    }
+
+    [Fact]
+    public void ForCommand_binds_a_token_to_the_command_parameter_it_names()
+    {
+        var entity = Order();
+        var note = new Param("note", new TypeRef("String"));
+        var command = new CommandDecl(
+            "Submit",
+            Parameters: [note],
+            Body: [],
+            ReturnType: null,
+            RouteOverride: "/orders/{note}");
+
+        RouteTokenBinding binding = RouteDerivation.ForCommand(entity, command).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Token.ShouldBe("note");
+        binding.Target.ShouldBe(RouteTokenTarget.Member);
+        binding.Member.ShouldBe(note);
+        binding.Type.ShouldBe(note.Type);
+    }
+
+    [Fact]
+    public void ForCommand_leaves_a_token_matching_nothing_unbound()
+    {
+        var entity = Order();
+        var command = new CommandDecl(
+            "Submit",
+            Parameters: [new Param("note", new TypeRef("String"))],
+            Body: [],
+            ReturnType: null,
+            RouteOverride: "/orders/{ref}");
+
+        RouteTokenBinding binding = RouteDerivation.ForCommand(entity, command).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Token.ShouldBe("ref");
+        binding.Target.ShouldBe(RouteTokenTarget.Unbound);
+        binding.Member.ShouldBeNull();
+        binding.Type.ShouldBeNull();
+    }
+
+    /// <summary>A command parameter named <c>id</c> wins over the aggregate-identity fallback — name match comes first.</summary>
+    [Fact]
+    public void ForCommand_prefers_a_matching_parameter_named_id_over_the_identity_fallback()
+    {
+        var entity = Order();
+        var id = new Param("id", new TypeRef("String"));
+        var command = new CommandDecl(
+            "Submit",
+            Parameters: [id],
+            Body: [],
+            ReturnType: null,
+            RouteOverride: "/orders/{id}");
+
+        RouteTokenBinding binding = RouteDerivation.ForCommand(entity, command).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Target.ShouldBe(RouteTokenTarget.Member);
+        binding.Member.ShouldBe(id);
+    }
+
+    /// <summary>Route tokens match a parameter name case-insensitively, mirroring ASP.NET's own route-value binding.</summary>
+    [Fact]
+    public void ForCommand_matches_a_token_to_a_parameter_ordinal_ignore_case()
+    {
+        var entity = Order();
+        var note = new Param("note", new TypeRef("String"));
+        var command = new CommandDecl(
+            "Submit",
+            Parameters: [note],
+            Body: [],
+            ReturnType: null,
+            RouteOverride: "/orders/{NOTE}");
+
+        RouteTokenBinding binding = RouteDerivation.ForCommand(entity, command).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Target.ShouldBe(RouteTokenTarget.Member);
+        binding.Member.ShouldBe(note);
+    }
+
+    /// <summary>A query has no aggregate identity to fall back to: an <c>id</c> token with no matching criterion is unbound.</summary>
+    [Fact]
+    public void ForQuery_never_resolves_a_token_to_an_identity()
+    {
+        var query = new QueryDecl(
+            "OrderById",
+            Criteria: [],
+            ResultType: new TypeRef("Order"),
+            RouteOverride: "/orders/{id}");
+
+        RouteTokenBinding binding = RouteDerivation.ForQuery(query).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Target.ShouldBe(RouteTokenTarget.Unbound);
+    }
+
+    [Fact]
+    public void ForQuery_binds_a_token_to_the_criterion_it_names()
+    {
+        var id = new Param("id", new TypeRef("OrderId"));
+        var query = new QueryDecl(
+            "OrderById",
+            Criteria: [id],
+            ResultType: new TypeRef("Order"),
+            RouteOverride: "/orders/{id}");
+
+        RouteTokenBinding binding = RouteDerivation.ForQuery(query).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Target.ShouldBe(RouteTokenTarget.Member);
+        binding.Member.ShouldBe(id);
+    }
+
+    /// <summary>A conventional (unannotated) route carries no <c>{token}</c>s, so it resolves no bindings at all.</summary>
+    [Fact]
+    public void A_conventional_route_has_no_token_bindings()
+    {
+        var entity = Order();
+        var command = new CommandDecl("Place", Parameters: [new Param("total", new TypeRef("Money"))], Body: [], ReturnType: null);
+
+        RouteDerivation.ForCommand(entity, command).TokenBindings.ShouldBeEmpty();
+
+        var query = new QueryDecl("OrderById", Criteria: [new Param("id", new TypeRef("OrderId"))], ResultType: new TypeRef("Order"));
+        RouteDerivation.ForQuery(query).TokenBindings.ShouldBeEmpty();
+    }
 }

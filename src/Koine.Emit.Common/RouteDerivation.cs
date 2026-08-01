@@ -19,13 +19,45 @@ namespace Koine.Compiler;
 /// return type.</param>
 /// <param name="AuthRole">The role an <c>@auth("role")</c> annotation requires, or <c>null</c> when the
 /// operation carries none (R19 / #1219).</param>
+/// <param name="TokenBindings">What each <c>{token}</c> in <paramref name="Route"/> resolves to (#1748):
+/// empty for a conventional route or one with no tokens. Resolved once here so the <c>openapi</c> document
+/// and the C# <c>api</c> layer read one answer and cannot disagree about what a token binds to.</param>
 public readonly record struct RouteInfo(
     string Verb,
     string Route,
     string OperationId,
     IReadOnlyList<Param> RequestShape,
     TypeRef? ResponseShape,
-    string? AuthRole);
+    string? AuthRole,
+    IReadOnlyList<RouteTokenBinding> TokenBindings);
+
+/// <summary>What a <c>@route</c> <c>{token}</c> resolves to (#1748).</summary>
+public enum RouteTokenTarget
+{
+    /// <summary>The token names neither a parameter/criterion nor the aggregate identity — KOI1215.</summary>
+    Unbound,
+
+    /// <summary>The token names a command parameter or query criterion (by <see cref="RouteTokenBinding.Member"/>).</summary>
+    Member,
+
+    /// <summary>The token is <c>id</c> and the declaration is a command on an entity with no <c>id</c>-named parameter — binds to the aggregate identity.</summary>
+    Identity,
+}
+
+/// <summary>
+/// One <c>{token}</c> in a <c>@route</c> template resolved against a command's parameters / a query's
+/// criteria / the aggregate identity (#1748). <see cref="Token"/> is the bare name
+/// <see cref="Ast.RouteTemplate.Tokens"/> produced (declaration-order, de-duplicated, ASP.NET
+/// constraint/modifier syntax already stripped). <see cref="Member"/> is set only for
+/// <see cref="RouteTokenTarget.Member"/>; <see cref="Type"/> is the type to bind — the member's own type,
+/// or the aggregate identity's type for <see cref="RouteTokenTarget.Identity"/> — and is <c>null</c> for
+/// <see cref="RouteTokenTarget.Unbound"/>.
+/// </summary>
+public readonly record struct RouteTokenBinding(
+    string Token,
+    RouteTokenTarget Target,
+    Param? Member,
+    TypeRef? Type);
 
 /// <summary>
 /// Derives the shared <see cref="RouteInfo"/> for an entity command or a query (#1042 / W2.0). This is
@@ -41,25 +73,86 @@ public static class RouteDerivation
     /// <c>@get</c>/<c>@post</c>/… annotation the verb. The three axes (route, verb, role) are independent:
     /// each falls back to the convention on its own.
     /// </summary>
-    public static RouteInfo ForCommand(EntityDecl entity, CommandDecl command) => new(
-        Verb: command.VerbOverride ?? "POST",
-        Route: command.RouteOverride ?? $"/{Kebab(entity.Name)}/{Kebab(command.Name)}",
-        OperationId: $"{entity.Name}_{command.Name}",
-        RequestShape: command.Parameters,
-        ResponseShape: command.ReturnType,
-        AuthRole: command.AuthRole);
+    public static RouteInfo ForCommand(EntityDecl entity, CommandDecl command)
+    {
+        var route = command.RouteOverride ?? $"/{Kebab(entity.Name)}/{Kebab(command.Name)}";
+        return new(
+            Verb: command.VerbOverride ?? "POST",
+            Route: route,
+            OperationId: $"{entity.Name}_{command.Name}",
+            RequestShape: command.Parameters,
+            ResponseShape: command.ReturnType,
+            AuthRole: command.AuthRole,
+            TokenBindings: ResolveTokenBindings(route, command.Parameters, entity));
+    }
 
     /// <summary>
     /// A query → <c>GET /{query}</c>, its criteria the query-string parameters — with the same R19
     /// annotation overrides as <see cref="ForCommand"/> (#1219).
     /// </summary>
-    public static RouteInfo ForQuery(QueryDecl query) => new(
-        Verb: query.VerbOverride ?? "GET",
-        Route: query.RouteOverride ?? $"/{Kebab(query.Name)}",
-        OperationId: query.Name,
-        RequestShape: query.Criteria,
-        ResponseShape: query.ResultType,
-        AuthRole: query.AuthRole);
+    public static RouteInfo ForQuery(QueryDecl query)
+    {
+        var route = query.RouteOverride ?? $"/{Kebab(query.Name)}";
+        return new(
+            Verb: query.VerbOverride ?? "GET",
+            Route: route,
+            OperationId: query.Name,
+            RequestShape: query.Criteria,
+            ResponseShape: query.ResultType,
+            AuthRole: query.AuthRole,
+            TokenBindings: ResolveTokenBindings(route, query.Criteria, entity: null));
+    }
+
+    /// <summary>
+    /// Resolves each <c>{token}</c> in <paramref name="route"/> against <paramref name="shape"/> (a
+    /// command's parameters or a query's criteria) — #1748. Resolution order: a member of
+    /// <paramref name="shape"/> whose name matches the token (<see cref="StringComparison.OrdinalIgnoreCase"/>,
+    /// mirroring ASP.NET's own case-insensitive route-value binding); else, when <paramref name="entity"/>
+    /// is not <c>null</c> (a command, never a query — a query has no aggregate identity) and the token is
+    /// <c>id</c>, the aggregate identity; else unbound (KOI1215's concern, not this method's). A rename
+    /// silently unbinding a token, or a token that never named anything, are exactly what KOI1215 exists
+    /// to catch — explicit binding syntax (<c>bind id -&gt; orderId</c>) was rejected for the same case in
+    /// #1219/#1748's design discussion as unneeded ceremony over name-matching.
+    /// </summary>
+    private static IReadOnlyList<RouteTokenBinding> ResolveTokenBindings(
+        string route, IReadOnlyList<Param> shape, EntityDecl? entity)
+    {
+        IReadOnlyList<string> tokens = RouteTemplate.Tokens(route);
+        if (tokens.Count == 0)
+        {
+            return [];
+        }
+
+        var bindings = new List<RouteTokenBinding>(tokens.Count);
+        foreach (var token in tokens)
+        {
+            Param? member = null;
+            foreach (var candidate in shape)
+            {
+                if (string.Equals(candidate.Name, token, StringComparison.OrdinalIgnoreCase))
+                {
+                    member = candidate;
+                    break;
+                }
+            }
+
+            if (member is not null)
+            {
+                bindings.Add(new RouteTokenBinding(token, RouteTokenTarget.Member, member, member.Type));
+            }
+            else if (entity is not null && string.Equals(token, "id", StringComparison.OrdinalIgnoreCase))
+            {
+                bindings.Add(new RouteTokenBinding(
+                    token, RouteTokenTarget.Identity, Member: null, Type: new TypeRef(entity.IdentityName)));
+            }
+            else
+            {
+                bindings.Add(new RouteTokenBinding(token, RouteTokenTarget.Unbound, Member: null, Type: null));
+            }
+        }
+
+        return bindings;
+    }
 
     /// <summary>
     /// Converts a Pascal/camel-cased identifier to a kebab-cased path segment
