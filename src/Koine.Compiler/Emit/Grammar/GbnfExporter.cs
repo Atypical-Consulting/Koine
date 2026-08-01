@@ -103,11 +103,13 @@ public static class GbnfExporter
         // (req_ws "when" req_ws expression)?: when present, ident→"when"→expression is word→word.
         ("state-rule", "ident (ws \"->\" ws ident (ws \",\" ws ident)*)? (req_ws \"when\" req_ws expression)?"),
         ("command-decl", "\"command\" req_ws ident (ws \"(\" ws param-list? ws \")\")? (ws \":\" ws type-ref)? ws \"{\" ws (command-stmt ws)* \"}\""),
-        ("command-stmt", "requires-clause | result-clause | transition | emit-clause"),
+        ("command-stmt", "requires-clause | result-clause | transition | emit-clause | publish-clause"),
         ("requires-clause", "\"requires\" req_ws expression (ws string)?"),
         ("result-clause", "\"result\" req_ws expression"),
         ("transition", "soft-name ws \"->\" ws expression"),
         ("emit-clause", "\"emit\" req_ws ident (ws \"(\" ws emit-arg-list? ws \")\")?"),
+        // R19 — `publish X(...)`: the cross-context counterpart of `emit`, same payload syntax.
+        ("publish-clause", "\"publish\" req_ws ident (ws \"(\" ws emit-arg-list? ws \")\")?"),
         ("emit-arg-list", "emit-arg (ws \",\" ws emit-arg)*"),
         ("emit-arg", "soft-name ws \":\" ws expression"),
         ("factory-decl", "\"create\" req_ws ident (ws \"(\" ws param-list? ws \")\")? ws \"{\" ws (factory-stmt ws)* \"}\""),
@@ -143,7 +145,7 @@ public static class GbnfExporter
         ("soft-name", "ident | decl-keyword | \"when\" | \"if\" | \"then\" | \"else\""),
         ("type-name", "ident | decl-keyword"),
         ("expr-name", "ident | decl-keyword | \"when\""),
-        ("decl-keyword", "\"context\" | \"value\" | \"quantity\" | \"entity\" | \"aggregate\" | \"enum\" | \"identified\" | \"by\" | \"root\" | \"command\" | \"requires\" | \"result\" | \"event\" | \"emit\" | \"states\" | \"create\" | \"spec\" | \"on\" | \"service\" | \"operation\" | \"policy\" | \"as\" | \"natural\" | \"sequence\" | \"guid\" | \"versioned\" | \"repository\" | \"operations\" | \"find\" | \"usecase\" | \"readmodel\" | \"from\" | \"query\" | \"import\" | \"module\" | \"acl\" | \"integration\" | \"publishes\" | \"subscribes\" | \"version\" | \"let\" | \"in\""),
+        ("decl-keyword", "\"context\" | \"value\" | \"quantity\" | \"entity\" | \"aggregate\" | \"enum\" | \"identified\" | \"by\" | \"root\" | \"command\" | \"requires\" | \"result\" | \"event\" | \"emit\" | \"states\" | \"create\" | \"spec\" | \"on\" | \"service\" | \"operation\" | \"policy\" | \"as\" | \"natural\" | \"sequence\" | \"guid\" | \"versioned\" | \"repository\" | \"operations\" | \"find\" | \"usecase\" | \"readmodel\" | \"from\" | \"query\" | \"import\" | \"module\" | \"acl\" | \"integration\" | \"publish\" | \"publishes\" | \"subscribes\" | \"version\" | \"let\" | \"in\""),
 
         // ---- Expression sublanguage (precedence-climbing) -----------------
         // Mirrors KoineParser.g4: lowest precedence (let / when-guard) climbs to the

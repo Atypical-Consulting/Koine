@@ -553,6 +553,14 @@ Koine.Compiler.Ast.PolicyDecl.Deconstruct(out string! Name, out string! EventNam
 Koine.Compiler.Ast.PolicyDecl.Equals(Koine.Compiler.Ast.PolicyDecl? other) -> bool
 Koine.Compiler.Ast.PolicyReaction.Deconstruct(out string! TargetType, out string! CommandName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.PolicyArg!>! Args) -> void
 Koine.Compiler.Ast.PolicyReaction.Equals(Koine.Compiler.Ast.PolicyReaction? other) -> bool
+Koine.Compiler.Ast.PublishClause
+Koine.Compiler.Ast.PublishClause.Args.get -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EmitArg!>!
+Koine.Compiler.Ast.PublishClause.Args.init -> void
+Koine.Compiler.Ast.PublishClause.Deconstruct(out string! EventName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EmitArg!>! Args) -> void
+Koine.Compiler.Ast.PublishClause.Equals(Koine.Compiler.Ast.PublishClause? other) -> bool
+Koine.Compiler.Ast.PublishClause.EventName.get -> string!
+Koine.Compiler.Ast.PublishClause.EventName.init -> void
+Koine.Compiler.Ast.PublishClause.PublishClause(string! EventName, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.EmitArg!>! Args) -> void
 Koine.Compiler.Ast.PublishDecl.Deconstruct(out string! EventName) -> void
 Koine.Compiler.Ast.PublishDecl.Equals(Koine.Compiler.Ast.PublishDecl? other) -> bool
 Koine.Compiler.Ast.QueryDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, out Koine.Compiler.Ast.TypeRef! ResultType, out string? RouteOverride, out string? VerbOverride, out string? AuthRole) -> void
@@ -993,6 +1001,10 @@ override Koine.Compiler.Ast.PolicyReaction.<Clone>$() -> Koine.Compiler.Ast.Poli
 override Koine.Compiler.Ast.PolicyReaction.Equals(object? obj) -> bool
 override Koine.Compiler.Ast.PolicyReaction.GetHashCode() -> int
 override Koine.Compiler.Ast.PolicyReaction.ToString() -> string!
+override Koine.Compiler.Ast.PublishClause.<Clone>$() -> Koine.Compiler.Ast.PublishClause!
+override Koine.Compiler.Ast.PublishClause.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.PublishClause.GetHashCode() -> int
+override Koine.Compiler.Ast.PublishClause.ToString() -> string!
 override Koine.Compiler.Ast.PublishDecl.<Clone>$() -> Koine.Compiler.Ast.PublishDecl!
 override Koine.Compiler.Ast.PublishDecl.Equals(object? obj) -> bool
 override Koine.Compiler.Ast.PublishDecl.GetHashCode() -> int
@@ -1277,6 +1289,7 @@ override sealed Koine.Compiler.Ast.Param.Equals(Koine.Compiler.Ast.KoineNode? ot
 override sealed Koine.Compiler.Ast.PolicyArg.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
 override sealed Koine.Compiler.Ast.PolicyDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
 override sealed Koine.Compiler.Ast.PolicyReaction.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
+override sealed Koine.Compiler.Ast.PublishClause.Equals(Koine.Compiler.Ast.CommandStmt? other) -> bool
 override sealed Koine.Compiler.Ast.PublishDecl.Equals(Koine.Compiler.Ast.KoineNode? other) -> bool
 override sealed Koine.Compiler.Ast.QueryDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
 override sealed Koine.Compiler.Ast.ReadModelDecl.Equals(Koine.Compiler.Ast.TypeDecl? other) -> bool
@@ -1421,6 +1434,8 @@ static Koine.Compiler.Ast.PolicyDecl.operator !=(Koine.Compiler.Ast.PolicyDecl? 
 static Koine.Compiler.Ast.PolicyDecl.operator ==(Koine.Compiler.Ast.PolicyDecl? left, Koine.Compiler.Ast.PolicyDecl? right) -> bool
 static Koine.Compiler.Ast.PolicyReaction.operator !=(Koine.Compiler.Ast.PolicyReaction? left, Koine.Compiler.Ast.PolicyReaction? right) -> bool
 static Koine.Compiler.Ast.PolicyReaction.operator ==(Koine.Compiler.Ast.PolicyReaction? left, Koine.Compiler.Ast.PolicyReaction? right) -> bool
+static Koine.Compiler.Ast.PublishClause.operator !=(Koine.Compiler.Ast.PublishClause? left, Koine.Compiler.Ast.PublishClause? right) -> bool
+static Koine.Compiler.Ast.PublishClause.operator ==(Koine.Compiler.Ast.PublishClause? left, Koine.Compiler.Ast.PublishClause? right) -> bool
 static Koine.Compiler.Ast.PublishDecl.operator !=(Koine.Compiler.Ast.PublishDecl? left, Koine.Compiler.Ast.PublishDecl? right) -> bool
 static Koine.Compiler.Ast.PublishDecl.operator ==(Koine.Compiler.Ast.PublishDecl? left, Koine.Compiler.Ast.PublishDecl? right) -> bool
 static Koine.Compiler.Ast.QueryDecl.operator !=(Koine.Compiler.Ast.QueryDecl? left, Koine.Compiler.Ast.QueryDecl? right) -> bool
