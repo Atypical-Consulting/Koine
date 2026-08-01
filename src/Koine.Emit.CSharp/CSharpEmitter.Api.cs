@@ -42,7 +42,7 @@ public sealed partial class CSharpEmitter
     /// Emits one context's <c>&lt;Context&gt;Endpoints</c> extension (W2), or nothing when the context has
     /// no commands, factories or queries to map.
     /// </summary>
-    private void EmitApiLayer(EmitContext emit, List<EmittedFile> files, ContextNode ctx)
+    private void EmitApiLayer(EmitContext emit, List<EmittedFile> files, ContextNode ctx, CSharpTypeMapper typeMapper, ModelIndex index)
     {
         var ns = ctx.Name;
         var body = new StringBuilder();
@@ -59,7 +59,7 @@ public sealed partial class CSharpEmitter
             {
                 foreach (CommandDecl cmd in root.Commands)
                 {
-                    WriteCommandEndpoint(body, root, cmd);
+                    WriteCommandEndpoint(body, root, cmd, typeMapper, index);
                     any = true;
                 }
             }
@@ -68,7 +68,7 @@ public sealed partial class CSharpEmitter
             {
                 foreach (FactoryDecl factory in root.Factories)
                 {
-                    WriteFactoryEndpoint(body, root, factory);
+                    WriteFactoryEndpoint(body, root, factory, typeMapper, index);
                     any = true;
                 }
             }
@@ -104,8 +104,10 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>A command → <c>POST /{entity}/{command}</c> bound to <c>&lt;Behavior&gt;Handler</c> — or the
-    /// verb/route/role its R19 <c>@route</c>/<c>@put</c>/<c>@auth</c> annotations named (#1219).</summary>
-    private void WriteCommandEndpoint(StringBuilder body, EntityDecl root, CommandDecl cmd)
+    /// verb/route/role its R19 <c>@route</c>/<c>@put</c>/<c>@auth</c> annotations named (#1219). A
+    /// <c>@route</c> <c>{token}</c> that resolves to a parameter or the aggregate identity (#1748) binds
+    /// into the endpoint via <see cref="RouteInfo.TokenBindings"/>.</summary>
+    private void WriteCommandEndpoint(StringBuilder body, EntityDecl root, CommandDecl cmd, CSharpTypeMapper typeMapper, ModelIndex index)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(cmd.Name);
         RouteInfo info = RouteDerivation.ForCommand(root, cmd);
@@ -118,19 +120,20 @@ public sealed partial class CSharpEmitter
             || _options.HandlerResult is CSharpHandlerResult.Aggregate or CSharpHandlerResult.ReadModel
             || _options.NotFound is CSharpNotFound.Nullable or CSharpNotFound.Result;
         WriteMutationEndpoint(body, info.Verb, "MapPost", info.Route, behavior, returnsValue,
-            _options.NotFound, info.AuthRole);
+            _options.NotFound, info.AuthRole, info.TokenBindings, CSharpNaming.CommandIdProperty(cmd), typeMapper, index);
     }
 
     /// <summary>A factory → <c>POST /{entity}/{factory}</c>; it always returns the created aggregate. Factories
-    /// carry no API annotations, so this one stays purely conventional.</summary>
-    private void WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory)
+    /// carry no API annotations (and no <c>@route</c> tokens to bind — #1748 is commands/queries only), so
+    /// this one stays purely conventional.</summary>
+    private void WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory, CSharpTypeMapper typeMapper, ModelIndex index)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(factory.Name);
         var route = "/" + RouteDerivation.Kebab(root.Name) + "/" + RouteDerivation.Kebab(factory.Name);
         // A factory creates — it has no not-found concept — so it always returns the created aggregate
         // plainly, regardless of the not-found policy.
         WriteMutationEndpoint(body, "POST", "MapPost", route, behavior, returnsValue: true, CSharpNotFound.Throw,
-            authRole: null);
+            authRole: null, bindings: [], identityProperty: "", typeMapper, index);
     }
 
     /// <summary>
@@ -142,22 +145,56 @@ public sealed partial class CSharpEmitter
     /// <c>Throw</c> ⇒ plain 200; <c>Nullable</c> ⇒ null → 404; <c>Result</c> ⇒ a <c>Result&lt;T&gt;</c> →
     /// 200 with the value / 404. <paramref name="authRole"/>, when set, appends
     /// <c>.RequireAuthorization("role")</c> to the chain (#1219).
+    ///
+    /// <para>Each bound <paramref name="bindings"/> entry (#1748) lifts one route-bindable
+    /// (scalar/enum/identity) token into its own fully-qualified <c>[FromRoute(Name = "…")]</c> parameter
+    /// ahead of the request, and the request is re-bound <c>with { … }</c> from it — so the route and the
+    /// body can never silently disagree. A member-matched token whose type is not route-bindable (a
+    /// general value object) stays unbound with an explanatory comment; an <c>Unbound</c> binding is
+    /// KOI1215's concern, not this method's. Zero bindings ⇒ output byte-identical to pre-#1748.</para>
     /// </summary>
     private void WriteMutationEndpoint(StringBuilder body, string verb, string conventionalMapMethod, string route,
-        string behavior, bool returnsValue, CSharpNotFound miss, string? authRole)
+        string behavior, bool returnsValue, CSharpNotFound miss, string? authRole,
+        IReadOnlyList<RouteTokenBinding> bindings, string identityProperty, CSharpTypeMapper typeMapper, ModelIndex index)
     {
         var requestType = behavior + "Request";
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
+        var routeParams = new StringBuilder();
+        var rebinds = new List<string>();
+        foreach (RouteTokenBinding binding in bindings)
+        {
+            if (binding.Target == RouteTokenTarget.Unbound)
+            {
+                continue;
+            }
+
+            if (!IsRouteBindable(binding.Type!, index))
+            {
+                body.Append(i2).Append("// route token '{").Append(binding.Token).Append("}': ")
+                    .Append(binding.Type!.Name).Append(" is not route-bindable\n");
+                continue;
+            }
+
+            routeParams.Append("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"").Append(binding.Token)
+                .Append("\")] ").Append(typeMapper.Map(binding.Type!)).Append(' ').Append(binding.Token).Append(", ");
+
+            var prop = binding.Target == RouteTokenTarget.Identity
+                ? identityProperty
+                : CSharpNaming.ToPascalCase(binding.Member!.Name);
+            rebinds.Add($"{prop} = {binding.Token}");
+        }
+
         body.Append(i2).Append("endpoints.").Append(MapMethodFor(verb, conventionalMapMethod)).Append("(\"")
             .Append(EscapeCSharpString(route))
-            .Append("\", async (").Append(BodyBindingAttributeFor(verb)).Append(requestType).Append(" request, ");
+            .Append("\", async (").Append(routeParams).Append(BodyBindingAttributeFor(verb)).Append(requestType).Append(" request, ");
         body.Append(_options.ApplicationMediatr ? "MediatR.IMediator mediator" : behavior + "Handler handler");
         body.Append(", CancellationToken ct) =>\n");
         body.Append(i2).Append("{\n");
 
-        var call = _options.ApplicationMediatr ? "mediator.Send(request, ct)" : "handler.HandleAsync(request, ct)";
+        var requestExpr = rebinds.Count > 0 ? $"request with {{ {string.Join(", ", rebinds)} }}" : "request";
+        var call = _options.ApplicationMediatr ? $"mediator.Send({requestExpr}, ct)" : $"handler.HandleAsync({requestExpr}, ct)";
         if (!returnsValue)
         {
             body.Append(i3).Append("await ").Append(call).Append(";\n");
@@ -171,6 +208,17 @@ public sealed partial class CSharpEmitter
 
         body.Append(i2).Append("})").Append(RequireAuthorizationFor(authRole)).Append(";\n");
     }
+
+    /// <summary>
+    /// Whether a route token bound-by-name to <paramref name="type"/> can actually be lifted into a
+    /// <c>[FromRoute]</c> parameter (#1748): a scalar primitive, an enum, or an identity value object —
+    /// every one of which ASP.NET Core Minimal APIs can bind from a single route-value string (identities
+    /// via the <c>TryParse</c> convention, issue #1649). A general value object has no such binding, so a
+    /// token matching one of those stays unbound in the emitted C# with an explanatory comment rather than
+    /// emitting code that would not compile or would compile and then fail to bind at request time.
+    /// </summary>
+    private static bool IsRouteBindable(TypeRef type, ModelIndex index) =>
+        index.Classify(type.Name) is TypeKind.Primitive or TypeKind.Enum or TypeKind.IdValueObject;
 
     /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query
     /// string. Honors the same R19 verb/route/role annotations as a command (#1219).</summary>

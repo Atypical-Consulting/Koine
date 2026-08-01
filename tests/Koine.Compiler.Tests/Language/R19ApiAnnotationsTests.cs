@@ -812,4 +812,146 @@ public class R19ApiAnnotationsTests
 
     private static string FileEndingWith(IEnumerable<Emit.EmittedFile> files, string suffix) =>
         files.Single(f => f.RelativePath.EndsWith(suffix, StringComparison.Ordinal)).Contents;
+
+    // ---- @route token binding into the C# api layer (#1748) -----------------
+
+    /// <summary>Emits <paramref name="source"/> with the Application + api layers on and asserts a clean compile.</summary>
+    private static IReadOnlyList<Emit.EmittedFile> BuildApi(string source)
+    {
+        var options = CSharpEmitterOptions.Empty with
+        {
+            Layers = new HashSet<CSharpLayer> { CSharpLayer.Domain, CSharpLayer.Application, CSharpLayer.Api },
+        };
+        var result = new KoineCompiler().Compile(source, new CSharpEmitter(options));
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var (asm, errors) = TestSupport.Compile(result.Files);
+        (asm is not null).ShouldBeTrue("generated C# failed to compile:\n" + string.Join("\n", errors));
+        return result.Files;
+    }
+
+    /// <summary>The §15.9 reference-docs example: a route token with no matching command parameter binds
+    /// to the aggregate identity (#1748) — an explicit <c>[FromRoute]</c> parameter ahead of the request,
+    /// re-bound into it via <c>with { Id = id }</c>, so the URL and the loaded aggregate can never
+    /// disagree about which order is being submitted.</summary>
+    [Fact]
+    public void A_route_token_with_no_matching_parameter_binds_to_the_aggregate_identity()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  @auth("admin")
+                  command submit(note: String) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var endpoints = FileEndingWith(BuildApi(src), "OrderingEndpoints.cs");
+
+        endpoints.ShouldContain("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"id\")] OrderId id");
+        endpoints.ShouldContain("request with { Id = id }");
+    }
+
+    /// <summary>
+    /// Collision case: a command parameter named <c>id</c> wins the name match over the identity
+    /// fallback (#1748) — the token binds to the <b>parameter</b>, and the identity property is pushed to
+    /// <c>AggregateId</c>, the same collision rule <c>CSharpEmitter.Application.cs</c>'s handler already
+    /// applies via the shared <see cref="CSharpNaming.CommandIdProperty"/> — the two can never disagree.
+    /// </summary>
+    [Fact]
+    public void A_command_parameter_named_id_wins_the_token_over_the_identity_fallback()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command submit(id: String) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var files = BuildApi(src);
+        var endpoints = FileEndingWith(files, "OrderingEndpoints.cs");
+
+        endpoints.ShouldContain("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"id\")] string id");
+        endpoints.ShouldContain("request with { Id = id }");
+
+        // The identity property collided with the parameter's own "Id" and was pushed to "AggregateId"
+        // (CSharpNaming.CommandIdProperty) — the handler, not the endpoint, is where it loads by it.
+        FileEndingWith(files, "OrderSubmitHandler.cs").ShouldContain("request.AggregateId");
+    }
+
+    /// <summary>Non-regression: an unannotated command, and a <c>@route</c> whose template carries no
+    /// <c>{token}</c> at all, both emit an endpoint with no <c>[FromRoute]</c> parameter and an untouched
+    /// <c>request</c> call — byte-identical to pre-#1748 (#1748).</summary>
+    [Fact]
+    public void No_route_tokens_leaves_the_endpoint_untouched()
+    {
+        const string unannotated = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  command submit(note: String) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var endpoints = FileEndingWith(BuildApi(unannotated), "OrderingEndpoints.cs");
+        endpoints.ShouldContain(
+            "endpoints.MapPost(\"/order/submit\", async (OrderSubmitRequest request, OrderSubmitHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("handler.HandleAsync(request, ct)");
+        endpoints.ShouldNotContain("FromRoute");
+
+        const string tokenless = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/submit")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var tokenlessEndpoints = FileEndingWith(BuildApi(tokenless), "OrderingEndpoints.cs");
+        tokenlessEndpoints.ShouldContain(
+            "endpoints.MapPut(\"/orders/submit\", async (OrderSubmitRequest request, OrderSubmitHandler handler, CancellationToken ct) =>");
+        tokenlessEndpoints.ShouldNotContain("FromRoute");
+    }
 }

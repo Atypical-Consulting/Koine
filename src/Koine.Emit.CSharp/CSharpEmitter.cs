@@ -395,7 +395,7 @@ public sealed partial class CSharpEmitter : IEmitter
         {
             foreach (ContextNode ctx in model.Contexts)
             {
-                EmitApiLayer(emit, files, ctx);
+                EmitApiLayer(emit, files, ctx, typeMapper, index);
             }
         }
 

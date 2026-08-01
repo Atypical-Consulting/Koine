@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
+using Koine.Compiler.Ast;
 
 namespace Koine.Compiler;
 
@@ -55,6 +56,27 @@ internal static class CSharpNaming
     /// modes always carry the byte-identical literal (issue #795).
     /// </summary>
     public static string VerbatimContent(string content) => content.Replace("\"", "\"\"");
+
+    /// <summary>
+    /// The identity property name a command's emitted request record uses: normally <c>Id</c>, but a
+    /// command may name one of its own parameters <c>id</c> (only a factory reserves the name), which
+    /// would PascalCase to a colliding <c>Id</c> — so this keeps prefixing <c>Aggregate</c> until it
+    /// doesn't (<c>Id</c>, <c>AggregateId</c>, <c>AggregateAggregateId</c>, …). Shared by
+    /// <c>CSharpEmitter.Application.cs</c>'s handler/request-record emission and the <c>api</c> layer's
+    /// route-token binding (#1748) so the two can never disagree about which request property the
+    /// aggregate identity lives on.
+    /// </summary>
+    public static string CommandIdProperty(CommandDecl cmd)
+    {
+        var paramProps = cmd.Parameters.Select(p => ToPascalCase(p.Name)).ToHashSet(StringComparer.Ordinal);
+        var idProp = "Id";
+        while (paramProps.Contains(idProp))
+        {
+            idProp = "Aggregate" + idProp;
+        }
+
+        return idProp;
+    }
 
     /// <summary>Prefixes a C# reserved keyword with <c>@</c> so it is a valid identifier.</summary>
     private static string Escape(string identifier) =>
