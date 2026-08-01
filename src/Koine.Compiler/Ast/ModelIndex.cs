@@ -153,7 +153,16 @@ public sealed class ModelIndex
     // immutable for these reads, and a model can call this once per bare enum-member reference.
     private readonly Dictionary<string, HashSet<string>> _visibleEnumNamesByContext = new(StringComparer.Ordinal);
 
-    /// <summary>Enum type names visible from <paramref name="context"/>: locally declared, or imported by name (wildcard or explicit) — the same locality <see cref="TryGetDeclIn"/> resolves through.</summary>
+    /// <summary>
+    /// Enum type names visible from <paramref name="context"/>: locally declared, or imported by name
+    /// (wildcard or explicit) — the same <c>_declsByContext</c>/<c>_importsByContext</c> registries
+    /// <see cref="TryGetDeclIn"/> resolves through, but looser on an ambiguous import: <c>TryGetDeclIn</c>
+    /// requires a SINGLE import owner to resolve a name at all, while this method treats the name as
+    /// visible if ANY of the import's owner contexts declares it as an enum — appropriate here, since
+    /// this only widens which of <see cref="EnumsDeclaring(string)"/>'s already-known owners survive
+    /// scoping, never invents a new one; a genuinely ambiguous import is reported by the separate
+    /// unqualified-import diagnostic, not by this method.
+    /// </summary>
     private HashSet<string> EnumsVisibleFrom(string context)
     {
         if (_visibleEnumNamesByContext.TryGetValue(context, out HashSet<string>? cached))
