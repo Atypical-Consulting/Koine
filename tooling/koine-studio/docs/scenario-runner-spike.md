@@ -224,8 +224,10 @@ and it is deliberately narrower than the word "sandbox" suggests:
   - *macOS:* a `sandbox-exec` profile that **denies the network** and **denies writes outside the per-run
     directory**.
   - *Linux:* an unprivileged user + network namespace (`unshare --user --map-root-user --net`) that
-    **denies the network**. No write confinement — Landlock needs a hook .NET does not offer, and
-    bubblewrap is a dependency an editor feature cannot assume.
+    **denies the network** — but only where the distribution permits unprivileged user namespaces
+    (Ubuntu 24.04's AppArmor policy does not, which is why this repo's own CI runner degrades to a note).
+    No write confinement — Landlock needs a hook .NET does not offer, and bubblewrap is a dependency an
+    editor feature cannot assume.
   - *Windows:* a **Job Object** carrying the memory and CPU ceilings (and killing the child if the host
     dies). No filesystem or network confinement — a restricted token needs `CreateProcessAsUser`.
   - **Reads stay unrestricted everywhere** (the child must load the runtime and its own assemblies), and

@@ -235,12 +235,16 @@ appended to the result's notes rather than left implied:
 |---|---|---|---|
 | Managed-heap ceiling (1 GiB) | ✅ | ✅ | ✅ *(also capped by a Job Object)* |
 | Processor-time ceiling | ✅ | ✅ | ✅ *(Job Object)* |
-| Network denied | ✅ | ✅ | ❌ *(reported)* |
+| Network denied | ✅ | ⚠️ *(only where unprivileged user namespaces are permitted)* | ❌ *(reported)* |
 | Writes confined to the run directory | ✅ | ❌ *(reported)* | ❌ *(reported)* |
 
 The memory row is a **managed-heap** ceiling on macOS and Linux — the .NET runtime enforces it, and it
 bounds the managed heap, which is where an allocation storm in emitted code lands. It does not bound
 native allocations; only the Windows Job Object caps those too.
+
+Linux network denial uses an unprivileged network namespace, which several distributions restrict —
+Ubuntu 24.04's AppArmor policy blocks it by default, and this project's own CI runners fall in that
+group. Where it is blocked, the run says so in its notes rather than pretending otherwise.
 
 Reads are unrestricted everywhere — the child has to load the .NET runtime and its own assemblies. A run
 stopped by a *resource* ceiling says so by name, so an allocation storm is never reported as an infinite

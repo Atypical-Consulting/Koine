@@ -20,6 +20,12 @@ internal sealed class ScenarioConfinement : IDisposable
     /// it is what <c>RLIMIT_CPU</c> raises when the soft processor-time limit is reached.</summary>
     internal const int UnixCpuLimitExitCode = 152;
 
+    /// <summary><c>128 + SIGKILL</c>. <c>ulimit -t</c> sets the soft AND hard <c>RLIMIT_CPU</c> to the same
+    /// value, so a child that is not reaped the instant <c>SIGXCPU</c> lands meets the hard limit a moment
+    /// later and is killed outright — which shell and kernel decide is observed varies by distribution,
+    /// so both codes have to be read as the same event.</summary>
+    internal const int UnixKilledExitCode = 137;
+
     /// <summary>Windows terminates a job that blows its TIME limit with <c>STATUS_QUOTA_EXCEEDED</c>,
     /// which surfaces as this (negative, when read as a signed exit code) NTSTATUS.</summary>
     internal const int WindowsQuotaExceededExitCode = unchecked((int)0xC0000044);
@@ -100,12 +106,17 @@ internal sealed class ScenarioConfinement : IDisposable
     public string? DescribeExit(int exitCode)
     {
         if (!OperatingSystem.IsWindows()
-            && exitCode == UnixCpuLimitExitCode
+            && exitCode is UnixCpuLimitExitCode or UnixKilledExitCode
             && _options.CpuLimit is { } cpu)
         {
-            return "The scenario exceeded the sandbox's ceiling of " + Seconds(cpu) + " of PROCESSOR time and "
-                + "was stopped. That is a resource ceiling, not the wall-clock deadline: the emitted code ran "
-                + "hot (an unbounded loop in a derived member or invariant) rather than merely slowly.";
+            return "The scenario was stopped with the sandbox's ceiling of " + Seconds(cpu) + " of PROCESSOR "
+                + "time in force, having produced no result — almost certainly by reaching it. That is a "
+                + "resource ceiling, not the wall-clock deadline: the emitted code ran hot (an unbounded loop "
+                + "in a derived member or invariant) rather than merely slowly."
+                + (exitCode == UnixKilledExitCode
+                    ? " (The child was killed outright rather than signalled, which the system's "
+                      + "out-of-memory killer or an external kill would also look like from here.)"
+                    : string.Empty);
         }
 
         // Deliberately NOT a memory diagnosis: a JOB_OBJECT_LIMIT_JOB_MEMORY breach makes the offending

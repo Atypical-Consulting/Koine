@@ -277,9 +277,11 @@ public class ScenarioSandboxTests
 
             // The distinction this test exists for: the deadline never expired, so the user must not be
             // told their model loops slowly when what it did was burn processor time against a ceiling.
+            // The whole tree is the failure message — which shell and kernel a platform uses decides
+            // whether the child is signalled or killed outright, and the note names the exit code.
             run.TimedOut.ShouldBeFalse(tree);
-            tree.ShouldContain("PROCESSOR time");
-            tree.ShouldNotContain("timed out");
+            tree.ShouldContain("PROCESSOR time", customMessage: tree);
+            tree.ShouldNotContain("timed out", customMessage: tree);
         }
         finally
         {

@@ -128,6 +128,16 @@ the rest of its content stay as they are — including its trust model, which st
   fork and exec (no hook), and bubblewrap is a dependency an editor feature cannot assume; Windows gets
   neither, because a restricted or low-integrity token requires `CreateProcessAsUser` and hand-plumbing
   all three redirected pipes. Each gap is a note on the run.
+- **Linux's network denial is conditional, and often unavailable.** An unprivileged network namespace
+  needs unprivileged user namespaces to be permitted, and several distributions restrict them — Ubuntu
+  24.04's AppArmor policy blocks them by default, which is why this repo's own `ubuntu-latest` CI runner
+  probes as unable and degrades to a note. So in practice a large share of Linux hosts get the resource
+  ceilings and nothing else. The probe is what keeps that honest rather than fatal.
+- **Exit codes are not a portable diagnosis.** `ulimit -t` sets the soft *and* hard `RLIMIT_CPU`, so a
+  child that blows the ceiling may be observed as signalled (`SIGXCPU`, 152) or killed outright
+  (`SIGKILL`, 137) depending on the shell and kernel — macOS reports the former, Linux the latter. Both
+  are read as the same event, which means a genuine external kill or an out-of-memory kill of a child
+  that produced no output is attributed to the CPU ceiling too; the note says so rather than overstating.
 - **CI covers one of the three platforms.** `build-and-test` runs on `ubuntu-latest` only, so the macOS
   `sandbox-exec` path and the whole Windows Job Object path ship **manually verified, not CI-verified** —
   the same blind spot that produced PR #1738's Windows-only review findings. The macOS path was verified
