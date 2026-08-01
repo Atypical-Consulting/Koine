@@ -652,11 +652,11 @@ public sealed partial class TypeScriptEmitter
         }
 
         // Build the all-args constructor call: an explicit `field <- value` init wins; otherwise a
-        // same-named factory parameter auto-binds (R8.2), then a member's own default, then
-        // undefined for an optional field, and finally `undefined as never` for a required field
-        // with no source (already flagged upstream).
+        // same-named factory parameter auto-binds (R8.2) — matching type shape and never binding an
+        // optional parameter into a non-optional member (MemberAnalysis.AutoBinds) — then a member's
+        // own default, then undefined for an optional field, and finally `undefined as never` for a
+        // required field with no source (already flagged upstream).
         var inits = factory.Body.OfType<Initialization>().ToDictionary(i => i.Field, i => i.Value);
-        var factoryParams = new HashSet<string>(factory.Parameters.Select(p => p.Name), StringComparer.Ordinal);
         var ordered = OrderCtorParams(ctorMembers).ToList();
         var args = new List<string> { "id" };
         foreach (Member m in ordered)
@@ -665,7 +665,7 @@ public sealed partial class TypeScriptEmitter
             {
                 args.Add(translator.Translate(value, EnumExpected(m, index, context)));
             }
-            else if (factoryParams.Contains(m.Name))
+            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {
                 args.Add(TypeScriptNaming.ToCamelCase(m.Name));
             }
