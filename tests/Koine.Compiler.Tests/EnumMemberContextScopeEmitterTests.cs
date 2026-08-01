@@ -446,6 +446,26 @@ public class EnumMemberContextScopeEmitterTests
     }
 
     /// <summary>
+    /// Issue #1797's model, shared by the seven-target string assertions and the three toolchain-compile
+    /// facts that follow them. <c>C</c> declares its OWN <c>Active</c> on <c>Flag</c>, so the bare
+    /// <c>Active</c> in the invariant is ambiguous on name alone; only the explicit <c>Other.Kind</c>
+    /// qualifier on the member's declared type tells the compiler which one is meant.
+    /// </summary>
+    private const string ExplicitlyQualifiedCollision = """
+        context Other {
+          enum Kind { Active, Idle }
+        }
+
+        context C {
+          enum Flag { Active, Blue }
+          entity Item identified by ItemId {
+            kind: Other.Kind
+            invariant kind == Active "hint must survive context scoping"
+          }
+        }
+        """;
+
+    /// <summary>
     /// Issue #1797, the emitter half. #1739 scoped the owner list to enums declared in or imported into
     /// the referencing context, missing R13.2's third way to name a foreign type — an explicit
     /// <c>Context.Type</c> qualifier. The VALIDATOR symptom was a false <c>KOI0210</c>, which is what made
@@ -462,34 +482,27 @@ public class EnumMemberContextScopeEmitterTests
     [Fact]
     public void Every_target_resolves_a_bare_member_to_the_explicitly_qualified_owner()
     {
-        const string source = """
-            context Other {
-              enum Kind { Active, Idle }
-            }
-
-            context C {
-              enum Flag { Active, Blue }
-              entity Item identified by ItemId {
-                kind: Other.Kind
-                invariant kind == Active "hint must survive context scoping"
-              }
-            }
-            """;
+        const string source = ExplicitlyQualifiedCollision;
 
         // (emitter, file the invariant lands in, the owner that must win, the local owner that must not).
+        // Expected is the FULLY qualified spelling for C#/Java/Kotlin: #1799 landed the emitter half, so
+        // the owner these three name is no longer merely the right enum but one the toolchain can
+        // actually resolve. The bare `Kind.Active` this row originally asserted still *substring*-matches
+        // the qualified form, so tightening it is what keeps the row honest about which defect it pins.
+        //
         // Forbidden is null for Rust alone: it emits the whole `C` context as ONE module, so `c.rs` also
         // holds Flag's own declaration and its from_str/from_i32 match arms — `Flag::Active` legitimately
         // appears there. The positive assertion still discriminates: pre-fix the owner list was ["Flag"],
         // so the invariant read `Flag::Active` and `Kind::Active` was absent from the file entirely.
         (IEmitter Emitter, string File, string Expected, string? Forbidden)[] targets =
         [
-            (new CSharpEmitter(), "Item.cs", "Kind.Active", "Flag.Active"),
+            (new CSharpEmitter(), "Item.cs", "Other.Kind.Active", "Flag.Active"),
             (new TypeScriptEmitter(), "Item.ts", "Kind.Active", "Flag.Active"),
             (new PythonEmitter(), "item.py", "Kind.ACTIVE", "Flag.ACTIVE"),
             (new PhpEmitter(), "Item.php", "Kind::ACTIVE", "Flag::ACTIVE"),
-            (new RustEmitter(), "c.rs", "Kind::Active", null),
-            (new JavaEmitter(), "Item.java", "Kind.Active", "Flag.Active"),
-            (new KotlinEmitter(), "Item.kt", "Kind.Active", "Flag.Active"),
+            (new RustEmitter(), "c.rs", "crate::other::Kind::Active", null),
+            (new JavaEmitter(), "Item.java", "koine.generated.other.Kind.Active", "Flag.Active"),
+            (new KotlinEmitter(), "Item.kt", "koine.generated.other.Kind.Active", "Flag.Active"),
         ];
 
         foreach ((IEmitter emitter, var file, var expected, var forbidden) in targets)
@@ -506,10 +519,51 @@ public class EnumMemberContextScopeEmitterTests
             }
         }
 
-        // Deliberately NOT toolchain-compiled. C#/Java/Kotlin render the (correct) owner as a BARE simple
-        // name with no using/import, so a cross-context enum reference doesn't resolve in those three
-        // targets — a SEPARATE, pre-existing defect tracked as #1799, reachable on main today via this
-        // model's collision-free control variant and therefore neither caused nor widened by #1797.
-        // TypeScript/Python/PHP/Rust already qualify correctly. Once #1799 lands, add the compile checks.
+        // The compile checks this test deferred to #1799 live in the three `..._compiles_the_collision_model`
+        // facts below rather than inline here, deliberately: `RequireOrSkip` aborts the WHOLE test on the
+        // first absent toolchain, so folding seven gates into this one loop would let a missing mypy or
+        // phpstan skip the six string assertions above with it — silently deleting the coverage #1797
+        // added. One fact per target keeps each toolchain's absence scoped to its own row.
+    }
+
+    /// <summary>
+    /// Issue #1799 closing the loop on #1797's deferred compile checks, for the three targets whose
+    /// rendering it fixed. This is the model where BOTH halves are load-bearing: #1797 (PR #1798) is what
+    /// puts the explicitly-qualified <c>Other.Kind</c> back in the owner list so the bare <c>Active</c>
+    /// resolves to it rather than the local <c>Flag</c>, and #1799 is what then spells that owner so the
+    /// toolchain can find it. Either half alone leaves this model broken — silently wrong code without
+    /// the first, non-compiling code without the second — which is exactly what a string assertion cannot
+    /// see and a real compile can.
+    /// </summary>
+    [Fact]
+    public void CSharp_compiles_the_collision_model_resolved_to_the_explicitly_qualified_owner()
+    {
+        var result = new KoineCompiler().Compile(ExplicitlyQualifiedCollision, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        (System.Reflection.Assembly? assembly, IReadOnlyList<string> errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Java_compiles_the_collision_model_resolved_to_the_explicitly_qualified_owner()
+    {
+        var result = new KoineCompiler().Compile(ExplicitlyQualifiedCollision, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Kotlin_compiles_the_collision_model_resolved_to_the_explicitly_qualified_owner()
+    {
+        var result = new KoineCompiler().Compile(ExplicitlyQualifiedCollision, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 }
