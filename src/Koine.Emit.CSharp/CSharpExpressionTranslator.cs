@@ -794,15 +794,18 @@ internal sealed class CSharpExpressionTranslator
             {
                 sb.Append(_memberReceiver).Append('.').Append(CSharpNaming.ToPascalCase(name));
             }
-            else if (mode == NameMode.Parameter && TryWriteDerivedBody(name, mode, sb))
+            else if (mode == NameMode.Parameter)
             {
-                // Substituted the derivation over the constructor parameters (issue #1756).
+                // A stored field IS the constructor parameter of the same name; a derived member is
+                // not a parameter at all, so its derivation is substituted instead (issue #1756).
+                if (!TryWriteDerivedBody(name, sb))
+                {
+                    sb.Append(CSharpNaming.ToCamelCase(name));
+                }
             }
             else
             {
-                sb.Append(mode == NameMode.Parameter
-                    ? CSharpNaming.ToCamelCase(name)
-                    : CSharpNaming.ToPascalCase(name));
+                sb.Append(CSharpNaming.ToPascalCase(name));
             }
 
             return;
@@ -843,7 +846,7 @@ internal sealed class CSharpExpressionTranslator
     /// former bare-name rendering instead of recursing forever.
     /// </para>
     /// </summary>
-    private bool TryWriteDerivedBody(string name, NameMode mode, StringBuilder sb)
+    private bool TryWriteDerivedBody(string name, StringBuilder sb)
     {
         if (!_derivedBodies.TryGetValue(name, out Expr? body) || !_inliningDerived.Add(name))
         {
@@ -853,7 +856,7 @@ internal sealed class CSharpExpressionTranslator
         try
         {
             sb.Append('(');
-            Write(body, mode, sb);
+            Write(body, NameMode.Parameter, sb);
             sb.Append(')');
         }
         finally
