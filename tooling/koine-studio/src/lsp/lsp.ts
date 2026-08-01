@@ -88,7 +88,7 @@ interface OpenDoc {
 
 export class KoineLsp {
   private nextId = 1;
-  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
   // Per-uri open buffers (text + monotonic version). The active uri is the one all
   // request methods target; didChange is debounced per active uri.
   private docs = new Map<string, OpenDoc>();
@@ -242,7 +242,9 @@ export class KoineLsp {
         this.pending.delete(id);
         reject(new Error(`LSP request '${method}' timed out`));
       }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timer });
+      // The map holds resolvers erased to `unknown` (it serves every `request<T>` call with one shared
+      // value type); `resolve` is narrowed back to `T` at the single call site in handle() below.
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       this.send({ jsonrpc: '2.0', id, method, params }).catch((e: unknown) => {
         clearTimeout(timer);
         this.pending.delete(id);

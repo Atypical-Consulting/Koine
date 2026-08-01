@@ -475,21 +475,21 @@ describe('routeContextMapClick', () => {
   const relEdge = { from: 'Sales', to: 'Shipping', label: 'Customer/Supplier', arrowKind: 'association' };
 
   test('a context node routes to onContextClick (filter), not onRelationSelect', () => {
-    let ctx: any = 'unset';
-    let rel: any = 'unset';
+    let ctx: DiagramNode | 'unset' = 'unset';
+    let rel: DiagramEdge | null | 'unset' = 'unset';
     routeContextMapClick(ctxNode, { onContextClick: (n) => (ctx = n), onRelationSelect: (e) => (rel = e) });
     expect(ctx).toMatchObject({ qualifiedName: 'Sales' });
     expect(rel).toBe('unset');
   });
 
   test('a relation edge routes to onRelationSelect', () => {
-    let rel: any = 'unset';
+    let rel: DiagramEdge | null | 'unset' = 'unset';
     routeContextMapClick(relEdge, { onRelationSelect: (e) => (rel = e) });
     expect(rel).toMatchObject({ from: 'Sales', to: 'Shipping' });
   });
 
   test('an empty / unknown click clears the selection (onRelationSelect(null))', () => {
-    let rel: any = 'unset';
+    let rel: DiagramEdge | null | 'unset' = 'unset';
     routeContextMapClick(null, { onRelationSelect: (e) => (rel = e) });
     expect(rel).toBeNull();
   });
