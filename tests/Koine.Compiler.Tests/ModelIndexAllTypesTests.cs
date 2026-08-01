@@ -103,6 +103,47 @@ public class ModelIndexAllTypesTests
         index.EnumsDeclaring("Closed").ShouldBe(new[] { "Status" });
     }
 
+    /// <summary>
+    /// The only <c>AllTypes()</c> consumers that pick a SINGLE result and can see a difference now
+    /// that both sides of a collision are visible are the three
+    /// <c>OfType&lt;EntityDecl&gt;().FirstOrDefault(e => e.IdentityName == name)</c> lookups
+    /// (<c>SymbolTable</c> ×2, <c>WorkspaceIndex</c>'s hover text). They need two same-named entities
+    /// in different contexts that ALSO share an identity name before the pick can change, and either
+    /// answer is equally arbitrary — they only need SOME owner for navigation/hover. This pins that
+    /// such a model still indexes and validates cleanly; disambiguating the owner by the reference's
+    /// own context is the follow-on tracked separately (#1632 spec, Approach 2 / non-goal).
+    /// </summary>
+    [Fact]
+    public void Same_name_entities_sharing_an_identity_name_across_contexts_still_resolve()
+    {
+        const string src = """
+            context Shipping {
+              entity Order identified by OrderId {
+                weight: Int
+              }
+            }
+
+            context Billing {
+              entity Order identified by OrderId {
+                total: Int
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldBeEmpty();
+
+        var result = new KoineCompiler().Compile(src, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        ModelIndex index = new SemanticModel(result.Model!).Index;
+
+        index.AllTypes().OfType<EntityDecl>().Count(e => e.Name == "Order").ShouldBe(2);
+
+        // Both IdentityName-keyed single-result lookups still find AN owner for the shared `OrderId`.
+        var table = new SymbolTable(result.Model!, index);
+        table.StrongSymbol("OrderId").ShouldNotBeNull();
+        table.IdValueObject("OrderId").ShouldNotBeNull();
+    }
+
     [Fact]
     public void AllTypes_does_not_duplicate_declarations_in_a_single_context_model()
     {

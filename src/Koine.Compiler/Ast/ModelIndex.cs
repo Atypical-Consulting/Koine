@@ -679,8 +679,8 @@ public sealed class ModelIndex
     /// last-write-wins <c>_byName</c> view, because R13.2 lets two bounded contexts each legally
     /// declare a type with the same simple name (uniqueness is enforced PER CONTEXT, not globally).
     /// Walking <c>_byName</c> made the losing context's declaration <b>entirely invisible</b> — so
-    /// every index built by iterating this method (<see cref="EnumsDeclaring"/> /
-    /// <c>_enumMemberToType</c>, <see cref="CandidateTypeNames"/>) silently dropped it (issue #1632).
+    /// every index built by iterating this method (chiefly <see cref="EnumsDeclaring"/> /
+    /// <c>_enumMemberToType</c>) silently dropped it (issue #1632).
     /// Declarations are deduplicated by reference, so a type merely imported into another context's
     /// scope is yielded once, by its owner. For a model with no cross-context name collision this
     /// yields exactly the same declarations in the same order as before — both registries are built
