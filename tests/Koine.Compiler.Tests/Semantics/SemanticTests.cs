@@ -409,6 +409,137 @@ public class SemanticTests
     }
 
     /// <summary>
+    /// Issue #1739: <c>CheckEnumMemberResolvable</c>/<c>ResolveEnumOperand</c>/<c>ConcreteEnumType</c> all
+    /// resolved owners via the context-blind <see cref="ModelIndex.EnumsDeclaring(string)"/>, so an enum
+    /// declared by a THIRD, unrelated context could still widen an ambiguity check that never sees it.
+    /// <c>Red == Blue</c> is unambiguous from <c>C</c>'s own perspective — <c>Flag</c> is the only enum
+    /// <c>C</c> declares (or imports), and it declares both compared members — yet pre-fix this was
+    /// rejected: both `Red` and `Blue` are independently ambiguous MODEL-WIDE (each declared by ≥2 enums
+    /// across unrelated contexts), so neither side's single-owner short-circuit could rescue the other,
+    /// and the containing expression is <c>Bool</c>-typed (no enum-typed <c>expected</c> to fall back on).
+    /// The stray <c>KOI0210</c> ("cannot compare 'Marker' with 'Signal'") is the more telling symptom:
+    /// <c>Marker</c>/<c>Signal</c> have no relationship to this code at all — they leak in purely because
+    /// the raw <c>TypeResolver.Infer</c>/<c>EnumMemberToType</c> fallback picked whichever enum happened
+    /// to be declared LAST in the file for each member name once the context-blind
+    /// <c>ConcreteEnumType</c> found >1 owner on both sides.
+    /// </summary>
+    [Fact]
+    public void A_locally_unambiguous_comparison_is_not_widened_by_an_unrelated_contexts_same_named_member()
+    {
+        const string src =
+            """
+            context A {
+              enum Status { Red }
+            }
+
+            context C {
+              enum Flag { Red, Blue }
+              value V {
+                ok: Bool = Red == Blue
+              }
+            }
+
+            context D {
+              enum Marker { Red }
+            }
+
+            context E {
+              enum Signal { Blue }
+            }
+            """;
+
+        Validate(src).ShouldBeEmpty();
+    }
+
+    /// <summary>Same shape as the comparison above, inside an <c>invariant</c> — confirms the fix isn't specific to value-member initializers (issue #1739).</summary>
+    [Fact]
+    public void The_same_shape_is_unambiguous_inside_an_invariant()
+    {
+        const string src =
+            """
+            context A {
+              enum Status { Red }
+            }
+
+            context C {
+              enum Flag { Red, Blue }
+              entity Item identified by ItemId {
+                tag: Flag = Red
+                invariant Red != Blue "sanity check with no declared-type hint"
+              }
+            }
+
+            context D {
+              enum Marker { Red }
+            }
+
+            context E {
+              enum Signal { Blue }
+            }
+            """;
+
+        Validate(src).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #1739, Validation rule: a member name shared by two enums WITHIN THE SAME context must
+    /// still be reported ambiguous — context-scoping narrows visibility, it must never suppress a real,
+    /// local collision.
+    /// </summary>
+    [Fact]
+    public void A_member_shared_by_two_enums_in_the_same_context_is_still_ambiguous()
+    {
+        // Both Red and Blue are declared by BOTH Flag and Marker, so neither operand's single-owner
+        // short-circuit can rescue the other — a genuine, unscoped-by-design collision (scoping to
+        // context C keeps both owners; they're both genuinely local to it).
+        const string src =
+            """
+            context C {
+              enum Flag { Red, Blue }
+              enum Marker { Red, Blue }
+              value V {
+                ok: Bool = Red == Blue
+              }
+            }
+            """;
+
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+    }
+
+    /// <summary>
+    /// Issue #1739, Validation rule: a member shared across contexts, both IMPORTED into the referencing
+    /// context, must still be ambiguous — the import is what makes both visible, so scoping must not
+    /// silently pick one.
+    /// </summary>
+    [Fact]
+    public void A_member_shared_by_two_imported_enums_is_still_ambiguous()
+    {
+        // Both Red and Blue are declared by BOTH imported enums, so neither operand's single-owner
+        // short-circuit can rescue the other — importing both is what makes both genuinely visible.
+        const string src =
+            """
+            context A {
+              enum Flag { Red, Blue }
+            }
+
+            context B {
+              enum Marker { Red, Blue }
+            }
+
+            context C {
+              import A.{ Flag }
+              import B.{ Marker }
+
+              value V {
+                ok: Bool = Red == Blue
+              }
+            }
+            """;
+
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+    }
+
+    /// <summary>
     /// Issue #1655: <c>CheckAggregateSelector</c>'s <c>sum</c>/<c>min</c>/<c>max</c> selector-kind checks
     /// called the context-blind 1-arg <c>ModelIndex.Classify(string)</c> overload directly, instead of the
     /// context-aware <see cref="ModelIndex.Classify(string?, string)"/> overload the way #1634/#1641

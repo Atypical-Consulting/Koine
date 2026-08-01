@@ -705,7 +705,7 @@ internal sealed class ExpressionChecker
             return; // a field reference, not a bare enum member
         }
 
-        IReadOnlyList<string> owners = _index.EnumsDeclaring(id.Name);
+        IReadOnlyList<string> owners = _index.EnumsDeclaring(_resolver.Context, id.Name);
         if (owners.Count <= 1)
         {
             return; // unambiguous (or not an enum member)
@@ -727,7 +727,7 @@ internal sealed class ExpressionChecker
     private TypeRef? ResolveEnumOperand(Expr operand, TypeRef? otherType, TypeScope scope)
     {
         if (operand is IdentifierExpr id && !scope.Contains(id.Name)
-            && otherType is not null && _index.EnumsDeclaring(id.Name).Contains(otherType.Name))
+            && otherType is not null && _index.EnumsDeclaring(_resolver.Context, id.Name).Contains(otherType.Name))
         {
             return otherType;
         }
@@ -768,7 +768,7 @@ internal sealed class ExpressionChecker
                 TypeRef? t = _resolver.Infer(operand, scope);
                 return t is not null && ResolveDecl(t) is EnumDecl ? t : null;
             }
-            IReadOnlyList<string> owners = _index.EnumsDeclaring(id.Name);
+            IReadOnlyList<string> owners = _index.EnumsDeclaring(_resolver.Context, id.Name);
             return owners.Count == 1 ? new TypeRef(owners[0]) : null;
         }
 
