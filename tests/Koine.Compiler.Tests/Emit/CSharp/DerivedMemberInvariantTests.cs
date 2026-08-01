@@ -95,6 +95,151 @@ public class DerivedMemberInvariantTests
         """;
 
     /// <summary>
+    /// Two lambdas of the SAME name nested inside one another (issue #1768, Task 3): the outer
+    /// <c>rate =&gt;</c> is mangled to free the member name, then the inner <c>rate =&gt;</c> — shadowing
+    /// the SAME Koine name again, one level deeper — must be mangled to a DIFFERENT identifier than the
+    /// outer's (not collide with it), and the outer's own rename mapping must survive the inner lambda's
+    /// render (save/restore nesting), rather than being left clobbered once the inner call returns.
+    /// </summary>
+    private const string NestedShadowFixture = """
+        context Shop {
+          value Grid {
+            rate:  Int
+            rows:  List<Int>
+            total: Int = rate * 2
+            invariant rows.all(rate => rows.all(rate => rate < total))   "every cell stays below the total"
+          }
+        }
+        """;
+
+    [Fact]
+    public void A_nested_lambda_rebinding_the_same_name_restores_the_outer_mapping()
+    {
+        Assembly asm = CompileFixture(NestedShadowFixture);
+        Type grid = asm.GetType("Shop.Grid")!;
+
+        // rate = 2 -> Total = 4, and a row of 5 is NOT below it: the guard must reject.
+        Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(grid, new object[] { 2, new List<int> { 5 } }));
+
+        // rate = 10 -> Total = 20, and a row of 5 IS below it: the guard must admit.
+        Activator.CreateInstance(grid, new object[] { 10, new List<int> { 5 } }).ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A derived member defined transitively over ANOTHER derived member, referenced from inside a
+    /// member-shadowing lambda (issue #1768, Task 3): substituting <c>total</c> first splices
+    /// <c>subtotal * 2</c>, and that splice must ITSELF resolve <c>subtotal</c> as a member (recursing
+    /// into <c>rate + 1</c>) rather than picking up the lambda's renamed <c>rate</c> binding at any point
+    /// along the chain — proving <c>TryWriteDerivedBody</c>'s scope-suppression holds across recursive
+    /// substitution, not just a single hop.
+    /// </summary>
+    private const string TransitiveDerivationFixture = """
+        context Shop {
+          value Ledger {
+            rate:     Int
+            lines:    List<Int>
+            subtotal: Int = rate + 1
+            total:    Int = subtotal * 2
+            invariant lines.all(rate => rate < total)   "every line stays below the total"
+          }
+        }
+        """;
+
+    [Fact]
+    public void A_transitive_derivation_substitutes_through_a_renamed_binding()
+    {
+        Assembly asm = CompileFixture(TransitiveDerivationFixture);
+        Type ledger = asm.GetType("Shop.Ledger")!;
+
+        // rate = 1 -> subtotal = 2 -> total = 4; a line of 5 is not below it.
+        Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(ledger, new object[] { 1, new List<int> { 5 } }));
+
+        // rate = 10 -> subtotal = 11 -> total = 22; a line of 5 is below it.
+        object ok = Activator.CreateInstance(ledger, new object[] { 10, new List<int> { 5 } })!;
+        ledger.GetProperty("Total")!.GetValue(ok).ShouldBe(22);
+    }
+
+    /// <summary>
+    /// Exercises <c>WriteLet</c>'s rename path specifically (issue #1768, Task 3), rather than
+    /// <c>RenderLambda</c>'s: a <c>let rate = 1 in …</c> binding shadows the member <c>rate</c> — so
+    /// inside the let's own scope, a bare <c>rate</c> reference must read the let's fixed local (always
+    /// <c>1</c>) — while <c>total</c>, referenced in the SAME scope, is a derived member defined as
+    /// <c>rate * 2</c> over the REAL constructor parameter. Pre-#1768 hygiene, substituting <c>total</c>
+    /// here would have refused (an un-renamed local capture) or — worse, pre-#1756/#1768 entirely —
+    /// silently spliced against the let's own <c>rate</c>, always yielding <c>total == 2</c> regardless
+    /// of the constructor argument. Both would be observably wrong: this fixture is built so the
+    /// discriminating instance (rate = 10) only succeeds when <c>total</c> is computed from the real
+    /// constructor parameter, not the let's local.
+    /// </summary>
+    private const string LetShadowFixture = """
+        context Shop {
+          value Crate {
+            rate:  Int
+            lines: List<Int>
+            total: Int = rate * 2
+            invariant let rate = 1 in rate == 1 && lines.all(line => line < total)   "the let's own rate stays fixed at 1 while total still derives from the real constructor rate"
+          }
+        }
+        """;
+
+    [Fact]
+    public void A_let_binding_that_shadows_a_member_does_not_leak_into_a_substituted_derivation()
+    {
+        Assembly asm = CompileFixture(LetShadowFixture);
+        Type crate = asm.GetType("Shop.Crate")!;
+
+        // rate = 2 -> total = 4 (from the real constructor parameter), and a line of 5 is
+        // not below it: the guard must reject regardless of the let's own fixed rate = 1.
+        Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(crate, new object[] { 2, new List<int> { 5 } }));
+
+        // rate = 10 -> total = 20 (from the REAL constructor parameter, not the let's fixed
+        // rate = 1): a line of 5 is below it, so construction must succeed. Pre-fix, the let's
+        // own `rate = 1` binding leaking into total's substituted body would compute
+        // total = 1 * 2 = 2 and wrongly reject this instance.
+        object ok = Activator.CreateInstance(crate, new object[] { 10, new List<int> { 5 } })!;
+        crate.GetProperty("Total")!.GetValue(ok).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// An author-written member already named after what <c>MangleBinding</c> would otherwise pick
+    /// (issue #1768, Task 3): the lambda's <c>rate =&gt;</c> shadows the member <c>rate</c>, so
+    /// <c>MangleBinding</c> tries <c>__rate</c> first — but the model ALSO declares a real member
+    /// literally named <c>__rate</c>, so that candidate collides and the fallback loop must pick
+    /// <c>__rate2</c> instead. Forces <c>MangleBinding</c>'s <c>n = 2</c> branch for real, rather than
+    /// coincidentally passing because the candidate was never checked against the model's own members.
+    /// </summary>
+    private const string PreMangledFixture = """
+        context Shop {
+          value Slate {
+            rate:   Int
+            __rate: Int
+            lines:  List<Int>
+            total:  Int = rate * 2
+            invariant lines.all(rate => rate < total)   "every line stays below the total"
+          }
+        }
+        """;
+
+    [Fact]
+    public void A_mangled_name_that_the_model_already_uses_does_not_collide()
+    {
+        Assembly asm = CompileFixture(PreMangledFixture);
+        Type slate = asm.GetType("Shop.Slate")!;
+
+        // rate = 2 -> Total = 4, and a line of 5 is not below it: the guard must reject.
+        Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(slate, new object[] { 2, 99, new List<int> { 5 } }));
+
+        // rate = 10 -> Total = 20, and a line of 5 is below it: construction (with the lambda's
+        // `rate` mangled to `__rate2`, since `__rate` is already taken by a real member) must succeed.
+        object ok = Activator.CreateInstance(slate, new object[] { 10, 99, new List<int> { 5 } })!;
+        slate.GetProperty("Total")!.GetValue(ok).ShouldBe(20);
+    }
+
+    /// <summary>
     /// The residual, GENUINELY unsafe shape (issue #1768): a single derived member referenced from a
     /// plain invariant — no lambda/<c>let</c> anywhere. Used (not compiled through the emitter directly)
     /// to obtain a real <see cref="ModelIndex"/> and <see cref="ValueObjectDecl"/> for driving
