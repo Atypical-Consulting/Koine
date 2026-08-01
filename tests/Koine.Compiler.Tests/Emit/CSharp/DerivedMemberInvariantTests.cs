@@ -1,4 +1,6 @@
 using System.Reflection;
+using Koine.Compiler.Ast;
+using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -88,6 +90,24 @@ public class DerivedMemberInvariantTests
             lines: List<Int>
             total: Int = rate * 2
             invariant lines.all(line => line < total)   "every line stays below the total"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The residual, GENUINELY unsafe shape (issue #1768): a single derived member referenced from a
+    /// plain invariant — no lambda/<c>let</c> anywhere. Used (not compiled through the emitter directly)
+    /// to obtain a real <see cref="ModelIndex"/> and <see cref="ValueObjectDecl"/> for driving
+    /// <see cref="CSharpExpressionTranslator"/> by hand in
+    /// <see cref="A_pushed_local_that_cannot_be_renamed_still_refuses_substitution"/> — see that test's
+    /// doc comment for why a real command/factory <c>.koi</c> fixture cannot exercise this case.
+    /// </summary>
+    private const string PushedLocalCaptureFixture = """
+        context Shop {
+          value Meter {
+            rate:  Int
+            total: Int = rate * 2
+            invariant total > 0   "total must stay positive"
           }
         }
         """;
@@ -190,27 +210,6 @@ public class DerivedMemberInvariantTests
     }
 
     [Fact]
-    public void A_lambda_binding_that_would_capture_the_derivation_is_not_substituted()
-    {
-        var result = new KoineCompiler().Compile(LambdaCaptureFixture, new CSharpEmitter());
-        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
-
-        var cart = result.Files.Single(f => f.RelativePath.EndsWith("Cart.cs", StringComparison.Ordinal));
-
-        // The emitted lambda parameter is literally `rate`, so a substituted `rate * 2` inside it would
-        // read the element. It must NOT appear — the guard keeps the bare name instead.
-        cart.Contents.ShouldNotContain("rate => (rate < ((rate * 2)))");
-
-        // …which is a KNOWN, LOUD limitation: this model does not compile, exactly as before #1756.
-        // Silently mis-binding the invariant would be strictly worse. Hygienic renaming is tracked
-        // separately; the guarantee asserted here is "never silently wrong".
-        var (assembly, errors) = TestSupport.Compile(result.Files);
-        assembly.ShouldBeNull();
-        errors.ShouldContain(e => e.Contains("CS0103", StringComparison.Ordinal)
-            && e.Contains("total", StringComparison.Ordinal));
-    }
-
-    [Fact]
     public void A_lambda_binding_that_shadows_a_member_is_renamed_so_the_derivation_substitutes()
     {
         Assembly asm = CompileFixture(LambdaCaptureFixture);
@@ -239,6 +238,73 @@ public class DerivedMemberInvariantTests
 
         object ok = Activator.CreateInstance(basket, new object[] { 10, new List<int> { 5 } })!;
         basket.GetProperty("Total")!.GetValue(ok).ShouldBe(20);
+    }
+
+    /// <summary>
+    /// The residual case Task 1's rename cannot cover (issue #1768): a local the emitter pushes
+    /// directly — <c>CSharpEmitter</c>/<c>CSharpEmitter.Behaviors.cs</c> call
+    /// <see cref="CSharpExpressionTranslator.PushLocal"/> for a command, factory, or service-operation
+    /// parameter — never goes through the rename-aware <c>RenderLambda</c>/<c>WriteLet</c> path, so it
+    /// can never be mangled: its name IS the emitted public C# signature.
+    /// <c>WouldBeCaptured</c> must still refuse a derived-member substitution such a local shadows.
+    /// <para>
+    /// This drives <see cref="CSharpExpressionTranslator"/> directly instead of compiling a
+    /// command/factory <c>.koi</c> fixture through <see cref="CSharpEmitter"/>, because — verified
+    /// empirically against this codebase, not assumed — <c>NameMode.Parameter</c> substitution (the
+    /// only mode <c>TryWriteDerivedBody</c> ever runs under) is reachable EXCLUSIVELY from a value
+    /// object's own constructor invariant guards: <c>WriteValueObjectConstructor</c>/
+    /// <c>WriteConstructor</c> are the only two <c>NameMode.Parameter</c> call sites in the whole C#
+    /// emitter, every command/factory/service-operation guard renders in <c>NameMode.Property</c>
+    /// (never substituting), and <see cref="ValueObjectDecl"/> has no commands or factories to push an
+    /// external local through in the first place. So a real command/factory parameter can never share a
+    /// translator's scope with a Parameter-mode substitution in the shipped grammar today — this test
+    /// pins the guarantee at the mechanism it actually depends on (an un-renamed <c>PushLocal</c>'d
+    /// name), so it stays true even if a future construct brings the two together.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void A_pushed_local_that_cannot_be_renamed_still_refuses_substitution()
+    {
+        var result = new KoineCompiler().Compile(PushedLocalCaptureFixture, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var index = new ModelIndex(result.Model!);
+        ValueObjectDecl meter = result.Model!.Contexts.Single(c => c.Name == "Shop")
+            .Types.OfType<ValueObjectDecl>().Single(v => v.Name == "Meter");
+        Invariant invariant = meter.Invariants.Single();
+
+        var translator = new CSharpExpressionTranslator(
+            index, meter.Members, new Dictionary<string, string>(StringComparer.Ordinal));
+
+        // Exactly what CSharpEmitter/.Behaviors.cs do for a command/factory/service parameter:
+        // PushLocal directly — never through a lambda/let — so no rename is ever registered for it.
+        translator.PushLocal("rate", new TypeRef("Int"));
+        var guard = translator.TranslateTopLevel(invariant.Condition, CSharpExpressionTranslator.NameMode.Parameter);
+
+        // A minimal, hand-assembled host for the translated guard (a full command/factory fixture
+        // cannot exist for this scope, per the doc comment above) — only "rate" is in scope, matching
+        // a value object's own constructor.
+        var source = $$"""
+            public sealed class Meter
+            {
+                public Meter(int rate)
+                {
+                    if (!({{guard}}))
+                    {
+                        throw new System.Exception("total must stay positive");
+                    }
+                }
+            }
+            """;
+
+        var (assembly, errors) = TestSupport.Compile(new[] { new EmittedFile("Meter.cs", source) });
+
+        // Refused: "total" stays the bare pre-#1756 name (unresolvable here — only "rate" is in scope)
+        // rather than splicing "rate * 2", which would silently read the PUSHED local instead of the
+        // member the invariant meant — exactly the miscompile issue #1768 exists to prevent.
+        assembly.ShouldBeNull();
+        errors.ShouldContain(e => e.Contains("CS0103", StringComparison.Ordinal)
+            && e.Contains("total", StringComparison.Ordinal));
     }
 
     [Fact]

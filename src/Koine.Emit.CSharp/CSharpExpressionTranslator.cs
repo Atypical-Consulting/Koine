@@ -945,13 +945,16 @@ internal sealed class CSharpExpressionTranslator
     /// </para>
     /// <para>
     /// Substitution is also refused where the reference site would <b>capture</b> the derivation's free
-    /// names. A lambda/<c>let</c> binding and a member render into one C# identifier space —
-    /// <c>lines.all(rate =&gt; rate &lt; total)</c> emits a lambda parameter literally named <c>rate</c>, which
-    /// shadows the constructor parameter of the same name — so splicing <c>total = rate * 2</c> in there
-    /// would read the ELEMENT and silently admit an instance violating the very invariant that let it
-    /// through. Bailing out leaves the pre-#1756 bare name and its loud <c>CS0103</c> instead of trading
-    /// a build break for an unsound aggregate. Only an ACTUAL collision refuses; a binding that shadows
-    /// nothing the body needs (<c>lines.all(x =&gt; x &lt; total)</c>) still substitutes.
+    /// names — but only when that capture cannot be fixed by renaming. A lambda/<c>let</c> binding that
+    /// shadows a member of the enclosing type (<c>lines.all(rate =&gt; rate &lt; total)</c>, where the
+    /// lambda's own <c>rate</c> would otherwise shadow the constructor parameter of the same name) is
+    /// itself emitted under a mangled name (issue #1768, <see cref="RenderLambda"/>/<c>WriteLet</c>), so
+    /// the member name stays free and substitution proceeds safely. Only a local the emitter genuinely
+    /// cannot rename — a command/factory/service parameter pushed directly via <see cref="PushLocal"/>,
+    /// whose name IS the emitted public C# signature — still forces the bail-out, leaving the pre-#1756
+    /// bare name and its loud <c>CS0103</c> instead of trading a build break for an unsound aggregate
+    /// (<see cref="WouldBeCaptured"/> draws exactly this line). A binding that shadows nothing the body
+    /// needs (<c>lines.all(x =&gt; x &lt; total)</c>) was never renamed and still substitutes, as before.
     /// </para>
     /// </summary>
     private bool TryWriteDerivedBody(string name, StringBuilder sb)
@@ -972,6 +975,24 @@ internal sealed class CSharpExpressionTranslator
         var outerExpectedEnum = _expectedEnum;
         _expectedEnum = member.ExpectedEnum;
 
+        // member.Body is defined at the enclosing type's OWN top level, so every free name inside it
+        // is a member reference — never a locally-scoped binding. WouldBeCaptured just proved no
+        // UNRENAMED local collides with one of those names, so the only local state that could still
+        // match is a RENAMED lambda/let binding (issue #1768): it is emitted under a DIFFERENT
+        // identifier, which is exactly why the original name is safe to give to the member. But
+        // WriteIdentifier resolves purely by name, with no notion of "this identifier came from a
+        // spliced-in outer body, not the current lambda" — left as-is, a name shared with an active
+        // renamed local would still be rendered under ITS rename (reading the lambda's element, not
+        // the member) here. Suppress the outer local/type/rename scope for the splice so free names in
+        // member.Body resolve as members, then restore it immediately after so the rest of the
+        // surrounding expression keeps seeing the active locals unchanged.
+        var savedLocals = new HashSet<string>(_locals, StringComparer.Ordinal);
+        var savedLocalTypes = new Dictionary<string, TypeRef>(_localTypes, StringComparer.Ordinal);
+        var savedLocalRenames = new Dictionary<string, string>(_localRenames, StringComparer.Ordinal);
+        _locals.Clear();
+        _localTypes.Clear();
+        _localRenames.Clear();
+
         try
         {
             sb.Append('(');
@@ -980,6 +1001,20 @@ internal sealed class CSharpExpressionTranslator
         }
         finally
         {
+            _locals.Clear();
+            _locals.UnionWith(savedLocals);
+            _localTypes.Clear();
+            foreach (KeyValuePair<string, TypeRef> kv in savedLocalTypes)
+            {
+                _localTypes[kv.Key] = kv.Value;
+            }
+
+            _localRenames.Clear();
+            foreach (KeyValuePair<string, string> kv in savedLocalRenames)
+            {
+                _localRenames[kv.Key] = kv.Value;
+            }
+
             _expectedEnum = outerExpectedEnum;
             _inliningDerived.Remove(name);
         }
@@ -989,15 +1024,23 @@ internal sealed class CSharpExpressionTranslator
 
     /// <summary>
     /// Whether any name reachable from <paramref name="body"/> — following references to further derived
-    /// members — is currently bound as a local, i.e. whether splicing the body here would rebind it.
-    /// Deliberately conservative: a name bound by the body's OWN lambda/<c>let</c> also counts, which can
-    /// only refuse a substitution that would have been safe, never allow one that isn't.
+    /// members — is currently bound as a local THE EMITTER COULD NOT RENAME, i.e. whether splicing the
+    /// body here would rebind it. A local the emitter renamed (a lambda/<c>let</c> binding shadowing a
+    /// member, mangled by <see cref="RenderLambda"/>/<c>WriteLet</c>, issue #1768) is emitted under a
+    /// different identifier, so it can no longer capture anything — only a local present in
+    /// <see cref="_locals"/> with no entry in <see cref="_localRenames"/> (an externally
+    /// <see cref="PushLocal"/>'d command/factory/service parameter, whose name is a public signature and
+    /// so is never renamed) still forces a refusal.
     /// </summary>
     private bool WouldBeCaptured(Expr body, HashSet<string> visited)
     {
         foreach (var referenced in MemberAnalysis.ReferencedIdentifiers(body))
         {
-            if (_locals.Contains(referenced))
+            // A local the emitter renamed (a lambda/let binding shadowing a member) is emitted under a
+            // mangled name, so it can no longer capture the derivation's free names. Only a local the
+            // emitter cannot rename — a command/factory parameter, whose name is a public signature —
+            // still forces the loud refusal.
+            if (_locals.Contains(referenced) && !_localRenames.ContainsKey(referenced))
             {
                 return true;
             }
