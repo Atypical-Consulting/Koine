@@ -208,4 +208,72 @@ public class EnumMemberContextScopeEmitterTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1797, the emitter half. #1739 scoped the owner list to enums declared in or imported into
+    /// the referencing context, missing R13.2's third way to name a foreign type — an explicit
+    /// <c>Context.Type</c> qualifier. The VALIDATOR symptom was a false <c>KOI0210</c>, which is what made
+    /// this model unreachable at emit time; all seven translators re-resolve the same bare identifier
+    /// through the same <see cref="Koine.Compiler.Ast.ModelIndex.EnumsDeclaring(string?, string)"/>
+    /// overload, so they carried the identical blind spot latently.
+    ///
+    /// <para>Pre-fix, <c>EnumsDeclaring("C", "Active")</c> returned just <c>["Flag"]</c> — a SINGLE owner,
+    /// so every translator's <c>owners.Count == 1</c> shortcut fired and confidently emitted the local
+    /// <c>Flag.Active</c> for a field typed <c>Other.Kind</c>: silently wrong code on all seven targets,
+    /// with no diagnostic once the validator let it through. Post-fix the qualified owner is back in the
+    /// list and the sibling-operand hint picks <c>Kind</c>.</para>
+    /// </summary>
+    [Fact]
+    public void Every_target_resolves_a_bare_member_to_the_explicitly_qualified_owner()
+    {
+        const string source = """
+            context Other {
+              enum Kind { Active, Idle }
+            }
+
+            context C {
+              enum Flag { Active, Blue }
+              entity Item identified by ItemId {
+                kind: Other.Kind
+                invariant kind == Active "hint must survive context scoping"
+              }
+            }
+            """;
+
+        // (emitter, file the invariant lands in, the owner that must win, the local owner that must not).
+        // Forbidden is null for Rust alone: it emits the whole `C` context as ONE module, so `c.rs` also
+        // holds Flag's own declaration and its from_str/from_i32 match arms — `Flag::Active` legitimately
+        // appears there. The positive assertion still discriminates: pre-fix the owner list was ["Flag"],
+        // so the invariant read `Flag::Active` and `Kind::Active` was absent from the file entirely.
+        (IEmitter Emitter, string File, string Expected, string? Forbidden)[] targets =
+        [
+            (new CSharpEmitter(), "Item.cs", "Kind.Active", "Flag.Active"),
+            (new TypeScriptEmitter(), "Item.ts", "Kind.Active", "Flag.Active"),
+            (new PythonEmitter(), "item.py", "Kind.ACTIVE", "Flag.ACTIVE"),
+            (new PhpEmitter(), "Item.php", "Kind::ACTIVE", "Flag::ACTIVE"),
+            (new RustEmitter(), "c.rs", "Kind::Active", null),
+            (new JavaEmitter(), "Item.java", "Kind.Active", "Flag.Active"),
+            (new KotlinEmitter(), "Item.kt", "Kind.Active", "Flag.Active"),
+        ];
+
+        foreach ((IEmitter emitter, var file, var expected, var forbidden) in targets)
+        {
+            var result = new KoineCompiler().Compile(source, emitter);
+            result.Success.ShouldBeTrue($"{file}: " + string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+            var contents = result.Files
+                .Single(f => f.RelativePath.EndsWith(file, StringComparison.OrdinalIgnoreCase)).Contents;
+            contents.ShouldContain(expected, customMessage: $"{file} should resolve the bare member to the qualified owner");
+            if (forbidden is not null)
+            {
+                contents.ShouldNotContain(forbidden, customMessage: $"{file} must not resolve it to the local same-named enum");
+            }
+        }
+
+        // Deliberately NOT toolchain-compiled. C#/Java/Kotlin render the (correct) owner as a BARE simple
+        // name with no using/import, so a cross-context enum reference doesn't resolve in those three
+        // targets — a SEPARATE, pre-existing defect tracked as #1799, reachable on main today via this
+        // model's collision-free control variant and therefore neither caused nor widened by #1797.
+        // TypeScript/Python/PHP/Rust already qualify correctly. Once #1799 lands, add the compile checks.
+    }
 }

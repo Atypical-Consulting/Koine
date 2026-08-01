@@ -540,6 +540,98 @@ public class SemanticTests
     }
 
     /// <summary>
+    /// Issue #1797, the regression #1739 traded in: <c>ModelIndex.EnumsVisibleFrom</c> models only two of
+    /// R13.2's THREE ways a context can name another context's type — declared locally, or imported by
+    /// name. It does not model a type reached by an explicit <c>Context.Type</c> qualifier, so
+    /// <c>Other.Kind</c> is scoped OUT of <c>C</c>'s owner list and <c>ResolveEnumOperand</c>'s
+    /// <c>owners.Contains(otherType.Name)</c> guard declines to resolve the bare <c>Active</c> against it.
+    /// <c>Active</c> then infers as the local <c>Flag</c>, the comparison becomes <c>Kind == Flag</c>, and
+    /// a false, build-blocking <c>KOI0210</c> fires on code the language permits.
+    ///
+    /// <para>Note the scoped list here is non-EMPTY (<c>["Flag"]</c>), so <c>EnumsDeclaring(context,
+    /// member)</c>'s documented "fall back to the flat list when nothing is visible" safety valve does not
+    /// fire — which is exactly why the blind spot is reachable.</para>
+    /// </summary>
+    [Fact]
+    public void A_bare_member_resolves_against_an_enum_named_by_an_explicit_context_qualifier()
+    {
+        const string src =
+            """
+            context Other {
+              enum Kind { Active, Idle }
+            }
+
+            context C {
+              enum Flag { Active, Blue }
+              entity Item identified by ItemId {
+                kind: Other.Kind
+                invariant kind == Active "hint must survive context scoping"
+              }
+            }
+            """;
+
+        Validate(src).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #1797 control: identical to the model above except <c>C.Flag</c> no longer declares a member
+    /// named <c>Active</c>. This compiled clean even at the height of the regression, which is what proves
+    /// the shape itself is legal — <c>kind: Other.Kind</c> by explicit qualifier with no import is fine,
+    /// and only the accident of a local same-named member turned it into an error.
+    /// </summary>
+    [Fact]
+    public void The_same_explicitly_qualified_shape_stays_clean_without_a_local_name_collision()
+    {
+        const string src =
+            """
+            context Other {
+              enum Kind { Active, Idle }
+            }
+
+            context C {
+              enum Flag { Green, Blue }
+              entity Item identified by ItemId {
+                kind: Other.Kind
+                invariant kind == Active "no collision — control"
+              }
+            }
+            """;
+
+        Validate(src).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #1797, the guard on the other side: widening visibility must never SUPPRESS a real
+    /// collision. Here BOTH operands are owned by both the local <c>Flag</c> and the explicitly-qualified
+    /// <c>Other.Kind</c>, so neither one's single-owner short-circuit can rescue the other and there is no
+    /// declared-type hint to fall back on — genuinely ambiguous, and it must be reported.
+    ///
+    /// <para>This is the case #1739 got wrong in the OPPOSITE direction: by dropping the qualified owner
+    /// it narrowed the list to <c>["Flag"]</c>, silently deciding a member the modeller left ambiguous.
+    /// So the fix does not merely un-break the false rejection — it also restores a real diagnostic.</para>
+    /// </summary>
+    [Fact]
+    public void A_member_shared_by_a_local_and_an_explicitly_qualified_enum_is_still_ambiguous()
+    {
+        const string src =
+            """
+            context Other {
+              enum Kind { Active, Blue }
+            }
+
+            context C {
+              enum Flag { Active, Blue }
+              entity Item identified by ItemId {
+                kind: Other.Kind
+                invariant Active != Blue "both operands ambiguous — no hint to resolve either"
+              }
+            }
+            """;
+
+        Validate(src).ShouldContain(d => d.Code == DiagnosticCodes.AmbiguousEnumMember);
+    }
+
+    /// <summary>
     /// Issue #1655: <c>CheckAggregateSelector</c>'s <c>sum</c>/<c>min</c>/<c>max</c> selector-kind checks
     /// called the context-blind 1-arg <c>ModelIndex.Classify(string)</c> overload directly, instead of the
     /// context-aware <see cref="ModelIndex.Classify(string?, string)"/> overload the way #1634/#1641
