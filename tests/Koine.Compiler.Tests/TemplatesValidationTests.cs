@@ -97,6 +97,30 @@ public class TemplatesValidationTests
         return new KoineCompiler().Compile(sources, new CSharpEmitter());
     }
 
+    /// <summary>
+    /// Every shipped template must emit C# that actually <b>compiles</b>, not merely C# that the
+    /// compiler was willing to write out. Issue #1756: <c>templates/saas-subscription</c> shipped
+    /// emitted code containing <c>CS0103</c> for months — <see cref="Template_compiles_green_in_directory_mode"/>
+    /// proved the <em>model</em> was valid and the snapshot suites proved the emitted text was
+    /// <em>stable</em>, but nothing Roslyn-compiled it. (<c>demo/Pizzeria.Domain</c> does compile emitted
+    /// output end-to-end, but only for the pizzeria template.) This closes that hole for all of them.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TemplateFolders))]
+    public void Template_emits_csharp_that_compiles(string folder)
+    {
+        string name = Path.GetFileName(folder);
+        var result = CompileTemplate(folder);
+        var errors = result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        errors.ShouldBeEmpty(
+            $"template '{name}' did not compile cleanly:\n" +
+            string.Join("\n", errors.Select(d => $"{d.File}:{d.Line}:{d.Column}: {d.Code}: {d.Message}")));
+
+        var (assembly, csErrors) = TestSupport.Compile(result.Files);
+        (assembly is not null).ShouldBeTrue(
+            $"template '{name}' emitted C# that does not compile:\n" + string.Join("\n", csErrors));
+    }
+
     [Theory]
     [MemberData(nameof(TemplateFolders))]
     public void Template_manifest_is_valid(string folder)

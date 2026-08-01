@@ -136,7 +136,7 @@ internal sealed class PythonExpressionTranslator
         _expectedEnum = expectedEnum;
         var sb = new StringBuilder();
 
-        TypeRef? valueType = InferCtorArgValueType(value);
+        TypeRef? valueType = InferRenderedType(value);
         BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
         if (needs.NeedsWiden)
         {
@@ -161,31 +161,29 @@ internal sealed class PythonExpressionTranslator
     }
 
     /// <summary>
-    /// The type <see cref="TranslateReconciled"/> should reconcile <paramref name="value"/>'s already-
-    /// translated body against. For most expressions this is just <c>_resolver.Infer(value, ...)</c> —
-    /// but a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic,
+    /// An expression's type AS THIS TRANSLATOR RENDERS IT — the type any surrounding reconciliation
+    /// (<see cref="TranslateReconciled"/>'s ctor-arg wrap, <see cref="WriteCoalesce"/>'s per-operand
+    /// widen) must classify against. For most expressions this is just <c>_resolver.Infer(value, ...)</c>
+    /// — but a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic,
     /// shared across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened
-    /// against the right operand. Like TypeScript, <b>Python's own <c>CoalesceExpr</c> case does no
-    /// numeric reconciliation of its own</b> (it emits a bare
-    /// <c>(l if l is not None else r)</c>) — so there is no existing widen this could double up with,
-    /// but naively reconciling the outer ctor-arg wrap against the raw LEFT-only type would still be
-    /// wrong: wrapping the WHOLE expression in <c>Decimal(...)</c> assumes the coalesce's runtime value
-    /// is always a plain <c>int</c>, which is false whenever the right (fallback) operand is itself
-    /// already <c>Decimal</c>-shaped. This computes the coalesce's OWN effective type the same way a
-    /// fixed <c>WriteReconciledBranch</c>-style rendering would, so <see cref="BranchReconciliation.Classify"/>
-    /// degrades to "no reconciliation needed" here and this call site leaves the (separately tracked)
-    /// unreconciled coalesce rendering untouched rather than wrapping it incorrectly.
+    /// against the right operand, whereas <see cref="WriteCoalesce"/> widens the narrower operand's
+    /// RENDERED text to match the wider one (#1762, mirroring Kotlin's #1615). Classifying against the
+    /// raw resolver type would therefore be wrong in both directions: it would DOUBLE-WIDEN an
+    /// already-widened coalesce (wrapping the whole conditional in <c>Decimal(...)</c> when the right
+    /// operand is already <c>Decimal</c>-shaped — the trap #1732 built this guard for), and it would
+    /// UNDER-widen a coalesce's sibling (an <c>Int?</c>-reported nested coalesce that in fact renders as
+    /// <c>Decimal | None</c>). Recursive for exactly that second reason: a nested coalesce's own
+    /// effective type is the join of ITS operands, not its leftmost leaf's.
     /// </summary>
-    private TypeRef? InferCtorArgValueType(Expr value)
+    private TypeRef? InferRenderedType(Expr value)
     {
         if (value is not CoalesceExpr co)
         {
             return _resolver.Infer(value, EffectiveScope());
         }
 
-        TypeScope scope = EffectiveScope();
-        TypeRef? leftType = _resolver.Infer(co.Left, scope);
-        TypeRef? rightType = _resolver.Infer(co.Right, scope);
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
 
         // Matches the coalesce's own result: it stays possibly-None only when the right (fallback)
         // operand is itself possibly-None.
@@ -306,15 +304,7 @@ internal sealed class PythonExpressionTranslator
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
-                // `l ?? r` -> `(<l> if <l> is not None else <r>)`. The left side is written twice;
-                // it is a pure expression in this sublanguage so duplication is safe.
-                sb.Append('(');
-                Write(co.Left, sb);
-                sb.Append(" if ");
-                Write(co.Left, sb);
-                sb.Append(" is not None else ");
-                Write(co.Right, sb);
-                sb.Append(')');
+                WriteCoalesce(co, sb);
                 break;
             case MemberAccessExpr ma:
                 WriteMemberAccess(ma, sb);
@@ -393,6 +383,59 @@ internal sealed class PythonExpressionTranslator
     /// passed in rather than re-inferred here — <c>Then</c>/<c>Else</c> would otherwise each be walked
     /// twice per conditional (#1369).
     /// </summary>
+    /// <summary>
+    /// Issue #1762: renders a coalesce as <c>(&lt;left&gt; if &lt;left&gt; is not None else
+    /// &lt;right&gt;)</c> with each operand numerically reconciled against the OTHER'S type — the
+    /// coalesce counterpart of <see cref="WriteReconciledBranch"/>, mirroring Kotlin's
+    /// <c>WriteCoalesce</c> (#1615) and Java's <c>Optional.or</c>/<c>.orElse</c> widening (#1548).
+    /// <c>TypeResolver.VisitCoalesce</c> reports the coalesce's type as its LEFT operand's own,
+    /// unreconciled against the right (the same latitude <c>VisitConditional</c> takes, #975), so
+    /// reconciling the operands is the RENDERING's job: an unreconciled <c>Int?</c>/<c>Decimal?</c> pair
+    /// emits an <c>int | Decimal | None</c> union, a real <c>mypy --strict</c> "incompatible type"
+    /// wherever the coalesce's value is consumed.
+    /// <para>Each side is classified INDEPENDENTLY against the other rather than the whole expression
+    /// being wrapped once, because a single outer wrap is wrong precisely when the operands render to
+    /// different runtime shapes — a bare <c>int</c> on one side and a <c>Decimal</c> on the other is
+    /// exactly what needs fixing.</para>
+    /// <para>A LEFT operand that needs widening switches the lowering from the duplicated-left form to a
+    /// walrus binding: the widened value occurrence and the <c>is not None</c> test must share a name
+    /// <c>mypy --strict</c> can narrow (narrowing only works on a simple name/attribute chain, not a
+    /// duplicated arbitrary sub-expression), and it drops the double evaluation as a bonus. The
+    /// non-widening path keeps the duplicated-left form byte-for-byte, so an already-matching coalesce
+    /// emits exactly what it did before this fix. Both sides can never need widening at once — the two
+    /// numeric dimensions key off which side is the narrower <c>Int</c> — so the single
+    /// <c>__koine_v</c> binding is never contended.</para>
+    /// <para>Operand types come from <see cref="InferRenderedType"/>, not the raw resolver, so a NESTED
+    /// coalesce operand is classified by what it actually renders as (its own joined type) rather than
+    /// by its leftmost leaf.</para>
+    /// </summary>
+    private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
+    {
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
+        BranchReconciliation leftNeeds = BranchReconciliation.Classify(leftType, rightType);
+
+        sb.Append('(');
+        if (leftNeeds.NeedsWiden || leftNeeds.NeedsOptionalWiden)
+        {
+            sb.Append("Decimal(__koine_v) if (__koine_v := ");
+            Write(co.Left, sb);
+            sb.Append(") is not None else ");
+        }
+        else
+        {
+            // `l ?? r` -> `(<l> if <l> is not None else <r>)`. The left side is written twice;
+            // it is a pure expression in this sublanguage so duplication is safe.
+            Write(co.Left, sb);
+            sb.Append(" if ");
+            Write(co.Left, sb);
+            sb.Append(" is not None else ");
+        }
+
+        WriteReconciledBranch(co.Right, rightType, leftType, sb);
+        sb.Append(')');
+    }
+
     private void WriteReconciledBranch(Expr branch, TypeRef? branchType, TypeRef? siblingType, StringBuilder sb)
     {
         BranchReconciliation needs = BranchReconciliation.Classify(branchType, siblingType);
