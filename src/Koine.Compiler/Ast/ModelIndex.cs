@@ -671,12 +671,43 @@ public sealed class ModelIndex
     public static bool IsIdConvention(string name) =>
         name.Length > 2 && name.EndsWith("Id", StringComparison.Ordinal) && char.IsUpper(name[0]);
 
-    /// <summary>Every declared type across all contexts and aggregates.</summary>
+    /// <summary>
+    /// Every declared type across all contexts and aggregates.
+    /// </summary>
+    /// <remarks>
+    /// Enumerates the per-context registry (<c>_declsByContext</c>) rather than the flat,
+    /// last-write-wins <c>_byName</c> view, because R13.2 lets two bounded contexts each legally
+    /// declare a type with the same simple name (uniqueness is enforced PER CONTEXT, not globally).
+    /// Walking <c>_byName</c> made the losing context's declaration <b>entirely invisible</b> — so
+    /// every index built by iterating this method (<see cref="EnumsDeclaring"/> /
+    /// <c>_enumMemberToType</c>, <see cref="CandidateTypeNames"/>) silently dropped it (issue #1632).
+    /// Declarations are deduplicated by reference, so a type merely imported into another context's
+    /// scope is yielded once, by its owner. For a model with no cross-context name collision this
+    /// yields exactly the same declarations in the same order as before — both registries are built
+    /// from the same context-then-declaration walk, so only a genuine collision adds an entry.
+    /// </remarks>
     public IEnumerable<TypeDecl> AllTypes()
     {
+        var seen = new HashSet<TypeDecl>(ReferenceEqualityComparer.Instance);
+        foreach (Dictionary<string, TypeDecl> declsByType in _declsByContext.Values)
+        {
+            foreach (TypeDecl decl in declsByType.Values)
+            {
+                if (seen.Add(decl))
+                {
+                    yield return decl;
+                }
+            }
+        }
+
+        // Defensive: yield anything the flat view knows about that the per-context registry
+        // somehow missed, so this can only ever ADD visibility, never remove it.
         foreach (TypeDecl decl in _byName.Values)
         {
-            yield return decl;
+            if (seen.Add(decl))
+            {
+                yield return decl;
+            }
         }
     }
 
