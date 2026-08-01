@@ -191,12 +191,18 @@ internal sealed class CSharpExpressionTranslator
     private readonly IReadOnlyDictionary<string, Expr> _specBodies;
     private readonly HashSet<string> _inliningSpecs = new(StringComparer.Ordinal);
 
-    // Derived members of the current type (`name: T = <expr over siblings>`) and their defining
-    // expressions. A derived member has NO constructor parameter — it is emitted as a get-only
-    // property computed from the stored ones — so in NameMode.Parameter a reference to one is
-    // inlined the way a spec reference is, rather than rendered as a camelCase name that binds to
-    // nothing (issue #1756). Empty for a type with no derived members.
-    private readonly IReadOnlyDictionary<string, Expr> _derivedBodies;
+    /// <summary>
+    /// A derived member's defining expression, plus the enum type it is expected to produce when the
+    /// member is enum-typed (<c>null</c> otherwise) — the same hint the derived-property path passes.
+    /// </summary>
+    private readonly record struct DerivedMember(Expr Body, string? ExpectedEnum);
+
+    // Derived members of the current type (`name: T = <expr over siblings>`). A derived member has NO
+    // constructor parameter — it is emitted as a get-only property computed from the stored ones — so
+    // in NameMode.Parameter a reference to one is inlined the way a spec reference is, rather than
+    // rendered as a camelCase name that binds to nothing (issue #1756). Empty for a type with no
+    // derived members.
+    private readonly IReadOnlyDictionary<string, DerivedMember> _derivedBodies;
     private readonly HashSet<string> _inliningDerived = new(StringComparer.Ordinal);
 
     // When set, member identifiers render as `<receiver>.Member` (used inside the
@@ -269,19 +275,23 @@ internal sealed class CSharpExpressionTranslator
         // Classified with the SAME MemberAnalysis.IsDerived the lowerer uses to build
         // BoundField.Kind, so the translator and the emitted property set never disagree
         // about which members are computed (issue #1756).
-        Dictionary<string, Expr>? derived = null;
+        Dictionary<string, DerivedMember>? derived = null;
         foreach (Member m in members)
         {
             if (m.Initializer is not null && MemberAnalysis.IsDerived(m, memberNames))
             {
-                (derived ??= new Dictionary<string, Expr>(StringComparer.Ordinal))[m.Name] = m.Initializer;
+                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                (derived ??= new Dictionary<string, DerivedMember>(StringComparer.Ordinal))[m.Name] =
+                    new DerivedMember(m.Initializer, expectedEnum);
             }
         }
 
-        _derivedBodies = derived ?? EmptySpecs;
+        _derivedBodies = derived ?? EmptyDerived;
     }
 
     private static readonly IReadOnlyDictionary<string, Expr> EmptySpecs = new Dictionary<string, Expr>();
+
+    private static readonly IReadOnlyDictionary<string, DerivedMember> EmptyDerived = new Dictionary<string, DerivedMember>();
 
     public string Translate(Expr expr, NameMode mode, string? expectedEnum = null)
     {
@@ -842,29 +852,82 @@ internal sealed class CSharpExpressionTranslator
     /// </para>
     /// <para>
     /// Substitution recurses (a derived member may be defined over another one) and is bounded by a
-    /// visited set, so a cyclic derivation — which the semantic layer already rejects — degrades to the
-    /// former bare-name rendering instead of recursing forever.
+    /// visited set. The set is scoped to the path currently being expanded — released in the
+    /// <c>finally</c> — so a diamond (one guard reaching a derivation along two paths) substitutes on
+    /// both, and only genuine re-entry, i.e. a <em>cyclic</em> derivation, hits the bail-out. A cycle is
+    /// NOT rejected upstream today (the only cycle validator is <c>KOI1003</c>, for specs), so that
+    /// bail-out degrades to the pre-#1756 bare name and its <c>CS0103</c> rather than recursing forever
+    /// — a loud failure on a model that is already broken (it also emits mutually-recursive get-only
+    /// properties). Tracked separately; the emitter's job here is only to not hang.
+    /// </para>
+    /// <para>
+    /// Substitution is also refused where the reference site would <b>capture</b> the derivation's free
+    /// names. A lambda/<c>let</c> binding and a member render into one C# identifier space —
+    /// <c>lines.all(rate =&gt; rate &lt; total)</c> emits a lambda parameter literally named <c>rate</c>, which
+    /// shadows the constructor parameter of the same name — so splicing <c>total = rate * 2</c> in there
+    /// would read the ELEMENT and silently admit an instance violating the very invariant that let it
+    /// through. Bailing out leaves the pre-#1756 bare name and its loud <c>CS0103</c> instead of trading
+    /// a build break for an unsound aggregate. Only an ACTUAL collision refuses; a binding that shadows
+    /// nothing the body needs (<c>lines.all(x =&gt; x &lt; total)</c>) still substitutes.
     /// </para>
     /// </summary>
     private bool TryWriteDerivedBody(string name, StringBuilder sb)
     {
-        if (!_derivedBodies.TryGetValue(name, out Expr? body) || !_inliningDerived.Add(name))
+        if (!_derivedBodies.TryGetValue(name, out DerivedMember member) || !_inliningDerived.Add(name))
         {
             return false;
         }
 
+        if (_locals.Count > 0 && WouldBeCaptured(member.Body, new HashSet<string>(StringComparer.Ordinal)))
+        {
+            _inliningDerived.Remove(name);
+            return false;
+        }
+
+        // A derived member of enum type expects its own enum, exactly as the property body does
+        // (`EnumExpected` on the derived-property path), so a bare shared member qualifies correctly.
+        var outerExpectedEnum = _expectedEnum;
+        _expectedEnum = member.ExpectedEnum;
+
         try
         {
             sb.Append('(');
-            Write(body, NameMode.Parameter, sb);
+            Write(member.Body, NameMode.Parameter, sb);
             sb.Append(')');
         }
         finally
         {
+            _expectedEnum = outerExpectedEnum;
             _inliningDerived.Remove(name);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Whether any name reachable from <paramref name="body"/> — following references to further derived
+    /// members — is currently bound as a local, i.e. whether splicing the body here would rebind it.
+    /// Deliberately conservative: a name bound by the body's OWN lambda/<c>let</c> also counts, which can
+    /// only refuse a substitution that would have been safe, never allow one that isn't.
+    /// </summary>
+    private bool WouldBeCaptured(Expr body, HashSet<string> visited)
+    {
+        foreach (var referenced in MemberAnalysis.ReferencedIdentifiers(body))
+        {
+            if (_locals.Contains(referenced))
+            {
+                return true;
+            }
+
+            if (_derivedBodies.TryGetValue(referenced, out DerivedMember nested)
+                && visited.Add(referenced)
+                && WouldBeCaptured(nested.Body, visited))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

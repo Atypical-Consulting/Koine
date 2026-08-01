@@ -63,6 +63,54 @@ public class DerivedMemberInvariantTests
         }
         """;
 
+    /// <summary>
+    /// The <b>hygiene</b> case: the lambda binds <c>rate</c>, the same name the derivation reads. In the
+    /// emitted C# a lambda parameter and a constructor parameter share one identifier space, so splicing
+    /// <c>total = rate * 2</c> here would read the ELEMENT — quietly admitting an instance that violates
+    /// the invariant that let it through. The emitter refuses instead, leaving the pre-#1756 bare name.
+    /// </summary>
+    private const string LambdaCaptureFixture = """
+        context Shop {
+          value Cart {
+            rate:  Int
+            lines: List<Int>
+            total: Int = rate * 2
+            invariant lines.all(rate => rate < total)   "every line stays below the total"
+          }
+        }
+        """;
+
+    /// <summary>The same shape with a lambda binding that shadows nothing — this one must substitute.</summary>
+    private const string LambdaNoCaptureFixture = """
+        context Shop {
+          value Basket {
+            rate:  Int
+            lines: List<Int>
+            total: Int = rate * 2
+            invariant lines.all(line => line < total)   "every line stays below the total"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// An enum-typed derived member whose branches name members SHARED with another enum, so the
+    /// substituted body needs the same expected-enum hint the derived-property body gets — otherwise
+    /// the two arms qualify to different enums and the ternary has no common type (CS0173).
+    /// </summary>
+    private const string SharedEnumMemberFixture = """
+        context Shop {
+          enum Grade { Low
+                       High }
+          enum Rank  { Low
+                       Top }
+          value Card {
+            score: Int
+            grade: Grade = if score > 10 then High else Low
+            invariant grade == High   "a card must be high grade"
+          }
+        }
+        """;
+
     /// <summary>An entity carrying the same shape — its guards run after assignment, over properties.</summary>
     private const string EntityFixture = """
         context Subscription {
@@ -138,6 +186,56 @@ public class DerivedMemberInvariantTests
         // A bare Bool derived member as the whole guard: net = 1 is not > rate = 9, so this throws.
         TargetInvocationException ex = Should.Throw<TargetInvocationException>(
             () => Activator.CreateInstance(split, new object[] { 10, 9 }));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+    }
+
+    [Fact]
+    public void A_lambda_binding_that_would_capture_the_derivation_is_not_substituted()
+    {
+        var result = new KoineCompiler().Compile(LambdaCaptureFixture, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var cart = result.Files.Single(f => f.RelativePath.EndsWith("Cart.cs", StringComparison.Ordinal));
+
+        // The emitted lambda parameter is literally `rate`, so a substituted `rate * 2` inside it would
+        // read the element. It must NOT appear — the guard keeps the bare name instead.
+        cart.Contents.ShouldNotContain("rate => (rate < ((rate * 2)))");
+
+        // …which is a KNOWN, LOUD limitation: this model does not compile, exactly as before #1756.
+        // Silently mis-binding the invariant would be strictly worse. Hygienic renaming is tracked
+        // separately; the guarantee asserted here is "never silently wrong".
+        var (assembly, errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldBeNull();
+        errors.ShouldContain(e => e.Contains("CS0103", StringComparison.Ordinal)
+            && e.Contains("total", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_lambda_binding_that_shadows_nothing_still_substitutes()
+    {
+        Assembly asm = CompileFixture(LambdaNoCaptureFixture);
+        Type basket = asm.GetType("Shop.Basket")!;
+
+        // rate = 1 -> total = 2, and a line of 5 is not below it: the guard must reject.
+        TargetInvocationException ex = Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(basket, new object[] { 1, new List<int> { 5 } }));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+
+        object ok = Activator.CreateInstance(basket, new object[] { 10, new List<int> { 5 } })!;
+        basket.GetProperty("Total")!.GetValue(ok).ShouldBe(20);
+    }
+
+    [Fact]
+    public void An_enum_typed_derived_member_keeps_its_expected_enum_when_substituted()
+    {
+        Assembly asm = CompileFixture(SharedEnumMemberFixture);
+        Type card = asm.GetType("Shop.Card")!;
+
+        object high = Activator.CreateInstance(card, new object[] { 42 })!;
+        card.GetProperty("Grade")!.GetValue(high)!.ToString().ShouldBe("High");
+
+        TargetInvocationException ex = Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(card, new object[] { 1 }));
         ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
     }
 
