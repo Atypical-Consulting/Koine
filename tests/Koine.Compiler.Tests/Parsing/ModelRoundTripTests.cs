@@ -50,6 +50,11 @@ public class ModelRoundTripTests
               command place {
                 requires status == Draft   "only a draft order can be placed"
                 status -> Placed
+                emit OrderSubmitted(orderId: id)
+              }
+
+              create draft(orderId: OrderId, lines: List<OrderLine>) {
+                emit OrderSubmitted(orderId: id)
               }
             }
           }
@@ -253,6 +258,164 @@ public class ModelRoundTripTests
         context.Children.Select(c => (c.Kind, c.Title)).ShouldBe(new[] { ("value", "Money"), ("enum", "OrderStatus") });
         context.Members.ShouldBeEmpty();
         context.Transitions.ShouldBeEmpty();
+    }
+
+    // ---- #483: the aggregate's and entity's behavioural vocabulary --------
+
+    /// <summary>
+    /// An aggregate carrying the behaviour the aggregate-level projection surfaces: a repository
+    /// contract (a tuned operations set plus a declarative finder), an aggregate-scoped rule, and a
+    /// value-returning command over the root. Kept apart from <see cref="Sample"/>, whose aggregate has
+    /// to stay repository-free for the "add a repository" edit tests further down.
+    /// </summary>
+    private const string AggregateBehaviourSample = """
+        context Shipping {
+          enum ParcelStatus { Packed, Dispatched }
+
+          event ParcelDispatched { parcel: ParcelId }
+
+          aggregate Deliveries root Parcel {
+            entity Parcel identified by ParcelId {
+              status: ParcelStatus = Packed
+
+              states status {
+                Packed -> Dispatched
+              }
+
+              command dispatch(carrier: String): ParcelId {
+                requires status == Packed   "only a packed parcel can be dispatched"
+                status -> Dispatched
+                emit ParcelDispatched(parcel: id)
+                result id
+              }
+            }
+
+            repository {
+              operations: getById, add
+              find byStatus(status: ParcelStatus): List<Parcel>
+            }
+
+            spec IsDispatched on Parcel = status == Dispatched
+          }
+        }
+        """;
+
+    [Fact]
+    public void ModelToJson_emits_an_aggregates_repository_and_rules_as_nodes()
+    {
+        ModelNode aggregate = ModelRoundTripService.ModelToJson(Compile(AggregateBehaviourSample), "Shipping.Deliveries");
+
+        // The nested types keep their positions; the repository contract (at most one) and the
+        // aggregate-scoped rules are appended after them.
+        aggregate.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldBe(new[]
+            {
+                ("entity", "Parcel", "Shipping.Deliveries.Parcel"),
+                ("repository", "repository", "Shipping.Deliveries.repository"),
+                ("spec", "IsDispatched", "Shipping.Deliveries.IsDispatched"),
+            });
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_repositorys_operations_and_finders()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(AggregateBehaviourSample), "Shipping.Deliveries.repository");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "operation", "operation", "finder" });
+        members[0].Name.ShouldBe("getById");
+        members[1].Name.ShouldBe("add");
+        members[2].Name.ShouldBe("byStatus");
+        members[2].Type.ShouldBe("List<Parcel>");            // the finder's result type
+        members[2].Value.ShouldBe("status: ParcelStatus");   // its parameter list, rendered canonically
+    }
+
+    [Fact]
+    public void MembersOf_of_an_aggregate_scoped_rule_describes_its_condition_over_the_root()
+    {
+        ModelMember condition = ModelRoundTripService
+            .MembersOf(Compile(AggregateBehaviourSample), "Shipping.Deliveries.IsDispatched").Single();
+
+        condition.Kind.ShouldBe("condition");
+        condition.Name.ShouldBe("Parcel");
+        condition.Value.ShouldBe("status == Dispatched");
+    }
+
+    [Fact]
+    public void ModelToJson_emits_an_entitys_commands_and_factories_beside_its_state_machines()
+    {
+        ModelNode entity = ModelRoundTripService.ModelToJson(Compile(Sample), "Ordering.Order.Order");
+
+        entity.Children
+            .Select(c => (c.Kind, c.Title, c.QualifiedName))
+            .ShouldBe(new[]
+            {
+                ("states", "status", "Ordering.Order.Order.states.status"),
+                ("command", "place", "Ordering.Order.Order.commands.place"),
+                ("factory", "draft", "Ordering.Order.Order.factories.draft"),
+            });
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_commands_preconditions_and_emitted_events()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.Order.Order.commands.place");
+
+        // The state edge the command drives is not repeated here — it is already surfaced, correlated
+        // by `Via`, on the owning entity's transitions.
+        members.Select(m => m.Kind).ShouldBe(new[] { "requires", "emit" });
+        // A precondition is named by its described condition, with the author's message as its value.
+        members[0].Name.ShouldBe("status == Draft");
+        members[0].Value.ShouldBe("only a draft order can be placed");
+        // An emitted event is named by the event, with its payload arguments rendered canonically.
+        members[1].Name.ShouldBe("OrderSubmitted");
+        members[1].Value.ShouldBe("orderId: id");
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_commands_parameters_and_its_result()
+    {
+        var members = ModelRoundTripService.MembersOf(
+            Compile(AggregateBehaviourSample), "Shipping.Deliveries.Parcel.commands.dispatch");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "param", "requires", "emit", "result" });
+        members[0].Name.ShouldBe("carrier");
+        members[0].Type.ShouldBe("String");
+        members[3].Type.ShouldBe("ParcelId");   // the declared return type
+        members[3].Value.ShouldBe("id");        // the described `result` expression
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_factorys_parameters_and_creation_events()
+    {
+        var members = ModelRoundTripService.MembersOf(Compile(Sample), "Ordering.Order.Order.factories.draft");
+
+        members.Select(m => m.Kind).ShouldBe(new[] { "param", "param", "emit" });
+        members[0].Name.ShouldBe("orderId");                 // the explicit identity parameter
+        members[0].Type.ShouldBe("OrderId");
+        members[1].Name.ShouldBe("lines");
+        members[1].Type.ShouldBe("List<OrderLine>");
+        members[2].Name.ShouldBe("OrderSubmitted");
+        members[2].Value.ShouldBe("orderId: id");
+    }
+
+    [Fact]
+    public void ModelToJson_of_a_behaviour_free_entity_projects_only_its_state_machines()
+    {
+        // The same additive guard as the context-level one above, one level down: an entity declaring
+        // no command and no factory keeps exactly the children it had before.
+        const string structural = """
+            context Ordering {
+              enum OrderStatus { Draft, Placed }
+              entity Order identified by OrderId {
+                status: OrderStatus = Draft
+                states status { Draft -> Placed }
+              }
+            }
+            """;
+        ModelNode entity = ModelRoundTripService.ModelToJson(Compile(structural), "Ordering.Order");
+
+        entity.Children.Select(c => c.Kind).ShouldBe(new[] { "states" });
     }
 
     // ---- #1163: transition/command correlation + per-edge fan-out ---------

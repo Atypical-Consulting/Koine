@@ -18,7 +18,9 @@ namespace Koine.Compiler.Services;
 /// </summary>
 /// <param name="Kind">The construct kind: <c>model</c>, <c>context</c>, <c>aggregate</c>,
 /// <c>entity</c>, <c>value</c>, <c>quantity</c>, <c>enum</c>, <c>event</c>, <c>integration event</c>,
-/// <c>states</c>, or <c>contextMap</c> (the type kinds match the glossary doc).</param>
+/// <c>states</c>, or <c>contextMap</c> (the type kinds match the glossary doc); plus the behavioural
+/// vocabulary (#483) — <c>policy</c>, <c>service</c>, <c>spec</c>, <c>read-model</c>, <c>query</c>,
+/// <c>repository</c>, <c>command</c>, and <c>factory</c>. New kinds are additive (see above).</param>
 /// <param name="QualifiedName">Stable dotted address from the context (e.g. <c>Ordering.Money</c>, or
 /// <c>Sales.Cart.CartLine</c> for an aggregate-nested type); the empty string for the synthetic root.
 /// The same id <see cref="ModelRoundTripService"/> resolves edits against.</param>
@@ -46,7 +48,9 @@ public sealed record ModelNode(
 /// form row without re-parsing. Target-agnostic; additive-only (see <see cref="ModelNode"/>).
 /// </summary>
 /// <param name="Kind">The member kind: <c>field</c>, <c>enumMember</c>, <c>transition</c>, or
-/// <c>relation</c>.</param>
+/// <c>relation</c>; plus the behavioural rows (#483) — <c>reaction</c>, <c>operation</c>,
+/// <c>usecase</c>, <c>condition</c>, <c>criterion</c>, <c>finder</c>, <c>param</c>, <c>requires</c>,
+/// <c>emit</c>, and <c>result</c>. New kinds are additive (see <see cref="ModelNode"/>).</param>
 /// <param name="Name">The member's simple name (a field/enum-member name, a transition's <c>from</c>
 /// state, or a relation's <c>Upstream -&gt; Downstream</c> label).</param>
 /// <param name="Type">The member's type rendered in canonical <c>.koi</c> syntax (e.g.

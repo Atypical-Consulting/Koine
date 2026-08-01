@@ -118,19 +118,9 @@ public static partial class ModelRoundTripService
         var qualified = prefix + "." + type.Name;
         return type switch
         {
-            // The state machine lives on the ENTITY, not the aggregate — an aggregate node has no
-            // `States` of its own, so it gets `[]`; the transitions surface on its root entity child.
-            AggregateDecl agg => new ModelNode(
-                "aggregate", qualified, agg.Name, [],
-                agg.Types.Select(t => BuildType(t, qualified)).ToList(), []),
+            AggregateDecl agg => BuildAggregate(agg, qualified),
 
-            EntityDecl entity => new ModelNode(
-                "entity", qualified, entity.Name,
-                entity.Members.Select(FieldMember).ToList(),
-                entity.States.Select(s => BuildStates(entity, s, qualified)).ToList(),
-                // The flattened per-edge transitions across all the entity's state machines, surfaced
-                // on the owner so a consumer needn't parse the nested `.states.<field>` qualifiedName.
-                entity.States.SelectMany(s => TransitionMembers(entity, s)).ToList()),
+            EntityDecl entity => BuildEntity(entity, qualified),
 
             ValueObjectDecl vo => new ModelNode(
                 vo.IsQuantity ? "quantity" : "value", qualified, vo.Name,
@@ -161,6 +151,66 @@ public static partial class ModelRoundTripService
 
             _ => new ModelNode("type", qualified, type.Name, [], [], []),
         };
+    }
+
+    /// <summary>
+    /// An aggregate: its nested types, then its behavioural vocabulary (#483) — the repository contract
+    /// (at most one) and the aggregate-scoped specifications — appended after them so the existing
+    /// children keep their declaration positions. The state machine lives on the ENTITY, not the
+    /// aggregate: an aggregate node has no <c>States</c> of its own, so its transitions are <c>[]</c>;
+    /// they surface on its root entity child.
+    /// </summary>
+    private static ModelNode BuildAggregate(AggregateDecl agg, string qualified)
+    {
+        var children = new List<ModelNode>();
+        foreach (TypeDecl type in agg.Types)
+        {
+            children.Add(BuildType(type, qualified));
+        }
+
+        if (agg.Repository is { } repository)
+        {
+            children.Add(BuildRepository(repository, qualified));
+        }
+
+        foreach (SpecDecl spec in agg.Specs)
+        {
+            children.Add(BuildSpec(spec, qualified));
+        }
+
+        return new ModelNode("aggregate", qualified, agg.Name, [], children, []);
+    }
+
+    /// <summary>
+    /// An entity: its fields as members, then its state machines followed by its behavioural vocabulary
+    /// (#483) — the commands and the factories — appended after them so the existing <c>states</c>
+    /// children keep their positions.
+    /// </summary>
+    private static ModelNode BuildEntity(EntityDecl entity, string qualified)
+    {
+        var children = new List<ModelNode>();
+        foreach (StatesDecl states in entity.States)
+        {
+            children.Add(BuildStates(entity, states, qualified));
+        }
+
+        foreach (CommandDecl command in entity.Commands)
+        {
+            children.Add(BuildCommand(command, qualified));
+        }
+
+        foreach (FactoryDecl factory in entity.Factories)
+        {
+            children.Add(BuildFactory(factory, qualified));
+        }
+
+        return new ModelNode(
+            "entity", qualified, entity.Name,
+            entity.Members.Select(FieldMember).ToList(),
+            children,
+            // The flattened per-edge transitions across all the entity's state machines, surfaced
+            // on the owner so a consumer needn't parse the nested `.states.<field>` qualifiedName.
+            entity.States.SelectMany(s => TransitionMembers(entity, s)).ToList());
     }
 
     private static ModelNode BuildStates(EntityDecl owner, StatesDecl states, string entityQualified)
@@ -214,6 +264,91 @@ public static partial class ModelRoundTripService
 
         return null;
     }
+
+    /// <summary>
+    /// An aggregate's repository contract (R11.3): one <c>operation</c> member per explicitly declared
+    /// mutating operation — none when the aggregate takes the default set — then one <c>finder</c> per
+    /// declarative finder, carrying its result type and its rendered parameter list. An aggregate holds
+    /// at most one repository, so the node's name is the fixed <c>.repository</c> segment.
+    /// </summary>
+    private static ModelNode BuildRepository(RepositoryDecl repository, string aggregateQualified) => new(
+        "repository", aggregateQualified + ".repository", "repository",
+        [
+            .. (repository.Operations ?? []).Select(op => new ModelMember("operation", op, null, null)),
+            .. repository.Finders.Select(f => new ModelMember(
+                "finder", f.Name, FormatType(f.ResultType), DescribeParams(f.Parameters))),
+        ],
+        [], []);
+
+    /// <summary>
+    /// An entity command (R5/R6): its typed <c>param</c>s, then its body's <c>requires</c> preconditions
+    /// and the events it <c>emit</c>s in declaration order, then — for a value-returning command — its
+    /// <c>result</c> (the terminal statement, so projected last). The state edges the command drives are
+    /// not repeated here: they already surface on the owning entity, correlated back to this command by
+    /// <see cref="ModelMember.Via"/>.
+    /// </summary>
+    private static ModelNode BuildCommand(CommandDecl command, string entityQualified)
+    {
+        var members = new List<ModelMember>(command.Parameters.Select(ParamMember));
+        members.AddRange(command.Body.Select(BehaviourStmtMember).OfType<ModelMember>());
+
+        ResultClause? result = command.Body.OfType<ResultClause>().FirstOrDefault();
+        if (command.ReturnType is not null || result is not null)
+        {
+            members.Add(new ModelMember(
+                "result", "result",
+                command.ReturnType is null ? null : FormatType(command.ReturnType),
+                result is null ? null : ExprDescriber.Describe(result.Value)));
+        }
+
+        return new ModelNode(
+            "command", entityQualified + ".commands." + command.Name, command.Name, members, [], []);
+    }
+
+    /// <summary>
+    /// A factory (R8): the intention-revealing creation operation's typed <c>param</c>s, then its body's
+    /// <c>requires</c> preconditions and creation <c>emit</c>s in declaration order. Identity is
+    /// generated, and the field initializations are the emitters' concern, so neither is projected.
+    /// </summary>
+    private static ModelNode BuildFactory(FactoryDecl factory, string entityQualified) => new(
+        "factory", entityQualified + ".factories." + factory.Name, factory.Name,
+        [
+            .. factory.Parameters.Select(ParamMember),
+            .. factory.Body.Select(BehaviourStmtMember).OfType<ModelMember>(),
+        ],
+        [], []);
+
+    /// <summary>
+    /// The member for one command/factory body statement, or <c>null</c> for a statement this projection
+    /// does not surface as its own row — a <see cref="Transition"/> (already surfaced, correlated, on the
+    /// owning entity), an <see cref="Initialization"/>, or a <see cref="ResultClause"/> (folded into the
+    /// command's single <c>result</c> member, which also carries the declared return type).
+    /// </summary>
+    private static ModelMember? BehaviourStmtMember(CommandStmt stmt) => stmt switch
+    {
+        // A precondition is named by its described condition, with the author's message as its value.
+        RequiresClause requires => new ModelMember(
+            "requires", ExprDescriber.Describe(requires.Condition), null, requires.Message),
+
+        EmitClause emit => new ModelMember("emit", emit.EventName, null, DescribeEmitArgs(emit)),
+
+        _ => null,
+    };
+
+    /// <summary>One typed parameter of a command/factory — the same shape as a query's <c>criterion</c>.</summary>
+    private static ModelMember ParamMember(Param p) => new("param", p.Name, FormatType(p.Type), null);
+
+    /// <summary>Renders a parameter list in canonical <c>.koi</c> syntax (<c>name: Type, ...</c>); null when empty.</summary>
+    private static string? DescribeParams(IReadOnlyList<Param> parameters) =>
+        parameters.Count == 0
+            ? null
+            : string.Join(", ", parameters.Select(p => $"{p.Name}: {FormatType(p.Type)}"));
+
+    /// <summary>Renders an emitted event's payload in canonical <c>.koi</c> syntax (<c>field: value, ...</c>); null when empty.</summary>
+    private static string? DescribeEmitArgs(EmitClause emit) =>
+        emit.Args.Count == 0
+            ? null
+            : string.Join(", ", emit.Args.Select(a => $"{a.Field}: {ExprDescriber.Describe(a.Value)}"));
 
     /// <summary>
     /// A policy (R10.3): one <c>reaction</c> member correlating the triggering event with the command
