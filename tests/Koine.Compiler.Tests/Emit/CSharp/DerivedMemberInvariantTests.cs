@@ -211,6 +211,22 @@ public class DerivedMemberInvariantTests
     }
 
     [Fact]
+    public void A_lambda_binding_that_shadows_a_member_is_renamed_so_the_derivation_substitutes()
+    {
+        Assembly asm = CompileFixture(LambdaCaptureFixture);
+        Type cart = asm.GetType("Shop.Cart")!;
+
+        // rate = 2 -> Total = 4, and a line of 5 is NOT below it: the guard must reject.
+        TargetInvocationException ex = Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(cart, new object[] { 2, new List<int> { 5 } }));
+        ex.InnerException!.GetType().Name.ShouldBe("DomainInvariantViolationException");
+
+        // rate = 10 -> Total = 20, and a line of 5 is below it: the guard must admit.
+        object ok = Activator.CreateInstance(cart, new object[] { 10, new List<int> { 5 } })!;
+        cart.GetProperty("Total")!.GetValue(ok).ShouldBe(20);
+    }
+
+    [Fact]
     public void A_lambda_binding_that_shadows_nothing_still_substitutes()
     {
         Assembly asm = CompileFixture(LambdaNoCaptureFixture);
