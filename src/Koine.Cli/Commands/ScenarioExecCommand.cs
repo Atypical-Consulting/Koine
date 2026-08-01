@@ -68,9 +68,10 @@ internal sealed class ScenarioExecCommand : Command<ScenarioExecCommand.Settings
         }
         catch (OutOfMemoryException) when (ScenarioSandbox.HeapCeilingNote() is not null)
         {
-            // The sandbox's memory ceiling (issue #1759), reported by the process that actually hit it and
-            // therefore knows the number. Naming the ceiling matters: "out of memory" alone reads as a
-            // machine problem, when what happened is a model-derived allocation meeting its budget.
+            // The sandbox's memory ceiling (issue #1759) reached OUTSIDE the executor — parsing a
+            // pathological model, say. The executor catches its own (it wraps both the emit/compile step
+            // and the reflective invoke, so an OOM in there never reaches here) and reports the ceiling
+            // itself; this is the backstop for everything else in this method.
             return Failed(parsed.Target, parsed.Operation, ScenarioSandbox.HeapCeilingNote()!);
         }
         catch (Exception ex)

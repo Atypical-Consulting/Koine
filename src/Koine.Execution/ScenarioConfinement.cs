@@ -20,9 +20,14 @@ internal sealed class ScenarioConfinement : IDisposable
     /// it is what <c>RLIMIT_CPU</c> raises when the soft processor-time limit is reached.</summary>
     internal const int UnixCpuLimitExitCode = 152;
 
-    /// <summary>Windows terminates a job that blows a quota with <c>STATUS_QUOTA_EXCEEDED</c>, which
-    /// surfaces as this (negative, when read as a signed exit code) NTSTATUS.</summary>
+    /// <summary>Windows terminates a job that blows its TIME limit with <c>STATUS_QUOTA_EXCEEDED</c>,
+    /// which surfaces as this (negative, when read as a signed exit code) NTSTATUS.</summary>
     internal const int WindowsQuotaExceededExitCode = unchecked((int)0xC0000044);
+
+    /// <summary><c>ERROR_NOT_ENOUGH_QUOTA</c> — the Win32 form of the same end-of-job-time termination,
+    /// which is what MSDN documents for <c>JOB_OBJECT_TERMINATE_AT_END_OF_JOB</c>. Both are accepted
+    /// because which one a process exits with is not something to bet a diagnostic on.</summary>
+    internal const int WindowsNotEnoughQuotaExitCode = 1816;
 
     private readonly List<string> _degradations = [];
     private readonly ScenarioSandboxOptions _options;
@@ -103,14 +108,18 @@ internal sealed class ScenarioConfinement : IDisposable
                 + "hot (an unbounded loop in a derived member or invariant) rather than merely slowly.";
         }
 
+        // Deliberately NOT a memory diagnosis: a JOB_OBJECT_LIMIT_JOB_MEMORY breach makes the offending
+        // COMMIT fail (the child sees an OutOfMemoryException and reports the ceiling itself) — it never
+        // terminates the process. The only ceiling that terminates a job is the TIME one, so that is the
+        // only ceiling this exit code can honestly be attributed to.
         if (OperatingSystem.IsWindows()
-            && exitCode == WindowsQuotaExceededExitCode
-            && (_options.MemoryLimitBytes is not null || _options.CpuLimit is not null))
+            && exitCode is WindowsQuotaExceededExitCode or WindowsNotEnoughQuotaExitCode
+            && _options.CpuLimit is { } jobTime)
         {
-            return "The scenario exceeded one of the sandbox's resource ceilings"
-                + (_options.MemoryLimitBytes is { } bytes ? " (memory: " + Mebibytes(bytes) + ")" : string.Empty)
-                + " and was stopped by the operating system. That is a resource ceiling, not the wall-clock "
-                + "deadline.";
+            return "The scenario exceeded the sandbox's ceiling of " + Seconds(jobTime) + " of PROCESSOR "
+                + "time and was stopped by the operating system. That is a resource ceiling, not the "
+                + "wall-clock deadline: the emitted code ran hot (an unbounded loop in a derived member or "
+                + "invariant) rather than merely slowly.";
         }
 
         return null;

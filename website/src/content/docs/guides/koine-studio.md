@@ -227,16 +227,20 @@ the other, rather than putting two Roslyn compiles inside the editor backend at 
 
 ### Resource ceilings and OS-level confinement
 
-Beyond the deadline, the child runs under limits the operating system enforces. What you get depends on
-the platform, and the run **tells you** when something could not be applied — any gap is appended to the
-result's notes rather than left implied:
+Beyond the deadline, the child runs under limits the runtime and the operating system enforce. What you
+get depends on the platform, and the run **tells you** when something could not be applied — any gap is
+appended to the result's notes rather than left implied:
 
 | | macOS | Linux | Windows |
 |---|---|---|---|
-| Memory ceiling (1 GiB) | ✅ | ✅ | ✅ (also enforced by a Job Object) |
-| Processor-time ceiling | ✅ | ✅ | ✅ |
+| Managed-heap ceiling (1 GiB) | ✅ | ✅ | ✅ *(also capped by a Job Object)* |
+| Processor-time ceiling | ✅ | ✅ | ✅ *(Job Object)* |
 | Network denied | ✅ | ✅ | ❌ *(reported)* |
 | Writes confined to the run directory | ✅ | ❌ *(reported)* | ❌ *(reported)* |
+
+The memory row is a **managed-heap** ceiling on macOS and Linux — the .NET runtime enforces it, and it
+bounds the managed heap, which is where an allocation storm in emitted code lands. It does not bound
+native allocations; only the Windows Job Object caps those too.
 
 Reads are unrestricted everywhere — the child has to load the .NET runtime and its own assemblies. A run
 stopped by a *resource* ceiling says so by name, so an allocation storm is never reported as an infinite

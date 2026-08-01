@@ -28,8 +28,22 @@ internal static class ScenarioSandbox
     /// it also lands exactly where a runaway allocation in emitted code lands.</summary>
     internal const string HeapHardLimitVariable = "DOTNET_GCHeapHardLimit";
 
-    /// <summary>How long an availability probe gets before it is treated as unavailable.</summary>
-    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>How long an availability probe gets before it is treated as unavailable. Short on
+    /// purpose: the probe launches a no-op program, so anything beyond a couple of seconds is a wedged
+    /// mechanism rather than a slow one — and this time is spent BEFORE the child starts, outside the
+    /// caller's own budget (see <see cref="MaxProbeCost"/>).</summary>
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>How many probes one <see cref="Plan"/> can run in the worst case: the filesystem/network
+    /// wrapper for this platform, and the shell for the processor-time ceiling.</summary>
+    private const int MaxProbesPerPlan = 2;
+
+    /// <summary>
+    /// The longest the confinement probes can add to a run. Callers that advertise a latency ceiling must
+    /// include it: probing happens before the child spawns, so it sits OUTSIDE the run's own timeout.
+    /// Paid at most once per host process — every probe result is cached for its lifetime.
+    /// </summary>
+    public static readonly TimeSpan MaxProbeCost = ProbeTimeout * MaxProbesPerPlan;
 
     private static readonly Lazy<bool> ShellAvailable = new(() => !OperatingSystem.IsWindows() && File.Exists(ShellPath));
 
@@ -424,6 +438,19 @@ internal static class ScenarioSandbox
             return false;
         }
     }
+
+    /// <summary>
+    /// The note for <paramref name="failure"/> when it is really a RESOURCE ceiling being reached rather
+    /// than a fault in the model — or <c>null</c> when it is not.
+    ///
+    /// <para>Consulted wherever the child catches an exception, because that is where a heap-limit
+    /// <see cref="OutOfMemoryException"/> actually surfaces: the executor catches around both the emit +
+    /// compile step and the reflective invoke, so an OOM never reaches an outer handler. Reporting it as
+    /// a generic "the scenario could not be executed" would be true and useless — it reads as a machine
+    /// problem, when what happened is a model-derived allocation meeting its budget.</para>
+    /// </summary>
+    public static string? ResourceCeilingNote(Exception failure) =>
+        failure is OutOfMemoryException ? HeapCeilingNote() : null;
 
     /// <summary>
     /// The note a CHILD writes when it dies of the heap hard limit — read from its own environment, so

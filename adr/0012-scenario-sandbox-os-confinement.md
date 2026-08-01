@@ -100,6 +100,13 @@ growing an I/O primitive.
 
 ## Consequences
 
+**Partial supersession of [ADR 0011](0011-scenario-execution-sandbox.md).** ADR 0011's decision — scenario
+execution runs in a killable child process — stands unchanged and is not superseded. What this ADR retires
+is one *trade-off* it recorded: the bullet stating there is no seccomp filter, no `sandbox-exec` profile,
+no Job Object and no filesystem or network denial. That bullet now carries an amendment pointing here, and
+both ADRs carry a `relates-to` link, per `adr/README.md`'s partial-supersession rule. ADR 0011's status and
+the rest of its content stay as they are — including its trust model, which still governs.
+
 **Easier:**
 
 - The premise ADR 0011 asserts is now *checked* on macOS rather than merely stated: a child that tries

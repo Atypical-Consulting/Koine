@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Semantics.Scenarios;
 using Koine.Compiler.Services;
@@ -234,6 +236,32 @@ public class ScenarioSandboxTests
         }
     }
 
+    /// <summary>A ceiling the real child cannot finish a compile under, but can still START under — so the
+    /// run reaches the executor and fails there, which is where the ceiling has to be recognised.</summary>
+    private const long ExhaustibleMemoryLimitBytes = 16L << 20;
+
+    [Fact]
+    public void A_run_that_exhausts_the_memory_ceiling_names_it_instead_of_reporting_a_generic_fault()
+    {
+        // The REAL child, not a stub: the ceiling surfaces as an OutOfMemoryException deep inside the
+        // executor, which catches every exception around both the emit/compile step and the reflective
+        // invoke — so a handler placed anywhere further out never sees it and the ceiling goes unnamed.
+        ScenarioChildRun run = ScenarioExecutionHost.RunDetailed(
+            Pizzeria.Value,
+            CancelACancelledOrder(),
+            RoundTripBudget,
+            ScenarioSandboxOptions.Default with { MemoryLimitBytes = ExhaustibleMemoryLimitBytes });
+
+        string tree = ScenarioService.WriteJson(run.Result);
+        run.Result["ok"].ShouldBe(false, tree);
+        run.TimedOut.ShouldBeFalse(tree);
+
+        // Named, and named with the ceiling that was actually in force — not "OutOfMemoryException", which
+        // reads as a machine problem rather than a model-derived allocation meeting its budget.
+        tree.ShouldContain("memory ceiling of 16 MiB");
+        tree.ShouldNotContain("timed out");
+    }
+
     [Fact]
     public void A_child_that_burns_past_the_processor_ceiling_is_reported_as_a_cap_not_a_timeout()
     {
@@ -297,7 +325,11 @@ public class ScenarioSandboxTests
             run.Result["ok"].ShouldBe(true, ScenarioService.WriteJson(run.Result));
 
             // …and every degradation is visible to the user, not just to the caller holding the run.
+            // Exactly the degradations, nothing invented: the stub reports no notes of its own, so the
+            // tree's note count IS the confinement's — an over-append would fail here just as a missing
+            // one would.
             object?[] notes = (object?[])run.Result["notes"]!;
+            notes.Length.ShouldBe(run.SandboxNotes.Count, ScenarioService.WriteJson(run.Result));
             foreach (string degradation in run.SandboxNotes)
             {
                 notes.ShouldContain(degradation);
@@ -317,12 +349,7 @@ public class ScenarioSandboxTests
     public void A_confined_child_may_write_inside_its_run_directory_and_nowhere_else()
     {
         RequireUnixStubs();
-        if (!ScenarioSandbox.FilesystemConfinementAvailable)
-        {
-            Assert.Skip("This platform has no filesystem confinement mechanism; degradation is asserted "
-                + "by " + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
-                + ".");
-        }
+        RequireFilesystemConfinement();
 
         string outside = Path.Combine(Path.GetTempPath(), "koine-outside-" + Guid.NewGuid().ToString("N") + ".txt");
         string stub = WriteStub(
@@ -339,6 +366,11 @@ public class ScenarioSandboxTests
             // also broke the legitimate write would be indistinguishable from a broken sandbox.
             Probed(run).ShouldBe("inside=allowed outside=denied");
             File.Exists(outside).ShouldBeFalse(outside);
+
+            // The control: the SAME child, confinement off, gets the write it was just denied. Without
+            // this the assertion above would also pass if the write had failed for some unrelated reason.
+            Forget(outside);
+            Probed(RunStub(stub, ScenarioSandboxOptions.None)).ShouldBe("inside=allowed outside=allowed");
         }
         finally
         {
@@ -351,12 +383,7 @@ public class ScenarioSandboxTests
     public void A_confined_child_cannot_open_a_network_connection()
     {
         RequireUnixStubs();
-        if (!ScenarioSandbox.NetworkConfinementAvailable)
-        {
-            Assert.Skip("This platform has no network confinement mechanism; degradation is asserted by "
-                + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
-                + ".");
-        }
+        RequireNetworkConfinement();
 
         if (!File.Exists(BashPath))
         {
@@ -365,23 +392,76 @@ public class ScenarioSandboxTests
             Assert.Skip("The network probe needs " + BashPath + ".");
         }
 
-        // 203.0.113.0/24 is TEST-NET-3 (RFC 5737): reserved for documentation, so an UNCONFINED attempt
-        // fails by timing out rather than by reaching anything — and the confined one fails INSTANTLY,
-        // which is what the short shell timeout below distinguishes.
+        // A socket this test OWNS, listening on loopback. Reaching a real address would make "denied" and
+        // "there is no route from this machine" the same observation; a listener we know is accepting
+        // makes the control below meaningful — unconfined, the connection MUST succeed.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
         string stub = WriteStub(
             "network=allowed\n"
-            + "if ! (exec 3<>/dev/tcp/203.0.113.1/80) 2>/dev/null; then network=denied; fi\n"
+            + "if ! (exec 3<>/dev/tcp/127.0.0.1/" + port.ToString(CultureInfo.InvariantCulture)
+            + ") 2>/dev/null; then network=denied; fi\n"
             + Report("network=${network}"),
             BashPath);
 
         try
         {
-            ScenarioChildRun run = RunStub(stub, ScenarioSandboxOptions.Default, TimeSpan.FromSeconds(20));
-            Probed(run).ShouldBe("network=denied");
+            Probed(RunStub(stub, ScenarioSandboxOptions.Default)).ShouldBe("network=denied");
+
+            // The control: same child, same listener, confinement off — it connects.
+            Probed(RunStub(stub, ScenarioSandboxOptions.None)).ShouldBe("network=allowed");
         }
         finally
         {
             Forget(stub);
+            listener.Stop();
+        }
+    }
+
+    /// <summary>
+    /// Gates the filesystem-enforcement test. Deliberately NOT a bare skip on
+    /// <see cref="ScenarioSandbox.FilesystemConfinementAvailable"/>: that is the very predicate the
+    /// production path consults, so skipping on it would turn a broken probe — confinement silently lost
+    /// everywhere — into a green run with a skip. On macOS, which always ships <c>sandbox-exec</c>, an
+    /// unavailable mechanism is a REGRESSION and fails here.
+    /// </summary>
+    private static void RequireFilesystemConfinement()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            ScenarioSandbox.FilesystemConfinementAvailable.ShouldBeTrue(
+                "macOS ships /usr/bin/sandbox-exec, so filesystem confinement being unavailable here is a "
+                + "regression in the sandbox, not a fact about the platform");
+            return;
+        }
+
+        Assert.Skip("Only macOS has a filesystem confinement mechanism today; the degradation every other "
+            + "platform reports instead is asserted by "
+            + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
+            + ".");
+    }
+
+    /// <summary>Gates the network-enforcement test, on the same principle as
+    /// <see cref="RequireFilesystemConfinement"/>. Linux keeps a real skip: an unprivileged network
+    /// namespace genuinely depends on the kernel's configuration, so its absence is a platform fact.</summary>
+    private static void RequireNetworkConfinement()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            ScenarioSandbox.NetworkConfinementAvailable.ShouldBeTrue(
+                "macOS ships /usr/bin/sandbox-exec, so network confinement being unavailable here is a "
+                + "regression in the sandbox, not a fact about the platform");
+            return;
+        }
+
+        if (!ScenarioSandbox.NetworkConfinementAvailable)
+        {
+            Assert.Skip("This host cannot create an unprivileged network namespace; the degradation "
+                + "reported instead is asserted by "
+                + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
+                + ".");
         }
     }
 

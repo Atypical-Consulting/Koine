@@ -319,6 +319,11 @@ internal static class ScenarioExecutionHost
         string runDirectory = Path.Combine(Path.GetTempPath(), "koine-scenario-" + Guid.NewGuid().ToString("N"));
         int childId = 0;
 
+        // Hoisted out of the try so the OUTER catch can report them too: on a platform that legitimately
+        // loses some confinement, a throw after planning would otherwise return a tree with no sandbox
+        // notes at all — which reads as "fully confined", the one thing it must never imply.
+        IReadOnlyList<string> degradations = [];
+
         try
         {
             Directory.CreateDirectory(runDirectory);
@@ -338,6 +343,7 @@ internal static class ScenarioExecutionHost
             // piece the platform cannot provide comes back as a note, never as a failure.
             using var confinement = ScenarioSandbox.Plan(
                 fileName, command.Value.Arguments, runDirectory, sandbox);
+            degradations = confinement.Degradations;
 
             var startInfo = new ProcessStartInfo
             {
@@ -463,7 +469,7 @@ internal static class ScenarioExecutionHost
         catch (Exception ex)
         {
             return Failure(scenario, runDirectory, childId, timedOut: false,
-                $"The scenario could not be run in the sandbox: {ex.Message}");
+                $"The scenario could not be run in the sandbox: {ex.Message}", degradations);
         }
         finally
         {

@@ -67,7 +67,10 @@ internal sealed class ScenarioExecutor
         }
         catch (Exception ex)
         {
-            executor._notes.Add($"The scenario could not be executed: {Describe(Unwrap(ex))}");
+            Exception failure = Unwrap(ex);
+            executor._notes.Add(
+                ScenarioSandbox.ResourceCeilingNote(failure)
+                ?? $"The scenario could not be executed: {Describe(failure)}");
             return executor.Failed(scenario);
         }
     }
@@ -190,7 +193,18 @@ internal sealed class ScenarioExecutor
         }
         catch (Exception ex)
         {
-            return OperationFailure(s, Unwrap(ex), instance, body, before);
+            Exception failure = Unwrap(ex);
+
+            // A sandbox resource ceiling is not the operation FAILING — nothing about the domain rejected
+            // anything — so it must not be dressed up as an operation failure with a timeline. Report the
+            // ceiling by name and stop (issue #1759).
+            if (ScenarioSandbox.ResourceCeilingNote(failure) is { } ceiling)
+            {
+                _notes.Add(ceiling);
+                return Failed(s);
+            }
+
+            return OperationFailure(s, failure, instance, body, before);
         }
 
         object? subject = isFactory ? returned : instance;
