@@ -11,7 +11,7 @@ describe('storeInspectorToggle', () => {
   let hostElement: HTMLElement | null;
 
   beforeEach(() => {
-    store = createStore<any>(() => ({
+    store = createStore<AppState>(() => ({
       selection: null,
       activeContext: null,
       center: 'code',
@@ -24,7 +24,7 @@ describe('storeInspectorToggle', () => {
       diagnosticsByUri: {},
       docViews: {},
       chat: { messages: [], status: 'idle', changeSet: null, workspaceKey: '', turn: null, draft: '' },
-    }));
+    }) as AppState);
 
     // Clean up any existing host from previous tests
     hostElement = document.querySelector('.koi-store-inspector-overlay');

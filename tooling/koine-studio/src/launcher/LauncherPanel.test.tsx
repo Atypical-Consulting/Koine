@@ -352,7 +352,7 @@ describe('LauncherPanel — quick actions + action menu + toast (issue #1143, ta
     fireEvent.click(row);
 
     expect(actionDeps.gotoDefinition).toHaveBeenCalledTimes(1);
-    const called = (actionDeps.gotoDefinition as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const called = (actionDeps.gotoDefinition as ReturnType<typeof vi.fn>).mock.calls[0][0] as CatalogEntry;
     expect(called.qualifiedName).toBe('Ordering.Order');
   });
 

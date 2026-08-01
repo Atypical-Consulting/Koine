@@ -30,7 +30,7 @@ function filesJson(source: string): string {
 export async function runWasmTool(name: string, argsJson: string): Promise<string> {
   let args: { source?: unknown; target?: unknown };
   try {
-    args = JSON.parse(argsJson || '{}');
+    args = JSON.parse(argsJson || '{}') as { source?: unknown; target?: unknown };
   } catch {
     return 'Error: the tool arguments were not valid JSON.';
   }

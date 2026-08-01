@@ -46,6 +46,32 @@
 // The event listeners attach only inside a real ServiceWorkerGlobalScope, so importing this file under
 // vitest is side-effect-free.
 
+// JSDoc types below are for consumer inference only (tsconfig.json: allowJs on, checkJs off) — the
+// dependency-injected `deps` shape is deliberately narrower than the real Cache/CacheStorage DOM
+// interfaces (just the handful of methods these helpers call), so the in-memory fakes
+// `src/shell/koine-studio-sw.test.ts` unit-tests against satisfy it structurally.
+/**
+ * @typedef {object} CacheLike
+ * @property {(request: Request | string) => Promise<Response | undefined>} match
+ * @property {(request: Request | string, response: Response) => Promise<void>} put
+ */
+/**
+ * @typedef {object} CacheStorageLike
+ * @property {(name: string) => Promise<CacheLike>} open
+ * @property {() => Promise<string[]>} keys
+ * @property {(name: string) => Promise<boolean>} delete
+ */
+/**
+ * @typedef {object} Deps
+ * @property {CacheStorageLike} caches
+ * @property {typeof fetch} fetch
+ */
+/**
+ * @typedef {object} BootManifest
+ * @property {string | null} generation
+ * @property {string[]} assetUrls
+ */
+
 export const WASM_CACHE_PREFIX = 'koine-studio-wasm-';
 export const SHELL_CACHE_PREFIX = 'koine-studio-shell-';
 // Bump SHELL_VERSION to force a one-time eviction of the previous shell/static generation at activate.
@@ -71,6 +97,8 @@ export function shellCacheName() {
  * need to be known here. The PWA manifest + launcher icons are deliberately NOT listed: the browser
  * keeps its own install-time copies and the running app uses inline SVG marks, so precaching them here
  * would be dead work the fetch handler never serves.
+ * @param {string} scope
+ * @returns {string[]}
  */
 export function shellAssetUrls(scope) {
   const b = scope.endsWith('/') ? scope : scope + '/';
@@ -81,33 +109,57 @@ export function shellAssetUrls(scope) {
  * Studio's framework path prefix for a SW scope (`new URL(registration.scope).pathname`), anchored at
  * `<scope>koine-wasm/_framework/`. Studio's SW is registered AT its own base, so this matches Studio's
  * own bundle (unlike the Playground SW, which anchors at the site root to exclude /studio/).
+ * @param {string} scopePath
+ * @returns {string}
  */
 export function frameworkPrefixForScope(scopePath) {
   return `${scopePath.replace(/\/$/, '')}/koine-wasm/_framework/`;
 }
 
-/** True for a request under Studio's framework prefix. */
+/**
+ * True for a request under Studio's framework prefix.
+ * @param {string} pathname
+ * @param {string} frameworkPrefix
+ * @returns {boolean}
+ */
 export function isFrameworkPath(pathname, frameworkPrefix) {
   return pathname.startsWith(frameworkPrefix);
 }
 
-/** True for the boot manifest specifically (handled network-first to detect new generations). */
+/**
+ * True for the boot manifest specifically (handled network-first to detect new generations).
+ * @param {string} pathname
+ * @returns {boolean}
+ */
 export function isBootManifestPath(pathname) {
   return pathname.endsWith(FRAMEWORK_MARKER + MANIFEST_NAME);
 }
 
-/** True for the loader entry (handled network-first so it always matches the live generation). */
+/**
+ * True for the loader entry (handled network-first so it always matches the live generation).
+ * @param {string} pathname
+ * @returns {boolean}
+ */
 export function isLoaderPath(pathname) {
   return pathname.endsWith(FRAMEWORK_MARKER + LOADER_NAME);
 }
 
-/** True for a Vite content-hashed built asset under `<scope>assets/` (cache-first, immutable by name). */
+/**
+ * True for a Vite content-hashed built asset under `<scope>assets/` (cache-first, immutable by name).
+ * @param {string} pathname
+ * @param {string} scopePath
+ * @returns {boolean}
+ */
 export function isShellAssetPath(pathname, scopePath) {
   const b = scopePath.endsWith('/') ? scopePath : scopePath + '/';
   return pathname.startsWith(b + ASSETS_SEGMENT);
 }
 
-/** Absolute framework base (…/koine-wasm/_framework/) for a request URL under it, else null. */
+/**
+ * Absolute framework base (…/koine-wasm/_framework/) for a request URL under it, else null.
+ * @param {string} url
+ * @returns {string | null}
+ */
 export function frameworkBaseOf(url) {
   const i = url.indexOf(FRAMEWORK_MARKER);
   return i >= 0 ? url.slice(0, i + FRAMEWORK_MARKER.length) : null;
@@ -117,6 +169,8 @@ export function frameworkBaseOf(url) {
  * URL of the build-time shell asset manifest (emitted by vite.config.ts's `shellManifestPlugin`): a
  * flat JSON array of every content-hashed file under `<scope>assets/` (JS/CSS chunks, fonts). Absent
  * under `vite dev` (no bundle) — `shellAssetManifestUrls` tolerates a fetch failure there.
+ * @param {string} scope
+ * @returns {string}
  */
 export function shellManifestUrl(scope) {
   const b = scope.endsWith('/') ? scope : scope + '/';
@@ -132,12 +186,16 @@ export function shellManifestUrl(scope) {
  * SW's cache-first fetch handler entirely (issue #1685). Precaching the whole list here, as a fetch made
  * by the SW itself, is unaffected by that client-control race. Best-effort: a missing/unreachable
  * manifest (e.g. `vite dev`, no bundle) yields an empty list rather than failing `install`.
+ * @param {string} scope
+ * @param {Pick<Deps, 'fetch'>} deps
+ * @returns {Promise<string[]>}
  */
 export async function shellAssetManifestUrls(scope, deps) {
   const b = scope.endsWith('/') ? scope : scope + '/';
   try {
     const res = await deps.fetch(shellManifestUrl(scope));
     if (!res || !res.ok) return [];
+    /** @type {string[]} */
     const fileNames = await res.json();
     return fileNames.map((fileName) => b + fileName);
   } catch {
@@ -148,6 +206,8 @@ export async function shellAssetManifestUrls(scope, deps) {
 /**
  * Cache name for a WASM bundle generation. base64url-maps the `sha256-…` hash (`+`→`-`, `/`→`_`, drop
  * padding) so it is a safe cache key AND injective — distinct hashes never collapse to one name.
+ * @param {string} generation
+ * @returns {string}
  */
 export function cacheNameFor(generation) {
   const safe = String(generation).replace(/\+/g, '-').replace(/\//g, '_').replace(/[^A-Za-z0-9_-]/g, '');
@@ -160,11 +220,15 @@ export function cacheNameFor(generation) {
  *   assetUrls:  every framework file worth precaching, absolute (frameworkBase + name): the loader
  *               (dotnet.js) + the manifest (dotnet.boot.js) + every `name` under the resources.* lists.
  * The manifest wraps its JSON between /*json-start* / … /*json-end* / markers; tolerate their absence.
+ * @param {string} text
+ * @param {string} frameworkBase
+ * @returns {BootManifest}
  */
 export function parseBootManifest(text, frameworkBase) {
   const open = text.indexOf('/*json-start*/');
   const close = text.lastIndexOf('/*json-end*/');
   const json = open >= 0 && close >= 0 ? text.slice(open + '/*json-start*/'.length, close) : text;
+  /** @type {{ resources?: { hash?: string, [key: string]: unknown } }} */
   const config = JSON.parse(json);
   const resources = config.resources ?? {};
   const names = new Set([LOADER_NAME, MANIFEST_NAME]);
@@ -181,13 +245,23 @@ export function parseBootManifest(text, frameworkBase) {
 
 // --- behaviours (dependency-injected via `deps = { caches, fetch }` so they unit-test) --------------
 
-/** The current WASM generation cache's name (the single koine-studio-wasm-* cache), or null. */
+/**
+ * The current WASM generation cache's name (the single koine-studio-wasm-* cache), or null.
+ * @param {Pick<Deps, 'caches'>} deps
+ * @returns {Promise<string | null>}
+ */
 export async function existingCacheName(deps) {
   const names = await deps.caches.keys();
   return names.find((name) => name.startsWith(WASM_CACHE_PREFIX)) ?? null;
 }
 
-/** Cache-first: serve from `cacheName`; on miss fetch, store a clone, return. Never caches !ok. */
+/**
+ * Cache-first: serve from `cacheName`; on miss fetch, store a clone, return. Never caches !ok.
+ * @param {Request} request
+ * @param {string} cacheName
+ * @param {Deps} deps
+ * @returns {Promise<Response>}
+ */
 export async function cacheFirst(request, cacheName, deps) {
   const cache = await deps.caches.open(cacheName);
   const hit = await cache.match(request);
@@ -203,7 +277,12 @@ export async function cacheFirst(request, cacheName, deps) {
   return response;
 }
 
-/** Serve `request` from the current WASM generation cache, or null when it isn't cached. */
+/**
+ * Serve `request` from the current WASM generation cache, or null when it isn't cached.
+ * @param {Request} request
+ * @param {Deps} deps
+ * @returns {Promise<Response | null>}
+ */
 async function matchInCurrentCache(request, deps) {
   const cacheName = await existingCacheName(deps);
   if (!cacheName) return null;
@@ -211,14 +290,24 @@ async function matchInCurrentCache(request, deps) {
   return (await cache.match(request)) ?? null;
 }
 
-/** Cache-first for a framework asset under the current generation cache (network passthrough if none). */
+/**
+ * Cache-first for a framework asset under the current generation cache (network passthrough if none).
+ * @param {Request} request
+ * @param {Deps} deps
+ * @returns {Promise<Response>}
+ */
 export async function handleAssetRequest(request, deps) {
   const cacheName = await existingCacheName(deps);
   if (!cacheName) return deps.fetch(request); // cold start, before the manifest created a cache
   return cacheFirst(request, cacheName, deps);
 }
 
-/** Cache-first for a content-hashed built asset under the shell cache (network passthrough otherwise). */
+/**
+ * Cache-first for a content-hashed built asset under the shell cache (network passthrough otherwise).
+ * @param {Request} request
+ * @param {Deps} deps
+ * @returns {Promise<Response>}
+ */
 export async function handleShellAssetRequest(request, deps) {
   return cacheFirst(request, shellCacheName(), deps);
 }
@@ -228,6 +317,9 @@ export async function handleShellAssetRequest(request, deps) {
  * a cache-first loader could be served from a STALE generation cache after a new build, then read the
  * new manifest — a half-old/half-new runtime. Fetching it fresh keeps it matched to the live build (the
  * heavy hashed assets stay cache-first — the loader is small). Offline → serve the cached loader.
+ * @param {Request} request
+ * @param {Deps} deps
+ * @returns {Promise<Response>}
  */
 export async function handleLoaderRequest(request, deps) {
   try {
@@ -253,6 +345,10 @@ export async function handleLoaderRequest(request, deps) {
 /**
  * Network-first for the manifest: fetch fresh to learn the live generation, (re)populate that
  * generation's cache, evict stale generations, return the fresh response. Offline → cached manifest.
+ * @param {Request} request
+ * @param {string} frameworkBase
+ * @param {Deps} deps
+ * @returns {Promise<Response>}
  */
 export async function handleManifestRequest(request, frameworkBase, deps) {
   try {
@@ -286,6 +382,10 @@ export async function handleManifestRequest(request, frameworkBase, deps) {
  * Network-first for SPA navigations. Fetch the document fresh and refresh the cached shell (so a new
  * deploy is picked up online and offline reloads stay current); offline → serve the cached index.html
  * (any route resolves to the single-page shell). This is the offline-launch guarantee for the app shell.
+ * @param {Request} request
+ * @param {string} scopePath
+ * @param {Deps} deps
+ * @returns {Promise<Response>}
  */
 export async function handleNavigationRequest(request, scopePath, deps) {
   const b = scopePath.endsWith('/') ? scopePath : scopePath + '/';
@@ -312,19 +412,34 @@ export async function handleNavigationRequest(request, scopePath, deps) {
   return (await cache.match(indexUrl)) ?? (await cache.match(b)) ?? deps.fetch(request);
 }
 
-/** Names of stale koine-studio-wasm-* caches (all ours except the current generation's) to delete. */
+/**
+ * Names of stale koine-studio-wasm-* caches (all ours except the current generation's) to delete.
+ * @param {string[]} existingNames
+ * @param {string | null} currentName
+ * @returns {string[]}
+ */
 export function staleCacheNames(existingNames, currentName) {
   return existingNames.filter((name) => name.startsWith(WASM_CACHE_PREFIX) && name !== currentName);
 }
 
-/** Delete every koine-studio-wasm-* cache except `currentCacheName`. Returns the evicted names. */
+/**
+ * Delete every koine-studio-wasm-* cache except `currentCacheName`. Returns the evicted names.
+ * @param {string} currentCacheName
+ * @param {Pick<Deps, 'caches'>} deps
+ * @returns {Promise<string[]>}
+ */
 export async function evictStaleCaches(currentCacheName, deps) {
   const stale = staleCacheNames(await deps.caches.keys(), currentCacheName);
   await Promise.all(stale.map((name) => deps.caches.delete(name)));
   return stale;
 }
 
-/** Names of stale koine-studio-shell-* caches (older shell generations) to delete. */
+/**
+ * Names of stale koine-studio-shell-* caches (older shell generations) to delete.
+ * @param {string[]} existingNames
+ * @param {string} currentShellName
+ * @returns {string[]}
+ */
 export function staleShellCacheNames(existingNames, currentShellName) {
   return existingNames.filter((name) => name.startsWith(SHELL_CACHE_PREFIX) && name !== currentShellName);
 }
@@ -333,6 +448,9 @@ export function staleShellCacheNames(existingNames, currentShellName) {
  * Delete every koine-studio-shell-* cache except `currentShellName`. Called at `activate` so a
  * SHELL_VERSION bump cleans up the previous shell generation — without ever touching the warmed WASM
  * caches (a different prefix) or any unrelated cache. Returns the evicted names.
+ * @param {string} currentShellName
+ * @param {Pick<Deps, 'caches'>} deps
+ * @returns {Promise<string[]>}
  */
 export async function evictStaleShellCaches(currentShellName, deps) {
   const stale = staleShellCacheNames(await deps.caches.keys(), currentShellName);
@@ -347,6 +465,9 @@ export async function evictStaleShellCaches(currentShellName, deps) {
  * itself requests early (its entry `<script>`/`<link>`, the compiler Web Worker script, CodeMirror
  * chunks, …), so an immediate offline reload (no warm-up second visit) would otherwise fail to boot
  * (issue #1685). Best-effort throughout: install must not fail just because a shell URL is unreachable.
+ * @param {string} scopePath
+ * @param {Deps} deps
+ * @returns {Promise<void>}
  */
 export async function precacheShell(scopePath, deps) {
   const cache = await deps.caches.open(shellCacheName());
@@ -368,9 +489,14 @@ export async function precacheShell(scopePath, deps) {
  * navigation is a pure cache hit (without blocking first paint — scheduled on idle by the registrar).
  * Reads the manifest for the generation + asset list, fetches anything not already cached, then evicts
  * stale generations. Best-effort: a failed asset is skipped, and offline is a no-op.
+ * @param {string} frameworkBase
+ * @param {Deps} deps
+ * @returns {Promise<void>}
  */
 export async function precacheFramework(frameworkBase, deps) {
+  /** @type {string | null | undefined} */
   let generation;
+  /** @type {string[] | undefined} */
   let assetUrls;
   try {
     const res = await deps.fetch(frameworkBase + MANIFEST_NAME, { cache: 'no-store' });

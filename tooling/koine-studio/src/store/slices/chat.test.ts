@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { createAppStore } from '@/store/index';
 import type { ChatMessage, ChatToolCall } from '@/ai/ai';
 import type { StagedEdit } from '@/ai/editSession';
+import type { ChatSlice } from '@/store/slices/chat';
 
 const user = (content: string): ChatMessage => ({ role: 'user', content });
 const assistant = (content: string): ChatMessage => ({ role: 'assistant', content });
@@ -172,7 +173,7 @@ describe('streaming turn', () => {
     const s = createAppStore();
     expect(s.getState().chat.turn).toBeNull();
     s.getState().startChatTurn();
-    expect(s.getState().chat.turn).toEqual({ text: '', toolCalls: [], turnId: expect.any(Number) });
+    expect(s.getState().chat.turn).toEqual({ text: '', toolCalls: [], turnId: expect.any(Number) as number });
   });
 
   test('startChatTurn while streaming does not reset the accumulated turn', () => {
@@ -180,7 +181,7 @@ describe('streaming turn', () => {
     s.getState().startChatTurn();
     s.getState().appendStreamingText('partial');
     s.getState().startChatTurn(); // no-op: must not clobber the live turn
-    expect(s.getState().chat.turn).toEqual({ text: 'partial', toolCalls: [], turnId: expect.any(Number) });
+    expect(s.getState().chat.turn).toEqual({ text: 'partial', toolCalls: [], turnId: expect.any(Number) as number });
   });
 
   test('appendStreamingText accumulates deltas in order', () => {
@@ -222,7 +223,7 @@ describe('streaming turn', () => {
           durationMs: null,
         },
       ],
-      turnId: expect.any(Number),
+      turnId: expect.any(Number) as number,
     });
   });
 
@@ -331,9 +332,9 @@ describe('commitChatTurn (#1133)', () => {
     // Exactly one notification: a subscriber can never observe the committed message without its
     // cards, nor the cards without the message — the two changes land in the same store transition.
     expect(fn).toHaveBeenCalledTimes(1);
-    const chat = fn.mock.calls[0][0];
+    const chat = fn.mock.calls[0][0] as ChatSlice['chat'];
     expect(chat.messages).toEqual([
-      { role: 'assistant', content: 'done', toolCalls: [toolCall(1)], turnId: expect.any(Number) },
+      { role: 'assistant', content: 'done', toolCalls: [toolCall(1)], turnId: expect.any(Number) as number },
     ]);
     expect(chat.turn).toBeNull();
   });
@@ -361,7 +362,7 @@ describe('commitChatTurn (#1133)', () => {
 
     expect(s.getState().chat.messages).toEqual([
       user('earlier question'),
-      { role: 'assistant', content: 'earlier reply', toolCalls: [toolCall(1)], turnId: expect.any(Number) },
+      { role: 'assistant', content: 'earlier reply', toolCalls: [toolCall(1)], turnId: expect.any(Number) as number },
     ]);
   });
 
