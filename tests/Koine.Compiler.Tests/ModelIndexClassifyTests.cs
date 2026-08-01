@@ -218,6 +218,31 @@ public class ModelIndexClassifyTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// Issue #1797: <see cref="ModelIndex.AllTypeRefsIn"/> yields only the OUTERMOST reference, so a
+    /// qualifier buried in a collection's element type has to be reached by recursing through
+    /// <see cref="TypeRef.Element"/>/<see cref="TypeRef.Value"/>. Here <c>Other.Kind</c> is named only
+    /// inside a <c>List&lt;…&gt;</c>, and it must still count as visible from <c>C</c>.
+    /// </summary>
+    [Fact]
+    public void An_enum_qualified_only_inside_a_collection_element_is_still_visible()
+    {
+        const string src = """
+            context Other {
+              enum Kind { Active, Idle }
+            }
+            context C {
+              enum Flag { Active, Blue }
+              entity Item identified by ItemId {
+                kinds: List<Other.Kind>
+              }
+            }
+            """;
+        var index = IndexOf(src);
+
+        index.EnumsDeclaring("C", "Active").ShouldBe(new[] { "Flag", "Kind" }, ignoreOrder: true);
+    }
+
+    /// <summary>
     /// Issue #1797 guard: a member shared by two enums WITHIN one context stays ambiguous — the
     /// widened set adds qualified owners, it never removes or merges local ones.
     /// </summary>
