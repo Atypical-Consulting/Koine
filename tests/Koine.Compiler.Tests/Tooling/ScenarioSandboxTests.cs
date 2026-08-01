@@ -384,11 +384,11 @@ public class ScenarioSandboxTests
     [Fact]
     public void A_confined_child_may_write_inside_its_run_directory_and_nowhere_else()
     {
-        RequireUnixStubs();
         RequireFilesystemConfinement();
 
         string outside = Path.Combine(Path.GetTempPath(), "koine-outside-" + Guid.NewGuid().ToString("N") + ".txt");
-        string stub = WriteStub(WriteProbe("./inside.txt", outside) + Report("inside=${inside} outside=${outside}"));
+        string stub = WriteStub(WriteProbe("./inside.txt", outside)
+            + Report("inside=" + EnvRef("inside") + " outside=" + EnvRef("outside")));
 
         try
         {
@@ -396,7 +396,8 @@ public class ScenarioSandboxTests
 
             // The run directory is the child's scratch space and must stay writable — a confinement that
             // also broke the legitimate write would be indistinguishable from a broken sandbox.
-            Probed(run).ShouldBe("inside=allowed outside=denied");
+            Probed(run).ShouldBe("inside=allowed outside=denied",
+                "sandbox notes: " + string.Join(" // ", run.SandboxNotes));
             File.Exists(outside).ShouldBeFalse(outside);
 
             // The control: the SAME child, confinement off, gets the write it was just denied. Without
@@ -463,9 +464,34 @@ public class ScenarioSandboxTests
     /// shell as a broken sandbox.</para>
     /// </summary>
     private static string WriteProbe(string inside, string outside) =>
-        "inside=denied; outside=denied\n"
-        + "if ( : > '" + inside + "' ) 2>/dev/null; then inside=allowed; fi\n"
-        + "if ( : > '" + outside + "' ) 2>/dev/null; then outside=allowed; fi\n";
+        OperatingSystem.IsWindows()
+            ? "@set inside=denied\r\n@set outside=denied\r\n"
+              + WindowsWriteProbe("inside", inside) + WindowsWriteProbe("outside", outside)
+            : "inside=denied; outside=denied\n"
+              + "if ( : > '" + inside + "' ) 2>/dev/null; then inside=allowed; fi\n"
+              + "if ( : > '" + outside + "' ) 2>/dev/null; then outside=allowed; fi\n";
+
+    /// <summary>
+    /// Batch that tries to create <paramref name="path"/> and leaves the verdict in
+    /// <c>%<paramref name="variable"/>%</c>.
+    ///
+    /// <para>The verdict is read with <c>if exist</c> rather than from the redirection's exit code,
+    /// because what this probe is asking is whether the FILE APPEARED — the one question with no
+    /// cmd.exe parsing subtleties in it. (An earlier form chained <c>&amp;&amp;</c> onto a
+    /// redirection-only command behind an <c>@</c> prefix, and reported "denied" for a write that was
+    /// in fact allowed.) Echo is already off: <see cref="RunStub"/> passes cmd.exe <c>/q</c>.</para>
+    ///
+    /// <para><c>2>nul</c> comes FIRST so it is in force before the <c>&gt;</c> is attempted: cmd.exe
+    /// applies redirections left to right, and the very "Access is denied" this probe exists to observe
+    /// would otherwise land on the child's real stderr — noise on the one stream a failing run quotes
+    /// back to the user.</para>
+    /// </summary>
+    private static string WindowsWriteProbe(string variable, string path)
+    {
+        string target = "\"" + path.Replace('/', '\\') + "\"";
+        return "2>nul >" + target + " echo x\r\n"
+            + "if exist " + target + " set " + variable + "=allowed\r\n";
+    }
 
     /// <summary>
     /// Gates the filesystem-enforcement test. Deliberately NOT a bare skip on
@@ -476,6 +502,16 @@ public class ScenarioSandboxTests
     /// </summary>
     private static void RequireFilesystemConfinement()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            ScenarioSandbox.FilesystemConfinementAvailable.ShouldBeTrue(
+                "every Windows lets a process derive a LOW-INTEGRITY primary token from its own without "
+                + "elevation (issue #1780 measured exactly that on this runner), so filesystem confinement "
+                + "being unavailable here is a regression in the sandbox, not a fact about the platform. "
+                + "The probe said: " + (WindowsConfinedProcess.ProbeFailure ?? "<nothing>"));
+            return;
+        }
+
         if (OperatingSystem.IsMacOS())
         {
             ScenarioSandbox.FilesystemConfinementAvailable.ShouldBeTrue(
@@ -830,6 +866,170 @@ public class ScenarioSandboxTests
 
         assigned.ShouldBeTrue(assignFailure);
         assignFailure.ShouldBeNull();
+    }
+
+    // ------------------------------------------------------------------------
+    // Windows filesystem confinement (#1780): a low-integrity primary token, a low mandatory label on
+    // the run directory, and a child built by hand with CreateProcessAsUser because Process.Start
+    // cannot supply a token. Every assertion below runs for real on the sandbox-confinement job's
+    // windows-latest leg (#1782) — this path is not shipped on reasoning about the documentation.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void The_Windows_confined_launcher_settles_its_availability_and_labels_soft()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The low-integrity token is a Windows mechanism; this suite is running on "
+                + RuntimeInformation.OSDescription + ".");
+            return;
+        }
+
+        bool available = WindowsConfinedProcess.Available;
+        WindowsConfinedProcess.Available.ShouldBe(
+            available, "availability is probed once and cached for the life of the process");
+        available.ShouldBeTrue(
+            "lowering a copy of your OWN token's integrity is a de-escalation, so it needs no privilege "
+            + "and no elevation — an unavailable mechanism here is a regression, not a platform fact. "
+            + "The probe said: " + (WindowsConfinedProcess.ProbeFailure ?? "<nothing>"));
+
+        // Failing SOFT is the contract: a label that cannot be written comes back as a reason, never as
+        // an exception, because the caller's next move is to degrade rather than to fail the run.
+        string missing = Path.Combine(Path.GetTempPath(), "koine-absent-" + Guid.NewGuid().ToString("N"));
+        WindowsConfinedProcess.TryLabelRunDirectory(missing, out string? missingFailure).ShouldBeFalse(
+            "there is no directory there to label");
+        missingFailure.ShouldNotBeNull("a refusal must say why, or the degradation note says nothing");
+
+        string runDirectory = NewDirectory("koine-label-");
+        try
+        {
+            WindowsConfinedProcess.TryLabelRunDirectory(runDirectory, out string? failure)
+                .ShouldBeTrue(failure);
+            failure.ShouldBeNull();
+        }
+        finally
+        {
+            Discard(runDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task The_Windows_confined_child_round_trips_all_three_hand_plumbed_pipes()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("CreateProcessAsUser is a Windows mechanism; this suite is running on "
+                + RuntimeInformation.OSDescription + ".");
+            return;
+        }
+
+        // stdin -> stdout, the exact traffic ScenarioExecutionHost's protocol depends on. `sort` is the
+        // shortest cmd.exe-native filter that needs no character cmd.exe would reinterpret.
+        using (WindowsConfinedProcess? filter =
+               WindowsConfinedProcess.TryStart(ConfinedCommand("sort"), out string? filterFailure))
+        {
+            filter.ShouldNotBeNull(filterFailure);
+            filter.Resume();
+
+            Task<string> output = filter.StandardOutput.ReadToEndAsync(Cancellation);
+            Task<string> error = filter.StandardError.ReadToEndAsync(Cancellation);
+            filter.StandardInput.Write("PIPE-OK\r\n");
+            filter.StandardInput.Close();
+
+            filter.Process.WaitForExit((int)PipeBudget.TotalMilliseconds).ShouldBeTrue(
+                "a child that never exits here is the hand-plumbed-stdio deadlock: an inheritable HOST "
+                + "pipe end the child holds open, so the read never sees EOF");
+            (await Bounded(output)).Trim().ShouldBe("PIPE-OK");
+            (await Bounded(error)).ShouldBeEmpty();
+            filter.Process.ExitCode.ShouldBe(0);
+        }
+
+        // stderr and a non-zero exit code, which the host reads to tell a failed child from a silent one.
+        string absent = Path.Combine(Path.GetTempPath(), "koine-absent-" + Guid.NewGuid().ToString("N"));
+        using WindowsConfinedProcess? missing =
+            WindowsConfinedProcess.TryStart(ConfinedCommand("type", absent), out string? missingFailure);
+        missing.ShouldNotBeNull(missingFailure);
+        missing.Resume();
+
+        Task<string> missingOutput = missing.StandardOutput.ReadToEndAsync(Cancellation);
+        Task<string> missingError = missing.StandardError.ReadToEndAsync(Cancellation);
+        missing.StandardInput.Close();
+        missing.Process.WaitForExit((int)PipeBudget.TotalMilliseconds).ShouldBeTrue();
+
+        (await Bounded(missingError)).ShouldNotBeEmpty(
+            "the child's stderr must reach the host, not the void");
+        missing.Process.ExitCode.ShouldNotBe(0);
+        (await Bounded(missingOutput)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_Windows_plan_enforces_the_writes_it_can_and_reports_the_network_it_cannot()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This asserts the WINDOWS plan's two halves; running on "
+                + RuntimeInformation.OSDescription + ".");
+            return;
+        }
+
+        string runDirectory = NewDirectory("koine-plan-win-");
+        try
+        {
+            using ScenarioConfinement plan = ScenarioSandbox.Plan(
+                "koine", ["scenario-exec"], runDirectory, ScenarioSandboxOptions.Default);
+
+            // The two halves are reported INDEPENDENTLY now. The single all-or-nothing sentence this
+            // replaced would have gone on claiming the writes were unconfined after they stopped being —
+            // a note that is wrong in the reassuring direction is worse than no note at all.
+            plan.Degradations.ShouldNotContain(
+                note => note.StartsWith("Filesystem confinement was not applied", StringComparison.Ordinal),
+                "a low-integrity token IS the mechanism Windows was said to be missing");
+            plan.Degradations.ShouldContain(
+                note => note.StartsWith("Network confinement was not applied", StringComparison.Ordinal),
+                "no mechanism the sandbox may use denies the network on Windows (issue #1780 task 1 "
+                + "measured both candidates), so the run must SAY so rather than let the caps imply it");
+
+            // Nothing asked for, nothing dropped — the network note included.
+            using ScenarioConfinement none = ScenarioSandbox.Plan(
+                "koine", ["scenario-exec"], runDirectory, ScenarioSandboxOptions.None);
+            none.Degradations.ShouldBeEmpty();
+        }
+        finally
+        {
+            Discard(runDirectory);
+        }
+    }
+
+    /// <summary>How long the confined-launch test waits for a child, and for the reads that follow it.
+    /// Generous — the point is that a WEDGED pipe fails rather than hanging the whole CI job.</summary>
+    private static readonly TimeSpan PipeBudget = TimeSpan.FromSeconds(30);
+
+    private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
+
+    /// <summary>Awaits <paramref name="read"/> with a deadline. A hand-plumbed pipe whose host end stayed
+    /// inheritable never sees EOF, so an unbounded await here would be a hung job rather than a red
+    /// test — the one failure mode this suite must not turn into silence.</summary>
+    private static async Task<string> Bounded(Task<string> read) =>
+        await read.WaitAsync(PipeBudget, Cancellation);
+
+    /// <summary>A <c>cmd.exe</c> invocation for the confined-launch tests. Each argument is a SEPARATE
+    /// list entry so nothing needs a quote or a caret — cmd.exe's <c>/c</c> does not read the
+    /// backslash-escaped quotes the C runtime's quoting rules produce.</summary>
+    private static ProcessStartInfo ConfinedCommand(params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("COMSPEC")
+                       ?? Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+            WorkingDirectory = Path.GetTempPath(),
+        };
+        startInfo.ArgumentList.Add("/c");
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return startInfo;
     }
 
     private const string BashPath = "/bin/bash";

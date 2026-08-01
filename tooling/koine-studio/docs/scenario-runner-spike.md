@@ -231,14 +231,21 @@ and it is deliberately narrower than the word "sandbox" suggests:
     24.04's AppArmor policy does not, which is why this repo's own CI runner degrades to a note for the
     network half; Landlock needs no privileges, so the write half holds there).
   - *Windows:* a **Job Object** carrying the memory and CPU ceilings (and killing the child if the host
-    dies). No filesystem or network confinement — a restricted token needs `CreateProcessAsUser`.
+    dies), plus a **low-integrity token** that **denies writes outside the per-run directory** — the run
+    directory gets a matching low mandatory label so the child keeps its scratch space
+    ([#1780](https://github.com/Atypical-Consulting/Koine/issues/1780)). That child is built by hand with
+    `CreateProcessAsUser` and three plumbed pipes, since `Process.Start` cannot supply a token; being
+    created suspended, it also gets its Job Object before its first instruction. **No network
+    confinement** — measured on a real kernel, low integrity does not deny sockets and the one
+    unprivileged mechanism that does (an AppContainer) cannot read the `koine` binary itself.
   - **Reads stay unrestricted everywhere** (the child must load the runtime and its own assemblies), and
     every mechanism is **probed before use**. Anything unavailable is appended to the result's `notes`
     and surfaced on `ScenarioChildRun.SandboxNotes`; **a scenario never fails because confinement is
     unavailable.**
 - **It is still not a containment boundary against a hostile actor.** The confinement above is defence in
-  depth: it makes the emitter's "no I/O primitives" premise an *enforced* property on macOS and on a
-  Landlock-capable Linux rather than a stated one, and bounds the resource attacks that are the realistic
+  depth: it makes the emitter's "no I/O primitives" premise an *enforced* property — for writes, on all
+  three platforms now; for the network, on macOS and on a Linux that permits unprivileged user
+  namespaces — rather than a stated one, and bounds the resource attacks that are the realistic
   failure. Its job remains protecting
   the **editor host** from hangs, crashes and resource exhaustion. ADR 0011 states that trust model
   plainly and requires revisiting *before* Koine ever executes a model authored by someone other than the

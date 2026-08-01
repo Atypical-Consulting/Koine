@@ -1006,6 +1006,17 @@ internal sealed class CSharpExpressionTranslator
 
     private void WriteMemberAccess(MemberAccessExpr ma, NameMode mode, StringBuilder sb)
     {
+        // Explicitly qualified enum-member access: `Kind.Active` -> `Other.Kind.Active`. Context-first
+        // (R13.2): a same-named enum in another context must not shadow this one's own declaration.
+        // Routes through the same QualifyEnumType helper as the bare-member branch (#1799) so both
+        // spellings of a reference to the same foreign enum render identically (#1802).
+        if (ma.Target is IdentifierExpr qualifier && !_memberNames.Contains(qualifier.Name)
+            && !_locals.Contains(qualifier.Name) && _index.Classify(_resolver.Context, qualifier.Name) == TypeKind.Enum)
+        {
+            sb.Append(QualifyEnumType(qualifier.Name)).Append('.').Append(CSharpNaming.EscapeIdentifier(ma.MemberName));
+            return;
+        }
+
         var t = Render(ma.Target, mode);
 
         // A user type that declares a member named after a built-in member-op (isEmpty/trim/…)

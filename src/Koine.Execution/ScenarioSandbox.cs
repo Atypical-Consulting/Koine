@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.Versioning;
 using System.Text;
 
 namespace Koine.Execution;
@@ -36,6 +37,11 @@ internal static class ScenarioSandbox
 
     /// <summary>How many probes one <see cref="Plan"/> can run in the worst case: the filesystem/network
     /// wrapper for this platform, and the shell for the processor-time ceiling.
+    ///
+    /// <para>Windows fits inside the same bound rather than widening it (issue #1780). Its write
+    /// confinement DOES spawn a probe — the first Windows path that ever has — but the shell probe it
+    /// would have shared the budget with is Unix-only and never runs there, so the worst case per
+    /// platform is unchanged and the published ceiling below still holds.</para>
     ///
     /// <para>Unchanged by the Linux write confinement added in issue #1781: <see cref="LandlockAvailable"/>
     /// asks the KERNEL directly (a <c>landlock_create_ruleset</c> version query, microseconds, no child)
@@ -108,7 +114,8 @@ internal static class ScenarioSandbox
     /// </summary>
     public static bool FilesystemConfinementAvailable =>
         (OperatingSystem.IsMacOS() && MacSandboxAvailable.Value)
-        || (OperatingSystem.IsLinux() && LandlockAvailable.Value);
+        || (OperatingSystem.IsLinux() && LandlockAvailable.Value)
+        || (OperatingSystem.IsWindows() && WindowsConfinedProcess.Available);
 
     /// <summary>Whether this platform can deny the child the network. See
     /// <see cref="FilesystemConfinementAvailable"/> for what a <c>false</c> means.</summary>
@@ -132,6 +139,7 @@ internal static class ScenarioSandbox
         var environment = new Dictionary<string, string>(StringComparer.Ordinal);
         string file = fileName;
         List<string> args = [.. arguments];
+        bool confineWindowsFilesystem = false;
 
         try
         {
@@ -159,15 +167,9 @@ internal static class ScenarioSandbox
             {
                 PlanUnix(ref file, args, runDirectory, options, degradations);
             }
-            else if (options.DenyNetwork || options.RestrictFilesystem)
+            else
             {
-                // Windows CAN confine a child this way — a restricted or low-integrity token — but only
-                // through CreateProcessAsUser, which means abandoning Process.Start and hand-plumbing all
-                // three redirected pipes. Until that exists, say so rather than let the caps imply it.
-                degradations.Add("Filesystem and network confinement were not applied: the sandbox has no "
-                    + "Windows mechanism for them yet, so this run kept its resource ceilings, its process "
-                    + "isolation and its wall-clock deadline, and nothing stopped the executed code from "
-                    + "reading or writing files.");
+                confineWindowsFilesystem = PlanWindows(runDirectory, options, degradations);
             }
         }
         catch (Exception ex)
@@ -179,8 +181,74 @@ internal static class ScenarioSandbox
             return new ScenarioConfinement(fileName, arguments, environment, options, degradations);
         }
 
-        return new ScenarioConfinement(file, args, environment, options, degradations);
+        return new ScenarioConfinement(
+            file, args, environment, options, degradations, confineWindowsFilesystem);
     }
+
+    /// <summary>
+    /// Plans Windows' half (issue #1780). Unlike every Unix mechanism, this rewrites no command: the
+    /// confinement is a TOKEN, which only exists at creation, so all this does is decide whether
+    /// <see cref="ScenarioConfinement.TryLaunch"/> should build the child itself — and report, half by
+    /// half, whatever it decided it could not do.
+    ///
+    /// <para>The run directory is labelled HERE rather than at launch, and a labelling failure cancels
+    /// the confinement rather than proceeding without it: a child confined out of its own scratch space
+    /// would fail for a reason that has nothing to do with the model, which the contract forbids more
+    /// strongly than it asks for confinement.</para>
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static bool PlanWindows(
+        string runDirectory, ScenarioSandboxOptions options, List<string> degradations)
+    {
+        bool confineFilesystem = false;
+
+        if (options.RestrictFilesystem)
+        {
+            if (!WindowsConfinedProcess.Available)
+            {
+                degradations.Add(WindowsFilesystemNote(WindowsConfinedProcess.ProbeFailure));
+            }
+            else if (!WindowsConfinedProcess.TryLabelRunDirectory(runDirectory, out string? failure))
+            {
+                degradations.Add(WindowsFilesystemNote(failure));
+            }
+            else
+            {
+                confineFilesystem = true;
+            }
+        }
+
+        if (options.DenyNetwork)
+        {
+            degradations.Add(WindowsNetworkNote);
+        }
+
+        return confineFilesystem;
+    }
+
+    /// <summary>The note for a Windows host whose writes could not be confined, with the mechanism's own
+    /// reason when there is one. Reads are unrestricted here in any case (ADR 0012).</summary>
+    internal static string WindowsFilesystemNote(string? reason) =>
+        "Filesystem confinement was not applied"
+        + (reason is null ? string.Empty : " (" + reason + ")")
+        + ": Windows can only confine a child's writes through a low-integrity token, and this host would "
+        + "not give the sandbox one, so nothing stopped the executed code from writing files outside its "
+        + "run directory.";
+
+    /// <summary>
+    /// The note EVERY Windows host gets, because no Windows mechanism the sandbox may use denies the
+    /// network (issue #1780). Both candidates were measured on a real kernel rather than reasoned about:
+    /// a low-integrity child still opens sockets, and an AppContainer with no capabilities does deny them
+    /// but cannot read the koine binary's own directory — which is where the real child lives — so it
+    /// would not start at all. Buying this half would mean persistently rewriting the permissions of an
+    /// install directory outside the run directory, from an editor click.
+    /// </summary>
+    internal const string WindowsNetworkNote =
+        "Network confinement was not applied: Windows offers no mechanism the sandbox can apply here — a "
+        + "Windows Filtering Platform filter needs administrator rights, and an AppContainer, the one "
+        + "unprivileged mechanism that does deny sockets, cannot read the koine binary outside its own "
+        + "run directory without a persistent change to that directory's permissions — so nothing stopped "
+        + "the executed code from opening a connection.";
 
     /// <summary>
     /// Wraps the command in <c>/bin/sh</c> so <c>ulimit</c> can lower the child's <c>RLIMIT_CPU</c> before

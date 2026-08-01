@@ -374,18 +374,31 @@ internal static class ScenarioExecutionHost
                 startInfo.Environment[name] = value;
             }
 
-            using Process? child = Process.Start(startInfo);
+            // Ask the confinement for the child FIRST: where confinement can only be applied at creation
+            // (a Windows low-integrity token, #1780), Process.Start cannot express it, so the confinement
+            // builds the child itself. It returns null on every other path — including a Windows host that
+            // could not manage it after all — and Process.Start below stays the fallback.
+            ScenarioChildProcess? launched = confinement.TryLaunch(startInfo);
+            if (launched is null)
+            {
+                Process? started = Process.Start(startInfo);
+                launched = started is null ? null : ScenarioChildProcess.Started(started);
+            }
+
+            using ScenarioChildProcess? child = launched;
             if (child is null)
             {
                 return Failure(scenario, runDirectory, childId, timedOut: false,
                     $"The scenario sandbox child ('{fileName}') could not be started.", confinement.Degradations);
             }
 
-            childId = child.Id;
+            childId = child.Process.Id;
 
-            // The Job Object can only exist once the process does — a race the sandbox accepts and
-            // documents (see WindowsJobObject). Everything else was already applied at spawn.
-            confinement.Attach(child);
+            // The Job Object can only exist once the process does. On the confined path the child is still
+            // SUSPENDED here, so the caps land before its first instruction; on the Process.Start path this
+            // is the race the sandbox accepts and documents (see WindowsJobObject).
+            confinement.Attach(child.Process);
+            child.Resume();
 
             // Drain both pipes CONCURRENTLY: reading one to EOF before touching the other deadlocks the
             // moment the child fills the second stream's buffer.
@@ -423,9 +436,9 @@ internal static class ScenarioExecutionHost
                 }
             });
 
-            if (!child.WaitForExit((int)Math.Max(0, Math.Min(timeout.TotalMilliseconds, int.MaxValue))))
+            if (!child.Process.WaitForExit((int)Math.Max(0, Math.Min(timeout.TotalMilliseconds, int.MaxValue))))
             {
-                Kill(child);
+                Kill(child.Process);
                 return Failure(scenario, runDirectory, childId, timedOut: true,
                     $"The scenario timed out after {Format(timeout)} and was stopped. The emitted code may not "
                     + "terminate (an unbounded loop or runaway allocation in a derived member or invariant); "
@@ -445,8 +458,8 @@ internal static class ScenarioExecutionHost
                 // death — the exit code is the only witness, so ask the confinement to read it before
                 // falling back to the generic note.
                 return Failure(scenario, runDirectory, childId, timedOut: false,
-                    confinement.DescribeExit(child.ExitCode)
-                    ?? $"The scenario sandbox child exited with code {child.ExitCode} and produced no result"
+                    confinement.DescribeExit(child.Process.ExitCode)
+                    ?? $"The scenario sandbox child exited with code {child.Process.ExitCode} and produced no result"
                     + Quote(Text(stderr)), confinement.Degradations);
             }
 

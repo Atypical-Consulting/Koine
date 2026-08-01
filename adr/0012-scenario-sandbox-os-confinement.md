@@ -126,8 +126,11 @@ the rest of its content stay as they are — including its trust model, which st
 - **Coverage is uneven, and the code says so rather than implying otherwise.** macOS gets filesystem and
   network confinement; Linux gets filesystem confinement on any kernel ≥ 5.13 (see the amendment below —
   originally this read "network only") and network confinement only where unprivileged user namespaces are
-  permitted; Windows gets neither, because a restricted or low-integrity token requires
-  `CreateProcessAsUser` and hand-plumbing all three redirected pipes. Each gap is a note on the run.
+  permitted; Windows gets **filesystem confinement** through a low-integrity token (see the third
+  amendment below — originally this read "Windows gets neither, because a restricted or low-integrity
+  token requires `CreateProcessAsUser` and hand-plumbing all three redirected pipes", which was true of
+  the cost and wrong about the conclusion: the pipes were plumbed) and **no network confinement**, which
+  no mechanism the sandbox may use can give it. Each gap is a note on the run.
 - **Linux's network denial is conditional, and often unavailable.** An unprivileged network namespace
   needs unprivileged user namespaces to be permitted, and several distributions restrict them — Ubuntu
   24.04's AppArmor policy blocks them by default, which is why this repo's own `ubuntu-latest` CI runner
@@ -149,22 +152,25 @@ the rest of its content stay as they are — including its trust model, which st
 - **The Job Object is attached a moment after the child starts.** `Process.Start` offers no
   `CREATE_SUSPENDED`, so there is a window — runtime start-up, before any model-derived code runs — in
   which the caps are not yet in force. Closing it means replacing `Process.Start` with a hand-rolled
-  `CreateProcess`, a large amount of interop for a window nothing can currently reach.
+  `CreateProcess`, a large amount of interop for a window nothing can currently reach. (The third
+  amendment below pays exactly that cost for another reason, and closes this window as a side effect on
+  the confined Windows path.)
 - **`sandbox-exec` is deprecated by Apple.** It remains functional and is the only mechanism a
   command-line tool launched from an editor can apply to itself without an App Sandbox entitlement. If a
   future macOS removes it, the probe fails and the run degrades to a note — noisy, but not broken.
 - **Availability probes cost one trivial process launch per mechanism per host process**, cached for the
   lifetime of that process.
-- **A degraded platform adds a note to every run.** Before the amendment below, every Linux result carried
-  the filesystem-confinement note; on Windows every result still carries the filesystem-and-network one,
-  and on a Linux host that cannot create an unprivileged network namespace the network note. That is
+- **A degraded platform adds a note to every run.** Before the amendments below, every Linux result
+  carried the filesystem-confinement note and every Windows result an all-or-nothing
+  filesystem-and-network one; today every Windows result carries the NETWORK note alone (third
+  amendment), and a Linux host that cannot create an unprivileged network namespace carries the same. That is
   deliberate: the
   alternative is a sandbox that looks stronger than it is. It does mean a caller comparing the sandbox's
   tree against another engine's must subtract `ScenarioChildRun.SandboxNotes` — which is why that list is
   reported separately rather than left to be recognised by its wording.
 - **The trust model still governs.** This is defence in depth, not a containment boundary against a
-  hostile actor: reads are open everywhere, Windows has no filesystem or network confinement, and a
-  degraded platform has none at all. Executing a model authored by someone other than the operator — a
+  hostile actor: reads are open everywhere, Windows has no network confinement (it does now confine
+  writes — third amendment below), and a degraded platform has none at all. Executing a model authored by someone other than the operator — a
   hosted playground, a CI bot running a PR's model — still needs its own review before it ships.
 
 ## Amendment — Linux write confinement, and what an AppArmor-restricted host can still do (issue #1781)
@@ -273,3 +279,67 @@ predates this ADR — fails intermittently on the Windows leg (3 of 4 observed C
 identically), where only the former is currently recognised by `ScenarioSandbox.ResourceCeilingNote`.
 Unrelated to the Job Object interop itself (which this amendment's new floor test proves sound) — tracked
 as issue #1791.
+
+## Amendment — Windows confines writes with a low-integrity token; the network stays open, and says so (issue #1780)
+
+**Status:** accepted, 2026-08-01. Amends the Consequences above; the *decision* — each platform's native
+mechanism, best-effort, probed, degrading to a note — is unchanged, which is why this is an amendment
+rather than a superseding ADR.
+
+The original Consequences named Windows' missing filesystem and network confinement as the sandbox's
+biggest coverage gap and gave one reason for it: a restricted or low-integrity token requires
+`CreateProcessAsUser`, and therefore hand-plumbing all three redirected pipes. That cost is real, and it
+has now been paid — `src/Koine.Execution/WindowsConfinedProcess.cs`.
+
+**Both candidate mechanisms were measured on a real Windows kernel before either was chosen**, on the
+`sandbox-confinement` job's `windows-latest` leg that the previous amendment added, each against an
+unconfined baseline so that "denied" could never be confused with "the probe never worked":
+
+| Probe | baseline | low-integrity token | AppContainer, no capabilities |
+|---|---|---|---|
+| write to `%USERPROFILE%` | allowed | **denied** | **denied** |
+| write to the run directory, after labelling it | — | **allowed** | denied |
+| read the koine binary's own directory | allowed | **allowed** | **denied** |
+| start the .NET host (`dotnet --version`) | ✅ | ✅ | ✅ |
+| connect to a loopback listener that answers | connected | **connected** | **dropped** |
+
+**Filesystem: enforced.** A primary token duplicated from the caller's own and relabelled
+`S-1-16-4096`, plus a low mandatory label on the per-run directory written through
+`LABEL_SECURITY_INFORMATION` (which, unlike `SACL_SECURITY_INFORMATION` where the label physically
+lives, needs no privilege). Windows' mandatory integrity control then denies the child write access to
+every object the user owns while leaving reads open — the same asymmetry this ADR already committed to
+on macOS and Linux, and for the same reason: the child must load the .NET shared framework from outside
+its run directory. No elevation is needed at any step; lowering a copy of your own token's integrity is
+a de-escalation.
+
+**Network: NOT enforced, and reported.** Low integrity does not deny sockets. An AppContainer with no
+capabilities does, and is the only unprivileged mechanism that does — but an AppContainer child cannot
+read the koine binary's own directory, which is where the real child lives (a dotnet-tools directory, or
+Studio's sidecar), so it would not start at all. Buying this half would mean persistently rewriting the
+permissions of an install directory *outside* the run directory from an editor click, or a Windows
+Filtering Platform filter, which needs administrator rights. Neither is a price an editor's Run button
+should pay, so the network half is reported as unenforced on every Windows run rather than faked.
+
+**Consequences of this amendment.**
+
+- **The Windows degradation note splits in two.** It was one all-or-nothing sentence covering both
+  confinements; a note that goes on claiming writes are unconfined after they stopped being is wrong in
+  the reassuring direction, which is worse than no note. Filesystem and network are now reported
+  independently, in the same voice as the Linux branch.
+- **The Job Object start-up window above is closed on the confined path.** The confined child is created
+  `CREATE_SUSPENDED` precisely so the caps can be attached before its first instruction. The
+  `Process.Start` path — every unconfined Windows run, and every non-Windows run — keeps the documented
+  race.
+- **A labelling failure cancels the confinement rather than proceeding without it.** A child confined out
+  of its own scratch space would fail for a reason that has nothing to do with the model, which this
+  ADR's contract forbids more strongly than it asks for confinement.
+- **This path is CI-executed, not manually verified.** Every assertion — the token, the three pipes, the
+  run-directory label, the split note, and the real pizzeria round trip under confinement — runs on the
+  `windows-latest` leg. `ScenarioSandbox.FilesystemConfinementAvailable` being false on Windows is now a
+  test FAILURE rather than a skip, on the same principle as macOS: the mechanism ships with the OS.
+- **`Process` cannot carry hand-plumbed pipes.** .NET populates `StandardInput`/`StandardOutput`/
+  `StandardError` only from `Process.Start`, so the confined launch returns a `ScenarioChildProcess`
+  carrying the process AND its streams. `ScenarioResult` and `ScenarioChildRun` are unchanged.
+- **The trust model is unchanged.** Reads stay open on Windows as everywhere else, the network stays
+  open there, and a host that cannot derive the token degrades to a note. Executing a model authored by
+  someone other than the operator still needs its own review.

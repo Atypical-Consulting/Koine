@@ -116,8 +116,9 @@ We will therefore:
   > ([#1759](https://github.com/Atypical-Consulting/Koine/issues/1759)).** The bullet below described
   > v1 and is no longer the whole truth. The child now also runs under a managed-heap ceiling and a
   > processor-time ceiling on every platform, a `sandbox-exec` profile on macOS that denies the network
-  > and denies writes outside the per-run directory, an unprivileged network namespace on Linux, and a
-  > Job Object on Windows. Coverage is uneven by platform and best-effort by design: anything a platform
+  > and denies writes outside the per-run directory, a Landlock ruleset plus an unprivileged network
+  > namespace on Linux, and on Windows a Job Object plus a low-integrity token that denies writes
+  > outside the per-run directory. Coverage is uneven by platform and best-effort by design: anything a platform
   > cannot enforce is reported in the result's `notes` and never fails the run. **Reads stay
   > unrestricted everywhere, and the trust model below still governs** — the confinement is defence in
   > depth, not a containment boundary against a hostile actor. ADR 0012 states exactly what is enforced
