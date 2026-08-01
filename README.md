@@ -98,7 +98,7 @@ complete target**; the same model also compiles to six other languages and three
 | **Python** 3.11+ | `--target python` | Dependency-free, `mypy --strict`-clean; opt-in infrastructure layer |
 | **PHP** 8.1 | `--target php` | Dependency-free; typed and readonly promoted properties |
 | **Rust** | `--target rust` | Idiomatic crate, multi-context; `cargo build` verifies it compiles |
-| **Java** 17 | `--target java` | stdlib-only records, sealed events; `javac` verifies |
+| **Java** 17 | `--target java` | stdlib-only records, sealed events; tactical + CQRS, opt-in infrastructure layer; `javac` verifies |
 | **Kotlin** 2.x | `--target kotlin` | Idiomatic Kotlin/JVM data classes; `kotlinc` verifies |
 | **docs** | `--target docs` | Living documentation — Markdown + Mermaid diagrams |
 | **AsyncAPI** 3.0 | `--target asyncapi` | Event-API document from the integration-event + context-map graph |
@@ -553,7 +553,7 @@ Koine.slnx
 │   ├── Koine.Emit.Python/        # PythonEmitter (tactical core + strategic/CQRS layer)
 │   ├── Koine.Emit.Php/           # PhpEmitter (tactical core + strategic/CQRS layer, PHP 8.1)
 │   ├── Koine.Emit.Rust/          # RustEmitter (multi-context + CQRS read side)
-│   ├── Koine.Emit.Java/          # JavaEmitter (stdlib-only records, sealed events; Java 17)
+│   ├── Koine.Emit.Java/          # JavaEmitter (tactical core + strategic/CQRS layer; stdlib-only, Java 17)
 │   ├── Koine.Emit.Kotlin/        # KotlinEmitter (idiomatic Kotlin/JVM data classes; Kotlin 2.x)
 │   ├── Koine.Emit.Glossary/      # ubiquitous-language glossary
 │   ├── Koine.Emit.Docs/          # living documentation (Markdown + Mermaid diagrams)
@@ -777,7 +777,11 @@ exposed as the `koine_coverage` MCP tool). The
 [feature catalogue](https://atypical-consulting.github.io/Koine/guides/feature-catalogue/) maps every
 construct to the C# it emits. The current version is shown by the NuGet badge above.
 
-**Recently landed:** **Java 17** and **Kotlin 2.x** emitters (dependency-free, compile-verified via
+**Recently landed:** the **Java** emitter's strategic/CQRS layer — read models, queries, service
+boundaries, policies, state-machine transition guards, context-map/ACL translators, integration
+subscribers, and an opt-in infrastructure layer — bringing it to parity with Python
+([#1090](https://github.com/Atypical-Consulting/Koine/issues/1090)); **Java 17** and **Kotlin 2.x**
+emitters (dependency-free, compile-verified via
 `javac`/`kotlinc`); **DDD-kind metadata** surfaced across the TypeScript/Python/PHP emitters
 ([#1170](https://github.com/Atypical-Consulting/Koine/issues/1170)); and the CLI is now published to
 **NuGet.org** via Trusted Publishing — `dotnet tool install --global Koine.Cli`
