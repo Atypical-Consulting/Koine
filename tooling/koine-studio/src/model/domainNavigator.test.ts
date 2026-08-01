@@ -4,6 +4,7 @@ import { h } from 'preact';
 import {
   DomainNavigator,
   mountDomainNavigator,
+  renderContextMapGraph,
   renderStrategic,
   renderTactical,
   type DomainNavigatorHandlers,
@@ -321,6 +322,121 @@ describe('renderTactical — leaf ⋯ menu dismissal', () => {
   });
 });
 
+// --- the STRATEGIC Context Map graph behind the doorway (#483) ------------------------------------
+// A typed context map: one directional customer/supplier relation, one anti-corruption-layer relation,
+// and (in the symmetric fixture) a partnership. The per-end `upstreamRole`/`downstreamRole` are derived
+// SERVER-side (#483 Task 3) — the navigator only badges what the payload carries, and a null role (the
+// symmetric patterns) must render NO badge at all.
+const salesSpan = { file: 'file:///sales.koi', line: 3, column: 9, endLine: 3, endColumn: 14, offset: 20, length: 5 };
+
+function typedContextMap(): ContextMapResult {
+  return {
+    contexts: ['Sales', 'Shipping', 'Legacy'],
+    // Sales carries its declaration span (jump-to-declaration); Shipping's is null (a recovered parse).
+    contextSpans: { Sales: salesSpan, Shipping: null },
+    relations: [
+      {
+        upstream: 'Sales',
+        downstream: 'Shipping',
+        kind: 'Customer/Supplier',
+        bidirectional: false,
+        sharedTypes: ['Address'],
+        acl: [],
+        upstreamRole: 'Supplier',
+        downstreamRole: 'Customer',
+      },
+      {
+        upstream: 'Legacy',
+        downstream: 'Shipping',
+        kind: 'Anticorruption Layer',
+        bidirectional: false,
+        sharedTypes: [],
+        acl: [{ upstreamContext: 'Legacy', upstreamType: 'Customer', localContext: 'Shipping', localType: 'Recipient' }],
+        upstreamRole: 'Upstream',
+        downstreamRole: 'Anti-Corruption Layer',
+      },
+    ],
+  };
+}
+
+/** A symmetric relation — partnership / shared kernel: neither end has a distinct role (null/null). */
+function symmetricContextMap(): ContextMapResult {
+  return {
+    contexts: ['Sales', 'Support'],
+    relations: [
+      {
+        upstream: 'Sales',
+        downstream: 'Support',
+        kind: 'Partnership',
+        bidirectional: true,
+        sharedTypes: [],
+        acl: [],
+        upstreamRole: null,
+        downstreamRole: null,
+      },
+    ],
+  };
+}
+
+const ctxmapNodes = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[data-ctxmap-node]')];
+const ctxmapEdges = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.koi-domain-ctxmap-edge')];
+const roleAt = (edge: HTMLElement, end: 'upstream' | 'downstream') =>
+  edge.querySelector<HTMLElement>(`[data-role-end="${end}"]`)?.textContent;
+
+describe('renderContextMapGraph', () => {
+  it('renders one node per context and one edge per relation, badging BOTH ends with its derived roles', () => {
+    const el = renderContextMapGraph(typedContextMap(), { goto: vi.fn() });
+
+    // Nodes = contexts (declaration order), each addressable by name.
+    expect(ctxmapNodes(el).map((n) => n.dataset.ctxmapNode)).toEqual(['Sales', 'Shipping', 'Legacy']);
+
+    // Edges = the typed relations, in declaration order, each naming both ends + the relationship kind.
+    const edges = ctxmapEdges(el);
+    expect(edges).toHaveLength(2);
+    expect(edges[0].textContent).toContain('Sales');
+    expect(edges[0].textContent).toContain('Shipping');
+    expect(edges[0].textContent).toContain('Customer/Supplier');
+
+    // …and BOTH ends carry the DDD role badge the payload derived for them.
+    expect(roleAt(edges[0], 'upstream')).toBe('Supplier');
+    expect(roleAt(edges[0], 'downstream')).toBe('Customer');
+    expect(roleAt(edges[1], 'upstream')).toBe('Upstream');
+    expect(roleAt(edges[1], 'downstream')).toBe('Anti-Corruption Layer');
+
+    // The row's accessible name carries the same reading (the `→` glyph is decorative).
+    expect(edges[0].getAttribute('aria-label')).toBe('Sales as Supplier to Shipping as Customer, Customer/Supplier');
+  });
+
+  it('a symmetric relation (partnership / shared kernel) renders NO role badge at either end', () => {
+    const el = renderContextMapGraph(symmetricContextMap(), { goto: vi.fn() });
+    const edge = ctxmapEdges(el)[0];
+
+    // A null role is an ABSENT badge — not an empty pill, and never the string "null".
+    expect(edge.querySelectorAll('.koi-domain-ctxmap-role')).toHaveLength(0);
+    expect(edge.textContent).not.toContain('null');
+    // Both ends are still named, and the undirected glyph replaces the arrow.
+    expect(edge.getAttribute('aria-label')).toBe('Sales and Support, Partnership');
+  });
+
+  it('a context-node click jumps to its declaration (contextSpans); a span-less node stays inert', () => {
+    const goto = vi.fn();
+    const el = renderContextMapGraph(typedContextMap(), { goto });
+
+    (el.querySelector('[data-ctxmap-node="Sales"]') as HTMLButtonElement).click();
+    expect(goto).toHaveBeenCalledWith(salesSpan.line, salesSpan.column); // the raw 1-based span
+
+    goto.mockClear();
+    (el.querySelector('[data-ctxmap-node="Shipping"]') as HTMLButtonElement).click();
+    expect(goto).not.toHaveBeenCalled(); // no span (recovered parse) ⇒ inert, not a crash
+  });
+
+  it('an empty context map renders a quiet note, not an empty tree', () => {
+    const el = renderContextMapGraph({ contexts: [], relations: [] }, { goto: vi.fn() });
+    expect(el.getAttribute('role')).toBe('note');
+    expect(el.querySelector('[role="treeitem"]')).toBeNull();
+  });
+});
+
 // A fresh app store — the single source of truth for the navigator's altitude + scope.
 const makeTestStore = () => createAppStore();
 
@@ -391,6 +507,80 @@ describe('mountDomainNavigator', () => {
     (host.querySelector('[data-door="glossary"]') as HTMLButtonElement).click();
     expect(onOpenContextMap).toHaveBeenCalledTimes(1);
     expect(onOpenGlossary).toHaveBeenCalledTimes(1);
+  });
+
+  // --- the Context Map doorway opens the in-navigator strategic graph (#483) ----------------------
+  // The doorway now has TWO destinations: a model that declares relationships gets the navigator's own
+  // graph level (nodes + typed, role-badged edges); a model with none keeps the pre-#483 hand-off to the
+  // caller's docs/center-deck view, which is where "no context map declared" belongs.
+  const typedLsp = () => ({
+    glossaryModel: vi.fn(async (): Promise<GlossaryModel> => fakeGlossary(['Ordering', 'Billing'])),
+    contextMap: vi.fn(async (): Promise<ContextMapResult> => typedContextMap()),
+    model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+  });
+
+  it('the Context Map doorway opens the in-navigator graph when the model declares relations', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOpenContextMap = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { onOpenContextMap });
+    await flush();
+
+    // The doorway badge counts the relations…
+    expect(host.querySelector('[data-door="contextmap"] .koi-domain-door-count')?.textContent).toBe('2');
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+
+    // …and opening it paints the graph level IN the navigator (no hand-off to the docs view).
+    expect(onOpenContextMap).not.toHaveBeenCalled();
+    expect(host.querySelectorAll('[data-ctxmap-node]')).toHaveLength(3);
+    expect(host.querySelectorAll('.koi-domain-ctxmap-edge')).toHaveLength(2);
+    expect(host.querySelector('.koi-ctx-row')).toBeNull(); // the strategic list gave way to the graph
+
+    // The breadcrumb climbs back to the strategic context list, like the tactical level's.
+    (host.querySelector('.koi-breadcrumb-back') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-edge')).toBeNull();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy();
+  });
+
+  it('a context-node click in the graph jumps to its declaration through the navigator\'s goto seam', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const goto = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { goto });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    (host.querySelector('[data-ctxmap-node="Sales"]') as HTMLButtonElement).click();
+    expect(goto).toHaveBeenCalledWith(salesSpan.line, salesSpan.column);
+  });
+
+  it('a model with NO relations keeps the docs hand-off — the doorway delegates to the caller', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOpenContextMap = vi.fn();
+    // fakeLsp()'s context map declares contexts but no relations — nothing to graph.
+    mountDomainNavigator(host, makeTestStore(), fakeLsp(), { onOpenContextMap });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(onOpenContextMap).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull(); // no in-navigator graph
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // still the strategic list
+  });
+
+  it('an external scope change leaves the graph — it is a strategic-level view, not a sticky one', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, typedLsp());
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    store.getState().setActiveContext('Billing'); // the top-bar switcher
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy();
   });
 
   it('labels the glossary doorway "Glossary" but keeps "the ubiquitous language" in its accessible name', async () => {
@@ -660,6 +850,28 @@ describe('DomainNavigator component (props-driven)', () => {
     expect(container.querySelector('.koi-breadcrumb-back')).toBeTruthy();
     expect(container.querySelector('[data-qname="Ordering.Order"]')).toBeTruthy();
     expect(container.querySelector('.koi-ctx-row')).toBeNull(); // not the strategic list
+  });
+
+  // The strategic Context Map graph is a third level the presenter can paint (#483): opened through the
+  // doorway, it replaces the context list until its breadcrumb closes it. The per-level filter doesn't
+  // apply to a cross-context graph, so it hides — the same way it does for the loading placeholder.
+  it('renders the Context Map graph level when contextMapOpen is set', () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'strategic',
+        activeContext: 'all',
+        outlineFilter: '',
+        cache: { ...cache, contextMap: typedContextMap() },
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+        contextMapOpen: true,
+      }),
+    );
+    expect(container.querySelectorAll('.koi-domain-ctxmap-edge')).toHaveLength(2);
+    expect(container.querySelector('.koi-ctx-row')).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('input.koi-domain-filter')!.hidden).toBe(true);
   });
 
   it('the explicit `.tsx` import resolves to a real component (not the case-collision barrel) and renders rows', () => {

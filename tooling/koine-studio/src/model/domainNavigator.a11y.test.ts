@@ -5,6 +5,7 @@ import { h } from 'preact';
 import {
   DomainNavigator,
   mountDomainNavigator,
+  renderContextMapGraph,
   renderStrategic,
   renderTactical,
   type DomainNavigatorHandlers,
@@ -190,6 +191,72 @@ describe('Domain navigator a11y — tactical', () => {
   });
 });
 
+// --- the strategic Context Map graph (#483) -------------------------------------------------------
+// The graph's context nodes are FOCUSABLE rows, which rules out the listbox/option pattern (axe forbids
+// a focusable descendant there, and role="group" doesn't dodge it). It reuses the navigator's own
+// WAI-ARIA TREE pattern instead — `role="tree"` of `role="treeitem"` rows (the context nodes are the
+// buttons; the relation rows are static) under the shared roving-tabindex model — so the whole rail
+// navigates identically and the audit below is the proof it stays axe-clean with the role badges on.
+function typedContextMap(): ContextMapResult {
+  return {
+    contexts: ['Sales', 'Shipping', 'Support'],
+    contextSpans: { Sales: { file: 'file:///s.koi', line: 3, column: 9, endLine: 3, endColumn: 14, offset: 20, length: 5 } },
+    relations: [
+      {
+        upstream: 'Sales',
+        downstream: 'Shipping',
+        kind: 'Customer/Supplier',
+        bidirectional: false,
+        sharedTypes: ['Address'],
+        acl: [],
+        upstreamRole: 'Supplier',
+        downstreamRole: 'Customer',
+      },
+      // Symmetric — both ends un-badged, so the audit covers the badge-less row shape too.
+      {
+        upstream: 'Sales',
+        downstream: 'Support',
+        kind: 'Partnership',
+        bidirectional: true,
+        sharedTypes: [],
+        acl: [],
+        upstreamRole: null,
+        downstreamRole: null,
+      },
+    ],
+  };
+}
+
+describe('Domain navigator a11y — the strategic Context Map graph', () => {
+  it('the context-map graph is axe-clean and keyboard-navigable', async () => {
+    const el = renderContextMapGraph(typedContextMap(), { goto: () => {} });
+    document.body.appendChild(el);
+
+    expect(await axe(el)).toHaveNoViolations();
+
+    // One row per context + one per relation, all reachable through the single-tab-stop roving model.
+    const items = treeitems(el);
+    expect(items).toHaveLength(5);
+    expect(items.filter((it) => it.tabIndex === 0)).toEqual([items[0]]);
+
+    items[0].focus();
+    for (let i = 1; i < items.length; i++) {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      expect(document.activeElement).toBe(items[i]);
+    }
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }));
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it('an empty context map renders a note, not an empty (keyboard-unreachable) tree', async () => {
+    const el = renderContextMapGraph({ contexts: [], relations: [] }, { goto: () => {} });
+    document.body.appendChild(el);
+
+    expect(await axe(el)).toHaveNoViolations();
+    expect(el.getAttribute('role')).toBe('note');
+  });
+});
+
 // --- the per-level filter narrows the active level (reuses the outlineFilter slice) --------------
 function fakeLsp() {
   return {
@@ -268,6 +335,26 @@ describe('Domain navigator a11y — focus continuity across drill/climb', () => 
     expect(document.activeElement).toBe(host.querySelector('[data-ctx="Ordering"]'));
   });
 
+  // Opening / closing the Context Map graph (#483) is the same kind of level swap as a drill / climb: the
+  // row that was activated is torn down by the repaint, so focus must land in the fresh level.
+  it('keeps focus in the navigator when opening the Context Map graph and closing it again', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = createAppStore();
+    mountDomainNavigator(host, store, { ...fakeLsp(), contextMap: vi.fn(async () => typedContextMap()) });
+    await flush();
+
+    const door = host.querySelector<HTMLElement>('[data-door="contextmap"]')!;
+    door.focus();
+    door.click(); // the graph level paints synchronously (it is drawn from the cached context map)
+
+    const back = host.querySelector<HTMLElement>('.koi-breadcrumb-back')!;
+    expect(document.activeElement).toBe(back);
+
+    back.click(); // climb back out: focus lands on the strategic level's first row, not <body>
+    expect(document.activeElement).toBe(host.querySelector('[data-ctx="Ordering"]'));
+  });
+
   it('a filter keystroke repaint does NOT steal focus from the filter input', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -308,6 +395,27 @@ describe('DomainNavigator component a11y', () => {
         tacticalHandlers: noopTacticalHandlers(),
       }),
     );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('the Context Map graph level is axe-clean inside the presenter (breadcrumb + graph)', async () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'strategic',
+        activeContext: 'all',
+        outlineFilter: '',
+        cache: { ...strategicCache, contextMap: typedContextMap() },
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers: noopTacticalHandlers(),
+        contextMapOpen: true,
+      }),
+    );
+    // The graph level replaced the context list, breadcrumb and all — and the whole presenter (including
+    // the hidden filter input) has no violations.
+    expect(container.querySelector('.koi-breadcrumb-back')).toBeTruthy();
+    expect(container.querySelectorAll('.koi-domain-ctxmap-edge')).toHaveLength(2);
     expect(await axe(container)).toHaveNoViolations();
   });
 
