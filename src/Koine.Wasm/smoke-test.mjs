@@ -469,8 +469,16 @@ check('ScenarioCatalog', () => {
 
 check('RunScenario', () => {
   const given = JSON.stringify({ status: 'Draft', lines: [{ product: 'P1', quantity: 2 }] });
-  const r = expectObject(parse(api.RunScenario(ORDERING_FILES, 'Order', 'place', given, '{}')), 'ok', 'steps');
+  // The trailing flag is the executed-mode opt-in (#236). This host cannot execute, so it is false here;
+  // passing true would still answer `mode: "interpreted"` plus a note saying execution was unavailable.
+  const r = expectObject(
+    parse(api.RunScenario(ORDERING_FILES, 'Order', 'place', given, '{}', false)),
+    'ok',
+    'steps',
+    'mode',
+  );
   expectTrue(r.ok === true, 'placing a draft order should succeed');
+  expectTrue(r.mode === 'interpreted', 'the browser host always answers in interpreted mode');
   expectArray(r.steps);
 });
 

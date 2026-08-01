@@ -1157,13 +1157,29 @@ public class LspServerTests
         }
         """;
 
-    private static byte[] RunScenario(string uri, string target, string operation, object given, object args) =>
+    private static byte[] RunScenario(
+        string uri, string target, string operation, object given, object args, int id = 36) =>
         Frame(JsonSerializer.Serialize(new
         {
             jsonrpc = "2.0",
-            id = 36,
+            id,
             method = "koine/runScenario",
             @params = new { textDocument = new { uri }, target, operation, given, args },
+        }));
+
+    /// <summary>
+    /// A <c>koine/runScenario</c> request that opts in to EXECUTED mode (#236): the server runs the
+    /// model's emitted C# in the sandbox child instead of interpreting the model.
+    /// <paramref name="timeoutMs"/> is the wall-clock budget the client asks for.
+    /// </summary>
+    private static byte[] RunScenarioExecuted(
+        string uri, string target, string operation, object given, object args, int timeoutMs, int id) =>
+        Frame(JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id,
+            method = "koine/runScenario",
+            @params = new { textDocument = new { uri }, target, operation, given, args, execute = true, timeoutMs },
         }));
 
     [Fact]
@@ -1180,6 +1196,137 @@ public class LspServerTests
         output.ShouldContain("\"lineCount\":\"2\"");
         output.ShouldContain("\"id\":36");
     }
+
+    // ---- executed mode (#236): `execute: true` + the truthful `mode` field ----
+
+    /// <summary>
+    /// The same domain as <see cref="ScenarioDoc"/> plus the one thing the interpreter cannot do:
+    /// <c>total</c> sums a DERIVED member of a value object, so Approach B degrades it to <c>?</c> while
+    /// executed mode runs the emitted property and computes a real number. That difference is what makes
+    /// <c>mode</c> observable rather than a label to be taken on trust.
+    /// </summary>
+    private const string ScenarioDerivedDoc = """
+        context Ordering {
+          enum OrderStatus { Draft, Placed }
+          aggregate Sales root Order {
+            event OrderPlaced { orderId: OrderId  lineCount: Int }
+            value OrderLine {
+              quantity:  Int
+              unitPrice: Decimal
+              payable:   Decimal = unitPrice * quantity
+            }
+            entity Order identified by OrderId {
+              lines:  List<OrderLine>
+              status: OrderStatus = Draft
+              total:  Decimal = lines.sum(l => l.payable)
+              states status { Draft -> Placed }
+              command place {
+                requires status == Draft   "only a draft order can be placed"
+                requires !lines.isEmpty    "cannot place an empty order"
+                status -> Placed
+                emit OrderPlaced(orderId: id, lineCount: lines.count)
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>Two lines worth 10x2 + 5x1 = 25.</summary>
+    private static object DerivedOrderGiven() => new
+    {
+        status = "Draft",
+        lines = new[]
+        {
+            new { quantity = 2, unitPrice = 10 },
+            new { quantity = 1, unitPrice = 5 },
+        },
+    };
+
+    /// <summary>The wall-clock budget the executed-mode tests ask for: a cold child process has to parse,
+    /// emit, Roslyn-compile and run this model, so it is generous — but it is the server's clamp ceiling,
+    /// so nothing here can wait longer than a minute.</summary>
+    private const int ExecuteBudgetMs = 60_000;
+
+    [Fact]
+    public void RunScenario_without_execute_reports_interpreted_mode()
+    {
+        var given = new { status = "Draft", lines = new[] { new { product = "P1", quantity = 2 } } };
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+
+        // Today's interpreted answer, unchanged…
+        output.ShouldContain("\"ok\":true");
+        output.ShouldContain("\"event\":\"OrderPlaced\"");
+        // …plus the new field that says which engine produced it.
+        output.ShouldContain("\"mode\":\"interpreted\"");
+        output.ShouldNotContain("\"mode\":\"executed\"");
+    }
+
+    [Fact]
+    public void RunScenario_with_execute_reports_executed_mode_and_computes_the_derived_value()
+    {
+        var given = DerivedOrderGiven();
+
+        // Interpreted: `total` sums a derived member of a value object, which Approach B cannot evaluate.
+        var interpreted = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenario("file:///t.koi", "Order", "place", given, new { }));
+        interpreted.ShouldContain("\"mode\":\"interpreted\"");
+        interpreted.ShouldContain("\"total\":\"?\"");
+
+        // Executed: the emitted `Total` property really runs, so the value is computed.
+        var executed = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", given, new { }, ExecuteBudgetMs, id: 36));
+
+        executed.ShouldContain("\"mode\":\"executed\"");
+        executed.ShouldNotContain("\"mode\":\"interpreted\"");
+        executed.ShouldContain("\"ok\":true");
+        executed.ShouldNotContain("\"total\":\"?\"");
+        executed.ShouldContain("\"total\":\"25");
+        executed.ShouldContain("\"id\":36");
+    }
+
+    [Fact]
+    public void RunScenario_that_blows_its_deadline_is_reported_and_the_server_survives()
+    {
+        // 100 ms is the clamp floor and no child can start, compile and run inside it — so the watchdog
+        // path is deterministic rather than timing-sensitive.
+        var transcript = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioDerivedDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, 100, id: 36),
+            RunScenario("file:///t.koi", "Order", "place", DerivedOrderGiven(), new { }, id: 37));
+
+        var timedOut = ResponseWithId(transcript, 36);
+        timedOut.ShouldContain("\"ok\":false");
+        timedOut.ShouldContain("timed out");
+        // The failed attempt is still an executed-mode answer — nothing was interpreted.
+        timedOut.ShouldContain("\"mode\":\"executed\"");
+
+        // …and the server answered the NEXT request normally, proving the host survived the kill.
+        var afterwards = ResponseWithId(transcript, 37);
+        afterwards.ShouldContain("\"ok\":true");
+        afterwards.ShouldContain("\"mode\":\"interpreted\"");
+        afterwards.ShouldContain("\"event\":\"OrderPlaced\"");
+    }
+
+    /// <summary>The framed JSON-RPC bodies of a transcript, in order.</summary>
+    private static IEnumerable<string> Bodies(string transcript)
+    {
+        foreach (var chunk in transcript.Split("Content-Length: ", StringSplitOptions.RemoveEmptyEntries))
+        {
+            var start = chunk.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+            if (start >= 0)
+            {
+                yield return chunk[(start + 4)..];
+            }
+        }
+    }
+
+    /// <summary>The single framed response carrying <c>"id":&lt;id&gt;</c>.</summary>
+    private static string ResponseWithId(string transcript, int id) =>
+        Bodies(transcript).Single(b => b.Contains($"\"id\":{id}", StringComparison.Ordinal));
 
     [Fact]
     public void RunScenario_rejects_a_non_draft_order_with_a_failed_precondition()

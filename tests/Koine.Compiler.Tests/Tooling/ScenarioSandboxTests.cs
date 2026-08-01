@@ -96,7 +96,8 @@ public class ScenarioSandboxTests
         diagnostics.ShouldBeEmpty();
         model.ShouldNotBeNull();
         string inProcess = ScenarioService.WriteJson(
-            ScenarioService.Shape(ScenarioExecutor.Run(new SemanticModel(model), scenario)));
+            ScenarioService.Shape(
+                ScenarioExecutor.Run(new SemanticModel(model), scenario), ScenarioService.ExecutedMode));
 
         IReadOnlyDictionary<string, object?> viaChild = ScenarioExecutionHost.Run(sources, scenario, RoundTripBudget);
         string sandboxed = ScenarioService.WriteJson(viaChild);

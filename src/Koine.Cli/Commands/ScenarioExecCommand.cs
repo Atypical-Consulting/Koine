@@ -51,7 +51,7 @@ internal sealed class ScenarioExecCommand : Command<ScenarioExecCommand.Settings
         }
         catch (Exception ex)
         {
-            return ScenarioService.Error("", "", $"The scenario request could not be read: {ex.Message}");
+            return Failed("", "", $"The scenario request could not be read: {ex.Message}");
         }
 
         try
@@ -59,16 +59,22 @@ internal sealed class ScenarioExecCommand : Command<ScenarioExecCommand.Settings
             var (model, diagnostics) = new KoineCompiler().Parse(parsed.Sources);
             if (model is null || diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
-                return ScenarioService.Error(parsed.Target, parsed.Operation,
+                return Failed(parsed.Target, parsed.Operation,
                     "The model has errors; fix them before running a scenario.");
             }
 
-            return ScenarioService.Shape(ScenarioExecutor.Run(new SemanticModel(model), parsed.ToScenario()));
+            return ScenarioService.Shape(
+                ScenarioExecutor.Run(new SemanticModel(model), parsed.ToScenario()), ScenarioService.ExecutedMode);
         }
         catch (Exception ex)
         {
-            return ScenarioService.Error(parsed.Target, parsed.Operation,
-                $"The scenario could not be run: {ex.Message}");
+            return Failed(parsed.Target, parsed.Operation, $"The scenario could not be run: {ex.Message}");
         }
     }
+
+    /// <summary>A not-ok tree from this process. Everything the child answers is EXECUTED-mode — that is
+    /// the only engine it runs — including the failures, so the caller is never told an answer was
+    /// interpreted when nothing interpreted it.</summary>
+    private static IReadOnlyDictionary<string, object?> Failed(string target, string operation, string note) =>
+        ScenarioService.Error(target, operation, note, ScenarioService.ExecutedMode);
 }

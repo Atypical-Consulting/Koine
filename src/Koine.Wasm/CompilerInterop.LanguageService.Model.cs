@@ -267,9 +267,17 @@ public static partial class CompilerInterop
     /// invariant-checks</c> timeline. Mirrors <c>koine/runScenario</c>; shares the exact response shape
     /// with the LSP backend via <see cref="ScenarioService"/>. A null/broken model yields a not-ok
     /// result carrying an explanatory note.
+    ///
+    /// <para><paramref name="execute"/> is the browser end of the executed-mode opt-in (#236). This host
+    /// CANNOT execute: running the model's emitted code means emitting, Roslyn-compiling and running it
+    /// in a sandbox child process (ADR 0011), and a browser has no process to spawn. So the request is
+    /// honoured as far as it can be — the interpreter answers — and the response says so: <c>mode</c>
+    /// stays <c>interpreted</c> and one note explains that execution was unavailable. Every response
+    /// carries <c>mode</c>, so a client never has to guess which engine produced it.</para>
     /// </summary>
     [JSExport]
-    public static string RunScenario(string filesJson, string target, string operation, string givenJson, string argsJson)
+    public static string RunScenario(
+        string filesJson, string target, string operation, string givenJson, string argsJson, bool execute)
     {
         try
         {
@@ -284,7 +292,8 @@ public static partial class CompilerInterop
             using JsonDocument argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson);
             var semantic = comp.SemanticModel;
             return ScenarioService.WriteJson(
-                ScenarioService.Run(semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement));
+                ScenarioService.Run(
+                    semantic, target, operation, givenDoc.RootElement, argsDoc.RootElement, executionRequested: execute));
         }
         catch
         {

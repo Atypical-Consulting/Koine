@@ -3,7 +3,9 @@ using System.Text.Json;
 using Koine.Compiler;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Formatting;
+using Koine.Compiler.Semantics.Scenarios;
 using Koine.Compiler.Services;
+using Koine.Execution;
 using SourceSpan = Koine.Compiler.Ast.SourceSpan;
 
 namespace Koine.Cli;
@@ -23,6 +25,18 @@ internal sealed class LspServer
     private readonly KoineCompiler _compiler = new();
     private readonly KoineLanguageService _ls = new();
     private readonly Compiler.CodeFixes.CodeFixService _codeFixes = new();
+
+    /// <summary>The floor on a client-requested executed-scenario budget: below this no child could even
+    /// start, so a smaller number would only ever buy a guaranteed timeout.</summary>
+    private const double MinScenarioTimeoutMs = 100;
+
+    /// <summary>The ceiling on a client-requested executed-scenario budget: a minute is far more than a
+    /// healthy run needs, and a client must not be able to pin the editor backend to a child for longer.</summary>
+    private const double MaxScenarioTimeoutMs = 60_000;
+
+    /// <summary>Serializes executed-mode scenario runs for this workspace — see
+    /// <see cref="RunScenarioInSandbox"/>.</summary>
+    private readonly SemaphoreSlim _scenarioExecutionGate = new(1, 1);
 
     /// <summary>
     /// Parses the workspace but treats a syntax error as "no usable model" for the output-producing
@@ -2093,17 +2107,31 @@ internal sealed class LspServer
     /// Runs a scenario (#149, <c>koine/runScenario</c>): exercises one aggregate command/factory against
     /// a given state + args and returns the <c>command → events → invariant-checks</c> timeline. A model
     /// with errors yields a not-ok result carrying an explanatory note rather than throwing.
+    ///
+    /// <para>Two engines answer this request and every response says which one did, in <c>mode</c>.
+    /// Interpreted (the default) reasons about the semantic model and leaves what it cannot evaluate as
+    /// <c>?</c>; EXECUTED — opted into with <c>execute: true</c> (#236) — emits, compiles and runs the
+    /// model's real C# in a sandbox child (ADR 0011), so derived values are computed. The opt-in is
+    /// deliberate: executed mode costs a process, a compile and a wall-clock budget.</para>
     /// </summary>
     private object RunScenarioResultJson(JsonElement root)
     {
         var target = TryGetStringParam(root, "target") ?? "";
         var operation = TryGetStringParam(root, "operation") ?? "";
+        var execute = TryGetBoolParam(root, "execute");
         try
         {
             JsonElement given = TryGetObjectParam(root, "given");
             JsonElement args = TryGetObjectParam(root, "args");
 
             var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            if (execute)
+            {
+                // Nothing model-derived happens here: the child parses, emits, compiles and runs it all
+                // (ADR 0011), and shapes the result with the same ScenarioService the interpreter uses.
+                return RunScenarioInSandbox(sources, target, operation, given, args, ScenarioTimeout(root));
+            }
+
             var (model, _) = ParseUsable(sources);
             if (model is null)
             {
@@ -2117,8 +2145,57 @@ internal sealed class LspServer
         {
             // Mirror the WASM backend: a malformed request or interpreter fault returns a not-ok result
             // (so the id-bearing request always gets a reply) rather than throwing and leaving the client hanging.
-            return ScenarioService.Error(target, operation, $"The scenario could not be run: {ex.Message}");
+            return ScenarioService.Error(
+                target,
+                operation,
+                $"The scenario could not be run: {ex.Message}",
+                execute ? ScenarioService.ExecutedMode : ScenarioService.InterpretedMode);
         }
+    }
+
+    /// <summary>
+    /// Runs one scenario in the sandbox child (#236, ADR 0011), one at a time.
+    ///
+    /// <para>The gate is a plain <see cref="SemaphoreSlim"/> held for the whole run, scoped to this
+    /// server instance — i.e. per workspace, which is the granularity a Studio window has. Serializing
+    /// (rather than cancelling the in-flight child) is the conservative half of the spec's edge case: a
+    /// client that fires two <c>execute: true</c> requests in quick succession pays for two runs in
+    /// sequence, never two concurrent Roslyn compiles in the editor backend. The message loop is
+    /// single-threaded today, so this is also the guard that keeps the invariant true if dispatch ever
+    /// becomes concurrent.</para>
+    /// </summary>
+    private object RunScenarioInSandbox(
+        IReadOnlyList<SourceFile> sources, string target, string operation,
+        JsonElement given, JsonElement args, TimeSpan timeout)
+    {
+        var scenario = new Scenario(target, operation, ScenarioService.ParseMap(given), ScenarioService.ParseMap(args));
+        _scenarioExecutionGate.Wait();
+        try
+        {
+            return ScenarioExecutionHost.Run(sources, scenario, timeout);
+        }
+        finally
+        {
+            _scenarioExecutionGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The wall-clock budget one executed run gets: <c>params.timeoutMs</c>, defaulting to
+    /// <see cref="ScenarioExecutionHost.DefaultTimeout"/> (5 s) and clamped to
+    /// [<see cref="MinScenarioTimeoutMs"/>, <see cref="MaxScenarioTimeoutMs"/>]. The ceiling matters:
+    /// without it a client could ask the editor backend to sit on a runaway child for an hour.
+    /// </summary>
+    private static TimeSpan ScenarioTimeout(JsonElement root)
+    {
+        var requested = root.TryGetProperty("params", out var p)
+                        && p.TryGetProperty("timeoutMs", out var el)
+                        && el.ValueKind == JsonValueKind.Number
+                        && el.TryGetDouble(out var ms)
+            ? ms
+            : ScenarioExecutionHost.DefaultTimeout.TotalMilliseconds;
+
+        return TimeSpan.FromMilliseconds(Math.Clamp(requested, MinScenarioTimeoutMs, MaxScenarioTimeoutMs));
     }
 
     /// <summary>
@@ -2178,6 +2255,13 @@ internal sealed class LspServer
             ["range"] = SpanRange(d.Span),
             ["uri"] = d.File,
         }).ToArray();
+
+    /// <summary><c>params.&lt;name&gt;</c> as a boolean; <c>false</c> when absent or not a boolean (so an
+    /// opt-in flag stays opt-in for every client that has never heard of it).</summary>
+    private static bool TryGetBoolParam(JsonElement root, string name) =>
+        root.TryGetProperty("params", out var p)
+        && p.TryGetProperty(name, out var el)
+        && el.ValueKind == JsonValueKind.True;
 
     private static string? TryGetStringParam(JsonElement root, string name) =>
         root.TryGetProperty("params", out var p) && p.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String

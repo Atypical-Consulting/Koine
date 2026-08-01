@@ -514,9 +514,16 @@ internal static class ScenarioExecutionHost
         }
     }
 
+    /// <summary>A not-ok run the host itself decided (the child never started, never answered, or blew
+    /// its deadline). Reported as EXECUTED mode: the request went down the execution path and that path
+    /// failed — calling it "interpreted" would credit an engine that never ran.</summary>
     private static ScenarioChildRun Failure(
         Scenario scenario, string runDirectory, int childId, bool timedOut, string note) =>
-        new(ScenarioService.Error(scenario.Target, scenario.Operation, note), childId, runDirectory, timedOut);
+        new(
+            ScenarioService.Error(scenario.Target, scenario.Operation, note, ScenarioService.ExecutedMode),
+            childId,
+            runDirectory,
+            timedOut);
 
     /// <summary>Waits (bounded) for the stdio pumps to finish. A pump that faulted or never ended leaves
     /// its text empty, which the caller reports — it never blocks the host.</summary>
