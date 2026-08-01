@@ -355,7 +355,8 @@ public class ScenarioSandboxTests
 
             // The run directory is the child's scratch space and must stay writable — a confinement that
             // also broke the legitimate write would be indistinguishable from a broken sandbox.
-            Probed(run).ShouldBe("inside=allowed outside=denied");
+            Probed(run).ShouldBe("inside=allowed outside=denied",
+                "sandbox notes: " + string.Join(" // ", run.SandboxNotes));
             File.Exists(outside).ShouldBeFalse(outside);
 
             // The control: the SAME child, confinement off, gets the write it was just denied. Without
@@ -430,16 +431,26 @@ public class ScenarioSandboxTests
               + "if ( : > '" + outside + "' ) 2>/dev/null; then outside=allowed; fi\n";
 
     /// <summary>
-    /// One line of batch that tries to create <paramref name="path"/> and leaves the verdict in
+    /// Batch that tries to create <paramref name="path"/> and leaves the verdict in
     /// <c>%<paramref name="variable"/>%</c>.
     ///
-    /// <para><c>2>nul</c> comes FIRST on purpose. cmd.exe applies redirections left to right, so a
-    /// <c>&gt;</c> that fails with the very "Access is denied" this probe exists to observe would print
-    /// it to the child's real stderr before a later <c>2>nul</c> could swallow it — noise on the one
-    /// stream a failing run quotes back to the user.</para>
+    /// <para>The verdict is read with <c>if exist</c> rather than from the redirection's exit code,
+    /// because what this probe is asking is whether the FILE APPEARED — the one question with no
+    /// cmd.exe parsing subtleties in it. (An earlier form chained <c>&amp;&amp;</c> onto a
+    /// redirection-only command behind an <c>@</c> prefix, and reported "denied" for a write that was
+    /// in fact allowed.) Echo is already off: <see cref="RunStub"/> passes cmd.exe <c>/q</c>.</para>
+    ///
+    /// <para><c>2>nul</c> comes FIRST so it is in force before the <c>&gt;</c> is attempted: cmd.exe
+    /// applies redirections left to right, and the very "Access is denied" this probe exists to observe
+    /// would otherwise land on the child's real stderr — noise on the one stream a failing run quotes
+    /// back to the user.</para>
     /// </summary>
-    private static string WindowsWriteProbe(string variable, string path) =>
-        "@2>nul >\"" + path.Replace('/', '\\') + "\" echo x && set " + variable + "=allowed\r\n";
+    private static string WindowsWriteProbe(string variable, string path)
+    {
+        string target = "\"" + path.Replace('/', '\\') + "\"";
+        return "2>nul >" + target + " echo x\r\n"
+            + "if exist " + target + " set " + variable + "=allowed\r\n";
+    }
 
     /// <summary>
     /// Gates the filesystem-enforcement test. Deliberately NOT a bare skip on
