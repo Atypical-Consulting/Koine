@@ -26,6 +26,9 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The join token is a bearer credential for someone's domain model, so it comes from the OS
+# CSPRNG. `getrandom` is the primitive itself and is already in the lock via Tauri.
+getrandom = "0.3"
 
 # Cross-platform pseudo-terminal (PTY) for the integrated terminal panel. The Rust
 # sidecar opens a PTY pair, spawns the user's shell into it, and brokers raw bytes
