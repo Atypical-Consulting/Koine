@@ -780,10 +780,12 @@ internal sealed class CSharpExpressionTranslator
 
         // Enum member reference -> qualify as EnumName.Member, resolving a shared
         // member against the comparison context (enumHint) or the expected enum
-        // type of the surrounding expression, when available.
+        // type of the surrounding expression, when available. Owners are scoped to
+        // what's visible from this translator's own context (#1739) so an enum only
+        // reachable through an unrelated context can't win the last-write-wins fallback.
         if (!_memberNames.Contains(name))
         {
-            IReadOnlyList<string> owners = _index.EnumsDeclaring(name);
+            IReadOnlyList<string> owners = _index.EnumsDeclaring(_resolver.Context, name);
             if (owners.Count > 0)
             {
                 var hint = enumHint ?? _expectedEnum;
@@ -791,7 +793,9 @@ internal sealed class CSharpExpressionTranslator
                     ? hint
                     : owners.Count == 1
                         ? owners[0]
-                        : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
+                        : _enumMemberToType.TryGetValue(name, out var fallback) && owners.Contains(fallback)
+                            ? fallback
+                            : owners[0];
                 sb.Append(enumType).Append('.').Append(CSharpNaming.EscapeIdentifier(name));
                 return;
             }
