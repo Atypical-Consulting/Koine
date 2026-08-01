@@ -15,6 +15,7 @@
 // the retry budget is exhausted (or after a clean stop).
 
 mod collab;
+mod noise;
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -133,7 +134,10 @@ fn read_frame<R: BufRead>(r: &mut R) -> io::Result<Option<String>> {
         if n == 0 {
             // EOF. If we already saw a header this frame is truncated; otherwise clean EOF.
             return if content_length.is_some() {
-                Err(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF mid-header"))
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "EOF mid-header",
+                ))
             } else {
                 Ok(None)
             };
@@ -147,10 +151,9 @@ fn read_frame<R: BufRead>(r: &mut R) -> io::Result<Option<String>> {
         // convention; ignore any other header (e.g. Content-Type).
         if let Some((key, value)) = trimmed.split_once(':') {
             if key.trim().eq_ignore_ascii_case("content-length") {
-                let v: usize = value
-                    .trim()
-                    .parse()
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad Content-Length"))?;
+                let v: usize = value.trim().parse().map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "bad Content-Length")
+                })?;
                 content_length = Some(v);
             }
         }
@@ -382,7 +385,9 @@ fn spawn_sidecar() -> Result<(Child, ChildStdin, std::process::ChildStdout), Str
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
 
-    let mut child = cmd.spawn().map_err(|e| format!("failed to spawn LSP: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn LSP: {e}"))?;
     let stdin = child.stdin.take().ok_or("no stdin on child")?;
     let stdout = child.stdout.take().ok_or("no stdout on child")?;
     Ok((child, stdin, stdout))
@@ -486,7 +491,7 @@ fn take_decodable(carry: &mut Vec<u8>) -> Option<String> {
     let end = match std::str::from_utf8(carry) {
         Ok(s) => s.len(),
         Err(e) => match e.error_len() {
-            None => e.valid_up_to(),            // incomplete trailing sequence — keep it for next read
+            None => e.valid_up_to(), // incomplete trailing sequence — keep it for next read
             Some(bad) => e.valid_up_to() + bad, // genuinely invalid bytes — emit lossily, don't retain
         },
     };
@@ -1066,13 +1071,19 @@ fn git_status(dir: String) -> Result<GitStatus, String> {
 
     // Surface upstream data only when git reported BOTH the ref and computable counts, so a gone
     // upstream (ref present, no `# branch.ab`) reads as "no upstream" rather than a fake 0/0.
-    let upstream = upstream_ref.zip(ahead_behind).map(|(r, (ahead, behind))| GitUpstream {
-        r#ref: r,
-        ahead,
-        behind,
-    });
+    let upstream = upstream_ref
+        .zip(ahead_behind)
+        .map(|(r, (ahead, behind))| GitUpstream {
+            r#ref: r,
+            ahead,
+            behind,
+        });
 
-    Ok(GitStatus { branch, files, upstream })
+    Ok(GitStatus {
+        branch,
+        files,
+        upstream,
+    })
 }
 
 /// The unified diff for one path: the worktree diff, or the staged (`--cached`) diff when `staged`.
@@ -1117,7 +1128,8 @@ fn parse_numstat(out: &str, staged: bool, entries: &mut Vec<GitNumstatEntry>) {
     for line in out.lines() {
         // splitn(3) keeps a path with embedded tabs intact in the third field.
         let mut fields = line.splitn(3, '\t');
-        let (Some(added), Some(removed), Some(path)) = (fields.next(), fields.next(), fields.next())
+        let (Some(added), Some(removed), Some(path)) =
+            (fields.next(), fields.next(), fields.next())
         else {
             continue;
         };
@@ -1139,7 +1151,11 @@ fn parse_numstat(out: &str, staged: bool, entries: &mut Vec<GitNumstatEntry>) {
 fn git_numstat(dir: String) -> Result<Vec<GitNumstatEntry>, String> {
     let mut entries: Vec<GitNumstatEntry> = Vec::new();
     parse_numstat(&run_git(&dir, &["diff", "--numstat"])?, false, &mut entries);
-    parse_numstat(&run_git(&dir, &["diff", "--cached", "--numstat"])?, true, &mut entries);
+    parse_numstat(
+        &run_git(&dir, &["diff", "--cached", "--numstat"])?,
+        true,
+        &mut entries,
+    );
     Ok(entries)
 }
 
@@ -1182,7 +1198,11 @@ fn git_unstage(dir: String, rel_paths: Vec<String>) -> Result<(), String> {
 /// entirely-empty call is a no-op up front — so a discard can never touch a path the caller didn't
 /// name. `Err` (git's trimmed stderr) when any step fails.
 #[tauri::command]
-fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<String>) -> Result<(), String> {
+fn git_discard(
+    dir: String,
+    tracked_paths: Vec<String>,
+    untracked_paths: Vec<String>,
+) -> Result<(), String> {
     if tracked_paths.is_empty() && untracked_paths.is_empty() {
         return Ok(()); // never run an unscoped restore/clean
     }
@@ -1193,8 +1213,10 @@ fn git_discard(dir: String, tracked_paths: Vec<String>, untracked_paths: Vec<Str
         run_git(&dir, &args)?;
     }
     if !untracked_paths.is_empty() {
-        let (dirs, files): (Vec<&str>, Vec<&str>) =
-            untracked_paths.iter().map(String::as_str).partition(|p| p.ends_with('/'));
+        let (dirs, files): (Vec<&str>, Vec<&str>) = untracked_paths
+            .iter()
+            .map(String::as_str)
+            .partition(|p| p.ends_with('/'));
         if !files.is_empty() {
             let mut args: Vec<&str> = vec!["clean", "-f", "--"];
             args.extend(files);
@@ -1251,7 +1273,9 @@ fn git_push(dir: String, set_upstream: Option<bool>) -> Result<(), String> {
             .trim()
             .to_string();
         if branch == "HEAD" {
-            return Err("cannot publish from a detached HEAD — checkout a branch first".to_string());
+            return Err(
+                "cannot publish from a detached HEAD — checkout a branch first".to_string(),
+            );
         }
         let remote = resolve_publish_remote(&dir)?;
         run_git(&dir, &["push", "-u", &remote, &branch]).map(|_| ())
@@ -1268,14 +1292,21 @@ fn git_push(dir: String, set_upstream: Option<bool>) -> Result<(), String> {
 /// would be a guess: zero remotes configured, or multiple remotes with none named `origin`.
 fn resolve_publish_remote(dir: &str) -> Result<String, String> {
     let out = run_git(dir, &["remote"])?;
-    let remotes: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let remotes: Vec<&str> = out
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     if remotes.contains(&"origin") {
         return Ok("origin".to_string());
     }
     match remotes.len() {
         0 => Err("no remote configured — add one before publishing".to_string()),
         1 => Ok(remotes[0].to_string()),
-        _ => Err("multiple remotes configured; publish only supports the 'origin' remote today".to_string()),
+        _ => Err(
+            "multiple remotes configured; publish only supports the 'origin' remote today"
+                .to_string(),
+        ),
     }
 }
 
@@ -1348,7 +1379,11 @@ fn git_checkout(dir: String, branch: String) -> Result<(), String> {
 fn git_log(dir: String, rel_path: Option<String>) -> Result<Vec<GitLogEntry>, String> {
     /// Comfortably above what the panel shows, while bounding the IPC payload on a long-history repo.
     const LOG_MAX_COUNT: &str = "--max-count=50";
-    let mut args: Vec<&str> = vec!["log", LOG_MAX_COUNT, "--pretty=format:%H%x1f%an%x1f%aI%x1f%s"];
+    let mut args: Vec<&str> = vec![
+        "log",
+        LOG_MAX_COUNT,
+        "--pretty=format:%H%x1f%an%x1f%aI%x1f%s",
+    ];
     if let Some(ref p) = rel_path {
         args.push("--");
         args.push(p.as_str());
@@ -1465,10 +1500,7 @@ fn is_safe_name(name: &str) -> bool {
 /// Build the explorer subtree for `dir`: every non-skipped child directory
 /// (recursively, even when empty) plus every `.koi` file, sorted folders-first
 /// then by name at each level. `root` anchors the forward-slashed `rel_path`.
-fn build_entries(
-    dir: &std::path::Path,
-    root: &std::path::Path,
-) -> Result<Vec<FsEntry>, String> {
+fn build_entries(dir: &std::path::Path, root: &std::path::Path) -> Result<Vec<FsEntry>, String> {
     let mut dirs: Vec<FsEntry> = Vec::new();
     let mut files: Vec<FsEntry> = Vec::new();
 
@@ -1638,8 +1670,7 @@ fn rename_entry(token: String, new_name: String) -> Result<String, String> {
     if target.exists() {
         return Err(format!("already exists: {}", target.display()));
     }
-    std::fs::rename(src, &target)
-        .map_err(|e| format!("failed to rename {token}: {e}"))?;
+    std::fs::rename(src, &target).map_err(|e| format!("failed to rename {token}: {e}"))?;
     Ok(target.to_string_lossy().into_owned())
 }
 
@@ -2271,7 +2302,9 @@ fn pty_start(
 fn pty_write(state: State<'_, PtyState>, data: String) -> Result<(), String> {
     let mut guard = state.writer.lock().map_err(|e| e.to_string())?;
     let writer = guard.as_mut().ok_or("PTY not started")?;
-    writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+    writer
+        .write_all(data.as_bytes())
+        .map_err(|e| e.to_string())?;
     writer.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -2418,7 +2451,9 @@ fn collab_start(
     end_collab_session(&state);
 
     let sink: Arc<dyn collab::LocalSink> = Arc::new(CollabEventSink { app });
-    let relay = relay.map(|r| r.trim().to_string()).filter(|r| !r.is_empty());
+    let relay = relay
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty());
 
     let session = match mode.as_str() {
         "create" => match relay {
@@ -2973,7 +3008,8 @@ mod tests {
     // the bundled sidecar — shadowing the Debug-DLL fallback and making every spawn fail EACCES.
     #[test]
     fn launchable_sidecar_rejects_the_zero_byte_placeholder() {
-        let dir = std::env::temp_dir().join(format!("koine_studio_sidecar_test_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("koine_studio_sidecar_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let stub = dir.join("koine");
@@ -2986,7 +3022,10 @@ mod tests {
 
     #[test]
     fn launchable_sidecar_accepts_a_nonempty_binary() {
-        let dir = std::env::temp_dir().join(format!("koine_studio_sidecar_real_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "koine_studio_sidecar_real_test_{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join("koine");
@@ -2999,7 +3038,10 @@ mod tests {
 
     #[test]
     fn launchable_sidecar_rejects_a_missing_file() {
-        let p = std::env::temp_dir().join(format!("koine_studio_sidecar_missing_{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "koine_studio_sidecar_missing_{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&p);
         assert_eq!(launchable_sidecar(p), None);
     }
@@ -3009,7 +3051,8 @@ mod tests {
     #[test]
     fn list_koi_files_recurses_sorts_and_skips_bin() {
         // Unique-ish temp root derived from the pid (no Instant/SystemTime).
-        let root = std::env::temp_dir().join(format!("koine_studio_fs_test_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("koine_studio_fs_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root); // clean any stale leftover
         let nested = root.join("contexts");
         let bin = root.join("bin");
@@ -3050,8 +3093,7 @@ mod tests {
 
     #[test]
     fn read_and_write_text_file_round_trip() {
-        let path = std::env::temp_dir()
-            .join(format!("koine_studio_rw_{}.koi", std::process::id()));
+        let path = std::env::temp_dir().join(format!("koine_studio_rw_{}.koi", std::process::id()));
         let body = "context Demo {\n  value Money\n}\n";
         write_text_file(path.to_string_lossy().into_owned(), body.to_string()).unwrap();
         let got = read_text_file(path.to_string_lossy().into_owned()).unwrap();
@@ -3063,8 +3105,8 @@ mod tests {
 
     #[test]
     fn list_entries_nests_dirs_and_koi_skips_bin_and_sorts_folders_first() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_entries_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("koine_studio_entries_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root); // clean any stale leftover
         let contexts = root.join("contexts");
         let empty = root.join("empty");
@@ -3107,8 +3149,8 @@ mod tests {
 
     #[test]
     fn list_dir_lists_immediate_children_of_any_extension_folders_first() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_listdir_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("koine_studio_listdir_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let adr = root.join("docs").join("adr");
         std::fs::create_dir_all(&adr).unwrap();
@@ -3117,11 +3159,15 @@ mod tests {
         std::fs::write(adr.join("0001-first.md"), "# 1. First").unwrap();
         std::fs::write(adr.join("README.txt"), "not markdown, still listed").unwrap();
 
-        let entries = list_dir(root.to_string_lossy().into_owned(), "docs/adr".to_string()).unwrap();
+        let entries =
+            list_dir(root.to_string_lossy().into_owned(), "docs/adr".to_string()).unwrap();
 
         // Flat, single-level listing: folder first (alpha), then files (alpha) — of ANY extension.
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["archive", "0001-first.md", "0002-second.md", "README.txt"]);
+        assert_eq!(
+            names,
+            vec!["archive", "0001-first.md", "0002-second.md", "README.txt"]
+        );
 
         // No recursion: every node carries children: None (even the directory).
         assert!(entries.iter().all(|e| e.children.is_none()));
@@ -3142,8 +3188,7 @@ mod tests {
 
     #[test]
     fn create_file_and_folder_write_to_disk_and_return_absolute_paths() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_create_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("koine_studio_create_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let folder = root.to_string_lossy().into_owned();
@@ -3171,8 +3216,7 @@ mod tests {
         .is_err());
 
         // create_folder makes a (nested) directory and returns the absolute path.
-        let folder_token =
-            create_folder(folder, "contexts/nested/deep".to_string()).unwrap();
+        let folder_token = create_folder(folder, "contexts/nested/deep".to_string()).unwrap();
         assert!(std::path::Path::new(&folder_token).is_absolute());
         assert!(std::path::Path::new(&folder_token).is_dir());
 
@@ -3181,18 +3225,14 @@ mod tests {
 
     #[test]
     fn rename_entry_renames_on_disk() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_rename_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("koine_studio_rename_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let src = root.join("old.koi");
         std::fs::write(&src, "context Old {}").unwrap();
 
-        let new_token = rename_entry(
-            src.to_string_lossy().into_owned(),
-            "new.koi".to_string(),
-        )
-        .unwrap();
+        let new_token =
+            rename_entry(src.to_string_lossy().into_owned(), "new.koi".to_string()).unwrap();
 
         assert!(new_token.ends_with("new.koi"));
         assert!(std::path::Path::new(&new_token).exists());
@@ -3207,8 +3247,7 @@ mod tests {
 
     #[test]
     fn delete_entry_removes_a_directory_recursively() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_delete_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("koine_studio_delete_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let nested = root.join("contexts");
         std::fs::create_dir_all(&nested).unwrap();
@@ -3224,8 +3263,7 @@ mod tests {
 
     #[test]
     fn move_entry_with_copy_leaves_the_source() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_move_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("koine_studio_move_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let src = root.join("billing.koi");
@@ -3254,8 +3292,8 @@ mod tests {
 
     #[test]
     fn move_entry_without_copy_relocates_the_entry() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_move_rel_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("koine_studio_move_rel_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let src = root.join("orders.koi");
@@ -3272,15 +3310,18 @@ mod tests {
 
         assert!(!src.exists()); // source removed on a move
         assert!(std::path::Path::new(&dest_token).exists());
-        assert_eq!(std::fs::read_to_string(&dest_token).unwrap(), "context Orders {}");
+        assert_eq!(
+            std::fs::read_to_string(&dest_token).unwrap(),
+            "context Orders {}"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn move_entry_rejects_an_existing_destination() {
-        let root = std::env::temp_dir()
-            .join(format!("koine_studio_move_clash_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("koine_studio_move_clash_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let src = root.join("a.koi");
@@ -3314,9 +3355,18 @@ mod tests {
         std::fs::write(root.join("orders.koi"), "context Orders {}").unwrap();
 
         let files = list_koi_files(root.to_string_lossy().into_owned()).unwrap();
-        assert_eq!(files.iter().map(|f| f.rel_path.as_str()).collect::<Vec<_>>(), vec!["orders.koi"]);
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| f.rel_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["orders.koi"]
+        );
         let tree = list_entries(root.to_string_lossy().into_owned()).unwrap();
-        assert_eq!(tree.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["orders.koi"]);
+        assert_eq!(
+            tree.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["orders.koi"]
+        );
 
         let _ = std::fs::remove_dir_all(&outer);
     }
@@ -3331,7 +3381,13 @@ mod tests {
         std::fs::write(nm.join("skip.koi"), "context Skip {}").unwrap();
 
         let files = list_koi_files(root.to_string_lossy().into_owned()).unwrap();
-        assert_eq!(files.iter().map(|f| f.rel_path.as_str()).collect::<Vec<_>>(), vec!["keep.koi"]);
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| f.rel_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["keep.koi"]
+        );
         assert!(!list_entries(root.to_string_lossy().into_owned())
             .unwrap()
             .iter()
@@ -3352,7 +3408,13 @@ mod tests {
         assert!(create_file(folder.clone(), "../escape.koi".into(), "x".into()).is_err());
         assert!(create_folder(folder.clone(), "../escape".into()).is_err());
         assert!(rename_entry(f.to_string_lossy().into_owned(), "..".into()).is_err());
-        assert!(move_entry(f.to_string_lossy().into_owned(), folder, "../escape.koi".into(), true).is_err());
+        assert!(move_entry(
+            f.to_string_lossy().into_owned(),
+            folder,
+            "../escape.koi".into(),
+            true
+        )
+        .is_err());
         // The escaping target was never created in the parent of the workspace.
         assert!(!root.parent().unwrap().join("escape.koi").exists());
 
@@ -3361,8 +3423,8 @@ mod tests {
 
     #[test]
     fn write_bytes_round_trips_binary() {
-        let path = std::env::temp_dir()
-            .join(format!("koine_studio_bytes_{}.zip", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("koine_studio_bytes_{}.zip", std::process::id()));
         // Bytes that are not valid UTF-8 (a zip's local-file-header magic + a stray 0xFF) must
         // survive write_bytes intact, which write_text_file could not carry.
         let body: Vec<u8> = vec![0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0xfe];
@@ -3380,14 +3442,20 @@ mod tests {
         // shell is spawned as a *login* shell (`-l`) so a Finder/Dock launch — whose stripped GUI
         // env never sourced `~/.zprofile` — still gets a real `PATH` (Homebrew/user dirs).
         let (program, args) = resolve_shell_command(Some("/bin/zsh"), Some("/bin/bash"), None);
-        assert_eq!(program, "/bin/zsh", "an explicit $SHELL is honoured verbatim");
+        assert_eq!(
+            program, "/bin/zsh",
+            "an explicit $SHELL is honoured verbatim"
+        );
         #[cfg(unix)]
         assert!(
             args.iter().any(|a| a == "-l"),
             "the Unix terminal must be a login shell so the user's profile runs"
         );
         #[cfg(windows)]
-        assert!(args.is_empty(), "the Windows spawn path is unchanged — no login flag");
+        assert!(
+            args.is_empty(),
+            "the Windows spawn path is unchanged — no login flag"
+        );
     }
 
     #[test]
@@ -3397,8 +3465,14 @@ mod tests {
         // `getpwuid` (passed as the second arg) rather than defaulting straight to `/bin/sh` —
         // still as a login shell.
         let (program, args) = resolve_shell_command(None, Some("/opt/homebrew/bin/fish"), None);
-        assert_eq!(program, "/opt/homebrew/bin/fish", "the passwd shell is the next preference");
-        assert!(args.iter().any(|a| a == "-l"), "the recovered shell is still a login shell");
+        assert_eq!(
+            program, "/opt/homebrew/bin/fish",
+            "the passwd shell is the next preference"
+        );
+        assert!(
+            args.iter().any(|a| a == "-l"),
+            "the recovered shell is still a login shell"
+        );
     }
 
     #[test]
@@ -3418,7 +3492,10 @@ mod tests {
         // flag is added. (Guards the `os_shell.unwrap_or("cmd")` branch, which the Unix-gated tests
         // above never exercise.)
         let (program, args) = resolve_shell_command(None, None, None);
-        assert_eq!(program, "cmd", "Windows defaults to cmd when no shell is named");
+        assert_eq!(
+            program, "cmd",
+            "Windows defaults to cmd when no shell is named"
+        );
         assert!(args.is_empty(), "the Windows spawn path adds no login flag");
     }
 
@@ -3429,11 +3506,20 @@ mod tests {
         // ["-l", "-i"] to get an interactive shell that sources it. Program resolution is unchanged.
         let override_args = vec!["-l".to_string(), "-i".to_string()];
         let (program, args) = resolve_shell_command(Some("/bin/bash"), None, Some(&override_args));
-        assert_eq!(program, "/bin/bash", "the override changes only the args, not the program");
+        assert_eq!(
+            program, "/bin/bash",
+            "the override changes only the args, not the program"
+        );
         #[cfg(unix)]
-        assert_eq!(args, override_args, "a non-empty override replaces the default -l args verbatim");
+        assert_eq!(
+            args, override_args,
+            "a non-empty override replaces the default -l args verbatim"
+        );
         #[cfg(windows)]
-        assert!(args.is_empty(), "Windows ignores the override — its spawn path is unchanged");
+        assert!(
+            args.is_empty(),
+            "Windows ignores the override — its spawn path is unchanged"
+        );
     }
 
     #[test]
@@ -3443,7 +3529,11 @@ mod tests {
         // #462's login-shell fix is unchanged when the user configured nothing.
         let empty: Vec<String> = Vec::new();
         let (_program, args) = resolve_shell_command(Some("/bin/zsh"), None, Some(&empty));
-        assert_eq!(args, vec!["-l".to_string()], "an empty override falls back to the default login flag");
+        assert_eq!(
+            args,
+            vec!["-l".to_string()],
+            "an empty override falls back to the default login flag"
+        );
     }
 
     #[test]
@@ -3451,7 +3541,11 @@ mod tests {
     fn resolve_shell_command_defaults_to_login_when_no_override_is_given() {
         // No override (None) ⇒ the default ["-l"] login shell — today's behaviour, the safe default.
         let (_program, args) = resolve_shell_command(Some("/bin/zsh"), None, None);
-        assert_eq!(args, vec!["-l".to_string()], "no override keeps the default login flag");
+        assert_eq!(
+            args,
+            vec!["-l".to_string()],
+            "no override keeps the default login flag"
+        );
     }
 
     #[test]
@@ -3461,7 +3555,10 @@ mod tests {
         let override_args = vec!["-l".to_string(), "-i".to_string()];
         let (program, args) = resolve_shell_command(None, None, Some(&override_args));
         assert_eq!(program, "cmd", "Windows still defaults to cmd");
-        assert!(args.is_empty(), "Windows ignores the override and adds no args");
+        assert!(
+            args.is_empty(),
+            "Windows ignores the override and adds no args"
+        );
     }
 
     // --- PTY chunk decoding (pure) ------------------------------------------
@@ -3469,7 +3566,10 @@ mod tests {
     #[test]
     fn take_decodable_passes_ascii_whole() {
         let mut carry = b"git status\r\n".to_vec();
-        assert_eq!(take_decodable(&mut carry).as_deref(), Some("git status\r\n"));
+        assert_eq!(
+            take_decodable(&mut carry).as_deref(),
+            Some("git status\r\n")
+        );
         assert!(carry.is_empty(), "a fully-valid buffer is drained entirely");
     }
 
@@ -3479,7 +3579,11 @@ mod tests {
         // nothing is emittable yet, and the partial byte is retained for the next read.
         let mut carry = vec![0xE2];
         assert_eq!(take_decodable(&mut carry), None);
-        assert_eq!(carry, vec![0xE2], "the incomplete sequence is kept, not lossily emitted");
+        assert_eq!(
+            carry,
+            vec![0xE2],
+            "the incomplete sequence is kept, not lossily emitted"
+        );
 
         // The continuation bytes arrive on the next read → the whole code point decodes.
         carry.extend_from_slice(&[0x82, 0xAC]);
@@ -3538,7 +3642,10 @@ mod tests {
         }
 
         // No data loss: every byte read is eventually emitted.
-        assert_eq!(emitted, total_bytes, "coalescing must not drop or duplicate output");
+        assert_eq!(
+            emitted, total_bytes,
+            "coalescing must not drop or duplicate output"
+        );
 
         // The event rate is bounded by the size window, not the 4 KB read size: at most one flush per
         // PTY_FLUSH_BYTES (+1 for the trailing remainder).
@@ -3605,8 +3712,8 @@ mod tests {
         fn new() -> Self {
             static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-            let dir = std::env::temp_dir()
-                .join(format!("koine_git_test_{}_{}", std::process::id(), n));
+            let dir =
+                std::env::temp_dir().join(format!("koine_git_test_{}_{}", std::process::id(), n));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             TempRepo { dir }
@@ -3689,8 +3796,16 @@ mod tests {
         let status = git_status(repo.path()).unwrap();
 
         assert_eq!(status.branch, "main");
-        assert!(has_file(&status.files, "base.txt", false, "modified"), "{:?}", status.files);
-        assert!(has_file(&status.files, "staged.txt", true, "added"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "base.txt", false, "modified"),
+            "{:?}",
+            status.files
+        );
+        assert!(
+            has_file(&status.files, "staged.txt", true, "added"),
+            "{:?}",
+            status.files
+        );
         assert!(
             has_file(&status.files, "untracked.txt", false, "untracked"),
             "{:?}",
@@ -3752,13 +3867,19 @@ mod tests {
         repo.write("f.txt", "2\n");
         repo.git(&["add", "f.txt"]);
         repo.git(&["commit", "-m", "c2"]);
-        let before = git_status(repo.path()).unwrap().upstream.expect("tracks origin/main");
+        let before = git_status(repo.path())
+            .unwrap()
+            .upstream
+            .expect("tracks origin/main");
         assert_eq!(before.r#ref, "origin/main");
         assert_eq!(before.ahead, 1);
 
         // Push → the upstream has the commit and the next status reads a truthful 0/0.
         git_push(repo.path(), None).unwrap();
-        let after = git_status(repo.path()).unwrap().upstream.expect("still tracking");
+        let after = git_status(repo.path())
+            .unwrap()
+            .upstream
+            .expect("still tracking");
         assert_eq!(after.ahead, 0);
         assert_eq!(after.behind, 0);
     }
@@ -3799,14 +3920,23 @@ mod tests {
         // instead (`git push -u origin <branch>`).
         git_push(repo.path(), Some(true)).unwrap();
 
-        let after = git_status(repo.path()).unwrap().upstream.expect("push -u sets the tracking ref");
+        let after = git_status(repo.path())
+            .unwrap()
+            .upstream
+            .expect("push -u sets the tracking ref");
         assert_eq!(after.r#ref, "origin/main");
         assert_eq!(after.ahead, 0);
         assert_eq!(after.behind, 0);
 
         // The remote actually received the commit.
-        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
-        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"])
+            .unwrap()
+            .trim()
+            .to_string();
+        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
         assert_eq!(remote_head, local_head);
     }
 
@@ -3828,14 +3958,23 @@ mod tests {
         git_push(repo.path(), Some(true)).unwrap();
 
         // The remote actually received the commit...
-        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
-        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
-        assert_eq!(remote_head, local_head);
-        // ...and the tracking ref was set against the ACTUAL remote used, not a hardcoded `origin`.
-        let tracked = run_git(&repo.path(), &["rev-parse", "--abbrev-ref", "main@{upstream}"])
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"])
             .unwrap()
             .trim()
             .to_string();
+        let local_head = run_git(&repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(remote_head, local_head);
+        // ...and the tracking ref was set against the ACTUAL remote used, not a hardcoded `origin`.
+        let tracked = run_git(
+            &repo.path(),
+            &["rev-parse", "--abbrev-ref", "main@{upstream}"],
+        )
+        .unwrap()
+        .trim()
+        .to_string();
         assert_eq!(tracked, "upstream/main");
     }
 
@@ -3849,7 +3988,10 @@ mod tests {
         repo.git(&["commit", "-m", "c1"]);
 
         let err = git_push(repo.path(), Some(true)).unwrap_err();
-        assert!(err.contains("no remote configured"), "unexpected error: {err}");
+        assert!(
+            err.contains("no remote configured"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -3886,7 +4028,10 @@ mod tests {
         repo.git(&["add", "f.txt"]);
         repo.git(&["commit", "-m", "c1"]);
         repo.git(&["remote", "add", "origin", &remote_path]);
-        let sha = run_git(&repo.path(), &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        let sha = run_git(&repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
         repo.git(&["checkout", &sha]);
 
         let err = git_push(repo.path(), Some(true)).unwrap_err();
@@ -3909,7 +4054,12 @@ mod tests {
 
         // Clone the remote — this is the repo under test, currently in sync with origin/main.
         let parent = TempRepo::new();
-        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        let clone_dir = git_clone(
+            remote_path.clone(),
+            parent.path(),
+            Some("clone".to_string()),
+        )
+        .unwrap();
         // `git clone` doesn't inherit `init_repo`'s autocrlf pin, so a Windows runner's
         // `core.autocrlf=true` default checks out the file with CRLF. Flipping the config alone
         // doesn't retroactively rewrite an already-checked-out file — it only changes what future
@@ -3925,23 +4075,39 @@ mod tests {
         origin.git(&["add", "f.txt"]);
         origin.git(&["commit", "-m", "c2"]);
         origin.git(&["push", "origin", "main"]);
-        let remote_head = run_git(&remote_path, &["rev-parse", "main"]).unwrap().trim().to_string();
+        let remote_head = run_git(&remote_path, &["rev-parse", "main"])
+            .unwrap()
+            .trim()
+            .to_string();
 
         // Before fetching, the clone's remote-tracking ref is still the stale first commit.
-        let stale = run_git(&clone_dir, &["rev-parse", "origin/main"]).unwrap().trim().to_string();
+        let stale = run_git(&clone_dir, &["rev-parse", "origin/main"])
+            .unwrap()
+            .trim()
+            .to_string();
         assert_ne!(stale, remote_head, "remote-tracking ref starts stale");
 
         git_fetch(clone_dir.clone()).unwrap();
 
         // Fetch catches the remote-tracking ref up to the remote's tip...
-        let fresh = run_git(&clone_dir, &["rev-parse", "origin/main"]).unwrap().trim().to_string();
+        let fresh = run_git(&clone_dir, &["rev-parse", "origin/main"])
+            .unwrap()
+            .trim()
+            .to_string();
         assert_eq!(fresh, remote_head, "fetch updates the remote-tracking ref");
 
         // ...but never touches the checked-out branch or worktree: same content, same local HEAD.
-        let contents = std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
+        let contents =
+            std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
         assert_eq!(contents, "1\n", "fetch never touches the worktree");
-        let local_head = run_git(&clone_dir, &["rev-parse", "main"]).unwrap().trim().to_string();
-        assert_ne!(local_head, remote_head, "local branch stays exactly where it was");
+        let local_head = run_git(&clone_dir, &["rev-parse", "main"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_ne!(
+            local_head, remote_head,
+            "local branch stays exactly where it was"
+        );
     }
 
     #[test]
@@ -3960,7 +4126,12 @@ mod tests {
 
         // Clone the remote — this is the repo under test, currently in sync with origin/main.
         let parent = TempRepo::new();
-        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        let clone_dir = git_clone(
+            remote_path.clone(),
+            parent.path(),
+            Some("clone".to_string()),
+        )
+        .unwrap();
         // `git clone` doesn't inherit `init_repo`'s autocrlf pin, so a Windows runner's
         // `core.autocrlf=true` default checks out the file with CRLF. Flipping the config alone
         // doesn't retroactively rewrite an already-checked-out file — it only changes what future
@@ -3979,8 +4150,12 @@ mod tests {
 
         git_pull(clone_dir.clone()).unwrap();
 
-        let contents = std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
-        assert_eq!(contents, "2\n", "pull fast-forwards the worktree to the remote's tip");
+        let contents =
+            std::fs::read_to_string(std::path::Path::new(&clone_dir).join("f.txt")).unwrap();
+        assert_eq!(
+            contents, "2\n",
+            "pull fast-forwards the worktree to the remote's tip"
+        );
     }
 
     #[test]
@@ -3999,10 +4174,17 @@ mod tests {
 
         // Clone the remote — this is the repo under test.
         let parent = TempRepo::new();
-        let clone_dir = git_clone(remote_path.clone(), parent.path(), Some("clone".to_string())).unwrap();
+        let clone_dir = git_clone(
+            remote_path.clone(),
+            parent.path(),
+            Some("clone".to_string()),
+        )
+        .unwrap();
         // `git clone` doesn't carry over a local identity, and the clone needs to make its own
         // commit below — give it the same throwaway identity `init_repo` seeds.
-        let clone = TempRepo { dir: std::path::PathBuf::from(&clone_dir) };
+        let clone = TempRepo {
+            dir: std::path::PathBuf::from(&clone_dir),
+        };
         clone.git(&["config", "user.email", "t@e.st"]);
         clone.git(&["config", "user.name", "Tester"]);
         clone.git(&["config", "commit.gpgsign", "false"]);
@@ -4038,8 +4220,16 @@ mod tests {
 
         // The single porcelain `1 MM ... b.txt` row expands to two GitFiles so the panel can group
         // them into Staged Changes / Changes by the flag alone.
-        assert!(has_file(&status.files, "b.txt", true, "modified"), "{:?}", status.files);
-        assert!(has_file(&status.files, "b.txt", false, "modified"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "b.txt", true, "modified"),
+            "{:?}",
+            status.files
+        );
+        assert!(
+            has_file(&status.files, "b.txt", false, "modified"),
+            "{:?}",
+            status.files
+        );
     }
 
     #[test]
@@ -4056,14 +4246,22 @@ mod tests {
 
         let status = git_status(repo.path()).unwrap();
 
-        assert!(has_file(&status.files, "crème.koi", false, "modified"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "crème.koi", false, "modified"),
+            "{:?}",
+            status.files
+        );
         assert!(
             has_file(&status.files, "naïve café.txt", false, "untracked"),
             "{:?}",
             status.files
         );
         for f in &status.files {
-            assert!(!f.rel_path.starts_with('"'), "relPath still C-quoted: {:?}", f.rel_path);
+            assert!(
+                !f.rel_path.starts_with('"'),
+                "relPath still C-quoted: {:?}",
+                f.rel_path
+            );
         }
 
         // Feed git_status's OWN returned relPath back into git as a pathspec — the actual round
@@ -4105,7 +4303,11 @@ mod tests {
 
         let status = git_status(repo.path()).unwrap();
 
-        assert!(has_file(&status.files, "brûlée.koi", true, "renamed"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "brûlée.koi", true, "renamed"),
+            "{:?}",
+            status.files
+        );
         assert!(
             !status.files.iter().any(|f| f.rel_path == "crème.koi"),
             "original path leaked as its own entry: {:?}",
@@ -4173,9 +4375,16 @@ mod tests {
         git_commit(repo.path(), "tip amended".to_string(), Some(true)).unwrap();
 
         let log = git_log(repo.path(), None).unwrap();
-        assert_eq!(log.len(), 2, "amend replaces the tip commit, it doesn't add a new one");
+        assert_eq!(
+            log.len(),
+            2,
+            "amend replaces the tip commit, it doesn't add a new one"
+        );
         assert_eq!(log[0].message, "tip amended");
-        let parent = run_git(&repo.path(), &["rev-parse", "HEAD^"]).unwrap().trim().to_string();
+        let parent = run_git(&repo.path(), &["rev-parse", "HEAD^"])
+            .unwrap()
+            .trim()
+            .to_string();
         assert_eq!(parent, base_sha, "amend keeps the same parent commit");
     }
 
@@ -4193,7 +4402,11 @@ mod tests {
         git_commit(repo.path(), String::new(), Some(true)).unwrap();
 
         let log = git_log(repo.path(), None).unwrap();
-        assert_eq!(log.len(), 1, "amend still replaces the tip, not a new commit");
+        assert_eq!(
+            log.len(),
+            1,
+            "amend still replaces the tip, not a new commit"
+        );
         assert_eq!(log[0].message, "original message");
         assert!(
             git_status(repo.path()).unwrap().files.is_empty(),
@@ -4218,7 +4431,11 @@ mod tests {
         // A revert is a FORWARD commit (not a history rewrite): a third commit lands on top…
         let log = git_log(repo.path(), None).unwrap();
         assert_eq!(log.len(), 3);
-        assert!(log[0].message.starts_with("Revert"), "revert message: {}", log[0].message);
+        assert!(
+            log[0].message.starts_with("Revert"),
+            "revert message: {}",
+            log[0].message
+        );
         // …the working file is back to the base content…
         let content = std::fs::read_to_string(repo.dir.join("f.txt")).unwrap();
         assert_eq!(content, "base\n");
@@ -4243,13 +4460,21 @@ mod tests {
         repo.write("e.txt", "2\n");
         git_stage(repo.path(), vec!["e.txt".to_string()]).unwrap();
         let staged = git_status(repo.path()).unwrap();
-        assert!(has_file(&staged.files, "e.txt", true, "modified"), "{:?}", staged.files);
+        assert!(
+            has_file(&staged.files, "e.txt", true, "modified"),
+            "{:?}",
+            staged.files
+        );
         assert!(!has_file(&staged.files, "e.txt", false, "modified"));
 
         // Unstage it → it moves back to the worktree (unstaged) area.
         git_unstage(repo.path(), vec!["e.txt".to_string()]).unwrap();
         let unstaged = git_status(repo.path()).unwrap();
-        assert!(has_file(&unstaged.files, "e.txt", false, "modified"), "{:?}", unstaged.files);
+        assert!(
+            has_file(&unstaged.files, "e.txt", false, "modified"),
+            "{:?}",
+            unstaged.files
+        );
         assert!(!has_file(&unstaged.files, "e.txt", true, "modified"));
     }
 
@@ -4267,21 +4492,44 @@ mod tests {
         repo.write("u.txt", "scratch\n");
         repo.write("keep.txt", "keep-edited\n");
         let before = git_status(repo.path()).unwrap();
-        assert!(has_file(&before.files, "t.txt", false, "modified"), "{:?}", before.files);
-        assert!(has_file(&before.files, "u.txt", false, "untracked"), "{:?}", before.files);
+        assert!(
+            has_file(&before.files, "t.txt", false, "modified"),
+            "{:?}",
+            before.files
+        );
+        assert!(
+            has_file(&before.files, "u.txt", false, "untracked"),
+            "{:?}",
+            before.files
+        );
 
         // One mixed call handles both kinds — exactly what a group Discard-all sends: the caller
         // supplies the tracked/untracked split (the panel knows each row's status).
-        git_discard(repo.path(), vec!["t.txt".to_string()], vec!["u.txt".to_string()]).unwrap();
+        git_discard(
+            repo.path(),
+            vec!["t.txt".to_string()],
+            vec!["u.txt".to_string()],
+        )
+        .unwrap();
 
         // The tracked file is reverted to its committed content…
-        assert_eq!(std::fs::read_to_string(repo.dir.join("t.txt")).unwrap(), "base\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.dir.join("t.txt")).unwrap(),
+            "base\n"
+        );
         // …the untracked file is deleted from disk…
         assert!(!repo.dir.join("u.txt").exists());
         // …and the unlisted file keeps its edit (still modified on the next status).
-        assert_eq!(std::fs::read_to_string(repo.dir.join("keep.txt")).unwrap(), "keep-edited\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.dir.join("keep.txt")).unwrap(),
+            "keep-edited\n"
+        );
         let after = git_status(repo.path()).unwrap();
-        assert!(has_file(&after.files, "keep.txt", false, "modified"), "{:?}", after.files);
+        assert!(
+            has_file(&after.files, "keep.txt", false, "modified"),
+            "{:?}",
+            after.files
+        );
         assert!(!has_file(&after.files, "t.txt", false, "modified"));
         assert!(!has_file(&after.files, "u.txt", false, "untracked"));
     }
@@ -4302,11 +4550,22 @@ mod tests {
         git_discard(repo.path(), vec!["p.txt".to_string()], vec![]).unwrap();
 
         // The worktree reverts to the INDEX content (the staged "2"), never all the way to HEAD's "1"…
-        assert_eq!(std::fs::read_to_string(repo.dir.join("p.txt")).unwrap(), "2\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.dir.join("p.txt")).unwrap(),
+            "2\n"
+        );
         // …so the staged copy survives, and only the worktree row is gone.
         let status = git_status(repo.path()).unwrap();
-        assert!(has_file(&status.files, "p.txt", true, "modified"), "{:?}", status.files);
-        assert!(!has_file(&status.files, "p.txt", false, "modified"), "{:?}", status.files);
+        assert!(
+            has_file(&status.files, "p.txt", true, "modified"),
+            "{:?}",
+            status.files
+        );
+        assert!(
+            !has_file(&status.files, "p.txt", false, "modified"),
+            "{:?}",
+            status.files
+        );
     }
 
     #[test]
@@ -4322,8 +4581,16 @@ mod tests {
 
         // Porcelain collapses the untracked directory into one `scratch/` entry.
         let before = git_status(repo.path()).unwrap();
-        assert!(has_file(&before.files, "scratch/", false, "untracked"), "{:?}", before.files);
-        assert!(has_file(&before.files, "u.txt", false, "untracked"), "{:?}", before.files);
+        assert!(
+            has_file(&before.files, "scratch/", false, "untracked"),
+            "{:?}",
+            before.files
+        );
+        assert!(
+            has_file(&before.files, "u.txt", false, "untracked"),
+            "{:?}",
+            before.files
+        );
 
         git_discard(repo.path(), vec![], vec!["scratch/".to_string()]).unwrap();
 
@@ -4332,8 +4599,16 @@ mod tests {
         // …and the unlisted untracked file was never touched.
         assert!(repo.dir.join("u.txt").exists());
         let after = git_status(repo.path()).unwrap();
-        assert!(!has_file(&after.files, "scratch/", false, "untracked"), "{:?}", after.files);
-        assert!(has_file(&after.files, "u.txt", false, "untracked"), "{:?}", after.files);
+        assert!(
+            !has_file(&after.files, "scratch/", false, "untracked"),
+            "{:?}",
+            after.files
+        );
+        assert!(
+            has_file(&after.files, "u.txt", false, "untracked"),
+            "{:?}",
+            after.files
+        );
     }
 
     #[test]
@@ -4382,14 +4657,19 @@ mod tests {
 
         // Worktree diff is non-empty and shows the added line.
         let worktree = git_diff(repo.path(), "h.txt".to_string(), false).unwrap();
-        assert!(worktree.contains("@@"), "expected a hunk header: {worktree}");
+        assert!(
+            worktree.contains("@@"),
+            "expected a hunk header: {worktree}"
+        );
         assert!(worktree.contains("+line2"), "{worktree}");
 
         // Once staged, the change shows under --cached and the worktree diff goes empty.
         git_stage(repo.path(), vec!["h.txt".to_string()]).unwrap();
         let cached = git_diff(repo.path(), "h.txt".to_string(), true).unwrap();
         assert!(cached.contains("+line2"), "{cached}");
-        assert!(git_diff(repo.path(), "h.txt".to_string(), false).unwrap().is_empty());
+        assert!(git_diff(repo.path(), "h.txt".to_string(), false)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -4457,7 +4737,10 @@ mod tests {
         assert_eq!(renamed.added, Some(0));
         assert_eq!(renamed.removed, Some(0));
         // The raw `old => new` arrow must never leak into a key.
-        assert!(!entries.iter().any(|e| e.rel_path.contains("=>")), "{entries:?}");
+        assert!(
+            !entries.iter().any(|e| e.rel_path.contains("=>")),
+            "{entries:?}"
+        );
     }
 
     #[test]
@@ -4475,11 +4758,17 @@ mod tests {
     fn git_init_turns_a_plain_folder_into_a_work_tree() {
         // A plain (never `git init`-ed) folder isn't a work tree yet...
         let plain = TempRepo::new();
-        assert!(git_status(plain.path()).is_err(), "plain folder must not be a work tree");
+        assert!(
+            git_status(plain.path()).is_err(),
+            "plain folder must not be a work tree"
+        );
 
         // ...but is, once `git_init` has run against it.
         git_init(plain.path()).unwrap();
-        assert!(!git_status(plain.path()).unwrap().branch.is_empty(), "status now reports a branch");
+        assert!(
+            !git_status(plain.path()).unwrap().branch.is_empty(),
+            "status now reports a branch"
+        );
     }
 
     #[test]
@@ -4496,9 +4785,15 @@ mod tests {
         let dest = git_clone(source.path(), parent.path(), Some("cloned".to_string())).unwrap();
 
         let dest_path = std::path::Path::new(&dest);
-        assert!(dest_path.ends_with("cloned"), "returns the clone path: {dest}");
+        assert!(
+            dest_path.ends_with("cloned"),
+            "returns the clone path: {dest}"
+        );
         assert!(dest_path.exists(), "the clone dir exists: {dest}");
-        assert!(dest_path.join(".git").exists(), "and is a work tree: {dest}");
+        assert!(
+            dest_path.join(".git").exists(),
+            "and is a work tree: {dest}"
+        );
 
         // With no explicit name, the dir is derived from the url's last path segment.
         let parent2 = TempRepo::new();
@@ -4509,8 +4804,14 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         let derived_path = std::path::Path::new(&derived);
-        assert!(derived_path.ends_with(&expected), "derived name is the source's last segment: {derived}");
-        assert!(derived_path.join(".git").exists(), "derived clone is a work tree: {derived}");
+        assert!(
+            derived_path.ends_with(&expected),
+            "derived name is the source's last segment: {derived}"
+        );
+        assert!(
+            derived_path.join(".git").exists(),
+            "derived clone is a work tree: {derived}"
+        );
     }
 
     #[test]
@@ -4528,17 +4829,37 @@ mod tests {
 
         // The SAME validation applies to a url-DERIVED name: a url ending in `/..` derives dest `".."`,
         // which must be rejected too (not just the explicit-dir-name branch).
-        assert!(git_clone("https://example.com/owner/..".to_string(), parent.path(), None).is_err());
+        assert!(git_clone(
+            "https://example.com/owner/..".to_string(),
+            parent.path(),
+            None
+        )
+        .is_err());
 
         // clone_dest_name derives the repo name across url styles AND platform separators (a Windows
         // local-path clone source uses `\` — this was the windows-latest CI failure) and rejects any
         // name that could escape parent_dir. Pure + platform-independent, so it runs on every OS.
-        assert_eq!(clone_dest_name("https://example.com/owner/repo.git", None).unwrap(), "repo");
-        assert_eq!(clone_dest_name("git@host:owner/repo.git", None).unwrap(), "repo");
+        assert_eq!(
+            clone_dest_name("https://example.com/owner/repo.git", None).unwrap(),
+            "repo"
+        );
+        assert_eq!(
+            clone_dest_name("git@host:owner/repo.git", None).unwrap(),
+            "repo"
+        );
         assert_eq!(clone_dest_name("https://h/o/repo/", None).unwrap(), "repo"); // trailing slash trimmed
-        assert_eq!(clone_dest_name("/tmp/koine_git_test_1", None).unwrap(), "koine_git_test_1");
-        assert_eq!(clone_dest_name(r"C:\Users\RUNNER~1\Temp\koine_git_test_2", None).unwrap(), "koine_git_test_2");
-        assert_eq!(clone_dest_name("ignored", Some("myclone")).unwrap(), "myclone");
+        assert_eq!(
+            clone_dest_name("/tmp/koine_git_test_1", None).unwrap(),
+            "koine_git_test_1"
+        );
+        assert_eq!(
+            clone_dest_name(r"C:\Users\RUNNER~1\Temp\koine_git_test_2", None).unwrap(),
+            "koine_git_test_2"
+        );
+        assert_eq!(
+            clone_dest_name("ignored", Some("myclone")).unwrap(),
+            "myclone"
+        );
         assert!(clone_dest_name("https://h/o/..", None).is_err());
         assert!(clone_dest_name("x", Some("a/b")).is_err());
         assert!(clone_dest_name("x", Some(r"a\b")).is_err());
@@ -4546,12 +4867,7 @@ mod tests {
         assert!(clone_dest_name("x", Some("")).is_err());
 
         // A non-existent local url fails fast (git rejects the missing path — no network).
-        assert!(git_clone(
-            "/no/such/path/repo.git".to_string(),
-            parent.path(),
-            None
-        )
-        .is_err());
+        assert!(git_clone("/no/such/path/repo.git".to_string(), parent.path(), None).is_err());
     }
 
     // --- PTY teardown / pty_start race (#810) --------------------------------
@@ -4574,23 +4890,34 @@ mod tests {
         let master = Mutex::new(Some("master-N"));
 
         let mut child_lock_was_held = false;
-        let reaped = take_pty_child_and_clear_handles_with_race_hook(&child, &writer, &master, || {
-            // Teardown has taken the dead child and is about to clear writer/master — the exact
-            // window a concurrent `pty_start` exploits. Probe the lock from another thread (so the
-            // result is the genuine cross-thread state): teardown must still hold it here.
-            std::thread::scope(|s| {
-                child_lock_was_held = s.spawn(|| child.try_lock().is_err()).join().unwrap();
+        let reaped =
+            take_pty_child_and_clear_handles_with_race_hook(&child, &writer, &master, || {
+                // Teardown has taken the dead child and is about to clear writer/master — the exact
+                // window a concurrent `pty_start` exploits. Probe the lock from another thread (so the
+                // result is the genuine cross-thread state): teardown must still hold it here.
+                std::thread::scope(|s| {
+                    child_lock_was_held = s.spawn(|| child.try_lock().is_err()).join().unwrap();
+                });
             });
-        });
 
-        assert_eq!(reaped, Some("child-N"), "teardown should hand back the reaped child");
+        assert_eq!(
+            reaped,
+            Some("child-N"),
+            "teardown should hand back the reaped child"
+        );
         assert!(
             child_lock_was_held,
             "#810: teardown must hold the child lock while clearing writer/master, else a racing \
              pty_start interleaves and its fresh handles are clobbered"
         );
-        assert!(writer.lock().unwrap().is_none(), "writer should be cleared by teardown");
-        assert!(master.lock().unwrap().is_none(), "master should be cleared by teardown");
+        assert!(
+            writer.lock().unwrap().is_none(),
+            "writer should be cleared by teardown"
+        );
+        assert!(
+            master.lock().unwrap().is_none(),
+            "master should be cleared by teardown"
+        );
     }
 
     #[test]
@@ -4614,7 +4941,10 @@ mod tests {
                 // Give the racing start a chance to contend for the child lock before we clear.
                 std::thread::yield_now();
             });
-            start.expect("start thread spawned").join().expect("start thread");
+            start
+                .expect("start thread spawned")
+                .join()
+                .expect("start thread");
         });
 
         assert_eq!(
