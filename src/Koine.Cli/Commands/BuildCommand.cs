@@ -66,6 +66,10 @@ internal class BuildSettings : CommandSettings
     [Description("Application layer: how a handler treats a missing aggregate, throw (default), nullable (return null, e.g. for a 404), or result (return a Result<T>).")]
     public string? AppNotFound { get; init; }
 
+    [CommandOption("--app-dispatch-events")]
+    [Description("Application layer: dispatch each domain event an aggregate recorded after the transaction commits, via the emitted IDomainEventDispatcher contract (you supply the implementation).")]
+    public bool AppDispatchEvents { get; init; }
+
     [CommandOption("--regex-match-timeout-ms <MS>")]
     [Description("Override the C# regex match timeout (ms) for this invocation; wins over targets.csharp.regexMatchTimeoutMs. Must be a positive integer.")]
     public string? RegexMatchTimeoutMs { get; init; }
@@ -130,6 +134,11 @@ internal class BuildSettings : CommandSettings
         var applicationHandlerResult = AppHandlerResult ?? targetOptions.ApplicationHandlerResult;
         var applicationNotFound = AppNotFound ?? targetOptions.ApplicationNotFound;
 
+        // Boolean sub-option, so flag-OR-config rather than flag-overrides-config (the --app-mediatr
+        // precedent): a bare switch has no way to express "explicitly false", so a config `true`
+        // cannot be turned off by omitting the flag.
+        var applicationDispatchEvents = AppDispatchEvents || targetOptions.ApplicationDispatchEvents;
+
         // The DTO/read-model mapping strategy (issue #630): validate the resolved value — the explicit
         // --app-mapping flag or the application.mapping config key — against the modes the emitter
         // understands. An unknown/typo'd value (e.g. "mapperley") is a hard error rather than a silent
@@ -162,7 +171,7 @@ internal class BuildSettings : CommandSettings
         // the resolved layers default to Domain-only. Run this after layer resolution so an explicit
         // --layers domain (or a config block) is still upgraded to include application.
         if (applicationMediatr || applicationMapping is not null || applicationHandlerResult is not null
-            || applicationNotFound is not null)
+            || applicationNotFound is not null || applicationDispatchEvents)
         {
             resolvedLayers = WithApplicationLayer(resolvedLayers);
         }
@@ -174,6 +183,7 @@ internal class BuildSettings : CommandSettings
             ApplicationMapping = applicationMapping,
             ApplicationHandlerResult = applicationHandlerResult,
             ApplicationNotFound = applicationNotFound,
+            ApplicationDispatchEvents = applicationDispatchEvents,
         };
 
         plan = new BuildPlan(
