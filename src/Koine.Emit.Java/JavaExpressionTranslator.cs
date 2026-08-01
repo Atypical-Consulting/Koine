@@ -498,7 +498,10 @@ internal sealed class JavaExpressionTranslator
 
         // (3) Object equality (String / Instant / value objects / enums …) -> null-safe Objects.equals.
         // A comparison against the `null` literal stays reference ==/!= (case 6), and primitive Int/Bool
-        // equality stays a plain operator.
+        // equality stays a plain operator. Each side's bare-identifier operand is hinted with the OTHER
+        // side's own inferred enum type (#1771): `status == Active` — `status` concretely typed
+        // `TenantStatus` — must qualify `Active` against `TenantStatus`, never an arbitrary other enum in
+        // the model that happens to also declare an `Active` member (R13.2 permits that legally).
         if (IsEquality(bin.Op) && NeedsObjectsEquals(bin, leftType, rightType))
         {
             if (bin.Op == BinaryOp.Neq)
@@ -507,9 +510,9 @@ internal sealed class JavaExpressionTranslator
             }
 
             sb.Append("java.util.Objects.equals(");
-            WriteTopLevel(bin.Left, sb);
+            WriteOperand(bin.Left, EnumTypeName(bin.Right), sb);
             sb.Append(", ");
-            WriteTopLevel(bin.Right, sb);
+            WriteOperand(bin.Right, EnumTypeName(bin.Left), sb);
             sb.Append(')');
             return;
         }
@@ -593,6 +596,31 @@ internal sealed class JavaExpressionTranslator
     /// <summary>True when a type classifies as a Koine value object (so its arithmetic lowers to a method call).</summary>
     private bool IsValueObject(TypeRef? type) =>
         type is not null && _index.Classify(type.Qualifier ?? _resolver.Context, type.Name) == TypeKind.Value;
+
+    /// <summary>
+    /// The enum type name an expression resolves to, else <c>null</c> — the sibling-operand hint a bare
+    /// enum-member identifier on the OTHER side of a comparison resolves against (mirrors
+    /// <c>CSharpExpressionTranslator.EnumTypeName</c>, #1771).
+    /// </summary>
+    private string? EnumTypeName(Expr expr)
+    {
+        TypeRef? type = InferType(expr);
+        return type is not null && _index.Classify(type.Qualifier ?? _resolver.Context, type.Name) == TypeKind.Enum
+            ? type.Name
+            : null;
+    }
+
+    /// <summary>Writes a binary operand, passing an enum-type hint through to a bare-identifier operand (#1771).</summary>
+    private void WriteOperand(Expr expr, string? enumHint, StringBuilder sb)
+    {
+        if (expr is IdentifierExpr id)
+        {
+            WriteIdentifier(id.Name, sb, enumHint);
+            return;
+        }
+
+        WriteTopLevel(expr, sb);
+    }
 
     /// <summary>Renders one operand of a plain-infix binary, dropping the redundant parentheses precedence/associativity does not require.</summary>
     private void WriteBinaryChild(Expr expr, BinaryOp parentOp, bool rightOperand, StringBuilder sb)

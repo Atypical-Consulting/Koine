@@ -225,17 +225,44 @@ parameter of `koine/runScenario`), clamped to **100 ms – 60 s**.
 Executed runs are also **serialized per window**: fire two in quick succession and they run one after
 the other, rather than putting two Roslyn compiles inside the editor backend at once.
 
-:::caution[The child process is isolation, not a security sandbox]
-Running a scenario in a killable child process protects the **editor** from the generated code — a hang,
-a crash, or an allocation storm costs you one dead child process and an honest error, not your session.
-It is **not** an OS-level sandbox: there is no `seccomp` filter, no macOS sandbox profile, no Windows Job
-Object, and **no filesystem or network denial** in this first version.
+### Resource ceilings and OS-level confinement
 
-That is a deliberate, documented boundary, and it rests on the fact that you are running **your own
-model on your own machine** — code you could equally have produced with `koine build` and run yourself.
-Do not treat it as a containment boundary for a model you do not trust. The reasoning, the trust model
-and the follow-up hardening are recorded in
-[ADR 0011 — Scenario execution runs in a killable child process](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0011-scenario-execution-sandbox.md).
+Beyond the deadline, the child runs under limits the runtime and the operating system enforce. What you
+get depends on the platform, and the run **tells you** when something could not be applied — any gap is
+appended to the result's notes rather than left implied:
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Managed-heap ceiling (1 GiB) | ✅ | ✅ | ✅ *(also capped by a Job Object)* |
+| Processor-time ceiling | ✅ | ✅ | ✅ *(Job Object)* |
+| Network denied | ✅ | ⚠️ *(only where unprivileged user namespaces are permitted)* | ❌ *(reported)* |
+| Writes confined to the run directory | ✅ | ❌ *(reported)* | ❌ *(reported)* |
+
+The memory row is a **managed-heap** ceiling on macOS and Linux — the .NET runtime enforces it, and it
+bounds the managed heap, which is where an allocation storm in emitted code lands. It does not bound
+native allocations; only the Windows Job Object caps those too.
+
+Linux network denial uses an unprivileged network namespace, which several distributions restrict —
+Ubuntu 24.04's AppArmor policy blocks it by default, and this project's own CI runners fall in that
+group. Where it is blocked, the run says so in its notes rather than pretending otherwise.
+
+Reads are unrestricted everywhere — the child has to load the .NET runtime and its own assemblies. A run
+stopped by a *resource* ceiling says so by name, so an allocation storm is never reported as an infinite
+loop. And confinement is never allowed to break a run: if a mechanism is missing on your machine, the
+scenario still executes and the result says which confinement was skipped.
+
+:::caution[The child process is defence in depth, not a security sandbox]
+Running a scenario in a confined, killable child process protects the **editor** from the generated
+code — a hang, a crash, or an allocation storm costs you one dead child process and an honest error, not
+your session — and, where the platform allows it, stops that code touching the network or your files.
+
+It is still **not** a containment boundary for a model you do not trust: reads are open everywhere, and
+two of the three platforms cannot confine writes at all. The boundary rests on the fact that you are
+running **your own model on your own machine** — code you could equally have produced with `koine build`
+and run yourself. The reasoning, the trust model and exactly what is enforced where are recorded in
+[ADR 0011 — Scenario execution runs in a killable child process](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0011-scenario-execution-sandbox.md)
+and
+[ADR 0012 — Scenario sandbox confinement uses each platform's native mechanism](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0012-scenario-sandbox-os-confinement.md).
 :::
 
 ## Relationship to the VS Code extension

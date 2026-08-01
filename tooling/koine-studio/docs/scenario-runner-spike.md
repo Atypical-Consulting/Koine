@@ -191,7 +191,7 @@ now names the engine that produced it, so the two modes can never be confused fo
 | Layer | What shipped |
 |---|---|
 | LSP | `koine/runScenario` gained two optional params: **`execute`** (boolean, default `false`) and **`timeoutMs`** (number, default **5000**, clamped to **100 ms – 60 s**). Every response — both engines, both hosts, success *and* failure — carries **`"mode": "executed" \| "interpreted"`**. Executed runs are serialized per workspace by a `SemaphoreSlim(1,1)` in `LspServer`, so two quick `execute: true` requests run in sequence rather than as two concurrent Roslyn compiles inside the editor backend. |
-| Engine | `src/Koine.Execution/` (new, non-packable): `GeneratedAssemblyCompiler` (the Roslyn compile-and-load harness, lifted out of the test project's `TestSupport` — exactly the reuse the spike predicted), `ScenarioValueBinder`, `ScenarioExecutor` (emit → compile into a collectible `AssemblyLoadContext` → drive the real types reflectively → **B's own `ScenarioResult` contract**), and `ScenarioExecutionHost` (spawn / drain / deadline / kill / cleanup). |
+| Engine | `src/Koine.Execution/` (new, non-packable): `GeneratedAssemblyCompiler` (the Roslyn compile-and-load harness, lifted out of the test project's `TestSupport` — exactly the reuse the spike predicted), `ScenarioValueBinder`, `ScenarioExecutor` (emit → compile into a collectible `AssemblyLoadContext` → drive the real types reflectively → **B's own `ScenarioResult` contract**), and `ScenarioExecutionHost` (spawn / confine / drain / deadline / kill / cleanup), with `ScenarioSandbox` + `ScenarioConfinement` + `WindowsJobObject` planning and applying the OS-level confinement described below. |
 | CLI | A **hidden** `koine scenario-exec` verb (`src/Koine.Cli/Commands/ScenarioExecCommand.cs`): one JSON request on stdin, one result tree on stdout, **always exit 0** — every failure is reported *inside* the tree as `ok: false` plus a note. It is a protocol endpoint spoken by `ScenarioExecutionHost`, not a command a human runs. |
 | Studio | A capability-gated checkbox **"Execute generated code (high fidelity)"** on the scenario panel, rendered only where the new `Platform.supportsScenarioExecution` capability is true (Tauri `true`, browser `false`). Default **OFF**, session-only — nothing is written to settings. The timeline header carries a mode chip read from **`result.mode`** (what actually happened), never from what was requested. |
 | Browser | `execute: true` reaching the WASM backend is answered by the interpreter with `mode: "interpreted"` **plus a note that execution is not available on this host** — degraded and explicitly so, never a silently interpreted answer wearing an executed label. The flag is still forwarded, so the degradation is stated by the one component that knows it. |
@@ -212,13 +212,35 @@ and it is deliberately narrower than the word "sandbox" suggests:
   **zero** model-derived work in its own process — not even the compile. (This is stronger than the
   sketch in #236, which passed a pre-built assembly path.)
 - **Housekeeping on every path.** The child runs with a **scrubbed environment** (an allow-list — it
-  inherits none of the host's tokens, proxies or build state) and a working directory set to a **per-run
-  temp directory deleted on success, failure and kill alike**.
-- **It is not an OS-level sandbox, and does not pretend to be.** No seccomp filter, no macOS
-  `sandbox-exec` profile, no Windows Job Object, no filesystem or network denial. Its job is to protect
-  the **editor host** from hangs, crashes and resource exhaustion — not to contain a hostile model
-  author. ADR 0011 states that trust model plainly and requires revisiting *before* Koine ever executes a
-  model authored by someone other than the operator (a hosted playground, a CI bot running a PR's model).
+  inherits none of the host's tokens, proxies or build state, and the runtime's diagnostics IPC channel
+  is switched off) and a working directory set to a **per-run temp directory deleted on success, failure
+  and kill alike**.
+- **OS-level confinement on top of all of that** ([ADR 0012](../../../adr/0012-scenario-sandbox-os-confinement.md),
+  [#1759](https://github.com/Atypical-Consulting/Koine/issues/1759)) — **best-effort, and uneven by
+  platform on purpose**:
+  - *Every platform:* a **managed-heap ceiling** (1 GiB by default) and a **processor-time ceiling**
+    derived from the wall-clock budget. A run stopped at either gets a note **naming that ceiling**, not
+    the timeout note — so "it allocated" is never reported as "it loops".
+  - *macOS:* a `sandbox-exec` profile that **denies the network** and **denies writes outside the per-run
+    directory**.
+  - *Linux:* an unprivileged user + network namespace (`unshare --user --map-root-user --net`) that
+    **denies the network** — but only where the distribution permits unprivileged user namespaces
+    (Ubuntu 24.04's AppArmor policy does not, which is why this repo's own CI runner degrades to a note).
+    No write confinement — Landlock needs a hook .NET does not offer, and bubblewrap is a dependency an
+    editor feature cannot assume.
+  - *Windows:* a **Job Object** carrying the memory and CPU ceilings (and killing the child if the host
+    dies). No filesystem or network confinement — a restricted token needs `CreateProcessAsUser`.
+  - **Reads stay unrestricted everywhere** (the child must load the runtime and its own assemblies), and
+    every mechanism is **probed before use**. Anything unavailable is appended to the result's `notes`
+    and surfaced on `ScenarioChildRun.SandboxNotes`; **a scenario never fails because confinement is
+    unavailable.**
+- **It is still not a containment boundary against a hostile actor.** The confinement above is defence in
+  depth: it makes the emitter's "no I/O primitives" premise an *enforced* property on macOS rather than a
+  stated one, and bounds the resource attacks that are the realistic failure. Its job remains protecting
+  the **editor host** from hangs, crashes and resource exhaustion. ADR 0011 states that trust model
+  plainly and requires revisiting *before* Koine ever executes a model authored by someone other than the
+  operator (a hosted playground, a CI bot running a PR's model) — ADR 0012 does not change that, and
+  notes that only the Linux path is CI-covered (`build-and-test` is `ubuntu-latest` only).
 
 #### Fidelity gaps, revisited
 

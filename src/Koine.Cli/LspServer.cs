@@ -38,10 +38,14 @@ internal sealed class LspServer
     /// thread (<see cref="TryDispatchExecutedScenario"/>).</summary>
     private const double MaxScenarioTimeoutMs = 60_000;
 
-    /// <summary>The longest ONE executed run can take before its response is written: the clamped budget
-    /// plus the host's kill grace.</summary>
+    /// <summary>The longest ONE executed run can take before its response is written: the clamped budget,
+    /// plus the host's kill grace, plus the sandbox's confinement probes — which run BEFORE the child does
+    /// and therefore outside the budget (issue #1759). The probes are cached for the life of the process,
+    /// so only the first executed run of a session can pay them.</summary>
     private static readonly TimeSpan ScenarioRunCeiling =
-        TimeSpan.FromMilliseconds(MaxScenarioTimeoutMs) + ScenarioExecutionHost.KillGrace;
+        TimeSpan.FromMilliseconds(MaxScenarioTimeoutMs)
+        + ScenarioExecutionHost.KillGrace
+        + ScenarioSandbox.MaxProbeCost;
 
     /// <summary>Serializes executed-mode scenario runs for this workspace — see
     /// <see cref="TryDispatchExecutedScenario"/>.</summary>
