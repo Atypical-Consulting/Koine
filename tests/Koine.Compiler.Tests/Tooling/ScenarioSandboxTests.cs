@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Semantics.Scenarios;
 using Koine.Compiler.Services;
@@ -354,11 +355,7 @@ public class ScenarioSandboxTests
         RequireFilesystemConfinement();
 
         string outside = Path.Combine(Path.GetTempPath(), "koine-outside-" + Guid.NewGuid().ToString("N") + ".txt");
-        string stub = WriteStub(
-            "inside=denied; outside=allowed\n"
-            + "if : > ./inside.txt 2>/dev/null; then inside=allowed; fi\n"
-            + "if : > '" + outside + "' 2>/dev/null; then outside=allowed; else outside=denied; fi\n"
-            + Report("inside=${inside} outside=${outside}"));
+        string stub = WriteStub(WriteProbe("./inside.txt", outside) + Report("inside=${inside} outside=${outside}"));
 
         try
         {
@@ -423,11 +420,26 @@ public class ScenarioSandboxTests
     }
 
     /// <summary>
+    /// A POSIX-sh probe that tries to create <paramref name="inside"/> and <paramref name="outside"/> and
+    /// leaves the verdicts in <c>$inside</c> / <c>$outside</c>.
+    ///
+    /// <para>Each redirection runs in a SUBSHELL on purpose. <c>:</c> is a POSIX special built-in, and a
+    /// redirection error on one of those makes a conforming shell exit — which <c>dash</c>, the
+    /// <c>/bin/sh</c> of most Linuxes, actually does. Written the obvious way, the very denial this probe
+    /// exists to observe would kill the probe before it could report it, and the test would read a broken
+    /// shell as a broken sandbox.</para>
+    /// </summary>
+    private static string WriteProbe(string inside, string outside) =>
+        "inside=denied; outside=denied\n"
+        + "if ( : > '" + inside + "' ) 2>/dev/null; then inside=allowed; fi\n"
+        + "if ( : > '" + outside + "' ) 2>/dev/null; then outside=allowed; fi\n";
+
+    /// <summary>
     /// Gates the filesystem-enforcement test. Deliberately NOT a bare skip on
     /// <see cref="ScenarioSandbox.FilesystemConfinementAvailable"/>: that is the very predicate the
     /// production path consults, so skipping on it would turn a broken probe — confinement silently lost
-    /// everywhere — into a green run with a skip. On macOS, which always ships <c>sandbox-exec</c>, an
-    /// unavailable mechanism is a REGRESSION and fails here.
+    /// everywhere — into a green run with a skip. On macOS, which always ships <c>sandbox-exec</c>, and on
+    /// a Linux whose kernel reports a Landlock ABI, an unavailable mechanism is a REGRESSION and fails here.
     /// </summary>
     private static void RequireFilesystemConfinement()
     {
@@ -439,10 +451,240 @@ public class ScenarioSandboxTests
             return;
         }
 
-        Assert.Skip("Only macOS has a filesystem confinement mechanism today; the degradation every other "
-            + "platform reports instead is asserted by "
+        if (OperatingSystem.IsLinux())
+        {
+            if (LinuxLandlock.AbiVersion < 1)
+            {
+                Assert.Skip("This kernel reports no Landlock ABI (needs 5.13+ with Landlock enabled), so "
+                    + "the degradation reported instead is asserted by "
+                    + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
+                    + ".");
+                return;
+            }
+
+            ScenarioSandbox.FilesystemConfinementAvailable.ShouldBeTrue(
+                "this kernel reports Landlock ABI v" + LinuxLandlock.AbiVersion
+                + ", so filesystem confinement being unavailable here is a regression in the sandbox "
+                + "(most likely the launcher verb no longer resolving), not a fact about the platform");
+            return;
+        }
+
+        Assert.Skip("Only macOS and Landlock-capable Linux have a filesystem confinement mechanism today; "
+            + "the degradation every other platform reports instead is asserted by "
             + nameof(Confinement_this_platform_cannot_provide_is_reported_in_the_tree_and_never_fails_the_run)
             + ".");
+    }
+
+    // ------------------------------------------------------------------------
+    // Linux write confinement (#1781): a Landlock ruleset installed by a launcher that execs the command.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void The_Landlock_ABI_this_kernel_speaks_is_settled_and_costs_no_child_process()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("Landlock is a Linux mechanism; this suite is running on "
+                + RuntimeInformation.OSDescription + ".");
+            return;
+        }
+
+        // NOTE: nothing here may call LinuxLandlock.TryRestrict. A ruleset is irrevocable and inherited
+        // across every exec, so installing one in the test process would confine the whole run — which is
+        // exactly why the production path installs it in a launcher CHILD. TryRestrict is exercised for
+        // real by the launcher tests below.
+        int abi = LinuxLandlock.AbiVersion;
+        abi.ShouldBeGreaterThanOrEqualTo(-1);
+        abi.ShouldNotBe(0, "a kernel either speaks a Landlock ABI (1 or later) or none at all (-1)");
+        LinuxLandlock.AbiVersion.ShouldBe(abi, "the ABI is settled once and cached for the process");
+    }
+
+    [Fact]
+    public void The_Landlock_launcher_confines_writes_to_the_directory_it_was_given()
+    {
+        var (launcher, arguments) = RequireLandlockLauncher();
+
+        string runDirectory = NewDirectory("koine-landlock-");
+        string outside = Path.Combine(Path.GetTempPath(), "koine-outside-" + Guid.NewGuid().ToString("N") + ".txt");
+        string inside = Path.Combine(runDirectory, "inside.txt");
+        string probe = WriteStub(
+            WriteProbe(inside, outside) + "printf 'inside=%s outside=%s' \"$inside\" \"$outside\"\n");
+
+        try
+        {
+            // The control FIRST: unconfined, the same probe writes both files. Without it, "denied" below
+            // would also be satisfied by a probe that never managed to write anything at all.
+            Capture(probe, []).ShouldBe("inside=allowed outside=allowed");
+            Forget(inside);
+            Forget(outside);
+
+            Capture(launcher, [.. arguments, "--run", runDirectory, "--", probe])
+                .ShouldBe("inside=allowed outside=denied");
+            File.Exists(outside).ShouldBeFalse(outside);
+            File.Exists(inside).ShouldBeTrue("the run directory is the child's scratch space and must stay "
+                + "writable — a confinement that broke the legitimate write would be a broken sandbox");
+        }
+        finally
+        {
+            Forget(probe);
+            Forget(outside);
+            Discard(runDirectory);
+        }
+    }
+
+    [Fact]
+    public void The_Landlock_launcher_refuses_to_run_the_command_when_it_cannot_confine()
+    {
+        var (launcher, arguments) = RequireLandlockLauncher();
+
+        // A run directory that does not exist: the ruleset has nowhere to allow writes, so the launcher
+        // cannot honour what it was asked for.
+        string missing = Path.Combine(Path.GetTempPath(), "koine-absent-" + Guid.NewGuid().ToString("N"));
+        string marker = Path.Combine(Path.GetTempPath(), "koine-marker-" + Guid.NewGuid().ToString("N") + ".txt");
+        string probe = WriteStub(": > '" + marker + "'\n");
+
+        try
+        {
+            (int exitCode, string _, string error) =
+                Run(launcher, [.. arguments, "--run", missing, "--", probe]);
+
+            // Failing LOUD is the whole contract: a launcher that quietly exec'd the command anyway would
+            // run unconfined code while the result tree said it was confined — worse than no sandbox,
+            // because the notes would be a lie rather than a warning.
+            exitCode.ShouldNotBe(0, "the launcher must not report success it did not achieve");
+            error.ShouldContain(ScenarioSandbox.LandlockLauncherVerb);
+            File.Exists(marker).ShouldBeFalse("the command must not have run at all");
+        }
+        finally
+        {
+            Forget(probe);
+            Forget(marker);
+        }
+    }
+
+    [Fact]
+    public void The_Linux_write_confinement_is_planned_inside_the_namespaces_and_the_processor_ceiling()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("This asserts the composition of the LINUX wrappers; running on "
+                + RuntimeInformation.OSDescription + ".");
+            return;
+        }
+
+        if (!ScenarioSandbox.FilesystemConfinementAvailable)
+        {
+            Assert.Skip("This Linux host cannot install a Landlock ruleset (ABI "
+                + LinuxLandlock.AbiVersion + "), so there is no launcher in the plan to order.");
+            return;
+        }
+
+        string runDirectory = NewDirectory("koine-plan-");
+        try
+        {
+            using ScenarioConfinement plan = ScenarioSandbox.Plan(
+                "koine", ["scenario-exec"], runDirectory, ScenarioSandboxOptions.Default);
+
+            plan.Degradations.ShouldNotContain(
+                note => note.StartsWith("Filesystem confinement was not applied", StringComparison.Ordinal),
+                "the launcher IS the mechanism this platform was said to be missing");
+
+            IReadOnlyList<string> argv = plan.Arguments;
+            int launcher = argv.ToList().IndexOf(ScenarioSandbox.LandlockLauncherVerb);
+            int command = argv.ToList().IndexOf("scenario-exec");
+
+            // The order is load-bearing, and every wrong version of it is silent: a launcher outside the
+            // ulimit shell loses RLIMIT_CPU, and one outside `unshare` installs an irrevocable ruleset
+            // before the namespaces that need mount and /proc writes have been created.
+            plan.FileName.ShouldBe("/bin/sh", "the processor-time ceiling is the outermost wrapper");
+            launcher.ShouldBeGreaterThan(-1, string.Join(' ', argv));
+            launcher.ShouldBeLessThan(command, "the launcher execs INTO the real command");
+            argv[argv.ToList().IndexOf("--run") + 1].ShouldBe(runDirectory);
+
+            if (ScenarioSandbox.NetworkConfinementAvailable)
+            {
+                int unshare = argv.ToList().IndexOf("--map-root-user");
+                unshare.ShouldBeGreaterThan(-1, string.Join(' ', argv));
+                unshare.ShouldBeLessThan(launcher,
+                    "a Landlock ruleset is irrevocable, so it must be installed INSIDE the namespaces "
+                    + "unshare has not created yet");
+            }
+        }
+        finally
+        {
+            Discard(runDirectory);
+        }
+    }
+
+    /// <summary>Gates the launcher tests on a kernel that can actually enforce a ruleset, and on the verb
+    /// resolving to a real binary — skipping with the reason, never silently.</summary>
+    private static (string FileName, IReadOnlyList<string> Arguments) RequireLandlockLauncher()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The Landlock launcher is a Linux mechanism; this suite is running on "
+                + RuntimeInformation.OSDescription + ".");
+        }
+        else if (LinuxLandlock.AbiVersion < 1)
+        {
+            Assert.Skip("This kernel reports no Landlock ABI (needs 5.13+ with Landlock enabled).");
+        }
+
+        return ScenarioExecutionHost.ResolveSelfCommand(ScenarioSandbox.LandlockLauncherVerb)
+            ?? throw new InvalidOperationException(
+                "the koine binary under test could not be located for the launcher verb");
+    }
+
+    private static string NewDirectory(string prefix)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private static void Discard(string directory)
+    {
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception)
+        {
+            // A leftover temp directory is not a test failure.
+        }
+    }
+
+    /// <summary>Runs a command to completion and returns its exit code and both streams.</summary>
+    private static (int ExitCode, string Output, string Error) Run(string fileName, IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("could not start " + fileName);
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        process.WaitForExit((int)TimeSpan.FromSeconds(60).TotalMilliseconds);
+        return (process.ExitCode, output.Result.Trim(), error.Result.Trim());
+    }
+
+    /// <summary>The stdout of a command that must have succeeded — its stderr is folded into the failure
+    /// message, because a launcher that could not confine says why there and nowhere else.</summary>
+    private static string Capture(string fileName, IReadOnlyList<string> arguments)
+    {
+        (int exitCode, string output, string error) = Run(fileName, arguments);
+        exitCode.ShouldBe(0, fileName + " exited " + exitCode + ": " + error);
+        return output;
     }
 
     /// <summary>Gates the network-enforcement test, on the same principle as
