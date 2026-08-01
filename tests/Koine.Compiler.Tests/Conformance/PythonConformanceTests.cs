@@ -1405,6 +1405,115 @@ public class PythonConformanceTests
         order.ShouldContain("def place(cls, quantity: int, new_status: Status) -> Order:");
     }
 
+    /// <summary>
+    /// Issue #1531 (audit, Task 3) — the Rust (#1467/PR #1476) and Java (#1480/PR #1521) emitters both
+    /// shipped the identical bug in their factory constructor-argument loop's auto-bound branch: a
+    /// <c>required</c>-bucket member declared optional but carrying no member-level default
+    /// (<c>total: Decimal?</c>), auto-bound to a NON-optional same-named factory parameter
+    /// (<c>create make(total: Decimal)</c>), had its bare value passed straight into a constructor slot
+    /// typed <c>Option&lt;T&gt;</c>/<c>Optional&lt;T&gt;</c> — a real <c>rustc</c> E0308 / <c>javac</c>
+    /// "incompatible types" error, fixed by wrapping in <c>Some(…)</c>/<c>Optional.of(…)</c>.
+    /// <para>
+    /// Python's <c>WriteFactory</c> likewise passes the bare value — but it maps <c>T?</c> to the UNION
+    /// <c>T | None</c> (<c>PythonTypeMapper</c>), not to a wrapper value, and <c>T</c> is a member of
+    /// that union, so the keyword argument is already well-typed. Note that Python's
+    /// <c>typing.Optional[T]</c> is spelled like a wrapper but is exactly this union — it constructs
+    /// nothing. There is no wrap construct to apply and none is needed. This test records that negative
+    /// audit result and locks it in: it asserts the union-typed field declaration AND the bare,
+    /// unwrapped keyword argument, then proves with a real <c>mypy --strict</c> run (plus the always-on
+    /// <c>ast.parse</c> gate) that the pair type-checks.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Factory_autobound_parameter_binding_to_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(total: Decimal) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no mypy required): the optional-declared member's dataclass field is a
+        // `T | None` UNION, so the auto-bound non-optional parameter is passed through bare.
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("total: Decimal | None = None");
+        product.ShouldContain("instance = cls(id=id, total=total)");
+
+        AssertStrictlyTypeChecks(result.Files);
+
+        // ...and the value must actually LAND as a bare Decimal at runtime — a wrapper-shaped
+        // representation would surface here as `total` comparing unequal to the passed value.
+        const string driver = """
+            from decimal import Decimal
+            from shop.entities.product import Product
+
+            product = Product.make(Decimal("5.0"))
+            assert product.total == Decimal("5.0"), \
+                f"auto-bound parameter must land unwrapped in the optional field, got {product.total!r}"
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "an auto-bound non-optional parameter must land unwrapped in the optional field at runtime:\n"
+            + string.Join("\n", run.Errors));
+    }
+
+    /// <summary>
+    /// The explicit-init half of the same #1531 audit — the branch Rust #1452/PR #1464 and Java
+    /// #1479/PR #1518 fixed. A <c>total -&gt; 5.0</c> initialization of an optional-declared,
+    /// default-less <c>required</c> member yields a non-optional value; Rust/Java must wrap it, Python
+    /// must not, for the same union-vs-wrapper reason. Since nothing is ever wrapped, the double-wrap
+    /// hazard the Rust/Java fixes had to guard against cannot arise here at all.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_declared_required_member_needs_no_wrap()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make() {
+                  total -> 5.0
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("total: Decimal | None = None");
+        product.ShouldContain("""instance = cls(id=id, total=Decimal("5.0"))""");
+
+        AssertStrictlyTypeChecks(result.Files);
+
+        const string driver = """
+            from decimal import Decimal
+            from shop.entities.product import Product
+
+            product = Product.make()
+            assert product.total == Decimal("5.0"), \
+                f"explicitly initialized value must land unwrapped in the optional field, got {product.total!r}"
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "an explicitly initialized value must land unwrapped in the optional field at runtime:\n"
+            + string.Join("\n", run.Errors));
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {
