@@ -66,6 +66,13 @@ internal sealed class ScenarioExecCommand : Command<ScenarioExecCommand.Settings
             return ScenarioService.Shape(
                 ScenarioExecutor.Run(new SemanticModel(model), parsed.ToScenario()), ScenarioService.ExecutedMode);
         }
+        catch (OutOfMemoryException) when (ScenarioSandbox.HeapCeilingNote() is not null)
+        {
+            // The sandbox's memory ceiling (issue #1759), reported by the process that actually hit it and
+            // therefore knows the number. Naming the ceiling matters: "out of memory" alone reads as a
+            // machine problem, when what happened is a model-derived allocation meeting its budget.
+            return Failed(parsed.Target, parsed.Operation, ScenarioSandbox.HeapCeilingNote()!);
+        }
         catch (Exception ex)
         {
             return Failed(parsed.Target, parsed.Operation, $"The scenario could not be run: {ex.Message}");

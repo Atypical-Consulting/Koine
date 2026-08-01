@@ -198,13 +198,19 @@ internal static class ScenarioExecutionProtocol
 
 /// <summary>
 /// One sandboxed run, with the facts a caller (and the sandbox's own tests) need beyond the result
-/// tree: which process ran it, where its scratch directory was, and whether the deadline expired.
+/// tree: which process ran it, where its scratch directory was, whether the deadline expired, and which
+/// pieces of the requested OS-level confinement this platform could not provide.
 /// </summary>
+/// <param name="SandboxNotes">The confinement degradations the host APPENDED to the result tree's
+/// <c>notes</c> (issue #1759). Reported separately as well as in the tree so a caller comparing this
+/// run against another engine can subtract exactly the notes the sandbox added, rather than guessing
+/// which of the tree's notes came from the scenario itself.</param>
 internal readonly record struct ScenarioChildRun(
     IReadOnlyDictionary<string, object?> Result,
     int ChildProcessId,
     string RunDirectory,
-    bool TimedOut);
+    bool TimedOut,
+    IReadOnlyList<string> SandboxNotes);
 
 /// <summary>
 /// Runs a scenario in a SANDBOXED child process (issue #236, ADR 0011): it spawns the hidden
@@ -291,10 +297,21 @@ internal static class ScenarioExecutionHost
 
     /// <summary>
     /// <see cref="Run(IReadOnlyList{SourceFile}, Scenario, TimeSpan)"/>, also reporting which process ran
-    /// the scenario, its scratch directory, and whether the deadline expired.
+    /// the scenario, its scratch directory, and whether the deadline expired. Confinement is the default
+    /// for this budget (<see cref="ScenarioSandboxOptions.For"/>).
     /// </summary>
     public static ScenarioChildRun RunDetailed(
-        IReadOnlyList<SourceFile> sources, Scenario scenario, TimeSpan timeout)
+        IReadOnlyList<SourceFile> sources, Scenario scenario, TimeSpan timeout) =>
+        RunDetailed(sources, scenario, timeout, ScenarioSandboxOptions.For(timeout));
+
+    /// <summary>
+    /// <see cref="RunDetailed(IReadOnlyList{SourceFile}, Scenario, TimeSpan)"/> with an explicit
+    /// confinement request (issue #1759). Anything <paramref name="sandbox"/> asks for that this platform
+    /// cannot provide is REPORTED, never fatal: the run still happens with ADR 0011's v1 guarantees and
+    /// the result carries a note saying which confinement was skipped.
+    /// </summary>
+    public static ScenarioChildRun RunDetailed(
+        IReadOnlyList<SourceFile> sources, Scenario scenario, TimeSpan timeout, ScenarioSandboxOptions sandbox)
     {
         // The child's working directory: a disposable scratch space, so anything the run leaves on disk
         // lands somewhere we delete rather than in the user's workspace. Cleanup is attempted on EVERY
@@ -315,9 +332,16 @@ internal static class ScenarioExecutionHost
             }
 
             string fileName = command.Value.FileName;
+
+            // OS-level confinement (issue #1759), planned BEFORE the spawn because on Unix it IS the
+            // spawn: the child becomes the confining wrapper, which execs into the command below. Every
+            // piece the platform cannot provide comes back as a note, never as a failure.
+            using var confinement = ScenarioSandbox.Plan(
+                fileName, command.Value.Arguments, runDirectory, sandbox);
+
             var startInfo = new ProcessStartInfo
             {
-                FileName = fileName,
+                FileName = confinement.FileName,
                 WorkingDirectory = runDirectory,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
@@ -330,21 +354,32 @@ internal static class ScenarioExecutionHost
                 StandardOutputEncoding = Utf8,
                 StandardErrorEncoding = Utf8,
             };
-            foreach (string argument in command.Value.Arguments)
+            foreach (string argument in confinement.Arguments)
             {
                 startInfo.ArgumentList.Add(argument);
             }
 
             Scrub(startInfo);
 
+            // After the scrub, never before: the scrub clears the whole block, so confinement variables
+            // set ahead of it would be thrown away.
+            foreach (var (name, value) in confinement.Environment)
+            {
+                startInfo.Environment[name] = value;
+            }
+
             using Process? child = Process.Start(startInfo);
             if (child is null)
             {
                 return Failure(scenario, runDirectory, childId, timedOut: false,
-                    $"The scenario sandbox child ('{fileName}') could not be started.");
+                    $"The scenario sandbox child ('{fileName}') could not be started.", confinement.Degradations);
             }
 
             childId = child.Id;
+
+            // The Job Object can only exist once the process does — a race the sandbox accepts and
+            // documents (see WindowsJobObject). Everything else was already applied at spawn.
+            confinement.Attach(child);
 
             // Drain both pipes CONCURRENTLY: reading one to EOF before touching the other deadlocks the
             // moment the child fills the second stream's buffer.
@@ -388,7 +423,7 @@ internal static class ScenarioExecutionHost
                 return Failure(scenario, runDirectory, childId, timedOut: true,
                     $"The scenario timed out after {Format(timeout)} and was stopped. The emitted code may not "
                     + "terminate (an unbounded loop or runaway allocation in a derived member or invariant); "
-                    + "nothing of the run survives.");
+                    + "nothing of the run survives.", confinement.Degradations);
             }
 
             // The child has exited, but its pipes may not have: `WaitForExit(int)` does not drain the
@@ -400,20 +435,29 @@ internal static class ScenarioExecutionHost
             string output = Text(stdout);
             if (string.IsNullOrWhiteSpace(output))
             {
+                // A child killed at a RESOURCE ceiling looks, from here, exactly like any other silent
+                // death — the exit code is the only witness, so ask the confinement to read it before
+                // falling back to the generic note.
                 return Failure(scenario, runDirectory, childId, timedOut: false,
-                    $"The scenario sandbox child exited with code {child.ExitCode} and produced no result"
-                    + Quote(Text(stderr)));
+                    confinement.DescribeExit(child.ExitCode)
+                    ?? $"The scenario sandbox child exited with code {child.ExitCode} and produced no result"
+                    + Quote(Text(stderr)), confinement.Degradations);
             }
 
             try
             {
                 return new ScenarioChildRun(
-                    ScenarioExecutionProtocol.ReadResult(output), childId, runDirectory, TimedOut: false);
+                    WithNotes(ScenarioExecutionProtocol.ReadResult(output), confinement.Degradations),
+                    childId,
+                    runDirectory,
+                    TimedOut: false,
+                    confinement.Degradations);
             }
             catch (JsonException ex)
             {
                 return Failure(scenario, runDirectory, childId, timedOut: false,
-                    $"The scenario sandbox child did not answer in the protocol ({ex.Message})" + Quote(Text(stderr)));
+                    $"The scenario sandbox child did not answer in the protocol ({ex.Message})" + Quote(Text(stderr)),
+                    confinement.Degradations);
             }
         }
         catch (Exception ex)
@@ -560,6 +604,12 @@ internal static class ScenarioExecutionHost
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["DOTNET_NOLOGO"] = "1";
         startInfo.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+
+        // Shut the diagnostics IPC channel (issue #1759). It is a named pipe / Unix socket the runtime
+        // opens on start, through which anything on the machine can attach a profiler to the child or
+        // make it dump — a control surface the sandbox has no use for, and one whose socket file is the
+        // single write outside the run directory the child would otherwise still need.
+        startInfo.Environment["DOTNET_EnableDiagnostics"] = "0";
     }
 
     /// <summary>Kills the child AND everything it started — a scenario that spawned helpers must not
@@ -624,12 +674,39 @@ internal static class ScenarioExecutionHost
     /// its deadline). Reported as EXECUTED mode: the request went down the execution path and that path
     /// failed — calling it "interpreted" would credit an engine that never ran.</summary>
     private static ScenarioChildRun Failure(
-        Scenario scenario, string runDirectory, int childId, bool timedOut, string note) =>
+        Scenario scenario,
+        string runDirectory,
+        int childId,
+        bool timedOut,
+        string note,
+        IReadOnlyList<string>? sandboxNotes = null) =>
         new(
-            ScenarioService.Error(scenario.Target, scenario.Operation, note, ScenarioService.ExecutedMode),
+            WithNotes(
+                ScenarioService.Error(scenario.Target, scenario.Operation, note, ScenarioService.ExecutedMode),
+                sandboxNotes ?? []),
             childId,
             runDirectory,
-            timedOut);
+            timedOut,
+            sandboxNotes ?? []);
+
+    /// <summary>
+    /// Appends the confinement's degradation notes to a result tree's <c>notes</c>, leaving the tree
+    /// untouched when there are none — so a fully confined run is byte-identical to what the child sent,
+    /// and only a run that lost some confinement pays for saying so.
+    /// </summary>
+    private static IReadOnlyDictionary<string, object?> WithNotes(
+        IReadOnlyDictionary<string, object?> result, IReadOnlyList<string> extra)
+    {
+        if (extra.Count == 0)
+        {
+            return result;
+        }
+
+        var copy = new Dictionary<string, object?>(result, StringComparer.Ordinal);
+        object?[] existing = copy.TryGetValue("notes", out object? notes) && notes is object?[] array ? array : [];
+        copy["notes"] = (object?[])[.. existing, .. extra];
+        return copy;
+    }
 
     /// <summary>Waits (bounded) for the stdio pumps to finish. A pump that faulted or never ended leaves
     /// its text empty, which the caller reports — it never blocks the host.</summary>
