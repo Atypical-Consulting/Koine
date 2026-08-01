@@ -32,11 +32,14 @@ const URI = 'file:///a.koi';
 /** Last element (ES2020 lib has no Array.prototype.at). */
 const last = <T>(xs: readonly T[]): T => xs[xs.length - 1];
 
+/** The JSON-RPC response shape onMessage delivers — only `id`/`result` are read below. */
+type JsonRpcReply = { id?: number | string | null; result?: unknown };
+
 /** Send one request through a started transport and return the parsed `result` of the reply. */
 async function roundtrip(method: string, params: unknown): Promise<unknown> {
   const transport = new WasmLspTransport();
-  const replies: any[] = [];
-  transport.onMessage((json) => replies.push(JSON.parse(json)));
+  const replies: JsonRpcReply[] = [];
+  transport.onMessage((json) => replies.push(JSON.parse(json) as JsonRpcReply));
   await transport.start();
   // Seed an open document so filesJson() carries the active file.
   await transport.send(JSON.stringify({ method: 'textDocument/didOpen', params: { textDocument: { uri: URI, text: 'x' } } }));

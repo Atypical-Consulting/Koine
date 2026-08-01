@@ -7,7 +7,7 @@
 // deferral is observable in state.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAssistantChat, type AssistantPanelOptions } from '@/ai/aiPanel';
-import { runAssistant } from '@/ai/ai';
+import { runAssistant, type AssistantRequest } from '@/ai/ai';
 import { loadChat, saveChat } from '@/settings/persistence';
 import { createAppStore, type AppState } from '@/store/index';
 import type { StoreApi } from 'zustand/vanilla';
@@ -198,7 +198,7 @@ describe('assistant ↔ chat slice change-set bridge (#984 Task 4)', () => {
   }
 
   test('a DOM-driven Apply walks the store through reviewing → applying → applied', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
       req.onText('Edit.');
       return 'Edit.';
@@ -236,7 +236,7 @@ describe('assistant ↔ chat slice change-set bridge (#984 Task 4)', () => {
     // Turn 1 stages a set; turn 2 is a plain reply, so the store's set after turn 2 is still turn 1's
     // — now invalidated('superseded') by the send, with the DOM treatment rendered by ChangeSetPanel.
     let turn = 0;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       turn++;
       if (turn === 1) req.editSession?.stage('orders.koi', 'context Orders { /* t1 */ }');
       req.onText('done');
@@ -263,7 +263,7 @@ describe('assistant ↔ chat slice change-set bridge (#984 Task 4)', () => {
   });
 
   test('a REJECTED apply returns the store to reviewing with the error note and re-enables Apply (#633)', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
       req.onText('Edit.');
       return 'Edit.';
@@ -292,7 +292,7 @@ describe('assistant ↔ chat slice change-set bridge (#984 Task 4)', () => {
   });
 
   test('accept-checkbox toggles land in chat.changeSet.files[].accepted', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
       req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
       req.onText('Two edits.');
