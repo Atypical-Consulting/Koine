@@ -119,6 +119,89 @@ public sealed class ModelIndex
     public IReadOnlyList<string> EnumsDeclaring(string member) =>
         _enumMembersByName.TryGetValue(member, out List<string>? list) ? list : Array.Empty<string>();
 
+    /// <summary>
+    /// Context-aware counterpart to <see cref="EnumsDeclaring(string)"/> (#1739), mirroring
+    /// <see cref="Classify(string?, string)"/>'s pattern: owners are restricted to enums declared in,
+    /// or imported into, <paramref name="context"/> — an enum only reachable through an unrelated
+    /// context can't widen an ambiguity check that never sees it. Falls back to the flat, global list
+    /// when <paramref name="context"/> is null, or when nothing in it is visible from that context
+    /// (e.g. reached only via a context-map permit this method doesn't model) — never narrower than
+    /// the flat answer for a caller with no scoped match.
+    /// </summary>
+    public IReadOnlyList<string> EnumsDeclaring(string? context, string member)
+    {
+        IReadOnlyList<string> all = EnumsDeclaring(member);
+        if (context is null || all.Count <= 1)
+        {
+            return all; // nothing to scope: no context, or already unambiguous either way
+        }
+
+        HashSet<string> visible = EnumsVisibleFrom(context);
+        List<string>? scoped = null;
+        foreach (var name in all)
+        {
+            if (visible.Contains(name))
+            {
+                (scoped ??= new List<string>()).Add(name);
+            }
+        }
+
+        return scoped is { Count: > 0 } ? scoped : all;
+    }
+
+    // Memoized per-context visible-enum-name sets for EnumsDeclaring(context, member) — the index is
+    // immutable for these reads, and a model can call this once per bare enum-member reference.
+    private readonly Dictionary<string, HashSet<string>> _visibleEnumNamesByContext = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Enum type names visible from <paramref name="context"/>: locally declared, or imported by name
+    /// (wildcard or explicit) — the same <c>_declsByContext</c>/<c>_importsByContext</c> registries
+    /// <see cref="TryGetDeclIn"/> resolves through, but looser on an ambiguous import: <c>TryGetDeclIn</c>
+    /// requires a SINGLE import owner to resolve a name at all, while this method treats the name as
+    /// visible if ANY of the import's owner contexts declares it as an enum — appropriate here, since
+    /// this only widens which of <see cref="EnumsDeclaring(string)"/>'s already-known owners survive
+    /// scoping, never invents a new one; a genuinely ambiguous import is reported by the separate
+    /// unqualified-import diagnostic, not by this method.
+    /// </summary>
+    private HashSet<string> EnumsVisibleFrom(string context)
+    {
+        if (_visibleEnumNamesByContext.TryGetValue(context, out HashSet<string>? cached))
+        {
+            return cached;
+        }
+
+        var visible = new HashSet<string>(StringComparer.Ordinal);
+        if (_declsByContext.TryGetValue(context, out Dictionary<string, TypeDecl>? local))
+        {
+            foreach (KeyValuePair<string, TypeDecl> kv in local)
+            {
+                if (kv.Value is EnumDecl)
+                {
+                    visible.Add(kv.Key);
+                }
+            }
+        }
+
+        if (_importsByContext.TryGetValue(context, out Dictionary<string, List<string>>? imports))
+        {
+            foreach (KeyValuePair<string, List<string>> kv in imports)
+            {
+                foreach (var owner in kv.Value)
+                {
+                    if (_declsByContext.TryGetValue(owner, out Dictionary<string, TypeDecl>? theirs)
+                        && theirs.TryGetValue(kv.Key, out TypeDecl? decl) && decl is EnumDecl)
+                    {
+                        visible.Add(kv.Key);
+                        break;
+                    }
+                }
+            }
+        }
+
+        _visibleEnumNamesByContext[context] = visible;
+        return visible;
+    }
+
     /// <summary>True when <paramref name="name"/> is the name of a declared enum type.</summary>
     public bool IsEnumType(string name) => Classify(name) == TypeKind.Enum;
 

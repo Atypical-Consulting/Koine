@@ -534,7 +534,7 @@ internal static class EntityBehaviorValidator
     /// <remarks>
     /// The <c>index.Classify(resolver.Context, ...)</c> call below is context-threaded per #1711. This
     /// site USED to be unpinnable end-to-end, because the guard also calls
-    /// <see cref="ModelIndex.EnumsDeclaring"/>, which is populated by walking
+    /// <see cref="ModelIndex.EnumsDeclaring(string)"/>, which is populated by walking
     /// <see cref="ModelIndex.AllTypes"/> — then the SAME flat, last-write-wins <c>_byName</c> map
     /// <c>Classify</c>'s single-arg overload read from. Any model colliding the bound field's enum by
     /// name also evicted that enum from <c>AllTypes()</c>, so <c>EnumsDeclaring</c> stayed blind and
@@ -542,7 +542,13 @@ internal static class EntityBehaviorValidator
     /// <b>#1632 fixed that</b>: <c>AllTypes()</c> now enumerates every per-context declaration, so a
     /// shadowed enum's members are registered and this check runs on a colliding model as it should.
     /// Pinned by <c>ModelIndexAllTypesTests.Unreachable_transition_is_detected_through_a_shadowed_same_name_enum</c>.
-    /// (See #1644 for the same former fusion in <c>ConcreteEnumType</c>'s consumers.)
+    /// (See #1644 for the same former fusion in <c>ConcreteEnumType</c>'s consumers.) <b>#1739</b> then
+    /// scoped <c>EnumsDeclaring</c> itself to the referencing context wherever an ambiguous owner list
+    /// could pick the WRONG enum — this call site is unaffected: it only asks whether
+    /// <c>target.Type.Name</c> (already resolved via the context-aware <c>Classify</c> call above) is
+    /// somewhere among <c>stateRef</c>'s owners, a pure membership check a wider, unscoped list can
+    /// only ever satisfy MORE readily, never wrongly deny — so it deliberately keeps the flat, 1-arg
+    /// overload rather than threading context through it too.
     /// </remarks>
     private static void CheckTransitionReachable(
         EntityDecl entity, Transition tr, Member target, ModelIndex index, TypeResolver resolver, List<Diagnostic> diagnostics)

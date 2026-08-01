@@ -876,10 +876,14 @@ internal sealed class RustExpressionTranslator
             return;
         }
 
-        // (3) Enum member reference -> EnumName::Variant.
+        // (3) Enum member reference -> EnumName::Variant. Owners are scoped to what's visible from
+        // this translator's own context (#1739, ported here by #1793) so an enum only reachable
+        // through an unrelated context can't win the last-write-wins fallback — on this target that
+        // was not merely a wrong qualifier but a hard `rustc` E0308, since the emitted path names a
+        // variant of the wrong enum type.
         if (!_memberNames.Contains(name))
         {
-            IReadOnlyList<string> owners = _index.EnumsDeclaring(name);
+            IReadOnlyList<string> owners = _index.EnumsDeclaring(_resolver.Context, name);
             if (owners.Count > 0)
             {
                 var hint = enumHint ?? _expectedEnum;
@@ -887,7 +891,9 @@ internal sealed class RustExpressionTranslator
                     ? hint
                     : owners.Count == 1
                         ? owners[0]
-                        : _enumMemberToType.TryGetValue(name, out var fallback) ? fallback : owners[0];
+                        : _enumMemberToType.TryGetValue(name, out var fallback) && owners.Contains(fallback)
+                            ? fallback
+                            : owners[0];
                 sb.Append(_typeMapper.QualifyTypeName(enumType)).Append("::").Append(VariantOf(enumType, name));
                 return;
             }
