@@ -38,6 +38,11 @@ internal static class ScenarioSandbox
     /// <summary>How many probes one <see cref="Plan"/> can run in the worst case: the filesystem/network
     /// wrapper for this platform, and the shell for the processor-time ceiling.
     ///
+    /// <para>Windows fits inside the same bound rather than widening it (issue #1780). Its write
+    /// confinement DOES spawn a probe — the first Windows path that ever has — but the shell probe it
+    /// would have shared the budget with is Unix-only and never runs there, so the worst case per
+    /// platform is unchanged and the published ceiling below still holds.</para>
+    ///
     /// <para>Unchanged by the Linux write confinement added in issue #1781: <see cref="LandlockAvailable"/>
     /// asks the KERNEL directly (a <c>landlock_create_ruleset</c> version query, microseconds, no child)
     /// and then only checks that the launcher verb resolves to a file. Nothing is spawned, so the published

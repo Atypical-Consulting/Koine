@@ -528,6 +528,14 @@ internal sealed class WindowsConfinedProcess : IDisposable
             line.Append(' ').Append(Quote(argument));
         }
 
+        // ProcessStartInfo carries arguments EITHER as the list or as one pre-quoted string, and the two
+        // are mutually exclusive. The host only ever fills the list, but reading just the list would drop
+        // a future caller's arguments silently — the failure mode that looks like the sandbox eating them.
+        if (startInfo.ArgumentList.Count == 0 && !string.IsNullOrEmpty(startInfo.Arguments))
+        {
+            line.Append(' ').Append(startInfo.Arguments);
+        }
+
         return line.ToString();
     }
 
