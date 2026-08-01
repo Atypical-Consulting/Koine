@@ -16,6 +16,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Koine.Compiler\Koine.Compiler.csproj" />
+    <!-- The scenario executor (issue #236) emits the model's C# itself before compiling and running it,
+         so it needs the C# backend — not the whole Koine.Emit.All aggregator, which would drag in eight
+         further emitters this project never uses. -->
+    <ProjectReference Include="..\Koine.Emit.CSharp\Koine.Emit.CSharp.csproj" />
   </ItemGroup>
 
   <ItemGroup>
