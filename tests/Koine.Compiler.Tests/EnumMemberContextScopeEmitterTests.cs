@@ -90,8 +90,15 @@ public class EnumMemberContextScopeEmitterTests
         item.ShouldNotContain("Signal::");
         item.ShouldNotContain("Status::");
 
-        var check = TestSupport.TypeCheckPhp(result.Files);
-        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable phpstan/php toolchain available; skipping.");
+        // Syntax-only (php -l), not TestSupport.TypeCheckPhp/phpstan: the fixture's invariant
+        // deliberately compares two literal enum cases with no other-operand hint available (the exact
+        // shape that exercises this fix's fallback branch) — phpstan's strict `identical.alwaysFalse`
+        // rule correctly, but irrelevantly, flags THAT as dead code regardless of which enum ends up
+        // qualifying it. Real-world code hitting this bug compares a runtime FIELD against a bare
+        // member (e.g. `status == Active`), which phpstan cannot fold — this fixture isolates the
+        // no-hint code path deliberately, at the cost of being unrepresentative of realistic PHP.
+        var check = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable php toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
