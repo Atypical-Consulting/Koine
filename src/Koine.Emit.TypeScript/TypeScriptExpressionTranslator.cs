@@ -36,8 +36,30 @@ internal sealed class TypeScriptExpressionTranslator
     private readonly ISet<string> _memberNames;
     private readonly IReadOnlyDictionary<string, string> _enumMemberToType;
 
+    /// <summary>
+    /// A derived member's defining expression, plus the enum type it is expected to produce when the
+    /// member is enum-typed (<c>null</c> otherwise) — the same hint its own getter's translation
+    /// receives (via <c>EnumExpected</c>, <c>TypeScriptEmitter.Types.cs:845</c>).
+    /// </summary>
+    private readonly record struct DerivedMember(Expr Body, string? ExpectedEnum);
+
+    // Derived members of the current type (`name: T = <expr over siblings>`). A derived member has NO
+    // constructor parameter — it is emitted as a get-only `get name(): T` accessor computed from the
+    // stored ones — so in NameMode.Parameter a reference to one is INLINED rather than rendered as a
+    // bare camelCase name that binds to nothing (tsc TS2663, issue #1756's TypeScript half). Empty for
+    // a type with no derived members.
+    private readonly IReadOnlyDictionary<string, DerivedMember> _derivedBodies;
+    private readonly HashSet<string> _inliningDerived = new(StringComparer.Ordinal);
+
+    private static readonly IReadOnlyDictionary<string, DerivedMember> EmptyDerived =
+        new Dictionary<string, DerivedMember>(StringComparer.Ordinal);
+
     // Per-name shadow stack: pushing a name that's already bound stacks the new binding on top rather
     // than evicting the outer one, so popping it back off restores whatever was there before (#1497).
+    // Only ever holds lambda/let bindings (a stored member is never pushed here), so `_locals.IsLocal`
+    // alone is exactly "is this name currently shadowed by a lambda/let binding" — no separate tracking
+    // set is needed the way the Java emitter's `_lambdaOrLetLocals` was (Java's own `_locals` doubles as
+    // its compact-constructor parameter registry, which this translator's does not).
     private readonly LocalScopeStack _locals = new();
 
     // When set, a member identifier renders as `receiver.<camelCase>` (e.g. a read-model projection
@@ -69,10 +91,29 @@ internal sealed class TypeScriptExpressionTranslator
         _resolver = new TypeResolver(index, context);
         _typeMapper = typeMapper;
         _scope = TypeScope.FromMembers(members, index);
-        _memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
+        var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
+        _memberNames = memberNames;
         _enumMemberToType = enumMemberToType;
         _memberReceiver = memberReceiver;
         _regexMatchTimeoutMs = regexMatchTimeoutMs;
+
+        // Classified with the SAME MemberAnalysis.IsDerived the emitter uses to split ctorMembers from
+        // derived accessors (TypeScriptEmitter.Types.cs:25-26), so the translator and the emitted
+        // property set never disagree about which members are computed (issue #1756).
+        Dictionary<string, DerivedMember>? derived = null;
+        foreach (Member m in members)
+        {
+            if (m.Initializer is not null && MemberAnalysis.IsDerived(m, memberNames))
+            {
+                var expectedEnum = index.Classify(m.Type.Qualifier ?? context, m.Type.Name) == TypeKind.Enum
+                    ? m.Type.Name
+                    : null;
+                (derived ??= new Dictionary<string, DerivedMember>(StringComparer.Ordinal))[m.Name] =
+                    new DerivedMember(m.Initializer, expectedEnum);
+            }
+        }
+
+        _derivedBodies = derived ?? EmptyDerived;
     }
 
     public void PushLocal(string name, TypeRef? type = null) => _locals.PushLocal(name, type);
@@ -816,6 +857,12 @@ internal sealed class TypeScriptExpressionTranslator
                 sb.Append(_memberReceiver).Append('.').Append(TypeScriptNaming.ToCamelCase(name));
                 return;
             }
+            // A derived member has no constructor parameter: substitute its derivation instead of a
+            // bare name that binds to nothing (issue #1756).
+            if (_mode == NameMode.Parameter && TryWriteDerivedBody(name, sb))
+            {
+                return;
+            }
             if (_mode == NameMode.Property)
             {
                 sb.Append("this.");
@@ -833,6 +880,103 @@ internal sealed class TypeScriptExpressionTranslator
 
         // Unknown identifier: emit verbatim (best effort).
         sb.Append(TypeScriptNaming.ToCamelCase(name));
+    }
+
+    /// <summary>
+    /// Substitutes a <b>derived</b> member's defining expression at its reference site, parenthesized
+    /// and translated in the same (parameter) scope, returning <c>false</c> when <paramref name="name"/>
+    /// is not derived.
+    /// <para>
+    /// Issue #1756's TypeScript half (C# fix: PR #1760; Java port: PR #1772). A value object's
+    /// <c>invariant</c> guards are emitted at the TOP of the constructor, before the fields are
+    /// assigned — deliberately, so an invalid instance is never even partially constructed — and every
+    /// member reference in them renders as the bare constructor parameter of the same name. That is
+    /// exact for a <em>stored</em> member, which IS a parameter, but a derived member has neither a
+    /// parameter nor an assigned property to read at that point: the guard used to emit a bare name
+    /// that bound to nothing (<c>tsc</c> <c>TS2663</c>). Inlining the derivation over the parameters
+    /// keeps the validate-before-assign ordering and evaluates exactly what the getter will later
+    /// compute.
+    /// </para>
+    /// <para>
+    /// Substitution recurses (a derived member may be defined over another one) and is bounded by a
+    /// visited set. The set is scoped to the path currently being expanded — released in the
+    /// <c>finally</c> — so a diamond (one guard reaching a derivation along two paths) substitutes on
+    /// both, and only genuine re-entry, i.e. a <em>cyclic</em> derivation, hits the bail-out. A cycle is
+    /// not rejected upstream today (the only cycle validator is <c>KOI1003</c>, for specs), so that
+    /// bail-out degrades to the pre-fix bare name and its <c>TS2663</c> rather than recursing forever —
+    /// a loud failure on a model that is already broken (it also emits mutually-recursive get-only
+    /// accessors). Tracked separately; this method's job here is only to not hang.
+    /// </para>
+    /// <para>
+    /// Substitution is also refused where the reference site would <b>capture</b> the derivation's free
+    /// names. A lambda/<c>let</c> binding and a member render into one JS identifier space —
+    /// <c>lines.all(rate =&gt; rate &lt; total)</c> emits a lambda parameter literally named <c>rate</c>,
+    /// which shadows the outer <c>rate</c> member within its own body — so splicing <c>total = rate * 2</c>
+    /// in there would read the ELEMENT and silently admit an instance violating the very invariant that
+    /// let it through. Bailing out leaves the pre-fix bare name and its loud <c>tsc</c> error instead of
+    /// trading a compile error for an unsound guard. Only an ACTUAL collision refuses; a binding that
+    /// shadows nothing the body needs (<c>lines.all(x =&gt; x &lt; total)</c>) still substitutes.
+    /// </para>
+    /// </summary>
+    private bool TryWriteDerivedBody(string name, StringBuilder sb)
+    {
+        if (!_derivedBodies.TryGetValue(name, out DerivedMember member) || !_inliningDerived.Add(name))
+        {
+            return false;
+        }
+
+        if (WouldBeCaptured(member.Body, new HashSet<string>(StringComparer.Ordinal)))
+        {
+            _inliningDerived.Remove(name);
+            return false;
+        }
+
+        // A derived member of enum type expects its own enum, exactly as its own getter body does
+        // (EnumExpected, TypeScriptEmitter.Types.cs:845), so a bare shared enum member qualifies
+        // correctly once substituted.
+        var outerExpectedEnum = _expectedEnum;
+        _expectedEnum = member.ExpectedEnum;
+
+        try
+        {
+            sb.Append('(');
+            Write(member.Body, sb);   // _mode is already Parameter — recursion inherits it
+            sb.Append(')');
+        }
+        finally
+        {
+            _expectedEnum = outerExpectedEnum;
+            _inliningDerived.Remove(name);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether any name reachable from <paramref name="body"/> — following references to further
+    /// derived members — is currently bound as a local, i.e. whether splicing the body here would
+    /// rebind it. Deliberately conservative: a name bound by the body's OWN lambda/<c>let</c> also
+    /// counts, which can only refuse a substitution that would have been safe, never allow one that
+    /// isn't.
+    /// </summary>
+    private bool WouldBeCaptured(Expr body, HashSet<string> visited)
+    {
+        foreach (var referenced in MemberAnalysis.ReferencedIdentifiers(body))
+        {
+            if (_locals.IsLocal(referenced))
+            {
+                return true;
+            }
+
+            if (_derivedBodies.TryGetValue(referenced, out DerivedMember nested)
+                && visited.Add(referenced)
+                && WouldBeCaptured(nested.Body, visited))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void WriteMemberAccess(MemberAccessExpr ma, StringBuilder sb)
