@@ -99,6 +99,79 @@ internal sealed class TypeScriptExpressionTranslator
     }
 
     /// <summary>
+    /// Issue #1732: like <see cref="Translate(Expr,string?)"/>, but reconciles <paramref name="value"/>'s
+    /// inferred type against the <paramref name="declared"/> type of the member it initializes — the
+    /// factory ctor-arg counterpart of <see cref="WriteReconciledBranch"/> (#1344), reusing the same
+    /// shared <see cref="BranchReconciliation.Classify"/> decision (#1368) and the same
+    /// <c>Decimal.fromInt(...)</c>/<see cref="WriteOptionalMap"/> renderings, so a factory's explicit
+    /// <c>field -&gt; expr</c> initialization emits a <c>tsc --strict</c>-clean value instead of a bare
+    /// mismatched literal (mirrors Java's #1519 <c>ReconcileFactoryCtorArg</c>/Kotlin's #1732 counterpart).
+    /// Type inference stays entirely inside the translator — <c>_resolver.Infer</c> is never exposed.
+    /// </summary>
+    internal string TranslateReconciled(Expr value, string? expectedEnum, TypeRef declared)
+    {
+        var prevMode = _mode;
+        _mode = NameMode.Property;
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+
+        TypeRef? valueType = InferCtorArgValueType(value);
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        if (needs.NeedsWiden)
+        {
+            sb.Append("Decimal.fromInt(");
+            Write(value, sb);
+            sb.Append(')');
+        }
+        else if (needs.NeedsOptionalWiden)
+        {
+            WriteOptionalMap(value, valueType!, mapped => mapped.Append("Decimal.fromInt(__v)"), sb);
+        }
+        else
+        {
+            Write(value, sb);
+        }
+
+        _expectedEnum = null;
+        _mode = prevMode;
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The type <see cref="TranslateReconciled"/> should reconcile <paramref name="value"/>'s already-
+    /// translated body against. For most expressions this is just <c>_resolver.Infer(value, ...)</c> —
+    /// but a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic,
+    /// shared across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened
+    /// against the right operand. Unlike Kotlin/Java, <b>TypeScript's own <c>CoalesceExpr</c> case does
+    /// no numeric reconciliation of its own</b> (it emits a bare <c>(left ?? right)</c>) — so there is no
+    /// existing widen this could double up with, but naively reconciling the outer ctor-arg wrap against
+    /// the raw LEFT-only type would still be wrong: wrapping the WHOLE <c>(a ?? b)</c> in
+    /// <c>Decimal.fromInt(...)</c> assumes the coalesce's runtime value is always a plain <c>number</c>,
+    /// which is false whenever the right (fallback) operand is itself already <c>Decimal</c>-shaped. This
+    /// computes the coalesce's OWN effective type the same way a fixed <c>WriteCoalesce</c> would, so
+    /// <see cref="BranchReconciliation.Classify"/> degrades to "no reconciliation needed" here and this
+    /// call site leaves the (separately tracked) unreconciled coalesce rendering untouched rather than
+    /// wrapping it incorrectly.
+    /// </summary>
+    private TypeRef? InferCtorArgValueType(Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return _resolver.Infer(value, EffectiveScope());
+        }
+
+        TypeScope scope = EffectiveScope();
+        TypeRef? leftType = _resolver.Infer(co.Left, scope);
+        TypeRef? rightType = _resolver.Infer(co.Right, scope);
+
+        // Matches the nullish-coalescing result type: the coalesce stays possibly-undefined only when
+        // the right (fallback) operand is itself possibly-undefined.
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
+    }
+
+    /// <summary>
     /// Renders the logical negation of a boolean condition, for guard emission where the
     /// assertion's failure is tested. Mirrors the C# translator: peel a leading <c>!</c>,
     /// flip a top-level comparison, else wrap once in <c>!(...)</c>.
