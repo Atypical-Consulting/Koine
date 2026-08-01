@@ -79,7 +79,7 @@ internal static class CqrsValidator
                 SemanticValidator.ValidateTypeRef(field.Type!, index, diagnostics);
                 checker.Check(field.Projection, scope, field.Type);
                 var inferred = resolver.Infer(field.Projection, scope);
-                if (inferred is not null && index.IsKnownType(field.Type!.Name)
+                if (inferred is not null && index.IsKnownType(resolver.Context, field.Type!.Name)
                     && !MemberAnalysis.IsAssignable(inferred, field.Type!))
                 {
                     diagnostics.Add(Diagnostic.Error(DiagnosticCodes.ReadModelFieldTypeMismatch,

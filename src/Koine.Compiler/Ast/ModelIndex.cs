@@ -1441,4 +1441,12 @@ public sealed class ModelIndex
 
     /// <summary>True when a type reference resolves to a known type.</summary>
     public bool IsKnownType(string typeName) => Classify(typeName) != TypeKind.Unknown;
+
+    /// <summary>
+    /// True when a type reference resolves to a known type with <paramref name="context"/>-aware type
+    /// resolution (R13.2): the named type is resolved in that context's scope first (local, then an
+    /// unambiguous import), falling back to the global view — so a reference site is judged against the
+    /// declaration its own context actually sees.
+    /// </summary>
+    public bool IsKnownType(string? context, string typeName) => Classify(context, typeName) != TypeKind.Unknown;
 }

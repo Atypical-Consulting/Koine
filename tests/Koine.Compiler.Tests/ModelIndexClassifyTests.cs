@@ -94,4 +94,19 @@ public class ModelIndexClassifyTests
         // this (local, then unambiguous import); Classify(context, typeName) must go through the same path.
         index.Classify("Gamma", "Money").ShouldBe(TypeKind.Value);
     }
+
+    [Fact]
+    public void Context_aware_is_known_type_tracks_the_context_aware_classification()
+    {
+        var index = IndexOf(SameNameDifferentKinds);
+
+        // IsKnownType(context, name) is defined as "Classify(context, name) is not Unknown", so it must
+        // answer for the same declarations the context-aware Classify resolves — including a name only
+        // reachable through the global fallback — and stay false for a name no context declares.
+        index.IsKnownType("Billing", "Status").ShouldBeTrue();
+        index.IsKnownType("Shipping", "Status").ShouldBeTrue();
+        index.IsKnownType(null, "Status").ShouldBeTrue();
+        index.IsKnownType("Billing", "Nope").ShouldBeFalse();
+        index.IsKnownType(null, "Nope").ShouldBeFalse();
+    }
 }
