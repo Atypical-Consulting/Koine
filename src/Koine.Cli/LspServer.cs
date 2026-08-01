@@ -2257,6 +2257,12 @@ internal sealed class LspServer
         ["contextSpans"] = new Dictionary<string, object?>(StringComparer.Ordinal),
     };
 
+    /// <summary>
+    /// Projects one context-map relation. <c>upstreamRole</c>/<c>downstreamRole</c> are additive (#483):
+    /// the strategic-DDD role each end plays under the relation's kind, derived by the shared
+    /// <see cref="ContextRelationRoles"/> helper the WASM host also calls, so both wires carry the same
+    /// labels (null for the symmetric partnership/shared-kernel patterns).
+    /// </summary>
     private static object MapRelation(Compiler.Ast.ContextRelation r) => new Dictionary<string, object?>
     {
         ["upstream"] = r.Upstream,
@@ -2265,6 +2271,8 @@ internal sealed class LspServer
         ["bidirectional"] = r.IsBidirectional,
         ["sharedTypes"] = r.SharedTypes.Select(s => (object)s).ToArray(),
         ["acl"] = r.AclMappings.Select(MapAcl).ToArray(),
+        ["upstreamRole"] = ContextRelationRoles.RoleOf(r.Kind, ContextRelationEnd.Upstream),
+        ["downstreamRole"] = ContextRelationRoles.RoleOf(r.Kind, ContextRelationEnd.Downstream),
     };
 
     private static object MapAcl(Compiler.Ast.AclMapping a) => new Dictionary<string, object?>
