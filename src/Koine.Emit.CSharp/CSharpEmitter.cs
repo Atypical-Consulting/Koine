@@ -1609,6 +1609,7 @@ public sealed partial class CSharpEmitter : IEmitter
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
         var emits = cmd.Body.OfType<EmitClause>().ToList();
+        var publishes = cmd.Body.OfType<PublishClause>().ToList();
         ResultClause? result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
 
         // 1. Preconditions — checked before any mutation.
@@ -1674,6 +1675,10 @@ public sealed partial class CSharpEmitter : IEmitter
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "", resultExpr)).ToList();
         bool hoistResult = emitStatements.Any(s => s.Hoisted);
 
+        // Publish payloads are translated in the SAME scope, for the same reason (they may reference
+        // the command's parameters), and are written right after the emits (R19).
+        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index)).ToList();
+
         // Parameters leave scope BEFORE the re-check: entity invariants reference
         // only entity state, which must render as the just-assigned properties (not
         // a parameter that happens to share a field's name).
@@ -1697,8 +1702,11 @@ public sealed partial class CSharpEmitter : IEmitter
             sb.Append(Indent).Append(Indent).Append("var __result = ").Append(resultExpr).Append(";\n");
         }
 
-        // 5. Record domain events (only reached if preconditions + re-check pass).
-        if (emitStatements.Count > 0)
+        // 5. Record events (only reached if preconditions + re-check pass): the intra-aggregate
+        // domain events first, then the integration events leaving the context, so the recording
+        // order reads inside-out. The two go into separate lists (_domainEvents / _integrationEvents)
+        // because IDomainEvent and IIntegrationEvent are distinct markers with distinct delivery.
+        if (emitStatements.Count > 0 || publishStatements.Count > 0)
         {
             if (!hoistResult)
             {
@@ -1708,6 +1716,11 @@ public sealed partial class CSharpEmitter : IEmitter
             foreach (var stmt in emitStatements)
             {
                 sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
+            }
+
+            foreach (var stmt in publishStatements)
+            {
+                sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
             }
         }
 
@@ -1950,6 +1963,14 @@ public sealed partial class CSharpEmitter : IEmitter
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
     /// <summary>
+    /// True when any command of the entity publishes an integration event (R19). Commands only:
+    /// <c>publish</c> is a command clause, not a factory one (KOI1422 also confines it to the
+    /// aggregate root), so an aggregate is never born already having published.
+    /// </summary>
+    private static bool PublishesEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<PublishClause>().Any();
+
+    /// <summary>
     /// Builds the <c>[prefix]_domainEvents.Add(new EventName(...));</c> statement for an emit. When
     /// <paramref name="hoistedResultExpr"/> is supplied, any argument whose WHOLE rendered form
     /// equals it is replaced with the <c>__result</c> local and <c>Hoisted</c> is returned true, so
@@ -1991,6 +2012,46 @@ public sealed partial class CSharpEmitter : IEmitter
         }).ToList();
 
         return ($"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoisted);
+    }
+
+    /// <summary>
+    /// Builds the <c>_integrationEvents.Add(new EventName(...));</c> statement for a <c>publish</c>
+    /// (R19) — the published-language counterpart of <see cref="BuildEmitStatement"/>. The name must
+    /// resolve to an <see cref="IntegrationEventDecl"/> (KOI1420 guarantees it by emit time), and the
+    /// payload binds positionally through <see cref="OrderCtorParams"/> exactly as an emit does.
+    /// <para>Unlike an emit, a publish takes no <c>__result</c> hoist: the hoist exists so a value
+    /// returned by the command is computed once, and only an emit argument triggers it. A publish
+    /// argument that happens to be the same expression simply renders inline — same value, and the
+    /// flag-off emit path stays byte-identical. There is no <c>targetPrefix</c> either: the grammar
+    /// admits <c>publish</c> only in a command body (never a factory), so the target is always
+    /// <c>this</c>.</para>
+    /// </summary>
+    private string BuildPublishStatement(
+        PublishClause publish, CSharpExpressionTranslator translator, ModelIndex index)
+    {
+        if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
+        {
+            return $"/* unknown integration event '{publish.EventName}' */";
+        }
+
+        var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
+        // Match the constructor's parameter order (OrderCtorParams moves defaulted/
+        // optional fields last), not the declaration order, so positional args bind.
+        var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
+        var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+
+        var args = ctorFields.Select(f =>
+        {
+            if (!argByField.TryGetValue(f.Name, out Expr? value))
+            {
+                return "default!"; // validator guarantees presence; defensive
+            }
+
+            var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
+            return translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
+        });
+
+        return $"_integrationEvents.Add(new {ev.Name}({string.Join(", ", args)}));";
     }
 
     /// <summary>
@@ -2201,6 +2262,9 @@ public sealed partial class CSharpEmitter : IEmitter
             RequiresClause r => ExprUsesLinq(r.Condition),
             Transition t => ExprUsesLinq(t.Value),
             EmitClause em => em.Args.Any(a => ExprUsesLinq(a.Value)),
+            // A publish payload is rendered into the command body just like an emit one, so a
+            // LINQ-backed argument there must pull in `using System.Linq;` too (R19).
+            PublishClause pub => pub.Args.Any(a => ExprUsesLinq(a.Value)),
             _ => false
         })
         || e.Factories.SelectMany(f => f.Body).Any(s => s switch
