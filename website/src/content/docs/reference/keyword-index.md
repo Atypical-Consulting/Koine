@@ -10,7 +10,14 @@ This index is complete and covers all construct chapters (§3–§18).
 
 | Keyword | Kind | Defined in |
 | --- | --- | --- |
+| `@auth` | annotation | [§15.9](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@delete` | annotation (HTTP verb) | [§15.9](/Koine/reference/application-cqrs/#159-api-annotations) |
 | `@deprecated` | annotation | [§18.3.3](/Koine/reference/versioning/#1833-deprecated-semantics) |
+| `@get` | annotation (HTTP verb) | [§15.9](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@patch` | annotation (HTTP verb) | [§15.9](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@post` | annotation (HTTP verb) | [§15.9](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@put` | annotation (HTTP verb) | [§15.9](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@route` | annotation | [§15.9](/Koine/reference/application-cqrs/#159-api-annotations) |
 | `@since` | annotation | [§18.3.2](/Koine/reference/versioning/#1832-since-ceiling-check-koi1501) |
 | `acl` | soft (context map role) | [§17.3.2](/Koine/reference/context-maps-integration/#1732-the-seven-roles) |
 | `aggregate` | soft (declaration) | [§7.2](/Koine/reference/aggregates/#72-syntax) |

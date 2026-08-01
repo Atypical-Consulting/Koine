@@ -96,7 +96,7 @@ A query object is a context-level declaration with `query`:
 
 ```ebnf
 query_decl
-    : 'query' Identifier '(' param_list? ')' ':' type_ref
+    : annotation* 'query' Identifier '(' param_list? ')' ':' type_ref
     ;
 ```
 
@@ -105,6 +105,8 @@ Unlike `usecase_decl`, the result type (`: type_ref`) is **required** on `query_
 ```koine
 query OrdersByStatus(status: OrderStatus): List<OrderSummary>
 ```
+
+The leading `annotation*` carries the optional HTTP surface — `@route`, a verb, `@auth` — covered in [§15.9](#159-api-annotations).
 
 ## 15.3 Semantics
 
@@ -375,6 +377,132 @@ context Ordering version 1 {
 
 From that single context Koine emits, in the `Ordering/` folder: the `Order` aggregate and `IOrderRepository`, an `IUnitOfWork` exposing `Orders`, the `IOrderingService` application interface, the `OrderSummary` record and projection, and the `OrdersByStatus` query DTO — plus the shared `Koine/Runtime/IQueryHandler.cs`. None of it references your database.
 
+## 15.9 API annotations
+
+A `command` and a `query` each already describe one HTTP operation, and two emitters derive it from the same convention: the [`openapi` target](/Koine/guides/cli/#emit-an-openapi-spec) and the C# **api** layer (`koine build … --layers api`). A command is `POST /{entity}/{command}`, a query is `GET /{query}`, both kebab-cased. Three optional annotations override that convention one declaration at a time. They precede the declaration, in any order:
+
+| Annotation | What it does | Rule |
+| --- | --- | --- |
+| `@route("/orders/{id}")` | replaces the derived path, verbatim | must be absolute — it has to start with `/` |
+| `@get` `@post` `@put` `@delete` `@patch` | replaces the derived verb | at most one per declaration |
+| `@auth("admin")` | *adds* an authorization requirement | must name a non-blank value |
+
+The three axes are **independent**: each falls back to the convention on its own, so `@auth` alone leaves an operation exactly where the convention put it. A declaration that carries none of them emits what it always did.
+
+```koine
+context Ordering {
+  enum OrderStatus { Draft, Submitted, Cancelled }
+
+  aggregate Order root Order {
+    entity Order identified by OrderId {
+      status: OrderStatus = Draft
+
+      /// Submit a draft order for fulfilment.
+      @route("/orders/{id}")
+      @put
+      @auth("admin")
+      command submit(note: String) {
+        requires status == Draft "only a draft order can be submitted"
+        status -> Submitted
+      }
+
+      /// Cancel an order that has not shipped yet.
+      @route("/orders/{id}")
+      @delete
+      command cancel {
+        requires status == Submitted "only a submitted order can be cancelled"
+        status -> Cancelled
+      }
+    }
+  }
+
+  readmodel OrderRow from Order {
+    status
+  }
+
+  /// All orders in a given lifecycle state.
+  @auth("analyst")
+  query OrdersByStatus(status: OrderStatus): List<OrderRow>
+}
+```
+
+### 15.9.1 Translation to C# (`--layers api`)
+
+The annotated command maps through ASP.NET's per-verb Minimal-API method at the overridden path, and its chain gains `.RequireAuthorization(...)`:
+
+```csharp
+endpoints.MapPut("/orders/{id}", async (OrderSubmitRequest request, OrderSubmitHandler handler, CancellationToken ct) =>
+{
+    await handler.HandleAsync(request, ct);
+    return Results.Ok();
+}).RequireAuthorization("admin");
+```
+
+`@auth` on its own moves nothing. The query keeps the conventional `MapGet` at the conventional route and only gains the call:
+
+```csharp
+endpoints.MapGet("/orders-by-status", async ([AsParameters] OrdersByStatus query, OrdersByStatusHandler handler, CancellationToken ct) =>
+{
+    var result = await handler.HandleAsync(query, ct);
+    return Results.Ok(result);
+}).RequireAuthorization("analyst");
+```
+
+:::caution
+`@auth("admin")` names an authorization **policy**, not a role. ASP.NET's `RequireAuthorization(params string[])` takes policy names, so the host app has to register a policy literally called `admin`:
+
+```csharp
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("admin", policy => policy.RequireRole("admin"));
+```
+
+Koine cannot see your DI container, so an unregistered name is not a build error — it fails at request time, when the authorization middleware looks the policy up.
+:::
+
+### 15.9.2 Translation to OpenAPI
+
+The `openapi` target keys the operation under the overridden path and the lower-cased verb, and adds a per-operation `security` requirement:
+
+```yaml
+paths:
+  /orders-by-status:
+    get:
+      operationId: OrdersByStatus
+      summary: "All orders in a given lifecycle state."
+      # …
+      security:
+        - analyst: []
+  "/orders/{id}":
+    put:
+      operationId: Order_submit
+      summary: "Submit a draft order for fulfilment."
+      # …
+      security:
+        - admin: []
+    delete:
+      operationId: Order_cancel
+      summary: "Cancel an order that has not shipped yet."
+      # …
+```
+
+Two declarations may point `@route` at the same path as long as their verbs differ — OpenAPI keys a path item by path and then by verb, so they merge under one key rather than colliding.
+
+:::note
+Koine emits no `components/securitySchemes`. The `@auth` value names a scheme the consuming document declares (bearer JWT, OAuth2 scopes, an API key); Koine models *which* operations require authorization, never *how* you authenticate.
+:::
+
+### 15.9.3 Rules and diagnostics
+
+| Rule | Diagnostic |
+| --- | --- |
+| `@route` names no path (a bare `@route`), or one that is not absolute | `KOI1208` `InvalidRouteOverride` |
+| a declaration carries more than one verb annotation | `KOI1209` `MultipleVerbAnnotations` |
+| `@auth` names no role (a bare `@auth`), or a blank one | `KOI1210` `EmptyAuthRole` |
+
+- The annotations attach to `command` and `query` only. A [factory (§12)](/Koine/reference/factories/) keeps the conventional `POST /{entity}/{factory}`, and a `usecase` has no HTTP surface to override.
+- Any other `@name` before a declaration parses and is silently ignored, per the [annotation ignorance rule (§18.3.4)](/Koine/reference/versioning/#1834-annotation-ignorance-rule). In particular `@since`/`@deprecated` carry no meaning on a command or a query.
+- Nothing here reaches the domain or application C#. Without `--layers api` or `--target openapi`, an annotated model emits exactly what an un-annotated one does.
+
 ## See also
 
 - [Aggregates & repositories (§7)](/Koine/reference/aggregates/) — where `I<Root>Repository` and finders come from.
@@ -382,3 +510,4 @@ From that single context Koine emits, in the `Ordering/` folder: the `Order` agg
 - [Contexts & types (§4)](/Koine/reference/contexts-and-types/) — how `List<T>`, `Instant`, and the rest map to C#.
 - [Expressions (§9)](/Koine/reference/expressions/) — the expression grammar used in derived read-model fields.
 - [Commands, events & state machines (§11)](/Koine/reference/commands-events-state/) — the `command` and `event` constructs that the application layer orchestrates.
+- [CLI reference](/Koine/guides/cli/) — `--layers` (the C# application and api layers) and `--target openapi`, the two consumers of the [API annotations (§15.9)](#159-api-annotations).

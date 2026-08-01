@@ -54,7 +54,7 @@ Each construct family has its own reference page. Start here and follow the link
 | `create … { … -> … emit … }` | factory methods and `->` field initialization | [Factories](/Koine/reference/factories/) |
 | `spec`, `service`, `policy` | named predicates, domain services, reaction seams | [Specs, services & policies](/Koine/reference/specs-services-policies/) |
 | `repository`, `find`, `versioned` | repository contracts, finders, optimistic concurrency | [Repositories & concurrency](/Koine/reference/repositories-concurrency/) |
-| `service … usecase …`, `readmodel`, `query` | application services, CQRS read models and queries | [Application layer & CQRS](/Koine/reference/application-cqrs/) |
+| `service … usecase …`, `readmodel`, `query`, `@route`/`@auth` | application services, CQRS read models and queries, the HTTP surface of a command or query | [Application layer & CQRS](/Koine/reference/application-cqrs/) |
 | `import`, `module`, directory builds | multi-file models, imports, sub-namespaces | [Multi-file, imports & modules](/Koine/reference/multi-file-imports-modules/) |
 | `contextmap`, `integration event`, `publishes`/`subscribes`, `acl` | context maps, the seven roles, shared kernels, integration events | [Context maps & integration](/Koine/reference/context-maps-integration/) |
 | `version`, `@since`, `@deprecated`, `koine check` | model versioning, deprecation, compatibility checks | [Versioning & evolution](/Koine/reference/versioning/) |
