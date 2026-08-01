@@ -181,6 +181,13 @@ export class TauriPlatform implements Platform {
   readonly persistsWorkspace = true;
   // The desktop shell brokers a real PTY (see TauriTerminalTransport / the Rust pty_* commands).
   readonly canRunShell = true;
+  // Real-time co-editing (#481) needs a session broker to relay CRDT updates and presence between
+  // machines. The desktop shell is the host that CAN run one — it already brokers a PTY and the `koine
+  // lsp` child — but that broker is #481 Task 5 and has not shipped, so the flag stays false and
+  // `createCollabTransport` stays absent: the Platform convention is that the optional factory exists
+  // iff its flag is true, and claiming a capability the UI can't exercise is worse than not having it.
+  // This flips to `true` in the same change that lands the Rust broker.
+  readonly canCollaborate = false;
   // The brokered `koine lsp` child can spawn the sandboxed `koine scenario-exec` grandchild (ADR 0011),
   // so the scenario runner may offer executed mode (#236).
   readonly supportsScenarioExecution = true;

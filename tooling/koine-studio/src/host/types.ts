@@ -108,6 +108,94 @@ export interface TerminalTransport {
 }
 
 /**
+ * One participant in a real-time collaboration session (issue #481, Phase 2 of #259): a stable id, the
+ * name shown on their remote caret, and the colour their cursor/selection is painted in. Host-provided —
+ * Phase 2 deliberately needs no account system.
+ */
+export interface CollabParticipant {
+  /** Stable within a session; the key presence and peer-join/leave events are addressed by. */
+  readonly id: string;
+  /** Shown on the remote caret's name label. */
+  readonly displayName: string;
+  /** CSS colour for this participant's caret and selection decorations (one colour per participant). */
+  readonly color: string;
+}
+
+/** A half-open document range `[from, to)` in editor offsets — one piece of a remote selection. */
+export interface CollabRange {
+  readonly from: number;
+  readonly to: number;
+}
+
+/**
+ * One participant's EPHEMERAL cursor/selection state, re-broadcast on every local selection change.
+ * Presence carries **no document authority**: it is painted as decorations and dropped on leave or
+ * timeout, and losing a frame costs nothing because the next one supersedes it. Identity is carried
+ * inline (rather than looked up in a peer table) so a renderer can paint a frame it receives before the
+ * corresponding `onPeerJoin`.
+ */
+export interface CollabPresence {
+  readonly participantId: string;
+  readonly displayName: string;
+  readonly color: string;
+  /** Document offset of the participant's caret. */
+  readonly cursor: number;
+  /** Their selected ranges; empty for a bare caret. */
+  readonly selection: readonly CollabRange[];
+}
+
+/** What {@link CollabTransport.start} is asked to do: open a new session, or attach to one by token. */
+export interface CollabSessionRequest {
+  /** `create` opens a session (this participant becomes the document authority); `join` attaches to one. */
+  readonly mode: 'create' | 'join';
+  /** Required for `join`, ignored for `create`. A SECRET — it grants edit access; never log it. */
+  readonly token?: string;
+  /** How this participant introduces itself to its peers. */
+  readonly identity: CollabParticipant;
+}
+
+/** The session {@link CollabTransport.start} resolves once the participant is connected. */
+export interface CollabSessionInfo {
+  /** Opaque session identifier, for diagnostics. */
+  readonly sessionId: string;
+  /** The join token to hand a second participant. A SECRET — short-lived, never logged. */
+  readonly token: string;
+  /** True for the session CREATOR only: the document authority that owns the canonical `.koi` save. */
+  readonly authority: boolean;
+  /** The identity this participant was admitted under. */
+  readonly self: CollabParticipant;
+}
+
+/**
+ * Transport for one real-time collaboration session (issue #481). Shaped like {@link LspTransport} /
+ * {@link TerminalTransport}: the host brokers the connection and this interface just moves bytes and
+ * surfaces peer events. It moves **opaque** CRDT-update payloads and presence frames — it does not
+ * understand `.koi`, and collaboration state never reaches the semantic model or the emitters.
+ *
+ * A browser tab can neither listen as a server nor dial peers, so a broker-capable host (the Tauri
+ * desktop shell, or a user-configured relay) supplies this; see {@link Platform.canCollaborate}.
+ * Register the `on*` handlers BEFORE `start`, exactly like the terminal and LSP transports.
+ */
+export interface CollabTransport {
+  /** Create or join the session, resolving once connected. Rejects on an unknown/expired join token. */
+  start(request: CollabSessionRequest): Promise<CollabSessionInfo>;
+  /** Broadcast an opaque CRDT update to the other participants (never echoed back to the sender). */
+  send(update: Uint8Array): Promise<void>;
+  /** Broadcast this participant's cursor/selection on the presence channel (also never echoed back). */
+  sendPresence(presence: CollabPresence): Promise<void>;
+  /** Register the handler for an inbound CRDT update from a peer. Call before `start`. */
+  onUpdate(cb: (update: Uint8Array) => void): void;
+  /** Register the handler for an inbound presence frame from a peer. Call before `start`. */
+  onPresence(cb: (presence: CollabPresence) => void): void;
+  /** Register the peer-joined handler. On `join`, it also replays the peers already in the session. */
+  onPeerJoin(cb: (peer: CollabParticipant) => void): void;
+  /** Register the peer-left handler (their presence must be dropped). */
+  onPeerLeave(cb: (participantId: string) => void): void;
+  /** Leave the session and detach listeners. Idempotent; later sends are inert, never a throw. */
+  stop(): Promise<void>;
+}
+
+/**
  * One path reported by `git status`, modeled per (file, area): a file changed in BOTH the index and
  * the working tree appears TWICE — once with `staged: true` (its staged change) and once with
  * `staged: false` (its unstaged change). The Source Control panel (issue #272) can therefore group
@@ -209,6 +297,22 @@ export interface Platform {
    * before invoking it.
    */
   createTerminal?(): TerminalTransport;
+
+  /**
+   * Whether this host can broker a real-time co-editing session (issue #481) — true iff it can relay
+   * CRDT updates and presence between participants, which means the Tauri desktop shell's session
+   * broker or a user-configured relay. **False in a bare browser tab**, which can neither listen as a
+   * server nor dial peers; there the collaboration affordance renders a graceful "desktop only /
+   * configure a relay" placeholder instead. Gates {@link createCollabTransport} — true iff that factory
+   * exists — exactly as {@link canRunShell} gates {@link createTerminal}. Never branch on {@link kind}.
+   */
+  readonly canCollaborate: boolean;
+
+  /**
+   * Create a collaboration transport (one per session) for hosts that {@link canCollaborate}. Hosts that
+   * can't broker omit it entirely, so callers must guard on the flag (or the optional chain) first.
+   */
+  createCollabTransport?(): CollabTransport;
 
   /**
    * Whether the scenario runner may offer EXECUTED mode (#236) — running the model's own emitted code
