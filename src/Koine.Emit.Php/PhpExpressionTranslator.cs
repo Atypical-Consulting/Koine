@@ -131,7 +131,9 @@ internal sealed class PhpExpressionTranslator
     /// <paramref name="value"/>'s inferred type against the <paramref name="declared"/> type of the
     /// member it initializes — the factory ctor-arg counterpart of the ternary/coalesce reconciliation
     /// the other four code emitters already have (#1344), reusing the same shared
-    /// <see cref="BranchReconciliation.Classify"/> decision (#1368). Unlike Kotlin/TypeScript/Python, PHP
+    /// <see cref="BranchReconciliation.Classify"/> decision (#1368) — mirroring Java's #1519
+    /// <c>ReconcileFactoryCtorArg</c>, Rust's #1438/#1543, and Kotlin's/TypeScript's/Python's #1732
+    /// counterparts. Unlike Kotlin/TypeScript/Python, PHP
     /// has no existing <c>WriteReconciledBranch</c> to route through, so <c>NeedsWiden</c> reuses the
     /// existing <see cref="WriteAsDecimal"/> arithmetic-operand primitive (its int-literal and generic
     /// fallthrough arms already produce exactly this widening, PHP-8.1-floor-safe parenthesisation

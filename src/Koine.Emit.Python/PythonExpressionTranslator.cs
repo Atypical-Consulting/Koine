@@ -126,7 +126,8 @@ internal sealed class PythonExpressionTranslator
     /// (#1344), reusing the same shared <see cref="BranchReconciliation.Classify"/> decision (#1368) and
     /// the same <c>Decimal(...)</c>/walrus-conditional renderings, so a factory's explicit
     /// <c>field -&gt; expr</c> initialization emits a <c>mypy --strict</c>-clean value instead of a bare
-    /// mismatched literal (mirrors Kotlin's/TypeScript's #1732 counterparts).
+    /// mismatched literal (mirrors Java's #1519 <c>ReconcileFactoryCtorArg</c>/Rust's #1438/#1543 and
+    /// Kotlin's/TypeScript's #1732 counterparts).
     /// </summary>
     internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
     {
