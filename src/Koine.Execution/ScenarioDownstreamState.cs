@@ -16,7 +16,11 @@ internal abstract record DownstreamState
     public sealed record Instance(object Value) : DownstreamState;
 
     /// <summary>The reaction targets a FACTORY: it builds its own instance, so there is no prior state
-    /// to establish and none is missing.</summary>
+    /// to establish and none is missing.
+    /// <para>Unreachable from a model that VALIDATES today — a policy reaction may only name a
+    /// <c>command</c> (<c>SemanticValidator.ValidatePolicies</c>, KOI1032) — see
+    /// <see cref="FanOutTarget.IsFactory"/> for why the branch is kept rather than speculative.</para>
+    /// </summary>
     public sealed record StaticTarget : DownstreamState;
 
     /// <summary>The routed <c>given</c> slice was REJECTED by the emitted code (a value object's

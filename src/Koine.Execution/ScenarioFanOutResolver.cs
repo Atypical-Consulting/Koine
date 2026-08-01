@@ -12,7 +12,15 @@ namespace Koine.Execution;
 /// <param name="Context">The bounded context declaring the entity.</param>
 /// <param name="MemberName">The command or factory the reaction invokes, as DECLARED (canonical casing).</param>
 /// <param name="IsFactory">True when the member is a <see cref="FactoryDecl"/> (static, no prior instance);
-/// false when it is a <see cref="CommandDecl"/>.</param>
+/// false when it is a <see cref="CommandDecl"/>.
+/// <para>NOT REACHABLE from a model that VALIDATES, as the language stands: <c>ValidatePolicies</c>
+/// resolves a reaction's member against the target root's <b>commands only</b>, so
+/// <c>then Replenishment.raise</c> naming a <c>create</c> is the hard error KOI1032 ("has no command").
+/// Every path keyed off this flag is therefore dead for any model the runner is actually asked to run,
+/// and its one test builds the shape deliberately unvalidated. It is kept, not speculative: the
+/// resolver answers the question either way, so the day a policy may name a factory the runner already
+/// runs it from no prior state instead of reporting an aggregate whose state it could not
+/// establish.</para></param>
 /// <param name="Args">The reaction's named arguments, in source order — values drawn from the event's fields.</param>
 /// <param name="PolicyName">The policy that declares the reaction, so a timeline can name it.</param>
 internal sealed record FanOutTarget(

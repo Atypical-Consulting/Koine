@@ -255,9 +255,11 @@ badge above a failed downstream step is intended: your command really did succee
 triggered did not.
 
 **How far it goes.** Fan-out stops at **three levels** past the command you ran, and it never runs the same
-aggregate on the same event twice — so a policy chain that loops is reported as a cycle rather than left to
-run into the timeout. Both bounds are stated in the run's notes, naming the reaction that was not explored,
-so a truncated run always looks truncated.
+reaction twice — so a policy chain that loops is reported as a cycle rather than left to run into the
+timeout. Both bounds are stated in the run's notes, naming the reaction that was not explored, so a
+truncated run always looks truncated. Several policies reacting to the same event all run, including
+several onto the same aggregate: that aggregate is built once and they run against it in turn, so its
+resulting state reflects all of them.
 
 **What it does *not* run: cross-context subscriptions.** `publishes` / `subscribes` declares that another
 bounded context reacts to an event — but not *how*, and the emitters produce only an empty handler seam

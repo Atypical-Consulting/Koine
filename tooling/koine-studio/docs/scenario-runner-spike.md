@@ -318,10 +318,13 @@ step attributed to that aggregate plus a note naming the exact key that would ha
 ```
 
 **Bounds.** The cascade is bounded twice, because one bound cannot do the job alone: a **visited set** over
-`(aggregate, event)` pairs terminates a cyclic model, and a **depth cap of 3** truncates a genuinely deep,
-non-repeating chain a visited set can never see. Both bite far inside the sandbox's wall clock, so such a
-model is diagnosed as *cyclic* or *truncated* rather than misreported as a timeout — and hitting either is
-always a note in `notes`, never a silent stop.
+the reactions already dispatched — `(aggregate, member, policy, event)` — terminates a cyclic model, and a
+**depth cap of 3** truncates a genuinely deep, non-repeating chain a visited set can never see. Both bite
+far inside the sandbox's wall clock, so such a model is diagnosed as *cyclic* or *truncated* rather than
+misreported as a timeout — and hitting either is always a note in `notes`, never a silent stop. The visited
+key names the *reaction* rather than only the `(aggregate, event)` pair, so two policies reacting to one
+event on one aggregate both run; they run against the **same** instance, in resolution order, because an
+aggregate is established once per run.
 
 **`ok` still reports the primary operation.** A downstream invariant failure is a *failed step attributed
 to that aggregate*, carrying the emitted code's real rule text, plus a note — it does not flip `ok`,

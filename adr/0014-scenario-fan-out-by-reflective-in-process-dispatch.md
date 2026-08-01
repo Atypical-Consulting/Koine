@@ -90,9 +90,20 @@ We will therefore:
   and the exact key that would drive it. A bare (undotted) key is always the primary aggregate's and is
   never routed downstream. Per-aggregate keys need no wire-shape change: `Scenario.Given` is already
   `IReadOnlyDictionary<string, ScenarioValue>`, so dotted keys are purely additive.
-- **Bound the cascade (D5).** A fixed maximum fan-out depth **and** a visited set over
-  `(aggregate, event)` pairs. Hitting either is reported in `Notes`. The cap must bite well inside the
-  wall-clock budget, so a cyclic model is diagnosed as a cycle rather than as a timeout.
+  A downstream aggregate is established **once per run**: a second reaction reaching it continues from
+  the state the first left it in, because one aggregate is one object. Rebuilding a second instance from
+  the same slice would make the timeline contradict itself — the merged `<Entity>.<member>` state would
+  report the last reaction's post-state while the steps above it show the first one's write.
+- **Bound the cascade (D5).** A fixed maximum fan-out depth **and** a visited set over the reactions
+  already dispatched — `(aggregate, member, policy, event)`. The key identifies the *reaction*, not
+  merely the `(aggregate, event)` pair it lands on, because those are different questions: two policies
+  reacting to one event on one aggregate ("post it, **and** audit it") are two distinct declared
+  reactions, and the coarser key would dispatch whichever sorted first and refuse the other as a cycle it
+  is not. Termination is unaffected — a model has finitely many policies, and every dispatch consumes a
+  key that is never released. Hitting either bound is reported in `Notes`, and the visited-set note says
+  what actually happened ("this reaction has already run") rather than asserting a cycle, since the same
+  bound also fires on a re-converging diamond. The cap must bite well inside the wall-clock budget, so a
+  cyclic model is diagnosed as a cycle rather than as a timeout.
 - **Keep `Ok` about the primary operation (D6).** A downstream invariant failure is a *failed step
   attributed to that aggregate*, carrying the real `DomainInvariantViolationException` message — which is
   a feature under [#1738](https://github.com/Atypical-Consulting/Koine/pull/1738)'s taxonomy, not an

@@ -724,8 +724,10 @@ public class ScenarioExecutionTests
     }
 
     /// <summary>
-    /// A policy whose reaction names a FACTORY rather than a command — no shipped template carries
-    /// that shape, so it is modelled inline.
+    /// A policy whose reaction names a FACTORY rather than a command. No shipped template carries that
+    /// shape for a reason the next test pins: the VALIDATOR rejects it, so this model is deliberately
+    /// only parsed (<see cref="Build"/> runs no semantic pass). The resolver is expected to answer the
+    /// question anyway — see <c>FanOutTarget.IsFactory</c>.
     /// </summary>
     private const string FactoryPolicyModel = """
         context Warehouse {
@@ -777,6 +779,23 @@ public class ScenarioExecutionTests
         target.IsFactory.ShouldBeTrue();
         target.Args.ShouldHaveSingleItem().Parameter.ShouldBe("sku");
         fanOut.DeclaredOnly.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Why every <c>IsFactory</c> path in the runner is DEAD CODE today, pinned rather than asserted in
+    /// prose: a policy reaction may only name a <c>command</c>, so the model above is one the compiler
+    /// refuses. The runner never sees it, and the resolver's factory branch cannot fire for a model that
+    /// validates. The day this diagnostic goes away, this test fails and the "unreachable" comments on
+    /// <c>FanOutTarget.IsFactory</c>, <c>DownstreamState.StaticTarget</c> and the dispatcher's
+    /// <c>StaticTarget</c> branch are due for review — which is the point of pinning it here.
+    /// </summary>
+    [Fact]
+    public void A_policy_reaction_naming_a_factory_is_a_model_the_validator_refuses_today()
+    {
+        IReadOnlyList<Diagnostics.Diagnostic> diagnostics = new KoineCompiler().Diagnose(FactoryPolicyModel);
+
+        diagnostics.ShouldContain(d =>
+            d.Code == Diagnostics.DiagnosticCodes.PolicyUnknownCommand && d.Message.Contains("raise"));
     }
 
     [Fact]
@@ -1261,6 +1280,86 @@ public class ScenarioExecutionTests
 
         // Nothing was constructed, so no downstream state is claimed.
         executed.ResultingState.Keys.ShouldNotContain(k => k.StartsWith("LedgerEntry.", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Two policies reacting to the SAME event on the SAME aggregate — an everyday DDD shape ("when the
+    /// charge is captured, post it to the ledger AND audit the ledger"). Both are declared, both are
+    /// executable, and neither is a cycle.
+    /// </summary>
+    private const string TwinPolicyModel = """
+        context Twinned {
+          event ChargeCaptured {
+            capturedAmount: Decimal
+          }
+
+          aggregate Billing root Charge {
+            entity Charge identified by ChargeId {
+              amount:  Decimal
+              settled: Bool = false
+
+              command capture {
+                settled -> true
+                emit ChargeCaptured(capturedAmount: amount)
+              }
+            }
+          }
+
+          aggregate Books root LedgerEntry {
+            entity LedgerEntry identified by LedgerEntryId {
+              balance: Decimal
+              audited: Bool = false
+
+              command record(amount: Decimal) {
+                balance -> balance + amount
+              }
+
+              command audit {
+                audited -> true
+              }
+            }
+          }
+
+          policy AuditLedger  when ChargeCaptured then Books.audit
+          policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)
+        }
+        """;
+
+    [Fact]
+    public void Two_policies_reacting_to_one_event_on_one_aggregate_both_run_against_the_same_instance()
+    {
+        SemanticModel sema = Build(TwinPolicyModel);
+        var scenario = new Scenario(
+            "Charge",
+            "capture",
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+            {
+                ["amount"] = ScenarioValue.FromDecimal(12m),
+                ["settled"] = ScenarioValue.FromBool(false),
+                ["LedgerEntry.balance"] = ScenarioValue.FromDecimal(5m),
+                ["LedgerEntry.audited"] = ScenarioValue.FromBool(false),
+            },
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+
+        // Neither declared reaction is dropped, and nothing here loops: the bound remembers the
+        // REACTION it dispatched, not merely the (aggregate, event) pair, so two distinct policies that
+        // happen to share a trigger and a target are not mistaken for one repeating itself.
+        executed.Notes.ShouldNotContain(n => n.Contains("cycle"), string.Join(" | ", executed.Notes));
+        executed.Steps
+            .Where(s => s.Aggregate == "LedgerEntry")
+            .OfType<ScenarioStep.Transition>()
+            .Select(t => t.Field)
+            .ShouldBe(new[] { "audited", "balance" });
+
+        // Both ran against ONE LedgerEntry, in order, so the merged state agrees with both steps above
+        // it instead of reporting whichever reaction happened to run last against a second instance
+        // rebuilt from the same `given`.
+        executed.ResultingState["LedgerEntry.audited"].ShouldBe("true");
+        executed.ResultingState["LedgerEntry.balance"].ShouldBe("17");
     }
 
     // D1's declared-only surface has NO executed-mode test on purpose: a command cannot `emit` an

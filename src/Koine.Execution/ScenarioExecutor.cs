@@ -62,6 +62,17 @@ internal sealed class ScenarioExecutor
     private readonly ScenarioFanOutResolver _fanOut;
     private readonly List<string> _notes = [];
 
+    /// <summary>
+    /// The state established for each fanned-out aggregate, by entity name — so ONE aggregate is one
+    /// object for the whole run (issue #1758). A second reaction reaching the same aggregate (two
+    /// policies on one event, or two rungs of a chain) continues from the state the first left it in,
+    /// rather than from a second instance rebuilt out of the same <c>given</c>: two instances would make
+    /// the timeline contradict itself, since the merged <c>&lt;Entity&gt;.&lt;member&gt;</c> state would
+    /// report the LAST reaction's post-state while the steps above it show the first one's write.
+    /// Factory targets never consult or populate it — a factory builds its own instance every time.
+    /// </summary>
+    private readonly Dictionary<string, DownstreamState> _downstream = new(StringComparer.Ordinal);
+
     private EntityDecl _entity = null!;
 
     private ScenarioExecutor(SemanticModel sema)
@@ -533,10 +544,31 @@ internal sealed class ScenarioExecutor
     /// <c>DomainInvariantViolationException</c> so it can be reported as the failed step it is; anything
     /// else is <see cref="DownstreamState.Unavailable"/> with a reason. No path invents an instance.</para>
     ///
+    /// <para>Established at most ONCE per aggregate per run (see <see cref="_downstream"/>): a second
+    /// reaction reaching the same aggregate reuses the live instance the first one left, so a timeline
+    /// that visits an aggregate twice reads — and merges — as one story about one object. A factory
+    /// target is exempt: it builds its own instance on every call, so there is nothing to cache.</para>
+    ///
     /// <para>Dispatching the target from that state is deliberately NOT done here — this seam only
     /// establishes it.</para>
     /// </summary>
     internal DownstreamState EstablishDownstreamState(Assembly assembly, Scenario s, FanOutTarget target)
+    {
+        if (!target.IsFactory && _downstream.TryGetValue(target.EntityName, out DownstreamState? established))
+        {
+            return established;
+        }
+
+        DownstreamState state = EstablishDownstreamStateCore(assembly, s, target);
+        if (!target.IsFactory)
+        {
+            _downstream[target.EntityName] = state;
+        }
+
+        return state;
+    }
+
+    private DownstreamState EstablishDownstreamStateCore(Assembly assembly, Scenario s, FanOutTarget target)
     {
         EntityDecl? entity = ResolveEntity(target.EntityName);
         if (entity is null)
@@ -580,10 +612,22 @@ internal sealed class ScenarioExecutor
     /// <c>&lt;Entity&gt;.&lt;member&gt;</c> keys (D4), and each dispatched target is recursed on.
     ///
     /// <para>The cascade is bounded twice over (D5), because one bound cannot do the job alone:
-    /// <paramref name="visited"/> — the <c>(aggregate, event)</c> pairs already dispatched — terminates a
-    /// CYCLIC model no matter how the cap is set, and <see cref="MaxFanOutDepth"/> truncates a genuinely
-    /// deep, non-repeating chain a visited set can never see. Hitting either is a note naming which bound
-    /// bit and what was left unexplored; neither ever stops silently.</para>
+    /// <paramref name="visited"/> — the REACTIONS already dispatched, identified by
+    /// <c>(aggregate, member, policy, event)</c> — terminates a CYCLIC model no matter how the cap is
+    /// set, and <see cref="MaxFanOutDepth"/> truncates a genuinely deep, non-repeating chain a visited
+    /// set can never see. Hitting either is a note naming which bound bit and what was left unexplored;
+    /// neither ever stops silently.</para>
+    ///
+    /// <para>The key identifies the REACTION rather than only the <c>(aggregate, event)</c> pair it
+    /// lands on, because those are not the same question: two policies reacting to one event on one
+    /// aggregate ("post it, and audit it") are two distinct declared reactions, and a coarser key would
+    /// run whichever sorted first and refuse the other as a cycle it is not. Termination is unaffected —
+    /// the key space is still finite (a model has finitely many policies), and every dispatch consumes a
+    /// key that is never released.</para>
+    ///
+    /// <para><paramref name="alreadyRecorded"/> is how many events <paramref name="subject"/> carried
+    /// BEFORE the invocation this call follows: an aggregate reached twice keeps its earlier events, and
+    /// re-reading them would re-resolve a cascade that already happened.</para>
     /// </summary>
     private void FanOut(
         Assembly assembly,
@@ -592,18 +636,19 @@ internal sealed class ScenarioExecutor
         object subject,
         List<ScenarioStep> steps,
         Dictionary<string, string> state,
-        HashSet<(string Aggregate, string Event)> visited,
-        int depth)
+        HashSet<(string Aggregate, string Member, string Policy, string Event)> visited,
+        int depth,
+        int alreadyRecorded = 0)
     {
         List<object> events = DomainEventsOf(subject);
-        if (events.Count == 0)
+        if (events.Count <= alreadyRecorded)
         {
             return;
         }
 
         string context = ContextOf(subjectEntity.Name) ?? string.Empty;
 
-        foreach (object recorded in events)
+        foreach (object recorded in events.Skip(alreadyRecorded))
         {
             // The RUNTIME event object's type name, not a re-reading of the body's `emit` clauses: an
             // event the emitted code really recorded is higher fidelity than one the model merely says
@@ -643,11 +688,17 @@ internal sealed class ScenarioExecutor
                     continue;
                 }
 
-                if (!visited.Add((target.EntityName, eventName)))
+                if (!visited.Add((target.EntityName, target.MemberName, target.PolicyName, eventName)))
                 {
-                    _notes.Add($"Fan-out stopped on a cycle: '{target.EntityName}' has already reacted to "
-                               + $"'{eventName}' in this run, so policy '{target.PolicyName}' "
-                               + $"({target.EntityName}.{target.MemberName}) was not dispatched again.");
+                    // Said as what it IS — a reaction that already ran — rather than as "your model has a
+                    // cycle": the same bound also fires when one reaction is reached twice by different
+                    // routes (a diamond re-converging, or one command emitting the same event twice), and
+                    // naming that a cycle would send a reader hunting for a loop that is not there.
+                    _notes.Add($"Fan-out did not repeat a reaction: policy '{target.PolicyName}' "
+                               + $"({target.EntityName}.{target.MemberName}) has already run for "
+                               + $"'{eventName}' on '{target.EntityName}' in this run, so it was not "
+                               + "dispatched again — that bound is what terminates a cycle in a policy "
+                               + "chain.");
                     continue;
                 }
 
@@ -674,7 +725,7 @@ internal sealed class ScenarioExecutor
         FanOutTarget target,
         List<ScenarioStep> steps,
         Dictionary<string, string> state,
-        HashSet<(string Aggregate, string Event)> visited,
+        HashSet<(string Aggregate, string Member, string Policy, string Event)> visited,
         int depth)
     {
         EntityDecl? entity = ResolveEntity(target.EntityName);
@@ -704,7 +755,9 @@ internal sealed class ScenarioExecutor
                 break;
 
             case DownstreamState.StaticTarget:
-                instance = null; // a factory builds its own
+                // A factory builds its own instance. Dead for any model that validates — a policy
+                // reaction may only name a `command` today (KOI1032) — see FanOutTarget.IsFactory.
+                instance = null;
                 break;
 
             case DownstreamState.Rejected rejected:
@@ -713,8 +766,10 @@ internal sealed class ScenarioExecutor
 
             case DownstreamState.Unavailable unavailable:
                 // D2 clause 3: a failed precondition attributed to the aggregate, plus the reason —
-                // which names the exact `<Entity>.<member>` key that would have driven it.
-                _notes.Add(unavailable.Reason);
+                // which names the exact `<Entity>.<member>` key that would have driven it. The step is
+                // per REACTION (it names the policy that could not be driven); the reason is per
+                // AGGREGATE, so several reactions onto one undescribed aggregate say it once.
+                NoteOnce(unavailable.Reason);
                 steps.Add(new ScenarioStep.Precondition(
                     $"no state was established for {target.EntityName}, so '{target.MemberName}' could not be driven",
                     $"policy {target.PolicyName}: when {eventName} then {target.AggregateName}.{target.MemberName}",
@@ -757,6 +812,11 @@ internal sealed class ScenarioExecutor
         IReadOnlyDictionary<string, string> before =
             instance is null ? NoState : Snapshot(entity, instance, recordNotes: false);
 
+        // What this aggregate had already recorded before this reaction ran. An aggregate reached twice
+        // keeps its earlier events, so both the `emit` step payloads below and the recursion after them
+        // must read only the ones THIS invocation added.
+        int alreadyRecorded = instance is null ? 0 : DomainEventsOf(instance).Count;
+
         object? returned;
         try
         {
@@ -793,7 +853,8 @@ internal sealed class ScenarioExecutor
 
         Dictionary<string, string> after = Snapshot(entity, downstream, recordNotes: true);
         string? unusedResult = null;
-        foreach (ScenarioStep step in SuccessSteps(body, before, after, downstream, returned, ref unusedResult))
+        foreach (ScenarioStep step in
+                 SuccessSteps(body, before, after, downstream, returned, ref unusedResult, alreadyRecorded))
         {
             steps.Add(step with { Aggregate = entity.Name });
         }
@@ -801,7 +862,18 @@ internal sealed class ScenarioExecutor
         Merge(state, entity, after);
 
         // The reaction may itself have emitted: keep going, under the same two bounds.
-        FanOut(assembly, s, entity, downstream, steps, state, visited, depth + 1);
+        FanOut(assembly, s, entity, downstream, steps, state, visited, depth + 1, alreadyRecorded);
+    }
+
+    /// <summary>Adds a note unless that exact sentence is already recorded — a fact about an AGGREGATE
+    /// (its state could not be established) is worth saying once however many reactions reach it, while
+    /// the per-reaction detail stays in the steps, which name the policy.</summary>
+    private void NoteOnce(string note)
+    {
+        if (!_notes.Contains(note, StringComparer.Ordinal))
+        {
+            _notes.Add(note);
+        }
     }
 
     /// <summary>D4: a downstream aggregate's state merges under <c>&lt;Entity&gt;.&lt;member&gt;</c> keys, so
@@ -949,16 +1021,18 @@ internal sealed class ScenarioExecutor
     /// primary aggregate's own.</summary>
     private ScenarioStep DownstreamGivenViolation(FanOutTarget target, Exception violation)
     {
+        // The note is a fact about the AGGREGATE's state, so it is said once however many reactions reach
+        // it — the same treatment the unavailable case gets.
         if (!TryReadViolation(violation, out string typeName, out string rule))
         {
-            _notes.Add($"The given state routed to '{target.EntityName}' could not be built: {Describe(violation)}");
+            NoteOnce($"The given state routed to '{target.EntityName}' could not be built: {Describe(violation)}");
             return new ScenarioStep.Precondition(violation.Message, Describe(violation), CheckOutcome.Failed)
             {
                 Aggregate = target.EntityName,
             };
         }
 
-        _notes.Add($"The given state routed to '{target.EntityName}' was rejected by '{typeName}': {rule}");
+        NoteOnce($"The given state routed to '{target.EntityName}' was rejected by '{typeName}': {rule}");
         return new ScenarioStep.Precondition(rule, rule, CheckOutcome.Failed) { Aggregate = target.EntityName };
     }
 
@@ -1041,17 +1115,22 @@ internal sealed class ScenarioExecutor
     // The timeline
     // ------------------------------------------------------------------------
 
+    /// <summary><paramref name="fromEvent"/> is where this invocation's own events start on
+    /// <paramref name="subject"/>: an aggregate a second reaction reached still carries the first
+    /// reaction's events, and matching an <c>emit</c> clause against one of those would report a
+    /// stale payload as if this command had just produced it.</summary>
     private List<ScenarioStep> SuccessSteps(
         IReadOnlyList<CommandStmt> body,
         IReadOnlyDictionary<string, string> before,
         IReadOnlyDictionary<string, string> after,
         object subject,
         object? returned,
-        ref string? result)
+        ref string? result,
+        int fromEvent = 0)
     {
         var steps = new List<ScenarioStep>();
         List<object> events = DomainEventsOf(subject);
-        int cursor = 0;
+        int cursor = fromEvent;
 
         foreach (CommandStmt stmt in body)
         {
