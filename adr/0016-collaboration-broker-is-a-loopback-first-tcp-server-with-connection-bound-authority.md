@@ -67,11 +67,21 @@ We will therefore:
 
 * **Bind the authority to the connection, never to a claimed identity.** A session's authority is the
   broker-minted `MemberId` of the connection that created it. `join` returns `authority: false`
-  unconditionally — there is no code path, and no identity, that can produce a second authority.
+  unconditionally — there is no code path, and no identity, that can produce a second authority. The
+  *client* re-asserts the same thing rather than believing the answer: a participant that asked to join
+  discards an `authority: true` it is handed, because a hostile broker reached through an invitation
+  link would otherwise make that editor seed the shared document from its own buffer and broadcast it.
 * **Let a participant speak only as the identity it was admitted under.** Every outbound presence frame
-  is re-stamped from the sender's admitted identity, and a join presenting an identity id already in the
-  session is refused. Identity stays self-asserted (there is no account system in Phase 2) but it is no
-  longer *forgeable at another participant's expense*.
+  is re-stamped from the sender's admitted identity, and a join is refused if either the participant id
+  *or* the display name is already in the session — the display name and colour swatch are the only
+  identity signal the UI shows, so a second "Ada Lovelace" would let a token-holder author edits everyone
+  attributes to the session owner. Identity stays self-asserted (there is no account system in Phase 2)
+  but it is no longer *forgeable at another participant's expense*.
+* **Bound the syntax of what the renderer will interpolate, not just its length.** A participant colour
+  ends up inside a `style` attribute, which parses a whole declaration list, in a webview that ships no
+  CSP — so a colour is constrained to hex or a bare colour keyword at the broker, at the client's inbound
+  edge (a joined broker is only as trustworthy as whoever the user pointed at), and once more at the sink
+  itself.
 * **Treat the join token as a bearer credential**: 128 bits from the OS CSPRNG, compared in constant
   time, never echoed into an error message or a log line. It carries the endpoint too
   (`koine-collab://host:port/secret`), so a joiner needs exactly one string.

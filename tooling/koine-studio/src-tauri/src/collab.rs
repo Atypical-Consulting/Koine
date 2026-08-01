@@ -85,7 +85,11 @@ pub struct Presence {
 
 /// Frames a participant sends to the broker.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientFrame {
     /// The first frame on every connection; anything else before it is a protocol error.
     Join {
@@ -108,7 +112,11 @@ pub enum ClientFrame {
 
 /// Frames the broker sends to a participant.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ServerFrame {
     Admitted {
         session_id: String,
@@ -267,7 +275,9 @@ impl Broker {
     /// Admit a participant to an existing session. Never grants authority.
     pub fn join(&mut self, secret: &str, identity: Participant) -> Result<Admission, BrokerError> {
         validate_identity(&identity)?;
-        let index = self.find_session(secret).ok_or(BrokerError::UnknownSession)?;
+        let index = self
+            .find_session(secret)
+            .ok_or(BrokerError::UnknownSession)?;
         let session = &mut self.sessions[index];
 
         if session.members.len() >= MAX_MEMBERS_PER_SESSION {
@@ -276,7 +286,17 @@ impl Broker {
         // Identity is self-asserted, so the one thing the broker CAN enforce is that it is unique
         // within the session. Without this, two members would share a participant id and every
         // presence/peer frame about them would be ambiguous — the caret-spoofing surface.
-        if session.members.iter().any(|m| m.identity.id == identity.id) {
+        //
+        // The DISPLAY NAME is held to the same rule, and for the same reason: it (with the colour
+        // swatch) is the only identity signal the UI actually shows, so admitting a second "Ada
+        // Lovelace" would let a token-holder author edits that everyone attributes to the session
+        // owner. Uniqueness is compared case- and whitespace-insensitively, because that is the
+        // comparison a human reading the participant list is making.
+        let display_key = identity.display_name.trim().to_lowercase();
+        if session.members.iter().any(|m| {
+            m.identity.id == identity.id
+                || m.identity.display_name.trim().to_lowercase() == display_key
+        }) {
             return Err(BrokerError::DuplicateIdentity);
         }
 
@@ -440,11 +460,7 @@ impl Broker {
             .position(|s| s.members.iter().any(|m| m.id == member))
     }
 
-    fn fan_out(
-        &self,
-        member: MemberId,
-        frame: impl Fn(&Member) -> ServerFrame,
-    ) -> Vec<Delivery> {
+    fn fan_out(&self, member: MemberId, frame: impl Fn(&Member) -> ServerFrame) -> Vec<Delivery> {
         let Some(index) = self.find_member_session(member) else {
             return Vec::new();
         };
@@ -457,14 +473,34 @@ impl Broker {
     }
 }
 
-/// Validate an identity off the wire. Non-empty, bounded, no control characters.
+/// Whether a participant colour is safe to hand to the renderer.
+///
+/// The far side interpolates this into a `style` attribute (`--koi-presence-color: <colour>`), which
+/// parses a whole declaration list — so a bare `;` in a colour is a CSS injection into a webview that
+/// runs with no CSP. Length and "no control characters" do not stop that; a syntax bound does. Hex or a
+/// bare CSS colour keyword covers everything Studio actually produces.
+/// Mirrored by `safePresenceColor` in `src/editor/presence.ts`, which is the last line of defence at
+/// the sink itself.
+pub fn is_safe_color(color: &str) -> bool {
+    if let Some(hex) = color.strip_prefix('#') {
+        return matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit());
+    }
+    !color.is_empty() && color.len() <= 32 && color.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+/// Validate an identity off the wire. Non-empty, bounded, no control characters, and a colour whose
+/// syntax cannot escape the CSS declaration it ends up in.
 pub fn validate_identity(identity: &Participant) -> Result<(), BrokerError> {
     let ok = |field: &str| {
         !field.is_empty()
             && field.len() <= MAX_IDENTITY_FIELD_LEN
             && !field.chars().any(char::is_control)
     };
-    if ok(&identity.id) && ok(&identity.display_name) && ok(&identity.color) {
+    if ok(&identity.id)
+        && ok(&identity.display_name)
+        && ok(&identity.color)
+        && is_safe_color(&identity.color)
+    {
         Ok(())
     } else {
         Err(BrokerError::InvalidIdentity)
@@ -1035,7 +1071,10 @@ pub fn create_via_relay(
     identity: Participant,
     sink: Arc<dyn LocalSink>,
 ) -> Result<RemoteSession, String> {
-    let authority = relay.trim().trim_start_matches(TOKEN_SCHEME).trim_end_matches('/');
+    let authority = relay
+        .trim()
+        .trim_start_matches(TOKEN_SCHEME)
+        .trim_end_matches('/');
     let (host, port) = authority
         .rsplit_once(':')
         .ok_or_else(|| "the collaboration relay must be host:port".to_string())?;
@@ -1067,6 +1106,11 @@ fn handshake(
         _ => return Err("unsupported collaboration handshake".to_string()),
     };
     validate_identity(&identity).map_err(|e| e.message().to_string())?;
+    // We know which side of the handshake we are on, so the broker's answer is not the last word on it.
+    // A hostile broker that answered a JOIN with `authority: true` would make this editor seed the
+    // shared document from its own buffer and broadcast it — turning an invitation link into document
+    // exfiltration. Authority is only ever believed for the connection that asked to CREATE.
+    let may_be_authority = matches!(hello, ClientFrame::Create { .. });
 
     let addr = (host, port)
         .to_socket_addrs()
@@ -1103,6 +1147,8 @@ fn handshake(
         token
     };
 
+    let authority = authority && may_be_authority;
+
     let _ = stream.set_read_timeout(None);
     let shutdown = Arc::new(AtomicBool::new(false));
     let reader = stream
@@ -1126,10 +1172,38 @@ fn handshake(
     })
 }
 
+/// Whether a frame arriving FROM a broker is fit to hand to the editor.
+///
+/// A hosted session validates what it fans out, but the broker at the other end of a joined session is
+/// only as trustworthy as whoever the user pointed at — a relay, or a peer's desktop. So the same
+/// bounds apply on the way in: an over-long name or a colour that can break out of a CSS declaration
+/// is dropped here rather than rendered.
+fn is_deliverable(frame: &ServerFrame) -> bool {
+    match frame {
+        ServerFrame::PeerJoin { peer } => validate_identity(peer).is_ok(),
+        ServerFrame::Presence { presence } => {
+            validate_identity(&Participant {
+                id: presence.participant_id.clone(),
+                display_name: presence.display_name.clone(),
+                color: presence.color.clone(),
+            })
+            .is_ok()
+                && presence.selection.len() <= MAX_SELECTION_RANGES
+        }
+        ServerFrame::PeerLeave { participant_id } => {
+            !participant_id.is_empty()
+                && participant_id.len() <= MAX_IDENTITY_FIELD_LEN
+                && !participant_id.chars().any(char::is_control)
+        }
+        _ => true,
+    }
+}
+
 fn read_loop(mut stream: TcpStream, sink: Arc<dyn LocalSink>, shutdown: Arc<AtomicBool>) {
     let mut peers: Vec<String> = Vec::new();
     loop {
         match read_frame::<_, ServerFrame>(&mut stream) {
+            Ok(Some(frame)) if !is_deliverable(&frame) => continue,
             Ok(Some(frame)) => {
                 match &frame {
                     ServerFrame::PeerJoin { peer } => peers.push(peer.id.clone()),
@@ -1187,12 +1261,7 @@ mod tests {
             .expect("create");
         let joiners = extra
             .iter()
-            .map(|id| {
-                broker
-                    .join(&secret, participant(id))
-                    .expect("join")
-                    .member
-            })
+            .map(|id| broker.join(&secret, participant(id)).expect("join").member)
             .collect();
         (broker, secret, created.member, joiners)
     }
@@ -1218,7 +1287,9 @@ mod tests {
     fn a_joiner_is_never_the_authority_even_presenting_the_creators_identity() {
         let mut broker = Broker::new();
         let secret = "a".repeat(SECRET_HEX_LEN);
-        broker.create(participant("ada"), secret.clone()).expect("create");
+        broker
+            .create(participant("ada"), secret.clone())
+            .expect("create");
 
         // The impersonation attempt: same participant id as the creator. It is refused because two
         // members may not share an identity — and even a *different* id would not have been granted
@@ -1227,7 +1298,10 @@ mod tests {
         assert_eq!(impostor.unwrap_err(), BrokerError::DuplicateIdentity);
 
         let joiner = broker.join(&secret, participant("grace")).expect("join");
-        assert!(!joiner.authority, "authority belongs to the creating connection");
+        assert!(
+            !joiner.authority,
+            "authority belongs to the creating connection"
+        );
     }
 
     #[test]
@@ -1276,10 +1350,58 @@ mod tests {
     }
 
     #[test]
+    fn a_colour_that_could_escape_its_css_declaration_is_refused() {
+        assert!(is_safe_color("#e8637c"));
+        assert!(is_safe_color("#fff"));
+        assert!(is_safe_color("rebeccapurple"));
+        for hostile in [
+            "red;background-image:url(http://evil.example/p)",
+            "red;position:fixed;inset:0",
+            "#fff;color:red",
+            "var(--x)",
+            "url(x)",
+            "",
+        ] {
+            assert!(!is_safe_color(hostile), "must refuse {hostile:?}");
+        }
+
+        let mut broker = Broker::new();
+        let styled = Participant {
+            id: "mallory".into(),
+            display_name: "Mallory".into(),
+            color: "red;background-image:url(http://evil.example/p)".into(),
+        };
+        assert_eq!(
+            broker
+                .create(styled, "a".repeat(SECRET_HEX_LEN))
+                .unwrap_err(),
+            BrokerError::InvalidIdentity
+        );
+    }
+
+    #[test]
+    fn a_joiner_reusing_an_incumbents_display_name_is_refused() {
+        let (mut broker, secret, _, _) = with_session(&[]);
+        // A distinct id, but the same label the participant list shows — which is the whole identity
+        // signal a human has to go on.
+        let impostor = Participant {
+            id: "not-ada".into(),
+            display_name: "  ADA DISPLAY  ".into(),
+            color: "#123456".into(),
+        };
+        assert_eq!(
+            broker.join(&secret, impostor).unwrap_err(),
+            BrokerError::DuplicateIdentity
+        );
+    }
+
+    #[test]
     fn a_session_is_capped_at_its_member_limit() {
         let mut broker = Broker::new();
         let secret = "a".repeat(SECRET_HEX_LEN);
-        broker.create(participant("ada"), secret.clone()).expect("create");
+        broker
+            .create(participant("ada"), secret.clone())
+            .expect("create");
         for i in 1..MAX_MEMBERS_PER_SESSION {
             broker
                 .join(&secret, participant(&format!("p{i}")))
@@ -1488,7 +1610,9 @@ mod tests {
     fn a_second_session_may_not_reuse_a_live_secret() {
         let mut broker = Broker::new();
         let secret = "a".repeat(SECRET_HEX_LEN);
-        broker.create(participant("ada"), secret.clone()).expect("create");
+        broker
+            .create(participant("ada"), secret.clone())
+            .expect("create");
         assert_eq!(
             broker.create(participant("grace"), secret).unwrap_err(),
             BrokerError::SecretInUse,
@@ -1583,7 +1707,10 @@ mod tests {
             format!("{TOKEN_SCHEME}127.0.0.1/{secret}"),
             format!("{TOKEN_SCHEME}127.0.0.1:99999/{secret}"),
             format!("{TOKEN_SCHEME}127.0.0.1:4321/short"),
-            format!("{TOKEN_SCHEME}127.0.0.1:4321/{}", "z".repeat(SECRET_HEX_LEN)),
+            format!(
+                "{TOKEN_SCHEME}127.0.0.1:4321/{}",
+                "z".repeat(SECRET_HEX_LEN)
+            ),
             format!("{TOKEN_SCHEME}:4321/{secret}"),
         ] {
             assert_eq!(parse_token(&bad), None, "must reject {bad:?}");
@@ -1595,7 +1722,9 @@ mod tests {
         let a = new_secret();
         let b = new_secret();
         assert_eq!(a.len(), SECRET_HEX_LEN);
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+        assert!(a
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
         assert_ne!(a, b, "a session token must not be guessable from another");
     }
 
@@ -1654,12 +1783,7 @@ mod tests {
         );
 
         guest.send_update(vec![1, 2]);
-        assert_eq!(
-            next(&host_rx),
-            ServerFrame::Update {
-                update: vec![1, 2]
-            }
-        );
+        assert_eq!(next(&host_rx), ServerFrame::Update { update: vec![1, 2] });
     }
 
     #[test]
@@ -1787,6 +1911,84 @@ mod tests {
         );
     }
 
+    /// A broker under the attacker's control: it answers the handshake however the test says, then
+    /// pushes whatever follow-up frames it likes. This is the threat model of an invitation link.
+    fn hostile_broker(reply: ServerFrame, follow_up: Vec<ServerFrame>) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let handle = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _: Option<ClientFrame> = read_frame(&mut stream).ok().flatten();
+                let _ = write_frame(&mut stream, &reply);
+                for frame in &follow_up {
+                    let _ = write_frame(&mut stream, frame);
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+        });
+        (
+            format_token("127.0.0.1", port, &"a".repeat(SECRET_HEX_LEN)),
+            handle,
+        )
+    }
+
+    #[test]
+    fn a_broker_that_calls_a_joiner_the_authority_is_not_believed() {
+        let (token, broker) = hostile_broker(
+            ServerFrame::Admitted {
+                session_id: "s1".into(),
+                authority: true,
+                admitted_as: participant("grace"),
+                secret: None,
+            },
+            Vec::new(),
+        );
+        let (guest_sink, _rx) = sink();
+        let session = join_session(&token, participant("grace"), guest_sink).expect("join");
+
+        // We asked to JOIN. Believing the answer would make this editor seed the shared document from
+        // its own buffer and broadcast it — an invitation link that exfiltrates the model.
+        assert!(!session.info.authority);
+        drop(session);
+        let _ = broker.join();
+    }
+
+    #[test]
+    fn a_hostile_identity_from_the_broker_never_reaches_the_editor() {
+        let malicious = Participant {
+            id: "mallory".into(),
+            display_name: "Mallory".into(),
+            // Breaks out of `--koi-presence-color: <colour>` into arbitrary declarations.
+            color: "red;background-image:url(http://evil.example/p)".into(),
+        };
+        let (token, broker) = hostile_broker(
+            ServerFrame::Admitted {
+                session_id: "s1".into(),
+                authority: false,
+                admitted_as: participant("grace"),
+                secret: None,
+            },
+            vec![
+                ServerFrame::PeerJoin { peer: malicious },
+                ServerFrame::PeerJoin {
+                    peer: participant("ada"),
+                },
+            ],
+        );
+        let (guest_sink, rx) = sink();
+        let session = join_session(&token, participant("grace"), guest_sink).expect("join");
+
+        assert_eq!(
+            next(&rx),
+            ServerFrame::PeerJoin {
+                peer: participant("ada")
+            },
+            "the hostile frame was dropped and the honest one still got through"
+        );
+        drop(session);
+        let _ = broker.join();
+    }
+
     #[test]
     fn a_relay_brokers_a_session_for_participants_that_host_nothing() {
         let relay = run_relay("127.0.0.1").expect("relay");
@@ -1847,7 +2049,10 @@ mod tests {
         let secret = "a".repeat(SECRET_HEX_LEN);
         assert!(secrets_match(&secret, &secret));
         assert!(!secrets_match(&secret, &"a".repeat(SECRET_HEX_LEN - 1)));
-        assert!(!secrets_match(&secret, &format!("{}b", "a".repeat(SECRET_HEX_LEN - 1))));
+        assert!(!secrets_match(
+            &secret,
+            &format!("{}b", "a".repeat(SECRET_HEX_LEN - 1))
+        ));
         assert!(!secrets_match("", ""), "an empty secret never matches");
     }
 }

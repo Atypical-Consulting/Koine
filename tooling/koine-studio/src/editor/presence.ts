@@ -100,12 +100,29 @@ class PresenceCaretWidget extends WidgetType {
  * `presenceField.update` — so a `selection` that isn't an array would throw straight out of
  * `view.dispatch` and wedge the editor.
  */
+/**
+ * A participant colour, or `''` if it isn't one.
+ *
+ * The colour arrives from a peer (or a user-configured relay) and is interpolated into a `style`
+ * attribute, which parses a whole declaration list — so a value containing `;` escapes
+ * `--koi-presence-color` into arbitrary CSS, in a webview that ships no CSP. Bounding the SYNTAX is
+ * what stops that: hex, or a bare colour keyword. Anything else yields `''`, and the stylesheet's
+ * `var(--koi-presence-color, var(--koi-accent))` fallback paints the accent instead.
+ *
+ * The Rust broker refuses such an identity outright (`is_safe_color` in `src-tauri/src/collab.rs`);
+ * this is the same rule at the sink, for every transport that ever reaches this renderer.
+ */
+export function safePresenceColor(color: unknown): string {
+  if (typeof color !== 'string') return '';
+  if (/^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(color)) return color;
+  return /^[a-zA-Z]{1,32}$/.test(color) ? color : '';
+}
+
 export function buildPresenceDecorations(entries: readonly CollabPresence[], doc: Text): DecorationSet {
   const decos: Range<Decoration>[] = [];
 
   for (const entry of entries) {
-    // A colour reaches the DOM as a style value, so a non-string is dropped rather than interpolated.
-    const color = typeof entry.color === 'string' ? entry.color : '';
+    const color = safePresenceColor(entry.color);
     const style = `--koi-presence-color: ${color}`;
 
     // Annotated because `Array.isArray` widens the narrowed branch to `any[]`, which would make every

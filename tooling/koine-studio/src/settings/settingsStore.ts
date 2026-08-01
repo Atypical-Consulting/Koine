@@ -297,7 +297,6 @@ function coerceCollabHost(v: unknown, fallback: string): string {
   if (typeof v !== 'string') return fallback;
   const trimmed = v.trim();
   if (trimmed.length === 0) return fallback;
-  // eslint-disable-next-line no-control-regex
   if (trimmed.length > 255 || /[\s\u0000-\u001f]/.test(trimmed)) return fallback;
   return trimmed;
 }
