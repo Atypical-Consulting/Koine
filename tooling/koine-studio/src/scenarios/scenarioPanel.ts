@@ -39,15 +39,26 @@ export interface ScenarioPanel {
 
 const OUTCOME_ICON: Record<string, string> = { passed: '✓', failed: '✗', indeterminate: '?' };
 
-/** How each engine (#236) is labelled on a result, and what that label promises. */
-const MODE_LABEL: Record<ScenarioMode, { text: string; title: string }> = {
+/**
+ * How each engine (#236) is labelled on a result, and what that label promises.
+ *
+ * The promise is OUTCOME-aware, because `mode` alone does not carry one. Every failure on the execution
+ * path is reported as `executed` — including ones where nothing was ever emitted, compiled or run (the
+ * model has errors, the sandbox child could not be started, the deadline expired). That label is
+ * defensible — nothing was interpreted — but "every value shown was really computed" would be a plain
+ * falsehood on those runs, so a not-ok result gets wording that claims only what happened.
+ */
+const MODE_LABEL: Record<ScenarioMode, { text: string; ok: string; failed: string }> = {
   executed: {
     text: 'Executed',
-    title: "Ran this model's generated code, so every value shown was really computed.",
+    ok: "Ran this model's generated code, so every value shown was really computed.",
+    failed: 'Execution was attempted; this run did not produce values — see the notes below.',
   },
   interpreted: {
     text: 'Interpreted',
-    title: 'Reasoned about the model without running it — a value the interpreter cannot evaluate stays ?.',
+    ok: 'Reasoned about the model without running it — a value the interpreter cannot evaluate stays ?.',
+    failed:
+      'Reasoned about the model without running it; this run did not complete — see the notes below.',
   },
 };
 
@@ -255,7 +266,7 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
     badge.textContent = result.ok
       ? `${result.target}.${result.operation} ran`
       : `${result.target}.${result.operation} was rejected`;
-    header.append(badge, modeChip(result.mode));
+    header.append(badge, modeChip(result.mode, result.ok));
     results.append(header);
 
     if (result.steps.length > 0) {
@@ -413,13 +424,16 @@ function executeToggle(): { field: HTMLLabelElement; input: HTMLInputElement } {
 }
 
 /** The engine that produced a result, as a chip on the timeline header — see {@link MODE_LABEL}. */
-function modeChip(mode: ScenarioMode): HTMLElement {
+function modeChip(mode: ScenarioMode, ok: boolean): HTMLElement {
   // `mode` crosses the wire as JSON, so a value a mismatched backend invents is read as the
-  // conservative `interpreted` rather than rendering `undefined` under an invented class.
-  const known: ScenarioMode = mode in MODE_LABEL ? mode : 'interpreted';
+  // conservative `interpreted` rather than rendering `undefined` under an invented class. An explicit
+  // comparison rather than `mode in MODE_LABEL`: `in` walks the PROTOTYPE chain, so a backend answering
+  // `"mode": "toString"` would pass the check and then render the literal string "undefined".
+  const known: ScenarioMode = mode === 'executed' ? 'executed' : 'interpreted';
   const el = h('span', `koi-scenario-mode is-${known}`);
   el.textContent = MODE_LABEL[known].text;
-  el.title = MODE_LABEL[known].title;
+  // The tooltip is what the label PROMISES, and a failed run promises less — see MODE_LABEL.
+  el.title = ok ? MODE_LABEL[known].ok : MODE_LABEL[known].failed;
   return el;
 }
 

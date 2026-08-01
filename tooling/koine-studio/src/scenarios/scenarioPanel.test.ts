@@ -227,6 +227,53 @@ describe('scenarioPanel', () => {
       const mode = container.querySelector('.koi-scenario-mode')!;
       expect(mode.classList.contains('is-executed')).toBe(true);
       expect(mode.textContent).toContain('Executed');
+      // An OK executed run really did compute its values, so the chip may say so.
+      expect(mode.getAttribute('title')).toContain('really computed');
+    });
+
+    it('does not claim values were computed on a failed executed run', async () => {
+      // Every failure on the execution path is labelled `executed` — including ones where nothing was
+      // emitted, compiled or run (the model has errors, the child never started, the deadline expired).
+      // The label is defensible; "every value shown was really computed" would not be.
+      const failed: ScenarioResult = {
+        ...PLACED,
+        ok: false,
+        mode: 'executed',
+        steps: [],
+        resultingState: {},
+        invariants: [],
+        notes: ['The model has errors; fix them before running a scenario.'],
+      };
+      const container = document.createElement('div');
+      const lsp = mockLsp({ runScenario: vi.fn(async () => failed) });
+      const panel = createScenarioPanel({ container, lsp, platform: CAN_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      const mode = container.querySelector('.koi-scenario-mode')!;
+      expect(mode.classList.contains('is-executed')).toBe(true);
+      expect(mode.textContent).toContain('Executed');
+      expect(mode.getAttribute('title')).not.toContain('really computed');
+      expect(mode.getAttribute('title')).toContain('did not produce values');
+    });
+
+    it('falls back to "interpreted" for a mode that is only an inherited prototype key', async () => {
+      // `'toString' in MODE_LABEL` is true — the prototype chain says so — which would render the
+      // literal string "undefined" as the chip's text under an `is-toString` class.
+      const bogus = { ...PLACED, mode: 'toString' } as unknown as ScenarioResult;
+      const container = document.createElement('div');
+      const lsp = mockLsp({ runScenario: vi.fn(async () => bogus) });
+      const panel = createScenarioPanel({ container, lsp, platform: CAN_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      const mode = container.querySelector('.koi-scenario-mode')!;
+      expect(mode.classList.contains('is-interpreted')).toBe(true);
+      expect(mode.textContent).toBe('Interpreted');
     });
 
     it('says "interpreted" when the host degraded the request, whatever the toggle asked for', async () => {

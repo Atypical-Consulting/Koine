@@ -84,9 +84,14 @@ public static class ScenarioService
     /// <see cref="Error(string, string, string)"/> for a given <paramref name="mode"/>: an executed run
     /// that failed (timed out, crashed, never started) is still an EXECUTED-mode answer — nothing was
     /// interpreted — so it says so rather than borrowing the interpreter's label.
+    ///
+    /// <para><paramref name="executionUnavailable"/> appends <see cref="ExecutionUnavailableNote"/>, for a
+    /// host that was asked to execute but cannot (the browser WASM backend). Without it an
+    /// <c>execute: true</c> request that ALSO failed — a model with errors, say — would lose the one hint
+    /// the success path gives: that execution was never on the table on this host.</para>
     /// </summary>
     internal static IReadOnlyDictionary<string, object?> Error(
-        string target, string operation, string note, string mode) =>
+        string target, string operation, string note, string mode, bool executionUnavailable = false) =>
         new Dictionary<string, object?>
         {
             ["ok"] = false,
@@ -97,7 +102,7 @@ public static class ScenarioService
             ["resultingState"] = new Dictionary<string, object?>(),
             ["invariants"] = Array.Empty<object>(),
             ["result"] = null,
-            ["notes"] = new[] { note },
+            ["notes"] = executionUnavailable ? new[] { note, ExecutionUnavailableNote } : new[] { note },
         };
 
     /// <summary>

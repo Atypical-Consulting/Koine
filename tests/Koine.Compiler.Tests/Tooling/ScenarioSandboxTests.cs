@@ -152,7 +152,28 @@ public class ScenarioSandboxTests
 
         run.TimedOut.ShouldBeTrue(ScenarioService.WriteJson(run.Result));
         run.RunDirectory.ShouldNotBeNullOrEmpty();
-        Directory.Exists(run.RunDirectory).ShouldBeFalse(run.RunDirectory);
+        // POLLED, like ProcessIsGone: cleanup is deliberately best-effort with a bounded retry, because
+        // on Windows the run directory is the killed child's cwd and the OS holds a handle on it until
+        // the process is fully reaped. Asserting once, immediately, would be asserting a guarantee the
+        // code does not make — and would flake on Windows only, where CI never looks.
+        DirectoryIsGone(run.RunDirectory).ShouldBeTrue(run.RunDirectory);
+    }
+
+    /// <summary>Polls (bounded) until <paramref name="directory"/> is gone — the host's own cleanup retries
+    /// for a couple of seconds, so the assertion waits at least as long before calling it a leak.</summary>
+    private static bool DirectoryIsGone(string directory)
+    {
+        for (int attempt = 0; attempt < 50; attempt++)
+        {
+            if (!Directory.Exists(directory))
+            {
+                return true;
+            }
+
+            Thread.Sleep(100);
+        }
+
+        return false;
     }
 
     /// <summary>Polls (bounded) until <paramref name="pid"/> names no live process.</summary>

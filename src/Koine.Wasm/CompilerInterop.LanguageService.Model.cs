@@ -284,8 +284,8 @@ public static partial class CompilerInterop
             var comp = GetWarmCompilation(DeserializeFiles(filesJson));
             if (comp.SyntaxDiagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
-                return ScenarioService.WriteJson(
-                    ScenarioErrorTree(target, operation, "The model has errors; fix them before running a scenario."));
+                return ScenarioService.WriteJson(ScenarioErrorTree(
+                    target, operation, "The model has errors; fix them before running a scenario.", execute));
             }
 
             using JsonDocument givenDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(givenJson) ? "{}" : givenJson);
@@ -297,8 +297,8 @@ public static partial class CompilerInterop
         }
         catch
         {
-            return ScenarioService.WriteJson(
-                ScenarioErrorTree(target, operation, "The scenario could not be run against this model."));
+            return ScenarioService.WriteJson(ScenarioErrorTree(
+                target, operation, "The scenario could not be run against this model.", execute));
         }
     }
 
@@ -328,9 +328,16 @@ public static partial class CompilerInterop
     }
 
     /// <summary>The not-ok scenario result for the failure paths — delegates to <see cref="ScenarioService"/>
-    /// so the wire shape lives in exactly one place (shared with the LSP backend).</summary>
-    private static IReadOnlyDictionary<string, object?> ScenarioErrorTree(string target, string operation, string note) =>
-        ScenarioService.Error(target, operation, note);
+    /// so the wire shape lives in exactly one place (shared with the LSP backend).
+    ///
+    /// <para><paramref name="execute"/> carries the caller's opt-in through the FAILURE paths too: a
+    /// browser user who asked to execute and hit a broken model would otherwise be told only that the
+    /// model has errors, never that execution was unavailable here — the very hint the success path
+    /// gives.</para></summary>
+    private static IReadOnlyDictionary<string, object?> ScenarioErrorTree(
+        string target, string operation, string note, bool execute) =>
+        ScenarioService.Error(
+            target, operation, note, ScenarioService.InterpretedMode, executionUnavailable: execute);
 
     // ---- diagram-graph mapping (issue #93) -----------------------------------
     // Mirrors LspServer.MapDiagram et al.: the W* DTOs serialize (source-gen CamelCase) to a wire

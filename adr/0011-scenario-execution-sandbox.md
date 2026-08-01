@@ -80,7 +80,11 @@ We will therefore:
   default)**. On expiry it kills the child *and its whole process tree*
   (`Process.Kill(entireProcessTree: true)`) and returns a not-ok result carrying a timeout note. The
   child runs with a **scrubbed environment**, its working directory set to a **per-run temp directory**
-  that is deleted on every path — success, failure, and kill alike.
+  whose removal is attempted on every path — success, failure, and kill alike — with a short bounded
+  retry, because on Windows the run directory is the killed child's current directory and the OS holds
+  a handle on it until the process is fully reaped. Cleanup stays *best effort*: a directory the OS will
+  not release must not turn a completed run into a failed one, so the last word belongs to the temp
+  reaper, not to us.
 - **Reuse the `koine` binary the host is already running** as the child, rather than shipping a second
   executable: Koine Studio already brokers `koine` as a Tauri sidecar, and the VS Code extension already
   launches `koine lsp`, so the sandbox adds no new artifact to package, sign, or keep version-matched.
@@ -93,7 +97,12 @@ We will therefore:
 **Easier:**
 
 - A hung or crashing scenario costs the user one killed child process and a `ok: false` result with an
-  honest note. The editor backend keeps its workspace, its diagnostics, and its responsiveness.
+  honest note. The editor backend keeps its workspace, its diagnostics, and its responsiveness — the
+  last one only because the run is dispatched **off the LSP message-loop thread**: the loop is
+  single-threaded, so an inline run would stop the server from reading or answering *anything* for the
+  length of the budget. The worker answers the JSON-RPC request itself (framed writes are serialized),
+  and a per-workspace semaphore keeps two `execute: true` requests from becoming two concurrent Roslyn
+  compiles.
 - The timeout is a real deadline rather than a best effort, so the Studio panel can promise bounded
   latency and offer a retry.
 - Crash isolation comes free: a `StackOverflowException` or an `Environment.FailFast` in generated code

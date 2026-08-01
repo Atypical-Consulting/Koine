@@ -217,8 +217,10 @@ An executed run happens in a **child process with a wall-clock deadline — 5 se
 the deadline expires the child *and its whole process tree* are killed, and the run comes back as a
 failed result carrying a note saying it timed out: the emitted code may simply not terminate (an
 unbounded loop or runaway allocation in a derived member or invariant). Nothing of that run survives —
-but your editor, its diagnostics and its open documents are untouched. A client can ask for a different
-budget (the `timeoutMs` parameter of `koine/runScenario`), clamped to **100 ms – 60 s**.
+but your editor, its diagnostics and its open documents are untouched. The run happens *off* the
+language server's message loop, so the editor keeps answering — diagnostics, hover and completion carry
+on while a scenario is compiling and running. A client can ask for a different budget (the `timeoutMs`
+parameter of `koine/runScenario`), clamped to **100 ms – 60 s**.
 
 Executed runs are also **serialized per window**: fire two in quick succession and they run one after
 the other, rather than putting two Roslyn compiles inside the editor backend at once.

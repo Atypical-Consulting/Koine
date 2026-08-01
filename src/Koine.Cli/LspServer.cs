@@ -31,12 +31,31 @@ internal sealed class LspServer
     private const double MinScenarioTimeoutMs = 100;
 
     /// <summary>The ceiling on a client-requested executed-scenario budget: a minute is far more than a
-    /// healthy run needs, and a client must not be able to pin the editor backend to a child for longer.</summary>
+    /// healthy run needs, and a client must not be able to make the server sit on a child indefinitely.
+    /// The true wall-clock ceiling for ONE run is this plus <see cref="ScenarioExecutionHost.KillGrace"/>
+    /// — the tail spent reaping a child that blew its deadline (see <see cref="ScenarioRunCeiling"/>).
+    /// The message loop keeps answering throughout either way: an executed run is dispatched off the loop
+    /// thread (<see cref="TryDispatchExecutedScenario"/>).</summary>
     private const double MaxScenarioTimeoutMs = 60_000;
 
+    /// <summary>The longest ONE executed run can take before its response is written: the clamped budget
+    /// plus the host's kill grace.</summary>
+    private static readonly TimeSpan ScenarioRunCeiling =
+        TimeSpan.FromMilliseconds(MaxScenarioTimeoutMs) + ScenarioExecutionHost.KillGrace;
+
     /// <summary>Serializes executed-mode scenario runs for this workspace — see
-    /// <see cref="RunScenarioInSandbox"/>.</summary>
+    /// <see cref="TryDispatchExecutedScenario"/>.</summary>
     private readonly SemaphoreSlim _scenarioExecutionGate = new(1, 1);
+
+    /// <summary>Executed runs dispatched off the message-loop thread and not yet answered. Drained
+    /// (bounded) before <see cref="Loop"/> returns, so a session never ends with an id-bearing request
+    /// unreplied.</summary>
+    private readonly List<Task> _scenarioRuns = [];
+    private readonly object _scenarioRunsLock = new();
+
+    /// <summary>Guards the framed write in <see cref="Send"/>: responses are produced by the message-loop
+    /// thread AND by executed-scenario workers, and two interleaved frames would corrupt the stream.</summary>
+    private readonly object _sendLock = new();
 
     /// <summary>
     /// Parses the workspace but treats a syntax error as "no usable model" for the output-producing
@@ -115,7 +134,24 @@ internal sealed class LspServer
         }
     }
 
+    /// <summary>
+    /// The message loop. Returns at EOF or on <c>exit</c> — but not before the executed-scenario runs
+    /// dispatched off this thread have answered (bounded), so a session never ends leaving an id-bearing
+    /// request unreplied.
+    /// </summary>
     public int Loop()
+    {
+        try
+        {
+            return MessageLoop();
+        }
+        finally
+        {
+            DrainScenarioRuns();
+        }
+    }
+
+    private int MessageLoop()
     {
         while (true)
         {
@@ -609,7 +645,7 @@ internal sealed class LspServer
                             break;
 
                         case "koine/runScenario":
-                            if (root.TryGetProperty("id", out _))
+                            if (root.TryGetProperty("id", out _) && !TryDispatchExecutedScenario(root))
                             {
                                 Respond(root, RunScenarioResultJson(root));
                             }
@@ -2109,29 +2145,23 @@ internal sealed class LspServer
     /// with errors yields a not-ok result carrying an explanatory note rather than throwing.
     ///
     /// <para>Two engines answer this request and every response says which one did, in <c>mode</c>.
-    /// Interpreted (the default) reasons about the semantic model and leaves what it cannot evaluate as
-    /// <c>?</c>; EXECUTED — opted into with <c>execute: true</c> (#236) — emits, compiles and runs the
-    /// model's real C# in a sandbox child (ADR 0011), so derived values are computed. The opt-in is
-    /// deliberate: executed mode costs a process, a compile and a wall-clock budget.</para>
+    /// Interpreted (the default, and the only one this method serves) reasons about the semantic model
+    /// and leaves what it cannot evaluate as <c>?</c>; EXECUTED — opted into with <c>execute: true</c>
+    /// (#236) — emits, compiles and runs the model's real C# in a sandbox child (ADR 0011) and is
+    /// dispatched off this thread by <see cref="TryDispatchExecutedScenario"/>, which answers the request
+    /// itself. The opt-in is deliberate: executed mode costs a process, a compile and a wall-clock
+    /// budget.</para>
     /// </summary>
     private object RunScenarioResultJson(JsonElement root)
     {
         var target = TryGetStringParam(root, "target") ?? "";
         var operation = TryGetStringParam(root, "operation") ?? "";
-        var execute = TryGetBoolParam(root, "execute");
         try
         {
             JsonElement given = TryGetObjectParam(root, "given");
             JsonElement args = TryGetObjectParam(root, "args");
 
             var sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
-            if (execute)
-            {
-                // Nothing model-derived happens here: the child parses, emits, compiles and runs it all
-                // (ADR 0011), and shapes the result with the same ScenarioService the interpreter uses.
-                return RunScenarioInSandbox(sources, target, operation, given, args, ScenarioTimeout(root));
-            }
-
             var (model, _) = ParseUsable(sources);
             if (model is null)
             {
@@ -2145,38 +2175,136 @@ internal sealed class LspServer
         {
             // Mirror the WASM backend: a malformed request or interpreter fault returns a not-ok result
             // (so the id-bearing request always gets a reply) rather than throwing and leaving the client hanging.
-            return ScenarioService.Error(
-                target,
-                operation,
-                $"The scenario could not be run: {ex.Message}",
-                execute ? ScenarioService.ExecutedMode : ScenarioService.InterpretedMode);
+            return ScenarioService.Error(target, operation, $"The scenario could not be run: {ex.Message}");
         }
     }
 
     /// <summary>
-    /// Runs one scenario in the sandbox child (#236, ADR 0011), one at a time.
+    /// Dispatches an EXECUTED-mode scenario run (#236, ADR 0011) to a worker and answers the request from
+    /// there. Returns <c>false</c> for a request that did not ask to execute, which the caller then serves
+    /// inline as before.
     ///
-    /// <para>The gate is a plain <see cref="SemaphoreSlim"/> held for the whole run, scoped to this
-    /// server instance — i.e. per workspace, which is the granularity a Studio window has. Serializing
-    /// (rather than cancelling the in-flight child) is the conservative half of the spec's edge case: a
-    /// client that fires two <c>execute: true</c> requests in quick succession pays for two runs in
-    /// sequence, never two concurrent Roslyn compiles in the editor backend. The message loop is
-    /// single-threaded today, so this is also the guard that keeps the invariant true if dispatch ever
-    /// becomes concurrent.</para>
+    /// <para><b>Why off the loop thread.</b> The sandbox run costs a process start, an emit, a Roslyn
+    /// compile and up to <see cref="MaxScenarioTimeoutMs"/> of waiting. Running it inline would make the
+    /// single-threaded message loop read and answer NOTHING for that whole window — no diagnostics, no
+    /// hover, not even <c>$/cancelRequest</c>, which is the freeze ADR 0011 promises the sandbox
+    /// prevents. Only the run itself moves: everything model- or state-derived is captured HERE, on the
+    /// loop thread, so the worker owns immutable data and never races the workspace a later request
+    /// mutates.</para>
+    ///
+    /// <para><b>The gate.</b> A plain <see cref="SemaphoreSlim"/> held for the whole run, scoped to this
+    /// server instance — i.e. per workspace, which is the granularity a Studio window has. Now that
+    /// dispatch really is concurrent it is load-bearing: a client firing two <c>execute: true</c>
+    /// requests in quick succession pays for two runs in SEQUENCE, never two concurrent Roslyn compiles
+    /// in the editor backend. Serializing (rather than cancelling the in-flight child) is the
+    /// conservative half of the spec's edge case.</para>
     /// </summary>
-    private object RunScenarioInSandbox(
-        IReadOnlyList<SourceFile> sources, string target, string operation,
-        JsonElement given, JsonElement args, TimeSpan timeout)
+    private bool TryDispatchExecutedScenario(JsonElement root)
     {
-        var scenario = new Scenario(target, operation, ScenarioService.ParseMap(given), ScenarioService.ParseMap(args));
-        _scenarioExecutionGate.Wait();
+        if (!TryGetBoolParam(root, "execute"))
+        {
+            return false;
+        }
+
+        var target = TryGetStringParam(root, "target") ?? "";
+        var operation = TryGetStringParam(root, "operation") ?? "";
+        // The request document is disposed the moment this message is handled, so the id is cloned out
+        // rather than captured: the worker answers long after `root` is gone.
+        JsonElement id = root.TryGetProperty("id", out var idEl) ? idEl.Clone() : default;
+
+        IReadOnlyList<SourceFile> sources;
+        Scenario scenario;
+        TimeSpan timeout;
         try
         {
-            return ScenarioExecutionHost.Run(sources, scenario, timeout);
+            sources = Workspace().Select(kv => new SourceFile(kv.Key, kv.Value)).ToList();
+            scenario = new Scenario(
+                target,
+                operation,
+                ScenarioService.ParseMap(TryGetObjectParam(root, "given")),
+                ScenarioService.ParseMap(TryGetObjectParam(root, "args")));
+            timeout = ScenarioTimeout(root);
         }
-        finally
+        catch (Exception ex)
         {
-            _scenarioExecutionGate.Release();
+            // A malformed request never reaches the sandbox — but it is still an executed-mode answer,
+            // and it is still an answer: the id-bearing request never goes unreplied.
+            SendResult(id, ScenarioService.Error(
+                target, operation, $"The scenario could not be run: {ex.Message}", ScenarioService.ExecutedMode));
+            return true;
+        }
+
+        Track(Task.Run(() =>
+        {
+            object result;
+            try
+            {
+                _scenarioExecutionGate.Wait();
+                try
+                {
+                    result = ScenarioExecutionHost.Run(sources, scenario, timeout);
+                }
+                finally
+                {
+                    _scenarioExecutionGate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                result = ScenarioService.Error(
+                    target, operation, $"The scenario could not be run: {ex.Message}", ScenarioService.ExecutedMode);
+            }
+
+            try
+            {
+                SendResult(id, result);
+            }
+            catch (Exception ex)
+            {
+                Log($"error answering executed scenario: {ex}");
+            }
+        }));
+
+        return true;
+    }
+
+    /// <summary>Registers an in-flight executed run, pruning the ones already answered.</summary>
+    private void Track(Task run)
+    {
+        lock (_scenarioRunsLock)
+        {
+            _scenarioRuns.RemoveAll(t => t.IsCompleted);
+            _scenarioRuns.Add(run);
+        }
+    }
+
+    /// <summary>
+    /// Waits (bounded) for the executed runs still in flight when the loop ends, so a client that closed
+    /// the stream right after asking still gets its answer. Every run is itself bounded by
+    /// <see cref="ScenarioRunCeiling"/> and they are serialized by the gate, so one ceiling per queued run
+    /// covers them — capped, so a client that queued a pile of them cannot stall shutdown indefinitely.
+    /// </summary>
+    private void DrainScenarioRuns()
+    {
+        Task[] pending;
+        lock (_scenarioRunsLock)
+        {
+            pending = [.. _scenarioRuns];
+            _scenarioRuns.Clear();
+        }
+
+        if (pending.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Task.WaitAll(pending, ScenarioRunCeiling * Math.Min(pending.Length, 8));
+        }
+        catch (Exception ex)
+        {
+            Log($"error draining executed scenarios: {ex.Message}");
         }
     }
 
@@ -2184,7 +2312,9 @@ internal sealed class LspServer
     /// The wall-clock budget one executed run gets: <c>params.timeoutMs</c>, defaulting to
     /// <see cref="ScenarioExecutionHost.DefaultTimeout"/> (5 s) and clamped to
     /// [<see cref="MinScenarioTimeoutMs"/>, <see cref="MaxScenarioTimeoutMs"/>]. The ceiling matters:
-    /// without it a client could ask the editor backend to sit on a runaway child for an hour.
+    /// without it a client could ask the backend to hold a runaway child — and the gate behind it — for
+    /// an hour. A <c>timeoutMs</c> that is absent or not a JSON number falls back to the default rather
+    /// than failing the request.
     /// </summary>
     private static TimeSpan ScenarioTimeout(JsonElement root)
     {
@@ -2713,6 +2843,20 @@ internal sealed class LspServer
         Send(msg);
     }
 
+    /// <summary><see cref="Respond(JsonElement, object?)"/> for a caller that no longer holds the request
+    /// document — an executed-scenario worker (see <see cref="TryDispatchExecutedScenario"/>) — and so
+    /// carries the already-cloned id instead. An <c>Undefined</c> id means the request had none.</summary>
+    private void SendResult(JsonElement id, object? result)
+    {
+        var msg = new Dictionary<string, object?> { ["jsonrpc"] = "2.0", ["result"] = result };
+        if (id.ValueKind != JsonValueKind.Undefined)
+        {
+            msg["id"] = id;
+        }
+
+        Send(msg);
+    }
+
     private void Respond(JsonElement request, Dictionary<string, object?> result) =>
         Respond(request, (object?)result);
 
@@ -2738,9 +2882,15 @@ internal sealed class LspServer
     {
         var json = JsonSerializer.SerializeToUtf8Bytes(message, SerializerOptions);
         var header = Encoding.ASCII.GetBytes($"Content-Length: {json.Length}\r\n\r\n");
-        _out.Write(header);
-        _out.Write(json);
-        _out.Flush();
+
+        // Header + body must reach the stream as ONE unit: an executed-scenario worker can answer while
+        // the message loop is writing, and two interleaved frames would desync the client for good.
+        lock (_sendLock)
+        {
+            _out.Write(header);
+            _out.Write(json);
+            _out.Flush();
+        }
     }
 
     private static readonly JsonSerializerOptions SerializerOptions = new()

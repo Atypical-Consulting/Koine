@@ -226,20 +226,39 @@ internal static class ScenarioExecutionHost
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Overrides how the child is launched: the executable, optionally followed by space-separated
-    /// leading arguments (the <c>scenario-exec</c> verb is always appended). For packaging setups where
-    /// the auto-resolution below cannot see the binary.
+    /// Overrides how the child is launched. Its WHOLE value is the executable path — never split, so a
+    /// real install path with a space in it (<c>C:\Program Files\Koine\koine.exe</c>,
+    /// <c>/Applications/Koine Studio.app/Contents/MacOS/koine</c>) works, which is exactly the packaging
+    /// case this escape hatch exists for. Leading arguments, if a setup needs them, go in
+    /// <see cref="ArgumentsOverrideVariable"/>.
     /// </summary>
     public const string CommandOverrideVariable = "KOINE_SCENARIO_EXEC_COMMAND";
 
-    /// <summary>How long a killed child gets to die before the host stops waiting on it.</summary>
-    private static readonly TimeSpan KillGrace = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// Optional space-separated leading arguments for <see cref="CommandOverrideVariable"/> — for a
+    /// packaging setup whose entry point needs them (e.g. a muxer plus an assembly path). The
+    /// <c>scenario-exec</c> verb is always appended after them. Only read when the command override is
+    /// set; individual arguments are passed verbatim, so an argument that itself contains a space cannot
+    /// be expressed here (the path — the thing that realistically has one — lives in the command).
+    /// </summary>
+    public const string ArgumentsOverrideVariable = "KOINE_SCENARIO_EXEC_ARGS";
+
+    /// <summary>How long a killed child gets to die before the host stops waiting on it. Callers that
+    /// advertise a latency ceiling must add this to their timeout: it is the tail a run can spend after
+    /// the deadline itself expires.</summary>
+    internal static readonly TimeSpan KillGrace = TimeSpan.FromSeconds(5);
 
     /// <summary>The encoding pinned on all three pipes (see <see cref="RunDetailed"/>).</summary>
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>How much of the child's stderr a failure note quotes.</summary>
     private const int MaxQuotedStdErr = 500;
+
+    /// <summary>How many times <see cref="Delete"/> tries to remove the run directory before giving up.</summary>
+    private const int DeleteAttempts = 20;
+
+    /// <summary>The pause between <see cref="Delete"/> attempts — 20 × 100 ms bounds cleanup at ~2 s.</summary>
+    private static readonly TimeSpan DeleteRetryDelay = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
     /// The environment variables the child keeps. Everything else is dropped: the child needs only
@@ -249,7 +268,12 @@ internal static class ScenarioExecutionHost
     private static readonly string[] KeptEnvironmentVariables =
     [
         "PATH", "HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP",
-        "DOTNET_ROOT", "DOTNET_ROOT(x86)", "DOTNET_HOST_PATH",
+        // Every variable hostfxr consults to locate the runtime, not just the classic pair: the
+        // architecture-specific DOTNET_ROOT_* forms take PRECEDENCE over plain DOTNET_ROOT, and
+        // ProgramFiles/ProgramFiles(x86) are what its Windows default-install-dir probe reads. Drop any
+        // of them and a portable/zip .NET install answers a scrubbed child with "You must install .NET".
+        "DOTNET_ROOT", "DOTNET_ROOT(x86)", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64", "DOTNET_ROOT_X86",
+        "DOTNET_HOST_PATH", "ProgramFiles", "ProgramFiles(x86)",
         "SystemRoot", "windir", "COMSPEC", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
         "LANG", "LC_ALL", "LD_LIBRARY_PATH",
     ];
@@ -273,7 +297,8 @@ internal static class ScenarioExecutionHost
         IReadOnlyList<SourceFile> sources, Scenario scenario, TimeSpan timeout)
     {
         // The child's working directory: a disposable scratch space, so anything the run leaves on disk
-        // lands somewhere we delete rather than in the user's workspace. Removed on EVERY path below.
+        // lands somewhere we delete rather than in the user's workspace. Cleanup is attempted on EVERY
+        // path below — and is best-effort by design, see Delete.
         string runDirectory = Path.Combine(Path.GetTempPath(), "koine-scenario-" + Guid.NewGuid().ToString("N"));
         int childId = 0;
 
@@ -281,7 +306,15 @@ internal static class ScenarioExecutionHost
         {
             Directory.CreateDirectory(runDirectory);
 
-            (string fileName, IReadOnlyList<string> arguments) = ResolveChildCommand();
+            (string FileName, IReadOnlyList<string> Arguments)? command = ResolveChildCommand();
+            if (command is null)
+            {
+                return Failure(scenario, runDirectory, childId, timedOut: false,
+                    "The scenario sandbox could not locate the koine binary to run the scenario in. Set "
+                    + CommandOverrideVariable + " to its absolute path.");
+            }
+
+            string fileName = command.Value.FileName;
             var startInfo = new ProcessStartInfo
             {
                 FileName = fileName,
@@ -297,7 +330,7 @@ internal static class ScenarioExecutionHost
                 StandardOutputEncoding = Utf8,
                 StandardErrorEncoding = Utf8,
             };
-            foreach (string argument in arguments)
+            foreach (string argument in command.Value.Arguments)
             {
                 startInfo.ArgumentList.Add(argument);
             }
@@ -326,13 +359,26 @@ internal static class ScenarioExecutionHost
                 try
                 {
                     child.StandardInput.Write(ScenarioExecutionProtocol.WriteRequest(sources, scenario));
-                    // The child gets the request and nothing more: stdin is closed immediately, so it can
-                    // never block reading input a caller was never going to send.
-                    child.StandardInput.Close();
                 }
                 catch (Exception)
                 {
                     // The child died before (or while) reading. The exit handling below reports it.
+                }
+                finally
+                {
+                    // The child gets the request and nothing more: stdin is closed immediately, so it can
+                    // never block reading input a caller was never going to send. In a `finally` because
+                    // a FAILED write must close it too — otherwise the child sits in `ReadToEnd()` waiting
+                    // for an EOF nobody will send, burns the whole budget, and a host-side IO fault gets
+                    // reported as "the emitted code may not terminate".
+                    try
+                    {
+                        child.StandardInput.Close();
+                    }
+                    catch (Exception)
+                    {
+                        // The pipe is already gone — there is nothing left to close.
+                    }
                 }
             });
 
@@ -393,18 +439,24 @@ internal static class ScenarioExecutionHost
     ///   <item><description><c>dotnet &lt;dir&gt;/Koine.Cli.dll</c>, when the host runs framework-dependent
     ///   or is not the CLI at all (the common dev/test case: the host process is <c>dotnet</c> or a test
     ///   runner, with the CLI's assembly sitting in the same output directory);</description></item>
-    ///   <item><description>a <c>koine</c> apphost next to us, then a <c>koine</c> on PATH.</description></item>
+    ///   <item><description>a <c>koine</c> apphost next to us, then a <c>koine</c> resolved to an
+    ///   ABSOLUTE path off PATH.</description></item>
     /// </list>
+    /// Returns <c>null</c> when nothing resolves — the caller reports that as a failed run rather than
+    /// handing a bare relative name to the OS: on Windows <c>CreateProcess</c>'s search for a bare name
+    /// includes a current directory, so an embedding could otherwise execute an unexpected
+    /// <c>koine.exe</c> that happens to sit in its working directory.
     /// </summary>
-    private static (string FileName, IReadOnlyList<string> Arguments) ResolveChildCommand()
+    private static (string FileName, IReadOnlyList<string> Arguments)? ResolveChildCommand()
     {
         if (Environment.GetEnvironmentVariable(CommandOverrideVariable) is { Length: > 0 } overridden)
         {
-            string[] parts = overridden.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (parts.Length > 0)
-            {
-                return (parts[0], [.. parts.Skip(1), ScenarioExecutionProtocol.CommandName]);
-            }
+            // The WHOLE variable is the executable — never split on spaces, or every install path with a
+            // space in it ("C:\Program Files\…") would resolve to a nonexistent "C:\Program".
+            string[] leading = Environment.GetEnvironmentVariable(ArgumentsOverrideVariable) is { Length: > 0 } extra
+                ? extra.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : [];
+            return (overridden.Trim(), [.. leading, ScenarioExecutionProtocol.CommandName]);
         }
 
         if (Environment.ProcessPath is { Length: > 0 } self
@@ -420,9 +472,45 @@ internal static class ScenarioExecutionHost
         }
 
         string apphost = Path.Combine(AppContext.BaseDirectory, Executable("koine"));
-        return File.Exists(apphost)
-            ? (apphost, [ScenarioExecutionProtocol.CommandName])
-            : (Executable("koine"), [ScenarioExecutionProtocol.CommandName]);
+        if (File.Exists(apphost))
+        {
+            return (apphost, [ScenarioExecutionProtocol.CommandName]);
+        }
+
+        return OnPath(Executable("koine")) is { } found
+            ? (found, [ScenarioExecutionProtocol.CommandName])
+            : null;
+    }
+
+    /// <summary>
+    /// The first <paramref name="name"/> found on <c>PATH</c>, as an absolute path — or <c>null</c>.
+    /// Resolving it ourselves is the point: handing a bare name to <c>CreateProcess</c> lets its own
+    /// search include a current directory, which is not a directory this host chose.
+    /// </summary>
+    private static string? OnPath(string name)
+    {
+        if (Environment.GetEnvironmentVariable("PATH") is not { Length: > 0 } path)
+        {
+            return null;
+        }
+
+        foreach (string entry in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                string candidate = Path.Combine(entry.Trim('"'), name);
+                if (File.Exists(candidate))
+                {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+            catch (Exception)
+            {
+                // A malformed PATH entry (invalid characters, a too-long path) is skipped, not fatal.
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The <c>dotnet</c> host that can run a framework-dependent <c>Koine.Cli.dll</c>: this
@@ -497,20 +585,38 @@ internal static class ScenarioExecutionHost
         }
     }
 
-    /// <summary>Removes the run directory, tolerating files a killed child still holds open.</summary>
+    /// <summary>
+    /// Removes the run directory, retrying BRIEFLY: on Windows the run directory is the killed child's
+    /// current directory, and the OS holds a handle on a process's cwd that is released only once the
+    /// process is fully reaped — a moment after the kill returns. A few attempts turn that race from a
+    /// leaked temp directory into a deleted one.
+    ///
+    /// <para>Still best-effort by design: a file some other process locked must not turn a completed run
+    /// into a failure, so exhausting the attempts leaves the directory for the OS to reclaim.</para>
+    /// </summary>
     private static void Delete(string directory)
     {
-        try
+        for (int attempt = 1; attempt <= DeleteAttempts; attempt++)
         {
-            if (Directory.Exists(directory))
+            try
             {
+                if (!Directory.Exists(directory))
+                {
+                    return;
+                }
+
                 Directory.Delete(directory, recursive: true);
+                return;
             }
-        }
-        catch (Exception)
-        {
-            // A locked file on Windows must not turn a completed run into a failure; the OS reclaims
-            // the temp directory eventually.
+            catch (Exception)
+            {
+                // Locked (or racing a reap): wait a beat and try again, up to the bounded attempt count.
+            }
+
+            if (attempt < DeleteAttempts)
+            {
+                Thread.Sleep(DeleteRetryDelay);
+            }
         }
     }
 
