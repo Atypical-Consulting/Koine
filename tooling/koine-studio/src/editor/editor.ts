@@ -89,7 +89,7 @@ import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
 // the helper that repaints them after a store change. A Studio-only view concern — never touches the model.
 import { reviewDecorationsExtension, dispatchReviewRefresh } from '@/review/reviewDecorations';
 import { presenceExtension, type PresenceSource } from '@/editor/presence';
-import { crdtExtension, type CrdtAttachOptions, type CrdtBinding } from '@/editor/collab/crdtBinding';
+import { crdtExtension, type CrdtBinding } from '@/editor/collab/crdtBinding';
 import type { ReviewThread } from '@/review/reviewStore';
 // The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
 // view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
