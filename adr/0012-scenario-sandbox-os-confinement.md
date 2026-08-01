@@ -124,15 +124,17 @@ the rest of its content stay as they are — including its trust model, which st
 **Harder / trade-offs accepted:**
 
 - **Coverage is uneven, and the code says so rather than implying otherwise.** macOS gets filesystem and
-  network confinement; Linux gets network only — Landlock needs a ruleset installed in the child between
-  fork and exec (no hook), and bubblewrap is a dependency an editor feature cannot assume; Windows gets
-  neither, because a restricted or low-integrity token requires `CreateProcessAsUser` and hand-plumbing
-  all three redirected pipes. Each gap is a note on the run.
+  network confinement; Linux gets filesystem confinement on any kernel ≥ 5.13 (see the amendment below —
+  originally this read "network only") and network confinement only where unprivileged user namespaces are
+  permitted; Windows gets neither, because a restricted or low-integrity token requires
+  `CreateProcessAsUser` and hand-plumbing all three redirected pipes. Each gap is a note on the run.
 - **Linux's network denial is conditional, and often unavailable.** An unprivileged network namespace
   needs unprivileged user namespaces to be permitted, and several distributions restrict them — Ubuntu
   24.04's AppArmor policy blocks them by default, which is why this repo's own `ubuntu-latest` CI runner
   probes as unable and degrades to a note. So in practice a large share of Linux hosts get the resource
-  ceilings and nothing else. The probe is what keeps that honest rather than fatal.
+  ceilings and nothing else. The probe is what keeps that honest rather than fatal. **The amendment below
+  records three mechanisms measured to work on exactly those hosts**; the note now names the AppArmor
+  restriction as the likely reason rather than describing the symptom generically.
 - **Exit codes are not a portable diagnosis.** `ulimit -t` sets the soft *and* hard `RLIMIT_CPU`, so a
   child that blows the ceiling may be observed as signalled (`SIGXCPU`, 152) or killed outright
   (`SIGKILL`, 137) depending on the shell and kernel — macOS reports the former, Linux the latter. Both
@@ -153,8 +155,10 @@ the rest of its content stay as they are — including its trust model, which st
   future macOS removes it, the probe fails and the run degrades to a note — noisy, but not broken.
 - **Availability probes cost one trivial process launch per mechanism per host process**, cached for the
   lifetime of that process.
-- **A degraded platform adds a note to every run.** On Linux every result carries the
-  filesystem-confinement note and on Windows the filesystem-and-network one. That is deliberate: the
+- **A degraded platform adds a note to every run.** Before the amendment below, every Linux result carried
+  the filesystem-confinement note; on Windows every result still carries the filesystem-and-network one,
+  and on a Linux host that cannot create an unprivileged network namespace the network note. That is
+  deliberate: the
   alternative is a sandbox that looks stronger than it is. It does mean a caller comparing the sandbox's
   tree against another engine's must subtract `ScenarioChildRun.SandboxNotes` — which is why that list is
   reported separately rather than left to be recognised by its wording.
@@ -162,3 +166,68 @@ the rest of its content stay as they are — including its trust model, which st
   hostile actor: reads are open everywhere, Windows has no filesystem or network confinement, and a
   degraded platform has none at all. Executing a model authored by someone other than the operator — a
   hosted playground, a CI bot running a PR's model — still needs its own review before it ships.
+
+## Amendment — Linux write confinement, and what an AppArmor-restricted host can still do (issue #1781)
+
+*Added 2026-08-01. The **decision** above is unchanged — confinement still uses each platform's native
+mechanism, applied by making the child BE the confining launcher, still probed, still degrading to a note.
+What changes is one recorded trade-off: "Linux gets network only" was true of the mechanisms considered,
+not of the platform.*
+
+**What was wrong, and why.** The original reasoning was that `landlock_restrict_self(2)` must be called by
+the process being confined, between fork and exec, and .NET offers no hook there. That is correct — but it
+overlooked that this ADR's own chosen shape *is* the hook: a launcher that installs a ruleset on itself and
+then `execve`s the real command needs no pre-exec callback, because the process boundary is one this repo
+already owns. Landlock is inherited across `execve` and can never be relaxed, so what the command inherits
+is a process that may read anywhere and write only beneath its run directory. `koine sandbox-landlock`
+(hidden, exactly as `scenario-exec` is) is that launcher.
+
+**The survey.** Measured on `ubuntu-latest` — Ubuntu 24.04.4 LTS, kernel 6.17.0-1020-azure, unprivileged
+(`CapEff: 0`), `kernel.apparmor_restrict_unprivileged_userns=1` — by a temporary workflow on the
+implementing PR, rather than reasoned about:
+
+| Mechanism | Unprivileged on Ubuntu 24.04 | Kernel floor | Evidence |
+|---|---|---|---|
+| `unshare --user --map-root-user --net` *(what shipped)* | ❌ | — | `write failed /proc/self/uid_map: Operation not permitted` |
+| `unshare --net`, no `--user` | ❌ | — | `unshare failed: Operation not permitted` (wants `CAP_SYS_ADMIN`) |
+| **`unshare --user --net`, no uid map** | ✅ **denies TCP** | 4.x | exit 0; probe `network=denied`, control `network=allowed` |
+| `bubblewrap` | ❌ | — | not installed by default; once installed, `setting up uid map: Permission denied` |
+| **Landlock filesystem (ABI v1)** | ✅ | 5.13 | kernel reports **ABI 7**; writes confined; a .NET app starts fine under it |
+| **Landlock network, `CONNECT_TCP` (ABI v4)** | ✅ **denies TCP** | 6.7 | probe `network=denied`, control `network=allowed` |
+| **seccomp-bpf denying `socket(2)`** | ✅ **denies TCP** | any | needs only `PR_SET_NO_NEW_PRIVS` |
+
+**Consequences of the amendment.**
+
+- **Linux now gets write confinement, and it is the *unconditional* half.** Landlock needs no privileges
+  and no user namespace, so it works on precisely the AppArmor-restricted hosts where the network namespace
+  does not — including this repo's own CI runner, where these tests now execute the enforcement for real
+  rather than skipping.
+- **The answer to "does a permitted network mechanism exist on those hosts" is yes — three of them.**
+  Dropping `--map-root-user` is the cheapest and is measured to work; Landlock's own ABI-4 network bits
+  would let one mechanism serve both halves on kernels ≥ 6.7; seccomp-bpf works everywhere. Recording the
+  answer was this issue's deliverable; **choosing and implementing one is deliberately left to a follow-up**,
+  because dropping the uid map leaves the child mapped to `nobody` inside the namespace and whether it can
+  still write its own run directory has to be proven, not assumed.
+- **`bubblewrap` is rejected as a fallback, on evidence.** It is absent from `ubuntu-latest` and, once
+  installed, fails there for the same reason `unshare --map-root-user` does. It covers no host Landlock
+  does not, so a second mechanism would be maintenance for nothing.
+- **The character-device allowance is mandatory, not cosmetic.** A first survey iteration without rules for
+  `/dev/null` and friends made a plain `2>/dev/null` in the confined child fail with `Permission denied`.
+  The ruleset grants read+write on those the way the macOS profile does.
+- **`LANDLOCK_ACCESS_FS_IOCTL_DEV` (ABI v5) is deliberately left unhandled**, so device `ioctl`s stay
+  unrestricted — the same allowance the macOS profile makes explicitly. `REFER` (v2) and `TRUNCATE` (v3)
+  *are* handled where the ABI has them: without `REFER` the kernel denies every cross-directory rename,
+  including legitimate ones inside the run directory.
+- **The probe budget did not move.** Availability is decided by asking the kernel its Landlock ABI — a
+  version query that builds nothing and costs microseconds — plus a check that the launcher verb resolves
+  to a file. No child is spawned, so `ScenarioSandbox.MaxProbeCost` is unchanged.
+- **The launcher fails loud.** If the ruleset cannot be installed it exits non-zero *without* running the
+  command. Silently running unconfined would be worse than no sandbox: the result tree would carry no note,
+  so the caller would be told the code was confined when it was not.
+- **`TMPDIR`/`TMP`/`TEMP` now point at the run directory whenever writes are confined.** The host's scrub
+  keeps the ambient temp directory, which is the run directory's *parent* — so a runtime wanting a temp
+  path would write exactly where the confinement says no, and fail for a reason unrelated to the model.
+- **The command override is not consulted for the launcher.** `KOINE_SCENARIO_EXEC_COMMAND` names a program
+  to run the *scenario* with (in the tests, a shell stub), and a stub knows nothing about
+  `sandbox-landlock`. An embedder reachable only through that override gets an honest degradation note
+  instead of a wrapper pointed at a program that cannot honour it.

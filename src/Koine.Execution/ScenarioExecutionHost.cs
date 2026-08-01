@@ -509,27 +509,41 @@ internal static class ScenarioExecutionHost
             return (overridden.Trim(), [.. leading, ScenarioExecutionProtocol.CommandName]);
         }
 
+        return ResolveSelfCommand(ScenarioExecutionProtocol.CommandName);
+    }
+
+    /// <summary>
+    /// This same <c>koine</c> binary, invoked with <paramref name="verb"/> — steps 2-4 of
+    /// <see cref="ResolveChildCommand"/>, shared with <see cref="ScenarioSandbox"/>'s Linux confinement
+    /// launcher (issue #1781), which is a second hidden verb of the very same executable.
+    ///
+    /// <para>Deliberately does NOT consult <see cref="CommandOverrideVariable"/>: that variable names a
+    /// program to run the SCENARIO with — in the tests, a shell stub — and a stub knows nothing about
+    /// <c>sandbox-landlock</c>. An embedder whose <c>koine</c> is reachable only through that override
+    /// therefore gets no Landlock launcher and an honest degradation note, rather than a confinement
+    /// wrapper pointed at a program that cannot honour it.</para>
+    /// </summary>
+    internal static (string FileName, IReadOnlyList<string> Arguments)? ResolveSelfCommand(string verb)
+    {
         if (Environment.ProcessPath is { Length: > 0 } self
             && Path.GetFileNameWithoutExtension(self) is "koine" or "Koine.Cli")
         {
-            return (self, [ScenarioExecutionProtocol.CommandName]);
+            return (self, [verb]);
         }
 
         string library = Path.Combine(AppContext.BaseDirectory, "Koine.Cli.dll");
         if (File.Exists(library))
         {
-            return (DotnetMuxer(), [library, ScenarioExecutionProtocol.CommandName]);
+            return (DotnetMuxer(), [library, verb]);
         }
 
         string apphost = Path.Combine(AppContext.BaseDirectory, Executable("koine"));
         if (File.Exists(apphost))
         {
-            return (apphost, [ScenarioExecutionProtocol.CommandName]);
+            return (apphost, [verb]);
         }
 
-        return OnPath(Executable("koine")) is { } found
-            ? (found, [ScenarioExecutionProtocol.CommandName])
-            : null;
+        return OnPath(Executable("koine")) is { } found ? (found, [verb]) : null;
     }
 
     /// <summary>
