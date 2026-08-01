@@ -4,7 +4,7 @@ title: Scenario execution runs in a killable child process
 status: proposed
 date: 2026-08-01
 tags: [tooling, scenario-runner, safety]
-links: [{type: relates-to, target: 626}]
+links: [{type: relates-to, target: 626}, {type: relates-to, target: 12}]
 ---
 
 # Scenario execution runs in a killable child process
@@ -112,11 +112,22 @@ We will therefore:
 
 **Harder / trade-offs accepted:**
 
-- **This is NOT an OS-level sandbox, and v1 does not pretend to be one.** There is no `seccomp` filter,
+- > **AMENDED by [ADR 0012](0012-scenario-sandbox-os-confinement.md)
+  > ([#1759](https://github.com/Atypical-Consulting/Koine/issues/1759)).** The bullet below described
+  > v1 and is no longer the whole truth. The child now also runs under a managed-heap ceiling and a
+  > processor-time ceiling on every platform, a `sandbox-exec` profile on macOS that denies the network
+  > and denies writes outside the per-run directory, an unprivileged network namespace on Linux, and a
+  > Job Object on Windows. Coverage is uneven by platform and best-effort by design: anything a platform
+  > cannot enforce is reported in the result's `notes` and never fails the run. **Reads stay
+  > unrestricted everywhere, and the trust model below still governs** — the confinement is defence in
+  > depth, not a containment boundary against a hostile actor. ADR 0012 states exactly what is enforced
+  > where, and what remains manually verified rather than CI-verified.
+- **v1 was NOT an OS-level sandbox, and did not pretend to be one.** There was no `seccomp` filter,
   no macOS `sandbox_init`/`sandbox-exec` profile, no Windows Job Object, no user/namespace confinement.
   A .NET child process cannot cheaply deny filesystem or network access from managed code — the BCL is
   loaded, `File` and `Socket` are right there — and the .NET sandboxing story (Code Access Security) was
-  removed on purpose and never replaced.
+  removed on purpose and never replaced. What made that acceptable is the trust model below; what
+  changed it is ADR 0012, which reaches the same problem from outside managed code.
 - The trust model this rests on, stated plainly so nobody mistakes the boundary for a security one:
   1. the emitted C# is produced by **our own emitter** from the user's model, and by construction
      contains no I/O primitives — no file, socket, process, or reflection-into-the-host surface;
@@ -126,8 +137,10 @@ We will therefore:
      it is **not** a containment boundary against a hostile actor, and must not be relied on as one.
   If Koine ever executes a model authored by someone other than the operator (a hosted playground
   running an uploaded `.koi`, a CI bot running a PR's model), this ADR must be revisited *before* that
-  ships. OS-level hardening — a seccomp profile on Linux, a sandbox profile on macOS, a Job Object with
-  memory/CPU caps on Windows — is a documented follow-up, not a v1 guarantee.
+  ships — and that remains true after ADR 0012, which hardens the boundary without making it a
+  containment one. OS-level hardening — a sandbox profile on macOS, namespaces on Linux, a Job Object
+  with memory/CPU caps on Windows — was a documented follow-up rather than a v1 guarantee; it landed in
+  [ADR 0012](0012-scenario-sandbox-os-confinement.md).
 - The child pays process startup plus a full parse/emit/Roslyn-compile per run (hundreds of milliseconds
   to a few seconds on a large model), where an in-process runner would pay only the compile. Caching the
   compiled assembly across runs is a later optimization the protocol leaves room for.
