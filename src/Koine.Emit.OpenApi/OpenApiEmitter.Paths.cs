@@ -82,51 +82,14 @@ public sealed partial class OpenApiEmitter
     /// requires every <c>{token}</c> in a path key to be declared as a required path parameter, so an
     /// <c>@route("/orders/{id}")</c> that declared none produced a document a real validator rejects
     /// (<c>openapi-spec-validator</c>: "Path parameter 'id' … was not resolved"; <c>redocly lint</c>:
-    /// <c>path-parameters-defined</c>). Tokens are emitted in declaration order and de-duplicated;
-    /// <c>{{</c>/<c>}}</c> literal-brace escapes are skipped, and ASP.NET's constraint/modifier syntax is
-    /// stripped down to the bare name (<c>{id:int}</c>, <c>{id?}</c>, <c>{*rest}</c> → <c>id</c>,
-    /// <c>id</c>, <c>rest</c>) since only the name is an OpenAPI concept. Every token is typed
-    /// <c>string</c>: the route is free text, so nothing in the model says what the token binds to — and
-    /// nothing binds it into the generated handler yet either (see §15.9 of the reference docs).
+    /// <c>path-parameters-defined</c>). Tokens come from the shared <see cref="RouteTemplate"/> walker
+    /// (#1748), in declaration order and de-duplicated. Every token is typed <c>string</c>: the route is
+    /// free text, so nothing here says what the token binds to (see §15.9 of the reference docs).
     /// </summary>
     private static YamlArray? PathParameters(string route)
     {
-        List<string>? names = null;
-        for (var i = 0; i < route.Length; i++)
-        {
-            if (route[i] != '{')
-            {
-                continue;
-            }
-
-            // `{{` escapes a literal brace and opens nothing; consume both characters.
-            if (i + 1 < route.Length && route[i + 1] == '{')
-            {
-                i++;
-                continue;
-            }
-
-            var close = route.IndexOf('}', i + 1);
-            if (close < 0)
-            {
-                // Unterminated — KOI1208 already rejects it; emit nothing rather than guess.
-                break;
-            }
-
-            var name = ParameterName(route[(i + 1)..close]);
-            if (name.Length > 0)
-            {
-                names ??= [];
-                if (!names.Contains(name, StringComparer.Ordinal))
-                {
-                    names.Add(name);
-                }
-            }
-
-            i = close;
-        }
-
-        if (names is null)
+        IReadOnlyList<string> names = RouteTemplate.Tokens(route);
+        if (names.Count == 0)
         {
             return null;
         }
@@ -144,23 +107,6 @@ public sealed partial class OpenApiEmitter
         }
 
         return parameters;
-    }
-
-    /// <summary>
-    /// The bare OpenAPI parameter name inside a route token: the catch-all <c>*</c>/<c>**</c> prefix and
-    /// the optional <c>?</c> and <c>:constraint</c> suffixes are ASP.NET template syntax, not part of the
-    /// name the specification declares.
-    /// </summary>
-    private static string ParameterName(string token)
-    {
-        var name = token.TrimStart('*');
-        var colon = name.IndexOf(':');
-        if (colon >= 0)
-        {
-            name = name[..colon];
-        }
-
-        return name.TrimEnd('?');
     }
 
     /// <summary>

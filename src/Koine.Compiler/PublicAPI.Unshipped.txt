@@ -1587,3 +1587,6 @@ virtual Koine.Compiler.Emit.EmitTargetInfo.PrintMembers(System.Text.StringBuilde
 ~override Koine.Compiler.Services.SemanticToken.ToString() -> string
 ~override Koine.Compiler.Services.SourceFile.Equals(object obj) -> bool
 ~override Koine.Compiler.Services.SourceFile.ToString() -> string
+Koine.Compiler.Ast.RouteTemplate
+static Koine.Compiler.Ast.RouteTemplate.ParameterName(string! token) -> string!
+static Koine.Compiler.Ast.RouteTemplate.Tokens(string! route) -> System.Collections.Generic.IReadOnlyList<string!>!

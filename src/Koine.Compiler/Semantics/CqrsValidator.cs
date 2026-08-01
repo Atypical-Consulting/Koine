@@ -332,8 +332,9 @@ internal static class CqrsValidator
         {
             var c = route[i];
 
-            // `{{` / `}}` escape a literal brace — consume both characters, delimiting nothing.
-            if ((c == '{' || c == '}') && i + 1 < route.Length && route[i + 1] == c)
+            // `{{` / `}}` escape a literal brace — consume both characters, delimiting nothing. The
+            // escape check itself is the one piece of this walk RouteTemplate.Tokens (#1748) shares.
+            if ((c == '{' || c == '}') && RouteTemplate.IsEscapedBrace(route, i, c))
             {
                 parameterLength += 2;
                 i++;
