@@ -873,7 +873,7 @@ public class ScenarioSandboxTests
     }
 
     [Fact]
-    public void The_Windows_confined_child_round_trips_all_three_hand_plumbed_pipes()
+    public async Task The_Windows_confined_child_round_trips_all_three_hand_plumbed_pipes()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -890,16 +890,16 @@ public class ScenarioSandboxTests
             filter.ShouldNotBeNull(filterFailure);
             filter.Resume();
 
-            Task<string> output = filter.StandardOutput.ReadToEndAsync();
-            Task<string> error = filter.StandardError.ReadToEndAsync();
+            Task<string> output = filter.StandardOutput.ReadToEndAsync(Cancellation);
+            Task<string> error = filter.StandardError.ReadToEndAsync(Cancellation);
             filter.StandardInput.Write("PIPE-OK\r\n");
             filter.StandardInput.Close();
 
-            filter.Process.WaitForExit((int)TimeSpan.FromSeconds(30).TotalMilliseconds).ShouldBeTrue(
+            filter.Process.WaitForExit((int)PipeBudget.TotalMilliseconds).ShouldBeTrue(
                 "a child that never exits here is the hand-plumbed-stdio deadlock: an inheritable HOST "
                 + "pipe end the child holds open, so the read never sees EOF");
-            output.Result.Trim().ShouldBe("PIPE-OK");
-            error.Result.ShouldBeEmpty();
+            (await Bounded(output)).Trim().ShouldBe("PIPE-OK");
+            (await Bounded(error)).ShouldBeEmpty();
             filter.Process.ExitCode.ShouldBe(0);
         }
 
@@ -910,14 +910,15 @@ public class ScenarioSandboxTests
         missing.ShouldNotBeNull(missingFailure);
         missing.Resume();
 
-        Task<string> missingOutput = missing.StandardOutput.ReadToEndAsync();
-        Task<string> missingError = missing.StandardError.ReadToEndAsync();
+        Task<string> missingOutput = missing.StandardOutput.ReadToEndAsync(Cancellation);
+        Task<string> missingError = missing.StandardError.ReadToEndAsync(Cancellation);
         missing.StandardInput.Close();
-        missing.Process.WaitForExit((int)TimeSpan.FromSeconds(30).TotalMilliseconds).ShouldBeTrue();
+        missing.Process.WaitForExit((int)PipeBudget.TotalMilliseconds).ShouldBeTrue();
 
-        missingError.Result.ShouldNotBeEmpty("the child's stderr must reach the host, not the void");
+        (await Bounded(missingError)).ShouldNotBeEmpty(
+            "the child's stderr must reach the host, not the void");
         missing.Process.ExitCode.ShouldNotBe(0);
-        missingOutput.Result.ShouldBeEmpty();
+        (await Bounded(missingOutput)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -957,6 +958,18 @@ public class ScenarioSandboxTests
             Discard(runDirectory);
         }
     }
+
+    /// <summary>How long the confined-launch test waits for a child, and for the reads that follow it.
+    /// Generous — the point is that a WEDGED pipe fails rather than hanging the whole CI job.</summary>
+    private static readonly TimeSpan PipeBudget = TimeSpan.FromSeconds(30);
+
+    private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
+
+    /// <summary>Awaits <paramref name="read"/> with a deadline. A hand-plumbed pipe whose host end stayed
+    /// inheritable never sees EOF, so an unbounded await here would be a hung job rather than a red
+    /// test — the one failure mode this suite must not turn into silence.</summary>
+    private static async Task<string> Bounded(Task<string> read) =>
+        await read.WaitAsync(PipeBudget, Cancellation);
 
     /// <summary>A <c>cmd.exe</c> invocation for the confined-launch tests. Each argument is a SEPARATE
     /// list entry so nothing needs a quote or a caret — cmd.exe's <c>/c</c> does not read the

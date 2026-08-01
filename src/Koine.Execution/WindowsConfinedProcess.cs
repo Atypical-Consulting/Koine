@@ -58,10 +58,6 @@ internal sealed class WindowsConfinedProcess : IDisposable
     /// </summary>
     private static readonly Lazy<bool> Probed = new(Probe);
 
-    /// <summary>Why the probe said no, or <c>null</c> when it said yes (or has not run). Folded into the
-    /// degradation note, so "Windows could not confine this run" always carries the step that refused
-    /// rather than leaving the reader — and the next maintainer — to guess.</summary>
-    private static string? _probeFailure;
     private readonly SafeProcessHandle _thread;
 
     private WindowsConfinedProcess(
@@ -81,9 +77,11 @@ internal sealed class WindowsConfinedProcess : IDisposable
     /// <summary>See <see cref="Probed"/>. Cheap after the first call; never throws.</summary>
     public static bool Available => Probed.Value;
 
-    /// <summary>See <see cref="_probeFailure"/>. Only meaningful once <see cref="Available"/> has been
-    /// read and came back <c>false</c>.</summary>
-    public static string? ProbeFailure => _probeFailure;
+    /// <summary>Why the probe said no, or <c>null</c> when it said yes. Folded into the degradation note,
+    /// so "Windows could not confine this run" always carries the step that refused rather than leaving
+    /// the reader — and the next maintainer — to guess. Only meaningful once <see cref="Available"/> has
+    /// been read and came back <c>false</c>.</summary>
+    public static string? ProbeFailure { get; private set; }
 
     /// <summary>The child, suspended until <see cref="Resume"/>. Carries the same <c>Id</c>,
     /// <c>ExitCode</c>, <c>WaitForExit</c> and <c>Kill(entireProcessTree: true)</c> surface the host
@@ -449,7 +447,7 @@ internal sealed class WindowsConfinedProcess : IDisposable
             using WindowsConfinedProcess? probe = TryStart(startInfo, out string? startFailure);
             if (probe is null)
             {
-                _probeFailure = startFailure;
+                ProbeFailure = startFailure;
                 return false;
             }
 
@@ -472,7 +470,7 @@ internal sealed class WindowsConfinedProcess : IDisposable
                     // Already gone; nothing to stop.
                 }
 
-                _probeFailure = "a trivial command did not finish under the confined token";
+                ProbeFailure = "a trivial command did not finish under the confined token";
                 return false;
             }
 
@@ -490,14 +488,14 @@ internal sealed class WindowsConfinedProcess : IDisposable
                 return true;
             }
 
-            _probeFailure = "a trivial command exited "
+            ProbeFailure = "a trivial command exited "
                 + probe.Process.ExitCode.ToString(CultureInfo.InvariantCulture)
                 + " under the confined token";
             return false;
         }
         catch (Exception ex)
         {
-            _probeFailure = "the confined-launch probe failed (" + ex.Message + ")";
+            ProbeFailure = "the confined-launch probe failed (" + ex.Message + ")";
             return false;
         }
     }
