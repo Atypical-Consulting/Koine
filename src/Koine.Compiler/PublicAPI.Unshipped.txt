@@ -8,11 +8,19 @@
 Koine.Compiler.Ast.ApiAnnotationInfo
 Koine.Compiler.Ast.ApiAnnotationInfo.<Clone>$() -> Koine.Compiler.Ast.ApiAnnotationInfo!
 Koine.Compiler.Ast.ApiAnnotationInfo.ApiAnnotationInfo() -> void
+Koine.Compiler.Ast.ApiAnnotationInfo.AuthCount.get -> int
+Koine.Compiler.Ast.ApiAnnotationInfo.AuthCount.init -> void
 Koine.Compiler.Ast.ApiAnnotationInfo.AuthSpan.get -> Koine.Compiler.Ast.SourceSpan
 Koine.Compiler.Ast.ApiAnnotationInfo.AuthSpan.init -> void
 Koine.Compiler.Ast.ApiAnnotationInfo.Equals(Koine.Compiler.Ast.ApiAnnotationInfo? other) -> bool
+Koine.Compiler.Ast.ApiAnnotationInfo.RouteCount.get -> int
+Koine.Compiler.Ast.ApiAnnotationInfo.RouteCount.init -> void
 Koine.Compiler.Ast.ApiAnnotationInfo.RouteSpan.get -> Koine.Compiler.Ast.SourceSpan
 Koine.Compiler.Ast.ApiAnnotationInfo.RouteSpan.init -> void
+Koine.Compiler.Ast.ApiAnnotationInfo.UnsupportedVersionSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.ApiAnnotationInfo.UnsupportedVersionSpan.init -> void
+Koine.Compiler.Ast.ApiAnnotationInfo.VerbArgumentSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.ApiAnnotationInfo.VerbArgumentSpan.init -> void
 Koine.Compiler.Ast.ApiAnnotationInfo.VerbCount.get -> int
 Koine.Compiler.Ast.ApiAnnotationInfo.VerbCount.init -> void
 Koine.Compiler.Ast.ApiAnnotationInfo.VerbSpan.get -> Koine.Compiler.Ast.SourceSpan
@@ -339,6 +347,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI
 const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DivisionByZeroInConstantDefault = "KOI1606" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateApiAnnotation = "KOI1212" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateSpecPredicate = "KOI1007" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EmptyAuthRole = "KOI1210" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageType = "KOI1605" -> string!
@@ -350,6 +359,8 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.MultipleVerbAnnotations = "KOI1
 const Koine.Compiler.Diagnostics.DiagnosticCodes.NumericNarrowingConversion = "KOI0217" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.QuantityTypeMismatch = "KOI0218" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.SpecCallTargetMismatch = "KOI1006" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.VerbAnnotationArgument = "KOI1213" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.VersionAnnotationOnCommand = "KOI1214" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.UnaryOperandTypeMismatch = "KOI0222" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectMulDivMismatch = "KOI0221" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.ValueObjectReferencesEntity = "KOI1601" -> string!

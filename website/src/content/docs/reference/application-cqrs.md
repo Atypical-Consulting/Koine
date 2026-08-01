@@ -383,11 +383,13 @@ A `command` and a `query` each already describe one HTTP operation, and two emit
 
 | Annotation | What it does | Rule |
 | --- | --- | --- |
-| `@route("/orders/{id}")` | replaces the derived path, verbatim | must be absolute — it has to start with `/` |
-| `@get` `@post` `@put` `@delete` `@patch` | replaces the derived verb | at most one per declaration |
-| `@auth("admin")` | *adds* an authorization requirement | must name a non-blank value |
+| `@route("/orders/{id}")` | replaces the derived path, verbatim | must be absolute (start with `/`) and a well-formed route template; at most one per declaration |
+| `@get` `@post` `@put` `@delete` `@patch` | replaces the derived verb | bare — no argument; at most one per declaration |
+| `@auth("admin")` | *adds* an authorization requirement | must name a non-blank value; at most one per declaration |
 
 The three axes are **independent**: each falls back to the convention on its own, so `@auth` alone leaves an operation exactly where the convention put it. A declaration that carries none of them emits what it always did.
+
+A `@route` path is pasted into the host's route table verbatim, so it is checked as a **route template**, not just as a string: `{}` parameters must be balanced, named, and un-nested, and the path may not contain whitespace or control characters. Constraints, optional and catch-all parameters, and the `{{`/`}}` escape for a literal brace are all accepted — `/orders/{id:int}`, `/orders/{id?}`, `/files/{*path}`, `/a/{{literal}}`. A malformed template such as `/orders/{id` would otherwise compile fine and then throw `RoutePatternException` when the host builds its routes, so it is a `KOI1208` error instead.
 
 ```koine
 context Ordering {
@@ -448,6 +450,18 @@ endpoints.MapGet("/orders-by-status", async ([AsParameters] OrdersByStatus query
 }).RequireAuthorization("analyst");
 ```
 
+A command mapped through a **body-less verb** — `@get` or `@delete` — still binds its generated `<Behavior>Request` record, so Koine marks the parameter `[FromBody]` explicitly:
+
+```csharp
+endpoints.MapDelete("/orders/{id}", async ([Microsoft.AspNetCore.Mvc.FromBody] OrderCancelRequest request, OrderCancelHandler handler, CancellationToken ct) =>
+{
+    await handler.HandleAsync(request, ct);
+    return Results.Ok();
+});
+```
+
+ASP.NET only *infers* a complex parameter as the request body for verbs that define body semantics; for `GET`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE`/`CONNECT` inferred-body binding is disabled, and an endpoint that relies on it throws `InvalidOperationException: Body was inferred but the method does not allow inferred body parameters` when the route table is built — at startup, not at compile time. The explicit attribute overrides that restriction. It is written by fully-qualified name, so the endpoints file needs no extra `using`. The body-taking verbs are untouched and keep the inferred binding.
+
 :::caution
 `@auth("admin")` names an authorization **policy**, not a role. ASP.NET's `RequireAuthorization(params string[])` takes policy names, so the host app has to register a policy literally called `admin`:
 
@@ -495,12 +509,16 @@ Koine emits no `components/securitySchemes`. The `@auth` value names a scheme th
 
 | Rule | Diagnostic |
 | --- | --- |
-| `@route` names no path (a bare `@route`), or one that is not absolute | `KOI1208` `InvalidRouteOverride` |
+| `@route` names no path (a bare `@route`), or a malformed one — not absolute, containing whitespace or control characters, or with unbalanced, nested, or empty `{}` parameters | `KOI1208` `InvalidRouteOverride` |
 | a declaration carries more than one verb annotation | `KOI1209` `MultipleVerbAnnotations` |
 | `@auth` names no role (a bare `@auth`), or a blank one | `KOI1210` `EmptyAuthRole` |
+| a declaration repeats `@route` or `@auth` | `KOI1212` `DuplicateApiAnnotation` |
+| a verb annotation is given an argument (`@get("/orders")`) | `KOI1213` `VerbAnnotationArgument` |
+| a `command` carries `@since`/`@deprecated` | `KOI1214` `VersionAnnotationOnCommand` |
 
 - The annotations attach to `command` and `query` only. A [factory (§12)](/Koine/reference/factories/) keeps the conventional `POST /{entity}/{factory}`, and a `usecase` has no HTTP surface to override.
-- Any other `@name` before a declaration parses and is silently ignored, per the [annotation ignorance rule (§18.3.4)](/Koine/reference/versioning/#1834-annotation-ignorance-rule). In particular `@since`/`@deprecated` carry no meaning on a command or a query.
+- Every axis is single-valued. Repeating one would quietly keep the last and drop the rest, so it is an error rather than a silent last-one-wins.
+- Any other `@name` before a declaration parses and is silently ignored, per the [annotation ignorance rule (§18.3.4)](/Koine/reference/versioning/#1834-annotation-ignorance-rule) — with one exception. A `query` is a type declaration, so the [evolution annotations (§18.3)](/Koine/reference/versioning/) `@since`/`@deprecated` apply to it exactly as they do to a `value` or an `event` (a deprecated query emits `[Obsolete]`). A `command` is *not* a type declaration and has nowhere to keep them, so `@since`/`@deprecated` on one is a `KOI1214` error rather than an annotation that vanishes.
 - Nothing here reaches the domain or application C#. Without `--layers api` or `--target openapi`, an annotated model emits exactly what an un-annotated one does.
 
 ## See also

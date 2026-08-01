@@ -344,4 +344,264 @@ public class R19ApiAnnotationsTests
         Diagnose(CommandSource()).ShouldBeEmpty();
         Diagnose(QuerySource()).ShouldBeEmpty();
     }
+
+    // ---- route templates beyond the leading slash (#1219 review) ------------
+
+    /// <summary>
+    /// A route override is pasted verbatim into the host's route table, so a malformed template is not
+    /// a cosmetic problem: it compiles (a bad template is still a valid string literal) and then throws
+    /// <c>RoutePatternException</c> when the host builds its routes. Every shape ASP.NET's route parser
+    /// rejects has to be rejected here instead, at compile time.
+    /// </summary>
+    [Theory]
+    [InlineData("/orders/{id", "unclosed")]
+    [InlineData("/orders/id}", "unopened")]
+    [InlineData("/orders/{a{b}}", "nested")]
+    [InlineData("/orders/{}", "empty parameter")]
+    [InlineData("/orders/{id}/{", "unclosed after a valid parameter")]
+    public void A_malformed_route_template_is_rejected(string route, string why) =>
+        Diagnose(CommandSource($"""@route("{route}")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride, $"expected a KOI1208 for the {why} route '{route}'");
+
+    /// <summary>A path with a space or a tab cannot be typed into a URL as written, so it is a mistake.</summary>
+    [Theory]
+    [InlineData("/orders/place order")]
+    [InlineData("/orders/\\tplace")]
+    public void A_route_template_containing_whitespace_is_rejected(string route) =>
+        Diagnose(CommandSource($"""@route("{route}")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+
+    /// <summary>The message names the rule that failed, not just "invalid" — the author has to know why.</summary>
+    [Fact]
+    public void A_malformed_route_diagnostic_names_the_rule_that_failed()
+    {
+        Diagnose(CommandSource("""@route("/orders/{id")"""))
+            .Single(d => d.Code == DiagnosticCodes.InvalidRouteOverride)
+            .Message.ShouldContain("unclosed");
+
+        Diagnose(CommandSource("""@route("/orders/{}")"""))
+            .Single(d => d.Code == DiagnosticCodes.InvalidRouteOverride)
+            .Message.ShouldContain("empty route parameter");
+    }
+
+    /// <summary>
+    /// Non-regression, and the reason the check cannot be a naive brace count: constraints, optional and
+    /// catch-all parameters, and the <c>{{</c>/<c>}}</c> escape for a literal brace are all legal
+    /// templates that the routing stack accepts, so none of them may be diagnosed.
+    /// </summary>
+    [Theory]
+    [InlineData("/orders/{id}")]
+    [InlineData("/orders/{id:int}")]
+    [InlineData("/orders/{id?}")]
+    [InlineData("/orders/{*rest}")]
+    [InlineData("/orders/{{id}}")]
+    [InlineData("/orders/{id}/lines/{lineId}")]
+    [InlineData("/")]
+    public void A_well_formed_route_template_is_accepted(string route) =>
+        Diagnose(CommandSource($"""@route("{route}")""")).ShouldBeEmpty();
+
+    // ---- each annotation is single-valued (#1219 review) --------------------
+
+    /// <summary>
+    /// <c>@route</c> is single-valued: repeating it kept the last silently, which is exactly the
+    /// "silently dropped" outcome the reader's contract promises not to allow.
+    /// </summary>
+    [Fact]
+    public void Two_route_annotations_are_rejected()
+    {
+        CommandDecl place = CommandOf(CommandSource("""@route("/first")""", """@route("/second")"""), "Order", "place");
+        place.RouteOverride.ShouldBe("/second");
+        place.ApiAnnotations.ShouldNotBeNull().RouteCount.ShouldBe(2);
+
+        Diagnose(CommandSource("""@route("/first")""", """@route("/second")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation);
+    }
+
+    /// <summary>
+    /// A bare <c>@route</c> alone is a KOI1208 error, so a bare one followed by a valid one must not
+    /// compile clean — that would make the malformed annotation disappear precisely because a second
+    /// one happened to follow it.
+    /// </summary>
+    [Fact]
+    public void A_bare_route_annotation_followed_by_a_valid_one_is_still_rejected() =>
+        Diagnose(CommandSource("@route", """@route("/first")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation);
+
+    [Fact]
+    public void Two_auth_annotations_are_rejected_on_a_command()
+    {
+        CommandDecl place = CommandOf(CommandSource("""@auth("a")""", """@auth("b")"""), "Order", "place");
+        place.AuthRole.ShouldBe("b");
+        place.ApiAnnotations.ShouldNotBeNull().AuthCount.ShouldBe(2);
+
+        Diagnose(CommandSource("""@auth("a")""", """@auth("b")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation);
+    }
+
+    [Fact]
+    public void Two_auth_annotations_are_rejected_on_a_query() =>
+        Diagnose(QuerySource("""@auth("a")""", """@auth("b")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation);
+
+    /// <summary>Non-regression: one of each is the normal case and stays silent.</summary>
+    [Fact]
+    public void One_route_and_one_auth_annotation_are_not_reported_as_duplicates()
+    {
+        Diagnose(CommandSource("""@route("/orders")""", """@auth("admin")"""))
+            .ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation);
+
+        CommandDecl place = CommandOf(CommandSource("""@route("/orders")""", """@auth("admin")"""), "Order", "place");
+        ApiAnnotationInfo api = place.ApiAnnotations.ShouldNotBeNull();
+        api.RouteCount.ShouldBe(1);
+        api.AuthCount.ShouldBe(1);
+    }
+
+    /// <summary>A duplicate is reported on its own annotation, and repeating a verb still reports KOI1209.</summary>
+    [Fact]
+    public void A_duplicate_annotation_is_reported_at_the_repeated_annotation()
+    {
+        // Annotations start on line 7 (see CommandSource): @route, @route, @auth, @auth.
+        IReadOnlyList<Diagnostic> diagnostics = Diagnose(CommandSource(
+            """@route("/a")""", """@route("/b")""", """@auth("x")""", """@auth("y")"""));
+
+        diagnostics.Count(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation).ShouldBe(2);
+        diagnostics.First(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation).Line.ShouldBe(8);
+        diagnostics.Last(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation).Line.ShouldBe(10);
+    }
+
+    // ---- a verb annotation takes no argument (#1219 review) -----------------
+
+    /// <summary>
+    /// A verb is a bare marker. An argument on one configures nothing — <c>@get("/orders")</c> reads as
+    /// a route that would never be applied — so it is rejected rather than discarded without a word.
+    /// </summary>
+    [Theory]
+    [InlineData("""@get("anything")""")]
+    [InlineData("@put(3)")]
+    [InlineData("""@delete("/orders")""")]
+    public void A_verb_annotation_with_an_argument_is_rejected(string annotation) =>
+        Diagnose(CommandSource(annotation))
+            .ShouldContain(d => d.Code == DiagnosticCodes.VerbAnnotationArgument);
+
+    [Fact]
+    public void A_verb_annotation_with_an_argument_is_rejected_on_a_query() =>
+        Diagnose(QuerySource("""@get("anything")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.VerbAnnotationArgument);
+
+    /// <summary>The argument's presence is recorded on the annotation info, at the offending verb.</summary>
+    [Fact]
+    public void A_verb_annotations_argument_is_recorded_for_the_validator()
+    {
+        CommandDecl place = CommandOf(CommandSource("@put", """@get("x")"""), "Order", "place");
+
+        ApiAnnotationInfo api = place.ApiAnnotations.ShouldNotBeNull();
+        api.VerbArgumentSpan.IsNone.ShouldBeFalse();
+        api.VerbArgumentSpan.Line.ShouldBe(8); // the @get, not the bare @put on line 7
+    }
+
+    /// <summary>Non-regression: a bare verb records no argument and is not reported.</summary>
+    [Fact]
+    public void A_bare_verb_annotation_records_no_argument()
+    {
+        CommandOf(CommandSource("@put"), "Order", "place")
+            .ApiAnnotations.ShouldNotBeNull().VerbArgumentSpan.IsNone.ShouldBeTrue();
+
+        Diagnose(CommandSource("@put")).ShouldNotContain(d => d.Code == DiagnosticCodes.VerbAnnotationArgument);
+    }
+
+    // ---- evolution annotations on the new annotation lists (#1219 review) ---
+
+    /// <summary>
+    /// <c>queryDecl</c> gained a leading <c>annotation*</c> for the API annotations, which also made the
+    /// R15.1 evolution annotations parse there. A query IS a type declaration, so they must land on it
+    /// rather than be read and thrown away.
+    /// </summary>
+    [Fact]
+    public void Since_and_deprecated_land_on_a_query()
+    {
+        QueryDecl byId = QueryOf(QuerySource("@since(2)", """@deprecated("use OrderSummaryById")"""), "OrderById");
+
+        byId.Since.ShouldBe(2);
+        byId.Deprecated.ShouldBe("use OrderSummaryById");
+    }
+
+    /// <summary>The deprecation reaches the emitted C#, exactly as it does for any other type declaration.</summary>
+    [Fact]
+    public void A_deprecated_query_emits_Obsolete_on_the_record()
+    {
+        var query = FileEndingWith(Build(QuerySource("""@deprecated("use OrderSummaryById")""")), "OrderById.cs");
+
+        query.ShouldContain("[Obsolete(\"use OrderSummaryById\")]\npublic sealed record OrderById(");
+        query.ShouldContain("using System;");
+    }
+
+    /// <summary>Non-regression: an un-annotated query gains no attribute.</summary>
+    [Fact]
+    public void An_unannotated_query_does_not_gain_Obsolete() =>
+        FileEndingWith(Build(QuerySource()), "OrderById.cs").ShouldNotContain("[Obsolete");
+
+    /// <summary>
+    /// A query's <c>@since</c> now reaches the R15.1 version-ceiling check (KOI1501) like every other
+    /// type declaration's — the clearest proof it is honored downstream rather than merely stored.
+    /// </summary>
+    [Fact]
+    public void A_querys_since_above_the_context_version_is_warned()
+    {
+        IReadOnlyList<Diagnostic> diagnostics = Diagnose("""
+            context Sales version 1 {
+              enum OrderStatus { Draft, Placed }
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                }
+              }
+
+              readmodel OrderSummary from Order {
+                id
+                status
+              }
+
+              @since(7)
+              query OrderById(id: OrderId): OrderSummary
+            }
+            """);
+
+        Diagnostic warning = diagnostics.ShouldHaveSingleItem();
+        warning.Code.ShouldBe(DiagnosticCodes.AnnotationVersionAboveContext);
+        warning.Message.ShouldContain("OrderById");
+    }
+
+    /// <summary>
+    /// <c>commandDecl</c> gained the same leading <c>annotation*</c>, but a command is NOT a type
+    /// declaration — it has no <c>Since</c>/<c>Deprecated</c> to hold an evolution annotation. Rather
+    /// than read one and drop it (before R19 it was a syntax error, so it never used to vanish), the
+    /// compiler rejects it.
+    /// </summary>
+    [Theory]
+    [InlineData("""@deprecated("use cancel")""")]
+    [InlineData("@since(2)")]
+    public void An_evolution_annotation_on_a_command_is_rejected(string annotation) =>
+        Diagnose(CommandSource(annotation))
+            .ShouldContain(d => d.Code == DiagnosticCodes.VersionAnnotationOnCommand);
+
+    /// <summary>It is reported at the annotation, and alongside — not instead of — the API checks.</summary>
+    [Fact]
+    public void An_evolution_annotation_on_a_command_is_reported_at_its_own_annotation()
+    {
+        // Annotations start on line 7 (see CommandSource): @route, then @deprecated.
+        IReadOnlyList<Diagnostic> diagnostics =
+            Diagnose(CommandSource("""@route("orders")""", """@deprecated("gone")"""));
+
+        diagnostics.Single(d => d.Code == DiagnosticCodes.VersionAnnotationOnCommand).Line.ShouldBe(8);
+        diagnostics.ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+    }
+
+    /// <summary>Non-regression: a command carrying only API annotations is never flagged for versioning.</summary>
+    [Fact]
+    public void An_api_annotated_command_is_not_flagged_as_carrying_an_evolution_annotation() =>
+        Diagnose(CommandSource("""@route("/orders/{id}")""", "@put", """@auth("admin")"""))
+            .ShouldNotContain(d => d.Code == DiagnosticCodes.VersionAnnotationOnCommand);
+
+    private static string FileEndingWith(IEnumerable<Emit.EmittedFile> files, string suffix) =>
+        files.Single(f => f.RelativePath.EndsWith(suffix, StringComparison.Ordinal)).Contents;
 }

@@ -31,6 +31,14 @@ public sealed partial class CSharpEmitter
     };
 
     /// <summary>
+    /// The HTTP verbs ASP.NET refuses to <b>infer</b> a request body for. Mapping a complex parameter
+    /// through one of these without an explicit binding source throws at endpoint-build time — see
+    /// <see cref="BodyBindingAttributeFor"/>.
+    /// </summary>
+    private static readonly HashSet<string> BodylessVerbs =
+        new(StringComparer.OrdinalIgnoreCase) { "GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT" };
+
+    /// <summary>
     /// Emits one context's <c>&lt;Context&gt;Endpoints</c> extension (W2), or nothing when the context has
     /// no commands, factories or queries to map.
     /// </summary>
@@ -109,7 +117,7 @@ public sealed partial class CSharpEmitter
         var returnsValue = cmd.ReturnType is not null
             || _options.HandlerResult is CSharpHandlerResult.Aggregate or CSharpHandlerResult.ReadModel
             || _options.NotFound is CSharpNotFound.Nullable or CSharpNotFound.Result;
-        WriteMutationEndpoint(body, MapMethodFor(info.Verb, "MapPost"), info.Route, behavior, returnsValue,
+        WriteMutationEndpoint(body, info.Verb, "MapPost", info.Route, behavior, returnsValue,
             _options.NotFound, info.AuthRole);
     }
 
@@ -121,27 +129,30 @@ public sealed partial class CSharpEmitter
         var route = "/" + RouteDerivation.Kebab(root.Name) + "/" + RouteDerivation.Kebab(factory.Name);
         // A factory creates — it has no not-found concept — so it always returns the created aggregate
         // plainly, regardless of the not-found policy.
-        WriteMutationEndpoint(body, "MapPost", route, behavior, returnsValue: true, CSharpNotFound.Throw, authRole: null);
+        WriteMutationEndpoint(body, "POST", "MapPost", route, behavior, returnsValue: true, CSharpNotFound.Throw,
+            authRole: null);
     }
 
     /// <summary>
-    /// Writes a mutating endpoint (<paramref name="mapMethod"/> is the ASP.NET per-verb mapping call) that
-    /// binds <c>&lt;Behavior&gt;Request</c> from the body and invokes the handler. In plain mode it injects
-    /// the concrete handler and calls <c>HandleAsync</c>; in MediatR mode it injects <c>IMediator</c> and
-    /// calls <c>Send</c>. <paramref name="miss"/> shapes the HTTP result from the handler's return:
+    /// Writes a mutating endpoint — <paramref name="verb"/> picks the ASP.NET per-verb mapping call
+    /// (falling back to <paramref name="conventionalMapMethod"/>) — that binds <c>&lt;Behavior&gt;Request</c>
+    /// from the body and invokes the handler. In plain mode it injects the concrete handler and calls
+    /// <c>HandleAsync</c>; in MediatR mode it injects <c>IMediator</c> and calls <c>Send</c>.
+    /// <paramref name="miss"/> shapes the HTTP result from the handler's return:
     /// <c>Throw</c> ⇒ plain 200; <c>Nullable</c> ⇒ null → 404; <c>Result</c> ⇒ a <c>Result&lt;T&gt;</c> →
     /// 200 with the value / 404. <paramref name="authRole"/>, when set, appends
     /// <c>.RequireAuthorization("role")</c> to the chain (#1219).
     /// </summary>
-    private void WriteMutationEndpoint(StringBuilder body, string mapMethod, string route, string behavior,
-        bool returnsValue, CSharpNotFound miss, string? authRole)
+    private void WriteMutationEndpoint(StringBuilder body, string verb, string conventionalMapMethod, string route,
+        string behavior, bool returnsValue, CSharpNotFound miss, string? authRole)
     {
         var requestType = behavior + "Request";
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
-        body.Append(i2).Append("endpoints.").Append(mapMethod).Append("(\"").Append(EscapeCSharpString(route))
-            .Append("\", async (").Append(requestType).Append(" request, ");
+        body.Append(i2).Append("endpoints.").Append(MapMethodFor(verb, conventionalMapMethod)).Append("(\"")
+            .Append(EscapeCSharpString(route))
+            .Append("\", async (").Append(BodyBindingAttributeFor(verb)).Append(requestType).Append(" request, ");
         body.Append(_options.ApplicationMediatr ? "MediatR.IMediator mediator" : behavior + "Handler handler");
         body.Append(", CancellationToken ct) =>\n");
         body.Append(i2).Append("{\n");
@@ -197,6 +208,22 @@ public sealed partial class CSharpEmitter
         "PATCH" => "MapPatch",
         _ => conventional,
     };
+
+    /// <summary>
+    /// The explicit body-binding attribute a mutating endpoint's request parameter needs, or the empty
+    /// string for the body-taking verbs (so every pre-R19 endpoint stays byte-identical).
+    ///
+    /// <para>ASP.NET only <em>infers</em> a complex parameter as the request body for verbs that define
+    /// body semantics; for GET/DELETE/HEAD/OPTIONS/TRACE/CONNECT inferred-body binding is disabled. An
+    /// <c>@get</c>/<c>@delete</c> command (#1219) still binds a <c>&lt;Behavior&gt;Request</c> record, so
+    /// without this the endpoint would <b>compile</b> and then throw
+    /// <c>InvalidOperationException: Body was inferred but the method does not allow inferred body
+    /// parameters</c> the moment the route table is built — i.e. at app startup, which a compile-only
+    /// check cannot catch. An <b>explicit</b> <c>[FromBody]</c> overrides that restriction. Written by
+    /// fully-qualified name, like the rest of this layer, so no <c>using</c> is added.</para>
+    /// </summary>
+    private static string BodyBindingAttributeFor(string verb) =>
+        BodylessVerbs.Contains(verb) ? "[Microsoft.AspNetCore.Mvc.FromBody] " : "";
 
     /// <summary>The <c>.RequireAuthorization("role")</c> suffix an <c>@auth</c> annotation adds to the endpoint's
     /// call chain, or the empty string when the operation carries none (#1219).</summary>

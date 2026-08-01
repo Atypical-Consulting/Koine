@@ -2097,4 +2097,85 @@ public class R18CSharpApplicationTests
         var (assembly, errors) = TestSupport.Compile(Emit(ApiOn, AnnotatedApiFixture));
         assembly.ShouldNotBeNull(string.Join("\n", errors));
     }
+
+    // ------------------------------------------------------------------
+    // #1219 review — a body-less verb (@get/@delete) on a command. ASP.NET
+    // disables INFERRED body binding for GET/DELETE/HEAD/OPTIONS/TRACE/
+    // CONNECT, so a command mapped through one still needs its request
+    // record bound EXPLICITLY. Without [FromBody] the endpoint compiles and
+    // then throws at endpoint-build time ("Body was inferred but the method
+    // does not allow inferred body parameters") — i.e. at app startup, which
+    // the Roslyn compile meta-test cannot see. So these assert the emitted
+    // TEXT, not just that it compiles.
+    // ------------------------------------------------------------------
+
+    /// <summary>A command carrying a body-less verb — the shape §15.9 of the reference documents.</summary>
+    private static string BodylessVerbFixture(string verb) => $$"""
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+
+          aggregate Order root Order {
+            repository {
+              operations: getById
+            }
+
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              @route("/orders/{id}")
+              @{{verb}}
+              command cancel {
+                requires status == Draft   "only a draft order can be cancelled"
+                status -> Cancelled
+              }
+            }
+          }
+        }
+        """;
+
+    [Theory]
+    [InlineData("delete", "MapDelete")]
+    [InlineData("get", "MapGet")]
+    public void Api_layer_binds_a_body_less_verbs_request_with_an_explicit_FromBody(string verb, string mapMethod)
+    {
+        var endpoints = File(Emit(ApiOn, BodylessVerbFixture(verb)), "SalesEndpoints.cs").Contents;
+
+        endpoints.ShouldContain(
+            $"endpoints.{mapMethod}(\"/orders/{{id}}\", async ([Microsoft.AspNetCore.Mvc.FromBody] OrderCancelRequest request, OrderCancelHandler handler, CancellationToken ct) =>");
+    }
+
+    /// <summary>
+    /// The attribute is written by fully-qualified name like the rest of this layer, so the endpoints
+    /// file gains no <c>using Microsoft.AspNetCore.Mvc;</c> (which would drag in the MVC package).
+    /// </summary>
+    [Fact]
+    public void Api_layer_body_less_verb_binding_adds_no_mvc_using()
+    {
+        var endpoints = File(Emit(ApiOn, BodylessVerbFixture("delete")), "SalesEndpoints.cs").Contents;
+
+        endpoints.ShouldNotContain("using Microsoft.AspNetCore.Mvc;");
+    }
+
+    /// <summary>
+    /// The verbs that DO define body semantics keep inferred binding — no attribute — so every endpoint
+    /// emitted before R19 stays byte-identical. <c>@put</c> and the conventional <c>POST</c> both.
+    /// </summary>
+    [Fact]
+    public void Api_layer_leaves_a_body_taking_verbs_request_binding_untouched()
+    {
+        File(Emit(ApiOn, AnnotatedApiFixture), "SalesEndpoints.cs").Contents
+            .ShouldContain("endpoints.MapPut(\"/orders/{id}\", async (OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
+
+        var conventional = File(Emit(ApiOn), "SalesEndpoints.cs").Contents;
+        conventional.ShouldContain("endpoints.MapPost(\"/order/place\", async (OrderPlaceRequest request,");
+        conventional.ShouldNotContain("FromBody");
+    }
+
+    /// <summary>And it still has to compile against the ASP.NET shared framework.</summary>
+    [Fact]
+    public void Api_layer_body_less_verb_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn, BodylessVerbFixture("delete")));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
 }

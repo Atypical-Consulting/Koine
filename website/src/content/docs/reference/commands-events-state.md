@@ -206,7 +206,7 @@ command submit(note: String) {
 
 The annotations change nothing about the emitted domain method — `Submit(string note)` is byte-identical
 either way. They are read only when you ask for an HTTP surface (`--layers api`, `--target openapi`). Queries take
-the same three; the full rules, the emitted shapes, and the `KOI1208`–`KOI1210` diagnostics live with them in
+the same three; the full rules, the emitted shapes, and the `KOI1208`–`KOI1214` diagnostics live with them in
 [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations).
 
 ## 11.4 Translation to C#

@@ -293,6 +293,9 @@ public sealed partial class CSharpEmitter
 
         var sb = new StringBuilder();
         WriteXmlDoc(sb, q.Doc ?? $"Query returning {resultType}; implement IQueryHandler<{q.Name}, {resultType}>.", "");
+        // A query is a TypeDecl, so `@deprecated("…")` carries onto it exactly as it does onto a value
+        // object or an event (R15.1); no-op for the un-annotated query every model had before.
+        WriteObsolete(sb, q.Deprecated, "");
         var criteria = string.Join(", ", q.Criteria.Select(p =>
             $"{typeMapper.Map(p.Type)} {CSharpNaming.ToPascalCase(p.Name)}"));
         sb.Append("public sealed record ").Append(q.Name).Append('(').Append(criteria).Append(");\n");

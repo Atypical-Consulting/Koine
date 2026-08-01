@@ -190,6 +190,9 @@ public static class DiagnosticCodes
     public const string InvalidRouteOverride = "KOI1208";
     public const string MultipleVerbAnnotations = "KOI1209";
     public const string EmptyAuthRole = "KOI1210";
+    public const string DuplicateApiAnnotation = "KOI1212";
+    public const string VerbAnnotationArgument = "KOI1213";
+    public const string VersionAnnotationOnCommand = "KOI1214";
 
     // ---- Multi-file, imports, modules (KOI1300–1399) ----------------------
     public const string UnknownContext = "KOI1301";
@@ -392,9 +395,12 @@ public static class DiagnosticCodes
             [DuplicateReadModelField] = D(DuplicateReadModelField, "A read model declares the same field name more than once.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [QueryResultNotReadModel] = D(QueryResultNotReadModel, "A query's result type is not a declared read model (or a list of one).", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [ReservedRecordMember] = D(ReservedRecordMember, "A read-model field, query criterion, or event field collides with a record-synthesized member (Equals/GetHashCode/…).", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
-            [InvalidRouteOverride] = D(InvalidRouteOverride, "A command's or query's '@route' names no path, or one that is not absolute (it must start with '/').", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [InvalidRouteOverride] = D(InvalidRouteOverride, "A command's or query's '@route' names no path, or a malformed one: not absolute (it must start with '/'), containing whitespace or control characters, or with unbalanced, nested, or empty '{}' route parameters.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [MultipleVerbAnnotations] = D(MultipleVerbAnnotations, "A command or query carries more than one HTTP verb annotation ('@get'/'@post'/'@put'/'@delete'/'@patch').", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [EmptyAuthRole] = D(EmptyAuthRole, "A command's or query's '@auth' names no role, or a blank one.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [DuplicateApiAnnotation] = D(DuplicateApiAnnotation, "A command or query repeats a single-valued API annotation ('@route' or '@auth'); only the last would take effect.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [VerbAnnotationArgument] = D(VerbAnnotationArgument, "An HTTP verb annotation ('@get'/'@post'/'@put'/'@delete'/'@patch') was given an argument; a verb is a bare marker and the argument would be discarded.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [VersionAnnotationOnCommand] = D(VersionAnnotationOnCommand, "A command carries a '@since'/'@deprecated' evolution annotation; those apply to type declarations, and a command is not one, so it would be discarded.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
 
             // ---- Multi-file, imports, modules --------------------------------
             [UnknownContext] = D(UnknownContext, "An import or qualified reference names a context that is not declared.", DiagnosticCategory.MultiFile, DiagnosticSeverity.Error),

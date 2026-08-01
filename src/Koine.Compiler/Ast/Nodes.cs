@@ -426,15 +426,21 @@ public sealed record Invariant(Expr Condition, string? Message) : KoineNode;
 
 /// <summary>
 /// Where a declaration's API annotations (<c>@route</c>, <c>@get</c>/<c>@post</c>/<c>@put</c>/
-/// <c>@delete</c>/<c>@patch</c>, <c>@auth</c>, R19) sat in source, plus how many verb annotations
-/// were seen. The annotation <em>values</em> live on <see cref="CommandDecl"/>/<see cref="QueryDecl"/>
+/// <c>@delete</c>/<c>@patch</c>, <c>@auth</c>, R19) sat in source, plus how many of each were seen.
+/// The annotation <em>values</em> live on <see cref="CommandDecl"/>/<see cref="QueryDecl"/>
 /// themselves; this companion exists so <c>Semantics/</c> can point a diagnostic at the offending
-/// annotation rather than the whole declaration, and can reject a declaration carrying more than one
-/// verb — the parser reads, it never rejects. TARGET-AGNOSTIC: spans and a count, no HTTP concept.
+/// annotation rather than the whole declaration, and can reject a declaration that repeats one —
+/// the parser reads, it never rejects. Every axis is single-valued, so the reader keeps a COUNT
+/// rather than collapsing a repeat to "last one wins" behind the author's back.
+/// TARGET-AGNOSTIC: spans and counts, no HTTP concept.
 /// </summary>
 public sealed record ApiAnnotationInfo
 {
-    /// <summary>The span of the <c>@route("…")</c> annotation; <see cref="SourceSpan.None"/> when absent.</summary>
+    /// <summary>
+    /// The span of the LAST <c>@route("…")</c> annotation seen — i.e. the duplicate, when
+    /// <see cref="RouteCount"/> is greater than 1, which is also the one whose value won;
+    /// <see cref="SourceSpan.None"/> when absent.
+    /// </summary>
     public SourceSpan RouteSpan { get; init; } = SourceSpan.None;
 
     /// <summary>
@@ -443,14 +449,45 @@ public sealed record ApiAnnotationInfo
     /// </summary>
     public SourceSpan VerbSpan { get; init; } = SourceSpan.None;
 
-    /// <summary>The span of the <c>@auth("…")</c> annotation; <see cref="SourceSpan.None"/> when absent.</summary>
+    /// <summary>
+    /// The span of the LAST <c>@auth("…")</c> annotation seen — i.e. the duplicate, when
+    /// <see cref="AuthCount"/> is greater than 1, which is also the one whose value won;
+    /// <see cref="SourceSpan.None"/> when absent.
+    /// </summary>
     public SourceSpan AuthSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>
+    /// The span of the first verb annotation that carried an argument (<c>@get("/x")</c>, <c>@put(3)</c>);
+    /// <see cref="SourceSpan.None"/> when every verb annotation was bare. A verb takes no argument, so the
+    /// reader records the occurrence rather than discarding the argument silently.
+    /// </summary>
+    public SourceSpan VerbArgumentSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>
+    /// The span of the first <c>@since</c>/<c>@deprecated</c> annotation on a declaration that has no
+    /// versioning surface to hold it (a command); <see cref="SourceSpan.None"/> otherwise — a query is a
+    /// type declaration and honors both, so the reader stores them there instead of flagging them here.
+    /// Recorded so <c>Semantics/</c> can reject the annotation rather than let it be dropped in silence.
+    /// </summary>
+    public SourceSpan UnsupportedVersionSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>
+    /// How many <c>@route</c> annotations preceded the declaration. Zero when unannotated; more than one
+    /// is a <c>Semantics/</c> error, so the count is preserved here instead of collapsing silently.
+    /// </summary>
+    public int RouteCount { get; init; }
 
     /// <summary>
     /// How many verb annotations preceded the declaration. Zero when unannotated; more than one is a
     /// <c>Semantics/</c> error, so the count is preserved here instead of collapsing silently.
     /// </summary>
     public int VerbCount { get; init; }
+
+    /// <summary>
+    /// How many <c>@auth</c> annotations preceded the declaration. Zero when unannotated; more than one
+    /// is a <c>Semantics/</c> error, so the count is preserved here instead of collapsing silently.
+    /// </summary>
+    public int AuthCount { get; init; }
 }
 
 /// <summary>
