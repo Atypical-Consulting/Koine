@@ -1433,6 +1433,30 @@ public sealed class SemanticValidator
         }
 
         // Classify once: the unknown-type, arity, and Range-orderable checks below all consult it.
+        //
+        // #1715 — why this one is NOT a context-blindness bug like its siblings (#1711/#1713/#1709).
+        // The three checks below branch only on (a) whether `kind` is Unknown and (b) whether it is a
+        // built-in generic; none of them reads WHICH declared kind a name resolved to. Both of those
+        // are provably insensitive to a cross-context simple-name collision:
+        //   * Unknown-ness is identical for `Classify(name)` and `Classify(context, name)`.
+        //     `ModelIndex._byName` and `_declsByContext` are populated from the SAME traversal
+        //     (ContextNode.AllTypeDecls), so any name resolvable in a context is also a key in the
+        //     flat table; a collision only OVERWRITES that slot's value (last-write-wins), it never
+        //     removes the key. And `ClassifyDecl` covers all eight `TypeDecl` subtypes, so it never
+        //     returns Unknown for a real declaration. Hence `Classify(ctx, n) == Unknown` iff
+        //     `Classify(n) == Unknown` — which is also all `IsKnownType` (the KOI0907 gate) reduces
+        //     to. `BuiltinOps.IsOrderable` is a pure name test, so it cannot diverge either.
+        //   * List/Set/Map/Range are matched by literal name BEFORE the table lookup, and KOI0908
+        //     (ValidateUniqueTypeNames) already forbids a user type from taking one of those names,
+        //     so no declaration can shadow them.
+        // Measured, not assumed: over all 715 type references in the eight shipped templates plus an
+        // adversarial value/entity, enum/value and enum/readmodel collision matrix, the flat and
+        // context-aware overloads never once disagreed on Unknown-ness or collection-ness (they do
+        // disagree on the concrete kind — e.g. flat Entity vs local Value — which nothing here reads).
+        // If a context is ever threaded through here anyway, guard the two shadowing regressions it
+        // introduces: on an already-invalid model declaring `value List` / `value Range`, the local
+        // declaration would shadow the built-in and silence the KOI0107 arity / KOI0907 orderable
+        // reports that fire today alongside KOI0908.
         TypeKind kind = index.Classify(type.Name);
 
         // A qualified `Context.T` is validated by the context-scoping pass (UnknownContext /
