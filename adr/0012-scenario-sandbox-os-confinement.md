@@ -260,8 +260,11 @@ are CI-verified, not just manually verified once.*
   default command echo, which otherwise corrupts the child's JSON answer on stdout).
 - **What remains manually verified, not CI-verified:** Windows filesystem and network confinement — this
   ADR's `WindowsJobObject` covers only the resource ceilings (memory, processor time); tracked separately
-  as issue #1780. `A_confined_child_cannot_open_a_network_connection` stays POSIX-only (needs bash's
-  `/dev/tcp`), the one test `RequireUnixStubs()` still gates.
+  as issue #1780. Two tests stay POSIX-only and are the ones `RequireUnixStubs()` still gates:
+  `A_confined_child_cannot_open_a_network_connection` (needs bash's `/dev/tcp`) and
+  `A_confined_child_may_write_inside_its_run_directory_and_nowhere_else` (its POSIX-shell write probe was
+  not given a Windows form, and is moot on Windows today regardless — `RequireFilesystemConfinement`
+  already skips it there until #1780 lands).
 
 **One real (pre-existing) defect this surfaced, not fixed here.**
 `A_run_that_exhausts_the_memory_ceiling_names_it_instead_of_reporting_a_generic_fault` — a test that

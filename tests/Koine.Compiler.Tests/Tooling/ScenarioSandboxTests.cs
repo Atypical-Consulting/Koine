@@ -872,7 +872,13 @@ public class ScenarioSandboxTests
         {
             string cmdPath = Path.Combine(Path.GetTempPath(), "koine-stub-" + Guid.NewGuid().ToString("N") + ".cmd");
             File.WriteAllText(cmdPath, body);
-            return cmdPath;
+
+            // RunStub carries this path through ArgumentsOverrideVariable, which — per its own documented
+            // contract — splits on spaces; Path.GetTempPath() is under the user profile and a space there
+            // ("C:\Users\Jane Doe\...") is ordinary, not exotic. The 8.3 short form has none, by
+            // construction. A failure (8dot3 generation disabled on this volume) falls back to the long
+            // path — no worse than before this existed, just not improved.
+            return WindowsShortPath(cmdPath) ?? cmdPath;
         }
 
         string path = Path.Combine(Path.GetTempPath(), "koine-stub-" + Guid.NewGuid().ToString("N") + ".sh");
@@ -884,10 +890,26 @@ public class ScenarioSandboxTests
         return path;
     }
 
-    /// <summary>Gates only the genuinely POSIX-specific stub tests — today, just the network probe, which
-    /// needs bash's <c>/dev/tcp</c> pseudo-device. Every other stub-based behavioural assertion now has a
-    /// Windows form too (issue #1782 Task 4): <see cref="WriteStub"/>, <see cref="Report"/> and <see
-    /// cref="EchoResult"/> all branch on platform instead of assuming POSIX.</summary>
+    /// <summary>The 8.3 short form of <paramref name="path"/>, or <c>null</c> if it could not be resolved
+    /// (8dot3 name generation disabled on the volume, or any other failure) — callers fall back to the
+    /// long path in that case.</summary>
+    private static string? WindowsShortPath(string path)
+    {
+        var buffer = new System.Text.StringBuilder(260);
+        uint length = GetShortPathNameW(path, buffer, (uint)buffer.Capacity);
+        return length > 0 && length < buffer.Capacity ? buffer.ToString() : null;
+    }
+
+#pragma warning disable SYSLIB1054 // no source-generated LibraryImport for this one Windows-only helper.
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetShortPathNameW(string longPath, System.Text.StringBuilder shortPath, uint bufferLength);
+#pragma warning restore SYSLIB1054
+
+    /// <summary>Gates the genuinely POSIX-specific stub tests: the network probe (needs bash's
+    /// <c>/dev/tcp</c> pseudo-device) and the filesystem-write probe (its POSIX-only <see
+    /// cref="WriteProbe"/> body was not given a Windows form). Every OTHER stub-based behavioural
+    /// assertion now has a Windows form too (issue #1782 Task 4): <see cref="WriteStub"/>, <see
+    /// cref="Report"/> and <see cref="EchoResult"/> all branch on platform instead of assuming POSIX.</summary>
     private static void RequireUnixStubs()
     {
         if (OperatingSystem.IsWindows())
