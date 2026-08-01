@@ -257,8 +257,13 @@ public class ScenarioSandboxTests
 
         // Named, and named with the ceiling that was actually in force — not "OutOfMemoryException", which
         // reads as a machine problem rather than a model-derived allocation meeting its budget.
-        tree.ShouldContain("memory ceiling of 16 MiB");
-        tree.ShouldNotContain("timed out");
+        //
+        // The whole tree rides along as the custom message because Shouldly TRUNCATES the actual value it
+        // prints (`…"resultingState":{},"..."`), and what it truncates away is `notes` — the only part of
+        // the tree that says WHICH stage failed and how. Without it, diagnosing a failure that only
+        // reproduces on another platform's CI costs a round trip just to read the message (#1791).
+        tree.ShouldContain("memory ceiling of 16 MiB", customMessage: tree);
+        tree.ShouldNotContain("timed out", customMessage: tree);
     }
 
     [Fact]
