@@ -161,30 +161,7 @@ public sealed partial class CSharpEmitter
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
-        var routeParams = new StringBuilder();
-        var rebinds = new List<string>();
-        foreach (RouteTokenBinding binding in bindings)
-        {
-            if (binding.Target == RouteTokenTarget.Unbound)
-            {
-                continue;
-            }
-
-            if (!IsRouteBindable(binding.Type!, index))
-            {
-                body.Append(i2).Append("// route token '{").Append(binding.Token).Append("}': ")
-                    .Append(binding.Type!.Name).Append(" is not route-bindable\n");
-                continue;
-            }
-
-            routeParams.Append("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"").Append(binding.Token)
-                .Append("\")] ").Append(typeMapper.Map(binding.Type!)).Append(' ').Append(binding.Token).Append(", ");
-
-            var prop = binding.Target == RouteTokenTarget.Identity
-                ? identityProperty
-                : CSharpNaming.ToPascalCase(binding.Member!.Name);
-            rebinds.Add($"{prop} = {binding.Token}");
-        }
+        (string routeParams, List<string> rebinds) = BuildRouteTokenBindings(body, i2, bindings, identityProperty, typeMapper, index);
 
         body.Append(i2).Append("endpoints.").Append(MapMethodFor(verb, conventionalMapMethod)).Append("(\"")
             .Append(EscapeCSharpString(route))
@@ -220,6 +197,53 @@ public sealed partial class CSharpEmitter
     private static bool IsRouteBindable(TypeRef type, ModelIndex index) =>
         index.Classify(type.Name) is TypeKind.Primitive or TypeKind.Enum or TypeKind.IdValueObject;
 
+    /// <summary>
+    /// Builds the <c>[FromRoute]</c> parameter list text and the <c>with { … }</c> rebind assignments for
+    /// <paramref name="bindings"/> (#1748), shared by <see cref="WriteMutationEndpoint"/> and
+    /// <see cref="WriteQueryEndpoint"/> so the two endpoint kinds can never diverge on how a token binds.
+    /// Writes a matched-but-not-route-bindable token's explanatory comment straight into
+    /// <paramref name="body"/> (at <paramref name="indent"/>) as it goes, ahead of the endpoint mapping
+    /// call it precedes. The route token's raw text becomes both the <c>[FromRoute(Name = "…")]</c>
+    /// argument (must match the route template exactly) and the emitted local's identifier — the latter
+    /// through <see cref="CSharpNaming.EscapeIdentifier"/>, since a token can be spelled like a C#
+    /// keyword (<c>{class}</c>, <c>{event}</c>, <c>{base}</c>, …) and only the identifier, not the
+    /// attribute's string argument, needs the <c>@</c> escape to stay valid C#.
+    /// </summary>
+    /// <param name="identityProperty">The request/query property name an <see cref="RouteTokenTarget.Identity"/>
+    /// binding rebinds — never actually reached for a query, which resolves no <c>Identity</c> binding.</param>
+    private static (string RouteParams, List<string> Rebinds) BuildRouteTokenBindings(
+        StringBuilder body, string indent, IReadOnlyList<RouteTokenBinding> bindings, string? identityProperty,
+        CSharpTypeMapper typeMapper, ModelIndex index)
+    {
+        var routeParams = new StringBuilder();
+        var rebinds = new List<string>();
+        foreach (RouteTokenBinding binding in bindings)
+        {
+            if (binding.Target == RouteTokenTarget.Unbound)
+            {
+                continue;
+            }
+
+            if (!IsRouteBindable(binding.Type!, index))
+            {
+                body.Append(indent).Append("// route token '{").Append(binding.Token).Append("}': ")
+                    .Append(binding.Type!.Name).Append(" is not route-bindable\n");
+                continue;
+            }
+
+            var identifier = CSharpNaming.EscapeIdentifier(binding.Token);
+            routeParams.Append("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"").Append(binding.Token)
+                .Append("\")] ").Append(typeMapper.Map(binding.Type!)).Append(' ').Append(identifier).Append(", ");
+
+            var prop = binding.Target == RouteTokenTarget.Identity
+                ? identityProperty!
+                : CSharpNaming.ToPascalCase(binding.Member!.Name);
+            rebinds.Add($"{prop} = {identifier}");
+        }
+
+        return (routeParams.ToString(), rebinds);
+    }
+
     /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query
     /// string. Honors the same R19 verb/route/role annotations as a command (#1219).</summary>
     private void WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query, CSharpTypeMapper typeMapper, ModelIndex index)
@@ -235,27 +259,9 @@ public sealed partial class CSharpEmitter
         // Route-bindable criteria (#1748): the same lifting WriteMutationEndpoint applies to a command's
         // request, mirrored onto the [AsParameters] query record. A query has no aggregate identity, so
         // every RouteTokenTarget here is Member or Unbound (never Identity — RouteDerivation.ForQuery
-        // never resolves one).
-        var routeParams = new StringBuilder();
-        var rebinds = new List<string>();
-        foreach (RouteTokenBinding binding in info.TokenBindings)
-        {
-            if (binding.Target == RouteTokenTarget.Unbound)
-            {
-                continue;
-            }
-
-            if (!IsRouteBindable(binding.Type!, index))
-            {
-                body.Append(i2).Append("// route token '{").Append(binding.Token).Append("}': ")
-                    .Append(binding.Type!.Name).Append(" is not route-bindable\n");
-                continue;
-            }
-
-            routeParams.Append("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"").Append(binding.Token)
-                .Append("\")] ").Append(typeMapper.Map(binding.Type!)).Append(' ').Append(binding.Token).Append(", ");
-            rebinds.Add($"{CSharpNaming.ToPascalCase(binding.Member!.Name)} = {binding.Token}");
-        }
+        // never resolves one) — identityProperty is passed null accordingly.
+        (string routeParams, List<string> rebinds) = BuildRouteTokenBindings(
+            body, i2, info.TokenBindings, identityProperty: null, typeMapper, index);
 
         body.Append(i2).Append("endpoints.").Append(MapMethodFor(info.Verb, "MapGet")).Append("(\"")
             .Append(EscapeCSharpString(info.Route)).Append("\", async (").Append(routeParams)

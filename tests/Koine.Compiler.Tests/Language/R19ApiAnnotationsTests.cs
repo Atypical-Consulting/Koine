@@ -1021,6 +1021,40 @@ public class R19ApiAnnotationsTests
         tokenlessEndpoints.ShouldNotContain("FromRoute");
     }
 
+    /// <summary>
+    /// A route token spelled exactly like a C# reserved keyword still has to compile: the
+    /// <c>[FromRoute(Name = "…")]</c> argument stays the token's literal text (it must match the route
+    /// template), but the identifier it binds to — the lambda parameter and every place the rebind
+    /// references it — needs the <c>@</c> escape (#1748 code review).
+    /// </summary>
+    [Fact]
+    public void A_route_token_spelled_like_a_csharp_keyword_still_compiles()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{class}")
+                  @put
+                  command submit(class: String) {
+                    requires status == Draft "order must be a draft to submit"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var endpoints = FileEndingWith(BuildApi(src), "OrderingEndpoints.cs");
+
+        endpoints.ShouldContain("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"class\")] string @class");
+        endpoints.ShouldContain("request with { Class = @class }");
+    }
+
     // ---- @route token binding into the C# api layer — queries (#1748) -------
 
     /// <summary>A query criterion named the same as the route token binds the same way a command
@@ -1083,5 +1117,34 @@ public class R19ApiAnnotationsTests
             "endpoints.MapGet(\"/orders/{id}\", async ([AsParameters] OrdersByStatus query, OrdersByStatusHandler handler, CancellationToken ct) =>");
         endpoints.ShouldContain("handler.HandleAsync(query, ct)");
         endpoints.ShouldNotContain("FromRoute");
+    }
+
+    /// <summary>The query-side counterpart to <see cref="A_route_token_spelled_like_a_csharp_keyword_still_compiles"/>: a
+    /// criterion named like a C# keyword needs the same <c>@</c>-escaped identifier (#1748 code review).</summary>
+    [Fact]
+    public void A_query_route_token_spelled_like_a_csharp_keyword_still_compiles()
+    {
+        const string src = """
+            context Ordering {
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: String
+                }
+              }
+
+              readmodel OrderSummary from Order {
+                id
+                status
+              }
+
+              @route("/orders/{event}")
+              query OrdersByEvent(event: String): List<OrderSummary>
+            }
+            """;
+
+        var endpoints = FileEndingWith(BuildApi(src), "OrderingEndpoints.cs");
+
+        endpoints.ShouldContain("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"event\")] string @event");
+        endpoints.ShouldContain("query with { Event = @event }");
     }
 }
