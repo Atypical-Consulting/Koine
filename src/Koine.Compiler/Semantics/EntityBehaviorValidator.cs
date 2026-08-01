@@ -63,6 +63,11 @@ internal static class EntityBehaviorValidator
                     $"command '{cmd.Name}' collides with a property of '{entity.Name}'", cmd.Span));
             }
 
+            // R19 — the `@route`/verb/`@auth` annotations preceding the command. Shared with queries,
+            // so the rules live next to the other CQRS checks.
+            CqrsValidator.ValidateApiAnnotations(
+                cmd.ApiAnnotations, cmd.RouteOverride, cmd.AuthRole, $"command '{cmd.Name}'", cmd.Span, diagnostics);
+
             // Scope: the entity's members, the synthetic `id` (its identity), and the
             // command's parameters.
             var scopePairs = entity.Members.Select(m => new KeyValuePair<string, TypeRef>(m.Name, m.Type))

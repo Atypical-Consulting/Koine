@@ -232,22 +232,260 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Emitted_document_passes_external_openapi_validation_when_available()
-    {
+    public void Emitted_document_passes_external_openapi_validation_when_available() =>
         // A rich model exercising schemas, refs, paths, parameters, and lowered keywords in one doc.
+        ExternallyValidate(OrderingFixture);
+
+    /// <summary>
+    /// Compiles <paramref name="fixture"/> to an OpenAPI document and runs it through a real external
+    /// validator when one is available. INCONCLUSIVE otherwise: validation is opt-in (set
+    /// <c>KOINE_OPENAPI_VALIDATE</c>) and needs a validator on PATH. Mirrors the TS/Python/Rust
+    /// external-toolchain conformance pattern — skip, never fail.
+    /// </summary>
+    private void ExternallyValidate(string fixture)
+    {
         var result = new KoineCompiler().Compile(
-            new[] { new SourceFile("ordering.koi", OrderingFixture) }, new OpenApiEmitter());
+            new[] { new SourceFile("ordering.koi", fixture) }, new OpenApiEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var check = TestSupport.ValidateOpenApi(result.Files);
         if (!check.ToolchainAvailable)
         {
-            // INCONCLUSIVE: validation is opt-in (set KOINE_OPENAPI_VALIDATE) and needs a validator on
-            // PATH. Mirrors the TS/Python/Rust external-toolchain conformance pattern — skip, never fail.
             _output.WriteLine("OpenAPI validation not enabled or no validator found; skipping conformance check.");
             return;
         }
 
         check.Ok.ShouldBeTrue("expected the emitted OpenAPI document to validate:\n" + string.Join("\n", check.Errors));
+    }
+
+    // ------------------------------------------------------------------
+    // R19 (#1219) — the openapi document reflects the @route / @get|@post|
+    // @put|@delete|@patch / @auth annotations, via the shared RouteDerivation.
+    // The three axes are independent, so an un-annotated model's document
+    // (the OrderingFixture snapshot above) stays byte-identical.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// The §annotated fixture points two commands at the same overridden path under different verbs — so
+    /// the emitted <c>paths</c> must merge them under one key — while the query carries only
+    /// <c>@auth</c> and therefore keeps its conventional <c>GET /orders-by-status</c>.
+    /// </summary>
+    private const string AnnotatedOrderingFixture = """
+        context Ordering {
+          enum OrderStatus { Draft, Submitted, Cancelled }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              /// Submit a draft order for fulfilment.
+              @route("/orders/{id}")
+              @put
+              @auth("admin")
+              command submit(note: String) {
+                requires status == Draft "only a draft order can be submitted"
+                status -> Submitted
+              }
+
+              /// Cancel an order that has not shipped yet.
+              @route("/orders/{id}")
+              @delete
+              command cancel {
+                requires status == Submitted "only a submitted order can be cancelled"
+                status -> Cancelled
+              }
+            }
+          }
+
+          readmodel OrderRow from Order {
+            status
+          }
+
+          /// All orders in a given lifecycle state.
+          @auth("analyst")
+          query OrdersByStatus(status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    [Fact]
+    public Task Paths_honor_the_route_verb_and_auth_annotations()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", AnnotatedOrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // The overridden path replaces the conventional one, and the verb key follows @put/@delete.
+        yaml.ShouldContain("\"/orders/{id}\":");
+        yaml.ShouldNotContain("/order/submit:");
+        yaml.ShouldNotContain("/order/cancel:");
+        yaml.ShouldContain("put:");
+        yaml.ShouldContain("delete:");
+        yaml.ShouldNotContain("post:");
+
+        // @auth("role") becomes an OpenAPI security-requirement object on the operation.
+        yaml.ShouldContain("security:");
+        yaml.ShouldContain("- admin: []");
+
+        // The query moved neither path nor verb — only its role axis was annotated.
+        yaml.ShouldContain("/orders-by-status:");
+        yaml.ShouldContain("get:");
+        yaml.ShouldContain("- analyst: []");
+
+        return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
+    }
+
+    /// <summary>
+    /// Two commands overriding to the same <c>@route</c> must merge under a single path key carrying both
+    /// verbs — a second entry for the same key would be a duplicate YAML mapping key, and an overwrite
+    /// would silently drop an operation.
+    /// </summary>
+    [Fact]
+    public void Commands_sharing_an_overridden_route_merge_under_one_path_key()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", AnnotatedOrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        var lines = yaml.Split('\n');
+
+        lines.Count(l => l.Trim() == "\"/orders/{id}\":").ShouldBe(1);
+        lines.Count(l => l.Trim() == "put:").ShouldBe(1);
+        lines.Count(l => l.Trim() == "delete:").ShouldBe(1);
+
+        // Both operations survived the merge.
+        yaml.ShouldContain("operationId: Order_submit");
+        yaml.ShouldContain("operationId: Order_cancel");
+    }
+
+    /// <summary>An un-annotated operation gains no <c>security</c> block — the role axis is opt-in.</summary>
+    [Fact]
+    public void Unannotated_operations_carry_no_security_block()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", OrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        result.Files.ShouldHaveSingleItem().Contents.ShouldNotContain("security:");
+    }
+
+    /// <summary>
+    /// The annotated document goes through the same real validator as the un-annotated one (#1219 code
+    /// review): substring assertions and a Verify snapshot both agreed on output that <c>redocly lint</c>
+    /// rejected with two <c>path-parameters-defined</c> errors, because the <c>@route</c> template's
+    /// <c>{id}</c> was never declared as a parameter. Pointing the existing harness at this fixture is
+    /// what closes that blind spot.
+    /// </summary>
+    [Fact]
+    public void Annotated_document_passes_external_openapi_validation_when_available() =>
+        ExternallyValidate(AnnotatedOrderingFixture);
+
+    /// <summary>
+    /// OpenAPI requires every <c>{token}</c> of a templated path to be declared as a required
+    /// <c>in: path</c> parameter — on <b>each</b> operation under that path, hence twice here.
+    /// </summary>
+    [Fact]
+    public void Route_template_tokens_are_declared_as_path_parameters()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", AnnotatedOrderingFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        var lines = yaml.Split('\n');
+
+        lines.Count(l => l.Trim() == "- name: id").ShouldBe(2);
+        lines.Count(l => l.Trim() == "in: path").ShouldBe(2);
+
+        // The un-annotated query keeps its criteria as query parameters, untouched.
+        yaml.ShouldContain("in: query");
+    }
+
+    /// <summary>
+    /// The ASP.NET template syntax a <c>@route</c> may carry is not part of the OpenAPI parameter name:
+    /// a constraint, an optional marker and a catch-all all reduce to the bare token, de-duplicated and
+    /// in declaration order, and a <c>{{</c>/<c>}}</c> literal-brace escape declares nothing.
+    /// </summary>
+    [Fact]
+    public void Path_parameter_names_strip_route_constraints_and_modifiers()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/tenants/{tenant}/orders/{id:int}/notes/{note?}/files/{*rest}/{{literal}}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "only a draft order can be submitted"
+                    status -> Submitted
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var names = result.Files.ShouldHaveSingleItem().Contents
+            .Split('\n')
+            .Where(l => l.TrimStart().StartsWith("- name: ", StringComparison.Ordinal))
+            .Select(l => l.Trim()["- name: ".Length..])
+            .ToArray();
+
+        names.ShouldBe(["tenant", "id", "note", "rest"]);
+    }
+
+    /// <summary>
+    /// Defence in depth for the KOI1211 collision (#1219 code review): the emitter can be driven without
+    /// the validator, and emitting the same verb key twice under one path yields a document no YAML parser
+    /// will read. The later operation is dropped deterministically — a lossy document beats an invalid one.
+    /// </summary>
+    [Fact]
+    public void Two_operations_sharing_a_route_and_verb_never_emit_a_duplicate_mapping_key()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted, Cancelled }
+
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "only a draft order can be submitted"
+                    status -> Submitted
+                  }
+
+                  @route("/orders/{id}")
+                  @put
+                  command cancel {
+                    requires status == Submitted "only a submitted order can be cancelled"
+                    status -> Cancelled
+                  }
+                }
+              }
+            }
+            """;
+
+        // The model is invalid (KOI1211), so the emitter is driven directly rather than through Compile.
+        (Ast.KoineModel? model, IReadOnlyList<Diagnostics.Diagnostic> diagnostics) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull(string.Join("\n", diagnostics.Select(d => d.ToString())));
+
+        var yaml = new OpenApiEmitter().Emit(model!).ShouldHaveSingleItem().Contents;
+
+        yaml.Split('\n').Count(l => l.Trim() == "put:").ShouldBe(1);
+        // First wins: the declaration that claimed the (route, verb) pair is the one that survives.
+        yaml.ShouldContain("operationId: Order_submit");
+        yaml.ShouldNotContain("operationId: Order_cancel");
     }
 }

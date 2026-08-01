@@ -1406,6 +1406,194 @@ public class PythonConformanceTests
     }
 
     /// <summary>
+
+    /// <summary>
+    /// Issue #1718 — the FOURTH call site of the #1701/#1712/#1716 qualifier-blind import gap, and
+    /// structurally worse than the first three: <c>EmitRepository</c> passed NO <c>symbolContext</c>
+    /// to <c>Assemble</c> at all (unlike the entity-file call sites #1712/#1716 extended, this one
+    /// never had ANY qualifier-aware import resolution). A repository finder's own parameter, here
+    /// <c>byShippingStatus</c>'s <c>status</c>, is declared with an EXPLICIT cross-context qualifier
+    /// (<c>Shipping.Status</c>) while <c>Ordering</c> separately declares its own, unrelated
+    /// <c>Status</c> enum — this is this issue's own repro model, verbatim.
+    /// </summary>
+    [Fact]
+    public void Repository_finder_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+                }
+
+                repository {
+                  find byShippingStatus(status: Shipping.Status): List<Order>
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var repo = FileText(result.Files, "ordering/repositories/order_repository.py");
+        repo.ShouldContain("from shipping.enums.status import Status");
+        repo.ShouldNotContain("from ordering.enums.status import Status");
+        repo.ShouldContain("async def by_shipping_status(self, status: Status) -> tuple[Order, ...]: ...");
+    }
+
+    /// <summary>
+    /// The application-service-boundary sibling of
+    /// <see cref="Repository_finder_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>
+    /// (issue #1718): <c>EmitApplicationService</c> shares the exact same qualifier-blind
+    /// parameter-hint gap — a <c>usecase</c>'s own parameter, not just a repository finder's.
+    /// </summary>
+    [Fact]
+    public void Application_service_usecase_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              service OrderService {
+                usecase SetShippingStatus(status: Shipping.Status)
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var svc = FileText(result.Files, "ordering/order_service.py");
+        svc.ShouldContain("from shipping.enums.status import Status");
+        svc.ShouldNotContain("from ordering.enums.status import Status");
+        svc.ShouldContain("async def set_shipping_status(self, status: Status) -> None: ...");
+    }
+
+    /// <summary>
+    /// The domain-service (pure <c>operation</c>) sibling of the same gap (issue #1718):
+    /// <c>EmitDomainService</c> shares the exact same qualifier-blind parameter-hint gap as
+    /// <c>EmitRepository</c>/<c>EmitApplicationService</c>.
+    /// </summary>
+    [Fact]
+    public void Domain_service_operation_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              service ShippingRouter {
+                operation currentStatus(status: Shipping.Status): Shipping.Status = status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var svc = FileText(result.Files, "ordering/shipping_router.py");
+        svc.ShouldContain("from shipping.enums.status import Status");
+        svc.ShouldNotContain("from ordering.enums.status import Status");
+        svc.ShouldContain("def current_status(self, status: Status) -> Status:");
+    }
+
+    /// <summary>
+    /// The mypy twin of
+    /// <see cref="Domain_service_operation_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>:
+    /// proves the bug at the TYPE level rather than just the emitted-text level. A synthetic downstream
+    /// consumer takes a <c>ShippingRouter</c>-typed parameter and passes <c>Shipping</c>'s own
+    /// <c>Status.ACTIVE</c> straight through <c>current_status</c> into a function that only accepts
+    /// <c>Shipping</c>'s own <c>Status</c>. Before the fix, <c>shipping_router.py</c>'s parameter/return
+    /// annotation resolved against <c>Ordering</c>'s own (differently-cased, same-named) <c>Status</c>
+    /// class — a REAL nominal-type mismatch under <c>mypy --strict</c>, even though both classes render
+    /// as the bare name <c>Status</c> in source. Skipped (not failed) when no <c>mypy</c> toolchain is
+    /// present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Domain_service_operation_parameter_import_qualification_typechecks_at_mypy_strict()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              service ShippingRouter {
+                operation currentStatus(status: Shipping.Status): Shipping.Status = status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string consumer = """
+            from shipping.enums.status import Status
+            from ordering.shipping_router import ShippingRouter
+
+
+            def take_shipping_status(status: Status) -> None:
+                pass
+
+
+            def use_router(router: ShippingRouter) -> None:
+                take_shipping_status(router.current_status(Status.ACTIVE))
+            """;
+        var files = result.Files.Append(new EmittedFile("consumer.py", consumer)).ToList();
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "current_status's 'status' parameter/return must bind Shipping's own Status enum "
+            + "(not Ordering's wrongly imported, differently-cased same-named sibling enum) so a "
+            + "downstream consumer type-checks:\n" + string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
     /// Issue #1531 (audit, Task 3) — the Rust (#1467/PR #1476) and Java (#1480/PR #1521) emitters both
     /// shipped the identical bug in their factory constructor-argument loop's auto-bound branch: a
     /// <c>required</c>-bucket member declared optional but carrying no member-level default
