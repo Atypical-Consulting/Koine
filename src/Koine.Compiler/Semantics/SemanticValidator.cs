@@ -1438,20 +1438,22 @@ public sealed class SemanticValidator
         // (#1711/#1713/#1709), NOT to fix a live bug: it is defense-in-depth. The three checks below
         // branch only on (a) whether `kind` is Unknown and (b) whether it is a built-in generic, and
         // Unknown-ness provably cannot diverge between the two overloads — `_byName` and
-        // `_declsByContext` come from the SAME traversal (ContextNode.AllTypeDecls), so a collision
-        // only overwrites a slot's value, never removes the key, and `ClassifyDecl` covers every
-        // `TypeDecl` subtype. Measured, not assumed: over all 715 type references in the eight shipped
-        // templates plus an adversarial collision matrix, the two overloads never once disagreed on
-        // Unknown-ness or collection-ness.
+        // `_declsByContext` are populated by two independent traversals that enumerate the same
+        // declaration set (`ModelIndex.IndexType` over `ctx.Types` plus its own aggregate recursion,
+        // and `ContextNode.AllTypeDecls()`), so any name resolvable in a context is also a key in the
+        // flat table: a collision only overwrites a slot's value, never removes the key, and
+        // `ClassifyDecl` covers every `TypeDecl` subtype. That equivalence is asserted, not assumed —
+        // `ModelIndexClassifyTests.Context_aware_and_flat_Classify_never_disagree_on_unknown_ness_across_all_templates`
+        // walks every type reference in every shipped template and fails the moment the two traversals drift.
         // Built-in names deliberately keep PRECEDENCE over a context-local declaration: KOI0908 already
         // forbids a type from taking one, so on an already-invalid model declaring `value List` /
         // `value Range` a plain `Classify(resolver.Context, …)` would let the local declaration shadow
         // the built-in and silence the KOI0107 arity / KOI0907 orderable reports that fire today
-        // alongside KOI0908. Pinned by R9ValueObjectTests' two `…still_reports_…_alongside_KOI0908` tests.
-        TypeKind flat = index.Classify(type.Name);
-        TypeKind kind = flat is TypeKind.Primitive or TypeKind.List or TypeKind.Set or TypeKind.Map or TypeKind.Range
-            ? flat
-            : index.Classify(resolver.Context, type.Name);
+        // alongside KOI0908. `ModelIndex.ClassifyBuiltIn` is the single source of truth for that set —
+        // the same prefix `Classify(string)` runs before consulting the declared types — so a new
+        // built-in cannot drift out of sync with this site. Pinned by R9ValueObjectTests' two
+        // `…still_reports_…_alongside_KOI0908` tests.
+        TypeKind kind = ModelIndex.ClassifyBuiltIn(type.Name) ?? index.Classify(resolver.Context, type.Name);
 
         // A qualified `Context.T` is validated by the context-scoping pass (UnknownContext /
         // NotExported); skip the global unknown-type check here to avoid a double report.

@@ -391,6 +391,10 @@ public class R12ApplicationTests
         // The field's declared `Status` resolves to Ordering's enum, which is exactly what the
         // projection yields — no KOI1204, even though a differently-kinded `Shipping.Status` owns
         // the global name slot.
+        // Regression pin: this passes on `main` too — the KOI1204 gate consumes only a boolean
+        // (`IsKnownType`) whose value provably can't diverge between the two Classify overloads, and
+        // `MemberAnalysis.IsAssignable` is pure name-shape matching. The diff-sensitive guards for
+        // #1715 are R9ValueObjectTests' two `…_alongside_KOI0908` tests.
         Diagnose(ShadowedStatusMatching).ShouldNotContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
     }
 
@@ -400,6 +404,11 @@ public class R12ApplicationTests
         // The KOI1204 gate is guarded by `IsKnownType(<declared type>)`: the mismatch is only
         // reported when the declared type resolves. A cross-context collision on `Status` must not
         // suppress it.
+        // Regression pin: this passes on `main` too — the gate consumes only that boolean, whose
+        // value provably can't diverge between the two Classify overloads, and the mismatch itself is
+        // decided by `MemberAnalysis.IsAssignable`, pure name-shape matching that is wholly
+        // context-insensitive. The diff-sensitive guards for #1715 are R9ValueObjectTests' two
+        // `…_alongside_KOI0908` tests.
         Diagnose(ShadowedStatusMismatching).ShouldContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
     }
 

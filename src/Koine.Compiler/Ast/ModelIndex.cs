@@ -1369,8 +1369,19 @@ public sealed class ModelIndex
 
     private static readonly RefResolution Ok = new(RefKind.Resolved, Array.Empty<string>());
 
-    /// <summary>Classifies a type by its simple name.</summary>
-    public TypeKind Classify(string typeName)
+    /// <summary>
+    /// The built-in half of <see cref="Classify(string)"/>: the kind of a language built-in (a
+    /// primitive or one of the generic collection/range names), or <see langword="null"/> when the
+    /// name is not a built-in and must be looked up among the declared types.
+    /// <para>
+    /// Factored out so this set has ONE definition. Callers that must keep built-ins ahead of a
+    /// context-local declaration of the same name — <c>SemanticValidator.ValidateTypeRef</c>, on an
+    /// already-invalid model where KOI0908 forbids the shadowing declaration — ask this directly
+    /// instead of hand-copying the list, so adding a sixth built-in here cannot silently change
+    /// their precedence.
+    /// </para>
+    /// </summary>
+    internal static TypeKind? ClassifyBuiltIn(string typeName)
     {
         if (Primitives.Contains(typeName))
         {
@@ -1395,6 +1406,17 @@ public sealed class ModelIndex
         if (typeName == RangeTypeName)
         {
             return TypeKind.Range;
+        }
+
+        return null;
+    }
+
+    /// <summary>Classifies a type by its simple name.</summary>
+    public TypeKind Classify(string typeName)
+    {
+        if (ClassifyBuiltIn(typeName) is { } builtIn)
+        {
+            return builtIn;
         }
 
         if (_byName.TryGetValue(typeName, out TypeDecl? decl))
