@@ -236,7 +236,7 @@ appended to the result's notes rather than left implied:
 | Managed-heap ceiling (1 GiB) | ✅ | ✅ | ✅ *(also capped by a Job Object)* |
 | Processor-time ceiling | ✅ | ✅ | ✅ *(Job Object)* |
 | Network denied | ✅ | ⚠️ *(only where unprivileged user namespaces are permitted)* | ❌ *(reported)* |
-| Writes confined to the run directory | ✅ | ❌ *(reported)* | ❌ *(reported)* |
+| Writes confined to the run directory | ✅ | ⚠️ *(kernel 5.13+, via Landlock)* | ❌ *(reported)* |
 
 The memory row is a **managed-heap** ceiling on macOS and Linux — the .NET runtime enforces it, and it
 bounds the managed heap, which is where an allocation storm in emitted code lands. It does not bound
@@ -245,6 +245,12 @@ native allocations; only the Windows Job Object caps those too.
 Linux network denial uses an unprivileged network namespace, which several distributions restrict —
 Ubuntu 24.04's AppArmor policy blocks it by default, and this project's own CI runners fall in that
 group. Where it is blocked, the run says so in its notes rather than pretending otherwise.
+
+Linux write confinement uses **Landlock**, which needs no privileges and no user namespace, so it works
+even on the hosts that restrict namespaces. It needs a kernel of 5.13 or newer with Landlock enabled; on
+anything older the run says so in its notes. Because the ruleset has to be installed by the process it
+confines, `koine` re-executes itself as a small launcher that installs it and then `exec`s the scenario
+child — which is why `TMPDIR` inside a confined run points at the run directory.
 
 Reads are unrestricted everywhere — the child has to load the .NET runtime and its own assemblies. A run
 stopped by a *resource* ceiling says so by name, so an allocation storm is never reported as an infinite
@@ -257,7 +263,7 @@ code — a hang, a crash, or an allocation storm costs you one dead child proces
 your session — and, where the platform allows it, stops that code touching the network or your files.
 
 It is still **not** a containment boundary for a model you do not trust: reads are open everywhere, and
-two of the three platforms cannot confine writes at all. The boundary rests on the fact that you are
+Windows cannot confine writes at all. The boundary rests on the fact that you are
 running **your own model on your own machine** — code you could equally have produced with `koine build`
 and run yourself. The reasoning, the trust model and exactly what is enforced where are recorded in
 [ADR 0011 — Scenario execution runs in a killable child process](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0011-scenario-execution-sandbox.md)
