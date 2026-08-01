@@ -66,7 +66,11 @@ public class RustCargoTargetDirConcurrencyTests
             results[i] = TestSupport.CompileRust(i % 2 == 0 ? goodFiles : badFiles);
         });
 
-        TestSupport.RequireOrSkip(results[0].ToolchainAvailable, NoToolchainNotice);
+        // Check every invocation, not just the first: a genuinely absent toolchain skips all of them
+        // identically, but a transient per-process launch failure could skip just one, and treating
+        // that as a real Ok=false would be a spurious failure unrelated to the concurrency bug this
+        // test guards against.
+        TestSupport.RequireOrSkip(results.All(r => r.ToolchainAvailable), NoToolchainNotice);
 
         for (int i = 0; i < concurrency; i++)
         {
