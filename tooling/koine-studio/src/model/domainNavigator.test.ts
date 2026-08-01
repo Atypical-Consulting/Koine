@@ -4,6 +4,7 @@ import { h } from 'preact';
 import {
   DomainNavigator,
   mountDomainNavigator,
+  renderContextMapLevel,
   renderStrategic,
   renderTactical,
   type DomainNavigatorHandlers,
@@ -138,6 +139,122 @@ describe('renderTactical', () => {
   });
 });
 
+// --- the behavioural vocabulary (#483): the rows the model graph now carries below an aggregate -----
+// The round-trip graph emits an aggregate's `repository`/`spec` and an ENTITY's `states`/`command`/
+// `factory` children, plus the context-level `policy`/`service`/`spec`/`read-model`/`query` peers. The
+// tactical tree used to descend only aggregate → leaf, so everything an entity owned was silently
+// dropped; each of these rows must now render with the slug `constructForKind` resolves for its kind.
+const behaviouralCtx = (): ModelNode =>
+  ctxNode('Ordering', [
+    aggNode('Order', [
+      modelNode('entity', 'OrderLine', [
+        modelNode('states', 'status'),
+        modelNode('command', 'place'),
+        modelNode('factory', 'draft'),
+      ]),
+      modelNode('repository', 'repository'),
+      modelNode('spec', 'Overdue'),
+    ]),
+    modelNode('policy', 'NotifyOnPlaced'),
+    modelNode('service', 'PricingService'),
+    modelNode('read-model', 'OrderSummary'),
+    modelNode('query', 'FindOpenOrders'),
+    modelNode('spec', 'HighValue'),
+  ]);
+
+/** The activation control addressing `name` (a leaf's button, or a branch node's head row). */
+const rowFor = (el: HTMLElement, name: string) => el.querySelector<HTMLElement>(`[data-name="${name}"]`);
+
+/** Every rendered `treeitem` in DOM order, named by the control it OWNS (its direct child) — so a branch
+ *  row reports its own name, not the first name in its nested spine. */
+const rowNames = (el: HTMLElement): (string | undefined)[] =>
+  [...el.querySelectorAll<HTMLElement>('[role="treeitem"]')].map(
+    (r) => r.querySelector<HTMLElement>(':scope > [data-name]')?.dataset.name,
+  );
+
+describe('renderTactical — behavioural vocabulary (#483)', () => {
+  it('renders the entity-owned states/command/factory rows with their construct slugs', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    const agg = el.querySelector<HTMLElement>('[data-qname="Ordering.Order"]')!;
+    // The entity is no longer a dead-end leaf: it owns a nested branch of behavioural rows.
+    const entityRow = agg.querySelector<HTMLElement>('[role="treeitem"][data-qname="OrderLine"]')!;
+    expect(entityRow).toBeTruthy();
+
+    expect(rowFor(entityRow, 'status')?.getAttribute('data-construct')).toBe('state-machine');
+    expect(rowFor(entityRow, 'place')?.getAttribute('data-construct')).toBe('command');
+    expect(rowFor(entityRow, 'draft')?.getAttribute('data-construct')).toBe('factory');
+    // Each is its own treeitem row (not just decoration inside the entity's row).
+    for (const name of ['status', 'place', 'draft']) {
+      expect(rowFor(entityRow, name)!.parentElement!.getAttribute('role')).toBe('treeitem');
+    }
+  });
+
+  it('renders the aggregate-owned repository/spec rows with their construct slugs', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    const agg = el.querySelector<HTMLElement>('[data-qname="Ordering.Order"]')!;
+    expect(rowFor(agg, 'repository')?.getAttribute('data-construct')).toBe('repository');
+    expect(rowFor(agg, 'Overdue')?.getAttribute('data-construct')).toBe('spec');
+  });
+
+  it('renders the context-level policy/service/read-model/query/spec peers with their construct slugs', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    const peers = el.querySelector<HTMLElement>('.koi-ctx-peers')!;
+    expect(rowFor(peers, 'NotifyOnPlaced')?.getAttribute('data-construct')).toBe('policy');
+    expect(rowFor(peers, 'PricingService')?.getAttribute('data-construct')).toBe('service');
+    expect(rowFor(peers, 'OrderSummary')?.getAttribute('data-construct')).toBe('read-model');
+    expect(rowFor(peers, 'FindOpenOrders')?.getAttribute('data-construct')).toBe('query');
+    expect(rowFor(peers, 'HighValue')?.getAttribute('data-construct')).toBe('spec');
+  });
+
+  it('preserves declaration order across the added depth', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    expect(rowNames(el)).toEqual([
+      'Order',
+      'OrderLine',
+      'status',
+      'place',
+      'draft',
+      'repository',
+      'Overdue',
+      'NotifyOnPlaced',
+      'PricingService',
+      'OrderSummary',
+      'FindOpenOrders',
+      'HighValue',
+    ]);
+  });
+
+  it('keeps every added row reachable by the roving-tabindex tree keyboard model', () => {
+    const el = renderTactical(behaviouralCtx(), noopTacticalHandlers());
+    document.body.appendChild(el);
+    const items = [...el.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    expect(items.length).toBe(12);
+
+    // A single tab stop, seeded on the first row (the nested rows must not steal or duplicate it).
+    expect(items.filter((it) => it.tabIndex === 0)).toEqual([items[0]]);
+
+    // ArrowDown walks EVERY row in DOM order — including the entity's nested behavioural rows.
+    items[0].focus();
+    for (let i = 1; i < items.length; i++) {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      expect(document.activeElement).toBe(items[i]);
+    }
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }));
+    expect(document.activeElement).toBe(items[0]);
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    expect(document.activeElement).toBe(items[items.length - 1]);
+  });
+
+  it('selecting a nested behavioural row selects + jumps to it', () => {
+    const onSelect = vi.fn();
+    const goto = vi.fn();
+    const el = renderTactical(behaviouralCtx(), { onSelect, goto, reveal: vi.fn(), setAxis: vi.fn() });
+    (rowFor(el, 'place') as HTMLButtonElement).click();
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: 'command', title: 'place' }));
+    expect(goto).toHaveBeenCalledWith(expect.objectContaining({ kind: 'command', title: 'place' }));
+  });
+});
+
 // --- cross-axis leaf actions: select → goto + the "Reveal in Files" overflow (Task 5, #453) --------
 describe('renderTactical — cross-axis leaf actions', () => {
   const ctxWithLeaf = (): ModelNode => ctxNode('Ordering', [value('Currency')]);
@@ -202,6 +319,213 @@ describe('renderTactical — leaf ⋯ menu dismissal', () => {
 
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     expect(document.querySelector('.koi-tactical-menu')).toBeNull();
+  });
+});
+
+// --- the STRATEGIC Context Map graph behind the doorway (#483) ------------------------------------
+// A typed context map: one directional customer/supplier relation, one anti-corruption-layer relation,
+// and (in the symmetric fixture) a partnership. The per-end `upstreamRole`/`downstreamRole` are derived
+// SERVER-side (#483 Task 3) — the navigator only badges what the payload carries, and a null role (the
+// symmetric patterns) must render NO badge at all.
+const salesSpan = { file: 'file:///sales.koi', line: 3, column: 9, endLine: 3, endColumn: 14, offset: 20, length: 5 };
+
+function typedContextMap(): ContextMapResult {
+  return {
+    contexts: ['Sales', 'Shipping', 'Legacy'],
+    // Sales carries its declaration span (jump-to-declaration); Shipping's is null (a recovered parse).
+    contextSpans: { Sales: salesSpan, Shipping: null },
+    relations: [
+      {
+        upstream: 'Sales',
+        downstream: 'Shipping',
+        kind: 'Customer/Supplier',
+        bidirectional: false,
+        sharedTypes: ['Address'],
+        acl: [],
+        upstreamRole: 'Supplier',
+        downstreamRole: 'Customer',
+      },
+      {
+        upstream: 'Legacy',
+        downstream: 'Shipping',
+        kind: 'Anticorruption Layer',
+        bidirectional: false,
+        sharedTypes: [],
+        acl: [{ upstreamContext: 'Legacy', upstreamType: 'Customer', localContext: 'Shipping', localType: 'Recipient' }],
+        upstreamRole: 'Upstream',
+        downstreamRole: 'Anti-Corruption Layer',
+      },
+    ],
+  };
+}
+
+/** A symmetric relation — partnership / shared kernel: neither end has a distinct role (null/null). */
+function symmetricContextMap(): ContextMapResult {
+  return {
+    contexts: ['Sales', 'Support'],
+    relations: [
+      {
+        upstream: 'Sales',
+        downstream: 'Support',
+        kind: 'Partnership',
+        bidirectional: true,
+        sharedTypes: [],
+        acl: [],
+        upstreamRole: null,
+        downstreamRole: null,
+      },
+    ],
+  };
+}
+
+const ctxmapNodes = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('[data-ctxmap-node]')];
+const ctxmapEdges = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.koi-domain-ctxmap-edge')];
+const roleAt = (edge: HTMLElement, end: 'upstream' | 'downstream') =>
+  edge.querySelector<HTMLElement>(`[data-role-end="${end}"]`)?.textContent;
+
+describe('renderContextMapLevel', () => {
+  it('renders one node per context and one edge per relation, badging BOTH ends with its derived roles', () => {
+    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
+
+    // Nodes = contexts (declaration order), each addressable by name.
+    expect(ctxmapNodes(el).map((n) => n.dataset.ctxmapNode)).toEqual(['Sales', 'Shipping', 'Legacy']);
+
+    // Edges = the typed relations, in declaration order, each naming both ends + the relationship kind.
+    const edges = ctxmapEdges(el);
+    expect(edges).toHaveLength(2);
+    expect(edges[0].textContent).toContain('Sales');
+    expect(edges[0].textContent).toContain('Shipping');
+    expect(edges[0].textContent).toContain('Customer/Supplier');
+
+    // …and BOTH ends carry the DDD role badge the payload derived for them.
+    expect(roleAt(edges[0], 'upstream')).toBe('Supplier');
+    expect(roleAt(edges[0], 'downstream')).toBe('Customer');
+    expect(roleAt(edges[1], 'upstream')).toBe('Upstream');
+    expect(roleAt(edges[1], 'downstream')).toBe('Anti-Corruption Layer');
+
+    // The row's accessible name carries the same reading (the `→` glyph is decorative).
+    expect(edges[0].getAttribute('aria-label')).toBe('Sales as Supplier to Shipping as Customer, Customer/Supplier');
+  });
+
+  it('a symmetric relation (partnership / shared kernel) renders NO role badge at either end', () => {
+    const el = renderContextMapLevel(symmetricContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
+    const edge = ctxmapEdges(el)[0];
+
+    // A null role is an ABSENT badge — not an empty pill, and never the string "null".
+    expect(edge.querySelectorAll('.koi-domain-ctxmap-role')).toHaveLength(0);
+    expect(edge.textContent).not.toContain('null');
+    // Both ends are still named, and the undirected glyph replaces the arrow.
+    expect(edge.getAttribute('aria-label')).toBe('Sales and Support, Partnership');
+  });
+
+  it('a context-node click jumps to its declaration (contextSpans); a span-less node stays inert', () => {
+    const goto = vi.fn();
+    const el = renderContextMapLevel(typedContextMap(), { goto, openFullMap: vi.fn() });
+
+    (el.querySelector('[data-ctxmap-node="Sales"]') as HTMLButtonElement).click();
+    expect(goto).toHaveBeenCalledWith(salesSpan.line, salesSpan.column); // the raw 1-based span
+
+    goto.mockClear();
+    (el.querySelector('[data-ctxmap-node="Shipping"]') as HTMLButtonElement).click();
+    expect(goto).not.toHaveBeenCalled(); // no span (recovered parse) ⇒ inert, not a crash
+  });
+
+  it('an empty context map renders a quiet note, not an empty tree', () => {
+    const el = renderContextMapLevel({ contexts: [], relations: [] }, { goto: vi.fn(), openFullMap: vi.fn() });
+    expect(el.getAttribute('role')).toBe('note');
+    expect(el.querySelector('[role="treeitem"]')).toBeNull();
+  });
+
+  // Two relations between the SAME pair of contexts: the row address must still tell them apart, so it
+  // carries the declaration index alongside the pair (a bare `from→to` collided).
+  it('addresses each edge row unambiguously when two relations share a context pair', () => {
+    const el = renderContextMapLevel(
+      {
+        contexts: ['Sales', 'Shipping'],
+        relations: [
+          {
+            upstream: 'Sales',
+            downstream: 'Shipping',
+            kind: 'Customer/Supplier',
+            bidirectional: false,
+            sharedTypes: [],
+            acl: [],
+            upstreamRole: 'Supplier',
+            downstreamRole: 'Customer',
+          },
+          {
+            upstream: 'Sales',
+            downstream: 'Shipping',
+            kind: 'Open Host Service',
+            bidirectional: false,
+            sharedTypes: [],
+            acl: [],
+            upstreamRole: 'Open Host Service',
+            downstreamRole: 'Downstream',
+          },
+        ],
+      },
+      { goto: vi.fn(), openFullMap: vi.fn() },
+    );
+    expect(ctxmapEdges(el).map((e) => e.dataset.ctxmapEdge)).toEqual(['Sales→Shipping#0', 'Sales→Shipping#1']);
+  });
+
+  // The rail level SUMMARIZES the map; the center-deck view owns the canvas, the Graph/Table toggle and
+  // the shared-type / ACL detail strip. So the level closes with a door back to it — otherwise opening
+  // the rail level would strand a reader away from the richer destination.
+  it('closes with an "Open full Context Map" row that hands off to the caller', () => {
+    const openFullMap = vi.fn();
+    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap });
+
+    const door = el.querySelector<HTMLButtonElement>('[data-door="contextmap-full"]')!;
+    expect(door).toBeTruthy();
+    // Same treeitem idiom as every other row, so the roving-tabindex model reaches it…
+    expect(door.getAttribute('role')).toBe('treeitem');
+    // …and it names both the action and where it lands (the row text alone would be ambiguous).
+    expect(door.getAttribute('aria-label')).toBe('Open full Context Map — the canvas, table and shared-type details');
+    expect([...el.querySelectorAll<HTMLElement>('[role="treeitem"]')].at(-1)).toBe(door); // last, after the map
+
+    door.click();
+    expect(openFullMap).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- Enter/Space activation only claims the key when there IS something to activate ----------------
+// The navigator's `treeNav.activate` forwards Enter/Space from a wrapper `treeitem` to the button inside
+// it. A wrapper with no button (a context-map relation row — pure information) must report the key
+// UNCONSUMED: the shared router calls `preventDefault()` on a `true`, which would swallow Space's native
+// scroll while doing nothing at all.
+describe('Domain navigator — Enter/Space activation', () => {
+  const press = (el: HTMLElement, key: string): KeyboardEvent => {
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+
+  it('a relation row has nothing to activate — Space is left to the browser', () => {
+    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
+    document.body.appendChild(el);
+    const edge = ctxmapEdges(el)[0];
+    edge.focus();
+
+    expect(press(edge, ' ').defaultPrevented).toBe(false);
+    expect(press(edge, 'Enter').defaultPrevented).toBe(false);
+  });
+
+  it('a tactical leaf row still forwards Space to its activation button (the key IS consumed)', () => {
+    const onSelect = vi.fn();
+    const el = renderTactical(ctxNode('Ordering', [value('Currency')]), {
+      onSelect,
+      goto: vi.fn(),
+      reveal: vi.fn(),
+      setAxis: vi.fn(),
+    });
+    document.body.appendChild(el);
+    const row = el.querySelector<HTMLElement>('.koi-tactical-leaf-row')!;
+    row.focus();
+
+    expect(press(row, ' ').defaultPrevented).toBe(true);
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -275,6 +599,162 @@ describe('mountDomainNavigator', () => {
     (host.querySelector('[data-door="glossary"]') as HTMLButtonElement).click();
     expect(onOpenContextMap).toHaveBeenCalledTimes(1);
     expect(onOpenGlossary).toHaveBeenCalledTimes(1);
+  });
+
+  // --- the Context Map doorway opens the in-navigator strategic graph (#483) ----------------------
+  // The doorway now has TWO destinations: a model that declares relationships gets the navigator's own
+  // graph level (nodes + typed, role-badged edges); a model with none keeps the pre-#483 hand-off to the
+  // caller's docs/center-deck view, which is where "no context map declared" belongs.
+  const typedLsp = () => ({
+    glossaryModel: vi.fn(async (): Promise<GlossaryModel> => fakeGlossary(['Ordering', 'Billing'])),
+    contextMap: vi.fn(async (): Promise<ContextMapResult> => typedContextMap()),
+    model: vi.fn(async () => ({ kind: 'model', qualifiedName: '', title: '', members: [], children: [] })),
+  });
+
+  it('the Context Map doorway opens the in-navigator graph when the model declares relations', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOpenContextMap = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { onOpenContextMap });
+    await flush();
+
+    // The doorway badge counts the relations…
+    expect(host.querySelector('[data-door="contextmap"] .koi-domain-door-count')?.textContent).toBe('2');
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+
+    // …and opening it paints the graph level IN the navigator (no hand-off to the docs view).
+    expect(onOpenContextMap).not.toHaveBeenCalled();
+    expect(host.querySelectorAll('[data-ctxmap-node]')).toHaveLength(3);
+    expect(host.querySelectorAll('.koi-domain-ctxmap-edge')).toHaveLength(2);
+    expect(host.querySelector('.koi-ctx-row')).toBeNull(); // the strategic list gave way to the graph
+
+    // The breadcrumb climbs back to the strategic context list, like the tactical level's.
+    (host.querySelector('.koi-breadcrumb-back') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-edge')).toBeNull();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy();
+  });
+
+  it('a context-node click in the graph jumps to its declaration through the navigator\'s goto seam', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const goto = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { goto });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    (host.querySelector('[data-ctxmap-node="Sales"]') as HTMLButtonElement).click();
+    expect(goto).toHaveBeenCalledWith(salesSpan.line, salesSpan.column);
+  });
+
+  it('a model with NO relations keeps the docs hand-off — the doorway delegates to the caller', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOpenContextMap = vi.fn();
+    // fakeLsp()'s context map declares contexts but no relations — nothing to graph.
+    mountDomainNavigator(host, makeTestStore(), fakeLsp(), { onOpenContextMap });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(onOpenContextMap).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull(); // no in-navigator graph
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // still the strategic list
+  });
+
+  // The rail level summarizes the map; the center-deck view owns the canvas, the Graph/Table toggle and
+  // the shared-type / ACL detail strip. The doorway prefers the rail level whenever there's something to
+  // graph — so the level itself must carry the way on to the richer destination, or opening it would be a
+  // one-way trip away from the very view it used to reach.
+  it('the graph level\'s "Open full Context Map" row still reaches the caller\'s center-deck view', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOpenContextMap = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { onOpenContextMap });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(onOpenContextMap).not.toHaveBeenCalled(); // the doorway opened the rail level, not the hand-off
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    (host.querySelector('[data-door="contextmap-full"]') as HTMLButtonElement).click();
+    expect(onOpenContextMap).toHaveBeenCalledTimes(1); // …and the level's own door hands off anyway
+  });
+
+  it('an external scope change leaves the graph — it is a strategic-level view, not a sticky one', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, typedLsp());
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    store.getState().setActiveContext('Billing'); // the top-bar switcher
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy();
+  });
+
+  // The other half of the same reset: an ALTITUDE change (a drill driven from outside the navigator)
+  // must drop the graph too — the scope-change half above shares one `closedContextMap` condition with it.
+  it('an external altitude change leaves the graph as well', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, typedLsp());
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    store.getState().setNavAltitude('tactical'); // an altitude move with the scope left alone
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // unscoped ⇒ the strategic list
+  });
+
+  // Closing the graph WITHOUT an altitude change tears the focused row down all the same, so the
+  // subscription's `else if (closedContextMap)` arm has to recover focus into the fresh level (WCAG 2.4.3)
+  // — the `navAltitude !== paintedAltitude` arm above it never fires for a same-altitude scope switch.
+  it('a scope switch made while reading the graph lands focus in the fresh strategic level', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, typedLsp());
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    const salesNode = host.querySelector<HTMLElement>('[data-ctxmap-node="Sales"]')!;
+    salesNode.focus();
+    expect(document.activeElement).toBe(salesNode);
+
+    store.getState().setActiveContext('Billing'); // the top-bar switcher, at the SAME altitude
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    // Focus follows the level swap instead of dropping to <body> and restarting the Tab order at the chrome.
+    expect(document.activeElement).toBe(host.querySelector('[data-ctx="Ordering"]'));
+  });
+
+  // A reload that FAILS leaves no map to draw, so the presenter's `contextMapOpen && cache?.contextMap`
+  // guard falls through and the graph vanishes. The flag has to fall with it — otherwise it stays `true`
+  // invisibly and the next SUCCESSFUL reload teleports the reader back into a level they never re-opened.
+  it('a failed reload closes the Context Map level — a later good reload does NOT re-enter it', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const lsp = typedLsp();
+    const handle = mountDomainNavigator(host, makeTestStore(), lsp);
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    lsp.contextMap.mockRejectedValueOnce(new Error('boom')); // a dropped connection mid-session
+    handle.reload();
+    await flush();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    expect(host.querySelector('.koi-domain-empty')).toBeTruthy(); // the best-effort empty strategic state
+
+    handle.reload(); // …and the model comes back
+    await flush();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull(); // no silent re-entry
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // the level navAltitude names
   });
 
   it('labels the glossary doorway "Glossary" but keeps "the ubiquitous language" in its accessible name', async () => {
@@ -546,6 +1026,28 @@ describe('DomainNavigator component (props-driven)', () => {
     expect(container.querySelector('.koi-ctx-row')).toBeNull(); // not the strategic list
   });
 
+  // The strategic Context Map graph is a third level the presenter can paint (#483): opened through the
+  // doorway, it replaces the context list until its breadcrumb closes it. The per-level filter doesn't
+  // apply to a cross-context graph, so it hides — the same way it does for the loading placeholder.
+  it('renders the Context Map graph level when contextMapOpen is set', () => {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'strategic',
+        activeContext: 'all',
+        outlineFilter: '',
+        cache: { ...cache, contextMap: typedContextMap() },
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+        contextMapOpen: true,
+      }),
+    );
+    expect(container.querySelectorAll('.koi-domain-ctxmap-edge')).toHaveLength(2);
+    expect(container.querySelector('.koi-ctx-row')).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('input.koi-domain-filter')!.hidden).toBe(true);
+  });
+
   it('the explicit `.tsx` import resolves to a real component (not the case-collision barrel) and renders rows', () => {
     expect(typeof DomainNavigatorViaTsx).toBe('function');
     const { container } = renderComponent(
@@ -563,6 +1065,44 @@ describe('DomainNavigator component (props-driven)', () => {
     // A `undefined` component would make Preact render the literal "[object Object]" with no error.
     expect(container.textContent).not.toContain('[object Object]');
     expect(container.querySelectorAll('.koi-ctx-row').length).toBe(2);
+  });
+
+  // The tactical filter must reach the depth the behavioural vocabulary added (#483): a nested row that
+  // matches keeps its OWNING chain visible, and a branch that matches by name keeps its whole subtree.
+  function tacticalWithFilter(outlineFilter: string): HTMLElement {
+    const { container } = renderComponent(
+      h(DomainNavigator, {
+        store: createAppStore(),
+        navAltitude: 'tactical',
+        activeContext: 'Ordering',
+        outlineFilter,
+        cache: { ...cache, tree: modelNode('model', '', [behaviouralCtx()]) },
+        contentToken: 0,
+        handlers: noopHandlers,
+        tacticalHandlers,
+      }),
+    );
+    return container as HTMLElement;
+  }
+
+  it('a matching nested behavioural row keeps its aggregate + entity ancestors visible', () => {
+    const el = tacticalWithFilter('draft');
+    expect(rowFor(el, 'draft')).toBeTruthy();
+    expect(el.querySelector('[data-qname="Ordering.Order"]')).toBeTruthy(); // the owning aggregate survives…
+    expect(el.querySelector('[data-qname="OrderLine"]')).toBeTruthy(); // …and so does the owning entity
+    // Only the matching chain survives: the row's non-matching siblings, the aggregate's other owned
+    // constructs, and every context-level peer are pruned.
+    expect(rowNames(el)).toEqual(['Order', 'OrderLine', 'draft']);
+  });
+
+  it('a matching entity keeps its whole behavioural subtree', () => {
+    const el = tacticalWithFilter('OrderLine');
+    expect(rowNames(el)).toEqual(['Order', 'OrderLine', 'status', 'place', 'draft']);
+  });
+
+  it('a matching context-level behavioural peer shows on its own', () => {
+    const el = tacticalWithFilter('Pricing');
+    expect(rowNames(el)).toEqual(['PricingService']);
   });
 
   it('the filter input is controlled by the outlineFilter prop', () => {

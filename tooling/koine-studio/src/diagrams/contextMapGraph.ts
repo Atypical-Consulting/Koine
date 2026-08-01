@@ -21,6 +21,14 @@ export interface ContextMapEdge extends DiagramEdge {
   sharedTypes: string[];
   /** Anticorruption-layer mappings (upstream type → local type) declared on the relation. */
   acl: AclMapping[];
+  /** The DDD role the UPSTREAM end plays, as derived server-side from `kind` (#483) — e.g. 'Supplier'
+   *  for customer/supplier, 'Open Host Service' for open host. `null` for the SYMMETRIC patterns
+   *  (partnership / shared kernel), where neither peer has a distinct role: a consumer must then badge
+   *  NOTHING rather than an empty label. */
+  upstreamRole: string | null;
+  /** The DDD role the DOWNSTREAM end plays (e.g. 'Customer', 'Conformist', 'Anti-Corruption Layer');
+   *  `null` for the symmetric patterns, like {@link upstreamRole}. */
+  downstreamRole: string | null;
 }
 
 /**
@@ -81,6 +89,12 @@ export function buildContextMapGraph(res: ContextMapResult): ContextMapGraph {
     bidirectional: r.bidirectional,
     sharedTypes: r.sharedTypes,
     acl: r.acl,
+    // Carried through verbatim (#483): the roles are derived ONCE, server-side, so every renderer
+    // (this canvas, the Domain navigator's strategic graph) badges a relation identically. A pre-#483
+    // payload omits them entirely → null, which reads as "no distinct role", exactly like a symmetric
+    // relation's ends, so an older server degrades to un-badged edges rather than to "undefined".
+    upstreamRole: r.upstreamRole ?? null,
+    downstreamRole: r.downstreamRole ?? null,
   }));
 
   return { nodes, edges };

@@ -52,6 +52,18 @@ export interface ContextRelation {
   bidirectional: boolean;
   sharedTypes: string[];
   acl: AclMapping[];
+  // Additive (#483): the DDD role each end plays, derived from `kind` by the server
+  // (Koine.Compiler.Services.ContextRelationRoles) so every consumer labels a relation the same way:
+  //   customer/supplier      → 'Supplier'            / 'Customer'
+  //   conformist             → 'Upstream'            / 'Conformist'
+  //   anti-corruption layer  → 'Upstream'            / 'Anti-Corruption Layer'
+  //   open host              → 'Open Host Service'   / 'Downstream'
+  //   published language     → 'Published Language'  / 'Downstream'
+  //   partnership / shared kernel → null / null (symmetric peers: neither end has a distinct role)
+  // Both properties are ALWAYS present on the wire (null-valued for the symmetric patterns); they are
+  // optional here — the `contextSpans` precedent above — only so a pre-#483 payload still conforms.
+  upstreamRole?: string | null;
+  downstreamRole?: string | null;
 }
 export interface ContextMapResult {
   contexts: string[];
@@ -83,6 +95,25 @@ export interface GlossaryModel {
 // event, a state machine, or the context map); a `ModelMember` is one editable leaf (a field, enum
 // member, transition, or relation). A `transition` member reuses the generic leaf fields:
 // name=from-state, value=to-state, type=guard, and `via`=the correlated triggering command (#1163).
+//
+// Behavioural vocabulary (#483): the graph now also projects the constructs that carry the domain's
+// BEHAVIOUR, not just its data. New `ModelNode.kind` values, by where they hang:
+//   context-level children   — 'policy', 'service', 'spec', 'read-model', 'query'
+//   aggregate-level children — 'repository' (at most one, titled `repository`), 'spec'
+//   entity-level children    — 'command', 'factory'
+// New `ModelMember.kind` values (`field` is reused verbatim for a read model's projected fields):
+//   'reaction'  — a policy's event → command correlation: name=triggering event, value=the reaction
+//   'operation' — a service's pure domain operation (type=result), or a repository's mutating op
+//   'usecase'   — a service's application use case (type=return type, or null)
+//   'condition' — a spec's rule: name=the value/entity it targets, value=the described condition
+//   'criterion' — one typed criterion of a query (same shape as `param`)
+//   'result'    — a query's returned read model, or a value-returning command's result (projected last)
+//   'finder'    — a repository's declarative finder: type=result, value=the rendered parameter list
+//   'param'     — one typed parameter of a command/factory
+//   'requires'  — a precondition: name=the described condition, value=the author's message
+//   'emit'      — an emitted event: name=the event, value=the rendered payload
+// Existing consumers stay valid: kinds are strings, so an unrecognized one is simply skipped — see
+// `constructForKind` (src/model/modelOutline.ts), which already resolves a glyph for each of these.
 export interface ModelMember {
   kind: string;
   name: string;

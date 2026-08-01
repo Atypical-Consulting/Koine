@@ -108,6 +108,54 @@ describe('buildContextMapGraph', () => {
     expect(g.edges[0].acl).toEqual(acl);
   });
 
+  test('the per-end strategic roles ride the edge; a symmetric relation carries null/null (#483)', () => {
+    const g = buildContextMapGraph(
+      ctxMap({
+        contexts: ['Sales', 'Shipping', 'Support'],
+        relations: [
+          {
+            upstream: 'Sales',
+            downstream: 'Shipping',
+            kind: 'Customer/Supplier',
+            bidirectional: false,
+            sharedTypes: [],
+            acl: [],
+            upstreamRole: 'Supplier',
+            downstreamRole: 'Customer',
+          },
+          // Symmetric: neither peer has a distinct role, so both ends stay null (no badge downstream).
+          {
+            upstream: 'Sales',
+            downstream: 'Support',
+            kind: 'Partnership',
+            bidirectional: true,
+            sharedTypes: [],
+            acl: [],
+            upstreamRole: null,
+            downstreamRole: null,
+          },
+        ],
+      }),
+    );
+
+    expect(g.edges[0].upstreamRole).toBe('Supplier');
+    expect(g.edges[0].downstreamRole).toBe('Customer');
+    expect(g.edges[1].upstreamRole).toBeNull();
+    expect(g.edges[1].downstreamRole).toBeNull();
+  });
+
+  test('a pre-#483 relation (no role fields on the wire) degrades to null roles, never undefined', () => {
+    const g = buildContextMapGraph(
+      ctxMap({
+        contexts: ['A', 'B'],
+        relations: [{ upstream: 'A', downstream: 'B', kind: 'Conformist', bidirectional: false, sharedTypes: [], acl: [] }],
+      }),
+    );
+
+    expect(g.edges[0].upstreamRole).toBeNull();
+    expect(g.edges[0].downstreamRole).toBeNull();
+  });
+
   test('a relation endpoint missing from `contexts` still yields a node (the graph never dangles)', () => {
     const g = buildContextMapGraph(
       ctxMap({
