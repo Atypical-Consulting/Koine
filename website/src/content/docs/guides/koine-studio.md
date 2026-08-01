@@ -292,7 +292,7 @@ appended to the result's notes rather than left implied:
 | Managed-heap ceiling (1 GiB) | ✅ | ✅ | ✅ *(also capped by a Job Object)* |
 | Processor-time ceiling | ✅ | ✅ | ✅ *(Job Object)* |
 | Network denied | ✅ | ⚠️ *(only where unprivileged user namespaces are permitted)* | ❌ *(reported)* |
-| Writes confined to the run directory | ✅ | ⚠️ *(kernel 5.13+, via Landlock)* | ❌ *(reported)* |
+| Writes confined to the run directory | ✅ | ⚠️ *(kernel 5.13+, via Landlock)* | ✅ *(low-integrity token)* |
 
 The memory row is a **managed-heap** ceiling on macOS and Linux — the .NET runtime enforces it, and it
 bounds the managed heap, which is where an allocation storm in emitted code lands. It does not bound
@@ -307,6 +307,13 @@ even on the hosts that restrict namespaces. It needs a kernel of 5.13 or newer w
 anything older the run says so in its notes. Because the ruleset has to be installed by the process it
 confines, `koine` re-executes itself as a small launcher that installs it and then `exec`s the scenario
 child — which is why `TMPDIR` inside a confined run points at the run directory.
+
+Windows write confinement runs the child under a **low-integrity token**, and gives the run directory a
+matching low label so the child keeps its scratch space. Windows then denies it write access to
+everything the user owns while leaving reads open — the same shape as the other two platforms. It needs
+no administrator rights. The network row stays ❌ there: the only unprivileged Windows mechanism that
+denies sockets is an AppContainer, and an AppContainer child cannot read the `koine` binary itself
+without a permanent change to that directory's permissions, so the run reports the gap instead.
 
 Reads are unrestricted everywhere — the child has to load the .NET runtime and its own assemblies. A run
 stopped by a *resource* ceiling says so by name, so an allocation storm is never reported as an infinite
