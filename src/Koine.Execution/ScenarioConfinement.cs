@@ -37,6 +37,7 @@ internal sealed class ScenarioConfinement : IDisposable
 
     private readonly List<string> _degradations = [];
     private readonly ScenarioSandboxOptions _options;
+    private readonly bool _confineWindowsFilesystem;
     private WindowsJobObject? _job;
 
     internal ScenarioConfinement(
@@ -44,12 +45,14 @@ internal sealed class ScenarioConfinement : IDisposable
         IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string> environment,
         ScenarioSandboxOptions options,
-        IEnumerable<string> degradations)
+        IEnumerable<string> degradations,
+        bool confineWindowsFilesystem = false)
     {
         FileName = fileName;
         Arguments = arguments;
         Environment = environment;
         _options = options;
+        _confineWindowsFilesystem = confineWindowsFilesystem;
         _degradations.AddRange(degradations);
     }
 
@@ -66,6 +69,38 @@ internal sealed class ScenarioConfinement : IDisposable
     /// <summary>What was asked for and could not be applied on this platform, in the words the result
     /// tree shows the user. Empty when everything requested was enforced.</summary>
     public IReadOnlyList<string> Degradations => _degradations;
+
+    /// <summary>
+    /// Starts the child ITSELF, where this platform's confinement can only be applied at creation —
+    /// today, a Windows low-integrity token (issue #1780), which <see cref="Process.Start(ProcessStartInfo)"/>
+    /// cannot supply. Returns <c>null</c> everywhere else, and on a Windows host that could not manage
+    /// it after all, so the caller's own <c>Process.Start</c> stays the fallback on every path.
+    ///
+    /// <para>The returned child is SUSPENDED: <see cref="Attach"/> gets to put it in its Job Object
+    /// before its first instruction — a race the <c>Process.Start</c> path cannot close — and
+    /// <see cref="ScenarioChildProcess.Resume"/> then lets it run.</para>
+    ///
+    /// <para>A launch that fails here appends the degradation itself, because <see cref="ScenarioSandbox.Plan"/>
+    /// had already decided it COULD confine and so wrote no note.</para>
+    /// </summary>
+    public ScenarioChildProcess? TryLaunch(ProcessStartInfo startInfo)
+    {
+        if (!OperatingSystem.IsWindows() || !_confineWindowsFilesystem)
+        {
+            return null;
+        }
+
+        WindowsConfinedProcess? confined = WindowsConfinedProcess.TryStart(startInfo, out string? failure);
+        if (confined is null)
+        {
+            _degradations.Add(ScenarioSandbox.WindowsFilesystemNote(failure));
+            return null;
+        }
+
+        return ScenarioChildProcess.Suspended(
+            confined.Process, confined.StandardInput, confined.StandardOutput, confined.StandardError,
+            confined.Resume, confined);
+    }
 
     /// <summary>Applies the confinement that can only exist once the process does — today, the Windows
     /// Job Object. A failure here is a degradation, never an error: the child is already running.</summary>
