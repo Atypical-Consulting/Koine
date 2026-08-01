@@ -16,8 +16,10 @@ namespace Koine.Compiler;
 /// absent (and the rest of the C# output byte-identical) when off. ASP.NET Minimal APIs are referenced
 /// by <c>using</c> / fully-qualified name; the consumer supplies
 /// <c>&lt;FrameworkReference Include="Microsoft.AspNetCore.App" /&gt;</c>. Convention-first (OpenApi-style
-/// routes); app-specific policy (auth, non-default status codes, custom routes) stays hand-written until
-/// the annotation escape hatches land.</para>
+/// routes), with R19's <c>@route</c>/<c>@get</c>…<c>@patch</c>/<c>@auth</c> annotations as the per-operation
+/// escape hatch — an annotated command/query maps through its own verb, path and
+/// <c>.RequireAuthorization(...)</c> (#1219). Other app-specific policy (non-default status codes,
+/// filters) still stays hand-written.</para>
 /// </summary>
 public sealed partial class CSharpEmitter
 {
@@ -93,11 +95,12 @@ public sealed partial class CSharpEmitter
             Assemble(emit, ns, sb.ToString(), usesLinq: false, AspNetCoreUsings)));
     }
 
-    /// <summary>A command → <c>POST /{entity}/{command}</c> bound to <c>&lt;Behavior&gt;Handler</c>.</summary>
+    /// <summary>A command → <c>POST /{entity}/{command}</c> bound to <c>&lt;Behavior&gt;Handler</c> — or the
+    /// verb/route/role its R19 <c>@route</c>/<c>@put</c>/<c>@auth</c> annotations named (#1219).</summary>
     private void WriteCommandEndpoint(StringBuilder body, EntityDecl root, CommandDecl cmd)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(cmd.Name);
-        var route = RouteDerivation.ForCommand(root, cmd).Route;
+        RouteInfo info = RouteDerivation.ForCommand(root, cmd);
 
         // Mirror the Application layer's handler result shape (W1): the handler returns a value when the
         // command declares a return type, or --app-handler-result aggregate/readModel, or --app-not-found
@@ -106,33 +109,39 @@ public sealed partial class CSharpEmitter
         var returnsValue = cmd.ReturnType is not null
             || _options.HandlerResult is CSharpHandlerResult.Aggregate or CSharpHandlerResult.ReadModel
             || _options.NotFound is CSharpNotFound.Nullable or CSharpNotFound.Result;
-        WriteMutationEndpoint(body, route, behavior, returnsValue, _options.NotFound);
+        WriteMutationEndpoint(body, MapMethodFor(info.Verb, "MapPost"), info.Route, behavior, returnsValue,
+            _options.NotFound, info.AuthRole);
     }
 
-    /// <summary>A factory → <c>POST /{entity}/{factory}</c>; it always returns the created aggregate.</summary>
+    /// <summary>A factory → <c>POST /{entity}/{factory}</c>; it always returns the created aggregate. Factories
+    /// carry no API annotations, so this one stays purely conventional.</summary>
     private void WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(factory.Name);
         var route = "/" + RouteDerivation.Kebab(root.Name) + "/" + RouteDerivation.Kebab(factory.Name);
         // A factory creates — it has no not-found concept — so it always returns the created aggregate
         // plainly, regardless of the not-found policy.
-        WriteMutationEndpoint(body, route, behavior, returnsValue: true, CSharpNotFound.Throw);
+        WriteMutationEndpoint(body, "MapPost", route, behavior, returnsValue: true, CSharpNotFound.Throw, authRole: null);
     }
 
     /// <summary>
-    /// Writes a POST endpoint that binds <c>&lt;Behavior&gt;Request</c> from the body and invokes the
-    /// handler. In plain mode it injects the concrete handler and calls <c>HandleAsync</c>; in MediatR
-    /// mode it injects <c>IMediator</c> and calls <c>Send</c>. <paramref name="miss"/> shapes the HTTP
-    /// result from the handler's return: <c>Throw</c> ⇒ plain 200; <c>Nullable</c> ⇒ null → 404;
-    /// <c>Result</c> ⇒ a <c>Result&lt;T&gt;</c> → 200 with the value / 404.
+    /// Writes a mutating endpoint (<paramref name="mapMethod"/> is the ASP.NET per-verb mapping call) that
+    /// binds <c>&lt;Behavior&gt;Request</c> from the body and invokes the handler. In plain mode it injects
+    /// the concrete handler and calls <c>HandleAsync</c>; in MediatR mode it injects <c>IMediator</c> and
+    /// calls <c>Send</c>. <paramref name="miss"/> shapes the HTTP result from the handler's return:
+    /// <c>Throw</c> ⇒ plain 200; <c>Nullable</c> ⇒ null → 404; <c>Result</c> ⇒ a <c>Result&lt;T&gt;</c> →
+    /// 200 with the value / 404. <paramref name="authRole"/>, when set, appends
+    /// <c>.RequireAuthorization("role")</c> to the chain (#1219).
     /// </summary>
-    private void WriteMutationEndpoint(StringBuilder body, string route, string behavior, bool returnsValue, CSharpNotFound miss)
+    private void WriteMutationEndpoint(StringBuilder body, string mapMethod, string route, string behavior,
+        bool returnsValue, CSharpNotFound miss, string? authRole)
     {
         var requestType = behavior + "Request";
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
-        body.Append(i2).Append("endpoints.MapPost(\"").Append(route).Append("\", async (").Append(requestType).Append(" request, ");
+        body.Append(i2).Append("endpoints.").Append(mapMethod).Append("(\"").Append(EscapeCSharpString(route))
+            .Append("\", async (").Append(requestType).Append(" request, ");
         body.Append(_options.ApplicationMediatr ? "MediatR.IMediator mediator" : behavior + "Handler handler");
         body.Append(", CancellationToken ct) =>\n");
         body.Append(i2).Append("{\n");
@@ -149,13 +158,14 @@ public sealed partial class CSharpEmitter
             body.Append(i3).Append(HttpResultFor(miss));
         }
 
-        body.Append(i2).Append("});\n");
+        body.Append(i2).Append("})").Append(RequireAuthorizationFor(authRole)).Append(";\n");
     }
 
-    /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query string.</summary>
+    /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query
+    /// string. Honors the same R19 verb/route/role annotations as a command (#1219).</summary>
     private void WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query)
     {
-        var route = RouteDerivation.ForQuery(query).Route;
+        RouteInfo info = RouteDerivation.ForQuery(query);
         // Only a by-identity query returns a wrapped value (nullable/Result<T>) — a list/non-identity
         // query returns a plain value, so its endpoint stays a plain 200 regardless of the policy. Uses
         // the same resolution as the Application-layer handler, so the two never disagree.
@@ -163,13 +173,35 @@ public sealed partial class CSharpEmitter
         var i2 = Indent + Indent;
         var i3 = i2 + Indent;
 
-        body.Append(i2).Append("endpoints.MapGet(\"").Append(route).Append("\", async ([AsParameters] ").Append(query.Name)
+        body.Append(i2).Append("endpoints.").Append(MapMethodFor(info.Verb, "MapGet")).Append("(\"")
+            .Append(EscapeCSharpString(info.Route)).Append("\", async ([AsParameters] ").Append(query.Name)
             .Append(" query, ").Append(query.Name).Append("Handler handler, CancellationToken ct) =>\n");
         body.Append(i2).Append("{\n");
         body.Append(i3).Append("var result = await handler.HandleAsync(query, ct);\n");
         body.Append(i3).Append(HttpResultFor(miss));
-        body.Append(i2).Append("});\n");
+        body.Append(i2).Append("})").Append(RequireAuthorizationFor(info.AuthRole)).Append(";\n");
     }
+
+    /// <summary>
+    /// ASP.NET's per-verb Minimal-API mapping method for a <see cref="RouteInfo.Verb"/>. The validator only
+    /// admits the five verbs below (KOI1209), so an unrecognized one can't come from a valid model —
+    /// it falls back to <paramref name="conventional"/> (the endpoint's un-annotated method) rather than
+    /// emitting a <c>Map&lt;Whatever&gt;</c> call that wouldn't compile.
+    /// </summary>
+    private static string MapMethodFor(string verb, string conventional) => verb switch
+    {
+        "GET" => "MapGet",
+        "POST" => "MapPost",
+        "PUT" => "MapPut",
+        "DELETE" => "MapDelete",
+        "PATCH" => "MapPatch",
+        _ => conventional,
+    };
+
+    /// <summary>The <c>.RequireAuthorization("role")</c> suffix an <c>@auth</c> annotation adds to the endpoint's
+    /// call chain, or the empty string when the operation carries none (#1219).</summary>
+    private static string RequireAuthorizationFor(string? authRole) =>
+        string.IsNullOrEmpty(authRole) ? "" : $".RequireAuthorization(\"{EscapeCSharpString(authRole)}\")";
 
     /// <summary>The <c>return</c> line mapping a handler's returned value to an HTTP result per the not-found policy.</summary>
     private static string HttpResultFor(CSharpNotFound miss) => miss switch

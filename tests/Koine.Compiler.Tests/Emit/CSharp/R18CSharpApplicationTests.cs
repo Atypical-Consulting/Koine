@@ -2012,4 +2012,89 @@ public class R18CSharpApplicationTests
         var (assembly, errors) = TestSupport.Compile(Emit(ApiOn with { HandlerResult = CSharpHandlerResult.ReadModel }));
         assembly.ShouldNotBeNull(string.Join("\n", errors));
     }
+
+    // ------------------------------------------------------------------
+    // R19 (#1219) — the api layer honors the @route / @get|@post|@put|
+    // @delete|@patch / @auth annotations, via the shared RouteDerivation.
+    // The three axes are independent: each falls back to the convention on
+    // its own, so an un-annotated model's endpoints stay byte-identical.
+    // ------------------------------------------------------------------
+
+    /// <summary>A command carrying all three annotations plus a query carrying only <c>@auth</c> — the
+    /// latter keeps the conventional <c>GET /order-by-id</c>, proving route/verb/role are independent.</summary>
+    internal const string AnnotatedApiFixture = """
+        context Sales {
+          enum OrderStatus { Draft, Placed }
+
+          aggregate Order root Order {
+            repository {
+              operations: getById
+            }
+
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              @route("/orders/{id}")
+              @put
+              @auth("admin")
+              command place {
+                requires status == Draft   "order must be a draft to place"
+                status -> Placed
+              }
+            }
+          }
+
+          readmodel OrderSummary from Order {
+            id
+            status
+          }
+
+          @auth("admin")
+          query OrderById(id: OrderId): OrderSummary
+        }
+        """;
+
+    [Fact]
+    public void Api_layer_maps_an_annotated_command_to_its_overridden_verb_and_route()
+    {
+        var endpoints = File(Emit(ApiOn, AnnotatedApiFixture), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain(
+            "endpoints.MapPut(\"/orders/{id}\", async (OrderPlaceRequest request, OrderPlaceHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldNotContain("MapPost");
+        endpoints.ShouldNotContain("/order/place");
+    }
+
+    [Fact]
+    public void Api_layer_requires_authorization_for_an_auth_annotated_command()
+    {
+        var endpoints = File(Emit(ApiOn, AnnotatedApiFixture), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain("}).RequireAuthorization(\"admin\");");
+    }
+
+    /// <summary>An <c>@auth</c>-only query keeps the conventional <c>MapGet</c> at the conventional
+    /// route and merely gains the authorization call — the role axis is independent of route/verb.</summary>
+    [Fact]
+    public void Api_layer_requires_authorization_for_an_auth_annotated_query_without_moving_it()
+    {
+        var endpoints = File(Emit(ApiOn, AnnotatedApiFixture), "SalesEndpoints.cs").Contents;
+        endpoints.ShouldContain(
+            "endpoints.MapGet(\"/order-by-id\", async ([AsParameters] OrderById query, OrderByIdHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("return Results.Ok(result);\n        }).RequireAuthorization(\"admin\");");
+    }
+
+    /// <summary>The un-annotated <see cref="Fixture"/> must gain nothing — no stray authorization call.</summary>
+    [Fact]
+    public void Api_layer_adds_no_authorization_to_an_unannotated_model()
+    {
+        File(Emit(ApiOn), "SalesEndpoints.cs").Contents.ShouldNotContain("RequireAuthorization");
+    }
+
+    /// <summary>The emitted <c>MapPut</c>/<c>RequireAuthorization</c> chain has to resolve against the
+    /// ASP.NET shared framework, not just read right (issue #1148's harness).</summary>
+    [Fact]
+    public void Api_layer_annotated_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn, AnnotatedApiFixture));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
 }
