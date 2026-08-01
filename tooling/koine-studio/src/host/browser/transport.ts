@@ -276,6 +276,10 @@ export class WasmLspTransport implements LspTransport {
                   msg.params?.operation ?? '',
                   JSON.stringify(msg.params?.given ?? {}),
                   JSON.stringify(msg.params?.args ?? {}),
+                  // Executed mode (#236) is forwarded even though this host can't honour it: the WASM
+                  // backend answers `mode: "interpreted"` + the "execution is not available on this
+                  // host" note, so the degradation is stated by the one component that knows it.
+                  msg.params?.execute ?? false,
                 ),
               ),
             ),

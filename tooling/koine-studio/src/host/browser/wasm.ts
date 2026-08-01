@@ -76,8 +76,17 @@ export interface KoineWasmApi {
   ): Promise<string>;
   /** Living-documentation files (Mermaid-in-Markdown) for the merged workspace → JSON `{files}`. */
   Docs(filesJson: string): Promise<string>;
-  /** Run a scenario (#149) → JSON ScenarioResult (command → events → invariant-checks). */
-  RunScenario(filesJson: string, target: string, operation: string, givenJson: string, argsJson: string): Promise<string>;
+  /** Run a scenario (#149) → JSON ScenarioResult (command → events → invariant-checks). `execute` is the
+   *  executed-mode opt-in (#236); this host cannot execute, so it answers with the interpreter, labelled
+   *  `mode: "interpreted"` plus a note — the flag is still forwarded so the backend states that itself. */
+  RunScenario(
+    filesJson: string,
+    target: string,
+    operation: string,
+    givenJson: string,
+    argsJson: string,
+    execute: boolean,
+  ): Promise<string>;
   /** Runnable surface of the workspace (#149) → JSON ScenarioCatalog (`{targets}`). */
   ScenarioCatalog(filesJson: string): Promise<string>;
   /** Inlay hints (type/parameter annotations) for a 0-based range → JSON InlayHint[]. */

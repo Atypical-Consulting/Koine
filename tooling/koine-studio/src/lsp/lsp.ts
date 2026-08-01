@@ -440,12 +440,18 @@ export class KoineLsp {
    * Run a scenario (#149): exercise one aggregate command/factory (`target`/`operation`) against a
    * `given` starting state and `args`, returning the command → events → invariant-checks timeline.
    * Backend-agnostic — routed to the CLI `koine lsp` child or the in-browser WASM export identically.
+   *
+   * `options.execute` (default false) opts into EXECUTED mode (#236): the backend emits, compiles and
+   * runs the model's own code in a sandbox child (ADR 0011) instead of interpreting it, so derived
+   * values are really computed. It is a request, not a guarantee — a host that cannot execute answers
+   * with the interpreter and says so — so callers read {@link ScenarioResult.mode} for what happened.
    */
   runScenario(
     target: string,
     operation: string,
     given: Record<string, unknown>,
     args: Record<string, unknown>,
+    options?: { execute?: boolean },
   ): Promise<ScenarioResult> {
     return this.request<ScenarioResult>('koine/runScenario', {
       textDocument: { uri: this.activeUri },
@@ -453,6 +459,7 @@ export class KoineLsp {
       operation,
       given,
       args,
+      execute: options?.execute ?? false,
     });
   }
 

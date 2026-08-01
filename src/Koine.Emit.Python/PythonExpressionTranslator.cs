@@ -120,6 +120,81 @@ internal sealed class PythonExpressionTranslator
     }
 
     /// <summary>
+    /// Issue #1732: like <see cref="Translate(Expr,NameMode,string?)"/>, but reconciles
+    /// <paramref name="value"/>'s inferred type against the <paramref name="declared"/> type of the
+    /// member it initializes — the factory ctor-arg counterpart of <see cref="WriteReconciledBranch"/>
+    /// (#1344), reusing the same shared <see cref="BranchReconciliation.Classify"/> decision (#1368) and
+    /// the same <c>Decimal(...)</c>/walrus-conditional renderings, so a factory's explicit
+    /// <c>field -&gt; expr</c> initialization emits a <c>mypy --strict</c>-clean value instead of a bare
+    /// mismatched literal (mirrors Java's #1519 <c>ReconcileFactoryCtorArg</c>/Rust's #1438/#1543 and
+    /// Kotlin's/TypeScript's #1732 counterparts).
+    /// </summary>
+    internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
+    {
+        var prevMode = _mode;
+        _mode = mode;
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+
+        TypeRef? valueType = InferCtorArgValueType(value);
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        if (needs.NeedsWiden)
+        {
+            sb.Append("Decimal(");
+            Write(value, sb);
+            sb.Append(')');
+        }
+        else if (needs.NeedsOptionalWiden)
+        {
+            sb.Append("(Decimal(__koine_v) if (__koine_v := ");
+            Write(value, sb);
+            sb.Append(") is not None else None)");
+        }
+        else
+        {
+            Write(value, sb);
+        }
+
+        _expectedEnum = null;
+        _mode = prevMode;
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The type <see cref="TranslateReconciled"/> should reconcile <paramref name="value"/>'s already-
+    /// translated body against. For most expressions this is just <c>_resolver.Infer(value, ...)</c> —
+    /// but a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic,
+    /// shared across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened
+    /// against the right operand. Like TypeScript, <b>Python's own <c>CoalesceExpr</c> case does no
+    /// numeric reconciliation of its own</b> (it emits a bare
+    /// <c>(l if l is not None else r)</c>) — so there is no existing widen this could double up with,
+    /// but naively reconciling the outer ctor-arg wrap against the raw LEFT-only type would still be
+    /// wrong: wrapping the WHOLE expression in <c>Decimal(...)</c> assumes the coalesce's runtime value
+    /// is always a plain <c>int</c>, which is false whenever the right (fallback) operand is itself
+    /// already <c>Decimal</c>-shaped. This computes the coalesce's OWN effective type the same way a
+    /// fixed <c>WriteReconciledBranch</c>-style rendering would, so <see cref="BranchReconciliation.Classify"/>
+    /// degrades to "no reconciliation needed" here and this call site leaves the (separately tracked)
+    /// unreconciled coalesce rendering untouched rather than wrapping it incorrectly.
+    /// </summary>
+    private TypeRef? InferCtorArgValueType(Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return _resolver.Infer(value, EffectiveScope());
+        }
+
+        TypeScope scope = EffectiveScope();
+        TypeRef? leftType = _resolver.Infer(co.Left, scope);
+        TypeRef? rightType = _resolver.Infer(co.Right, scope);
+
+        // Matches the coalesce's own result: it stays possibly-None only when the right (fallback)
+        // operand is itself possibly-None.
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
+    }
+
+    /// <summary>
     /// Renders the logical negation of a boolean condition, for guard emission where the
     /// assertion's failure is tested. Mirrors the sibling translators: peel a leading <c>not</c>,
     /// flip a top-level comparison, simplify a bool-literal ternary, else wrap once in

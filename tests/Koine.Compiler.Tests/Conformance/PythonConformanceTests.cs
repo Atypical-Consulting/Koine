@@ -1702,6 +1702,193 @@ public class PythonConformanceTests
             + string.Join("\n", run.Errors));
     }
 
+    /// <summary>
+    /// Issue #1731: the factory constructor-argument loop matched a same-named factory parameter to
+    /// an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>), not via the shared,
+    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already used by the C#, Kotlin,
+    /// Java and Rust emitters — which additionally requires matching type shape and that an OPTIONAL
+    /// parameter never auto-bind to a NON-optional member. This is the reverse direction from the
+    /// #1531 audit pinned above (there the MEMBER was optional and the parameter was not); here the
+    /// PARAMETER is optional (<c>total: Decimal?</c>) and the member is not (<c>total: Decimal = 0.0</c>).
+    /// Before the fix, the optional parameter was bound straight into the non-optional constructor
+    /// slot — a real <c>mypy --strict</c> error (<c>Decimal | None</c> is not assignable to
+    /// <c>Decimal</c>). The member carries its own literal default so that, once <c>AutoBinds</c>
+    /// correctly rejects the auto-bind, the ctor-arg loop falls through to a real, working branch
+    /// (the member's own default) instead of the unrelated "required field left uninitialized"
+    /// (KOI0806) gap that a default-less member would hit.
+    /// </summary>
+    [Fact]
+    public void Optional_parameter_does_not_auto_bind_a_non_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal = 0.0
+
+                create make(total: Decimal?) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no mypy required): the optional parameter must NOT be passed directly into
+        // the non-optional member's constructor slot; instead the ctor-arg loop falls through to the
+        // member's own literal default (`total: Decimal = 0.0`), rendered via the same Decimal(...)
+        // literal formatting as an explicit `field -> value` initialization.
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldNotContain("instance = cls(id=id, total=total)");
+        product.ShouldContain("""instance = cls(id=id, total=Decimal("0.0"))""");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1732: the explicit-init branch of <c>WriteFactory</c>'s ctor-args loop never reconciled
+    /// the value's inferred type against the member's declared type, so an <c>Int</c> literal
+    /// initializing a <c>Decimal</c> member emitted a bare <c>int</c> where <c>decimal.Decimal</c> is
+    /// required — a real <c>mypy --strict</c> "incompatible type" error. Mirrors Kotlin's/TypeScript's
+    /// #1732 fix.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_an_int_literal_is_decimal_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make() {
+                  total -> 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no mypy required): the Int-typed initializer must be widened to Decimal to
+        // match the constructor's Decimal parameter, not passed through as a bare int literal.
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("instance = cls(id=id, total=Decimal(5))");
+        product.ShouldNotContain("instance = cls(id=id, total=5)");
+
+        AssertStrictlyTypeChecks(result.Files);
+
+        const string driver = """
+            from decimal import Decimal
+            from shop.entities.product import Product
+
+            product = Product.make()
+            assert product.total == Decimal(5), \
+                f"the Int initializer must be widened to Decimal, got {product.total!r}"
+            """;
+
+        TestSupport.PythonCheck run = TestSupport.RunPython(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(string.Join("\n", run.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard: a <c>Decimal</c>-typed value explicit-initializing a
+    /// <c>Decimal</c>-declared member must be unaffected by #1732's coercion — no extra
+    /// <c>Decimal(...)</c> wrap added around an already-<c>Decimal</c> value.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_decimal_literal_is_unaffected()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make() {
+                  total -> 5.0
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("""instance = cls(id=id, total=Decimal("5.0"))""");
+        product.ShouldNotContain("""Decimal(Decimal("5.0")""");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Zero-change regression guard for the coalesce double-widen trap: a <c>CoalesceExpr</c> whose own
+    /// effective type ALREADY matches the declared member (both <c>Decimal</c>-shaped) must be left
+    /// entirely unwrapped by <c>TranslateReconciled</c>'s <c>InferCtorArgValueType</c> guard — pins that
+    /// the guard degrades to "no reconciliation needed" rather than wrapping the whole
+    /// <c>(a if a is not None else b)</c> in a <c>Decimal(...)</c> call that would not type-check
+    /// against a <c>Decimal</c>-typed right operand.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_matching_coalesce_is_unaffected()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make(a: Decimal?, b: Decimal) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("instance = cls(id=id, total=(a if a is not None else b))");
+        product.ShouldNotContain("Decimal(");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1732: an ALREADY-optional <c>int | None</c> initializing expression (a factory parameter)
+    /// that is ALSO numerically mismatched against an optional-declared <c>Decimal?</c> member needs
+    /// the walrus-bound null-check widen (<see cref="PythonExpressionTranslator.WriteReconciledBranch"/>'s
+    /// rendering) — a bare <c>Decimal(...)</c> wrap around a possibly-<c>None</c> value does not
+    /// type-check. Mirrors Kotlin's/TypeScript's #1732 fix and Java's #1519 follow-up.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_decimal_member_from_an_already_optional_int_source_is_walrus_widened()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(discount: Int?) {
+                  total -> discount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no mypy required): the already-optional int value must be walrus-bound and
+        // null-check widened, never bare-wrapped (a real mypy --strict "incompatible type" error).
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("(Decimal(__koine_v) if (__koine_v := discount) is not None else None)");
+        product.ShouldNotContain("instance = cls(id=id, total=discount)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
     {

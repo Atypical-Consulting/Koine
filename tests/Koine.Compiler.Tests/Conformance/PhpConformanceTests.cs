@@ -1998,4 +1998,209 @@ public class PhpConformanceTests
             "an explicitly initialized non-optional value must be assignable straight into an "
             + "optional-declared member's `?T` constructor slot:\n" + string.Join("\n", types.Errors));
     }
+
+    /// <summary>
+    /// Issue #1731: the factory constructor-argument loop matched a same-named factory parameter to
+    /// an entity member by NAME ONLY (<c>factoryParams.Contains(m.Name)</c>), not via the shared,
+    /// target-agnostic <c>MemberAnalysis.AutoBinds</c> predicate already used by the C#, Kotlin,
+    /// Java and Rust emitters — which additionally requires matching type shape and that an
+    /// OPTIONAL parameter never auto-bind to a NON-optional member. This is the reverse direction from
+    /// the #1531 audit pinned above (there the MEMBER was optional and the parameter was not); here the
+    /// PARAMETER is optional (<c>total: Decimal?</c>) and the member is not (<c>total: Decimal = 0.0</c>).
+    /// Before the fix, the optional parameter was bound straight into the non-optional constructor
+    /// slot — a real <c>phpstan --level max</c> error (<c>Decimal|null</c> is not assignable to
+    /// <c>Decimal</c>). The member carries its own literal default so that, once <c>AutoBinds</c>
+    /// correctly rejects the auto-bind, the ctor-arg loop falls through to a real, working branch (the
+    /// member's own default) instead of the unrelated "required field left uninitialized" gap a
+    /// default-less member would hit (an omitted/missing-argument error, which would prove nothing
+    /// about this fix).
+    /// </summary>
+    [Fact]
+    public void Optional_parameter_does_not_auto_bind_a_non_optional_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal = 0.0
+
+                create make(total: Decimal?) {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no phpstan required): the optional parameter must NOT be passed directly
+        // into the non-optional member's constructor slot.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldNotContain("$instance = new self($id, $total);");
+        product.ShouldContain("$instance = new self($id, new \\Koine\\Runtime\\Decimal('0.0'));");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "an optional factory parameter must not auto-bind into a non-optional member's constructor "
+            + "slot:\n" + string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1732: the explicit-init branch of the factory ctor-args loop never reconciled the value's
+    /// inferred type against the member's declared type, so an <c>Int</c> literal initializing a
+    /// <c>Decimal</c> member emitted a bare PHP <c>int</c> where <c>\Koine\Runtime\Decimal</c> is
+    /// required — a real <c>phpstan analyse --level max</c> "expects Decimal, int given" error. Mirrors
+    /// Kotlin's/TypeScript's/Python's #1732 fix.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_an_int_literal_is_decimal_coerced()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make() {
+                  total -> 5
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no phpstan required): the Int-typed initializer must be widened to Decimal
+        // to match the constructor's Decimal parameter, not passed through as a bare int literal.
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"$instance = new self($id, (new \Koine\Runtime\Decimal('5')));");
+        product.ShouldNotContain("$instance = new self($id, 5);");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard: a <c>Decimal</c>-typed value explicit-initializing a
+    /// <c>Decimal</c>-declared member must be unaffected by #1732's coercion — no extra
+    /// <c>Decimal(...)</c> wrap added around an already-<c>Decimal</c> value.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_decimal_literal_is_unaffected()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make() {
+                  total -> 5.0
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"$instance = new self($id, new \Koine\Runtime\Decimal('5.0'));");
+        product.ShouldNotContain(@"Decimal(new \Koine\Runtime\Decimal");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// Zero-change regression guard for the coalesce double-widen trap: a <c>CoalesceExpr</c> whose own
+    /// effective type ALREADY matches the declared member (both <c>Decimal</c>-shaped) must be left
+    /// entirely unwrapped by <c>TranslateReconciled</c>'s <c>InferCtorArgValueType</c> guard — pins that
+    /// the guard degrades to "no reconciliation needed" rather than wrapping the whole
+    /// <c>($a ?? $b)</c> in a <c>new \Koine\Runtime\Decimal(...)</c> call that would not type-check
+    /// against a <c>Decimal</c>-typed right operand.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_a_decimal_member_from_a_matching_coalesce_is_unaffected()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal
+
+                create make(a: Decimal?, b: Decimal) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("$instance = new self($id, ($a ?? $b));");
+        product.ShouldNotContain(@"Decimal(");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1732: an ALREADY-nullable <c>?int</c> initializing expression (a factory parameter) that
+    /// is ALSO numerically mismatched against an optional-declared <c>Decimal?</c> member needs the
+    /// null-check-and-widen arrow-function shell — a bare <c>new \Koine\Runtime\Decimal(...)</c> wrap
+    /// around a possibly-null value does not type-check. Mirrors Kotlin's/TypeScript's/Python's #1732
+    /// fix and Java's #1519 follow-up.
+    /// </summary>
+    [Fact]
+    public void Factory_explicit_init_of_an_optional_decimal_member_from_an_already_optional_int_source_is_null_check_widened()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(discount: Int?) {
+                  total -> discount
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no phpstan required): the already-nullable int value must be null-check-and-
+        // widened, never bare-wrapped (a real phpstan "not assignable" error).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"(fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))($discount)");
+        product.ShouldNotContain("$instance = new self($id, $discount);");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(string.Join("\n", types.Errors));
+    }
 }

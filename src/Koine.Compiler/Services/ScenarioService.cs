@@ -22,35 +22,87 @@ namespace Koine.Compiler.Services;
 public static class ScenarioService
 {
     /// <summary>
+    /// The <c>mode</c> of a result produced by the target-agnostic <see cref="ScenarioInterpreter"/>
+    /// (Approach B): the model is reasoned about, never compiled or run, so a value the interpreter
+    /// cannot evaluate shows up as <c>?</c>.
+    /// </summary>
+    internal const string InterpretedMode = "interpreted";
+
+    /// <summary>
+    /// The <c>mode</c> of a result produced by running the model's EMITTED code (Approach A, #236):
+    /// every derived value is a real computed value. Only a host that can spawn the sandbox child
+    /// (ADR 0011) ever reports it.
+    /// </summary>
+    internal const string ExecutedMode = "executed";
+
+    /// <summary>
+    /// The note a host adds when the caller asked for executed mode but this host cannot execute (the
+    /// browser WASM backend has no process to sandbox into). The answer is the interpreter's, labelled
+    /// <see cref="InterpretedMode"/> — degraded, and explicitly said so, never silently misread as an
+    /// executed run.
+    /// </summary>
+    internal const string ExecutionUnavailableNote =
+        "Execution is not available on this host; the scenario was interpreted instead, so values the "
+        + "interpreter cannot evaluate stay indeterminate (?).";
+
+    /// <summary>
     /// Runs the scenario described by the request fields against <paramref name="semantic"/> and
     /// returns the <c>command → events → invariant-checks</c> timeline as a JSON-ready tree.
     /// <paramref name="given"/> and <paramref name="args"/> are JSON objects (field → value); a
     /// non-object is treated as empty.
     /// </summary>
     public static IReadOnlyDictionary<string, object?> Run(
-        SemanticModel semantic, string target, string operation, JsonElement given, JsonElement args)
+        SemanticModel semantic, string target, string operation, JsonElement given, JsonElement args) =>
+        Run(semantic, target, operation, given, args, executionRequested: false);
+
+    /// <summary>
+    /// <see cref="Run(SemanticModel, string, string, JsonElement, JsonElement)"/>, for a host that was
+    /// asked for executed mode (<c>execute: true</c>) but cannot execute: the result is still the
+    /// interpreter's and is labelled <see cref="InterpretedMode"/>, with
+    /// <see cref="ExecutionUnavailableNote"/> appended. The degraded answer is the SAME shape as any
+    /// other, so the panel renders it normally — and says which engine produced it.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> Run(
+        SemanticModel semantic, string target, string operation, JsonElement given, JsonElement args,
+        bool executionRequested)
     {
         var scenario = new Scenario(target, operation, ParseMap(given), ParseMap(args));
         ScenarioResult result = ScenarioInterpreter.Run(semantic, scenario);
-        return Shape(result);
+        return Shape(result, InterpretedMode, executionRequested ? ExecutionUnavailableNote : null);
     }
 
     /// <summary>
     /// A not-ok scenario result carrying an explanatory <paramref name="note"/> — the single shape both
     /// hosts return for the failure paths (model has errors, request could not be run), so the wire
-    /// shape stays defined in exactly one place.
+    /// shape stays defined in exactly one place. Reported as <see cref="InterpretedMode"/>; the executed
+    /// pipeline uses the <see cref="Error(string, string, string, string)"/> overload.
     /// </summary>
     public static IReadOnlyDictionary<string, object?> Error(string target, string operation, string note) =>
+        Error(target, operation, note, InterpretedMode);
+
+    /// <summary>
+    /// <see cref="Error(string, string, string)"/> for a given <paramref name="mode"/>: an executed run
+    /// that failed (timed out, crashed, never started) is still an EXECUTED-mode answer — nothing was
+    /// interpreted — so it says so rather than borrowing the interpreter's label.
+    ///
+    /// <para><paramref name="executionUnavailable"/> appends <see cref="ExecutionUnavailableNote"/>, for a
+    /// host that was asked to execute but cannot (the browser WASM backend). Without it an
+    /// <c>execute: true</c> request that ALSO failed — a model with errors, say — would lose the one hint
+    /// the success path gives: that execution was never on the table on this host.</para>
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> Error(
+        string target, string operation, string note, string mode, bool executionUnavailable = false) =>
         new Dictionary<string, object?>
         {
             ["ok"] = false,
             ["target"] = target,
             ["operation"] = operation,
+            ["mode"] = mode,
             ["steps"] = Array.Empty<object>(),
             ["resultingState"] = new Dictionary<string, object?>(),
             ["invariants"] = Array.Empty<object>(),
             ["result"] = null,
-            ["notes"] = new[] { note },
+            ["notes"] = executionUnavailable ? new[] { note, ExecutionUnavailableNote } : new[] { note },
         };
 
     /// <summary>
@@ -144,7 +196,13 @@ public static class ScenarioService
     // JSON request -> scenario values
     // ------------------------------------------------------------------------
 
-    private static IReadOnlyDictionary<string, ScenarioValue> ParseMap(JsonElement element)
+    /// <summary>
+    /// Maps a JSON object (field → value) onto scenario values. <c>internal</c> rather than private
+    /// because the sandboxed executed-mode child (<c>koine scenario-exec</c>, ADR 0011) must read a
+    /// request's <c>given</c>/<c>args</c> with EXACTLY this mapping — two hand-rolled readers would
+    /// let the same JSON mean different things in interpreted and executed mode.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, ScenarioValue> ParseMap(JsonElement element)
     {
         var map = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal);
         if (element.ValueKind == JsonValueKind.Object)
@@ -180,17 +238,31 @@ public static class ScenarioService
     // Scenario result -> JSON-ready tree
     // ------------------------------------------------------------------------
 
-    private static IReadOnlyDictionary<string, object?> Shape(ScenarioResult result) => new Dictionary<string, object?>
-    {
-        ["ok"] = result.Ok,
-        ["target"] = result.Target,
-        ["operation"] = result.Operation,
-        ["steps"] = result.Steps.Select(ShapeStep).ToArray(),
-        ["resultingState"] = result.ResultingState.ToDictionary(kv => kv.Key, kv => (object?)kv.Value),
-        ["invariants"] = result.Invariants.Select(ShapeInvariant).ToArray(),
-        ["result"] = result.Result,
-        ["notes"] = result.Notes.ToArray(),
-    };
+    /// <summary>
+    /// Shapes a scenario result into the one JSON-ready tree both hosts return. <c>internal</c> rather
+    /// than private because executed mode (#236) produces its result in a child process and shapes it
+    /// there (ADR 0011) — the wire shape must stay defined exactly once.
+    ///
+    /// <para><paramref name="mode"/> (<see cref="InterpretedMode"/> / <see cref="ExecutedMode"/>) names
+    /// the engine that actually produced this result, so a client can never mistake an interpreted
+    /// answer for an executed one. It is stated by the caller rather than inferred here precisely
+    /// because both engines fill the very same <see cref="ScenarioResult"/> contract.
+    /// <paramref name="extraNote"/> appends one host-level note (e.g. "this host cannot execute") to the
+    /// engine's own.</para>
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> Shape(
+        ScenarioResult result, string mode, string? extraNote = null) => new Dictionary<string, object?>
+        {
+            ["ok"] = result.Ok,
+            ["target"] = result.Target,
+            ["operation"] = result.Operation,
+            ["mode"] = mode,
+            ["steps"] = result.Steps.Select(ShapeStep).ToArray(),
+            ["resultingState"] = result.ResultingState.ToDictionary(kv => kv.Key, kv => (object?)kv.Value),
+            ["invariants"] = result.Invariants.Select(ShapeInvariant).ToArray(),
+            ["result"] = result.Result,
+            ["notes"] = extraNote is null ? result.Notes.ToArray() : [.. result.Notes, extraNote],
+        };
 
     private static object ShapeStep(ScenarioStep step) => step switch
     {

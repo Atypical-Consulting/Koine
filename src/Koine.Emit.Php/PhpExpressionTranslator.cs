@@ -127,6 +127,81 @@ internal sealed class PhpExpressionTranslator
     }
 
     /// <summary>
+    /// Issue #1732: like <see cref="Translate(Expr,NameMode,string?)"/>, but reconciles
+    /// <paramref name="value"/>'s inferred type against the <paramref name="declared"/> type of the
+    /// member it initializes — the factory ctor-arg counterpart of the ternary/coalesce reconciliation
+    /// the other four code emitters already have (#1344), reusing the same shared
+    /// <see cref="BranchReconciliation.Classify"/> decision (#1368) — mirroring Java's #1519
+    /// <c>ReconcileFactoryCtorArg</c>, Rust's #1438/#1543, and Kotlin's/TypeScript's/Python's #1732
+    /// counterparts. Unlike Kotlin/TypeScript/Python, PHP
+    /// has no existing <c>WriteReconciledBranch</c> to route through, so <c>NeedsWiden</c> reuses the
+    /// existing <see cref="WriteAsDecimal"/> arithmetic-operand primitive (its int-literal and generic
+    /// fallthrough arms already produce exactly this widening, PHP-8.1-floor-safe parenthesisation
+    /// included), and <c>NeedsOptionalWiden</c> is a new null-check-and-widen arrow-function shell —
+    /// PHP's <c>??</c> cannot itself transform a present value, so this follows the same immediately-
+    /// invoked-closure idiom <see cref="WriteLet"/> already uses.
+    /// </summary>
+    internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
+    {
+        var prevMode = _mode;
+        _mode = mode;
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+
+        TypeRef? valueType = InferCtorArgValueType(value);
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        if (needs.NeedsWiden)
+        {
+            WriteAsDecimal(value, sb);
+        }
+        else if (needs.NeedsOptionalWiden)
+        {
+            sb.Append(@"(fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))(");
+            Write(value, sb);
+            sb.Append(')');
+        }
+        else
+        {
+            Write(value, sb);
+        }
+
+        _expectedEnum = null;
+        _mode = prevMode;
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The type <see cref="TranslateReconciled"/> should reconcile <paramref name="value"/>'s already-
+    /// translated body against. For most expressions this is just <see cref="InferType"/> — but a
+    /// <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic, shared
+    /// across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened against
+    /// the right operand. Like TypeScript/Python, <b>PHP's own <c>CoalesceExpr</c> case does no numeric
+    /// reconciliation of its own</b> (it emits a bare <c>($l ?? $r)</c>) — so there is no existing widen
+    /// this could double up with, but naively reconciling the outer ctor-arg wrap against the raw
+    /// LEFT-only type would still be wrong whenever the right (fallback) operand is itself already
+    /// <c>Decimal</c>-shaped. This computes the coalesce's OWN effective type the same way a fixed
+    /// reconciled rendering would, so <see cref="BranchReconciliation.Classify"/> degrades to "no
+    /// reconciliation needed" here and this call site leaves the (separately tracked) unreconciled
+    /// coalesce rendering untouched rather than wrapping it incorrectly.
+    /// </summary>
+    private TypeRef? InferCtorArgValueType(Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return InferType(value);
+        }
+
+        TypeRef? leftType = InferType(co.Left);
+        TypeRef? rightType = InferType(co.Right);
+
+        // Matches PHP's own `??` result: the coalesce stays possibly-null only when the right
+        // (fallback) operand is itself possibly-null.
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
+    }
+
+    /// <summary>
     /// Renders the logical negation of a boolean condition, for guard emission where the
     /// assertion's failure is tested. Peels a leading <c>!</c>, flips a top-level comparison,
     /// simplifies a bool-literal ternary, else wraps once in <c>!(...)</c>.

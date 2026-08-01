@@ -111,6 +111,72 @@ internal sealed class KotlinExpressionTranslator
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Issue #1732: like <see cref="Translate"/>, but reconciles <paramref name="value"/>'s inferred type
+    /// against the <paramref name="declared"/> type of the member it initializes — the factory ctor-arg
+    /// counterpart of <see cref="WriteReconciledBranch"/> (#1344), reusing the same shared
+    /// <see cref="BranchReconciliation.Classify"/> decision (#1368) and the same target-local widen
+    /// renderings, so a factory's explicit <c>field -&gt; expr</c> initialization emits a
+    /// <c>kotlinc</c>-clean value instead of a bare mismatched literal (mirrors Java's #1519
+    /// <c>ReconcileFactoryCtorArg</c>/Rust's #1438/#1543).
+    /// </summary>
+    internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
+    {
+        NameMode prevMode = _mode;
+        _mode = mode;
+        _expectedEnum = expectedEnum;
+        var sb = new StringBuilder();
+
+        TypeRef? valueType = InferCtorArgValueType(value);
+        BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
+        if (needs.NeedsWiden)
+        {
+            WriteBigDecimalOperand(value, valueType, sb);
+        }
+        else if (needs.NeedsOptionalWiden)
+        {
+            WriteAtom(value, sb);
+            sb.Append("?.let { java.math.BigDecimal.valueOf(it) }");
+        }
+        else
+        {
+            WriteTopLevel(value, sb);
+        }
+
+        _expectedEnum = null;
+        _mode = prevMode;
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The type <see cref="TranslateReconciled"/> should reconcile <paramref name="value"/>'s already-
+    /// translated body against. For most expressions this is just <see cref="InferType"/> — but a
+    /// <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic, shared
+    /// across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened against the
+    /// right operand — unlike <c>VisitConditional</c>'s <c>WiderNumeric</c>. <see cref="WriteCoalesce"/>
+    /// already widens the narrower operand's RENDERED text to match the wider one (#1615), so reconciling
+    /// the outer ctor-arg wrap against that same naive (unwidened) type would double-widen an already-
+    /// widened value — a real <c>kotlinc</c> "type mismatch" error. This mirrors <c>WriteCoalesce</c>'s own
+    /// elvis-result-type computation locally, scoped to this one caller, without touching the shared
+    /// resolver (mirrors Java's #1519 <c>InferCtorArgValueType</c>).
+    /// </summary>
+    private TypeRef? InferCtorArgValueType(Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return InferType(value);
+        }
+
+        TypeRef? leftType = InferType(co.Left);
+        TypeRef? rightType = InferType(co.Right);
+
+        // Matches WriteCoalesce's own elvis result: the coalesce stays nullable only when the right
+        // (fallback) operand is itself nullable.
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
+    }
+
     // ------------------------------------------------------------------------
     // Dispatch
     // ------------------------------------------------------------------------

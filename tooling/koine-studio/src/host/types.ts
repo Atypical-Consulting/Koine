@@ -210,6 +210,17 @@ export interface Platform {
    */
   createTerminal?(): TerminalTransport;
 
+  /**
+   * Whether the scenario runner may offer EXECUTED mode (#236) — running the model's own emitted code
+   * instead of interpreting it. True on the Tauri desktop, whose backend spawns the sandboxed
+   * `koine scenario-exec` child (ADR 0011); false in the browser, where a tab has no process to spawn
+   * and the request degrades to an interpreted answer. It gates the panel's opt-in toggle, so the
+   * affordance is simply absent where it could never do what it says — the panel asks this flag rather
+   * than the platform {@link kind}. Nothing else is gated: `koine/runScenario` itself stays available
+   * on both hosts, and the answer's `mode` always states which engine ran.
+   */
+  readonly supportsScenarioExecution: boolean;
+
   /** The application version, for the About dialog. */
   appVersion(): Promise<string>;
 
