@@ -1701,7 +1701,6 @@ public class PythonConformanceTests
             "an explicitly initialized value must land unwrapped in the optional field at runtime:\n"
             + string.Join("\n", run.Errors));
     }
-    }
 
     /// <summary>The full text of an emitted file, by relative path (fails the test if absent).</summary>
     private static string FileText(IReadOnlyList<EmittedFile> files, string relativePath)
