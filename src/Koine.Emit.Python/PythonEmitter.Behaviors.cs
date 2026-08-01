@@ -408,7 +408,7 @@ public sealed partial class PythonEmitter
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
                 var expectedEnum = index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-                args.Add($"{field}={translator.Translate(value, PythonExpressionTranslator.NameMode.Property, expectedEnum)}");
+                args.Add($"{field}={translator.TranslateReconciled(value, PythonExpressionTranslator.NameMode.Property, expectedEnum, m.Type)}");
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {
