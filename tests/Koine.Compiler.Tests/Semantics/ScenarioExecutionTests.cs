@@ -677,4 +677,119 @@ public class ScenarioExecutionTests
         executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
         executed.Result.ShouldBe("{flag: true}");
     }
+
+    // ------------------------------------------------------------------------
+    // Fan-out resolution (#1758): an emitted event mapped onto the downstream
+    // targets the MODEL declares — the executable policy reactions, and the
+    // merely-declared cross-context subscriptions. Pure model reading; no
+    // emission, no execution (that is the dispatcher's job).
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void A_policy_reaction_resolves_to_the_target_aggregates_root_entity_and_its_command()
+    {
+        SemanticModel sema = Pizzeria.Value;
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Payment", "ChargeCaptured");
+
+        // `policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)`
+        FanOutTarget target = fanOut.Executable.ShouldHaveSingleItem();
+        target.PolicyName.ShouldBe("PostToLedger");
+        target.Context.ShouldBe("Payment");
+        // The reaction names the AGGREGATE (`Books`); the executable member lives on its root entity.
+        target.AggregateName.ShouldBe("Books");
+        target.EntityName.ShouldBe("LedgerEntry");
+        target.MemberName.ShouldBe("record");
+        target.IsFactory.ShouldBeFalse();
+        target.Args.ShouldHaveSingleItem().Parameter.ShouldBe("amount");
+
+        // A domain event crosses no context boundary, so nothing is merely declared.
+        fanOut.DeclaredOnly.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_published_integration_event_resolves_to_its_subscribers_and_to_no_executable_target()
+    {
+        SemanticModel sema = Pizzeria.Value;
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Ordering", "OrderPlaced");
+
+        // `Ordering` publishes `OrderPlaced`; Kitchen, Delivery and Payment each subscribe to it. No
+        // policy reacts to it, and the C# emitter gives a subscriber only an `IHandle<OrderPlaced>`
+        // seam with no body — so there is nothing executable downstream, only a declaration.
+        fanOut.Executable.ShouldBeEmpty();
+        fanOut.DeclaredOnly.Select(s => s.Context).ShouldBe(new[] { "Delivery", "Kitchen", "Payment" });
+        fanOut.DeclaredOnly.ShouldAllBe(s => s.EventName == "OrderPlaced");
+    }
+
+    /// <summary>
+    /// A policy whose reaction names a FACTORY rather than a command — no shipped template carries
+    /// that shape, so it is modelled inline.
+    /// </summary>
+    private const string FactoryPolicyModel = """
+        context Warehouse {
+          event StockDepleted {
+            sku: String
+          }
+
+          entity StockItem identified by StockItemId {
+            sku:      String
+            quantity: Int
+
+            command consume(amount: Int) {
+              quantity -> quantity - amount
+              emit StockDepleted(sku: sku)
+            }
+          }
+
+          aggregate Replenishment root PurchaseOrder {
+            event PurchaseOrderRaised {
+              sku: String
+            }
+
+            entity PurchaseOrder identified by PurchaseOrderId {
+              sku: String
+
+              create raise(sku: String) {
+                emit PurchaseOrderRaised(sku: sku)
+              }
+            }
+          }
+
+          policy Reorder when StockDepleted then Replenishment.raise(sku: sku)
+        }
+        """;
+
+    [Fact]
+    public void A_policy_reaction_naming_a_factory_resolves_as_a_factory_target()
+    {
+        SemanticModel sema = Build(FactoryPolicyModel);
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Warehouse", "StockDepleted");
+
+        FanOutTarget target = fanOut.Executable.ShouldHaveSingleItem();
+        target.PolicyName.ShouldBe("Reorder");
+        target.Context.ShouldBe("Warehouse");
+        target.AggregateName.ShouldBe("Replenishment");
+        target.EntityName.ShouldBe("PurchaseOrder");
+        target.MemberName.ShouldBe("raise");
+        target.IsFactory.ShouldBeTrue();
+        target.Args.ShouldHaveSingleItem().Parameter.ShouldBe("sku");
+        fanOut.DeclaredOnly.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void An_unknown_event_resolves_to_nothing_rather_than_throwing()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        var resolver = new ScenarioFanOutResolver(sema);
+
+        FanOutResolution unknownEvent = resolver.Resolve("Ordering", "NoSuchEventWasEverDeclared");
+        unknownEvent.Executable.ShouldBeEmpty();
+        unknownEvent.DeclaredOnly.ShouldBeEmpty();
+
+        // An unknown emitting context is equally a non-answer, not an exception.
+        FanOutResolution unknownContext = resolver.Resolve("NoSuchContext", "OrderPlaced");
+        unknownContext.DeclaredOnly.ShouldBeEmpty();
+    }
 }
