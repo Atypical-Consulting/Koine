@@ -186,13 +186,13 @@ public sealed partial class PythonEmitter
         // context. A service file isn't tied to one entity's own field set, so it gets its own
         // dictionary built from scratch (rather than extending an existing one).
         var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (OperationDecl op0 in svc.Operations)
+        foreach (OperationDecl op in svc.Operations)
         {
-            foreach (Param p in op0.Parameters)
+            foreach (Param p in op.Parameters)
             {
                 CollectImportHints(p.Type, context, symbolContext);
             }
-            CollectImportHints(op0.ReturnType, context, symbolContext);
+            CollectImportHints(op.ReturnType, context, symbolContext);
         }
 
         var translator = new PythonExpressionTranslator(emit.Index, Array.Empty<Member>(), emit.EnumMemberToType, typeMapper, context, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
@@ -266,15 +266,15 @@ public sealed partial class PythonEmitter
         // context. A service file isn't tied to one entity's own field set, so it gets its own
         // dictionary built from scratch (rather than extending an existing one).
         var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (UseCaseDecl uc0 in svc.UseCases)
+        foreach (UseCaseDecl uc in svc.UseCases)
         {
-            foreach (Param p in uc0.Parameters)
+            foreach (Param p in uc.Parameters)
             {
                 CollectImportHints(p.Type, context, symbolContext);
             }
-            if (uc0.ReturnType is not null)
+            if (uc.ReturnType is not null)
             {
-                CollectImportHints(uc0.ReturnType, context, symbolContext);
+                CollectImportHints(uc.ReturnType, context, symbolContext);
             }
         }
 

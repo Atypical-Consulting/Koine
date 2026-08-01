@@ -187,15 +187,15 @@ public sealed partial class PhpEmitter
         // service's own context. A service file isn't tied to one entity's own field set, so it
         // gets its own dictionary built from scratch (rather than extending an existing one).
         var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (UseCaseDecl uc0 in svc.UseCases)
+        foreach (UseCaseDecl uc in svc.UseCases)
         {
-            foreach (Param p in uc0.Parameters)
+            foreach (Param p in uc.Parameters)
             {
                 CollectImportHints(p.Type, ctxName, symbolContext);
             }
-            if (uc0.ReturnType is not null)
+            if (uc.ReturnType is not null)
             {
-                CollectImportHints(uc0.ReturnType, ctxName, symbolContext);
+                CollectImportHints(uc.ReturnType, ctxName, symbolContext);
             }
         }
 
