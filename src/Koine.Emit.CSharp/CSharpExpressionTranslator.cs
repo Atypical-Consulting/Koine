@@ -56,12 +56,17 @@ internal sealed class CSharpExpressionTranslator
     /// <summary>
     /// A collision-free emitted name for a binding that shadows a member. Koine's Identifier rule
     /// (`[a-zA-Z_] [a-zA-Z0-9_]*`) permits a leading underscore, so an author can legally write
-    /// `__rate`; the candidate is checked rather than assumed unique. Prefixing happens AFTER
-    /// camel-casing so CSharpNaming's casing/keyword-escaping is not bypassed.
+    /// `__rate`; the candidate is checked rather than assumed unique. Built from the camel-cased name
+    /// with any `@` keyword-escape stripped first — <see cref="CSharpNaming.ToCamelCase"/> escapes a
+    /// keyword-spelled name to e.g. `@base`, and prefixing `__` onto THAT yields `__@base`, which is not
+    /// a valid C# identifier (`@` is only legal as the first character). A `__`-prefixed identifier can
+    /// never itself collide with a bare keyword, so no re-escaping is needed after the prefix.
     /// </summary>
     private string MangleBinding(string name)
     {
-        var baseName = "__" + CSharpNaming.ToCamelCase(name);
+        var camelCased = CSharpNaming.ToCamelCase(name);
+        var unescaped = camelCased.Length > 0 && camelCased[0] == '@' ? camelCased[1..] : camelCased;
+        var baseName = "__" + unescaped;
         var candidate = baseName;
         for (var n = 2; Collides(candidate); n++)
         {

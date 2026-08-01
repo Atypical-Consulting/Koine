@@ -240,6 +240,40 @@ public class DerivedMemberInvariantTests
     }
 
     /// <summary>
+    /// A member whose Koine name camelCases to a C# reserved keyword (issue #1768): <c>CSharpNaming
+    /// .ToCamelCase</c> already keyword-escapes its result (<c>"base"</c> becomes <c>"@base"</c>), so
+    /// <c>MangleBinding</c> must not blindly prepend <c>"__"</c> onto an already-escaped name — that
+    /// would emit <c>__@base</c>, which is not a valid C# identifier (<c>@</c> is only legal as the
+    /// FIRST character). A mangled name can never itself collide with a bare keyword (no reserved word
+    /// starts with <c>__</c>), so the escape is not needed post-prefix.
+    /// </summary>
+    private const string KeywordMemberFixture = """
+        context Shop {
+          value Widget {
+            base:  Int
+            items: List<Int>
+            total: Int = base * 2
+            invariant items.all(base => base < total)   "every item stays below the total"
+          }
+        }
+        """;
+
+    [Fact]
+    public void A_member_name_that_camel_cases_to_a_keyword_is_mangled_to_valid_csharp()
+    {
+        Assembly asm = CompileFixture(KeywordMemberFixture);
+        Type widget = asm.GetType("Shop.Widget")!;
+
+        // base = 2 -> Total = 4, and an item of 5 is NOT below it: the guard must reject.
+        Should.Throw<TargetInvocationException>(
+            () => Activator.CreateInstance(widget, new object[] { 2, new List<int> { 5 } }));
+
+        // base = 10 -> Total = 20, and an item of 5 IS below it: construction must succeed.
+        object ok = Activator.CreateInstance(widget, new object[] { 10, new List<int> { 5 } })!;
+        widget.GetProperty("Total")!.GetValue(ok).ShouldBe(20);
+    }
+
+    /// <summary>
     /// The residual, GENUINELY unsafe shape (issue #1768): a single derived member referenced from a
     /// plain invariant — no lambda/<c>let</c> anywhere. Used (not compiled through the emitter directly)
     /// to obtain a real <see cref="ModelIndex"/> and <see cref="ValueObjectDecl"/> for driving
