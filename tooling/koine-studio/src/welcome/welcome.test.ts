@@ -124,7 +124,7 @@ describe('welcome gallery', () => {
       (b) => b.querySelector('.koi-welcome-example-name')?.textContent === 'Billing',
     )!;
     billing.click();
-    expect((cb.onOpenExample as ReturnType<typeof vi.fn>).mock.calls[0][0].id).toBe('billing');
+    expect((cb.onOpenExample as Mock<(template: Template) => void>).mock.calls[0][0].id).toBe('billing');
   });
 
   test('the title sits beside the icon, with a tagline and an open chevron — no badges', () => {
@@ -327,7 +327,7 @@ describe('welcome recent rows', () => {
     mountHome(container, makeCallbacks());
     (document.querySelector('.koi-welcome-recent-remove') as HTMLElement).click();
     expect(document.querySelectorAll('.koi-welcome-recent-item').length).toBe(1);
-    expect(JSON.parse(localStorage.getItem(KEY)!).length).toBe(1);
+    expect((JSON.parse(localStorage.getItem(KEY)!) as string[]).length).toBe(1);
   });
 
   test('keeps recent rows inside the scroll list wrapper', () => {

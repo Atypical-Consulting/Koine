@@ -6,7 +6,7 @@
 // dependency (Editor, Output, Advanced; see also scopeKit.test.ts's own direct coverage) — a real
 // `createScopeKit` instance built the same way `mountPreferencesPane` builds its one instance. Extracted
 // here (instead of six copies) so the doubles' semantics can't drift file-to-file (#987 code review).
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { saveSettings, loadSettings, type Settings } from "@/settings/persistence";
 import { createScopeKit, type ScopeKit } from "@/settings/prefsSections/scopeKit";
 import type { SectionCtx } from "@/settings/prefsSections/types";
@@ -15,13 +15,13 @@ import type { SectionCtx } from "@/settings/prefsSections/types";
  *  `commit` merges the patch into persisted Settings (mirroring prefs.ts's own `commit()`), `onChange` is
  *  a bare spy (most sections don't inspect what it was called with beyond "was it called"). */
 export function buildCtx(): SectionCtx & {
-    commit: ReturnType<typeof vi.fn>;
-    onChange: ReturnType<typeof vi.fn>;
+    commit: Mock<(patch: Partial<Settings>) => void>;
+    onChange: Mock<(s: Settings) => void>;
 } {
     const commit = vi.fn((patch: Partial<Settings>) => {
         saveSettings({ ...loadSettings(), ...patch });
     });
-    const onChange = vi.fn();
+    const onChange = vi.fn<(s: Settings) => void>();
     return { commit, onChange };
 }
 

@@ -27,7 +27,7 @@ function thread(id: string, status: ReviewThread['status'], offset: number, leng
 function rows(set: DecorationSet): { from: number; to: number; cls: string | undefined }[] {
   const out: { from: number; to: number; cls: string | undefined }[] = [];
   set.between(0, Number.MAX_SAFE_INTEGER, (from, to, value) => {
-    out.push({ from, to, cls: value.spec.class as string | undefined });
+    out.push({ from, to, cls: (value.spec as { class?: string }).class });
   });
   return out.sort((a, b) => a.from - b.from);
 }
