@@ -6,7 +6,7 @@ namespace Koine.Compiler.Tests;
 /// <summary>
 /// Issue #1771: the Java emitter resolves a bare enum-member reference (e.g. <c>Active</c> in
 /// <c>status == Active</c>) by looking up every enum in the whole model that declares a member of that
-/// name (<see cref="Ast.ModelIndex.EnumsDeclaring"/>) and, when more than one does, falls back to
+/// name (<see cref="Ast.ModelIndex.EnumsDeclaring(string)"/>) and, when more than one does, falls back to
 /// whichever one <see cref="Ast.ModelIndex.EnumMemberToType"/> happened to record first — ignoring the
 /// concrete type of the operand it is being compared against. R13.2 lets two bounded contexts each
 /// legally declare an enum sharing a member name, so a comparison like <c>status == Active</c> can
@@ -24,6 +24,15 @@ namespace Koine.Compiler.Tests;
 /// <c>JavaExpressionTranslator</c>. Discovered while implementing #1763 — that fix alone still left
 /// <c>templates/saas-subscription</c> and <c>templates/library</c> emitting non-compiling Java, for this
 /// separate reason.
+/// </para>
+/// <para>
+/// The <c>enumHint</c> mechanism this suite pins only reaches bare members that sit on one side of a
+/// binary <c>==</c>/<c>!=</c> whose OTHER operand types to an enum. When nothing hints — no comparison
+/// context at all — resolution still fell through to the same context-blind owners list, which #1739
+/// (for C#/TypeScript/PHP/Kotlin) and #1793 (Java/Python/Rust) scoped to the referencing context. That
+/// complementary fallback fix is covered by
+/// <see cref="EnumMemberContextScopeEmitterTests.Java_qualifies_both_operands_against_the_referencing_contexts_own_enum"/>;
+/// the tests below stay the guard that the hint keeps PRIORITY over it whenever the hint resolves.
 /// </para>
 /// </summary>
 public class JavaEnumMemberDisambiguationTests

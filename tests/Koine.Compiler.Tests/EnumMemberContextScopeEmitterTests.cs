@@ -181,4 +181,31 @@ public class EnumMemberContextScopeEmitterTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable python toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1793, Task 3 — Java already carried #1771's (PR #1778) sibling-operand <c>enumHint</c>,
+    /// but that only threads through binary <c>==</c>/<c>!=</c> comparisons whose OTHER operand types
+    /// to an enum. This fixture's invariant compares two bare members, so neither operand can hint the
+    /// other and resolution fell through to the context-blind owners list, emitting an unqualified
+    /// <c>Status.Red</c> from context <c>A</c> inside <c>koine.generated.c</c>. The <c>enumHint</c>
+    /// path is untouched by this fix and still wins when it resolves — <see
+    /// cref="JavaEnumMemberDisambiguationTests"/> pins that.
+    /// </summary>
+    [Fact]
+    public void Java_qualifies_both_operands_against_the_referencing_contexts_own_enum()
+    {
+        var result = new KoineCompiler().Compile(CrossContextCollision, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.java", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Flag.Red");
+        item.ShouldContain("Flag.Blue");
+        item.ShouldNotContain("Marker.");
+        item.ShouldNotContain("Signal.");
+        item.ShouldNotContain("Status.");
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
