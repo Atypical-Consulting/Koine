@@ -89,6 +89,7 @@ import { buildExtraKeys, type BindingId } from '@/editor/keybindings';
 // the helper that repaints them after a store change. A Studio-only view concern — never touches the model.
 import { reviewDecorationsExtension, dispatchReviewRefresh } from '@/review/reviewDecorations';
 import { presenceExtension, type PresenceSource } from '@/editor/presence';
+import { crdtExtension, type CrdtAttachOptions, type CrdtBinding } from '@/editor/collab/crdtBinding';
 import type { ReviewThread } from '@/review/reviewStore';
 // The markdown renderer lives in ./markdown (extracted so it can be unit-tested without a CodeMirror
 // view). Re-exported below so existing importers keep resolving it from `@/editor/editor`.
@@ -459,6 +460,15 @@ export interface KoineEditor {
    * every change; detaching drops every remote caret. Idempotent.
    */
   setPresenceEnabled(on: boolean, source?: PresenceSource): void;
+  /**
+   * Bind or unbind the collaboration SHARED DOCUMENT (#481): the buffer mirrors a CRDT replica, so
+   * concurrent edits from every participant converge. Like {@link setPresenceEnabled} it reconfigures a
+   * compartment, so a session starts and ends mid-edit with no state loss and no view rebuild.
+   * `bind.hydrate` states who is authoritative at attach time (`'editor'` for the session creator,
+   * `'crdt'` for a joiner) — see {@link CrdtAttachOptions}. Turning it off leaves the buffer untouched
+   * and simply stops mirroring.
+   */
+  setCrdtEnabled(on: boolean, bind?: CrdtBinding): void;
   destroy(): void;
 }
 
@@ -748,6 +758,10 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
   // remote-caret layer live — starting or leaving a co-editing session must never rebuild the view or
   // lose undo history. Empty until setPresenceEnabled turns it on, so a solo editor pays nothing.
   const presence = new Compartment();
+  // The CRDT shared document (#481) gets its own compartment for the same reason, and a separate one
+  // from presence because the two attach independently: presence can paint remote carets before (or
+  // without) the buffer being shared at all.
+  const crdt = new Compartment();
   const indentConfig = (n: number): Extension => {
     const width = Math.max(1, Math.round(n));
     return [indentUnit.of(' '.repeat(width)), EditorState.tabSize.of(width)];
@@ -858,6 +872,8 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
         ...(opts.getReviewThreads ? [reviewDecorationsExtension(opts.getReviewThreads), reviewTheme] : []),
         // Collaboration presence (#481) — empty until a session attaches it via setPresenceEnabled.
         presence.of([]),
+        // Collaboration shared document (#481) — empty until a session binds it via setCrdtEnabled.
+        crdt.of([]),
         lintGutter(),
         ...(opts.onHover ? [koineHoverTooltip(opts.onHover)] : []),
         sharedTheme,
@@ -961,6 +977,12 @@ export function createKoineEditor(opts: KoineEditorOptions): KoineEditor {
     },
     setPresenceEnabled(on: boolean, source?: PresenceSource) {
       view.dispatch({ effects: presence.reconfigure(on ? presenceExtension(source) : []) });
+    },
+    setCrdtEnabled(on: boolean, bind?: CrdtBinding) {
+      // `on` without a binding would silently leave the buffer unshared while the session believed it
+      // was live, so it detaches instead — the same visible state, reached honestly.
+      const extension = on && bind ? crdtExtension(bind.text, bind) : [];
+      view.dispatch({ effects: crdt.reconfigure(extension) });
     },
     destroy() {
       viewDestroyed = true; // stop any queued caret-reveal frame from touching a torn-down view
