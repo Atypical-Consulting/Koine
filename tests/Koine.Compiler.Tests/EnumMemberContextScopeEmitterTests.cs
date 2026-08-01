@@ -42,6 +42,242 @@ public class EnumMemberContextScopeEmitterTests
         }
         """;
 
+    /// <summary>
+    /// Issue #1799 — the *control* model: unambiguous, so owner SELECTION (the #1739/#1793/#1797 axis)
+    /// is already right and untouched here. What is wrong is the owner's RENDERING: <c>Kind</c> is owned
+    /// by context <c>Other</c>, the reference sits in context <c>C</c>, and C#/Java/Kotlin appended the
+    /// enum's *simple* name straight into the buffer with no namespace/package qualification and no
+    /// import — so the emitted artifact does not compile. The declared member type
+    /// (<c>Other.Kind</c> / <c>koine.generated.other.Kind</c>) is routed through each emitter's type
+    /// mapper and has always been correct; only the expression path bypassed it.
+    /// </summary>
+    private const string CrossContextQualifiedEnum = """
+        context Other {
+          enum Kind { Active, Idle }
+        }
+
+        context C {
+          enum Flag { Green, Blue }
+          entity Item identified by ItemId {
+            status: Other.Kind
+            previous: Other.Kind
+            invariant status == Active "cross-context enum reference"
+            invariant previous != Idle "a second cross-context member of the same foreign enum"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1799, the collection form the spec calls out: a lambda body over a
+    /// <c>List&lt;Other.Kind&gt;</c> re-enters the same bare-identifier path from a nested scope, where
+    /// the enclosing member scope no longer supplies the reference. Exercised for the three targets
+    /// this issue fixes only — Rust rejects <c>kinds.iter().all(|k| k != …)</c> with
+    /// <c>E0277: can't compare `&amp;Kind` with `Kind`</c> (a missing deref in the lambda binder), which
+    /// reproduces identically for a SAME-context enum and is therefore a pre-existing defect unrelated
+    /// to owner qualification; it is tracked separately rather than fixed or masked here.
+    /// </summary>
+    private const string CrossContextQualifiedEnumInLambda = """
+        context Other {
+          enum Kind { Active, Idle }
+        }
+
+        context C {
+          entity Item identified by ItemId {
+            kinds: List<Other.Kind>
+            invariant kinds.all(k => k != Idle) "cross-context enum reference inside a lambda"
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Issue #1799, the C#-specific aggravated form: the member is named <c>kind</c>, so the emitted
+    /// property is <c>Kind</c> — the same identifier as the enum type. A bare <c>Kind.Active</c> then
+    /// binds to the PROPERTY rather than failing to resolve, and Roslyn reports
+    /// <c>CS0176: Member 'Kind.Active' cannot be accessed with an instance reference</c> instead of
+    /// <c>CS0103</c>. This is why the fix must emit a genuinely namespace-qualified reference rather
+    /// than lean on C#'s "Color Color" rule or an added <c>using</c>.
+    /// </summary>
+    private const string CrossContextQualifiedEnumShadowingProperty = """
+        context Other {
+          enum Kind { Active, Idle }
+        }
+
+        context C {
+          entity Item identified by ItemId {
+            kind: Other.Kind
+            invariant kind == Active "cross-context enum reference shadowed by a same-named property"
+          }
+        }
+        """;
+
+    [Fact]
+    public void CSharp_namespace_qualifies_a_bare_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnum, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.cs", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Other.Kind.Active");
+        item.ShouldContain("Other.Kind.Idle");
+
+        (System.Reflection.Assembly? assembly, IReadOnlyList<string> errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void CSharp_namespace_qualifies_a_bare_enum_member_shadowed_by_a_same_named_property()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnumShadowingProperty, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.cs", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Other.Kind.Active");
+
+        (System.Reflection.Assembly? assembly, IReadOnlyList<string> errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Java_package_qualifies_a_bare_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnum, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.java", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("koine.generated.other.Kind.Active");
+        item.ShouldContain("koine.generated.other.Kind.Idle");
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Kotlin_package_qualifies_a_bare_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnum, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.kt", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("koine.generated.other.Kind.Active");
+        item.ShouldContain("koine.generated.other.Kind.Idle");
+
+        var check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void CSharp_namespace_qualifies_a_bare_enum_member_inside_a_lambda()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnumInLambda, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.cs", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Other.Kind.Idle");
+
+        (System.Reflection.Assembly? assembly, IReadOnlyList<string> errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void Java_package_qualifies_a_bare_enum_member_inside_a_lambda()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnumInLambda, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.java", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("koine.generated.other.Kind.Idle");
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Kotlin_package_qualifies_a_bare_enum_member_inside_a_lambda()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnumInLambda, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.kt", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("koine.generated.other.Kind.Idle");
+
+        var check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// The four targets the issue's audit found already correct — each routes the enum through its own
+    /// import/qualification machinery. Pinned here so the C#/Java/Kotlin fix can't silently churn them:
+    /// unlike the C#-family fixtures above, this fixture compares a runtime FIELD against a bare member,
+    /// which mypy/phpstan cannot constant-fold, so the full type-checkers apply rather than the
+    /// syntax-only fallbacks the sibling <c>CrossContextCollision</c> tests need.
+    /// </summary>
+    [Fact]
+    public void TypeScript_imports_a_bare_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnum, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("item.ts", StringComparison.OrdinalIgnoreCase)).Contents;
+        item.ShouldContain("Kind.Active");
+        item.ShouldContain("Kind.Idle");
+        item.ShouldContain("from '../../Other/enums/Kind'");
+
+        var check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable tsc toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Python_imports_a_bare_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnum, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("item.py", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Kind.ACTIVE");
+        item.ShouldContain("Kind.IDLE");
+        item.ShouldContain("from other.enums.kind import Kind");
+
+        var check = TestSupport.TypeCheckPython(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable python toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Php_imports_a_bare_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnum, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("Item.php", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("Kind::ACTIVE");
+        item.ShouldContain("Kind::IDLE");
+        item.ShouldContain(@"use Koine\Other\Enums\Kind;");
+
+        var check = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable php toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Rust_path_qualifies_a_bare_enum_member_owned_by_another_context()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnum, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var module = result.Files.Single(f => f.RelativePath.EndsWith("c.rs", StringComparison.Ordinal)).Contents;
+        module.ShouldContain("crate::other::Kind::Active");
+        module.ShouldContain("crate::other::Kind::Idle");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable cargo toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     [Fact]
     public void CSharp_qualifies_both_operands_against_the_referencing_contexts_own_enum()
     {
