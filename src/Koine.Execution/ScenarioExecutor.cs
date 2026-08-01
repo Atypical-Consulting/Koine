@@ -174,7 +174,7 @@ internal sealed class ScenarioExecutor
         object? instance = null;
         if (!isFactory)
         {
-            if (!TryConstructGivenState(entityType, s, out instance, out Exception? constructionFailure))
+            if (!TryConstructGivenState(_entity, entityType, s.Given, out instance, out Exception? constructionFailure))
             {
                 return constructionFailure is null ? Failed(s) : GivenStateViolation(s, constructionFailure);
             }
@@ -184,7 +184,7 @@ internal sealed class ScenarioExecutor
             _notes.Add($"'{s.Operation}' is a factory: it builds the instance itself, so the given state was not applied.");
         }
 
-        IReadOnlyDictionary<string, string> before = instance is null ? NoState : Snapshot(instance, recordNotes: false);
+        IReadOnlyDictionary<string, string> before = instance is null ? NoState : Snapshot(_entity, instance, recordNotes: false);
 
         object? returned;
         try
@@ -214,7 +214,7 @@ internal sealed class ScenarioExecutor
             return Failed(s);
         }
 
-        IReadOnlyDictionary<string, string> after = Snapshot(subject, recordNotes: true);
+        IReadOnlyDictionary<string, string> after = Snapshot(_entity, subject, recordNotes: true);
         string? result = null;
         List<ScenarioStep> steps = SuccessSteps(body, before, after, subject, returned, ref result);
 
@@ -307,13 +307,22 @@ internal sealed class ScenarioExecutor
     // ------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds the aggregate's given state through its own (emitter-generated, often private) all-args
-    /// constructor, so the constructor's <c>CheckInvariants()</c> and every value object it builds really
-    /// run. Returns <c>false</c> with <paramref name="violation"/> set when the emitted code REJECTED the
-    /// state (a domain outcome to report, not an error), or with it <c>null</c> when a value simply could
-    /// not be bound.
+    /// Builds <paramref name="entity"/>'s given state through its own (emitter-generated, often private)
+    /// all-args constructor, so the constructor's <c>CheckInvariants()</c> and every value object it builds
+    /// really run. Returns <c>false</c> with <paramref name="violation"/> set when the emitted code REJECTED
+    /// the state (a domain outcome to report, not an error), or with it <c>null</c> when a value simply
+    /// could not be bound.
+    ///
+    /// <para>The entity and its <c>given</c> map are PARAMETERS rather than the scenario's own, because
+    /// fan-out (issue #1758) establishes the very same way for a DOWNSTREAM aggregate, from the slice of
+    /// the scenario's given state routed to it — see <see cref="ScenarioDownstreamState"/>.</para>
     /// </summary>
-    private bool TryConstructGivenState(Type entityType, Scenario s, out object? instance, out Exception? violation)
+    private bool TryConstructGivenState(
+        EntityDecl entity,
+        Type entityType,
+        IReadOnlyDictionary<string, ScenarioValue> given,
+        out object? instance,
+        out Exception? violation)
     {
         instance = null;
         violation = null;
@@ -336,7 +345,7 @@ internal sealed class ScenarioExecutor
             var args = new object?[parameters.Length];
             for (int i = 0; i < parameters.Length; i++)
             {
-                if (!TryBindConstructorParameter(entityType, s, parameters[i], out args[i]))
+                if (!TryBindConstructorParameter(entity, entityType, given, parameters[i], out args[i]))
                 {
                     return false;
                 }
@@ -352,18 +361,23 @@ internal sealed class ScenarioExecutor
         }
     }
 
-    private bool TryBindConstructorParameter(Type entityType, Scenario s, ParameterInfo parameter, out object? bound)
+    private bool TryBindConstructorParameter(
+        EntityDecl entity,
+        Type entityType,
+        IReadOnlyDictionary<string, ScenarioValue> given,
+        ParameterInfo parameter,
+        out object? bound)
     {
         bound = null;
         string name = parameter.Name ?? string.Empty;
 
-        Member? member = _entity.Members.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
+        Member? member = entity.Members.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
         if (member is null)
         {
             // The synthetic identity the emitter threads through as `id`.
             if (string.Equals(name, "id", StringComparison.OrdinalIgnoreCase))
             {
-                return TryBindIdentity(s, parameter, out bound);
+                return TryBindIdentity(given, parameter, out bound);
             }
 
             if (parameter.HasDefaultValue)
@@ -377,9 +391,9 @@ internal sealed class ScenarioExecutor
             return false;
         }
 
-        if (s.Given.TryGetValue(member.Name, out ScenarioValue? given))
+        if (given.TryGetValue(member.Name, out ScenarioValue? supplied))
         {
-            if (_binder.TryBind(given, parameter.ParameterType, out bound, out string? error))
+            if (_binder.TryBind(supplied, parameter.ParameterType, out bound, out string? error))
             {
                 return true;
             }
@@ -402,17 +416,20 @@ internal sealed class ScenarioExecutor
         }
 
         _notes.Add($"No 'given' value for required field '{member.Name}'; the runner will not guess one, "
-                   + $"so '{_entity.Name}' could not be constructed.");
+                   + $"so '{entity.Name}' could not be constructed.");
         return false;
     }
 
-    private bool TryBindIdentity(Scenario s, ParameterInfo parameter, out object? bound)
+    private bool TryBindIdentity(
+        IReadOnlyDictionary<string, ScenarioValue> given,
+        ParameterInfo parameter,
+        out object? bound)
     {
         bound = null;
 
-        if (s.Given.TryGetValue("id", out ScenarioValue? given))
+        if (given.TryGetValue("id", out ScenarioValue? supplied))
         {
-            if (_binder.TryBind(given, parameter.ParameterType, out bound, out string? error))
+            if (_binder.TryBind(supplied, parameter.ParameterType, out bound, out string? error))
             {
                 return true;
             }
@@ -466,6 +483,56 @@ internal sealed class ScenarioExecutor
         }
 
         return true;
+    }
+
+    // ------------------------------------------------------------------------
+    // Fan-out: the downstream aggregate's starting state (#1758, decision D2)
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Establishes the state one fanned-out <paramref name="target"/> would run from, by wiring D2's rule
+    /// (<see cref="ScenarioDownstreamState.Establish"/>) to the REAL emitted constructor: the routed
+    /// per-aggregate <c>given</c> slice is built through the downstream entity's own all-args constructor,
+    /// so its value objects and invariants fire exactly as the primary aggregate's do.
+    ///
+    /// <para>Every outcome is honest. A factory needs no prior instance; a rejected given state comes back
+    /// as <see cref="DownstreamState.Rejected"/> carrying the real
+    /// <c>DomainInvariantViolationException</c> so it can be reported as the failed step it is; anything
+    /// else is <see cref="DownstreamState.Unavailable"/> with a reason. No path invents an instance.</para>
+    ///
+    /// <para>Dispatching the target from that state is deliberately NOT done here — this seam only
+    /// establishes it.</para>
+    /// </summary>
+    internal DownstreamState EstablishDownstreamState(Assembly assembly, Scenario s, FanOutTarget target)
+    {
+        EntityDecl? entity = ResolveEntity(target.EntityName);
+        if (entity is null)
+        {
+            return new DownstreamState.Unavailable(
+                $"No state was established for {target.EntityName}: the model declares no entity by that name.");
+        }
+
+        return ScenarioDownstreamState.Establish(target, _entity?.Name ?? s.Target, s.Given, routed =>
+        {
+            // Resolved inside the construction, so a target that needs no instance never pays for it —
+            // and never fails on a type-resolution note it did not need.
+            if (!TryResolveType(assembly, entity.Name, out Type? entityType))
+            {
+                return new DownstreamState.Unavailable(
+                    $"No state was established for {entity.Name}: its emitted type could not be located.");
+            }
+
+            if (TryConstructGivenState(entity, entityType!, routed, out object? instance, out Exception? violation))
+            {
+                return new DownstreamState.Instance(instance!);
+            }
+
+            return violation is not null
+                ? new DownstreamState.Rejected(violation)
+                : new DownstreamState.Unavailable(
+                    $"No state was established for {entity.Name}: the given state routed to it could not be "
+                    + "built (see the notes above for the value that failed to bind).");
+        });
     }
 
     // ------------------------------------------------------------------------
@@ -561,12 +628,13 @@ internal sealed class ScenarioExecutor
             : [];
     }
 
-    /// <summary>Reads every declared member off the live instance — including the DERIVED ones, whose
-    /// values the emitted code actually computed (gap #1).</summary>
-    private Dictionary<string, string> Snapshot(object instance, bool recordNotes)
+    /// <summary>Reads every member declared on <paramref name="entity"/> off the live instance — including
+    /// the DERIVED ones, whose values the emitted code actually computed (gap #1). The entity is a
+    /// parameter so a fanned-out downstream aggregate (issue #1758) is read exactly the same way.</summary>
+    private Dictionary<string, string> Snapshot(EntityDecl entity, object instance, bool recordNotes)
     {
         var state = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Member member in _entity.Members)
+        foreach (Member member in entity.Members)
         {
             try
             {
@@ -619,7 +687,7 @@ internal sealed class ScenarioExecutor
         IReadOnlyList<CommandStmt> body,
         IReadOnlyDictionary<string, string> before)
     {
-        IReadOnlyDictionary<string, string> state = instance is null ? NoState : Snapshot(instance, recordNotes: false);
+        IReadOnlyDictionary<string, string> state = instance is null ? NoState : Snapshot(_entity, instance, recordNotes: false);
 
         if (!TryReadViolation(ex, out string typeName, out string rule))
         {

@@ -792,4 +792,152 @@ public class ScenarioExecutionTests
         FanOutResolution unknownContext = resolver.Resolve("NoSuchContext", "OrderPlaced");
         unknownContext.DeclaredOnly.ShouldBeEmpty();
     }
+
+    // ------------------------------------------------------------------------
+    // The downstream aggregate's STARTING state (#1758, D2): a per-aggregate
+    // `given` slice, a factory that needs no prior instance, or an honest note —
+    // never an invented default instance.
+    // ------------------------------------------------------------------------
+
+    private static readonly IReadOnlyDictionary<string, ScenarioValue> NoGiven =
+        new Dictionary<string, ScenarioValue>(StringComparer.Ordinal);
+
+    /// <summary>The pizzeria's own downstream shape: <c>policy PostToLedger when ChargeCaptured then
+    /// Books.record(...)</c>, whose target aggregate <c>Books</c> is rooted on <c>LedgerEntry</c>.</summary>
+    private static FanOutTarget Downstream(string entity, string aggregate, string member, bool isFactory = false) =>
+        new(entity, aggregate, "Payment", member, isFactory, [], "PostToLedger");
+
+    /// <summary>A construction that must never run: the rule under test is expected to answer without
+    /// touching the emitted code at all.</summary>
+    private static DownstreamState NeverConstructs(IReadOnlyDictionary<string, ScenarioValue> _) =>
+        throw new InvalidOperationException("the downstream state was constructed when it should not have been");
+
+    [Fact]
+    public void A_dotted_given_key_is_routed_to_the_named_entity_with_its_prefix_stripped()
+    {
+        var given = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+        {
+            ["status"] = ScenarioValue.Enum("Draft"),                 // bare: the PRIMARY aggregate's
+            ["LedgerEntry.amount"] = ScenarioValue.FromDecimal(12m),
+            ["ledgerentry.posted"] = ScenarioValue.FromBool(false),   // case-insensitive on the entity
+            ["Invoice.number"] = ScenarioValue.FromString("INV-1"),   // a THIRD aggregate's
+        };
+
+        IReadOnlyDictionary<string, ScenarioValue> routed = ScenarioDownstreamState.GivenFor(given, "LedgerEntry");
+
+        routed.Keys.OrderBy(k => k, StringComparer.Ordinal).ShouldBe(new[] { "amount", "posted" });
+        routed["amount"].ShouldBe(ScenarioValue.FromDecimal(12m));
+        routed["posted"].ShouldBe(ScenarioValue.FromBool(false));
+
+        // The prefix is stripped, and nothing that belongs to another aggregate comes along.
+        routed.ContainsKey("LedgerEntry.amount").ShouldBeFalse();
+        routed.ContainsKey("status").ShouldBeFalse();
+        routed.ContainsKey("number").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Bare_given_keys_belong_to_the_primary_aggregate_and_never_leak_downstream()
+    {
+        var given = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+        {
+            ["status"] = ScenarioValue.Enum("Draft"),
+            ["amount"] = ScenarioValue.FromDecimal(12m),
+        };
+
+        // Whatever the downstream entity is called, an undotted key is the primary aggregate's.
+        ScenarioDownstreamState.GivenFor(given, "LedgerEntry").ShouldBeEmpty();
+        ScenarioDownstreamState.GivenFor(given, "Order").ShouldBeEmpty();
+        ScenarioDownstreamState.GivenFor(NoGiven, "LedgerEntry").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_factory_target_needs_no_prior_instance()
+    {
+        FanOutTarget target = Downstream("PurchaseOrder", "Replenishment", "raise", isFactory: true);
+
+        DownstreamState state = ScenarioDownstreamState.Establish(target, "StockItem", NoGiven, NeverConstructs);
+
+        state.ShouldBeOfType<DownstreamState.StaticTarget>();
+    }
+
+    [Fact]
+    public void A_downstream_aggregate_with_no_state_to_establish_is_unavailable_with_a_reason_naming_it()
+    {
+        FanOutTarget target = Downstream("LedgerEntry", "Books", "record");
+        var given = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+        {
+            ["status"] = ScenarioValue.Enum("Draft"),
+            ["amount"] = ScenarioValue.FromDecimal(12m),
+        };
+
+        DownstreamState state = ScenarioDownstreamState.Establish(target, "Order", given, NeverConstructs);
+
+        DownstreamState.Unavailable unavailable = state.ShouldBeOfType<DownstreamState.Unavailable>();
+        unavailable.Reason.ShouldContain("LedgerEntry");     // the aggregate that has no state
+        unavailable.Reason.ShouldContain("Order");           // what the given state DOES describe
+        unavailable.Reason.ShouldContain("LedgerEntry.");    // the remedy: the key to add
+    }
+
+    [Fact]
+    public void A_routed_given_slice_is_handed_to_the_construction_stripped_of_its_prefix()
+    {
+        FanOutTarget target = Downstream("LedgerEntry", "Books", "record");
+        var given = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+        {
+            ["status"] = ScenarioValue.Enum("Draft"),
+            ["LedgerEntry.amount"] = ScenarioValue.FromDecimal(12m),
+        };
+        var built = new object();
+        IReadOnlyDictionary<string, ScenarioValue>? seen = null;
+
+        DownstreamState state = ScenarioDownstreamState.Establish(target, "Order", given, routed =>
+        {
+            seen = routed;
+            return new DownstreamState.Instance(built);
+        });
+
+        state.ShouldBeOfType<DownstreamState.Instance>().Value.ShouldBeSameAs(built);
+        seen.ShouldNotBeNull();
+        seen!.Keys.ShouldBe(new[] { "amount" });
+    }
+
+    [Fact]
+    public void A_given_slice_keyed_by_the_policys_aggregate_name_still_reaches_its_root_entity()
+    {
+        // A policy reaction names the AGGREGATE (`Books.record`), so keying the slice by that name is
+        // what a scenario author reads off the model — it resolves to the same root entity.
+        FanOutTarget target = Downstream("LedgerEntry", "Books", "record");
+        var given = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+        {
+            ["Books.amount"] = ScenarioValue.FromDecimal(12m),
+        };
+        IReadOnlyDictionary<string, ScenarioValue>? seen = null;
+
+        ScenarioDownstreamState.Establish(target, "Order", given, routed =>
+        {
+            seen = routed;
+            return new DownstreamState.Instance(new object());
+        });
+
+        seen.ShouldNotBeNull();
+        seen!.Keys.ShouldBe(new[] { "amount" });
+    }
+
+    [Fact]
+    public void A_domain_violation_building_the_downstream_state_is_surfaced_rather_than_reported_as_unavailable()
+    {
+        FanOutTarget target = Downstream("LedgerEntry", "Books", "record");
+        var given = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+        {
+            ["LedgerEntry.amount"] = ScenarioValue.FromDecimal(-1m),
+        };
+        var violation = new InvalidOperationException("an amount cannot be negative");
+
+        DownstreamState state = ScenarioDownstreamState.Establish(
+            target, "Order", given, _ => new DownstreamState.Rejected(violation));
+
+        // A rejected given state is a real domain outcome the runner must report with its real message,
+        // never a swallowed "no state was established" note.
+        state.ShouldBeOfType<DownstreamState.Rejected>().Violation.ShouldBeSameAs(violation);
+    }
 }
