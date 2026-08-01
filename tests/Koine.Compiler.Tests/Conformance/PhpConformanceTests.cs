@@ -1722,4 +1722,187 @@ public class PhpConformanceTests
         order.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
         order.ShouldContain("public static function place(int $quantity, Status $newStatus): self");
     }
+
+    /// <summary>
+    /// Issue #1718 — the FOURTH call site of the #1701/#1712/#1716 qualifier-blind import gap, and
+    /// structurally worse than the first three: <c>EmitRepository</c> passes NO <c>symbolContext</c>
+    /// to <c>Assemble</c> at all (unlike the entity-file call sites #1712/#1716 extended, this one
+    /// never had ANY qualifier-aware import resolution). A repository finder's own parameter, here
+    /// <c>byShippingStatus</c>'s <c>status</c>, is declared with an EXPLICIT cross-context qualifier
+    /// (<c>Shipping.Status</c>) while <c>Ordering</c> separately declares its own, unrelated
+    /// <c>Status</c> enum — this is this issue's own repro model, verbatim.
+    /// </summary>
+    [Fact]
+    public void Repository_finder_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  quantity: Int
+                }
+
+                repository {
+                  find byShippingStatus(status: Shipping.Status): List<Order>
+                }
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var repo = result.Files.Single(f => f.RelativePath.EndsWith("OrderRepository.php", StringComparison.Ordinal)).Contents;
+        repo.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        repo.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        repo.ShouldContain("public function byShippingStatus(Status $status): array;");
+    }
+
+    /// <summary>
+    /// The application-service-boundary sibling of
+    /// <see cref="Repository_finder_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>
+    /// (issue #1718): <c>EmitApplicationService</c> shares the exact same qualifier-blind
+    /// parameter-hint gap — a <c>usecase</c>'s own parameter, not just a repository finder's.
+    /// </summary>
+    [Fact]
+    public void Application_service_usecase_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              service OrderService {
+                usecase SetShippingStatus(status: Shipping.Status)
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var svc = result.Files.Single(f => f.RelativePath.EndsWith("OrderService.php", StringComparison.Ordinal)).Contents;
+        svc.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        svc.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        svc.ShouldContain("public function setShippingStatus(Status $status): void;");
+    }
+
+    /// <summary>
+    /// The domain-service (pure <c>operation</c>) sibling of the same gap (issue #1718):
+    /// <c>EmitDomainService</c> shares the exact same qualifier-blind parameter-hint gap as
+    /// <c>EmitRepository</c>/<c>EmitApplicationService</c>.
+    /// </summary>
+    [Fact]
+    public void Domain_service_operation_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              service ShippingRouter {
+                operation currentStatus(status: Shipping.Status): Shipping.Status = status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var svc = result.Files.Single(f => f.RelativePath.EndsWith("ShippingRouter.php", StringComparison.Ordinal)).Contents;
+        svc.ShouldContain("use Koine\\Shipping\\Enums\\Status;");
+        svc.ShouldNotContain("use Koine\\Ordering\\Enums\\Status;");
+        svc.ShouldContain("public function currentStatus(Status $status): Status");
+    }
+
+    /// <summary>
+    /// The runtime twin of
+    /// <see cref="Domain_service_operation_parameter_import_honors_an_explicit_qualifier_over_the_owning_context"/>:
+    /// with the wrong import, <c>currentStatus</c>'s parameter is type-hinted against
+    /// <c>Ordering</c>'s own <c>Status</c>, so calling it with <c>Shipping</c>'s own
+    /// <c>Status::ACTIVE</c> is a hard runtime <c>TypeError</c> under <c>declare(strict_types=1)</c>.
+    /// Skipped (not failed) when no <c>php</c> interpreter is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Domain_service_operation_parameter_binds_the_qualified_type_at_runtime()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              service ShippingRouter {
+                operation currentStatus(status: Shipping.Status): Shipping.Status = status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string driver = """
+            <?php
+            declare(strict_types=1);
+            require __DIR__ . '/src/Shipping/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/Enums/Status.php';
+            require __DIR__ . '/src/Ordering/Services/ShippingRouter.php';
+
+            $svc = new Koine\Ordering\Services\ShippingRouter();
+            $result = $svc->currentStatus(Koine\Shipping\Enums\Status::ACTIVE);
+            if ($result !== Koine\Shipping\Enums\Status::ACTIVE) {
+                fwrite(STDERR, "expected Shipping's own Status::ACTIVE, got " . var_export($result, true) . "\n");
+                exit(1);
+            }
+            """;
+
+        TestSupport.PhpCheck run = TestSupport.RunPhp(result.Files, driver);
+        TestSupport.RequireOrSkip(run.ToolchainAvailable, NoInterpreterNotice);
+        run.Ok.ShouldBeTrue(
+            "currentStatus's 'status' parameter must bind Shipping's own Status enum (not "
+            + "Ordering's wrongly imported, differently-cased same-named sibling enum) at runtime:\n"
+            + string.Join("\n", run.Errors));
+    }
 }

@@ -77,6 +77,22 @@ public sealed partial class PhpEmitter
 
         sb.Append(isAbstract ? "abstract " : "final ").Append("class ").Append(name).Append("\n{\n");
 
+        // Per-parameter import hint for Assemble/CollectUses (issue #1718, the fourth call site of
+        // the #1701/#1712/#1716 gap): an operation's parameter's own `use` import must resolve
+        // against ITS declared type's context — the parameter's explicit `Context.Type` qualifier
+        // when present, else this service's own declaring context — not unconditionally this
+        // service's own context. A service file isn't tied to one entity's own field set, so it
+        // gets its own dictionary built from scratch (rather than extending an existing one).
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (OperationDecl op in svc.Operations)
+        {
+            foreach (Param p in op.Parameters)
+            {
+                CollectImportHints(p.Type, ctxName, symbolContext);
+            }
+            CollectImportHints(op.ReturnType, ctxName, symbolContext);
+        }
+
         var translator = new PhpExpressionTranslator(
             emit.Index,
             Array.Empty<Member>(),
@@ -139,7 +155,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(ctxName, KindFolder.Services, svc.Name),
-            Assemble(ctxName, KindFolder.Services, sb.ToString(), name),
+            Assemble(ctxName, KindFolder.Services, sb.ToString(), name,
+                symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.Services));
     }
 
@@ -162,6 +179,25 @@ public sealed partial class PhpEmitter
         WriteDoc(sb, svc.Doc ?? $"Application-service boundary for the {svc.Name} use cases.", "");
 
         sb.Append("interface ").Append(name).Append("\n{\n");
+
+        // Per-parameter import hint for Assemble/CollectUses (issue #1718, the fourth call site of
+        // the #1701/#1712/#1716 gap): a use case's parameter's own `use` import must resolve
+        // against ITS declared type's context — the parameter's explicit `Context.Type` qualifier
+        // when present, else this service's own declaring context — not unconditionally this
+        // service's own context. A service file isn't tied to one entity's own field set, so it
+        // gets its own dictionary built from scratch (rather than extending an existing one).
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (UseCaseDecl uc0 in svc.UseCases)
+        {
+            foreach (Param p in uc0.Parameters)
+            {
+                CollectImportHints(p.Type, ctxName, symbolContext);
+            }
+            if (uc0.ReturnType is not null)
+            {
+                CollectImportHints(uc0.ReturnType, ctxName, symbolContext);
+            }
+        }
 
         var first = true;
         foreach (UseCaseDecl uc in svc.UseCases)
@@ -190,7 +226,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(ctxName, KindFolder.Services, svc.Name),
-            Assemble(ctxName, KindFolder.Services, sb.ToString(), name),
+            Assemble(ctxName, KindFolder.Services, sb.ToString(), name,
+                symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.Services));
     }
 
