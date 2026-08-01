@@ -295,7 +295,6 @@ public sealed partial class PhpEmitter
             initByField.TryAdd(i.Field, i.Value);
         }
 
-        var factoryParams = new HashSet<string>(factory.Parameters.Select(p => p.Name), StringComparer.Ordinal);
         var args = new List<string> { "$id" };
         // Walk the ctor members in the SAME order the constructor signature uses (defaulted/optional
         // last), so these positional `new self($id, …)` args line up with the reordered parameters.
@@ -311,7 +310,7 @@ public sealed partial class PhpEmitter
                 // synthetic `id` are pushed as locals and take precedence anyway).
                 args.Add(translator.Translate(value, PhpExpressionTranslator.NameMode.Parameter, expectedEnum));
             }
-            else if (factoryParams.Contains(m.Name))
+            else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {
                 args.Add("$" + param);
             }

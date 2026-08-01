@@ -207,13 +207,19 @@ The shared primitives live once in an emitted `infrastructure-runtime.ts` / `koi
 
 ### Java infrastructure (`--layers`)
 
-The **Java** target honours the same selector (issue #1090). Per bounded context with at least one entity-rooted aggregate it emits an `InMemory<Root>Repository` implementing the repository contract over an injectable `koine.runtime.AggregateStore` (declarative finders become concrete in-memory queries), and — for a context that publishes an integration event — an `IntegrationEventDispatcher` draining a transactional outbox:
+The **Java** target honours the same selector (issue #1090, completed by #1726) and now emits the same family set as TypeScript and Python. Per bounded context with at least one entity-rooted aggregate it emits:
 
 ```bash
 koine build templates/pizzeria --target java --out Generated --layers domain,infrastructure
 ```
 
-The shared primitives (`AggregateStore`, `InMemoryStore`, `OutboxMessage`, `OutboxStore`, `InMemoryOutboxStore`, `IntegrationEventHandler`) ship once into the `koine.runtime` package. Everything stays stdlib-only and dependency-free, and the layer is **off by default**, so an unconfigured Java emit is **byte-identical** to the domain-only output.
+- an `InMemory<Root>Repository` per aggregate root, implementing the repository contract over an injectable `koine.runtime.AggregateStore` (declarative finders become concrete in-memory queries);
+- a concrete `UnitOfWork` — one repository field per root, defaulting to its in-memory repository — that is also the producer half of the transactional outbox: `enqueue` buffers an integration event and `saveChanges` flushes it to the outbox (only for a context that publishes);
+- an `IntegrationEventDispatcher` draining the outbox — only for a publishing context;
+- **validation + transaction pipeline behaviors** (`Behaviors.validationBehavior` / `transactionBehavior`), Java's idiom of a small `koine.runtime.PipelineBehavior` functional interface plus composable static factories, the analogue of the C# MediatR decorators;
+- a **composition-root factory** — `<Context>Infrastructure.create()` — wiring every repository, the unit of work, and (for a publishing context) the outbox and its dispatcher in one call; a publishing context's `create` takes the `IntegrationEventHandler` to dispatch to, the one piece only the caller can supply.
+
+The shared primitives (`AggregateStore`, `InMemoryStore`, `OutboxMessage`, `OutboxStore`, `InMemoryOutboxStore`, `IntegrationEventHandler`, `PipelineBehavior`, `Validator`, `ValidationError`) ship once into the `koine.runtime` package. Everything stays stdlib-only and dependency-free, and the layer is **off by default**, so an unconfigured Java emit is **byte-identical** to the domain-only output.
 
 ### Emit a glossary
 
