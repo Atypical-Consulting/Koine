@@ -1,8 +1,31 @@
 #nullable enable
+*REMOVED*Koine.Compiler.Ast.CommandDecl.CommandDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, Koine.Compiler.Ast.TypeRef? ReturnType = null) -> void
+*REMOVED*Koine.Compiler.Ast.QueryDecl.QueryDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, Koine.Compiler.Ast.TypeRef! ResultType) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null, int? RegexMatchTimeoutMs = null) -> void
 *REMOVED*override Koine.Compiler.Ast.PrimitiveType.Name.get -> string?
+Koine.Compiler.Ast.ApiAnnotationInfo
+Koine.Compiler.Ast.ApiAnnotationInfo.<Clone>$() -> Koine.Compiler.Ast.ApiAnnotationInfo!
+Koine.Compiler.Ast.ApiAnnotationInfo.ApiAnnotationInfo() -> void
+Koine.Compiler.Ast.ApiAnnotationInfo.AuthSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.ApiAnnotationInfo.AuthSpan.init -> void
+Koine.Compiler.Ast.ApiAnnotationInfo.Equals(Koine.Compiler.Ast.ApiAnnotationInfo? other) -> bool
+Koine.Compiler.Ast.ApiAnnotationInfo.RouteSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.ApiAnnotationInfo.RouteSpan.init -> void
+Koine.Compiler.Ast.ApiAnnotationInfo.VerbCount.get -> int
+Koine.Compiler.Ast.ApiAnnotationInfo.VerbCount.init -> void
+Koine.Compiler.Ast.ApiAnnotationInfo.VerbSpan.get -> Koine.Compiler.Ast.SourceSpan
+Koine.Compiler.Ast.ApiAnnotationInfo.VerbSpan.init -> void
+Koine.Compiler.Ast.CommandDecl.ApiAnnotations.get -> Koine.Compiler.Ast.ApiAnnotationInfo?
+Koine.Compiler.Ast.CommandDecl.ApiAnnotations.init -> void
+Koine.Compiler.Ast.CommandDecl.AuthRole.get -> string?
+Koine.Compiler.Ast.CommandDecl.AuthRole.init -> void
+Koine.Compiler.Ast.CommandDecl.CommandDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, Koine.Compiler.Ast.TypeRef? ReturnType = null, string? RouteOverride = null, string? VerbOverride = null, string? AuthRole = null) -> void
+Koine.Compiler.Ast.CommandDecl.RouteOverride.get -> string?
+Koine.Compiler.Ast.CommandDecl.RouteOverride.init -> void
+Koine.Compiler.Ast.CommandDecl.VerbOverride.get -> string?
+Koine.Compiler.Ast.CommandDecl.VerbOverride.init -> void
 Koine.Compiler.Ast.CoverageItem
 Koine.Compiler.Ast.CoverageItem.Context.get -> string!
 Koine.Compiler.Ast.CoverageItem.Context.init -> void
@@ -35,6 +58,15 @@ Koine.Compiler.Ast.ModelIndex.CommandsEmitting(string! eventName) -> System.Coll
 Koine.Compiler.Ast.ModelIndex.EventsEmittedBy(string! targetType, string! commandName) -> System.Collections.Generic.IReadOnlyList<string!>!
 Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
 Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
+Koine.Compiler.Ast.QueryDecl.ApiAnnotations.get -> Koine.Compiler.Ast.ApiAnnotationInfo?
+Koine.Compiler.Ast.QueryDecl.ApiAnnotations.init -> void
+Koine.Compiler.Ast.QueryDecl.AuthRole.get -> string?
+Koine.Compiler.Ast.QueryDecl.AuthRole.init -> void
+Koine.Compiler.Ast.QueryDecl.QueryDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, Koine.Compiler.Ast.TypeRef! ResultType, string? RouteOverride = null, string? VerbOverride = null, string? AuthRole = null) -> void
+Koine.Compiler.Ast.QueryDecl.RouteOverride.get -> string?
+Koine.Compiler.Ast.QueryDecl.RouteOverride.init -> void
+Koine.Compiler.Ast.QueryDecl.VerbOverride.get -> string?
+Koine.Compiler.Ast.QueryDecl.VerbOverride.init -> void
 Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider
 Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.AddOptionalMarkerCodeFixProvider() -> void
 Koine.Compiler.CodeFixes.Providers.AddOptionalMarkerCodeFixProvider.FixableDiagnosticCodes.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
@@ -330,7 +362,12 @@ const Koine.Compiler.Services.StructuredEditKind.ChangeFieldType = "changeFieldT
 const Koine.Compiler.Services.StructuredEditKind.RemoveMember = "removeMember" -> string!
 const Koine.Compiler.Services.StructuredEditKind.RemoveType = "removeType" -> string!
 const Koine.Compiler.Services.StructuredEditKind.RenameMember = "renameMember" -> string!
+override Koine.Compiler.Ast.ApiAnnotationInfo.Equals(object? obj) -> bool
+override Koine.Compiler.Ast.ApiAnnotationInfo.GetHashCode() -> int
+override Koine.Compiler.Ast.ApiAnnotationInfo.ToString() -> string!
 override Koine.Compiler.Ast.PrimitiveType.Name.get -> string!
+static Koine.Compiler.Ast.ApiAnnotationInfo.operator !=(Koine.Compiler.Ast.ApiAnnotationInfo? left, Koine.Compiler.Ast.ApiAnnotationInfo? right) -> bool
+static Koine.Compiler.Ast.ApiAnnotationInfo.operator ==(Koine.Compiler.Ast.ApiAnnotationInfo? left, Koine.Compiler.Ast.ApiAnnotationInfo? right) -> bool
 static Koine.Compiler.Ast.MemberAnalysis.ExplicitIdParameter(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> Koine.Compiler.Ast.Param?
 static Koine.Compiler.Ast.MemberAnalysis.FactoryProvidesExplicitId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> bool
 static Koine.Compiler.Ast.MemberAnalysis.IdentityParameters(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>!
@@ -414,7 +451,7 @@ Koine.Compiler.Ast.CallExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Target, out
 Koine.Compiler.Ast.CallExpr.Equals(Koine.Compiler.Ast.CallExpr? other) -> bool
 Koine.Compiler.Ast.CoalesceExpr.Deconstruct(out Koine.Compiler.Ast.Expr! Left, out Koine.Compiler.Ast.Expr! Right) -> void
 Koine.Compiler.Ast.CoalesceExpr.Equals(Koine.Compiler.Ast.CoalesceExpr? other) -> bool
-Koine.Compiler.Ast.CommandDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, out Koine.Compiler.Ast.TypeRef? ReturnType) -> void
+Koine.Compiler.Ast.CommandDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, out Koine.Compiler.Ast.TypeRef? ReturnType, out string? RouteOverride, out string? VerbOverride, out string? AuthRole) -> void
 Koine.Compiler.Ast.CommandDecl.Equals(Koine.Compiler.Ast.CommandDecl? other) -> bool
 Koine.Compiler.Ast.CommandStmt.CommandStmt() -> void
 Koine.Compiler.Ast.CommandStmt.CommandStmt(Koine.Compiler.Ast.CommandStmt! original) -> void
@@ -498,7 +535,7 @@ Koine.Compiler.Ast.PolicyReaction.Deconstruct(out string! TargetType, out string
 Koine.Compiler.Ast.PolicyReaction.Equals(Koine.Compiler.Ast.PolicyReaction? other) -> bool
 Koine.Compiler.Ast.PublishDecl.Deconstruct(out string! EventName) -> void
 Koine.Compiler.Ast.PublishDecl.Equals(Koine.Compiler.Ast.PublishDecl? other) -> bool
-Koine.Compiler.Ast.QueryDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, out Koine.Compiler.Ast.TypeRef! ResultType) -> void
+Koine.Compiler.Ast.QueryDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, out Koine.Compiler.Ast.TypeRef! ResultType, out string? RouteOverride, out string? VerbOverride, out string? AuthRole) -> void
 Koine.Compiler.Ast.QueryDecl.Equals(Koine.Compiler.Ast.QueryDecl? other) -> bool
 Koine.Compiler.Ast.ReadModelDecl.Deconstruct(out string! Name, out string! SourceType, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.ReadModelField!>! Fields) -> void
 Koine.Compiler.Ast.ReadModelDecl.Equals(Koine.Compiler.Ast.ReadModelDecl? other) -> bool

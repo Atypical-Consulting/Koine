@@ -425,14 +425,58 @@ public sealed record TypeRef(
 public sealed record Invariant(Expr Condition, string? Message) : KoineNode;
 
 /// <summary>
+/// Where a declaration's API annotations (<c>@route</c>, <c>@get</c>/<c>@post</c>/<c>@put</c>/
+/// <c>@delete</c>/<c>@patch</c>, <c>@auth</c>, R19) sat in source, plus how many verb annotations
+/// were seen. The annotation <em>values</em> live on <see cref="CommandDecl"/>/<see cref="QueryDecl"/>
+/// themselves; this companion exists so <c>Semantics/</c> can point a diagnostic at the offending
+/// annotation rather than the whole declaration, and can reject a declaration carrying more than one
+/// verb — the parser reads, it never rejects. TARGET-AGNOSTIC: spans and a count, no HTTP concept.
+/// </summary>
+public sealed record ApiAnnotationInfo
+{
+    /// <summary>The span of the <c>@route("…")</c> annotation; <see cref="SourceSpan.None"/> when absent.</summary>
+    public SourceSpan RouteSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>
+    /// The span of the LAST verb annotation seen — i.e. the duplicate, when <see cref="VerbCount"/>
+    /// is greater than 1, which is also the one whose value won; <see cref="SourceSpan.None"/> when absent.
+    /// </summary>
+    public SourceSpan VerbSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>The span of the <c>@auth("…")</c> annotation; <see cref="SourceSpan.None"/> when absent.</summary>
+    public SourceSpan AuthSpan { get; init; } = SourceSpan.None;
+
+    /// <summary>
+    /// How many verb annotations preceded the declaration. Zero when unannotated; more than one is a
+    /// <c>Semantics/</c> error, so the count is preserved here instead of collapsing silently.
+    /// </summary>
+    public int VerbCount { get; init; }
+}
+
+/// <summary>
 /// A state-changing operation on an entity: named, with typed parameters,
 /// preconditions, and state transitions. TARGET-AGNOSTIC.
+///
+/// <para><see cref="RouteOverride"/>, <see cref="VerbOverride"/> and <see cref="AuthRole"/> carry the
+/// R19 <c>@route</c>/verb/<c>@auth</c> annotations; all three are <c>null</c> on an unannotated command,
+/// leaving every consumer on its derived default. Plain strings — an HTTP method and a path template,
+/// not a framework type.</para>
 /// </summary>
 public sealed record CommandDecl(
     string Name,
     IReadOnlyList<Param> Parameters,
     IReadOnlyList<CommandStmt> Body,
-    TypeRef? ReturnType = null) : KoineNode;
+    TypeRef? ReturnType = null,
+    string? RouteOverride = null,
+    string? VerbOverride = null,
+    string? AuthRole = null) : KoineNode
+{
+    /// <summary>
+    /// Where the API annotations sat and how many verbs were seen (R19); <c>null</c> when the command
+    /// carries none. Consumed by <c>Semantics/</c> to position <c>@route</c>/verb/<c>@auth</c> diagnostics.
+    /// </summary>
+    public ApiAnnotationInfo? ApiAnnotations { get; init; }
+}
 
 /// <summary>A typed command parameter.</summary>
 public sealed record Param(string Name, TypeRef Type) : KoineNode;
@@ -529,11 +573,26 @@ public sealed record ReadModelField(
 /// A query object (R12.4): typed <see cref="Criteria"/> over a read model, with a single
 /// or list <see cref="ResultType"/>. Emitted as a DTO record handled via the generic
 /// <c>IQueryHandler&lt;TQuery,TResult&gt;</c>. TARGET-AGNOSTIC.
+///
+/// <para><see cref="RouteOverride"/>, <see cref="VerbOverride"/> and <see cref="AuthRole"/> carry the
+/// R19 <c>@route</c>/verb/<c>@auth</c> annotations; all three are <c>null</c> on an unannotated query,
+/// leaving every consumer on its derived default. Plain strings — an HTTP method and a path template,
+/// not a framework type.</para>
 /// </summary>
 public sealed record QueryDecl(
     string Name,
     IReadOnlyList<Param> Criteria,
-    TypeRef ResultType) : TypeDecl(Name);
+    TypeRef ResultType,
+    string? RouteOverride = null,
+    string? VerbOverride = null,
+    string? AuthRole = null) : TypeDecl(Name)
+{
+    /// <summary>
+    /// Where the API annotations sat and how many verbs were seen (R19); <c>null</c> when the query
+    /// carries none. Consumed by <c>Semantics/</c> to position <c>@route</c>/verb/<c>@auth</c> diagnostics.
+    /// </summary>
+    public ApiAnnotationInfo? ApiAnnotations { get; init; }
+}
 
 /// <summary>
 /// A domain-service operation. <see cref="Body"/> is the pure result expression when

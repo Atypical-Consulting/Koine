@@ -213,6 +213,63 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return (since, deprecated);
     }
 
+    /// <summary>
+    /// Reads the <c>@route("…")</c> / <c>@get</c>|<c>@post</c>|<c>@put</c>|<c>@delete</c>|<c>@patch</c> /
+    /// <c>@auth("…")</c> API annotations preceding a command or query declaration (R19). A verb annotation
+    /// becomes its uppercased HTTP method. Unknown annotation names are ignored, exactly as
+    /// <see cref="ReadAnnotations"/> does.
+    ///
+    /// <para>The parser reads, it never rejects: a repeated verb keeps the LAST one's value but records
+    /// every occurrence in <see cref="ApiAnnotationInfo.VerbCount"/>, and an argument-less or malformed
+    /// <c>@route</c>/<c>@auth</c> still contributes its span — so <c>Semantics/</c> can diagnose all of it
+    /// at the offending annotation. The returned info is <c>null</c> when no API annotation is present.</para>
+    /// </summary>
+    private (string? Route, string? Verb, string? Auth, ApiAnnotationInfo? Info) ReadApiAnnotations(
+        IReadOnlyList<KoineParser.AnnotationContext> annotations)
+    {
+        string? route = null;
+        string? verb = null;
+        string? auth = null;
+        SourceSpan routeSpan = SourceSpan.None;
+        SourceSpan verbSpan = SourceSpan.None;
+        SourceSpan authSpan = SourceSpan.None;
+        var verbCount = 0;
+
+        for (var i = 0; i < annotations.Count; i++)
+        {
+            KoineParser.AnnotationContext a = annotations[i];
+            var name = a.Identifier().GetText();
+            switch (name)
+            {
+                case "route":
+                    routeSpan = SpanOf(a);
+                    route = a.StringLiteral() is { } rv ? UnescapeString(StripQuotes(rv.GetText())) : null;
+                    break;
+                case "get" or "post" or "put" or "delete" or "patch":
+                    verbSpan = SpanOf(a);
+                    verb = name.ToUpperInvariant();
+                    verbCount++;
+                    break;
+                case "auth":
+                    authSpan = SpanOf(a);
+                    auth = a.StringLiteral() is { } av ? UnescapeString(StripQuotes(av.GetText())) : null;
+                    break;
+            }
+        }
+
+        ApiAnnotationInfo? info = routeSpan.IsNone && verbSpan.IsNone && authSpan.IsNone
+            ? null
+            : new ApiAnnotationInfo
+            {
+                RouteSpan = routeSpan,
+                VerbSpan = verbSpan,
+                AuthSpan = authSpan,
+                VerbCount = verbCount
+            };
+
+        return (route, verb, auth, info);
+    }
+
     // ---- Context map & integration-event wiring (R14) ----------------------
 
     private ContextRelation BuildRelation(KoineParser.RelationDeclContext ctx)
@@ -472,13 +529,16 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         List<Param> criteria = ctx.paramList() is { } pl
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
-        return new QueryDecl(NameOf(ctx.Identifier()), criteria, BuildTypeRef(ctx.typeRef()))
+        var (route, verb, auth, api) = ReadApiAnnotations(ctx.annotation());
+
+        return new QueryDecl(NameOf(ctx.Identifier()), criteria, BuildTypeRef(ctx.typeRef()), route, verb, auth)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
-            TrailingTrivia = TrailingTriviaFor(ctx)
+            TrailingTrivia = TrailingTriviaFor(ctx),
+            ApiAnnotations = api
         };
     }
 
@@ -713,14 +773,16 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             : new List<Param>();
         var body = Map(ctx.commandStmt(), BuildCommandStmt);
         TypeRef? returnType = ctx.typeRef() is { } tr ? BuildTypeRef(tr) : null;
+        var (route, verb, auth, api) = ReadApiAnnotations(ctx.annotation());
 
-        return new CommandDecl(NameOf(ctx.Identifier()), parameters, body, returnType)
+        return new CommandDecl(NameOf(ctx.Identifier()), parameters, body, returnType, route, verb, auth)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
-            TrailingTrivia = TrailingTriviaFor(ctx)
+            TrailingTrivia = TrailingTriviaFor(ctx),
+            ApiAnnotations = api
         };
     }
 
