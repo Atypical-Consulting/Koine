@@ -4,7 +4,7 @@ import { h } from 'preact';
 import {
   DomainNavigator,
   mountDomainNavigator,
-  renderContextMapGraph,
+  renderContextMapLevel,
   renderStrategic,
   renderTactical,
   type DomainNavigatorHandlers,
@@ -383,9 +383,9 @@ const ctxmapEdges = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.
 const roleAt = (edge: HTMLElement, end: 'upstream' | 'downstream') =>
   edge.querySelector<HTMLElement>(`[data-role-end="${end}"]`)?.textContent;
 
-describe('renderContextMapGraph', () => {
+describe('renderContextMapLevel', () => {
   it('renders one node per context and one edge per relation, badging BOTH ends with its derived roles', () => {
-    const el = renderContextMapGraph(typedContextMap(), { goto: vi.fn() });
+    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
 
     // Nodes = contexts (declaration order), each addressable by name.
     expect(ctxmapNodes(el).map((n) => n.dataset.ctxmapNode)).toEqual(['Sales', 'Shipping', 'Legacy']);
@@ -408,7 +408,7 @@ describe('renderContextMapGraph', () => {
   });
 
   it('a symmetric relation (partnership / shared kernel) renders NO role badge at either end', () => {
-    const el = renderContextMapGraph(symmetricContextMap(), { goto: vi.fn() });
+    const el = renderContextMapLevel(symmetricContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
     const edge = ctxmapEdges(el)[0];
 
     // A null role is an ABSENT badge — not an empty pill, and never the string "null".
@@ -420,7 +420,7 @@ describe('renderContextMapGraph', () => {
 
   it('a context-node click jumps to its declaration (contextSpans); a span-less node stays inert', () => {
     const goto = vi.fn();
-    const el = renderContextMapGraph(typedContextMap(), { goto });
+    const el = renderContextMapLevel(typedContextMap(), { goto, openFullMap: vi.fn() });
 
     (el.querySelector('[data-ctxmap-node="Sales"]') as HTMLButtonElement).click();
     expect(goto).toHaveBeenCalledWith(salesSpan.line, salesSpan.column); // the raw 1-based span
@@ -431,9 +431,101 @@ describe('renderContextMapGraph', () => {
   });
 
   it('an empty context map renders a quiet note, not an empty tree', () => {
-    const el = renderContextMapGraph({ contexts: [], relations: [] }, { goto: vi.fn() });
+    const el = renderContextMapLevel({ contexts: [], relations: [] }, { goto: vi.fn(), openFullMap: vi.fn() });
     expect(el.getAttribute('role')).toBe('note');
     expect(el.querySelector('[role="treeitem"]')).toBeNull();
+  });
+
+  // Two relations between the SAME pair of contexts: the row address must still tell them apart, so it
+  // carries the declaration index alongside the pair (a bare `from→to` collided).
+  it('addresses each edge row unambiguously when two relations share a context pair', () => {
+    const el = renderContextMapLevel(
+      {
+        contexts: ['Sales', 'Shipping'],
+        relations: [
+          {
+            upstream: 'Sales',
+            downstream: 'Shipping',
+            kind: 'Customer/Supplier',
+            bidirectional: false,
+            sharedTypes: [],
+            acl: [],
+            upstreamRole: 'Supplier',
+            downstreamRole: 'Customer',
+          },
+          {
+            upstream: 'Sales',
+            downstream: 'Shipping',
+            kind: 'Open Host Service',
+            bidirectional: false,
+            sharedTypes: [],
+            acl: [],
+            upstreamRole: 'Open Host Service',
+            downstreamRole: 'Downstream',
+          },
+        ],
+      },
+      { goto: vi.fn(), openFullMap: vi.fn() },
+    );
+    expect(ctxmapEdges(el).map((e) => e.dataset.ctxmapEdge)).toEqual(['Sales→Shipping#0', 'Sales→Shipping#1']);
+  });
+
+  // The rail level SUMMARIZES the map; the center-deck view owns the canvas, the Graph/Table toggle and
+  // the shared-type / ACL detail strip. So the level closes with a door back to it — otherwise opening
+  // the rail level would strand a reader away from the richer destination.
+  it('closes with an "Open full Context Map" row that hands off to the caller', () => {
+    const openFullMap = vi.fn();
+    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap });
+
+    const door = el.querySelector<HTMLButtonElement>('[data-door="contextmap-full"]')!;
+    expect(door).toBeTruthy();
+    // Same treeitem idiom as every other row, so the roving-tabindex model reaches it…
+    expect(door.getAttribute('role')).toBe('treeitem');
+    // …and it names both the action and where it lands (the row text alone would be ambiguous).
+    expect(door.getAttribute('aria-label')).toBe('Open full Context Map — the canvas, table and shared-type details');
+    expect([...el.querySelectorAll<HTMLElement>('[role="treeitem"]')].at(-1)).toBe(door); // last, after the map
+
+    door.click();
+    expect(openFullMap).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- Enter/Space activation only claims the key when there IS something to activate ----------------
+// The navigator's `treeNav.activate` forwards Enter/Space from a wrapper `treeitem` to the button inside
+// it. A wrapper with no button (a context-map relation row — pure information) must report the key
+// UNCONSUMED: the shared router calls `preventDefault()` on a `true`, which would swallow Space's native
+// scroll while doing nothing at all.
+describe('Domain navigator — Enter/Space activation', () => {
+  const press = (el: HTMLElement, key: string): KeyboardEvent => {
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+
+  it('a relation row has nothing to activate — Space is left to the browser', () => {
+    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
+    document.body.appendChild(el);
+    const edge = ctxmapEdges(el)[0];
+    edge.focus();
+
+    expect(press(edge, ' ').defaultPrevented).toBe(false);
+    expect(press(edge, 'Enter').defaultPrevented).toBe(false);
+  });
+
+  it('a tactical leaf row still forwards Space to its activation button (the key IS consumed)', () => {
+    const onSelect = vi.fn();
+    const el = renderTactical(ctxNode('Ordering', [value('Currency')]), {
+      onSelect,
+      goto: vi.fn(),
+      reveal: vi.fn(),
+      setAxis: vi.fn(),
+    });
+    document.body.appendChild(el);
+    const row = el.querySelector<HTMLElement>('.koi-tactical-leaf-row')!;
+    row.focus();
+
+    expect(press(row, ' ').defaultPrevented).toBe(true);
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -568,6 +660,25 @@ describe('mountDomainNavigator', () => {
     expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // still the strategic list
   });
 
+  // The rail level summarizes the map; the center-deck view owns the canvas, the Graph/Table toggle and
+  // the shared-type / ACL detail strip. The doorway prefers the rail level whenever there's something to
+  // graph — so the level itself must carry the way on to the richer destination, or opening it would be a
+  // one-way trip away from the very view it used to reach.
+  it('the graph level\'s "Open full Context Map" row still reaches the caller\'s center-deck view', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const onOpenContextMap = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { onOpenContextMap });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(onOpenContextMap).not.toHaveBeenCalled(); // the doorway opened the rail level, not the hand-off
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    (host.querySelector('[data-door="contextmap-full"]') as HTMLButtonElement).click();
+    expect(onOpenContextMap).toHaveBeenCalledTimes(1); // …and the level's own door hands off anyway
+  });
+
   it('an external scope change leaves the graph — it is a strategic-level view, not a sticky one', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
@@ -581,6 +692,69 @@ describe('mountDomainNavigator', () => {
     store.getState().setActiveContext('Billing'); // the top-bar switcher
     expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
     expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy();
+  });
+
+  // The other half of the same reset: an ALTITUDE change (a drill driven from outside the navigator)
+  // must drop the graph too — the scope-change half above shares one `closedContextMap` condition with it.
+  it('an external altitude change leaves the graph as well', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, typedLsp());
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    store.getState().setNavAltitude('tactical'); // an altitude move with the scope left alone
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // unscoped ⇒ the strategic list
+  });
+
+  // Closing the graph WITHOUT an altitude change tears the focused row down all the same, so the
+  // subscription's `else if (closedContextMap)` arm has to recover focus into the fresh level (WCAG 2.4.3)
+  // — the `navAltitude !== paintedAltitude` arm above it never fires for a same-altitude scope switch.
+  it('a scope switch made while reading the graph lands focus in the fresh strategic level', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = makeTestStore();
+    mountDomainNavigator(host, store, typedLsp());
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    const salesNode = host.querySelector<HTMLElement>('[data-ctxmap-node="Sales"]')!;
+    salesNode.focus();
+    expect(document.activeElement).toBe(salesNode);
+
+    store.getState().setActiveContext('Billing'); // the top-bar switcher, at the SAME altitude
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    // Focus follows the level swap instead of dropping to <body> and restarting the Tab order at the chrome.
+    expect(document.activeElement).toBe(host.querySelector('[data-ctx="Ordering"]'));
+  });
+
+  // A reload that FAILS leaves no map to draw, so the presenter's `contextMapOpen && cache?.contextMap`
+  // guard falls through and the graph vanishes. The flag has to fall with it — otherwise it stays `true`
+  // invisibly and the next SUCCESSFUL reload teleports the reader back into a level they never re-opened.
+  it('a failed reload closes the Context Map level — a later good reload does NOT re-enter it', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const lsp = typedLsp();
+    const handle = mountDomainNavigator(host, makeTestStore(), lsp);
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeTruthy();
+
+    lsp.contextMap.mockRejectedValueOnce(new Error('boom')); // a dropped connection mid-session
+    handle.reload();
+    await flush();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull();
+    expect(host.querySelector('.koi-domain-empty')).toBeTruthy(); // the best-effort empty strategic state
+
+    handle.reload(); // …and the model comes back
+    await flush();
+    expect(host.querySelector('.koi-domain-ctxmap-body')).toBeNull(); // no silent re-entry
+    expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy(); // the level navAltitude names
   });
 
   it('labels the glossary doorway "Glossary" but keeps "the ubiquitous language" in its accessible name', async () => {

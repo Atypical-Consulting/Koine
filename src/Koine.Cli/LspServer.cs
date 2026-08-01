@@ -2271,8 +2271,8 @@ internal sealed class LspServer
         ["bidirectional"] = r.IsBidirectional,
         ["sharedTypes"] = r.SharedTypes.Select(s => (object)s).ToArray(),
         ["acl"] = r.AclMappings.Select(MapAcl).ToArray(),
-        ["upstreamRole"] = ContextRelationRoles.RoleOf(r.Kind, ContextRelationEnd.Upstream),
-        ["downstreamRole"] = ContextRelationRoles.RoleOf(r.Kind, ContextRelationEnd.Downstream),
+        ["upstreamRole"] = ContextRelationRoles.UpstreamRole(r),
+        ["downstreamRole"] = ContextRelationRoles.DownstreamRole(r),
     };
 
     private static object MapAcl(Compiler.Ast.AclMapping a) => new Dictionary<string, object?>

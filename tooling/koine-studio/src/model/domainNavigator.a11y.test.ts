@@ -5,7 +5,7 @@ import { h } from 'preact';
 import {
   DomainNavigator,
   mountDomainNavigator,
-  renderContextMapGraph,
+  renderContextMapLevel,
   renderStrategic,
   renderTactical,
   type DomainNavigatorHandlers,
@@ -229,14 +229,16 @@ function typedContextMap(): ContextMapResult {
 
 describe('Domain navigator a11y — the strategic Context Map graph', () => {
   it('the context-map graph is axe-clean and keyboard-navigable', async () => {
-    const el = renderContextMapGraph(typedContextMap(), { goto: () => {} });
+    const el = renderContextMapLevel(typedContextMap(), { goto: () => {}, openFullMap: () => {} });
     document.body.appendChild(el);
 
     expect(await axe(el)).toHaveNoViolations();
 
-    // One row per context + one per relation, all reachable through the single-tab-stop roving model.
+    // One row per context, one per relation, and the closing `Open full Context Map` door — all
+    // reachable through the single-tab-stop roving model.
     const items = treeitems(el);
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
+    expect(items.at(-1)!.dataset.door).toBe('contextmap-full'); // the escape hatch is a row like any other
     expect(items.filter((it) => it.tabIndex === 0)).toEqual([items[0]]);
 
     items[0].focus();
@@ -249,7 +251,7 @@ describe('Domain navigator a11y — the strategic Context Map graph', () => {
   });
 
   it('an empty context map renders a note, not an empty (keyboard-unreachable) tree', async () => {
-    const el = renderContextMapGraph({ contexts: [], relations: [] }, { goto: () => {} });
+    const el = renderContextMapLevel({ contexts: [], relations: [] }, { goto: () => {}, openFullMap: () => {} });
     document.body.appendChild(el);
 
     expect(await axe(el)).toHaveNoViolations();

@@ -45,7 +45,16 @@ public static partial class ModelRoundTripService
     /// <see cref="ModelNode.Children"/> the bounded contexts (then the strategic context map, when
     /// present) in declaration order. With a qualified name only the matching subtree is returned —
     /// the scoped read an editor uses to drive a single form/canvas — or an empty <c>unknown</c> node
-    /// when nothing resolves. Declaration-order stable, so editors never reshuffle.
+    /// when nothing resolves.
+    ///
+    /// <para><b>Order is stable per list, not per source line.</b> The Ast stores a declaration's kinds in
+    /// separate lists (a context's types / policies / services / specs; an entity's state machines /
+    /// commands / factories; a service's operations / use cases), so the projection concatenates those
+    /// lists in a fixed order and each keeps its own declaration order within the group. Source
+    /// interleaving across two groups is therefore not preserved — a policy written above a service still
+    /// projects after it. What the contract guarantees is that the sequence is deterministic and that new
+    /// groups are <em>appended</em>, never spliced in, so an editor re-reading the tree never sees existing
+    /// children reshuffle.</para>
     /// </summary>
     public static ModelNode ModelToJson(KoineModel model, string? qualifiedName = null)
     {
@@ -62,7 +71,7 @@ public static partial class ModelRoundTripService
     /// Enumerates the editable children (<see cref="ModelNode.Members"/>) of the node addressed by
     /// <paramref name="qualifiedName"/> — a value/entity's fields, an enum's members, a state machine's
     /// transitions, the context map's relations — with their kinds and current values. Empty when the
-    /// name does not resolve. Declaration-order stable.
+    /// name does not resolve. Order is stable per list, in the sense <see cref="ModelToJson"/> documents.
     /// </summary>
     public static IReadOnlyList<ModelMember> MembersOf(KoineModel model, string qualifiedName) =>
         Find(BuildRoot(model), qualifiedName)?.Members ?? [];
@@ -95,6 +104,8 @@ public static partial class ModelRoundTripService
         // The context's behavioural vocabulary (#483) — policies, services, then specifications —
         // appended after the types so the existing children keep their positions. The read side
         // (read models, queries) rides `ctx.Types`, so it keeps its own declaration position there.
+        // Policies and specs get their own `.policies.` / `.specs.` name segment because, unlike a
+        // service, their names are not reserved against the type namespace: see BuildPolicy/BuildSpec.
         foreach (PolicyDecl policy in ctx.Policies)
         {
             children.Add(BuildPolicy(policy, ctx.Name));
@@ -353,9 +364,15 @@ public static partial class ModelRoundTripService
     /// <summary>
     /// A policy (R10.3): one <c>reaction</c> member correlating the triggering event with the command
     /// the policy reacts with — the <c>command → event → policy</c> chain a navigator walks.
+    ///
+    /// <para>Addressed under a <c>.policies.</c> segment rather than <c><paramref name="prefix"/>.Name</c>:
+    /// nothing in the language reserves a policy's name against the type namespace (only a
+    /// <em>service</em> shares it — see <see cref="Semantics.SemanticValidator.ValidateUniqueTypeNames"/>),
+    /// so a legal model may declare a policy and a type of the same name, and a flat qualified name would
+    /// make the two children collide and shadow one another in <see cref="Find"/>.</para>
     /// </summary>
     private static ModelNode BuildPolicy(PolicyDecl policy, string prefix) => new(
-        "policy", prefix + "." + policy.Name, policy.Name,
+        "policy", prefix + ".policies." + policy.Name, policy.Name,
         [new ModelMember("reaction", policy.EventName, null, DescribeReaction(policy.Reaction))], [], []);
 
     /// <summary>Renders a policy's reaction in canonical <c>.koi</c> syntax: <c>Target.command(arg: value, ...)</c>.</summary>
@@ -380,10 +397,13 @@ public static partial class ModelRoundTripService
 
     /// <summary>
     /// A specification (R10.1): one <c>condition</c> member naming the value/entity the rule is declared
-    /// on, with the boolean condition described target-agnostically.
+    /// on, with the boolean condition described target-agnostically. Addressed under a <c>.specs.</c>
+    /// segment — at context scope under the context, at aggregate scope under the aggregate — for the
+    /// same reason as <see cref="BuildPolicy"/>: a spec's name is not reserved against the type
+    /// namespace, so a flat qualified name would collide with a same-named type's node.
     /// </summary>
     private static ModelNode BuildSpec(SpecDecl spec, string prefix) => new(
-        "spec", prefix + "." + spec.Name, spec.Name,
+        "spec", prefix + ".specs." + spec.Name, spec.Name,
         [new ModelMember("condition", spec.TargetType, null, ExprDescriber.Describe(spec.Condition))], [], []);
 
     private static ModelNode BuildContextMap(ContextMapNode map)

@@ -7,7 +7,10 @@
 // as a graph — the bounded contexts as nodes, the typed relationships as edges badged with the DDD role
 // each END plays (Supplier/Customer, Upstream/Conformist, …). It shapes its data with the SHARED
 // `buildContextMapGraph` the inspector's maxGraph canvas uses, and falls back to the caller's docs
-// hand-off when the model declares no relationships (nothing to graph).
+// hand-off when the model declares no relationships (nothing to graph). The rail level is a SUMMARY, not
+// a replacement: the center-deck view still owns the maxGraph canvas, the Graph/Table toggle and the
+// shared-types / anti-corruption detail strip, so the level carries its own `Open full Context Map` row
+// that hands off there — the doorway is a two-way street, not a one-way trip away from the rich view.
 //
 // SHAPE (a container/presenter split, like GlossaryPanel + inspectorController): the pure levels render
 // as keyed JSX sub-components (`StrategicLevel` / `TacticalView` / `ContextMapView`), and the live
@@ -189,13 +192,16 @@ function treeNav(rovingTabIndex: RovingTabIndexHelper, ev: KeyboardEvent): Rovin
     },
     activate: () => {
       // A `<button>` treeitem activates natively (leave the key to the browser); a wrapper row (the
-      // tactical rows) forwards Enter/Space to the primary control inside it.
+      // tactical rows) forwards Enter/Space to the primary control inside it. A wrapper row with NO
+      // control to forward to — the context-map relation rows, which are pure information — reports the
+      // key UNCONSUMED so the router leaves it to the browser: claiming it would `preventDefault()` and
+      // silently swallow Space's native scroll while doing nothing at all.
       const current = rovingTabIndex.currentTreeItem(ev);
-      if (current && current.tagName !== 'BUTTON') {
-        current.querySelector<HTMLElement>('button')?.click();
-        return true;
-      }
-      return false;
+      if (!current || current.tagName === 'BUTTON') return false;
+      const inner = current.querySelector<HTMLElement>('button');
+      if (!inner) return false;
+      inner.click();
+      return true;
     },
   };
 }
@@ -589,6 +595,11 @@ export interface ContextMapHandlers {
    *  ({@link ModelOutlineHandlers.goto}, already wired to `editor.goto`), fed from the context's
    *  declaration span in `contextSpans` (#290). A span-less context stays inert. */
   goto(line: number, column: number): void;
+  /** Hand off to the caller's FULL Context Map view — the center-deck destination
+   *  ({@link StrategicHandlers.onOpenContextMap}) with the maxGraph canvas, the Graph/Table toggle and
+   *  the shared-types / anti-corruption detail strip this 260px rail level deliberately summarizes away.
+   *  Wired to the level's own `Open full Context Map` row, so the richer view stays one step from here. */
+  openFullMap(): void;
 }
 
 /** One bounded-context node. The whole row IS the button (and the treeitem), like {@link ContextRow};
@@ -627,8 +638,12 @@ function RoleBadge({ end, role }: { end: 'upstream' | 'downstream'; role: string
 /** One typed relationship: `‹upstream› [role] → ‹downstream› [role]` plus the relationship kind. The
  * arrow glyph is decorative (`↔` for a symmetric relation), so the row carries an explicit accessible
  * name that reads the same information in words — "Sales as Supplier to Shipping as Customer,
- * Customer/Supplier" — instead of concatenating the badge fragments. */
-function ContextMapEdgeRow({ edge }: { edge: ContextMapEdge }): VNode {
+ * Customer/Supplier" — instead of concatenating the badge fragments.
+ *
+ * `data-ctxmap-edge` addresses the row as `‹from›→‹to›#‹index›`: a context PAIR alone is ambiguous (two
+ * contexts may declare several relations), so the declaration index disambiguates it — the same key the
+ * list renders each row with. */
+function ContextMapEdgeRow({ edge, index }: { edge: ContextMapEdge; index: number }): VNode {
   const kind = edge.label ?? 'relation';
   const end = (name: string, role: string | null): string => (role ? `${name} as ${role}` : name);
   const label = `${end(edge.from, edge.upstreamRole)} ${edge.bidirectional ? 'and' : 'to'} ${end(
@@ -638,7 +653,7 @@ function ContextMapEdgeRow({ edge }: { edge: ContextMapEdge }): VNode {
   return (
     <div
       class="koi-domain-ctxmap-edge"
-      data-ctxmap-edge={`${edge.from}→${edge.to}`}
+      data-ctxmap-edge={`${edge.from}→${edge.to}#${String(index)}`}
       role="treeitem"
       aria-label={label}
     >
@@ -658,10 +673,16 @@ function ContextMapEdgeRow({ edge }: { edge: ContextMapEdge }): VNode {
 
 /**
  * The Context Map GRAPH body: one node row per bounded context, then the typed relations as edge rows
- * under a quiet group — the same `role="tree"` + roving-tabindex keyboard model as the navigator's other
- * levels (so the whole rail navigates identically), with the context nodes as the focusable, activatable
- * rows. An empty map renders a quiet note, NOT an empty `role="tree"` (which would break
- * aria-required-children and leave a keyboard-unreachable tree) — mirroring {@link TacticalLevel}.
+ * under a quiet group, and last the `Open full Context Map` door — the same `role="tree"` +
+ * roving-tabindex keyboard model as the navigator's other levels (so the whole rail navigates
+ * identically), with the context nodes and that door as the focusable, activatable rows. An empty map
+ * renders a quiet note, NOT an empty `role="tree"` (which would break aria-required-children and leave a
+ * keyboard-unreachable tree) — mirroring {@link TacticalLevel}.
+ *
+ * The closing door is deliberate: this level SUMMARIZES the map for a 260px rail (nodes + role-badged
+ * edges), while the center-deck Context Map view owns the maxGraph canvas, the Graph/Table toggle and the
+ * shared-types / anti-corruption detail strip. Without it, opening the rail level would strand a reader
+ * away from the richer view — so it's a row here, in the same tree, reachable by the same keyboard model.
  */
 export function ContextMapLevel({ map, handlers }: { map: ContextMapResult; handlers: ContextMapHandlers }): VNode {
   const graph = buildContextMapGraph(map);
@@ -689,10 +710,23 @@ export function ContextMapLevel({ map, handlers }: { map: ContextMapResult; hand
       {graph.edges.length ? (
         <div class="koi-domain-ctxmap-edges" role="group">
           {graph.edges.map((e, i) => (
-            <ContextMapEdgeRow key={`${e.from}→${e.to}#${String(i)}`} edge={e} />
+            <ContextMapEdgeRow key={`${e.from}→${e.to}#${String(i)}`} edge={e} index={i} />
           ))}
         </div>
       ) : null}
+      {/* The way OUT to the richer view — reusing the strategic level's {@link DoorwayRow} idiom so it
+          looks, reads and keyboards like every other door in the rail (a `treeitem` button in this same
+          tree, with the destination woven into its accessible name via `hint`). Owned by a group for the
+          same reason the strategic doors are, and last so the map itself stays the level's headline. */}
+      <div class="koi-domain-ctxmap-doors" role="group">
+        <DoorwayRow
+          door="contextmap-full"
+          symbol="⤢"
+          label="Open full Context Map"
+          hint="the canvas, table and shared-type details"
+          onOpen={handlers.openFullMap}
+        />
+      </div>
     </div>
   );
 }
@@ -746,15 +780,18 @@ export function renderTactical(ctxNode: ModelNode | null | undefined, h: Tactica
 }
 
 /**
- * Build the strategic Context Map graph as a detached DOM tree (see {@link ContextMapLevel}): one node
- * per bounded context, one edge per typed relation, badged with the role each END plays.
+ * Build the strategic Context Map LEVEL as a detached DOM tree (see {@link ContextMapLevel}): one node
+ * per bounded context, one edge per typed relation badged with the role each END plays, and the
+ * `Open full Context Map` door.
  *
- * NOT the maxGraph mount of the same name in `@/diagrams/diagrams-maxgraph` — that one mounts an
- * interactive canvas into a stage element; this is the left rail's pure-DOM level builder. Both shape
- * their data with the SAME `buildContextMapGraph` mapper, so the two views can never disagree about a
- * relation; only the rendering differs.
+ * Named for the rail LEVEL it builds — a sibling of {@link renderStrategic} / {@link renderTactical} —
+ * and deliberately not `renderContextMapGraph`, which `@/diagrams/diagrams-maxgraph` already exports for
+ * the interactive canvas mount. Two same-named exports would collide on the `domainNavigator.ts` barrel's
+ * `export *`, which ESM resolves by silently DROPPING the ambiguous name rather than erroring. Both
+ * surfaces still shape their data with the SAME `buildContextMapGraph` mapper, so they can never disagree
+ * about a relation; only the rendering differs.
  */
-export function renderContextMapGraph(map: ContextMapResult, h: ContextMapHandlers): HTMLElement {
+export function renderContextMapLevel(map: ContextMapResult, h: ContextMapHandlers): HTMLElement {
   const host = document.createElement('div');
   render(<ContextMapLevel map={map} handlers={h} />, host);
   return host.firstElementChild as HTMLElement;
@@ -859,7 +896,9 @@ export function DomainNavigator({
     // while you navigate. With no relations there is no graph to draw, so it keeps the pre-#483 hand-off
     // to the caller's docs/center-deck Context Map view, which owns the "no context map declared" story
     // (and the dense table + canvas). Same fallback when the map failed to fetch or the presenter was
-    // rendered without the open/close seam.
+    // rendered without the open/close seam. Opening the rail level is never a dead end either way: the
+    // level's own `Open full Context Map` row hands off to that same center-deck view (see
+    // `contextMapHandlers.openFullMap` below).
     onOpenContextMap: () => {
       const map = cache?.contextMap;
       if (map && map.relations.length > 0 && onSetContextMapOpen) onSetContextMapOpen(true);
@@ -868,9 +907,12 @@ export function DomainNavigator({
     onOpenGlossary: () => handlers.onOpenGlossary?.(),
   };
 
-  /** The graph's jump-to-declaration, routed through the navigator's existing `goto(line, col)` seam. */
+  /** The graph's jump-to-declaration, routed through the navigator's existing `goto(line, col)` seam,
+   *  plus the level's escape hatch to the caller's FULL Context Map view — the SAME hand-off the doorway
+   *  falls back to when there's nothing to graph, so the richer destination is reachable either way. */
   const contextMapHandlers: ContextMapHandlers = {
     goto: (line, column) => handlers.goto?.(line, column),
+    openFullMap: () => handlers.onOpenContextMap?.(),
   };
 
   let filterHidden: boolean;
@@ -1112,6 +1154,12 @@ export function mountDomainNavigator(
       if (!isCurrent()) return;
       // best-effort: render the empty strategic state (and, with no map, a doorway that hands off)
       cache = { model: { entries: [] }, relLinks: 0, tree: null, contextMap: null };
+      // …and CLOSE the Context Map level with it (#483 review). With `cache.contextMap` null the
+      // presenter's `contextMapOpen && cache?.contextMap` guard falls through anyway, so leaving the flag
+      // set would keep an invisible "open" state: no graph, no breadcrumb — and then the next SUCCESSFUL
+      // reload would silently re-enter the level nobody asked for, with no entrance animation or focus
+      // continuity (doFetch never runs onLevelChanged). Dropping it here keeps flag and paint in step.
+      contextMapOpen = false;
     }
     contentToken += 1;
     renderNow();

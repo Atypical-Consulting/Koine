@@ -384,7 +384,7 @@ public static partial class CompilerInterop
         r.IsBidirectional,
         r.SharedTypes.ToArray(),
         r.AclMappings.Select(a => new WAclMapping(a.UpstreamContext, a.UpstreamType, a.LocalContext, a.LocalType)).ToArray(),
-        ContextRelationRoles.RoleOf(r.Kind, ContextRelationEnd.Upstream),
-        ContextRelationRoles.RoleOf(r.Kind, ContextRelationEnd.Downstream));
+        ContextRelationRoles.UpstreamRole(r),
+        ContextRelationRoles.DownstreamRole(r));
 
 }
