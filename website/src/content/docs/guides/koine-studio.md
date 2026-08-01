@@ -191,8 +191,10 @@ engines can produce that answer, and **every result is labelled with the one tha
 runs anything. Reach for executed mode when the interpreter's `?` is the answer you actually needed —
 typically a derived value object (`total = lines.sum(l => l.payable)`), a value object's own invariant
 firing on the given state, an illegal state transition, or the exact wording of a domain-invariant
-failure. Those four are precisely what executed mode adds. What it does **not** add: cross-aggregate
-effects — the runner still exercises *one* aggregate in isolation, in either mode.
+failure. Those four are precisely what executed mode adds — and so is a fifth: it **follows your
+`policy` declarations** into the aggregates they react on, instead of stopping at the command you ran
+(see [Following a policy across aggregates](#following-a-policy-across-aggregates)). Interpreted mode
+still exercises *one* aggregate in isolation.
 
 ### Turning it on
 
@@ -210,6 +212,60 @@ second Roslyn compile-and-load *inside the tab*, which runs into the per-tab mem
 Asking to execute is a **request, not a promise**: a host that cannot execute, a model that does not
 compile, or a run that overruns its budget all come back honestly labelled. Read the chip, not the
 checkbox.
+
+### Following a policy across aggregates
+
+An `emit` is where a story starts, not where it ends. If your model says
+
+```koine
+policy PostToLedger when ChargeCaptured then Books.record(amount: capturedAmount)
+```
+
+then capturing a charge should post a ledger entry — and an executed run **really posts it**. After the
+command you ran finishes, every event it actually emitted is matched against your `policy` declarations,
+and each reaction is run against the aggregate it names. Its steps join the same timeline, indented and
+tagged with a chip naming that aggregate, so you can see at a glance where the story left `Charge` and
+continued on `LedgerEntry`. Its resulting state joins the same list, under dotted `<Entity>.<member>`
+keys — your primary aggregate keeps its plain field names, and nothing collides.
+
+**Give the downstream aggregate a starting state.** Your `given` describes the aggregate you are testing;
+the one a policy reacts on is a different object with a different state, and the runner will not invent
+one. Use a dotted key to describe it:
+
+```json
+{
+  "amount": 12,
+  "settled": false,
+  "LedgerEntry.balance": 5,
+  "LedgerEntry.closed": false
+}
+```
+
+Everything before the dot names the downstream entity (or its aggregate — `Books.balance` reaches the same
+root entity as `LedgerEntry.balance`); everything after it is a field on that entity, written exactly as
+you would write it for the primary one. Plain, undotted keys always belong to the aggregate under test and
+are never routed downstream. Leave the dotted keys out and the reaction is **not** run: you get a failed
+step against that aggregate and a note naming the exact key that would have driven it — an honest "I could
+not know this", never a default instance whose invariants would be fiction.
+
+**A downstream failure does not change the verdict.** `Ok`/`rejected` on the header reports the operation
+*you ran*. If a policy's reaction is rejected — a precondition, an illegal transition, an invariant — it
+shows up as a failed step attributed to *that* aggregate, carrying the real rule text, plus a note. A green
+badge above a failed downstream step is intended: your command really did succeed; the reaction it
+triggered did not.
+
+**How far it goes.** Fan-out stops at **three levels** past the command you ran, and it never runs the same
+reaction twice — so a policy chain that loops is reported as a cycle rather than left to run into the
+timeout. Both bounds are stated in the run's notes, naming the reaction that was not explored, so a
+truncated run always looks truncated. Several policies reacting to the same event all run, including
+several onto the same aggregate: that aggregate is built once and they run against it in turn, so its
+resulting state reflects all of them.
+
+**What it does *not* run: cross-context subscriptions.** `publishes` / `subscribes` declares that another
+bounded context reacts to an event — but not *how*, and the emitters produce only an empty handler seam
+for it. There is nothing to execute, so the runner says so: the subscribing contexts are named in the
+notes as declared with no executable handler. That is a fact about your model worth knowing, not a
+limitation being hidden — a `policy` is what makes a reaction runnable.
 
 ### Timeouts, and what a runaway model costs you
 

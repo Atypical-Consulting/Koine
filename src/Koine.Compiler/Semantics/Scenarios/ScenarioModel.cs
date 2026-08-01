@@ -112,6 +112,15 @@ internal abstract record ScenarioStep
     /// <summary>A stable discriminator for serialization (<c>requires</c>/<c>transition</c>/<c>emit</c>/<c>result</c>).</summary>
     public abstract string Kind { get; }
 
+    /// <summary>
+    /// The aggregate this step belongs to when it is NOT the scenario's own (issue #1758, decision D3):
+    /// <c>null</c> on every step of the primary aggregate — which is every step either runner produced
+    /// before fan-out existed — and the downstream entity's name on a step the executed runner fanned out
+    /// to a policy reaction. Purely additive: an <c>init</c> property on the base, so no construction site
+    /// changes and no existing timeline gains a field.
+    /// </summary>
+    public string? Aggregate { get; init; }
+
     /// <summary>A <c>requires</c> precondition check, with its outcome.</summary>
     public sealed record Precondition(string? Message, string Condition, CheckOutcome Outcome) : ScenarioStep
     {

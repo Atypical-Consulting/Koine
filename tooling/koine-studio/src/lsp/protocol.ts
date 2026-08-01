@@ -194,25 +194,33 @@ export type ScenarioOutcome = 'passed' | 'failed' | 'indeterminate';
 // execute but cannot (the browser has no process to spawn) answers `interpreted` plus an explanatory
 // note — so the panel never has to guess which engine answered, and never labels a run it didn't get.
 export type ScenarioMode = 'executed' | 'interpreted';
-export interface ScenarioPreconditionStep {
+// Which aggregate a step happened on (#1758). Present ONLY on a step executed mode fanned out to —
+// a `policy P when E then Target.member(...)` reaction it really dispatched downstream of the
+// operation under test. Every primary-aggregate step omits the key entirely (as does every step
+// interpreted mode produces, which is single-aggregate by design), so an older result still parses
+// and still renders unattributed. Optional, never null: absent means "the aggregate under test".
+export interface ScenarioStepAttribution {
+  aggregate?: string;
+}
+export interface ScenarioPreconditionStep extends ScenarioStepAttribution {
   kind: 'requires';
   message: string | null;
   condition: string;
   outcome: ScenarioOutcome;
 }
-export interface ScenarioTransitionStep {
+export interface ScenarioTransitionStep extends ScenarioStepAttribution {
   kind: 'transition';
   field: string;
   from: string | null;
   to: string;
   isInitialization: boolean;
 }
-export interface ScenarioEmitStep {
+export interface ScenarioEmitStep extends ScenarioStepAttribution {
   kind: 'emit';
   event: string;
   args: Record<string, string>;
 }
-export interface ScenarioResultStep {
+export interface ScenarioResultStep extends ScenarioStepAttribution {
   kind: 'result';
   value: string;
 }
@@ -227,12 +235,16 @@ export interface ScenarioInvariantCheck {
   outcome: ScenarioOutcome;
 }
 export interface ScenarioResult {
+  /** The PRIMARY operation's verdict only. A fanned-out reaction that failed is a failed step
+   *  attributed to its own aggregate, plus a note — it does not flip this (#1758, D6). */
   ok: boolean;
   target: string;
   operation: string;
   /** Which engine actually produced this result — see {@link ScenarioMode}. Never what was asked for. */
   mode: ScenarioMode;
   steps: ScenarioStep[];
+  /** The primary aggregate's fields are keyed by bare member name; a fanned-out aggregate's state
+   *  merges under `<Entity>.<member>` keys (#1758, D4), so nothing collides. */
   resultingState: Record<string, string>;
   invariants: ScenarioInvariantCheck[];
   result: string | null;
