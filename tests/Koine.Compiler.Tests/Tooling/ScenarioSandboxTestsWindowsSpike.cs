@@ -53,17 +53,37 @@ public sealed class ScenarioSandboxTestsWindowsSpike
         report.Append("test binaries: ").Append(binaries).Append('\n');
         report.Append("run directory: ").Append(runDirectory).Append('\n');
 
+        // The listener must ANSWER, not merely listen. Round 1 only called Start(), so the kernel
+        // completed the handshake and curl then sat waiting for a response until --max-time — exit 28,
+        // the SAME code a silently-dropped connection produces. Serving a response makes exit 0 mean
+        // "connected" and everything else mean "did not", which is the whole question.
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
         report.Append("loopback listener port: ").Append(port.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        _ = Task.Run(async () =>
+        {
+            byte[] response = Encoding.ASCII.GetBytes("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+            while (true)
+            {
+                try
+                {
+                    using TcpClient client = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    await client.GetStream().WriteAsync(response).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    return; // the listener was stopped; the spike is done with it
+                }
+            }
+        });
 
         try
         {
             report.Append("\n--- 0. Baseline (caller's own token, no confinement) ---\n");
             Probe(report, "baseline write outside", IntPtr.Zero, Quote(comspec) + " /c echo x > " + Quote(outside), null);
             Probe(report, "baseline write inside", IntPtr.Zero, Quote(comspec) + " /c echo x > " + Quote(inside), null);
-            Probe(report, "baseline loopback", IntPtr.Zero, NetCommand(curl, port), null);
+            Probe(report, "baseline loopback (0 == connected)", IntPtr.Zero, NetCommand(curl, port), null);
             Forget(outside);
             Forget(inside);
 
@@ -174,13 +194,18 @@ public sealed class ScenarioSandboxTestsWindowsSpike
                 Quote(comspec) + " /c echo x > " + Quote(inside), runDirectory);
             report.Append("     inside file exists: ").Append(File.Exists(inside)).Append('\n');
 
-            Probe(report, "A: loopback connect (7 == denied)", token, NetCommand(curl, port), runDirectory);
+            Probe(report, "A: loopback connect (0 == connected)", token, NetCommand(curl, port), runDirectory);
             Probe(report, "A: read a test binary", token,
                 Quote(comspec) + " /c type " + Quote(Path.Combine(binaries, "Koine.Execution.dll")) + " > NUL", runDirectory);
             if (dotnet is not null)
             {
                 Probe(report, "A: dotnet --version (want 0)", token, Quote(dotnet) + " --version", runDirectory);
             }
+
+            // Task 3/6 de-risking, in the same CI round trip: the three hand-plumbed pipes, the
+            // CREATE_SUSPENDED window that lets the Job Object attach before a single instruction runs,
+            // and a Process object the host's existing Kill/WaitForExit surface can be pointed at.
+            ProbePipes(report, token, comspec, runDirectory);
         }
         finally
         {
@@ -239,7 +264,7 @@ public sealed class ScenarioSandboxTestsWindowsSpike
             ProbeAppContainer(report, containerSid, "B: write inside run dir",
                 Quote(comspec) + " /c echo x > " + Quote(inside), runDirectory);
             report.Append("     inside file exists: ").Append(File.Exists(inside)).Append('\n');
-            ProbeAppContainer(report, containerSid, "B: loopback connect (7 == denied)",
+            ProbeAppContainer(report, containerSid, "B: loopback connect (0 == connected)",
                 NetCommand(curl, port), runDirectory);
             ProbeAppContainer(report, containerSid, "B: read a test binary",
                 Quote(comspec) + " /c type " + Quote(Path.Combine(binaries, "Koine.Execution.dll")) + " > NUL",
@@ -258,6 +283,126 @@ public sealed class ScenarioSandboxTestsWindowsSpike
             }
 
             DeleteAppContainerProfile(container);
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Task 3/6 de-risking: hand-plumbed stdio, a suspended start, and the Job Object.
+    // ------------------------------------------------------------------------
+
+    private static void ProbePipes(StringBuilder report, IntPtr token, string comspec, string workingDirectory)
+    {
+        IntPtr inRead = IntPtr.Zero, inWrite = IntPtr.Zero;
+        IntPtr outRead = IntPtr.Zero, outWrite = IntPtr.Zero;
+        IntPtr errRead = IntPtr.Zero, errWrite = IntPtr.Zero;
+        try
+        {
+            var inheritable = new SecurityAttributesStruct
+            {
+                Length = Marshal.SizeOf<SecurityAttributesStruct>(),
+                SecurityDescriptor = IntPtr.Zero,
+                InheritHandle = 1,
+            };
+
+            // The HOST side of every pipe is made non-inheritable: leave it inheritable and the child
+            // holds the far end open, so the host's read never sees EOF — the classic hand-plumbed hang.
+            if (!CreatePipe(out inRead, out inWrite, ref inheritable, 0)
+                || !CreatePipe(out outRead, out outWrite, ref inheritable, 0)
+                || !CreatePipe(out errRead, out errWrite, ref inheritable, 0))
+            {
+                report.Append("  A: CreatePipe FAILED, error ").Append(LastError()).Append('\n');
+                return;
+            }
+
+            SetHandleInformation(inWrite, HandleFlagInherit, 0);
+            SetHandleInformation(outRead, HandleFlagInherit, 0);
+            SetHandleInformation(errRead, HandleFlagInherit, 0);
+
+            var startup = default(StartupInfoStruct);
+            startup.Cb = Marshal.SizeOf<StartupInfoStruct>();
+            startup.Flags = StartFUseStdHandles;
+            startup.StdInput = inRead;
+            startup.StdOutput = outWrite;
+            startup.StdError = errWrite;
+
+            // findstr "^" matches every line, so it is the shortest cmd.exe-native cat.
+            var commandLine = new StringBuilder(Quote(comspec) + " /c findstr \"^\"");
+
+            if (!CreateProcessAsUserW(token, null, commandLine, IntPtr.Zero, IntPtr.Zero, true,
+                    CreateNoWindow | CreateUnicodeEnvironment | CreateSuspended, IntPtr.Zero,
+                    workingDirectory, ref startup, out ProcessInformationStruct information))
+            {
+                report.Append("  A: pipes+CREATE_SUSPENDED CREATE FAILED, error ").Append(LastError()).Append('\n');
+                return;
+            }
+
+            // Close the CHILD's ends here — the host must not keep them, or EOF never arrives.
+            CloseHandle(inRead);
+            inRead = IntPtr.Zero;
+            CloseHandle(outWrite);
+            outWrite = IntPtr.Zero;
+            CloseHandle(errWrite);
+            errWrite = IntPtr.Zero;
+
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(information.ProcessId);
+                report.Append("  A: Process.GetProcessById on a SUSPENDED child: id ")
+                    .Append(process.Id.ToString(CultureInfo.InvariantCulture)).Append('\n');
+
+                using Koine.Execution.WindowsJobObject? job = Koine.Execution.WindowsJobObject.TryCreate(
+                    1L << 30, TimeSpan.FromSeconds(30), out string? jobFailure);
+                report.Append("  A: job created: ").Append(job is not null).Append(' ')
+                    .Append(jobFailure ?? string.Empty).Append('\n');
+                if (job is not null)
+                {
+                    report.Append("  A: job assigned BEFORE the first instruction: ")
+                        .Append(job.TryAssign(process, out string? assignFailure)).Append(' ')
+                        .Append(assignFailure ?? string.Empty).Append('\n');
+                }
+
+                uint resumed = ResumeThread(information.Thread);
+                report.Append("  A: ResumeThread previous count ")
+                    .Append(resumed.ToString(CultureInfo.InvariantCulture)).Append('\n');
+
+                using (var stdin = new StreamWriter(
+                    new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle(inWrite, ownsHandle: true),
+                        FileAccess.Write), new UTF8Encoding(false)))
+                {
+                    inWrite = IntPtr.Zero; // owned by the SafeFileHandle now
+                    stdin.Write("PIPE-OK\r\n");
+                }
+
+                using var stdout = new StreamReader(
+                    new FileStream(new Microsoft.Win32.SafeHandles.SafeFileHandle(outRead, ownsHandle: true),
+                        FileAccess.Read), new UTF8Encoding(false));
+                outRead = IntPtr.Zero;
+                string echoed = stdout.ReadToEnd().Trim();
+
+                process.WaitForExit((int)TimeSpan.FromSeconds(15).TotalMilliseconds);
+                report.Append("  A: stdio round trip: '").Append(echoed).Append("' exit ")
+                    .Append(process.ExitCode.ToString(CultureInfo.InvariantCulture)).Append('\n');
+            }
+            finally
+            {
+                CloseHandle(information.Thread);
+                CloseHandle(information.Process);
+            }
+        }
+        catch (Exception ex)
+        {
+            report.Append("  A: pipe probe THREW ").Append(ex.GetType().Name).Append(": ")
+                .Append(ex.Message).Append('\n');
+        }
+        finally
+        {
+            foreach (IntPtr handle in (IntPtr[])[inRead, inWrite, outRead, outWrite, errRead, errWrite])
+            {
+                if (handle != IntPtr.Zero)
+                {
+                    CloseHandle(handle);
+                }
+            }
         }
     }
 
@@ -465,6 +610,9 @@ public sealed class ScenarioSandboxTestsWindowsSpike
     private const int SeFileObject = 1;
     private const uint LabelSecurityInformation = 0x00000010;
     private const uint CreateNoWindow = 0x08000000;
+    private const uint CreateSuspended = 0x00000004;
+    private const int StartFUseStdHandles = 0x00000100;
+    private const uint HandleFlagInherit = 0x00000001;
     private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint ExtendedStartupInfoPresent = 0x00080000;
     private static readonly IntPtr SecurityCapabilitiesAttribute = (IntPtr)0x00020009;
@@ -482,6 +630,18 @@ public sealed class ScenarioSandboxTestsWindowsSpike
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreatePipe(
+        out IntPtr readPipe, out IntPtr writePipe, ref SecurityAttributesStruct attributes, uint size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr thread);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -575,6 +735,14 @@ public sealed class ScenarioSandboxTestsWindowsSpike
     [DllImport("advapi32.dll")]
     private static extern IntPtr FreeSid(IntPtr sid);
 #pragma warning restore SYSLIB1054
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SecurityAttributesStruct
+    {
+        public int Length;
+        public IntPtr SecurityDescriptor;
+        public int InheritHandle;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SidAndAttributesStruct
