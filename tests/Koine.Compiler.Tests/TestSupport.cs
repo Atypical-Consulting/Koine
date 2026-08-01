@@ -1189,6 +1189,15 @@ public static class TestSupport
                 File.WriteAllText(Path.Combine(root, "Cargo.toml"), MinimalCargoToml);
             }
 
+            // Every manifest at this point declares a FIXED package name ("koine-domain" or
+            // "koine-fixture"), and the target dir below is shared across every concurrently-running
+            // Rust test. Cargo's own build-unit fingerprinting collides across concurrent processes
+            // that share a (package name, version, target dir) triple even when each has a genuinely
+            // distinct source tree — confirmed by a standalone stress harness (#1777): a source that
+            // fails `cargo check` in isolation reported a false exit 0 when run concurrently against a
+            // same-named sibling. Uniquifying the package name per invocation eliminates the collision.
+            UniquifyCargoPackageName(Path.Combine(root, "Cargo.toml"));
+
             // Reuse one shared target dir across runs so the (potentially many) dependency builds
             // compile once, not per test — a big speed-up that keeps the harness deterministic.
             string targetDir = Path.Combine(Path.GetTempPath(), "koine-cargo-target");
@@ -1241,6 +1250,38 @@ public static class TestSupport
         "\n" +
         "[lib]\n" +
         "path = \"src/lib.rs\"\n";
+
+    /// <summary>
+    /// Rewrites a written <c>Cargo.toml</c>'s <c>[package] name</c> to a run-unique value, so
+    /// concurrent <c>RunCargo</c> invocations sharing one <c>CARGO_TARGET_DIR</c> never collide on
+    /// Cargo's own build-unit fingerprinting (see the call site). The crate's Rust-visible module name
+    /// must stay stable, though — <see cref="RunRust"/>'s hand-written integration tests import via a
+    /// fixed <c>use koine_domain::...</c> path — so this pins an explicit <c>[lib] name</c> to what
+    /// Cargo would otherwise have derived by default from the <em>original</em> package name (hyphens
+    /// replaced with underscores) before uniquifying it. A no-op if the manifest has no recognizable
+    /// <c>[package] name</c> line.
+    /// </summary>
+    private static void UniquifyCargoPackageName(string manifestPath)
+    {
+        string manifest = File.ReadAllText(manifestPath);
+        Match nameMatch = Regex.Match(manifest, "(?m)^name\\s*=\\s*\"([^\"]+)\"\\s*$");
+        if (!nameMatch.Success)
+        {
+            return;
+        }
+
+        string originalName = nameMatch.Groups[1].Value;
+        string libCrateName = originalName.Replace('-', '_');
+        string uniqueName = $"{originalName}-{Guid.NewGuid():N}";
+
+        manifest = string.Concat(
+            manifest.AsSpan(0, nameMatch.Index),
+            $"name = \"{uniqueName}\"",
+            manifest.AsSpan(nameMatch.Index + nameMatch.Length));
+        manifest = Regex.Replace(manifest, @"(?m)^\[lib\]$", $"[lib]\nname = \"{libCrateName}\"");
+
+        File.WriteAllText(manifestPath, manifest);
+    }
 
     /// <summary>
     /// True when a <c>cargo test</c> run actually executed a test binary (libtest prints
