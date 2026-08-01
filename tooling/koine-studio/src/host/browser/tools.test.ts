@@ -17,7 +17,7 @@ describe('runWasmTool', () => {
     api.DiagnoseWorkspace.mockReturnValue(JSON.stringify([{ uri: 'file:///model.koi', diagnostics: [] }]));
     const out = await runWasmTool('koine_validate', JSON.stringify({ source: 'context X {}' }));
 
-    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]) as { uri: string; text: string }[];
     expect(sentFiles).toEqual([{ uri: 'file:///model.koi', text: 'context X {}' }]);
     expect(out).toContain('ok: true');
   });
@@ -99,7 +99,7 @@ describe('runEditTool', () => {
     // The validate call carried the FULL staged workspace: every relPath the session knows, with the
     // staged body for the written file (a.koi) and the initial body for the untouched one (b.koi).
     expect(api.DiagnoseWorkspace).toHaveBeenCalledTimes(1);
-    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]) as { uri: string; text: string }[];
     expect(sentFiles).toEqual([
       { uri: 'file:///a.koi', text: 'context A2 {}' },
       { uri: 'file:///b.koi', text: 'context B {}' },
@@ -116,7 +116,7 @@ describe('runEditTool', () => {
     await runEditTool('koine_write_file', JSON.stringify({ relPath: 'events.koi', contents: 'context E {}' }), session);
 
     await validateStagedWorkspace(session);
-    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]) as { uri: string; text: string }[];
     expect(sentFiles).toEqual([
       { uri: 'file:///model.koi', text: 'context A {}' },
       { uri: 'file:///events.koi', text: 'context E {}' },
@@ -135,7 +135,7 @@ describe('runEditTool', () => {
       { 'file:///wsA/model.koi': 'model.koi', 'file:///wsB/model.koi': 'model.koi' },
     );
     await validateStagedWorkspace(session);
-    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]);
+    const sentFiles = JSON.parse(api.DiagnoseWorkspace.mock.calls[0][0]) as { uri: string; text: string }[];
     expect(sentFiles).toEqual([
       { uri: 'file:///model.koi@1', text: 'context A {}' },
       { uri: 'file:///model.koi@2', text: 'context B {}' },

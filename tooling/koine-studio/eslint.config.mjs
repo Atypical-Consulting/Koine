@@ -79,14 +79,13 @@ function selectorsExcept(...excluded) {
 // down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
 // (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-explicit-any': 'off', //                65 findings /  9 files
-  '@typescript-eslint/no-unsafe-assignment': 'off', //           68 findings / 22 files
-  '@typescript-eslint/no-unused-vars': 'off', //                 72 findings / 28 files
-  '@typescript-eslint/no-unsafe-call': 'off', //                129 findings /  5 files
-  '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 221 findings / 68 files
-  '@typescript-eslint/no-unsafe-member-access': 'off', //       261 findings / 26 files
-  '@typescript-eslint/require-await': 'off', //                 477 findings / 61 files
-  '@typescript-eslint/unbound-method': 'off', //                546 findings / 57 files
+  '@typescript-eslint/no-explicit-any': 'off', //                53 findings /  7 files
+  '@typescript-eslint/no-unused-vars': 'off', //                 73 findings / 29 files
+  '@typescript-eslint/no-unsafe-call': 'off', //                113 findings /  4 files
+  '@typescript-eslint/no-unsafe-member-access': 'off', //       159 findings / 15 files
+  '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 234 findings / 70 files
+  '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files
+  '@typescript-eslint/unbound-method': 'off', //                569 findings / 62 files
 };
 
 export default tseslint.config(

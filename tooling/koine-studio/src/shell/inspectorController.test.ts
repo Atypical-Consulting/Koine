@@ -2032,7 +2032,7 @@ describe('createInspectorController — deck center layout', () => {
     ctl.selectCenter('docs');
     expect(saveWorkspaceDeck).toHaveBeenCalled();
     const calls = saveWorkspaceDeck.mock.calls;
-    const lastDeck = calls[calls.length - 1][0];
+    const lastDeck = calls[calls.length - 1][0] as DeckState;
     expect(lastDeck.primary).toBe('docs');
     ctl.dispose();
   });

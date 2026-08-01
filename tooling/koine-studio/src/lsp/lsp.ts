@@ -52,8 +52,8 @@ interface JsonRpcMessage {
   jsonrpc?: string;
   id?: number | string | null;
   method?: string;
-  params?: any;
-  result?: any;
+  params?: unknown;
+  result?: unknown;
   error?: { code: number; message: string };
 }
 

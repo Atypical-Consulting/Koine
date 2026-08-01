@@ -326,7 +326,7 @@ export class TauriPlatform implements Platform {
     const url = endpoint.url;
     let args: { source?: unknown; target?: unknown };
     try {
-      args = JSON.parse(argsJson || '{}');
+      args = JSON.parse(argsJson || '{}') as { source?: unknown; target?: unknown };
     } catch {
       return 'Error: the tool arguments were not valid JSON.';
     }

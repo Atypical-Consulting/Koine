@@ -87,7 +87,7 @@ describe('layout controller', () => {
     ctrl.actions.togglePanelSide();
     expect(split.dataset.panelSide).toBe('right'); // flipped
     // The transition merges into the koine.studio.layout blob, so the reload-source reflects it.
-    const blob = JSON.parse(localStorage.getItem('koine.studio.layout') as string);
+    const blob = JSON.parse(localStorage.getItem('koine.studio.layout') as string) as { panelSide: string };
     expect(blob.panelSide).toBe('right');
   });
 
@@ -101,7 +101,7 @@ describe('layout controller', () => {
 
     expect(split.dataset.siderailSide).toBe('left'); // flipped
     expect(initEdgeResizerMock).toHaveBeenCalledTimes(2); // both handles re-wired live
-    const blob = JSON.parse(localStorage.getItem('koine.studio.layout') as string);
+    const blob = JSON.parse(localStorage.getItem('koine.studio.layout') as string) as { sideRail: string };
     expect(blob.sideRail).toBe('left');
   });
 

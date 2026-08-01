@@ -1,4 +1,5 @@
 import { describe, expect, test, vi, type Mock } from 'vitest';
+import type { KeyBinding } from '@codemirror/view';
 import {
   DEFAULT_BINDINGS,
   KEYBINDINGS,
@@ -52,7 +53,7 @@ describe('toKeyBindings', () => {
     // Six EDITOR-scope rows; the two global rows (commandPalette / saveAll) are excluded.
     expect(bindings).toHaveLength(6);
 
-    const byKey = Object.fromEntries(bindings.map((b) => [b.key, b]));
+    const byKey = Object.fromEntries(bindings.map((b): [string, KeyBinding] => [b.key ?? '', b]));
     expect(byKey['F12'].run).toBe(handlers.goToDefinition);
     expect(byKey['Mod-s'].run).toBe(handlers.format);
     expect(byKey['F2'].run).toBe(handlers.rename);

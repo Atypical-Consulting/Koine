@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact';
 import { SearchPanel, type SearchPanelOptions } from '@/shell/searchController';
+import type { Match } from '@/shell/workspaceSearch';
 
 afterEach(() => cleanup());
 
@@ -64,7 +65,7 @@ describe('SearchPanel', () => {
     fireEvent.click(view.container.querySelector('.koi-search-match') as HTMLElement);
 
     expect(opts.openAndReveal).toHaveBeenCalledTimes(1);
-    const [uri, match] = (opts.openAndReveal as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [uri, match] = (opts.openAndReveal as ReturnType<typeof vi.fn>).mock.calls[0] as [string, Match];
     expect(uri).toBe('file:///a.koi');
     expect(match).toMatchObject({ line: 2, column: 9, length: 5 });
   });

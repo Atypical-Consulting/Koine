@@ -412,7 +412,7 @@ describe('KoineLsp trace logging', () => {
     lsp.setTrace('messages');
     lsp.openDoc(URI, 'hello');
     expect(debug).toHaveBeenCalledTimes(1);
-    const [line, ...payload] = debug.mock.calls[0];
+    const [line, ...payload] = debug.mock.calls[0] as [string, ...unknown[]];
     expect(line).toContain('textDocument/didOpen');
     expect(line).toContain('→'); // outgoing
     expect(payload).toHaveLength(0); // method name only — no params at the messages level

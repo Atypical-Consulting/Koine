@@ -168,7 +168,7 @@ describe('createSettingsPage', () => {
     expect(saveSettings).not.toHaveBeenCalled();
     vi.advanceTimersByTime(500);
     expect(saveSettings).toHaveBeenCalledTimes(1);
-    const saved = saveSettings.mock.calls.at(-1)![0];
+    const saved = saveSettings.mock.calls.at(-1)![0] as typeof DEFAULT_SETTINGS;
     expect(saved.fontSize).toBe(15);
     expect(saved.aiApiKey).toBe('sk-LIVE'); // secret re-injected from loadSettings()
     // Live-applied through the same cb.onChange hook the Visual form uses.
