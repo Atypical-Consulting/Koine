@@ -48,6 +48,7 @@ public sealed partial class JavaEmitter
             }
 
             files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates, publishesEvents));
+            files.Add(EmitBehaviors(ctx.Name));
 
             // Only a PUBLISHING context needs to drain an outbox; a subscribe-only context gets none.
             if (publishesEvents)
@@ -68,6 +69,9 @@ public sealed partial class JavaEmitter
         files.Add(new EmittedFile(JavaRuntime.InMemoryOutboxStoreFileName, JavaRuntime.InMemoryOutboxStoreSource + "\n"));
         files.Add(new EmittedFile(
             JavaRuntime.IntegrationEventHandlerFileName, JavaRuntime.IntegrationEventHandlerSource + "\n"));
+        files.Add(new EmittedFile(JavaRuntime.PipelineBehaviorFileName, JavaRuntime.PipelineBehaviorSource + "\n"));
+        files.Add(new EmittedFile(JavaRuntime.ValidatorFileName, JavaRuntime.ValidatorSource + "\n"));
+        files.Add(new EmittedFile(JavaRuntime.ValidationErrorFileName, JavaRuntime.ValidationErrorSource + "\n"));
     }
 
     /// <summary>

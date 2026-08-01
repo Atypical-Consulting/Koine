@@ -254,4 +254,60 @@ public class JavaInfrastructureTests
         uow.ShouldNotContain("enqueue");
         uow.ShouldNotContain("pending");
     }
+
+    /// <summary>
+    /// Every context with a unit of work also gets a <c>Behaviors</c> class carrying the validation and
+    /// transaction pipeline behaviors — a small functional interface plus composable static factories,
+    /// Java's idiom for the C#/Python MediatR-style decorator stack. The shared
+    /// <c>koine.runtime.PipelineBehavior</c>/<c>Validator</c>/<c>ValidationError</c> primitives ship once.
+    /// </summary>
+    [Fact]
+    public void Infrastructure_layer_emits_validation_and_transaction_pipeline_behaviors()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        result.Files.ShouldContain(f => f.RelativePath == "koine/runtime/PipelineBehavior.java");
+        result.Files.ShouldContain(f => f.RelativePath == "koine/runtime/Validator.java");
+        result.Files.ShouldContain(f => f.RelativePath == "koine/runtime/ValidationError.java");
+
+        var behaviors = result.Files
+            .Single(f => f.RelativePath == "koine/generated/sales/Behaviors.java").Contents;
+
+        behaviors.ShouldContain("public final class Behaviors {");
+        behaviors.ShouldContain("private Behaviors() {");
+
+        behaviors.ShouldContain(
+            "public static <TRequest, TResponse> koine.runtime.PipelineBehavior<TRequest, TResponse> validationBehavior() {");
+        behaviors.ShouldContain("return validationBehavior(java.util.List.of());");
+        behaviors.ShouldContain(
+            "public static <TRequest, TResponse> koine.runtime.PipelineBehavior<TRequest, TResponse> "
+            + "validationBehavior(java.util.List<koine.runtime.Validator<TRequest>> validators) {");
+        behaviors.ShouldContain(".flatMap(validator -> validator.validate(request).stream())");
+        behaviors.ShouldContain("failed.completeExceptionally(new koine.runtime.ValidationError(errors));");
+        behaviors.ShouldContain("return next.get();");
+
+        behaviors.ShouldContain(
+            "public static <TRequest, TResponse> koine.runtime.PipelineBehavior<TRequest, TResponse> "
+            + "transactionBehavior(UnitOfWork unitOfWork) {");
+        behaviors.ShouldContain(".thenCompose(response -> unitOfWork.saveChanges().thenApply(ignored -> response));");
+    }
+
+    /// <summary>
+    /// A NON-publishing context still gets a <c>Behaviors</c> class — its <c>transactionBehavior</c> just
+    /// commits a unit of work whose <c>saveChanges</c> happens to be a no-op, so a caller never has to
+    /// branch on whether the context publishes.
+    /// </summary>
+    [Fact]
+    public void Non_publishing_context_still_gets_behaviors()
+    {
+        var result = new KoineCompiler().Compile(Fixture, InfrastructureEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var behaviors = result.Files
+            .Single(f => f.RelativePath == "koine/generated/shipping/Behaviors.java").Contents;
+
+        behaviors.ShouldContain("public final class Behaviors {");
+        behaviors.ShouldContain("transactionBehavior(UnitOfWork unitOfWork) {");
+    }
 }
