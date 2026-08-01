@@ -351,7 +351,9 @@ public sealed partial class CSharpEmitter : IEmitter
                 .ToList();
             if (aggregates.Count > 0)
             {
-                files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates));
+                // Same publishing gate the Infrastructure layer applies to the concrete UnitOfWork,
+                // so the contract and its realization always agree on the outbox enqueue seam.
+                files.Add(EmitUnitOfWork(emit, ctx.Name, aggregates, ctx.Publishes.Count > 0));
             }
         }
 

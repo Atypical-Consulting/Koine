@@ -212,11 +212,14 @@ internal static class EntityBehaviorValidator
 
         // A factory emits a `public static` method; its name must not collide (case-
         // insensitively) with a property, a command (instance method), another factory,
-        // or an always-generated member (Id, the domain-event API, the value-equality
-        // members) — any of which would yield uncompilable C# (CS0102/CS0111).
-        var reserved = new HashSet<string>(entity.Members.Count + 5, StringComparer.OrdinalIgnoreCase)
+        // or an always-generated member (Id, the domain-event API, the integration-event
+        // API a publishing root carries (R19), the value-equality members) — any of which
+        // would yield uncompilable C# (CS0102/CS0111).
+        var reserved = new HashSet<string>(entity.Members.Count + 7, StringComparer.OrdinalIgnoreCase)
         {
-            "Id", "DomainEvents", "ClearDomainEvents", "Equals", "GetHashCode"
+            "Id", "DomainEvents", "ClearDomainEvents",
+            "IntegrationEvents", "ClearIntegrationEvents",
+            "Equals", "GetHashCode"
         };
         foreach (var m in entity.Members)
         {
