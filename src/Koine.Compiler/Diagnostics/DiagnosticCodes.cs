@@ -190,6 +190,7 @@ public static class DiagnosticCodes
     public const string InvalidRouteOverride = "KOI1208";
     public const string MultipleVerbAnnotations = "KOI1209";
     public const string EmptyAuthRole = "KOI1210";
+    public const string DuplicateApiRoute = "KOI1211";
     public const string DuplicateApiAnnotation = "KOI1212";
     public const string VerbAnnotationArgument = "KOI1213";
     public const string VersionAnnotationOnCommand = "KOI1214";
@@ -398,6 +399,7 @@ public static class DiagnosticCodes
             [InvalidRouteOverride] = D(InvalidRouteOverride, "A command's or query's '@route' names no path, or a malformed one: not absolute (it must start with '/'), containing whitespace or control characters, or with unbalanced, nested, or empty '{}' route parameters.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [MultipleVerbAnnotations] = D(MultipleVerbAnnotations, "A command or query carries more than one HTTP verb annotation ('@get'/'@post'/'@put'/'@delete'/'@patch').", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [EmptyAuthRole] = D(EmptyAuthRole, "A command's or query's '@auth' names no role, or a blank one.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
+            [DuplicateApiRoute] = D(DuplicateApiRoute, "Two commands/queries in one context resolve to the same HTTP route AND verb; the openapi document would carry a duplicate mapping key and the api layer would map two ambiguous endpoints.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [DuplicateApiAnnotation] = D(DuplicateApiAnnotation, "A command or query repeats a single-valued API annotation ('@route' or '@auth'); only the last would take effect.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [VerbAnnotationArgument] = D(VerbAnnotationArgument, "An HTTP verb annotation ('@get'/'@post'/'@put'/'@delete'/'@patch') was given an argument; a verb is a bare marker and the argument would be discarded.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),
             [VersionAnnotationOnCommand] = D(VersionAnnotationOnCommand, "A command carries a '@since'/'@deprecated' evolution annotation; those apply to type declarations, and a command is not one, so it would be discarded.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),

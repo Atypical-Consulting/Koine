@@ -602,6 +602,214 @@ public class R19ApiAnnotationsTests
         Diagnose(CommandSource("""@route("/orders/{id}")""", "@put", """@auth("admin")"""))
             .ShouldNotContain(d => d.Code == DiagnosticCodes.VersionAnnotationOnCommand);
 
+    // ---- KOI1211: route + verb collisions across a context (#1219 review) ---
+
+    /// <summary>
+    /// A context whose <c>Order</c> entity carries a <c>place</c> then a <c>cancel</c> command, preceded
+    /// by the <paramref name="onPlace"/> / <paramref name="onCancel"/> annotation lines respectively.
+    /// </summary>
+    private static string TwoCommandSource(string[] onPlace, string[] onCancel) => $$"""
+        context Sales {
+          enum OrderStatus { Draft, Placed, Cancelled }
+          aggregate Fulfilment root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              {{string.Join("\n      ", onPlace)}}
+              command place {
+                requires status == Draft "order already placed"
+                status -> Placed
+              }
+
+              {{string.Join("\n      ", onCancel)}}
+              command cancel {
+                requires status == Placed "order not placed"
+                status -> Cancelled
+              }
+            }
+          }
+        }
+        """;
+
+    private static readonly string[] PutOrdersId = ["""@route("/orders/{id}")""", "@put"];
+
+    /// <summary>
+    /// Two declarations resolving to the same route AND verb is the one API-annotation mistake that no
+    /// per-declaration check can see. Left unreported it produced an <b>unparseable</b> openapi document
+    /// (the same verb key twice under one path) and, in C#, two identical <c>MapPut</c> calls that ASP.NET
+    /// rejects with <c>AmbiguousMatchException</c> at request time.
+    /// </summary>
+    [Fact]
+    public void Two_declarations_sharing_a_route_and_verb_are_rejected()
+    {
+        Diagnostic collision = Diagnose(TwoCommandSource(PutOrdersId, PutOrdersId)).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldContain("PUT /orders/{id}");
+        // Named both ways round: the offender, and the declaration already holding the route.
+        collision.Message.ShouldContain("command 'cancel' on 'Order'");
+        collision.Message.ShouldContain("command 'place' on 'Order'");
+    }
+
+    /// <summary>
+    /// It lands on the SECOND declaration — the first one is not the mistake. A command's span opens at
+    /// its annotation prefix (the grammar's <c>annotation*</c> is part of <c>commandDecl</c>), so the
+    /// expected line is <c>cancel</c>'s first annotation, not its <c>command</c> keyword.
+    /// </summary>
+    [Fact]
+    public void The_route_collision_is_reported_on_the_later_declaration()
+    {
+        var lines = TwoCommandSource(PutOrdersId, PutOrdersId).Split('\n');
+        var placeLine = Array.FindIndex(lines, l => l.Contains("command place", StringComparison.Ordinal)) + 1;
+        var cancelSpanLine = Array.FindIndex(
+            lines, placeLine, l => l.Contains("@route(", StringComparison.Ordinal)) + 1;
+
+        Diagnostic collision = Diagnose(TwoCommandSource(PutOrdersId, PutOrdersId)).ShouldHaveSingleItem();
+
+        collision.Line.ShouldBeGreaterThan(placeLine);
+        collision.Line.ShouldBe(cancelSpanLine);
+    }
+
+    /// <summary>Sharing a route under DIFFERENT verbs is the whole point of <c>@route</c> — never reported.</summary>
+    [Fact]
+    public void Two_declarations_sharing_a_route_under_different_verbs_are_accepted() =>
+        Diagnose(TwoCommandSource(PutOrdersId, ["""@route("/orders/{id}")""", "@delete"]))
+            .ShouldBeEmpty();
+
+    /// <summary>And the same verb at different routes is likewise fine — both axes have to match.</summary>
+    [Fact]
+    public void Two_declarations_sharing_a_verb_at_different_routes_are_accepted() =>
+        Diagnose(TwoCommandSource(
+                ["""@route("/orders/{id}/place")""", "@put"],
+                ["""@route("/orders/{id}/cancel")""", "@put"]))
+            .ShouldBeEmpty();
+
+    /// <summary>
+    /// The validator sees CONVENTIONAL routes too, not just overridden ones: an <c>@route</c> aimed at the
+    /// path another, un-annotated declaration already derives collides just as hard. The expected path is
+    /// computed through <see cref="RouteDerivation"/> itself rather than hard-coded, so this doubles as the
+    /// pin that keeps <c>CqrsValidator</c>'s restated convention and the emit-side one from drifting — the
+    /// two live in different assemblies and only the test project can see both.
+    /// </summary>
+    [Theory]
+    [InlineData("place")]
+    [InlineData("placeOrder")]
+    [InlineData("place2Ship")]
+    [InlineData("placeXMLOrder")]
+    public void An_override_colliding_with_a_conventional_route_is_rejected(string commandName)
+    {
+        var source = $$"""
+            context Sales {
+              enum OrderStatus { Draft, Placed, Cancelled }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  command {{commandName}} {
+                    requires status == Draft "order already placed"
+                    status -> Placed
+                  }
+
+                  @route("{{ConventionalCommandRoute("Order", commandName)}}")
+                  command cancel {
+                    requires status == Placed "order not placed"
+                    status -> Cancelled
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnose(source).ShouldHaveSingleItem().Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+    }
+
+    /// <summary>A query's conventional <c>GET /{query}</c> is in the same namespace as the commands'.</summary>
+    [Fact]
+    public void An_override_colliding_with_a_conventional_query_route_is_rejected()
+    {
+        var source = $$"""
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("{{ConventionalQueryRoute("OrderById")}}")
+                  @get
+                  command place {
+                    requires status == Draft "order already placed"
+                    status -> Placed
+                  }
+                }
+              }
+
+              readmodel OrderSummary from Order {
+                id
+                status
+              }
+
+              query OrderById(id: OrderId): OrderSummary
+            }
+            """;
+
+        Diagnose(source).ShouldHaveSingleItem().Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+    }
+
+    /// <summary>
+    /// The check is per bounded context — two contexts each emit their own openapi document and their own
+    /// endpoint class, so the same route in both is not a collision.
+    /// </summary>
+    [Fact]
+    public void The_same_route_in_two_contexts_is_not_a_collision() =>
+        Diagnose("""
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command place {
+                    requires status == Draft "order already placed"
+                    status -> Placed
+                  }
+                }
+              }
+            }
+
+            context Shipping {
+              enum ParcelStatus { Ready, Sent }
+              aggregate Dispatch root Parcel {
+                entity Parcel identified by ParcelId {
+                  status: ParcelStatus = Ready
+
+                  @route("/orders/{id}")
+                  @put
+                  command send {
+                    requires status == Ready "parcel already sent"
+                    status -> Sent
+                  }
+                }
+              }
+            }
+            """).ShouldBeEmpty();
+
+    /// <summary>Non-regression: a wholly conventional context never trips the check.</summary>
+    [Fact]
+    public void A_conventional_context_reports_no_route_collision() =>
+        Diagnose(TwoCommandSource([], [])).ShouldBeEmpty();
+
+    /// <summary>The conventional route the emit side derives for <c>entity.command</c>.</summary>
+    private static string ConventionalCommandRoute(string entity, string command) =>
+        RouteDerivation.ForCommand(
+            new EntityDecl(entity, entity + "Id", [], [], [], [], []),
+            new CommandDecl(command, [], [])).Route;
+
+    /// <summary>The conventional route the emit side derives for a query.</summary>
+    private static string ConventionalQueryRoute(string query) =>
+        RouteDerivation.ForQuery(new QueryDecl(query, [], new TypeRef("Unused"))).Route;
+
     private static string FileEndingWith(IEnumerable<Emit.EmittedFile> files, string suffix) =>
         files.Single(f => f.RelativePath.EndsWith(suffix, StringComparison.Ordinal)).Contents;
 }

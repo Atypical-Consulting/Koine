@@ -150,6 +150,7 @@ Koine.Compiler.Formatting.FormatRangeEdit.StartCharacter.init -> void
 Koine.Compiler.Formatting.FormatRangeEdit.StartLine.get -> int
 Koine.Compiler.Formatting.FormatRangeEdit.StartLine.init -> void
 Koine.Compiler.Formatting.KoineFormatter.FormatRange(string! source, int startLine, int startCharacter, int endLine, int endCharacter) -> Koine.Compiler.Formatting.FormatRangeEdit?
+Koine.Compiler.IdentifierWords
 Koine.Compiler.Services.CallHierarchyIncomingCall
 Koine.Compiler.Services.CallHierarchyIncomingCall.CallHierarchyIncomingCall(Koine.Compiler.Services.CallHierarchyItem! From) -> void
 Koine.Compiler.Services.CallHierarchyIncomingCall.From.get -> Koine.Compiler.Services.CallHierarchyItem!
@@ -391,6 +392,7 @@ static Koine.Compiler.Ast.ModelCoverage.ToJson(Koine.Compiler.Ast.CoverageReport
 static Koine.Compiler.Ast.TypeResolver.IsBool(Koine.Compiler.Ast.TypeRef? t) -> bool
 static Koine.Compiler.Emit.ExprDescriber.Describe(Koine.Compiler.Ast.Expr! e) -> string!
 static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
+static Koine.Compiler.IdentifierWords.Split(string! name, bool splitAfterDigit) -> System.Collections.Generic.IReadOnlyList<string!>!
 static Koine.Compiler.Services.KoineCompilation.Reconcile(Koine.Compiler.Services.KoineCompilation? previous, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files) -> Koine.Compiler.Services.KoineCompilation!
 static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(Koine.Compiler.Services.KoineCompilation! compilation, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!
 static Koine.Compiler.Services.ModelRoundTripService.ApplyEdit(System.Collections.Generic.IReadOnlyList<Koine.Compiler.Services.SourceFile>! files, Koine.Compiler.Services.StructuredEdit! edit) -> Koine.Compiler.Services.ModelEditResult!

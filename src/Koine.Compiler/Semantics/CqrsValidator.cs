@@ -12,7 +12,9 @@ namespace Koine.Compiler.Semantics;
 ///
 /// <para><see cref="ValidateApiAnnotations"/> (R19) is shared: queries reach it from
 /// <see cref="ValidateQuery"/>, commands from <c>EntityBehaviorValidator.ValidateCommands</c>,
-/// so both surfaces of the API annotations obey one set of rules.</para>
+/// so both surfaces of the API annotations obey one set of rules. <see cref="ValidateApiRoutes"/> is
+/// the one check that cannot be per-declaration — a route collision is a property of the whole
+/// context — so <c>PerContextAnalyzer</c> drives it once per context.</para>
 /// </summary>
 internal static class CqrsValidator
 {
@@ -224,6 +226,80 @@ internal static class CqrsValidator
             }
         }
     }
+
+    /// <summary>
+    /// Context-level R19 check (#1219): no two commands/queries in one bounded context may resolve to the
+    /// same HTTP <b>route AND verb</b>. Sharing a route is legal — that is what <c>@route</c> is for, and
+    /// OpenAPI keys a path item by path then by verb — but sharing both is not: the <c>openapi</c> document
+    /// would carry the same verb key twice under one path (a duplicate YAML mapping key, which makes the
+    /// document unparseable), and the C# <c>api</c> layer would register two indistinguishable endpoints,
+    /// which ASP.NET rejects with <c>AmbiguousMatchException</c> at request time. Reported as KOI1211 on the
+    /// second (and each later) colliding declaration, so the first one — the one already "holding" the
+    /// route — stays clean.
+    ///
+    /// <para>Scope: every entity's commands (top-level and aggregate-nested) and every query, i.e. the
+    /// superset the <c>openapi</c> emitter maps. The C# <c>api</c> layer maps a narrower set (aggregate
+    /// roots whose repository exposes <c>getById</c>, top-level queries), so a collision this reports is
+    /// always real for at least one HTTP target.</para>
+    ///
+    /// <para>Routes are compared <b>ordinally</b> — exactly the criterion that makes an OpenAPI mapping key
+    /// a duplicate. Two templates that differ only in letter case, or only in the <i>name</i> of a route
+    /// parameter (<c>/orders/{id}</c> vs <c>/orders/{orderId}</c>), are distinct YAML keys and so are not
+    /// reported here, even though ASP.NET would still consider them ambiguous.</para>
+    /// </summary>
+    public static void ValidateApiRoutes(ContextNode ctx, List<Diagnostic> diagnostics)
+    {
+        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a message.
+        var claimed = new Dictionary<(string Route, string Verb), string>();
+
+        foreach (EntityDecl entity in ctx.AllEntities())
+        {
+            foreach (CommandDecl command in entity.Commands)
+            {
+                Claim(
+                    command.RouteOverride ?? $"/{Kebab(entity.Name)}/{Kebab(command.Name)}",
+                    command.VerbOverride ?? "POST",
+                    $"command '{command.Name}' on '{entity.Name}'",
+                    command.Span);
+            }
+        }
+
+        foreach (QueryDecl query in ctx.AllTypeDecls().OfType<QueryDecl>())
+        {
+            Claim(
+                query.RouteOverride ?? $"/{Kebab(query.Name)}",
+                query.VerbOverride ?? "GET",
+                $"query '{query.Name}'",
+                query.Span);
+        }
+
+        void Claim(string route, string verb, string subject, SourceSpan span)
+        {
+            if (claimed.TryGetValue((route, verb), out var first))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,
+                    $"{subject} maps '{verb} {route}', which {first} already maps; two declarations may " +
+                    "share a route only when their verbs differ",
+                    span));
+                return;
+            }
+
+            claimed[(route, verb)] = subject;
+        }
+    }
+
+    /// <summary>
+    /// The kebab-cased path segment the HTTP convention derives from an identifier
+    /// (<c>OrdersByStatus → orders-by-status</c>) — the same rule <c>RouteDerivation.Kebab</c> applies
+    /// emit-side. The convention itself has to be restated here because it lives in
+    /// <c>Koine.Emit.Common</c>, which references this assembly: <c>Semantics/</c> runs before the
+    /// emitters and must never depend on one. Only the two format strings are restated — the fiddly
+    /// word-boundary rule is the shared <see cref="IdentifierWords.Split"/> (#1239), so the two cannot
+    /// drift on the hard part, and <c>R19ApiAnnotationsTests</c> pins the whole derivation against
+    /// <c>RouteDerivation</c> from the test project, which can see both.
+    /// </summary>
+    private static string Kebab(string name) =>
+        string.Join('-', IdentifierWords.Split(name, splitAfterDigit: true)).ToLowerInvariant();
 
     /// <summary>
     /// The rule a route override breaks, phrased to complete "route override 'x' on <c>subject</c> …",

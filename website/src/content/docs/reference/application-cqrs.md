@@ -391,6 +391,10 @@ The three axes are **independent**: each falls back to the convention on its own
 
 A `@route` path is pasted into the host's route table verbatim, so it is checked as a **route template**, not just as a string: `{}` parameters must be balanced, named, and un-nested, and the path may not contain whitespace or control characters. Constraints, optional and catch-all parameters, and the `{{`/`}}` escape for a literal brace are all accepted — `/orders/{id:int}`, `/orders/{id?}`, `/files/{*path}`, `/a/{{literal}}`. A malformed template such as `/orders/{id` would otherwise compile fine and then throw `RoutePatternException` when the host builds its routes, so it is a `KOI1208` error instead.
 
+:::caution[A route token is not bound into the handler — yet]
+A `{token}` in a `@route` path shapes the **URL** and is declared as an OpenAPI [path parameter](#1592-translation-to-openapi), but Koine does **not** bind it to anything in the generated C#. The handler still receives its `<Behavior>Request` / query record exactly as the un-annotated endpoint did, so `{id}` in `@route("/orders/{id}")` is carried by the URL while the command's own arguments keep coming from the request body (a query's criteria from the query string). Read the token yourself — for example from `HttpContext` in a filter, or by hand-writing that one endpoint — until the axis that binds it lands.
+:::
+
 ```koine
 context Ordering {
   enum OrderStatus { Draft, Submitted, Cancelled }
@@ -439,6 +443,8 @@ endpoints.MapPut("/orders/{id}", async (OrderSubmitRequest request, OrderSubmitH
     return Results.Ok();
 }).RequireAuthorization("admin");
 ```
+
+Note what the handler lambda takes: `OrderSubmitRequest request` — the same body-bound record the conventional `POST /order/submit` endpoint bound. The `{id}` token in the route moved the endpoint's **address**; it did not become a handler argument, and `note` still arrives in the request body. Nothing in the emitted code reads `{id}`.
 
 `@auth` on its own moves nothing. The query keeps the conventional `MapGet` at the conventional route and only gains the call:
 
@@ -490,16 +496,30 @@ paths:
     put:
       operationId: Order_submit
       summary: "Submit a draft order for fulfilment."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       # …
       security:
         - admin: []
     delete:
       operationId: Order_cancel
       summary: "Cancel an order that has not shipped yet."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       # …
 ```
 
-Two declarations may point `@route` at the same path as long as their verbs differ — OpenAPI keys a path item by path and then by verb, so they merge under one key rather than colliding.
+Every `{token}` in the path becomes a required `in: path` parameter — OpenAPI requires it, and a document that declares a templated path without them is rejected by validators. The token's ASP.NET syntax is stripped down to the bare name (`{id:int}`, `{id?}`, `{*rest}` are declared as `id`, `id`, `rest`) and each token is typed `string`, since the route is free text and the model says nothing about what the token holds. On a query, path parameters come first and the criteria follow as `in: query` ones in the same array. Remember that [none of these are bound into the C# handler](#159-api-annotations) — the operation documents the URL's shape, not a handler argument.
+
+Two declarations may point `@route` at the same path as long as their **verbs differ** — OpenAPI keys a path item by path and then by verb, so they merge under one key rather than colliding. Sharing a path *and* a verb is a `KOI1211` error: the document would carry the same verb key twice under one path (a duplicate YAML mapping key, which no parser will read), and the C# `api` layer would register two indistinguishable endpoints, which ASP.NET rejects with `AmbiguousMatchException` at request time.
 
 :::note
 Koine emits no `components/securitySchemes`. The `@auth` value names a scheme the consuming document declares (bearer JWT, OAuth2 scopes, an API key); Koine models *which* operations require authorization, never *how* you authenticate.
@@ -512,12 +532,14 @@ Koine emits no `components/securitySchemes`. The `@auth` value names a scheme th
 | `@route` names no path (a bare `@route`), or a malformed one — not absolute, containing whitespace or control characters, or with unbalanced, nested, or empty `{}` parameters | `KOI1208` `InvalidRouteOverride` |
 | a declaration carries more than one verb annotation | `KOI1209` `MultipleVerbAnnotations` |
 | `@auth` names no role (a bare `@auth`), or a blank one | `KOI1210` `EmptyAuthRole` |
+| two commands/queries in one context resolve to the same route **and** verb | `KOI1211` `DuplicateApiRoute` |
 | a declaration repeats `@route` or `@auth` | `KOI1212` `DuplicateApiAnnotation` |
 | a verb annotation is given an argument (`@get("/orders")`) | `KOI1213` `VerbAnnotationArgument` |
 | a `command` carries `@since`/`@deprecated` | `KOI1214` `VersionAnnotationOnCommand` |
 
 - The annotations attach to `command` and `query` only. A [factory (§12)](/Koine/reference/factories/) keeps the conventional `POST /{entity}/{factory}`, and a `usecase` has no HTTP surface to override.
 - Every axis is single-valued. Repeating one would quietly keep the last and drop the rest, so it is an error rather than a silent last-one-wins.
+- The `KOI1211` collision check compares whole route strings *exactly*, across every command and query of one bounded context, whether the route came from `@route` or from the convention. Two templates that differ only in letter case, or only in the *name* of a token (`/orders/{id}` vs `/orders/{orderId}`), are distinct OpenAPI keys and so are not reported — but ASP.NET would still consider them ambiguous, so avoid them.
 - Any other `@name` before a declaration parses and is silently ignored, per the [annotation ignorance rule (§18.3.4)](/Koine/reference/versioning/#1834-annotation-ignorance-rule) — with one exception. A `query` is a type declaration, so the [evolution annotations (§18.3)](/Koine/reference/versioning/) `@since`/`@deprecated` apply to it exactly as they do to a `value` or an `event` (a deprecated query emits `[Obsolete]`). A `command` is *not* a type declaration and has nowhere to keep them, so `@since`/`@deprecated` on one is a `KOI1214` error rather than an annotation that vanishes.
 - Nothing here reaches the domain or application C#. Without `--layers api` or `--target openapi`, an annotated model emits exactly what an un-annotated one does.
 

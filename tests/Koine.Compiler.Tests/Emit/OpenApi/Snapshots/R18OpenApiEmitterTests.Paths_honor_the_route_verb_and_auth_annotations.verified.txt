@@ -29,6 +29,12 @@ paths:
     put:
       operationId: Order_submit
       summary: "Submit a draft order for fulfilment."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -50,6 +56,12 @@ paths:
     delete:
       operationId: Order_cancel
       summary: "Cancel an order that has not shipped yet."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "204":
           description: "The command succeeded."
