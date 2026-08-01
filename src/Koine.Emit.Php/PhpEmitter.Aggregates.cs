@@ -52,6 +52,22 @@ public sealed partial class PhpEmitter
         IReadOnlyList<FinderDecl> finders = agg.Repository?.Finders ?? Array.Empty<FinderDecl>();
         var interfaceName = rootName + "Repository";
 
+        // Per-parameter import hint for Assemble/CollectUses (issue #1718, the fourth call site of
+        // the #1701/#1712/#1716 gap): a finder's parameter's own `use` import must resolve against
+        // ITS declared type's context — the parameter's explicit `Context.Type` qualifier when
+        // present, else this repository's own declaring context — not unconditionally this
+        // repository's own context. A repository file isn't tied to one entity's own field set, so
+        // it gets its own dictionary built from scratch (rather than extending an existing one).
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (FinderDecl finder in finders)
+        {
+            foreach (Param p in finder.Parameters)
+            {
+                CollectImportHints(p.Type, contextName, symbolContext);
+            }
+            CollectImportHints(finder.ResultType, contextName, symbolContext);
+        }
+
         var sb = new StringBuilder();
         sb.Append("/** Persistence-ignorant repository contract for the ").Append(rootName).Append(" aggregate root. */\n");
         sb.Append("interface ").Append(interfaceName).Append('\n');
@@ -118,7 +134,8 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Repositories, interfaceName),
-            Assemble(contextName, KindFolder.Repositories, sb.ToString(), interfaceName),
+            Assemble(contextName, KindFolder.Repositories, sb.ToString(), interfaceName,
+                symbolContext.Count > 0 ? symbolContext : null),
             Kind: KindForFolder(KindFolder.Repositories));
     }
 }
