@@ -295,6 +295,27 @@ There is no `null` literal in Koine — you never write `null`. Absence is expre
 field unset; you reach for it with `??`, `.isPresent`, and `.isNone`.
 :::
 
+### Coalescing operands of different numeric types
+
+`??` may join an `Int`-typed operand with a `Decimal`-typed one (`total: Decimal? = hint ?? fallback`
+where `hint: Int?`) — the semantic model widens the pair the same way it widens the two branches of an
+`if … then … else`. Because most targets require both sides of their coalesce construct to agree in
+type, each emitter **reconciles the narrower operand against the wider one when it renders the
+coalesce**, rather than emitting the two disagreeing types verbatim:
+
+| Target | `best: Decimal? = hint ?? fallback` where `hint: Int?`, `fallback: Decimal?` |
+|--------|------------------------------------------------------------------------------|
+| C# | `(Hint ?? Fallback)` — an implicit `int`→`decimal` conversion covers it |
+| TypeScript | `(((__v: number \| undefined) => (__v === undefined ? undefined : Decimal.fromInt(__v)))(this.hint) ?? this.fallback)` |
+| Python | `(Decimal(__koine_v) if (__koine_v := self.hint) is not None else self.fallback)` |
+| PHP | `((fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))($this->hint) ?? $this->fallback)` |
+| Kotlin | `this.hint?.let { java.math.BigDecimal.valueOf(it) } ?: this.fallback` |
+| Java | `this.hint.map(java.math.BigDecimal::valueOf).or(() -> this.fallback)` |
+
+Each operand is reconciled against the **other** operand's type independently, so the widening lands on
+whichever side is narrower — swap the two above and the widen moves to the right-hand side. A coalesce
+whose operands already agree emits the plain construct with no wrapping.
+
 ## 9.11 Translation to C#
 
 Every expression form has a direct C# rendering shown inline in the sections above. In summary:
