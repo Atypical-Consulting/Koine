@@ -57,6 +57,11 @@ internal sealed class WindowsConfinedProcess : IDisposable
     /// low-integrity process, must be found here rather than by a user whose scenario stopped working.
     /// </summary>
     private static readonly Lazy<bool> Probed = new(Probe);
+
+    /// <summary>Why the probe said no, or <c>null</c> when it said yes (or has not run). Folded into the
+    /// degradation note, so "Windows could not confine this run" always carries the step that refused
+    /// rather than leaving the reader — and the next maintainer — to guess.</summary>
+    private static string? _probeFailure;
     private readonly SafeProcessHandle _thread;
 
     private WindowsConfinedProcess(
@@ -75,6 +80,10 @@ internal sealed class WindowsConfinedProcess : IDisposable
 
     /// <summary>See <see cref="Probed"/>. Cheap after the first call; never throws.</summary>
     public static bool Available => Probed.Value;
+
+    /// <summary>See <see cref="_probeFailure"/>. Only meaningful once <see cref="Available"/> has been
+    /// read and came back <c>false</c>.</summary>
+    public static string? ProbeFailure => _probeFailure;
 
     /// <summary>The child, suspended until <see cref="Resume"/>. Carries the same <c>Id</c>,
     /// <c>ExitCode</c>, <c>WaitForExit</c> and <c>Kill(entireProcessTree: true)</c> surface the host
@@ -349,6 +358,13 @@ internal sealed class WindowsConfinedProcess : IDisposable
             // Safe precisely because the child is suspended: it cannot have exited, so the id still
             // names it and no other process can have inherited the number.
             Process process = Process.GetProcessById(information.ProcessId);
+
+            // Force the Process to OPEN AND HOLD its own handle, now, while the child is still suspended.
+            // A Process it did not start keeps only an id, and Process.ExitCode throws outright
+            // ("Process was not started by this object") unless a handle was held — WaitForExit opens a
+            // transient SYNCHRONIZE-only one, which does not count. Reading .Handle is what makes the
+            // exit code, and therefore every diagnosis the host draws from it, readable at all.
+            _ = process.Handle;
             thread = new SafeProcessHandle(information.Thread, ownsHandle: true);
             information.Thread = IntPtr.Zero;
 
@@ -430,9 +446,10 @@ internal sealed class WindowsConfinedProcess : IDisposable
             startInfo.ArgumentList.Add("/c");
             startInfo.ArgumentList.Add("exit 0");
 
-            using WindowsConfinedProcess? probe = TryStart(startInfo, out string? _);
+            using WindowsConfinedProcess? probe = TryStart(startInfo, out string? startFailure);
             if (probe is null)
             {
+                _probeFailure = startFailure;
                 return false;
             }
 
@@ -455,6 +472,7 @@ internal sealed class WindowsConfinedProcess : IDisposable
                     // Already gone; nothing to stop.
                 }
 
+                _probeFailure = "a trivial command did not finish under the confined token";
                 return false;
             }
 
@@ -467,10 +485,19 @@ internal sealed class WindowsConfinedProcess : IDisposable
                 // A faulted read says nothing about the exit code, which is what the probe asks about.
             }
 
-            return probe.Process.ExitCode == 0;
+            if (probe.Process.ExitCode == 0)
+            {
+                return true;
+            }
+
+            _probeFailure = "a trivial command exited "
+                + probe.Process.ExitCode.ToString(CultureInfo.InvariantCulture)
+                + " under the confined token";
+            return false;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _probeFailure = "the confined-launch probe failed (" + ex.Message + ")";
             return false;
         }
     }

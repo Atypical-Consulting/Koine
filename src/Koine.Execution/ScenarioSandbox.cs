@@ -201,7 +201,7 @@ internal static class ScenarioSandbox
         {
             if (!WindowsConfinedProcess.Available)
             {
-                degradations.Add(WindowsFilesystemNote(null));
+                degradations.Add(WindowsFilesystemNote(WindowsConfinedProcess.ProbeFailure));
             }
             else if (!WindowsConfinedProcess.TryLabelRunDirectory(runDirectory, out string? failure))
             {

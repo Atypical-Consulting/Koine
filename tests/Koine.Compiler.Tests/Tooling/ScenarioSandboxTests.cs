@@ -455,7 +455,8 @@ public class ScenarioSandboxTests
             ScenarioSandbox.FilesystemConfinementAvailable.ShouldBeTrue(
                 "every Windows lets a process derive a LOW-INTEGRITY primary token from its own without "
                 + "elevation (issue #1780 measured exactly that on this runner), so filesystem confinement "
-                + "being unavailable here is a regression in the sandbox, not a fact about the platform");
+                + "being unavailable here is a regression in the sandbox, not a fact about the platform. "
+                + "The probe said: " + (WindowsConfinedProcess.ProbeFailure ?? "<nothing>"));
             return;
         }
 
@@ -837,7 +838,8 @@ public class ScenarioSandboxTests
             available, "availability is probed once and cached for the life of the process");
         available.ShouldBeTrue(
             "lowering a copy of your OWN token's integrity is a de-escalation, so it needs no privilege "
-            + "and no elevation — an unavailable mechanism here is a regression, not a platform fact");
+            + "and no elevation — an unavailable mechanism here is a regression, not a platform fact. "
+            + "The probe said: " + (WindowsConfinedProcess.ProbeFailure ?? "<nothing>"));
 
         // Failing SOFT is the contract: a label that cannot be written comes back as a reason, never as
         // an exception, because the caller's next move is to degrade rather than to fail the run.
