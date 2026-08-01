@@ -82,6 +82,13 @@ internal static class Program
                 .WithDescription("MCP server exposing the compiler tools to AI agents (stdio, or --http by URL).")
                 .WithExample("mcp", "--http")
                 .WithExample("mcp", "--http", "--port", "3001");
+
+            // HIDDEN: the sandbox child of the executed scenario runner (#236, ADR 0011). It speaks a
+            // stdio JSON protocol with ScenarioExecutionHost, which spawns this very binary — it is not
+            // a command a human runs, so it stays out of help and completion.
+            config.AddCommand<ScenarioExecCommand>("scenario-exec")
+                .WithDescription("Run one scenario against the model's emitted code (stdio protocol; internal).")
+                .IsHidden();
         });
 
         // Spectre returns -1 for its own parse/validation/usage failures; the commands return

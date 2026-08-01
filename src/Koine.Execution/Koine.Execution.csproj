@@ -24,6 +24,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Koine.Compiler.Tests" />
+    <!-- The CLI hosts the sandbox child (`koine scenario-exec`, #236 / ADR 0011), which drives the
+         internal ScenarioExecutor and the internal stdio protocol shared with ScenarioExecutionHost. -->
+    <InternalsVisibleTo Include="Koine.Cli" />
   </ItemGroup>
 
 </Project>

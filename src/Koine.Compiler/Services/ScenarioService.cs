@@ -144,7 +144,13 @@ public static class ScenarioService
     // JSON request -> scenario values
     // ------------------------------------------------------------------------
 
-    private static IReadOnlyDictionary<string, ScenarioValue> ParseMap(JsonElement element)
+    /// <summary>
+    /// Maps a JSON object (field → value) onto scenario values. <c>internal</c> rather than private
+    /// because the sandboxed executed-mode child (<c>koine scenario-exec</c>, ADR 0011) must read a
+    /// request's <c>given</c>/<c>args</c> with EXACTLY this mapping — two hand-rolled readers would
+    /// let the same JSON mean different things in interpreted and executed mode.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, ScenarioValue> ParseMap(JsonElement element)
     {
         var map = new Dictionary<string, ScenarioValue>(StringComparer.Ordinal);
         if (element.ValueKind == JsonValueKind.Object)
@@ -180,7 +186,12 @@ public static class ScenarioService
     // Scenario result -> JSON-ready tree
     // ------------------------------------------------------------------------
 
-    private static IReadOnlyDictionary<string, object?> Shape(ScenarioResult result) => new Dictionary<string, object?>
+    /// <summary>
+    /// Shapes a scenario result into the one JSON-ready tree both hosts return. <c>internal</c> rather
+    /// than private because executed mode (#236) produces its result in a child process and shapes it
+    /// there (ADR 0011) — the wire shape must stay defined exactly once.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> Shape(ScenarioResult result) => new Dictionary<string, object?>
     {
         ["ok"] = result.Ok,
         ["target"] = result.Target,
