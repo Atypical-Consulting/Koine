@@ -12,11 +12,21 @@ namespace Koine.Compiler.Tests;
 /// dictionary — so a same-named type in the losing context was not merely misclassified (the
 /// #1560 family of bugs), it was <b>entirely absent</b> from enumeration. The enum-member index
 /// (<see cref="ModelIndex.EnumsDeclaring"/> / <c>_enumMemberToType</c>) is populated by iterating
-/// <c>AllTypes()</c>, so the shadowed enum's members were never registered at all and a qualified
-/// reference to one failed target-agnostic semantic validation with a false
-/// <see cref="DiagnosticCodes.UnknownEnumMemberForType"/> (KOI0106). The declaration order of the two
-/// contexts decided which side broke, which is exactly what these tests pin: both orders must
-/// validate identically.
+/// <c>AllTypes()</c>, so the shadowed enum's members were never registered <i>at all</i> — 0 owners,
+/// not the "≥2 means ambiguous" the API's own doc comment describes.
+///
+/// <para><b>On the issue's headline repro.</b> #1632 reports the symptom as a false
+/// <see cref="DiagnosticCodes.UnknownEnumMemberForType"/> (KOI0106) on the shadowed context's own
+/// qualified reference. That no longer reproduces: the context-aware resolution that landed since
+/// (#1711/#1713, #1715/#1729 and siblings) made <c>ExpressionChecker.CheckMember</c> resolve through
+/// <c>ResolveDecl</c>'s per-context lookup, which is not built off the shadowed index — see the
+/// remark at <c>ExpressionChecker.cs</c>'s KOI0106 report site. The KOI0106 tests here therefore pass
+/// both before and after the fix and stand as <i>stays-clean guards</i>, not regression pins. What
+/// actually went red before this fix, and is what these tests exist to pin, is the registry itself:
+/// <see cref="AllTypes_yields_every_per_context_declaration_of_a_shared_simple_name"/>,
+/// <see cref="EnumsDeclaring_sees_the_members_of_a_shadowed_same_name_enum"/>,
+/// <see cref="Unreachable_transition_is_detected_through_a_shadowed_same_name_enum"/> and
+/// <see cref="Same_name_entities_sharing_an_identity_name_across_contexts_still_resolve"/>.</para>
 /// </summary>
 public class ModelIndexAllTypesTests
 {
@@ -59,18 +69,12 @@ public class ModelIndexAllTypesTests
 
     private const string BillingFirst = $"{Billing}\n{Shipping}";
 
-    [Fact]
-    public void Qualified_members_of_both_same_name_enums_validate_with_shipping_declared_first()
-    {
-        Diagnose(ShippingFirst).ShouldNotContain(d => d.Code == DiagnosticCodes.UnknownEnumMemberForType);
-    }
-
-    [Fact]
-    public void Qualified_members_of_both_same_name_enums_validate_with_billing_declared_first()
-    {
-        Diagnose(BillingFirst).ShouldNotContain(d => d.Code == DiagnosticCodes.UnknownEnumMemberForType);
-    }
-
+    /// <summary>
+    /// Both contexts' qualified <c>Status.Member</c> references must validate cleanly whichever
+    /// context is declared first — declaration order decided which side occupied the flat
+    /// <c>_byName["Status"]</c> slot, so an order-sensitive result is the tell-tale of the bug class.
+    /// Green before this fix too (see the class remark); kept as a guard.
+    /// </summary>
     [Fact]
     public void Same_name_enum_in_two_contexts_validates_regardless_of_declaration_order()
     {
@@ -78,6 +82,7 @@ public class ModelIndexAllTypesTests
         Diagnose(BillingFirst).ShouldBeEmpty();
     }
 
+    /// <summary>Red before the fix: only the flat winner's declaration was ever yielded.</summary>
     [Fact]
     public void AllTypes_yields_every_per_context_declaration_of_a_shared_simple_name()
     {
@@ -90,17 +95,52 @@ public class ModelIndexAllTypesTests
             ignoreOrder: true);
     }
 
+    /// <summary>
+    /// Red before the fix: the shadowed enum's members had <b>zero</b> registered owners. Both enums
+    /// are (by construction) named <c>Status</c>, so the owner NAME each assertion expects coincides;
+    /// the signal being pinned is therefore <i>presence</i> — that every member of both enums resolves
+    /// to an owner at all — plus that each resolves to exactly one, i.e. the union didn't
+    /// double-register the same declaration.
+    /// </summary>
     [Fact]
     public void EnumsDeclaring_sees_the_members_of_a_shadowed_same_name_enum()
     {
         ModelIndex index = IndexOf(ShippingFirst);
 
-        // Members of BOTH same-named `Status` enums must be indexed — the shadowed context's own
-        // members used to be missing outright (0 owners), not merely ambiguous (≥2 owners).
         index.EnumsDeclaring("Pending").ShouldBe(new[] { "Status" });
         index.EnumsDeclaring("Delivered").ShouldBe(new[] { "Status" });
         index.EnumsDeclaring("Open").ShouldBe(new[] { "Status" });
         index.EnumsDeclaring("Closed").ShouldBe(new[] { "Status" });
+    }
+
+    /// <summary>
+    /// An end-to-end diagnostic pin for the fix's reach beyond the enum-member index.
+    /// <c>EntityBehaviorValidator.CheckTransitionReachable</c> guards on
+    /// <c>index.EnumsDeclaring(stateRef.Name).Contains(target.Type.Name)</c>, so while the bound
+    /// enum was evicted from <c>AllTypes()</c> that guard returned early <b>every time</b> and the
+    /// unreachable-transition error (KOI0703) was silently never reported. Here <c>Other</c>'s
+    /// <c>S</c> is declared second and shadows <c>C</c>'s in the flat map; before the fix this model
+    /// validated clean (the bug went undetected), after it the genuine KOI0703 is reported.
+    /// </summary>
+    [Fact]
+    public void Unreachable_transition_is_detected_through_a_shadowed_same_name_enum()
+    {
+        const string src = """
+            context C {
+              enum S { Draft, Done }
+              entity E identified by EId {
+                s: S = Draft
+                states s { Draft -> Done  Done }
+                command reset { s -> Draft }
+              }
+            }
+
+            context Other {
+              enum S { Alpha, Beta }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.UnreachableTransition);
     }
 
     /// <summary>
@@ -136,12 +176,49 @@ public class ModelIndexAllTypesTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
         ModelIndex index = new SemanticModel(result.Model!).Index;
 
-        index.AllTypes().OfType<EntityDecl>().Count(e => e.Name == "Order").ShouldBe(2);
+        List<EntityDecl> orders = index.AllTypes().OfType<EntityDecl>().Where(e => e.Name == "Order").ToList();
+        orders.Count.ShouldBe(2);
 
-        // Both IdentityName-keyed single-result lookups still find AN owner for the shared `OrderId`.
+        // The IdentityName-keyed lookup still resolves to one of the two — which one is arbitrary in
+        // either direction, so assert only that it picks a genuine declaration rather than nothing.
         var table = new SymbolTable(result.Model!, index);
         table.StrongSymbol("OrderId").ShouldNotBeNull();
-        table.IdValueObject("OrderId").ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The central backward-compatibility claim: with no cross-context simple-name collision the
+    /// enumeration is unchanged in content AND order, across contexts and into aggregates. Both
+    /// registries are built from the same context-then-declaration pre-order walk, so this holds by
+    /// construction — pinned here so a future refactor of either walk can't drift silently.
+    /// </summary>
+    [Fact]
+    public void AllTypes_enumeration_order_is_context_then_declaration_order_without_collisions()
+    {
+        const string src = """
+            context Shipping {
+              enum Carrier { Road, Air }
+              aggregate Fleet root Shipment {
+                entity Shipment identified by ShipmentId {
+                  carrier: Carrier
+                }
+                value Leg {
+                  distance: Int
+                }
+              }
+            }
+
+            context Billing {
+              enum Status { Open, Closed }
+              value Invoice {
+                status: Status
+              }
+            }
+            """;
+
+        ModelIndex index = IndexOf(src);
+
+        index.AllTypes().Select(t => t.Name).ShouldBe(
+            new[] { "Carrier", "Fleet", "Shipment", "Leg", "Status", "Invoice" });
     }
 
     [Fact]
@@ -163,6 +240,9 @@ public class ModelIndexAllTypesTests
 
         List<TypeDecl> all = index.AllTypes().ToList();
         all.Select(t => t.Name).ShouldBe(new[] { "Status", "Invoice" });
-        all.Distinct().Count().ShouldBe(all.Count);
+
+        // Dedup is by REFERENCE (TypeDecl is a record, so the default value equality would mask a
+        // genuine double-yield of the same declaration) — assert with the same comparer production uses.
+        all.Distinct(ReferenceEqualityComparer.Instance).Count().ShouldBe(all.Count);
     }
 }

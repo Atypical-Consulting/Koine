@@ -681,13 +681,22 @@ public sealed class ModelIndex
     /// Walking <c>_byName</c> made the losing context's declaration <b>entirely invisible</b> — so
     /// every index built by iterating this method (chiefly <see cref="EnumsDeclaring"/> /
     /// <c>_enumMemberToType</c>) silently dropped it (issue #1632).
-    /// Declarations are deduplicated by reference, so a type merely imported into another context's
-    /// scope is yielded once, by its owner. For a model with no cross-context name collision this
-    /// yields exactly the same declarations in the same order as before — both registries are built
-    /// from the same context-then-declaration walk, so only a genuine collision adds an entry.
+    /// For a model with no cross-context name collision this yields exactly the same declarations in
+    /// the same order as before: <c>_byName</c> is filled by <see cref="IndexType"/> walking
+    /// <c>ctx.Types</c> pre-order into each aggregate, <c>_declsByContext</c> by
+    /// <c>ctx.AllTypeDecls()</c> doing the identical walk, over the same <c>model.Contexts</c>
+    /// sequence — so only a genuine collision adds an entry. (Both the old and the new enumeration
+    /// order rest on <see cref="Dictionary{TKey,TValue}"/> enumerating in insertion order, which holds
+    /// absent removals — there are none — but is an implementation detail rather than a contract; the
+    /// snapshot suite is the real guard.)
+    /// <para><b>Ordering requirement:</b> this reads <c>_declsByContext</c>, so it must not be called
+    /// from the constructor before step 1b has filled it. Today's two in-constructor callers (steps 2
+    /// and 4) both run after.</para>
     /// </remarks>
     public IEnumerable<TypeDecl> AllTypes()
     {
+        // Reference equality, not the record's structural Equals: two contexts can legally declare
+        // identically-shaped types, and collapsing those would reintroduce the very drop this fixes.
         var seen = new HashSet<TypeDecl>(ReferenceEqualityComparer.Instance);
         foreach (Dictionary<string, TypeDecl> declsByType in _declsByContext.Values)
         {
@@ -700,8 +709,12 @@ public sealed class ModelIndex
             }
         }
 
-        // Defensive: yield anything the flat view knows about that the per-context registry
-        // somehow missed, so this can only ever ADD visibility, never remove it.
+        // Unreachable for any model the compiler itself builds — KoineCompilation.Merge folds
+        // same-named contexts into one, so `_declsByContext[ctx.Name]` can't clobber and it covers
+        // exactly what `_byName` does. It IS reachable for a hand-built KoineModel carrying two
+        // ContextNodes with the same Name (the public `new ModelIndex(model)` /
+        // `SemanticValidator.Validate(model)` entry points don't go through Merge), where the loop
+        // above would keep only the last. Cheap insurance that this can only ever ADD visibility.
         foreach (TypeDecl decl in _byName.Values)
         {
             if (seen.Add(decl))
