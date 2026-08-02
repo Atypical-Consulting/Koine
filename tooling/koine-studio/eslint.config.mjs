@@ -83,15 +83,43 @@ function selectorsExcept(...excluded) {
 // deliberately-unused bindings — 71 of its 73 day-of findings were already `_`-prefixed identifiers
 // the default rule doesn't recognize) plus two genuine fixes (a dangling type-only import, and a
 // declaration-merging interface's unused type parameter renamed to match the pattern).
+//
+// `unbound-method` was the 15th (570 studio + 22 koine-ui findings). Its findings were investigated
+// rather than swept: NOT ONE was a real lost-`this` bug. Every receiver is a closure-built callback bag
+// (props/deps/handlers/store slices) or a factory handle — no class instance, no `this` in any body —
+// so the rule was firing purely on DECLARATION STYLE: a member written `onCreateAdr(t: string): void`
+// is a method (detaching it may lose `this`), whereas `onCreateAdr: (t: string) => void` is a function
+// -valued property (explicitly detachable). The fix declares the truth: every type member the codebase
+// actually passes around as a VALUE became a function-typed property. That is the rule's own criterion,
+// so members that are only ever invoked deliberately stay method-shorthand. Bonus, and the reason this
+// is a safety win rather than a rename: property signatures check parameters CONTRAVARIANTLY under
+// `strictFunctionTypes` while method signatures are bivariant — the conversion immediately surfaced two
+// genuinely unsound test doubles (`emitPreview` mocks typed `(t: 'csharp' | 'typescript')` standing in
+// for a `(target: string)` contract), both widened to the real contract in the same PR. The residue the
+// conversion can't reach is DOM/lib-declared (`Element.prototype.scrollIntoView`, `HTMLElement.prototype
+// .focus`, `window.matchMedia`, `navigator.clipboard.writeText`): those sites now round-trip the
+// property DESCRIPTOR instead of reading the method as a value, and the clipboard suites assert on the
+// `vi.fn()` handle they installed instead of re-reading it off `navigator`.
+//
 // Burn-down order is cheapest-first. Counts are LIVE — re-measure before editing this table, with
 // `npx eslint . -f json` under a config that adds the preset with no `off` entries, grouped by rule.
 // Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
 // down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
-// (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
+// (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table (now
+// EMPTY: with `unbound-method` enforced, that package is at the full preset with no overrides at all).
+//
+// `require-await` is the LAST entry, and it is not a cheap one — see #1827 for the measurement. Its 490
+// findings were classified and essentially none is a forgotten `await`: 322 are `vi.fn(async …)` /
+// `mockImplementation(async …)` doubles, 43 are methods with an explicit `Promise<T>` return type, 113
+// are async callbacks passed where an async signature is expected, and only 4 are `test(…, async () =>`
+// bodies where the `async` is genuinely droppable. All 13 non-test findings implement a Promise-typed
+// interface (`FsFileHandle`, `FsDirHandle`, `KoineHost`, `LspTransport`). The forgotten-await class the
+// rule exists to catch is already covered here by `no-floating-promises` + `no-misused-promises`, both
+// enforced at `error` including in tests (#997). So clearing it means rewriting ~486 deliberate `async`
+// bodies to `Promise.resolve(…)`, which also converts every `throw` in them from a REJECTION into a
+// synchronous throw — a real behaviour change. #1827 decides that trade before this entry moves.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 236 findings / 71 files
-  '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files
-  '@typescript-eslint/unbound-method': 'off', //                570 findings / 62 files
+  '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files — see #1827
 };
 
 export default tseslint.config(

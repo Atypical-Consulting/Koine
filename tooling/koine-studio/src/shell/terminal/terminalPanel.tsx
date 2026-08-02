@@ -43,7 +43,7 @@ export interface TerminalPanel {
    *  running terminal re-themes live. A no-op on the browser placeholder branch (no terminal). */
   applyTheme(): void;
   /** Tear down: stop the shell, disconnect observers, and dispose the xterm instance. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 /**

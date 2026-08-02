@@ -159,7 +159,7 @@ export const KIND: Partial<Record<ConceptSlug, KindMeta>> = Object.fromEntries(
     slug as ConceptSlug,
     { ...meta, token: `--koi-ddd-${slug}` },
   ]),
-) as Partial<Record<ConceptSlug, KindMeta>>;
+);
 
 /**
  * Resolve a raw launcher input to its mode + the query with the prefix stripped. `input[0]` being one

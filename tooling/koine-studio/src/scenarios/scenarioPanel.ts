@@ -34,7 +34,7 @@ export interface ScenarioPanelOptions {
 
 export interface ScenarioPanel {
   /** Reload the runnable catalog (call on tab open and after a model edit). */
-  refresh(): Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const OUTCOME_ICON: Record<string, string> = { passed: '✓', failed: '✗', indeterminate: '?' };

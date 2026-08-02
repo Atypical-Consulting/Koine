@@ -33,7 +33,7 @@ export interface DeckSpineProps {
   onOverview(): void;
   onFocus(id: string): void;
   onOpenBeside(id: string): void;
-  onSelectFacet(id: string, value: string): void;
+  onSelectFacet: (id: string, value: string) => void;
   onClose(id: string): void;
   onSwap(): void;
   onSelectPane(id: string): void;

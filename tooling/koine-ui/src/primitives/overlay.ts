@@ -77,9 +77,9 @@ export interface ModalHandle {
   readonly body: HTMLElement;
   /** The .koi-modal-footer element to hold action buttons. */
   readonly footer: HTMLElement;
-  open(): void;
-  close(): void;
-  toggle(): void;
+  open: () => void;
+  close: () => void;
+  toggle: () => void;
   readonly isOpen: boolean;
   /** Register a callback run every time the modal opens (e.g. to (re)populate or fetch). */
   onOpen(cb: () => void): void;

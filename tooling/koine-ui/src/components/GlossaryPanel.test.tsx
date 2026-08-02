@@ -73,8 +73,11 @@ describe('GlossaryPanel', () => {
   test('scrolls the targeted term into view when a scroll target is given (#1165)', () => {
     const store = createTestReadableStore<GlossaryPanelSlice>(sliceOf(twoContexts));
     const scrolled: Element[] = [];
-    const orig = Element.prototype.scrollIntoView;
-    // happy-dom doesn't implement scrollIntoView; install a spy that records the element it lands on.
+    // Save/restore the DESCRIPTOR rather than the method value: happy-dom doesn't implement
+    // scrollIntoView, so reading `Element.prototype.scrollIntoView` yields undefined (and reading a
+    // prototype method as a value is what unbound-method flags). The descriptor round-trips the
+    // not-implemented case honestly — absent before, absent after.
+    const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
     Element.prototype.scrollIntoView = function (this: Element) {
       scrolled.push(this);
     };
@@ -83,7 +86,8 @@ describe('GlossaryPanel', () => {
       // The Order entry (data-qn="Sales.Order") is the one scrolled into view — not the whole panel.
       expect(scrolled.some((e) => e.getAttribute('data-qn') === 'Sales.Order')).toBe(true);
     } finally {
-      Element.prototype.scrollIntoView = orig;
+      if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+      else delete (Element.prototype as Partial<Element>).scrollIntoView;
     }
   });
 
@@ -146,7 +150,7 @@ describe('GlossaryPanel', () => {
       const moneyRow = entryRow(container, 1);
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
 
-      const textarea = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      const textarea = within(moneyRow).getByRole<HTMLTextAreaElement>('textbox');
       expect(textarea.value).toBe('A monetary amount.');
       expect(document.activeElement).toBe(textarea);
     });
@@ -159,7 +163,7 @@ describe('GlossaryPanel', () => {
       expect(addBtn.textContent).toBe('Add description');
       fireEvent.click(addBtn);
 
-      const input = within(currencyRow).getByRole('textbox') as HTMLTextAreaElement;
+      const input = within(currencyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'The currency of an amount.' } });
       fireEvent.click(within(currencyRow).getByRole('button', { name: 'Save description for Currency' }));
 
@@ -176,7 +180,7 @@ describe('GlossaryPanel', () => {
       const { container } = render(<GlossaryPanel store={store()} handlers={{ ...noopHandlers, onSave }} />);
       const currencyRow = entryRow(container, 2);
       fireEvent.click(within(currencyRow).getByRole('button', { name: 'Add description for Currency' }));
-      const input = within(currencyRow).getByRole('textbox') as HTMLTextAreaElement;
+      const input = within(currencyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'nope' } });
       fireEvent.click(within(currencyRow).getByRole('button', { name: 'Cancel editing description for Currency' }));
 
@@ -190,7 +194,7 @@ describe('GlossaryPanel', () => {
       const { container } = render(<GlossaryPanel store={store()} handlers={{ ...noopHandlers, onSave }} />);
       const moneyRow = entryRow(container, 1); // already documented
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
-      const input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      const input = within(moneyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'a discarded draft' } });
       fireEvent.keyDown(input, { key: 'Escape' });
 
@@ -205,14 +209,14 @@ describe('GlossaryPanel', () => {
       const currencyRow = entryRow(container, 2);
 
       fireEvent.click(within(currencyRow).getByRole('button', { name: 'Add description for Currency' }));
-      let input = within(currencyRow).getByRole('textbox') as HTMLTextAreaElement;
+      let input = within(currencyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'Committed via Cmd+Enter.' } });
       fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: 'Currency' }), 'Committed via Cmd+Enter.');
       expect(currencyRow.querySelector('.koi-gloss-input')).toBeNull();
 
       fireEvent.click(within(currencyRow).getByRole('button', { name: 'Edit description for Currency' }));
-      input = within(currencyRow).getByRole('textbox') as HTMLTextAreaElement;
+      input = within(currencyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'Committed via Ctrl+Enter.' } });
       fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: 'Currency' }), 'Committed via Ctrl+Enter.');
@@ -224,7 +228,7 @@ describe('GlossaryPanel', () => {
       const { container } = render(<GlossaryPanel store={store()} handlers={{ ...noopHandlers, onSave }} />);
       const currencyRow = entryRow(container, 2); // undocumented enum
       fireEvent.click(within(currencyRow).getByRole('button', { name: 'Add description for Currency' }));
-      const input = within(currencyRow).getByRole('textbox') as HTMLTextAreaElement;
+      const input = within(currencyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: '  padded with whitespace  ' } });
       fireEvent.click(within(currencyRow).getByRole('button', { name: 'Save description for Currency' }));
 
@@ -242,7 +246,7 @@ describe('GlossaryPanel', () => {
       const moneyRow = entryRow(container, 1); // documented: doc = 'A monetary amount.'
 
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
-      let input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      let input = within(moneyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'A freshly saved amount.' } });
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Save description for Money' }));
       expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: 'Money' }), 'A freshly saved amount.');
@@ -250,7 +254,7 @@ describe('GlossaryPanel', () => {
 
       // Re-open Edit on the same row (no remount — same stale entry.doc prop) and Cancel.
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
-      input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      input = within(moneyRow).getByRole<HTMLTextAreaElement>('textbox');
       expect(input.value).toBe('A freshly saved amount.'); // seeded from the just-saved value, not the prop
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Cancel editing description for Money' }));
 
@@ -263,12 +267,12 @@ describe('GlossaryPanel', () => {
       const moneyRow = entryRow(container, 1);
 
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
-      let input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      let input = within(moneyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'A freshly saved amount.' } });
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Save description for Money' }));
 
       fireEvent.click(within(moneyRow).getByRole('button', { name: 'Edit description for Money' }));
-      input = within(moneyRow).getByRole('textbox') as HTMLTextAreaElement;
+      input = within(moneyRow).getByRole<HTMLTextAreaElement>('textbox');
       fireEvent.input(input, { target: { value: 'a discarded second draft' } });
       fireEvent.keyDown(input, { key: 'Escape' });
 

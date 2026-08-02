@@ -359,7 +359,7 @@ describe("Settings → Output panel", () => {
             .find((b) => b.dataset.value === "python")!
             .click();
         expect(onChange).toHaveBeenCalled();
-        const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as { previewTarget: string };
+        const last = onChange.mock.calls[onChange.mock.calls.length - 1][0] as { previewTarget: string };
         expect(last.previewTarget).toBe("python");
         expect(loadSettings().previewTarget).toBe("python");
     });
@@ -523,7 +523,7 @@ describe("Settings → User/Workspace scope toggle", () => {
         expect(loadSettings().wordWrap).toBe(false); // user value stays put
         // The host is notified with the UNCHANGED user settings (it re-applies effective behaviors itself).
         expect(onChange).toHaveBeenCalled();
-        const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as { wordWrap: boolean };
+        const last = onChange.mock.calls[onChange.mock.calls.length - 1][0] as { wordWrap: boolean };
         expect(last.wordWrap).toBe(false);
     });
 
@@ -536,7 +536,7 @@ describe("Settings → User/Workspace scope toggle", () => {
         wordWrapToggle().click();
         expect(loadSettings().wordWrap).toBe(true);
         expect(loadWorkspaceOverrides(KEY)).not.toHaveProperty("wordWrap");
-        const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as { wordWrap: boolean };
+        const last = onChange.mock.calls[onChange.mock.calls.length - 1][0] as { wordWrap: boolean };
         expect(last.wordWrap).toBe(true);
     });
 
@@ -1157,7 +1157,7 @@ describe("Settings → Display name (#479)", () => {
         input.dispatchEvent(new Event("change"));
         expect(loadSettings().displayName).toBe("Grace Hopper");
         expect(onChange).toHaveBeenCalled();
-        const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as { displayName: string };
+        const last = onChange.mock.calls[onChange.mock.calls.length - 1][0] as { displayName: string };
         expect(last.displayName).toBe("Grace Hopper");
     });
 
@@ -1246,7 +1246,7 @@ describe("Settings → new namespaced controls (#750): Tab size / Editor font / 
         input.dispatchEvent(new Event("change"));
         const last = onChange.mock.calls[
             onChange.mock.calls.length - 1
-        ]![0] as { aiTemperature: number };
+        ][0] as { aiTemperature: number };
         expect(last.aiTemperature).toBe(0.9);
     });
 });

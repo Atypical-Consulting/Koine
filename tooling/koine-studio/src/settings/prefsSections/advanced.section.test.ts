@@ -36,10 +36,10 @@ function buildSection(
     overrides: Partial<{
         canSaveProjects: boolean;
         hasIntegratedTerminal: boolean;
-        workspaceRootName(): Promise<string | null>;
-        pickWorkspaceRoot(): Promise<string | null>;
+        workspaceRootName: () => Promise<string | null>;
+        pickWorkspaceRoot: () => Promise<string | null>;
         onReset(): void;
-        onKeybindingsChanged(): void;
+        onKeybindingsChanged: () => void;
     }> = {},
 ) {
     const ctx = buildCtx();

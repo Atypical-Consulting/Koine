@@ -40,7 +40,7 @@ import type { PrefsSection } from "@/settings/prefsSections/types";
  *  keybinding change (reconfigures the editor keymap). Optional: a caller that doesn't wire it simply
  *  never live-applies (tests, mostly). */
 export interface KeyboardSectionDeps {
-    onKeybindingsChanged?(): void;
+    onKeybindingsChanged?: () => void;
 }
 
 export function buildKeyboardSection(

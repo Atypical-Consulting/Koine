@@ -135,7 +135,7 @@ describe('ExplorerPanel', () => {
 
     const trees = container.querySelectorAll('ul[role="tree"]');
     expect(trees.length).toBe(1);
-    const tree = trees[0]!;
+    const tree = trees[0];
 
     const salesGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/sales"]');
     const billingGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/billing"]');
@@ -1615,7 +1615,10 @@ describe('ExplorerPanel', () => {
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       const scrolled: Element[] = [];
-      const orig = Element.prototype.scrollIntoView;
+      // Save/restore the DESCRIPTOR, not the method value (reading a prototype method as a value is
+      // what unbound-method flags) — and happy-dom doesn't implement scrollIntoView, so the descriptor
+      // round-trips the not-implemented case honestly: absent before, absent after.
+      const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
       // happy-dom doesn't implement scrollIntoView; install a spy that records the element it lands on
       // (same pattern as GlossaryPanel.test.tsx's own scroll-target test).
       Element.prototype.scrollIntoView = function (this: Element) {
@@ -1627,7 +1630,8 @@ describe('ExplorerPanel', () => {
         const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
         expect(scrolled).toContain(targetLi);
       } finally {
-        Element.prototype.scrollIntoView = orig;
+        if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+        else delete (Element.prototype as Partial<Element>).scrollIntoView;
       }
     });
 
@@ -1640,7 +1644,10 @@ describe('ExplorerPanel', () => {
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       const scrolled: Element[] = [];
-      const orig = Element.prototype.scrollIntoView;
+      // Save/restore the DESCRIPTOR, not the method value (reading a prototype method as a value is
+      // what unbound-method flags) — and happy-dom doesn't implement scrollIntoView, so the descriptor
+      // round-trips the not-implemented case honestly: absent before, absent after.
+      const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
       Element.prototype.scrollIntoView = function (this: Element) {
         scrolled.push(this);
       };
@@ -1651,7 +1658,8 @@ describe('ExplorerPanel', () => {
         const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
         expect(scrolled).toContain(targetLi);
       } finally {
-        Element.prototype.scrollIntoView = orig;
+        if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+        else delete (Element.prototype as Partial<Element>).scrollIntoView;
       }
     });
 
@@ -1707,7 +1715,10 @@ describe('ExplorerPanel', () => {
       expect(document.querySelector('.explorer-menu[role="menu"]')).not.toBeNull();
 
       const scrolled: Element[] = [];
-      const orig = Element.prototype.scrollIntoView;
+      // Save/restore the DESCRIPTOR, not the method value (reading a prototype method as a value is
+      // what unbound-method flags) — and happy-dom doesn't implement scrollIntoView, so the descriptor
+      // round-trips the not-implemented case honestly: absent before, absent after.
+      const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
       Element.prototype.scrollIntoView = function (this: Element) {
         scrolled.push(this);
       };
@@ -1716,7 +1727,8 @@ describe('ExplorerPanel', () => {
         expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
         expect(scrolled.length).toBe(0);
       } finally {
-        Element.prototype.scrollIntoView = orig;
+        if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+        else delete (Element.prototype as Partial<Element>).scrollIntoView;
       }
     });
   });

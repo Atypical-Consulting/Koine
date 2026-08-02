@@ -46,15 +46,15 @@ export interface LauncherAction {
  */
 export interface LauncherActionDeps {
   /** `lsp.definition(...)` + `deps.openUri(...)` (Task 8). */
-  gotoDefinition(entry: CatalogEntry): void | Promise<void>;
+  gotoDefinition: (entry: CatalogEntry) => void | Promise<void>;
   /** `lsp.references(...)`, surfaced via the Search panel (`deps.search.focus()`) or a results list. */
-  findUsages(entry: CatalogEntry): void | Promise<void>;
+  findUsages: (entry: CatalogEntry) => void | Promise<void>;
   /** A non-navigating "quick look" at the entry (inline preview / hover), short of a full jump. */
-  peek(entry: CatalogEntry): void | Promise<void>;
+  peek: (entry: CatalogEntry) => void | Promise<void>;
   /** `lsp.prepareRename(...)` + `lsp.rename(...)`. */
   rename(entry: CatalogEntry): void | Promise<void>;
   /** `navigator.clipboard.writeText(text)` — the one place raw text ever leaves this module. */
-  copy(text: string): void | Promise<void>;
+  copy: (text: string) => void | Promise<void>;
   /** Opens a workspace file — `deps.openUri(uri)`. */
   openFile(entry: CatalogEntry): void | Promise<void>;
   /** Opens a file's pending changes (Source Control / diff view). */
@@ -64,17 +64,17 @@ export interface LauncherActionDeps {
   /** Opens the ubiquitous-language glossary entry (glossary panel / docs). */
   openGlossary(entry: CatalogEntry): void | Promise<void>;
   /** Finds the term across the model — `deps.search.focus()` (text search panel). */
-  findInModel(entry: CatalogEntry): void | Promise<void>;
+  findInModel: (entry: CatalogEntry) => void | Promise<void>;
   /** Jumps to an invariant/business rule's declaration. */
   gotoRule(entry: CatalogEntry): void | Promise<void>;
   /** Opens a commit's detail view against the git store. */
   viewCommit(entry: CatalogEntry): void | Promise<void>;
   /** Reverts a commit via the git store. */
-  revertCommit(entry: CatalogEntry): void | Promise<void>;
+  revertCommit: (entry: CatalogEntry) => void | Promise<void>;
   /** `registry.run(cmdId)` for an `action`-category entry. */
-  runCommand(entry: CatalogEntry): void | Promise<void>;
+  runCommand: (entry: CatalogEntry) => void | Promise<void>;
   /** Requests a transient confirmation toast (`.lx-toast`); the panel renders it. */
-  toast(message: string): void;
+  toast: (message: string) => void;
 }
 
 

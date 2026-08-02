@@ -84,7 +84,7 @@ import type {
 export interface SurfaceLoadersLsp {
   glossaryModel(): Promise<GlossaryModel>;
   livingDocs(): Promise<DocsResult>;
-  emitPreview(target: PreviewTarget): Promise<EmitPreviewResult>;
+  emitPreview: (target: PreviewTarget) => Promise<EmitPreviewResult>;
   check(baseline: string, baselineSources?: { uri: string; text: string }[]): Promise<CheckResult>;
 }
 
@@ -108,19 +108,19 @@ export interface SurfaceLoadersHosts {
  *  facade), mirroring how `ActiveContextControllerDeps` redeclares its own subset of the same fields. */
 export interface SurfaceLoadersDeps {
   /** The opened-folder token (or '' in no-folder mode) — keys the docs/git/diagram-layout hosts. */
-  folderRootToken(): string;
+  folderRootToken: () => string;
   /** Write the action-feedback pill (a loader failure that has no better in-panel home routes here). */
-  setStatus(text: string, kind: 'error'): void;
+  setStatus: (text: string, kind: 'error') => void;
   /** Persist a glossary concept's `///` description; the promise lets the glossary pane surface a
    *  failure inline (the original error home). */
-  onSaveGlossaryDescription(entry: GlossaryEntry, text: string): Promise<void>;
+  onSaveGlossaryDescription: (entry: GlossaryEntry, text: string) => Promise<void>;
   /** Persist every dirty editor buffer (#109's Save-all) — the Source Control panel's save-all-before-
    *  commit prompt (#470). */
-  saveAllDirty(): Promise<void>;
+  saveAllDirty: () => Promise<void>;
   /** Jump to a RAW 1-based source span — the bottom tables' row click. */
-  gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
+  gotoSourceSpan: (span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>) => void;
   /** Jump the editor to an LSP range (0-based) — the glossary term list's jump-to-source. */
-  gotoRange(start: { line: number; character: number }, end: { line: number; character: number }): void;
+  gotoRange: (start: { line: number; character: number }, end: { line: number; character: number }) => void;
 }
 
 /** The cross-module effects a loader needs but doesn't own — every one of these is either facade-private
@@ -132,17 +132,17 @@ export interface SurfaceLoadersDeps {
 export interface SurfaceLoadersHooks {
   /** Build (or reuse) the joined model index (`ensureModelIndex`/`modelIndex`/`indexPromise` stay in the
    *  facade — a selection concern, not a loader concern). */
-  ensureModelIndex(): Promise<ModelIndex>;
+  ensureModelIndex: () => Promise<ModelIndex>;
   /** Repaint the model-index-derived chrome once the index has (re)built: the construct palette's
    *  aggregate gating, the Properties inspector, and the diagram/outline cross-highlight — the facade's
    *  `renderCanvasPalette`/`renderSelectedInspector`/`applySelectionHighlight` tail of the old loadModel. */
-  onModelIndexRebuilt(): void;
+  onModelIndexRebuilt: () => void;
   /** Mount the Domain navigator on first load, or reload its strategic data when the model was rebuilt.
    *  The facade owns the mount node, the mounted handle, and the navigator's selection/goto handlers. */
-  ensureDomainNavigator(): void;
+  ensureDomainNavigator: () => void;
   /** Drop the facade's own model-derived caches (the joined model index, its in-flight builder, and the
    *  assistant's domain index) — called once per invalidateDocViews(), alongside this module's token bump. */
-  invalidateModelDerivedCaches(): void;
+  invalidateModelDerivedCaches: () => void;
   /** Refresh the Code surface's Scenario runner if it's the active sub-view (chrome-owned; not a
    *  docViews-gated surface, so it's a facade concern like the rest of `ensureVisibleLoaded`). */
   ensureTechLoaded(): void;
@@ -156,7 +156,7 @@ export interface SurfaceLoadersHooks {
   loadSyntaxTree(): void;
   /** Refresh the bounded-context switcher's option list from the just-edited model (Task 2's
    *  activeContextController) — a cross-module call the facade wires in. */
-  refreshContextList(): Promise<void>;
+  refreshContextList: () => Promise<void>;
 }
 
 export interface SurfaceLoadersOptions {
@@ -171,8 +171,8 @@ export interface SurfaceLoadersOptions {
 }
 
 export interface SurfaceLoaders {
-  loadPreview(): Promise<void>;
-  loadDiagrams(): Promise<void>;
+  loadPreview: () => Promise<void>;
+  loadDiagrams: () => Promise<void>;
   loadGlossary(): Promise<void>;
   loadModel(): Promise<void>;
   loadAdr(host?: HTMLElement): Promise<void>;
@@ -180,17 +180,17 @@ export interface SurfaceLoaders {
   loadSourceControl(): void;
   loadEventsPanel(): Promise<void>;
   loadRelationshipsPanel(): Promise<void>;
-  runCheck(): Promise<void>;
+  runCheck: () => Promise<void>;
   renderCheckIdleIfEmpty(): void;
-  refreshSourceControl(): void;
-  invalidateDocViews(): void;
-  invalidateDocsPanel(): void;
+  refreshSourceControl: () => void;
+  invalidateDocViews: () => void;
+  invalidateDocsPanel: () => void;
   invalidateBottomPanels(): void;
-  onDocEdited(): void;
-  onThemeChanged(): void;
-  setTarget(target: PreviewTarget): void;
-  onPreviewTargetChanged(target: PreviewTarget): void;
-  refreshActiveSurfaces(): void;
+  onDocEdited: () => void;
+  onThemeChanged: () => void;
+  setTarget: (target: PreviewTarget) => void;
+  onPreviewTargetChanged: (target: PreviewTarget) => void;
+  refreshActiveSurfaces: () => void;
   /** Whether the ADR page has painted for the current folder — the facade's `ensureDocsLoaded` gate
    *  (the flag itself is module-local, per the folder-derived-flags constraint). */
   isAdrLoaded(): boolean;
@@ -205,7 +205,7 @@ export interface SurfaceLoaders {
    *  re-emit — the facade's `rerenderScopedSurfaces` calls this after a scope change. */
   refreshOutputRailScope(): void;
   /** Cancel pending debounce timers and drop this module's own store subscription. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 export function createSurfaceLoaders(options: SurfaceLoadersOptions): SurfaceLoaders {

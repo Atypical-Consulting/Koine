@@ -2,7 +2,7 @@
 // Smoke tests for the pure control factories hoisted out of mountPreferencesPane's closure (#987 task 1).
 // These are DOM builders only — no Settings/persistence wiring — so each test drives a control in
 // isolation via the callbacks it takes as parameters, matching how prefs.ts calls them today.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import {
     row,
     panel,
@@ -185,21 +185,26 @@ describe("prefsControls: copyButton()", () => {
         vi.useRealTimers();
     });
 
-    function mockClipboard(writeText: () => Promise<void>): void {
+    /** Install a clipboard double and RETURN the mock. Assert on this handle rather than re-reading
+     *  `navigator.clipboard.writeText`: that re-read detaches a DOM prototype method from its receiver
+     *  (what unbound-method flags), and asserting on the double you installed is the clearer contract. */
+    function mockClipboard(writeText: () => Promise<void>): Mock<() => Promise<void>> {
+        const spy = vi.fn(writeText);
         Object.defineProperty(navigator, "clipboard", {
-            value: { writeText: vi.fn(writeText) },
+            value: { writeText: spy },
             configurable: true,
         });
+        return spy;
     }
 
     it("copies getText()'s value, flashes 'Copied ✓', then reverts to the idle label after 1600ms", async () => {
-        mockClipboard(() => Promise.resolve());
+        const writeText = mockClipboard(() => Promise.resolve());
         const { el: btn } = copyButton("Copy", () => "hello");
         expect(btn.className).toBe("koi-set-action");
 
         btn.click();
         await vi.advanceTimersByTimeAsync(0);
-        expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
+        expect(writeText).toHaveBeenCalledWith("hello");
         expect(btn.textContent).toBe("Copied ✓");
 
         await vi.advanceTimersByTimeAsync(1600);
@@ -227,19 +232,19 @@ describe("prefsControls: copyButton()", () => {
     });
 
     it("a guard veto blocks the copy (mcpCopyBtn's empty-URL no-op case)", async () => {
-        mockClipboard(() => Promise.resolve());
+        const writeText = mockClipboard(() => Promise.resolve());
         let allow = false;
         const { el: btn } = copyButton("Copy", () => "hello", { guard: () => allow });
 
         btn.click();
         await vi.advanceTimersByTimeAsync(0);
-        expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+        expect(writeText).not.toHaveBeenCalled();
         expect(btn.textContent).toBe("Copy");
 
         allow = true;
         btn.click();
         await vi.advanceTimersByTimeAsync(0);
-        expect(navigator.clipboard.writeText).toHaveBeenCalledWith("hello");
+        expect(writeText).toHaveBeenCalledWith("hello");
     });
 });
 

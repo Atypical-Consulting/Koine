@@ -103,7 +103,7 @@ export function useEditableField<T extends HTMLInputElement | HTMLTextAreaElemen
         if (session) {
           // No persistent field to reset to — the whole session ends.
           e.preventDefault();
-          onCancel!();
+          onCancel();
         } else {
           el.value = value;
           el.blur();
@@ -117,12 +117,12 @@ export function useEditableField<T extends HTMLInputElement | HTMLTextAreaElemen
         // session (the row disappears) rather than resetting a DOM value in place.
         if (!el.isConnected) {
           // The edited entry was removed upstream mid-edit — Preact already unmounted this element.
-          onCancel!();
+          onCancel();
           return;
         }
         const next = el.value.trim();
         if ((!next && !commitBlank) || (validate && !validate(next)) || next === value) {
-          onCancel!();
+          onCancel();
           return;
         }
         onCommit(next);

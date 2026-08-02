@@ -22,7 +22,7 @@ const tpl = (over: Partial<Template> & Pick<Template, 'id' | 'name' | 'difficult
     icon: '📦',
     source: '',
     ...over,
-  }) as Template;
+  });
 
 const SAMPLE: Template[] = [
   tpl({ id: 'billing', name: 'Billing', tagline: 'Money and orders', difficulty: 'starter', tags: ['money', 'orders'], icon: '💳' }),

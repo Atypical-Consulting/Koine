@@ -250,7 +250,7 @@ describe('Transcript (#990)', () => {
         store.getState().completeToolCall({ id: 1, state: 'ok', summary: 'big', result: huge, durationMs: 5 }),
       );
       const card = cards(container)[0];
-      expect(card.querySelectorAll('.koi-tool-detail dd pre')[1].textContent!.length).toBe(TOOL_RESULT_CLAMP);
+      expect(card.querySelectorAll('.koi-tool-detail dd pre')[1].textContent.length).toBe(TOOL_RESULT_CLAMP);
       expect(card.querySelector('.koi-tool-truncated')!.textContent).toBe('(truncated)');
     });
 

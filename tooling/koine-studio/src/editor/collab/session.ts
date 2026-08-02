@@ -63,9 +63,9 @@ export interface CollabSessionState {
 
 export interface CollabSession {
   /** The current state. Cheap; safe to call in a render. */
-  getState(): CollabSessionState;
+  getState: () => CollabSessionState;
   /** Observe state changes. Returns the unsubscribe function. */
-  subscribe(listener: (state: CollabSessionState) => void): () => void;
+  subscribe: (listener: (state: CollabSessionState) => void) => () => void;
   /**
    * Open a session over this participant's buffer and become the document authority. Their buffer IS
    * the session document — it is seeded into the replica as-is.

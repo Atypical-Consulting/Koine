@@ -51,7 +51,7 @@ export interface ReviewPanelOptions {
 
 export interface ReviewPanel {
   /** Unmount the Preact tree (its store subscription is released by the unmount effect cleanup). */
-  dispose(): void;
+  dispose: () => void;
 }
 
 /** Group threads by their file uri, files sorted stably, threads kept in store order within a file. */

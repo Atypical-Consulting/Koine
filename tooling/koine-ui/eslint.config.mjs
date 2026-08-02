@@ -6,18 +6,17 @@ import reactHooks from 'eslint-plugin-react-hooks';
 // rules (the package ships Preact components) — minus the studio-specific imperative-island allow-list.
 // Type-aware rules run against tsconfig.json (include: ["src"]) via parserOptions.projectService.
 
-// ── #998: the tseslint.configs.recommendedTypeChecked ratchet ────────────────────────────────────
-// Same inverted allow-list as koine-studio's config (see its header comment for the full rationale):
-// the whole preset is on, and every rule that still has findings is listed here as 'off' with its
-// live count; each ratchet PR fixes one rule and DELETES its entry. Never re-add an entry.
-const RATCHET_PENDING = {
-  '@typescript-eslint/no-unnecessary-type-assertion': 'off', //  15 findings / 3 files
-  '@typescript-eslint/unbound-method': 'off', //                 22 findings / 5 files
-};
-
+// ── #998: the tseslint.configs.recommendedTypeChecked ratchet — COMPLETE for this package ────────
+// This was the mirror of koine-studio's inverted allow-list (see its header comment for the full
+// rationale): the whole preset on, every still-noisy rule listed here as 'off' with its live count,
+// each ratchet PR deleting one entry. The table is now EMPTY — `unbound-method` (22 findings / 5 files)
+// was the last one, so `recommendedTypeChecked` is enforced here with NO per-rule override at all.
+// `require-await` never appeared in this table: it was clean in this package on day one.
+// The invariant that got us here still binds: never re-add an entry, and never clear a rule with a
+// blanket `eslint-disable`. A future preset upgrade that lands new findings gets fixed, not deferred.
 export default tseslint.config(
-  // The full type-checked preset, minus the still-pending rules above. Placed first so the narrow
-  // #978 gate below stays the last word on the rules it names explicitly.
+  // The full type-checked preset. Placed first so the narrow #978 gate below stays the last word on
+  // the rules it names explicitly.
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [tseslint.configs.recommendedTypeChecked],
@@ -26,7 +25,6 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
-      ...RATCHET_PENDING,
       // Same underscore-ignore config as koine-studio's (see its header comment for the rationale):
       // matches the codebase's pre-existing `_name` convention for deliberately-unused bindings.
       '@typescript-eslint/no-unused-vars': [

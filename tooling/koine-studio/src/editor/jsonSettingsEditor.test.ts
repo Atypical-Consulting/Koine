@@ -140,7 +140,7 @@ describe('settings.json schema hover + completion (#765)', () => {
     const pos = doc.indexOf('"tabSize"') + 3; // inside the `tabSize` key
     const tip = settingsSchemaHover(view, pos, 1);
     expect(tip).not.toBeNull();
-    const dom = tip!.create(view).dom as HTMLElement;
+    const dom = tip!.create(view).dom;
     expect(dom.className).toContain('koi-hover');
     // The title (which the bundled extension never surfaces) and the description both reach the user.
     expect(dom.textContent).toContain('Tab size');

@@ -59,13 +59,13 @@ export interface UpdateController {
   /** Mark a new version installed-and-waiting; flips canReload() true and notifies subscribers. */
   markUpdateReady(): void;
   /** Hide the affordance for this session (a new version stays applied; the reminder just stops nagging). */
-  dismiss(): void;
+  dismiss: () => void;
   /** True only when an update is ready AND the user hasn't dismissed the affordance this session. */
   canReload(): boolean;
   /** Whether an update has been detected (independent of dismissal). */
   isReady(): boolean;
   /** Subscribe to state changes (ready / dismiss). Returns an unsubscribe fn. */
-  subscribe(listener: () => void): () => void;
+  subscribe: (listener: () => void) => () => void;
 }
 
 export function createUpdateController(): UpdateController {
@@ -229,7 +229,7 @@ export function registerStudioServiceWorker(deps: RegisterServiceWorkerDeps = {}
   registered = true;
   const swContainer = nav.serviceWorker;
   const { url, scope } = serviceWorkerUrl(
-    deps.base ?? (import.meta.env.BASE_URL as string | undefined),
+    deps.base ?? (import.meta.env.BASE_URL),
   );
   const onUpdateReady = deps.onUpdateReady ?? ((): void => {});
 
@@ -240,7 +240,7 @@ export function registerStudioServiceWorker(deps: RegisterServiceWorkerDeps = {}
     swContainer
       .register(url, { type: 'module', scope })
       .then((registration) => {
-        watchForUpdates(registration as unknown as RegistrationLike, onUpdateReady, hadController);
+        watchForUpdates(registration, onUpdateReady, hadController);
         // NB: the WASM bundle is NOT precached here — that's gated to editor-route entry
         // (scheduleCompilerPrecache, called from main.ts) so a Home-only visit never downloads it.
       })

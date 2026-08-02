@@ -45,9 +45,9 @@ function mount(
   );
 }
 
-const panel = (c: Element) => c.querySelector('.koi-changeset') as HTMLElement | null;
+const panel = (c: Element) => c.querySelector<HTMLElement>('.koi-changeset');
 const applyBtn = (c: Element) => c.querySelector('.koi-changeset-apply') as HTMLButtonElement;
-const discardBtn = (c: Element) => c.querySelector('.koi-changeset-discard') as HTMLButtonElement | null;
+const discardBtn = (c: Element) => c.querySelector<HTMLButtonElement>('.koi-changeset-discard');
 const status = (c: Element) => c.querySelector('.koi-changeset-status') as HTMLElement;
 const checkboxes = (c: Element) => [...c.querySelectorAll('.koi-changeset-accept')] as HTMLInputElement[];
 
@@ -77,7 +77,7 @@ describe('ChangeSetPanel (#990)', () => {
     expect(check.getAttribute('aria-label')).toBe('Accept changes to ordering/order.koi');
     expect(first.querySelector('.koi-changeset-badge-modified')!.textContent).toBe('modified');
     expect(first.querySelector('.koi-changeset-path')!.textContent).toBe('ordering/order.koi');
-    const diff = first.querySelector('.koi-changeset-diff')!.textContent!;
+    const diff = first.querySelector('.koi-changeset-diff')!.textContent;
     expect(diff).toContain('  context Ordering {'); // shared line
     expect(diff).toContain('+   aggregate Order {}'); // added line
 
@@ -318,7 +318,7 @@ describe('colliding relPaths across roots (#472)', () => {
       'model.koi@2',
     ]);
     // Per-row before: each diff keeps its own root's shared line (no last-writer collapse).
-    const diffs = rows.map((r) => r.querySelector('.koi-changeset-diff')!.textContent!);
+    const diffs = rows.map((r) => r.querySelector('.koi-changeset-diff')!.textContent);
     expect(diffs[0]).toContain('  context A {');
     expect(diffs[0]).toContain('+   aggregate One {}');
     expect(diffs[0]).not.toContain('context B');
@@ -410,7 +410,7 @@ describe('root picker for new-file rows (#1132)', () => {
     return store;
   }
 
-  const rootSelect = (row: Element) => row.querySelector('.koi-changeset-root') as HTMLSelectElement | null;
+  const rootSelect = (row: Element) => row.querySelector<HTMLSelectElement>('.koi-changeset-root');
 
   test('a new-file row in a multi-root workspace renders a select with one option per root, folder-labelled and full-root-titled', () => {
     const store = storeWithRoots([rootA, rootB]);
@@ -427,7 +427,7 @@ describe('root picker for new-file rows (#1132)', () => {
     // (the full root token) still disambiguates them.
     expect(options.map((o) => o.textContent)).toEqual(['shared', 'shared']);
     expect(options.map((o) => o.getAttribute('title'))).toEqual([rootA, rootB]);
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual([rootA, rootB]);
+    expect(options.map((o) => o.value)).toEqual([rootA, rootB]);
   });
 
   test('a MODIFIED row renders no root select, even in a multi-root workspace', () => {
@@ -516,7 +516,7 @@ describe('root reconciliation when a workspace root is removed mid-review (#1689
     return store;
   }
 
-  const rootSelect = (row: Element) => row.querySelector('.koi-changeset-root') as HTMLSelectElement | null;
+  const rootSelect = (row: Element) => row.querySelector<HTMLSelectElement>('.koi-changeset-root');
 
   test('root removed, count drops to 1: targetRoot resets to null and the picker disappears', async () => {
     const store = storeWithRoots([rootA, rootB], { 'billing/invoice.koi': rootB });

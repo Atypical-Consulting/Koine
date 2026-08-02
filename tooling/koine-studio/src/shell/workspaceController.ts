@@ -52,13 +52,13 @@ export interface WorkspaceLsp {
   setActive(uri: string): void;
   flush(): void;
   didSave(): void;
-  format(): Promise<TextEdit[]>;
+  format: () => Promise<TextEdit[]>;
 }
 
 /** The slice of the {@link import('@/editor/editor').KoineEditor} handle the workspace drives. */
 export interface WorkspaceEditor {
   getDoc(): string;
-  setDoc(doc: string): void;
+  setDoc: (doc: string) => void;
   applyEdits(edits: TextEdit[]): void;
 }
 
@@ -85,7 +85,7 @@ export interface WorkspaceControllerDeps {
   store: StoreApi<AppState>;
 
   /** Action-feedback pill writer (ide.ts's editorSession.setStatus). */
-  setStatus(text: string, kind: 'error'): void;
+  setStatus: (text: string, kind: 'error') => void;
   /**
    * Non-clobbering notification for a user-initiated open of an empty folder (#817). Unlike
    * `setStatus('…', 'error')`, which permanently overwrites a healthy compiled status, this channel
@@ -103,13 +103,13 @@ export interface WorkspaceControllerDeps {
    * path (which repaints the next file WITHOUT firing the full onActiveChanged seam, matching the old
    * activateFallback's narrower effect set: showDiagnostics + invalidateDocViews only).
    */
-  invalidateDocViews(): void;
+  invalidateDocViews: () => void;
   /** Forget the cached diagnostics for `uri` (a delete). */
   dropDiagnostics(uri: string): void;
   /** Move cached diagnostics from `oldUri` to `newUri` (a rename/move). */
   renameDiagnostics(oldUri: string, newUri: string): void;
   /** Forget every cached diagnostic (a workspace swap). */
-  clearDiagnostics(): void;
+  clearDiagnostics: () => void;
 
   /** Whether format-on-save is enabled (read live from ide.ts's `settings`). */
   getFormatOnSave(): boolean;
@@ -145,13 +145,13 @@ export interface WorkspaceController {
    *  mutation of a Buffer read off this map. */
   readonly buffers: ReadonlyMap<string, Readonly<Buffer>>;
   /** The uri the editor currently shows / all LSP requests target. */
-  activeUri(): string;
+  activeUri: () => string;
   /**
    * The PRIMARY (first) workspace root token ('' before any folder opens). Back-compat shim over the
    * ordered {@link rootsList}: for the single-root case it is byte-identical to the opened folder, which
    * is what ide.ts / the inspector / the store slice still depend on.
    */
-  folderRootToken(): string;
+  folderRootToken: () => string;
   /** Every workspace root, in add order (a copy); the first is the primary ({@link folderRootToken}). */
   rootsList(): string[];
   /** The last explorer entry tree fetched for the primary root. */
@@ -168,7 +168,7 @@ export interface WorkspaceController {
    * absent/`false` preserves the #627 silent path (boot/late re-scans must not clobber a healthy
    * compiled status).
    */
-  openFolderPath(folder: string, opts?: { recent?: boolean; userInitiated?: boolean }): Promise<OpenResult>;
+  openFolderPath: (folder: string, opts?: { recent?: boolean; userInitiated?: boolean }) => Promise<OpenResult>;
   /**
    * ADDITIVE: union a second folder's .koi files into the current workspace as a new root (appended to
    * {@link rootsList}), WITHOUT closing existing buffers or changing the active one. An already-present
@@ -189,7 +189,7 @@ export interface WorkspaceController {
    */
   openDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean; pristineSeed: Buffer | null }>;
   /** Open one shared model as a transient 1-file workspace (non-destructive). */
-  openWorkspaceWith1File(text: string): Promise<void>;
+  openWorkspaceWith1File: (text: string) => Promise<void>;
   /**
    * Every `.koi` file uri under the open folder (the host walk's skip-list already applied), in
    * relPath order; `[]` when no folder is open. An optional comma-separated include glob narrows the
@@ -198,9 +198,9 @@ export interface WorkspaceController {
    */
   listWorkspaceFiles(glob?: string): Promise<string[]>;
   /** Open a .koi file token as a buffer if needed; returns its uri (or null on failure). */
-  ensureBuffer(token: string): Promise<string | null>;
+  ensureBuffer: (token: string) => Promise<string | null>;
   /** Open a file token (if needed) and make it the active editor buffer. */
-  openFileToken(token: string): Promise<void>;
+  openFileToken: (token: string) => Promise<void>;
   /** Switch the editor + LSP to a different open buffer (flush-then-swap; fires onActiveChanged). */
   activateFile(uri: string): void;
   /**
@@ -216,7 +216,7 @@ export interface WorkspaceController {
   /** Format-then-write the active buffer to disk and clear its dirty flag. Re-entrancy guarded. */
   saveActive(): Promise<void>;
   /** Save every dirty buffer; a failed write stays dirty and is reported. Re-entrancy guarded. */
-  saveAllDirty(): Promise<void>;
+  saveAllDirty: () => Promise<void>;
   /** Enable/disable idle auto-save; disabling cancels any pending debounce. */
   setAutoSave(on: boolean): void;
   /**
@@ -250,9 +250,9 @@ export interface WorkspaceController {
   handleDuplicate(entry: FsEntry): Promise<void>;
   handleMove(entry: FsEntry, destDirToken: string): Promise<void>;
   /** Re-read the folder's entry tree from the host and re-render the explorer. */
-  refreshEntries(): Promise<void>;
+  refreshEntries: () => Promise<void>;
   /** Re-render the explorer from the cached entry tree. */
-  renderTree(): void;
+  renderTree: () => void;
 
   // --- workspace edits ---
   /** Apply a rename/code-action WorkspaceEdit across open buffers (active via editor, others patched). */
@@ -283,17 +283,17 @@ export interface WorkspaceController {
  */
 export interface WorkspaceModuleCtx {
   store: StoreApi<AppState>;
-  st(): AppState;
+  st: () => AppState;
   deps: WorkspaceControllerDeps;
-  rootOfToken(token: string): string | undefined;
-  relOfToken(token: string): string;
-  renderTree(): void;
-  refreshEntries(): Promise<void>;
-  ensureBuffer(token: string): Promise<string | null>;
-  openFileToken(token: string): Promise<void>;
-  syncOpenKoi(): Promise<void>;
-  activateFallback(): void;
-  rekeyBuffers(oldToken: string, newToken: string): void;
+  rootOfToken: (token: string) => string | undefined;
+  relOfToken: (token: string) => string;
+  renderTree: () => void;
+  refreshEntries: () => Promise<void>;
+  ensureBuffer: (token: string) => Promise<string | null>;
+  openFileToken: (token: string) => Promise<void>;
+  syncOpenKoi: () => Promise<void>;
+  activateFallback: () => void;
+  rekeyBuffers: (oldToken: string, newToken: string) => void;
 }
 
 export function createWorkspaceController(deps: WorkspaceControllerDeps): WorkspaceController {

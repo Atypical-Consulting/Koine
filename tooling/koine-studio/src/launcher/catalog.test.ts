@@ -71,7 +71,7 @@ describe('KIND', () => {
   // desync from the key it lives under.
   test('every token equals --koi-ddd-<slug> for its own key — never a hand-typed mismatch', () => {
     for (const [slug, meta] of Object.entries(KIND)) {
-      expect(meta!.token).toBe(`--koi-ddd-${slug}`);
+      expect(meta.token).toBe(`--koi-ddd-${slug}`);
     }
   });
 });

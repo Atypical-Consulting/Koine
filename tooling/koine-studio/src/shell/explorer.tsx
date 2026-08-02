@@ -28,19 +28,19 @@ import { ExplorerPanel } from '@/shell/ExplorerPanel';
 import { findFileForContext } from '@/shell/explorerModel';
 
 export interface ExplorerCallbacks {
-  onOpenFile(fileToken: string): void;
+  onOpenFile: (fileToken: string) => void;
   /** Create a file named `name` into `parentDirToken` (root folder token for the top level). */
-  onNewFile(parentDirToken: string, name: string): void;
+  onNewFile: (parentDirToken: string, name: string) => void;
   /** Create a folder named `name` into `parentDirToken` (root folder token for the top level). */
-  onNewFolder(parentDirToken: string, name: string): void;
-  onRename(entry: FsEntry, newName: string): void;
-  onDelete(entry: FsEntry): void;
-  onDuplicate(entry: FsEntry): void;
+  onNewFolder: (parentDirToken: string, name: string) => void;
+  onRename: (entry: FsEntry, newName: string) => void;
+  onDelete: (entry: FsEntry) => void;
+  onDuplicate: (entry: FsEntry) => void;
   /** Move `entry` into the directory identified by `destDirToken` (the opened-folder token for root). */
-  onMove(entry: FsEntry, destDirToken: string): void;
-  isActive(fileToken: string): boolean;
+  onMove: (entry: FsEntry, destDirToken: string) => void;
+  isActive: (fileToken: string) => boolean;
   isDirty(fileToken: string): boolean;
-  diagCounts(fileToken: string): { errors: number; warnings: number };
+  diagCounts: (fileToken: string) => { errors: number; warnings: number };
   /** Add a new folder (root) to the workspace (the head "Add folder" affordance). Optional. */
   onAddRoot?(): void;
   /** Remove the workspace root `root` (a per-group "Remove" affordance). Optional. */
@@ -86,7 +86,7 @@ export interface Explorer {
    * {@link revealByContext} uses; a scope that names no file simply emphasises nothing — a no-op. The
    * emphasis is applied in the render pass, so it survives the diagnostics-driven tree rebuilds.
    */
-  setActiveContext(context: string | null): void;
+  setActiveContext: (context: string | null) => void;
   /**
    * Teardown seam (#980). The explorer is a pre-Preact island with no owner-driven unmount, so nothing
    * released its deferred work between shell boots. dispose() clears the pending filter debounce (so a
@@ -96,7 +96,7 @@ export interface Explorer {
    * filter input/keydown handlers all hang off nodes inside `el`; row-level listeners already die with
    * the innerHTML rebuilds.
    */
-  dispose(): void;
+  dispose: () => void;
 }
 
 /** The facade's per-instance props store shape — everything `createExplorer()`'s callers push in that

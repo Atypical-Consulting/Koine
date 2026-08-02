@@ -20,20 +20,20 @@ export interface LayoutControllerDeps {
   /** The #split grid host whose data-* attributes drive the layout reflow + the resizers' target. */
   splitEl: HTMLElement;
   /** Switch the left rail's axis (the inspector controller owns + persists it) — drives ⌘B. */
-  setAxis(axis: 'files' | 'domain'): void;
+  setAxis: (axis: 'files' | 'domain') => void;
   /** Flip the right Properties panel's collapse flag (uiChrome slice). */
-  toggleRightCollapsed(): void;
+  toggleRightCollapsed: () => void;
   /** Flip the left navigator rail's collapse flag (uiChrome slice). */
-  toggleLeftCollapsed(): void;
+  toggleLeftCollapsed: () => void;
 }
 
 export interface LayoutController {
   /** The layout palette actions (split/panel/rail toggles), consumed by the command surface. */
   readonly actions: LayoutActions;
   /** ⌘B: show/hide the file tree by flipping the rail's Domain↔Files axis. */
-  toggleFileTree(): void;
+  toggleFileTree: () => void;
   /** Release the layout subscription, the edge resizers, and the section-disclosure listeners. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 export function createLayoutController(deps: LayoutControllerDeps): LayoutController {

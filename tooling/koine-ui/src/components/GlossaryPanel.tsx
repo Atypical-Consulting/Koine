@@ -149,7 +149,7 @@ function GlossaryEntryRow(props: { entry: GlossaryEntryView; handlers: GlossaryH
               placeholder={`Describe ${entry.name} in plain language…`}
               aria-label={`Description for ${entry.name}`}
               value={draft}
-              onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
+              onInput={(e) => setDraft(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                   e.preventDefault();

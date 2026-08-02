@@ -168,7 +168,7 @@ describe('createSettingsPage', () => {
     expect(saveSettings).not.toHaveBeenCalled();
     vi.advanceTimersByTime(500);
     expect(saveSettings).toHaveBeenCalledTimes(1);
-    const saved = saveSettings.mock.calls.at(-1)![0] as typeof DEFAULT_SETTINGS;
+    const saved = saveSettings.mock.calls.at(-1)![0];
     expect(saved.fontSize).toBe(15);
     expect(saved.aiApiKey).toBe('sk-LIVE'); // secret re-injected from loadSettings()
     // Live-applied through the same cb.onChange hook the Visual form uses.
@@ -681,7 +681,7 @@ describe('createSettingsPage', () => {
     expect(blobAfterTwo.lspTrace).toBe('verbose');
     expect(cbWs.onChange).toHaveBeenCalledTimes(1);
     // onChange receives user-level settings (not merged); verify the effective merge separately.
-    const effectiveAfterTwo = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
+    const effectiveAfterTwo = effectiveSettings(loadSettings(), WS_KEY);
     expect(effectiveAfterTwo.previewTarget).toBe('typescript');
     expect(effectiveAfterTwo.lspTrace).toBe('verbose');
 
@@ -698,7 +698,7 @@ describe('createSettingsPage', () => {
     // The effective merge now shows the revert: previewTarget is the User default, lspTrace stays.
     // onChange receives user-level settings; the host's effectiveSettings() is the source of truth.
     expect(cbWs.onChange).toHaveBeenCalledTimes(1);
-    const effectiveAfterOne = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
+    const effectiveAfterOne = effectiveSettings(loadSettings(), WS_KEY);
     expect(effectiveAfterOne.previewTarget).toBe(DEFAULT_SETTINGS.previewTarget); // reverted to user default
     expect(effectiveAfterOne.lspTrace).toBe('verbose'); // still overridden
   });

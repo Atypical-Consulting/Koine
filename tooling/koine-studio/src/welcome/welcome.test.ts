@@ -31,7 +31,7 @@ function tpl(over: Partial<Template> & Pick<Template, 'id' | 'name' | 'difficult
     icon: '📦',
     source: '',
     ...over,
-  } as Template;
+  };
 }
 
 // A small spread across difficulties and tags so grouping + filtering have something to chew on.
@@ -388,7 +388,7 @@ describe('welcome recent management', () => {
   test('the filter is always available even while the list is short (#1005)', () => {
     localStorage.setItem(KEY, JSON.stringify(['/a', '/b']));
     mountHome(container, makeCallbacks());
-    const filter = document.querySelector('.koi-welcome-recent-filter') as HTMLInputElement | null;
+    const filter = document.querySelector<HTMLInputElement>('.koi-welcome-recent-filter');
     // #1005: the recent filter is header-mounted and always available — present and perceivable
     // regardless of how few recents there are (it no longer waits for a length threshold).
     expect(filter).not.toBeNull();
@@ -1070,7 +1070,9 @@ describe('mountHome — resume session card', () => {
   test('prefers-reduced-motion suppresses the ping animation (no is-live class)', () => {
     seedLastSession({ project: 'billing', editedAt: Date.now() });
     const el = document.createElement('div');
-    const original = window.matchMedia;
+    // Descriptor round-trip rather than a method-value read (unbound-method): happy-dom's
+    // matchMedia is a prototype method, and re-assigning a detached reference is what the rule warns about.
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query.includes('prefers-reduced-motion'),
       media: query,
@@ -1080,7 +1082,7 @@ describe('mountHome — resume session card', () => {
       addListener: vi.fn(),
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
-    })) as unknown as typeof window.matchMedia;
+    }));
     try {
       mountHome(el, { ...makeCallbacks(), onResume: vi.fn() }, SAMPLE, true, { warm: true });
       const ping = el.querySelector('.koi-home-resume-ping');
@@ -1088,7 +1090,8 @@ describe('mountHome — resume session card', () => {
       expect(ping).not.toBeNull();
       expect(ping!.classList.contains('is-live')).toBe(false);
     } finally {
-      window.matchMedia = original;
+      if (original) Object.defineProperty(window, 'matchMedia', original);
+      else delete (window as Partial<Window>).matchMedia;
     }
   });
 });

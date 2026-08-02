@@ -40,7 +40,7 @@ export interface SettingsPageHandle {
    * valid edit isn't disturbed) and any stale diagnostics clear. Pass a category id (#731) to land the
    * Visual pane on that tab (the About deep-link); ignored in JSON mode, which has no category tabs.
    */
-  refresh(category?: string): void;
+  refresh: (category?: string) => void;
   /** Tear down the active pane/editor, clear the header toggle, and cancel any pending debounce. */
   destroy(): void;
 }

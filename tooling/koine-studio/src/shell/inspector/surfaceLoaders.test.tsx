@@ -5,7 +5,7 @@
 // refresh-on-save (#470)" / "deck 2-up SECONDARY panes refresh on scope / theme / emit-target changes" /
 // "loading states clear on success" describe blocks (the facade's delegation to this module, unmodified
 // by this extraction).
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi, type Mock } from 'vitest';
 import { createSurfaceLoaders, type SurfaceLoadersDeps, type SurfaceLoadersHooks, type SurfaceLoadersHosts } from '@/shell/inspector/surfaceLoaders';
 import { createAppStore } from '@/store/index';
 import type { AppState } from '@/store/index';
@@ -434,9 +434,14 @@ describe('createSurfaceLoaders — the Generated file tree replaces the flat rai
 
 // --- (f) Copy file / Copy all (#871 Task 4) --------------------------------
 describe('createSurfaceLoaders — Copy file / Copy all (#871 Task 4)', () => {
+  // Kept as a handle so the assertions below read the double they installed rather than re-reading
+  // `navigator.clipboard.writeText` — a re-read detaches a DOM prototype method from its receiver,
+  // which is what unbound-method flags.
+  let writeText: Mock<(text: string) => Promise<void>>;
   beforeEach(() => {
     // The suite's existing clipboard-mocking convention (see exportShare.test.ts).
-    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => undefined) } });
+    writeText = vi.fn(async (_text: string) => undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
   });
 
   test('Copy file is disabled until a file is selected, then writes only the SELECTED file\'s contents', async () => {
@@ -460,8 +465,8 @@ describe('createSurfaceLoaders — Copy file / Copy all (#871 Task 4)', () => {
     copyFileBtn.click();
     await Promise.resolve();
     await Promise.resolve();
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('// money'); // the first/selected file only
-    expect(navigator.clipboard.writeText).not.toHaveBeenCalledWith(expect.stringContaining('invoice'));
+    expect(writeText).toHaveBeenCalledWith('// money'); // the first/selected file only
+    expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining('invoice'));
   });
 
   test('Copy file proceeds (writeText("")) for a genuinely empty-content file — code-review fix: the old ' +
@@ -481,7 +486,7 @@ describe('createSurfaceLoaders — Copy file / Copy all (#871 Task 4)', () => {
     copyFileBtn.click();
     await Promise.resolve();
     await Promise.resolve();
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('');
+    expect(writeText).toHaveBeenCalledWith('');
     expect(copyFileBtn.textContent).toBe('Copied ✓');
   });
 
@@ -506,7 +511,7 @@ describe('createSurfaceLoaders — Copy file / Copy all (#871 Task 4)', () => {
     copyAllBtn.click();
     await Promise.resolve();
     await Promise.resolve();
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    expect(writeText).toHaveBeenCalledWith(
       '// ==== Billing/Money.cs ====\n// money\n\n// ==== Billing/Invoice.cs ====\n// invoice',
     );
   });

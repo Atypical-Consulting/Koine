@@ -18,7 +18,7 @@ export interface CommentComposerOptions {
 
 export interface CommentComposer {
   /** Unmount the composer's Preact tree (the caller removes its host element). */
-  dispose(): void;
+  dispose: () => void;
 }
 
 function ComposerView({ onSubmit, onCancel }: { onSubmit: (text: string) => void; onCancel: () => void }) {

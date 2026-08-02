@@ -40,7 +40,7 @@ export interface CollabGateOptions {
 /** Handle returned by {@link createCollabGate}. */
 export interface CollabGate {
   /** Unmount the gate, leaving `parent` empty. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 function sessionUi(session?: CollabSession, renderSession?: () => ComponentChildren): ComponentChildren {

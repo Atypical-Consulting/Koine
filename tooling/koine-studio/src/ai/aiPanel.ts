@@ -99,7 +99,7 @@ export function inferNewFileRoot(staged: StagedEdit[], rootOf: Record<string, st
     if (root === undefined) continue;
     roots.add(root);
   }
-  return roots.size === 1 ? [...roots][0]! : null;
+  return roots.size === 1 ? [...roots][0] : null;
 }
 
 export interface AssistantPanelOptions {
@@ -183,7 +183,7 @@ export interface AssistantPanelOptions {
 
 export interface AssistantPanel {
   /** Move keyboard focus into the prompt input. */
-  focusInput(): void;
+  focusInput: () => void;
   /**
    * Re-point the panel at the current workspace's conversation when the folder changed: rehydrate the
    * chat slice from storage. A no-op when the workspace key is unchanged, so the host can call it on
@@ -191,7 +191,7 @@ export interface AssistantPanel {
    * is streaming (a mid-stream hydrate would swap the transcript out from under the turn being
    * committed — the slice's own no-op is the belt-and-braces half).
    */
-  syncWorkspace(): void;
+  syncWorkspace: () => void;
   /**
    * Explain the current construct (the editor selection, or the whole model when there's none) in
    * plain language — an explanatory turn that does NOT offer to apply anything. For the command palette.

@@ -169,7 +169,7 @@ export function createJsonSettingsEditor(
       view.dispatch({ effects: contentAttributes.reconfigure(EditorView.contentAttributes.of(attrs)) });
     },
     setSchema(schema) {
-      updateSchema(view, schema as unknown as Parameters<typeof stateExtensions>[0]);
+      updateSchema(view, schema);
     },
     destroy: () => view.destroy(),
   };

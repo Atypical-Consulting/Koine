@@ -5,7 +5,7 @@
 // click (a second click before the reset restarts the timer, per surfaceLoaders.test.tsx's existing
 // "Copy file flashes… then resets… after 1600ms" test and every original call site's `clearTimeout` +
 // `setTimeout` pairing).
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi, type Mock } from 'vitest';
 import { makeCopyButton, wireCopyButton } from '@/shell/copyFeedback';
 
 beforeEach(() => {
@@ -16,20 +16,25 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function mockClipboard(writeText: (text: string) => Promise<void>): void {
-  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(writeText) } });
+/** Install a clipboard double and RETURN the mock. Assert on this handle rather than re-reading
+ *  `navigator.clipboard.writeText`: that re-read detaches a DOM prototype method from its receiver
+ *  (what unbound-method flags), and asserting on the double you installed is the clearer contract. */
+function mockClipboard(writeText: (text: string) => Promise<void>): Mock<(text: string) => Promise<void>> {
+  const spy = vi.fn(writeText);
+  vi.stubGlobal('navigator', { clipboard: { writeText: spy } });
+  return spy;
 }
 
 describe('wireCopyButton', () => {
   test('a resolving write flashes the idle label to "Copied ✓", then resets after 1600ms', async () => {
-    mockClipboard(async () => undefined);
+    const writeText = mockClipboard(async () => undefined);
     const btn = document.createElement('button');
     btn.textContent = 'Copy';
     wireCopyButton(btn, 'Copy', () => 'hello');
 
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('hello');
+    expect(writeText).toHaveBeenCalledWith('hello');
     expect(btn.textContent).toBe('Copied ✓');
 
     await vi.advanceTimersByTimeAsync(1599);
@@ -55,7 +60,7 @@ describe('wireCopyButton', () => {
   });
 
   test('a second click before the reset fires restarts the timer — reset lands 1600ms after the LATEST click', async () => {
-    mockClipboard(async () => undefined);
+    const writeText = mockClipboard(async () => undefined);
     const btn = document.createElement('button');
     btn.textContent = 'Copy';
     wireCopyButton(btn, 'Copy', () => 'hello');
@@ -66,7 +71,7 @@ describe('wireCopyButton', () => {
 
     btn.click(); // restarts the timer — the FIRST click's reset (which would land at 1600) must not fire
     await vi.advanceTimersByTimeAsync(800);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenCalledTimes(2);
     expect(btn.textContent).toBe('Copied ✓'); // still flashed — the original 1600ms-from-first-click mark passed with no reset
 
     await vi.advanceTimersByTimeAsync(800);
@@ -74,23 +79,23 @@ describe('wireCopyButton', () => {
   });
 
   test('getText() is read fresh at click time', async () => {
-    mockClipboard(async () => undefined);
+    const writeText = mockClipboard(async () => undefined);
     const btn = document.createElement('button');
     let text = 'first';
     wireCopyButton(btn, 'Copy', () => text);
 
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('first');
+    expect(writeText).toHaveBeenCalledWith('first');
 
     text = 'second';
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('second');
+    expect(writeText).toHaveBeenCalledWith('second');
   });
 
   test('a disabled button does not write to the clipboard or flash', async () => {
-    mockClipboard(async () => undefined);
+    const writeText = mockClipboard(async () => undefined);
     const btn = document.createElement('button');
     btn.textContent = 'Copy';
     btn.disabled = true;
@@ -98,19 +103,19 @@ describe('wireCopyButton', () => {
 
     btn.click();
     await vi.advanceTimersByTimeAsync(2000);
-    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
     expect(btn.textContent).toBe('Copy');
   });
 
   test('an empty string from getText() still proceeds (a genuinely empty file must still copy)', async () => {
-    mockClipboard(async () => undefined);
+    const writeText = mockClipboard(async () => undefined);
     const btn = document.createElement('button');
     btn.textContent = 'Copy';
     wireCopyButton(btn, 'Copy', () => '');
 
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('');
+    expect(writeText).toHaveBeenCalledWith('');
     expect(btn.textContent).toBe('Copied ✓');
   });
 
@@ -142,13 +147,13 @@ describe('makeCopyButton', () => {
   });
 
   test('is wired via wireCopyButton — a click on the (enabled) button flashes and resets', async () => {
-    mockClipboard(async () => undefined);
+    const writeText = mockClipboard(async () => undefined);
     const { el } = makeCopyButton('out-copy', 'Copy file', 'Copy this file', () => 'hello');
     el.disabled = false;
 
     el.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('hello');
+    expect(writeText).toHaveBeenCalledWith('hello');
     expect(el.textContent).toBe('Copied ✓');
 
     await vi.advanceTimersByTimeAsync(1600);
@@ -168,12 +173,12 @@ describe('makeCopyButton', () => {
   });
 
   test('stays inert while disabled (default state) — no write, no flash', async () => {
-    mockClipboard(async () => undefined);
+    const writeText = mockClipboard(async () => undefined);
     const { el } = makeCopyButton('out-copy', 'Copy file', 'Copy this file', () => 'hello');
 
     el.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(writeText).not.toHaveBeenCalled();
     expect(el.textContent).toBe('Copy file');
   });
 });
