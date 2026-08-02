@@ -561,7 +561,7 @@ public sealed class ModelIndex
     /// the different question of which module a name is <i>emitted</i> into, and which therefore
     /// must produce an owner even when ambiguous (it flags the tie-break instead).</para>
     /// <para>This is the one seam every context-aware caller resolves through — the validators, all
-    /// five code emitters, <see cref="Classify(string?, string)"/>,
+    /// seven code emitters, <see cref="Classify(string?, string)"/>,
     /// <see cref="TryGetDecl(string?, string, out TypeDecl)"/>,
     /// <see cref="TryGetMemberType(string?, string, string, out TypeRef)"/> — each of which falls back
     /// to the flat, last-declaration-wins <c>_byName</c> view when it answers <c>false</c>. The permit
@@ -585,27 +585,14 @@ public sealed class ModelIndex
             return true;
         }
 
-        // The map-permit rung. `context` itself is excluded: it declares the name or it does not, and
-        // the local rung above already settled that — leaving it in would let a self-relation answer
-        // for a name the context never declared.
-        IReadOnlyList<string> declaring = DeclaringContextsOf(typeName);
-        if (declaring.Count > 0)
+        // The map-permit rung. `DeclaringContextsOf` returns the empty singleton for a name no context
+        // declares — by far the common miss here (primitives, collections, unknown names) — so that
+        // case costs one dictionary probe and no allocation.
+        if (SingleMapPermittedOwner(DeclaringContextsOf(typeName), context) is { } permitted
+            && _declsByContext.TryGetValue(permitted, out Dictionary<string, TypeDecl>? permittedDecls)
+            && permittedDecls.TryGetValue(typeName, out decl!))
         {
-            var elsewhere = new List<string>(declaring.Count);
-            foreach (var c in declaring)
-            {
-                if (!string.Equals(c, context, StringComparison.Ordinal))
-                {
-                    elsewhere.Add(c);
-                }
-            }
-
-            if (SingleMapPermittedOwner(elsewhere, context) is { } permitted
-                && _declsByContext.TryGetValue(permitted, out Dictionary<string, TypeDecl>? permittedDecls)
-                && permittedDecls.TryGetValue(typeName, out decl!))
-            {
-                return true;
-            }
+            return true;
         }
 
         decl = null!;
@@ -1115,12 +1102,21 @@ public sealed class ModelIndex
     /// reference without an import (R14.1), or <c>null</c> when none — or more than one — does (the
     /// latter is not determinate, so it stays the ambiguous ordinal-fallback case).
     /// </summary>
+    /// <remarks>
+    /// <paramref name="referencingContext"/> is never its own permitted owner: a context either
+    /// declares the name — which both callers settle before reaching here — or it does not. Skipping
+    /// it explicitly matters because a self-relation is only <i>diagnosed</i> by
+    /// <c>ContextMapValidator</c>, not removed from <c>_relations</c>, so on an erroneous model
+    /// <see cref="MapPermitsReference"/> can answer <c>true</c> for a context against itself and
+    /// poison the single-owner count.
+    /// </remarks>
     private string? SingleMapPermittedOwner(IReadOnlyList<string> declaring, string referencingContext)
     {
         string? only = null;
         foreach (var upstream in declaring)
         {
-            if (!MapPermitsReference(referencingContext, upstream))
+            if (string.Equals(upstream, referencingContext, StringComparison.Ordinal)
+                || !MapPermitsReference(referencingContext, upstream))
             {
                 continue;
             }

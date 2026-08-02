@@ -1173,11 +1173,10 @@ public sealed class SemanticValidator
             // its payload from another context's same-named declaration. Moving one half without the
             // other re-opens exactly that hole.
             //
-            // Note the residual gap this does NOT close: `TryGetDeclIn` resolves local declarations
-            // and unambiguous imports only, so a type made visible purely by a context-map permit
-            // (`conformist` and friends, with no `import`) still falls through to the flat view. That
-            // is a shared `ModelIndex` limitation — it affects `emit` and `publish` identically — and
-            // is tracked separately rather than papered over here.
+            // The residual gap this used to leave — a type made visible purely by a context-map permit
+            // (`conformist` and friends, with no `import`) falling through to the flat view — was the
+            // shared `ModelIndex` limitation behind the whole family, and #1853 closed it in
+            // `TryGetDeclIn` itself, for `emit`, `policy` and `publish` at once. Nothing to patch here.
             EventDecl? ev = index.TryGetDecl(ctx.Name, policy.EventName, out TypeDecl ed) && ed is EventDecl e ? e : null;
             if (ev is null)
             {
