@@ -290,8 +290,11 @@ public class R17GbnfExportTests
 
         // Mutation: inject a stray `;` — a token the Koine lexer never produces and the GBNF
         // never defines. Structural coverage of keywords alone would miss this; a real parse
-        // cannot consume it, so the whole input falls out of the language.
-        string garbage = good.Replace("amount: Decimal", "amount: Decimal;");
+        // cannot consume it, so the whole input falls out of the language. Anchored on the type
+        // name alone (not the `name:` gap before it, issue #1842): that gap is column-aligned to
+        // its sibling members and its exact width is a formatting detail the mutation must not
+        // depend on.
+        string garbage = good.Replace("Decimal\n", "Decimal;\n");
         garbage.ShouldNotBe(good, "the mutation must actually change the source");
 
         GbnfMatcher.Accepts(gbnf, garbage)

@@ -31,6 +31,8 @@
 - `dotnet build`
 - `dotnet test`
 - `dotnet format Koine.slnx --verify-no-changes --no-restore`
+- `dotnet run --project src/Koine.Cli -c Release --no-build -- fmt templates/ --check` (issue #1842 —
+  `templates/` must stay canonically formatted; run `dotnet build src/Koine.Cli -c Release` first locally)
 - **Resolving CI status programmatically:** never trust `gh pr checks` or `mergeStateStatus` alone to
   decide "is `build-and-test` (or any draft-gated job) green" — a draft PR that receives its last push
   while still draft, then is later flipped ready without an intervening push, deterministically gets

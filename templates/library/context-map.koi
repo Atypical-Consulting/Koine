@@ -9,21 +9,20 @@
 // event flow below is wired with one of those (a `partnership` is symmetric coordination
 // but does not by itself authorize a subscription).
 contextmap {
-
   // Customer–supplier: Catalog (upstream) owns the abstract `Book` title; Inventory
   // (downstream) references it by `BookId` for every physical `BookCopy` it shelves. This
   // is the Book-vs-BookCopy split made strategic — one title, many copies, two contexts.
-  Catalog  -> Inventory     : customer-supplier
+  Catalog -> Inventory: customer-supplier
 
   // Customer–supplier: Reservations (downstream) holds against a `Book` title supplied by
   // Catalog — a reservation is on the work, never on a specific copy.
-  Catalog  -> Reservations  : customer-supplier
+  Catalog -> Reservations: customer-supplier
 
   // Customer-supplier: Loans (supplier) publishes its lending facts
   // (BookBorrowed, Returned, LoanRenewed, FineCreated) and Members (customer) consumes them.
   // The `Loans -> Members` relation authorizes Members' `subscribes Loans.FineCreated`
   // (without it the subscription would be rejected).
-  Loans    -> Members       : customer-supplier
+  Loans -> Members: customer-supplier
 
   // Customer–supplier, bidirectional: Loans and Reservations are partners in the
   // lend/return/hold dance. Loans publishes `Returned` so Reservations can promote the next
@@ -31,5 +30,5 @@ contextmap {
   // of a current loan of the same title. A single bidirectional customer-supplier relation
   // authorizes the subscriptions in BOTH directions (a context map allows only one relation
   // per pair, so the round-trip is modelled as `<->`).
-  Loans   <-> Reservations  : customer-supplier
+  Loans <-> Reservations: customer-supplier
 }

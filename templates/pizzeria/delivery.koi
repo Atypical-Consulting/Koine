@@ -3,7 +3,6 @@
 /// customer-supplier candidate) and enforces the rule that anchors this context: a
 /// delivery order must carry a delivery address.
 context Delivery version 1 {
-
   // React to placed orders (authorized by `Ordering -> Delivery : open-host`
   // in context-map.koi). Emits an IHandleOrderPlaced seam the dispatcher implements
   // to create a delivery for a delivery-fulfilment order.
@@ -22,23 +21,22 @@ context Delivery version 1 {
     country:    String
     // Derived string composition + a normalized one-line form.
     formatted:  String = street + ", " + city + " " + postalCode
-    invariant street.trim.length > 0                "a delivery needs a street"
-    invariant city.trim.length > 0                  "a delivery needs a city"
-    invariant postalCode matches /^[0-9A-Za-z -]{3,10}$/   "invalid postal code"
+    invariant street.trim.length > 0 "a delivery needs a street"
+    invariant city.trim.length > 0 "a delivery needs a city"
+    invariant postalCode matches /^[0-9A-Za-z -]{3,10}$/ "invalid postal code"
   }
 
   /// A driver assigned to a delivery. A small value object so an assignee is typed.
   value Courier {
     name:  String
     phone: String
-    invariant name.trim.length > 0   "a courier needs a name"
+    invariant name.trim.length > 0 "a courier needs a name"
   }
 
   /// The delivery aggregate: one record per delivery order. Being an aggregate root
   /// it gains an `IDeliveryRepository` and joins the context UoW; the repository
   /// block adds intention-revealing finders.
   aggregate Dispatch root Delivery {
-
     repository {
       operations: getById, add, update
       find enRoute(): List<Delivery>
@@ -74,38 +72,38 @@ context Delivery version 1 {
       // combined with the non-optional `destination` field, a delivery can never be
       // created without somewhere to go.
       invariant destination.street.trim.length > 0
-        "a delivery order requires a delivery address"
+      "a delivery order requires a delivery address"
       // A delivery that has actually left must have a courier carrying it.
       invariant courier.isPresent when status == EnRoute
-        "a delivery en route must have a courier"
+      "a delivery en route must have a courier"
 
       // The delivery lifecycle: scheduled, picked up, en route, delivered —
       // or failed if it could not be completed.
       states status {
         Scheduled -> PickedUp, Failed
-        PickedUp  -> EnRoute, Failed
-        EnRoute   -> Delivered, Failed
+        PickedUp -> EnRoute, Failed
+        EnRoute -> Delivered, Failed
         Delivered
         Failed
       }
 
       /// Assign a courier and have them collect the order.
       command pickUp(by: Courier) {
-        requires status == Scheduled   "only a scheduled delivery can be picked up"
+        requires status == Scheduled "only a scheduled delivery can be picked up"
         courier -> by
-        status  -> PickedUp
+        status -> PickedUp
       }
 
       /// Send a picked-up delivery on its way.
       command depart {
-        requires status == PickedUp   "only a picked-up delivery can depart"
-        requires courier.isPresent    "a delivery cannot depart without a courier"
+        requires status == PickedUp "only a picked-up delivery can depart"
+        requires courier.isPresent "a delivery cannot depart without a courier"
         status -> EnRoute
       }
 
       /// Mark a delivery as completed at the door.
       command complete {
-        requires status == EnRoute   "only an en-route delivery can be completed"
+        requires status == EnRoute "only an en-route delivery can be completed"
         status -> Delivered
         emit DeliveryCompleted(delivery: id)
       }
@@ -113,7 +111,7 @@ context Delivery version 1 {
       /// Schedule a delivery for a placed delivery order. The same-named
       /// parameters auto-bind the required fields; `status` defaults to Scheduled.
       create schedule(order: OrderId, destination: Address) {
-        requires destination.street.trim.length > 0   "a delivery order requires a delivery address"
+        requires destination.street.trim.length > 0 "a delivery order requires a delivery address"
         emit DeliveryScheduled(delivery: id, order: order)
       }
     }

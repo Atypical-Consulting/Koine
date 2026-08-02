@@ -12,5 +12,5 @@ context Sales {
 }
 
 contextmap {
-  Catalog -> Sales : conformist
+  Catalog -> Sales: conformist
 }

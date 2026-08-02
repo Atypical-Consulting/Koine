@@ -9,5 +9,5 @@
 // customer-supplier relation authorizes subscriptions in BOTH directions (a context
 // map allows only one relation per pair, so the round-trip is modelled as `<->`).
 contextmap {
-  TicketManagement <-> SLA : customer-supplier
+  TicketManagement <-> SLA: customer-supplier
 }

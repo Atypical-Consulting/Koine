@@ -1,7 +1,5 @@
 context Ordering {
-
   aggregate Sales root Order {
-
     enum OrderStatus { Draft, Placed, Shipped, Cancelled }
 
     value OrderLine {
@@ -16,23 +14,23 @@ context Ordering {
       status: OrderStatus = Draft
 
       states status {
-        Draft   -> Placed
-        Placed  -> Shipped
-        Placed  -> Cancelled
+        Draft -> Placed
+        Placed -> Shipped
+        Placed -> Cancelled
       }
 
       command place {
-        requires status == Draft   "only a draft order can be placed"
+        requires status == Draft "only a draft order can be placed"
         status -> Placed
       }
 
       command ship {
-        requires status == Placed  "only a placed order can be shipped"
+        requires status == Placed "only a placed order can be shipped"
         status -> Shipped
       }
 
       command cancel {
-        requires status == Placed  "only a placed order can be cancelled"
+        requires status == Placed "only a placed order can be cancelled"
         status -> Cancelled
       }
     }

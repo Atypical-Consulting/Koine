@@ -9,7 +9,6 @@
 /// not share its enclosing namespace's name, and this context emits into a `Billing`
 /// namespace; an entity called `Billing` would collide with it.
 context Billing version 1 {
-
   // R14.3 — react to activated subscriptions (authorized by `Subscription -> Billing :
   // open-host` in context-map.koi). The host implements the IHandleSubscriptionActivated
   // seam to raise the first invoice for the new paying plan.
@@ -23,7 +22,7 @@ context Billing version 1 {
   value Money {
     amount:   Decimal
     currency: String
-    invariant amount >= 0   "an amount cannot be negative"
+    invariant amount >= 0 "an amount cannot be negative"
   }
 
   // R14.2 — the destination type the anti-corruption layer translates the provider's raw
@@ -32,16 +31,16 @@ context Billing version 1 {
   value ChargeReceipt {
     reference: String
     amount:    Decimal
-    invariant amount >= 0   "a receipt amount cannot be negative"
+    invariant amount >= 0 "a receipt amount cannot be negative"
   }
 
   /// Announced when the payment provider declines a recurring charge (R14.3). This is the
   /// gateway-level failure fact; Subscription subscribes to it to suspend the plan and
   /// re-publish its own subscription-level PaymentFailed (see context-map.koi).
   integration event PaymentDeclined {
-    invoice: InvoiceId
-    tenant:  TenantId
-    attempt: Int
+    invoice:    InvoiceId
+    tenant:     TenantId
+    attempt:    Int
     declinedAt: Instant
   }
 
@@ -55,7 +54,6 @@ context Billing version 1 {
 
   /// The invoice aggregate — one bill against a subscription.
   aggregate Invoicing root Invoice {
-
     repository {
       operations: getById, add, update
       find byTenant(tenant: TenantId): List<Invoice>
@@ -77,25 +75,25 @@ context Billing version 1 {
     }
 
     entity Invoice identified by InvoiceId {
-      tenant:   TenantId
+      tenant:       TenantId
       subscription: SubscriptionId
-      amount:   Money
-      status:   InvoiceStatus = Draft
-      attempts: Int           = 0
+      amount:       Money
+      status:       InvoiceStatus = Draft
+      attempts:     Int = 0
 
       // Derived read helpers (R1.1).
       isPaid:   Bool = status == Paid
       isFailed: Bool = status == Failed
 
-      invariant amount.amount >= 0   "an invoice amount cannot be negative"
+      invariant amount.amount >= 0 "an invoice amount cannot be negative"
       // A paid invoice must carry a positive amount (a zero charge is never "paid").
       invariant amount.amount > 0 when status == Paid
-        "a paid invoice must have a positive amount"
+      "a paid invoice must have a positive amount"
 
       // The invoice lifecycle (R7): drafted, issued, then paid — or failed (retryable)
       // — and voided if written off.
       states status {
-        Draft  -> Issued, Voided
+        Draft -> Issued, Voided
         Issued -> Paid, Failed, Voided
         Failed -> Issued, Voided
         Paid
@@ -104,14 +102,14 @@ context Billing version 1 {
 
       /// Issue a drafted invoice for collection (R5).
       command issue {
-        requires status == Draft   "only a draft invoice can be issued"
+        requires status == Draft "only a draft invoice can be issued"
         status -> Issued
       }
 
       /// Mark an issued invoice as paid against a translated provider receipt (R5/R6).
       /// The ledger-posting policy reacts to the emitted InvoicePaid event.
       command settle(receipt: ChargeReceipt) {
-        requires status == Issued   "only an issued invoice can be settled"
+        requires status == Issued "only an issued invoice can be settled"
         status -> Paid
         emit InvoicePaid(invoice: id, amount: receipt.amount)
       }
@@ -119,15 +117,15 @@ context Billing version 1 {
       /// Record a failed collection attempt (R5/R6). The cross-context announcement is
       /// `PaymentDeclined`, which Subscription reacts to.
       command decline(attempt: Int) {
-        requires status == Issued   "only an issued invoice can be declined"
-        status   -> Failed
+        requires status == Issued "only an issued invoice can be declined"
+        status -> Failed
         attempts -> attempt
         emit InvoiceFailed(invoice: id, attempt: attempt)
       }
 
       /// R8 — issue an invoice for a subscription's charge.
       create raise(tenant: TenantId, subscription: SubscriptionId, amount: Money) {
-        requires amount.amount > 0   "cannot raise a zero-value invoice"
+        requires amount.amount > 0 "cannot raise a zero-value invoice"
         emit InvoiceIssued(invoice: id, tenant: tenant, amount: amount.amount)
       }
     }
@@ -173,12 +171,11 @@ context Billing version 1 {
 /// control. Billing never references this directly; it goes through the generated
 /// anti-corruption translator interface (see the acl block in context-map.koi).
 context PaymentGateway version 1 {
-
   /// The raw charge result the third-party provider returns. Billing shields itself from
   /// this shape with its anti-corruption layer.
   value ProviderCharge {
-    rawId:       String
+    rawId:        String
     chargedCents: Int
-    invariant chargedCents >= 0   "a charged amount cannot be negative"
+    invariant chargedCents >= 0 "a charged amount cannot be negative"
   }
 }

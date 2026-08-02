@@ -96,6 +96,85 @@ public class R17FmtTests
     }
 
     [Fact]
+    public void Alignment_group_spans_interspersed_doc_and_line_comments()
+    {
+        // issue #1842: templates hand-align a member block THROUGH doc/line comments; the formatter
+        // must treat comment-only lines as transparent for alignment purposes rather than splitting
+        // the block at the first comment. Widest member here is `unitPrice` (9 chars).
+        const string messy =
+            "context C {\n" +
+            "value OrderLine {\n" +
+            "pizza: PizzaCode\n" +
+            "/// How many. At least one.\n" +
+            "quantity: Int\n" +
+            "unitPrice: Money\n" +
+            "// a line comment\n" +
+            "payable: Money\n" +
+            "}\n" +
+            "}\n";
+        var formatted = Fmt.Format(messy).Text;
+        formatted.ShouldContain("    pizza:     PizzaCode");
+        formatted.ShouldContain("    quantity:  Int");
+        formatted.ShouldContain("    unitPrice: Money");
+        formatted.ShouldContain("    payable:   Money");
+    }
+
+    [Fact]
+    public void Alignment_group_reflows_across_comments_when_a_longer_member_is_added()
+    {
+        // Adding a longer member name widens the whole comment-spanning group, not just its own run.
+        const string messy =
+            "context C {\n" +
+            "value V {\n" +
+            "a: Int\n" +
+            "/// doc\n" +
+            "muchLongerName: Int\n" +
+            "}\n" +
+            "}\n";
+        var formatted = Fmt.Format(messy).Text;
+        formatted.ShouldContain("    a:              Int");
+        formatted.ShouldContain("    muchLongerName: Int");
+    }
+
+    [Fact]
+    public void Blank_line_still_ends_an_alignment_group_even_with_comment_transparency()
+    {
+        // A real blank line is a genuine group boundary — must not be swallowed by the new
+        // comment-transparency rule. Each blank-separated cluster aligns to its OWN widest member.
+        const string messy =
+            "context C {\n" +
+            "value V {\n" +
+            "a: Int\n" +
+            "longName: Int\n" +
+            "\n" +
+            "// comment\n" +
+            "b: Int\n" +
+            "}\n" +
+            "}\n";
+        var formatted = Fmt.Format(messy).Text;
+        formatted.ShouldContain("    a:        Int");
+        formatted.ShouldContain("    longName: Int");
+        formatted.ShouldContain("    b: Int");
+        formatted.ShouldNotContain("    b:        Int");
+    }
+
+    [Fact]
+    public void Natural_identity_strategy_parenthesis_glues_to_the_keyword()
+    {
+        // issue #1842: `NATURAL` is its own lexer token (not an Identifier), so the call-paren glue
+        // rule missed it and inserted a spurious space before '(' — `natural (String)` instead of the
+        // canonical, call-like `natural(String)` used consistently elsewhere (e.g. `Currency(...)`).
+        const string messy =
+            "context C {\n" +
+            "entity E identified by EId as natural(String) {\n" +
+            "}\n" +
+            "}\n";
+        var formatted = Fmt.Format(messy).Text;
+        formatted.ShouldContain("as natural(String)");
+        formatted.ShouldNotContain("as natural (String)");
+    }
+
+    [Fact]
     public void Formatting_round_trips_a_publish_clause()
     {
         // R19 — `publish` is a soft keyword read through the same token stream as any other clause, so

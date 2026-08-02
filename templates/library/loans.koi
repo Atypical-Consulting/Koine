@@ -5,7 +5,6 @@
 /// accrues a fine. It publishes the lending facts (BookBorrowed, Returned, LoanRenewed,
 /// FineCreated) the rest of the library reacts to.
 context Loans version 1 {
-
   /// The lifecycle state of a loan. Drives the `states status { … }` machine on the entity,
   /// so only the transitions declared there are legal at runtime.
   enum LoanStatus { Active, Returned, Overdue, Lost }
@@ -14,7 +13,7 @@ context Loans version 1 {
   value Money {
     amount:   Decimal
     currency: String
-    invariant amount >= 0   "an amount cannot be negative"
+    invariant amount >= 0 "an amount cannot be negative"
   }
 
   /// The loan period and overdue calculation for a single loan, as a value object so the
@@ -29,14 +28,14 @@ context Loans version 1 {
     dailyRate:   Int
     // Derived (computed, get-only): the accrued fine in cents, non-negative by
     // construction — clamped so a not-yet-overdue loan owes nothing (R1.1).
-    fineCents:   Int  = if daysOverdue > 0 then daysOverdue * dailyRate else 0
+    fineCents:   Int = if daysOverdue > 0 then daysOverdue * dailyRate else 0
     isOverdue:   Bool = daysOverdue > 0
 
-    invariant loanDays > 0       "a loan period must be positive"
-    invariant daysOverdue >= 0   "days overdue cannot be negative"
-    invariant dailyRate >= 0     "a daily fine rate cannot be negative"
+    invariant loanDays > 0 "a loan period must be positive"
+    invariant daysOverdue >= 0 "days overdue cannot be negative"
+    invariant dailyRate >= 0 "a daily fine rate cannot be negative"
     // The anchoring rule: an accrued fine is never negative.
-    invariant fineCents >= 0     "an accrued fine can never be negative"
+    invariant fineCents >= 0 "an accrued fine can never be negative"
   }
 
   /// Announced when a copy is borrowed (R14.3). An integration event is a *published
@@ -44,9 +43,9 @@ context Loans version 1 {
   /// value objects. Inventory reacts to flip the copy to OnLoan; Reservations reacts to
   /// fulfil a waiting hold.
   integration event BookBorrowed {
-    loan:     LoanId
-    copy:     BookCopyId
-    member:   MemberId
+    loan:       LoanId
+    copy:       BookCopyId
+    member:     MemberId
     borrowedAt: Instant
   }
 
@@ -60,18 +59,18 @@ context Loans version 1 {
 
   /// Announced when a loan is renewed for another period (R14.3).
   integration event LoanRenewed {
-    loan:     LoanId
-    renewals: Int
+    loan:      LoanId
+    renewals:  Int
     renewedAt: Instant
   }
 
   /// Announced when an overdue return creates a fine (R14.3). Members subscribes to it to
   /// add the charge to the borrower's account.
   integration event FineCreated {
-    loan:      LoanId
-    member:    MemberId
+    loan:        LoanId
+    member:      MemberId
     amountCents: Int
-    createdAt: Instant
+    createdAt:   Instant
   }
 
   publishes BookBorrowed
@@ -89,7 +88,6 @@ context Loans version 1 {
   /// `versioned` adds an optimistic-concurrency token (R11.4); the repository block tunes
   /// the mutating set and adds intention-revealing finders (R11.3).
   aggregate Lending root Loan versioned {
-
     repository {
       operations: getById, add, update
       find byMember(member: MemberId): List<Loan>
@@ -122,38 +120,38 @@ context Loans version 1 {
     }
 
     entity Loan identified by LoanId {
-      copy:     BookCopyId
-      member:   MemberId
-      term:     LoanTerm
-      status:   LoanStatus = Active
-      renewals: Int        = 0
+      copy:           BookCopyId
+      member:         MemberId
+      term:           LoanTerm
+      status:         LoanStatus = Active
+      renewals:       Int = 0
       // Set by the ReservationPlaced subscription when another member is waiting on this
       // copy's title; the renew command refuses while it is true.
       hasReservation: Bool = false
-      returnedAt: Instant?
+      returnedAt:     Instant?
 
       // Derived (computed, get-only) read helpers (R1.1 / R2.1).
-      isActive:    Bool = status == Active
-      isReturned:  Bool = status == Returned
-      isOverdue:   Bool = status == Overdue
-      fineCents:   Int  = term.fineCents
+      isActive:   Bool = status == Active
+      isReturned: Bool = status == Returned
+      isOverdue:  Bool = status == Overdue
+      fineCents:  Int = term.fineCents
       // Whether this loan may still be renewed: active, no waiting hold, under the limit.
-      renewable:   Bool = status == Active && !hasReservation && renewals < 3
+      renewable:  Bool = status == Active && !hasReservation && renewals < 3
 
       // --- The anchoring invariants (R4) ------------------------------------------
       // A returned loan must record when it came back.
       invariant returnedAt.isPresent when status == Returned
-        "a returned loan must record its return time"
+      "a returned loan must record its return time"
       // Renewals are capped — the "renew blocked if a reservation exists" rule is enforced
       // in the renew command's guard, but the cap is a standing invariant.
-      invariant renewals <= 3   "a loan cannot be renewed more than three times"
-      invariant renewals >= 0   "a renewal count cannot be negative"
+      invariant renewals <= 3 "a loan cannot be renewed more than three times"
+      invariant renewals >= 0 "a renewal count cannot be negative"
 
       // The loan lifecycle (R7): active, possibly slipping to overdue, then returned — or
       // written off as lost. Returned and Lost are terminal.
       states status {
-        Active   -> Returned, Overdue, Lost
-        Overdue  -> Returned, Lost
+        Active -> Returned, Overdue, Lost
+        Overdue -> Returned, Lost
         Returned
         Lost
       }
@@ -161,38 +159,38 @@ context Loans version 1 {
       /// Renew the loan for another period (R5/R6). THE rule of this context: a renewal is
       /// refused while another member is waiting on the title (a reservation exists).
       command renew {
-        requires status == Active        "only an active loan can be renewed"
-        requires !hasReservation         "cannot renew: another member has reserved this title"
-        requires renewals < 3            "this loan has reached its renewal limit"
+        requires status == Active "only an active loan can be renewed"
+        requires !hasReservation "cannot renew: another member has reserved this title"
+        requires renewals < 3 "this loan has reached its renewal limit"
         renewals -> renewals + 1
         emit LoanRenewedInternally(loan: id, renewals: renewals)
       }
 
       /// Flag the loan as overdue when the due date passes (R5).
       command markOverdue {
-        requires status == Active   "only an active loan can become overdue"
+        requires status == Active "only an active loan can become overdue"
         status -> Overdue
       }
 
       /// Record that the loan accrued a fine for being overdue (R5/R6). The cross-context
       /// announcement is `FineCreated`, which Members reacts to.
       command accrueFine(updatedTerm: LoanTerm) {
-        requires status == Overdue   "only an overdue loan accrues a fine"
+        requires status == Overdue "only an overdue loan accrues a fine"
         term -> updatedTerm
         emit FineAccrued(loan: id, amountCents: updatedTerm.fineCents)
       }
 
       /// Return the copy, stamping the time the invariant demands (R5).
       command returnCopy {
-        requires status != Returned   "the copy is already returned"
-        requires status != Lost       "a lost copy cannot be returned"
-        status     -> Returned
+        requires status != Returned "the copy is already returned"
+        requires status != Lost "a lost copy cannot be returned"
+        status -> Returned
         returnedAt -> now
       }
 
       /// Mark the loaned copy as lost (R5).
       command markLost {
-        requires status != Returned   "a returned copy cannot be marked lost"
+        requires status != Returned "a returned copy cannot be marked lost"
         status -> Lost
       }
 
@@ -214,7 +212,7 @@ context Loans version 1 {
   /// number of overdue days at a daily rate; `withinLimit` checks the renewal cap.
   service FinePolicy {
     operation fineFor(daysOverdue: Int, dailyRate: Int): Int =
-      if daysOverdue > 0 then daysOverdue * dailyRate else 0
+    if daysOverdue > 0 then daysOverdue * dailyRate else 0
     operation withinLimit(renewals: Int): Bool = renewals < 3
   }
 
