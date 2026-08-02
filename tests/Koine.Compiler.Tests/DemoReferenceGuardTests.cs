@@ -89,7 +89,9 @@ public class DemoReferenceGuardTests
     /// text, so this mirrors <see cref="Koine.Cli.Commands.CheckCommand"/>'s own line formatting
     /// (breaking/non-breaking lines, the summary line, the exit code) over the SAME
     /// <see cref="CompatibilityChecker"/> report the real command prints — never re-deriving the
-    /// compatibility rules themselves, only the three lines of text formatting around them.
+    /// compatibility rules themselves, only the three lines of text formatting around them. Skips
+    /// <c>CheckCommand</c>'s <c>koine.config</c>-driven severity overrides: neither
+    /// <c>examples/versioning</c> nor the repo root carries one today, so there is nothing to apply.
     /// </summary>
     [Fact]
     public void Koine_check_transcript_matches_committed_reference()
