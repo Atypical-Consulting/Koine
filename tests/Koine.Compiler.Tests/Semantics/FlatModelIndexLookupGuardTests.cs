@@ -212,10 +212,13 @@ public class FlatModelIndexLookupGuardTests
         //
         //     The nine C#-emitter sites that used to sit here are GONE: #1870's C# task confirmed every
         //     one of them order-dependent with a two-order fixture and fixed them to
-        //     Classify(context, name). See CSharpFlatClassifyCrossContextTests. ---
-        ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 822, "Classify", "BuildFactoryCtorArgs (required loop): translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 853, "Classify", "BuildFactoryCtorArgs (defaulted loop): translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 914, "Classify", "TransitionEnum: context available only at its sole caller, not threaded in (#1870)"),
+        //     Classify(context, name). See CSharpFlatClassifyCrossContextTests.
+        //
+        //     The three Rust-emitter sites (RustEmitter.Entities.cs — BuildFactoryCtorArgs' required and
+        //     defaulted loops, and TransitionEnum) are GONE for the same reason: #1870's Rust task
+        //     reproduced all three, fixed them to Classify(context, name) via the shared ExpectedEnum
+        //     helper (TransitionEnum took a threaded-in context parameter), and pinned them under both
+        //     context orders in RustEntityEnumContextScopeTests. ---
         ("src/Koine.Emit.CSharp/CSharpEmitter.Infrastructure.cs", 458, "Classify", "CollectAggregateEnumTypes: parameter context available, used two lines later at :473, unused here (#1870)"),
         ("src/Koine.Compiler/Services/KoineLanguageService.cs", 360, "TryGetDecl", "DotCandidates' single-hop enum fallback: ctx.EnclosingContextName available, unused (#1870)"),
         ("src/Koine.Compiler/Services/KoineLanguageService.cs", 407, "TryGetDecl", "BinderReceiverMembers: ctx.EnclosingContextName available; the method's own doc comment claims context-aware resolution this call doesn't perform (#1870)"),
