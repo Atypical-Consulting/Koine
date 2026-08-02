@@ -1591,7 +1591,8 @@ public class TypeScriptConformanceTests
         invoice.ShouldContain("total: Decimal = Decimal.fromInt(5)");
         // (b) the factory's ctor-arg fallback.
         invoice.ShouldContain("return new Invoice(id, Decimal.fromInt(5));");
-        invoice.ShouldNotContain("= 5)");
+        invoice.ShouldNotContain("total: Decimal = 5");
+        invoice.ShouldNotContain("new Invoice(id, 5)");
 
         var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.ts", StringComparison.Ordinal)).Contents;
         money.ShouldContain("amount: Decimal = Decimal.fromInt(7)");

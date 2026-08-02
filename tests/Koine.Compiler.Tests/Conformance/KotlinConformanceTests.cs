@@ -1055,11 +1055,11 @@ public class KotlinConformanceTests
 
         var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
         invoice.ShouldContain("val total: java.math.BigDecimal = java.math.BigDecimal.valueOf(5L)");
-        invoice.ShouldNotContain("= 5L");
+        invoice.ShouldNotContain("val total: java.math.BigDecimal = 5L");
 
         var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
         money.ShouldContain("val amount: java.math.BigDecimal = java.math.BigDecimal.valueOf(7L)");
-        money.ShouldNotContain("= 7L");
+        money.ShouldNotContain("val amount: java.math.BigDecimal = 7L");
 
         var r = TestSupport.CompileKotlin(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
@@ -1083,12 +1083,21 @@ public class KotlinConformanceTests
             "    create make() {\n" +
             "    }\n" +
             "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal? = 5\n" +
+            "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new KotlinEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
         invoice.ShouldContain("val total: java.math.BigDecimal? = java.math.BigDecimal.valueOf(5L)");
+
+        // Kotlin nullability is subtyping, so the value object's primary-constructor parameter needs the
+        // widen but never a lift — the same conclusion TypeScript/Python/PHP reach for their optionals.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("val amount: java.math.BigDecimal? = java.math.BigDecimal.valueOf(5L)");
 
         var r = TestSupport.CompileKotlin(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);

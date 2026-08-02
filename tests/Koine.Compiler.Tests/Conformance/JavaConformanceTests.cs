@@ -1440,6 +1440,11 @@ public class JavaConformanceTests
             "    create make() {\n" +
             "    }\n" +
             "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal? = 5\n" +
+            "    tag: String = \"t\"\n" +
+            "  }\n" +
             "}\n";
         var result = new KoineCompiler().Compile(src, new JavaEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
@@ -1447,6 +1452,12 @@ public class JavaConformanceTests
         var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
         invoice.ShouldContain("this.total = java.util.Optional.of(java.math.BigDecimal.valueOf(5L));");
         invoice.ShouldContain("this.note = java.util.Optional.of(\"hi\");");
+
+        // The value object's defaulting convenience constructor forwards into the canonical record
+        // constructor, whose optional components are declared `Optional<T>` — so it needs the same
+        // widen-inside/lift-outside composition, and a non-optional component must NOT be lifted.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("this(java.util.Optional.of(java.math.BigDecimal.valueOf(5L)), \"t\");");
 
         var r = TestSupport.CompileJava(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);

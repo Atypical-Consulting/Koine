@@ -223,13 +223,8 @@ public sealed partial class JavaEmitter
         foreach (Member m in defaulted)
         {
             var value = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context));
-            // The default is reconciled against the member's OWN declared type (#1880) through the same
-            // helper the factory-ctor-arg (#1519), result and payload (#1866) sites already share: an
-            // `Int` default on a `Decimal` field emitted a bare `5L` into a `BigDecimal` field, and an
-            // optional-declared member's default a bare value into an `Optional<T>` field — both hard
-            // `javac` "incompatible types" errors. allowOptionalWrap stays ON (the default): unlike the
-            // result/payload sites, this one assigns straight into the declared field, so the lift is
-            // exactly what the field's own type requires.
+            // Reconciled against the member's OWN declared type (#1880) — this assigns straight into the
+            // declared field, so allowOptionalWrap stays ON (see ReconcileAgainstDeclared's own remarks).
             value = ReconcileAgainstDeclared(InferReconcilableValueType(translator, m.Initializer!), m.Type, value);
             sb.Append(Indent).Append(Indent).Append("this.").Append(JavaNaming.Member(m.Name)).Append(" = ")
               .Append(value).Append(";\n");
@@ -790,8 +785,9 @@ public sealed partial class JavaEmitter
     /// <c>VisitConditional</c>'s own numeric widening locally, scoped to this one caller, without touching
     /// the shared resolver.
     /// <para>Shared by every call site that reconciles a translated value against a declared type — factory
-    /// ctor args (#1519), a command's <c>result</c> expression, and an <c>emit</c>/<c>publish</c> payload
-    /// argument (#1866, the #1511 Rust fix ported here).</para>
+    /// ctor args (#1519), a command's <c>result</c> expression, an <c>emit</c>/<c>publish</c> payload
+    /// argument (#1866, the #1511 Rust fix ported here), and a member's own default initializer at both
+    /// the entity constructor and the value object's defaulting constructor (#1880).</para>
     /// </summary>
     private static TypeRef? InferReconcilableValueType(JavaExpressionTranslator translator, Expr value)
     {
@@ -822,9 +818,11 @@ public sealed partial class JavaEmitter
     /// <c>NeedsWiden</c> and <c>NeedsOptionalWiden</c> are mutually exclusive and <c>NeedsOptionalWiden</c>
     /// never composes with <c>NeedsSomeWrap</c> (see <see cref="BranchReconciliation"/>'s own remarks), so
     /// applying all three in sequence is safe.
-    /// <para>Applied at three call sites: an explicit-init factory ctor argument (#1519), a command's
-    /// <c>result</c> expression, and an <c>emit</c>/<c>publish</c> payload argument (#1866) — the two call
-    /// sites the Rust emitter already closed at #1511.</para>
+    /// <para>Applied at five call sites: an explicit-init factory ctor argument (#1519), a command's
+    /// <c>result</c> expression, an <c>emit</c>/<c>publish</c> payload argument (#1866) — the two call
+    /// sites the Rust emitter already closed at #1511 — and a member's own default initializer, rendered
+    /// both in the entity constructor body and in a value object's defaulting convenience constructor
+    /// (#1880, the site Rust closed at #1319/#1324/#1325).</para>
     /// <para><paramref name="allowOptionalWrap"/> gates the <c>NeedsSomeWrap</c> dimension, which is
     /// type-agnostic — it lifts ANY non-optional value into an optional-declared target, not just a
     /// numeric one. The factory-ctor-arg call site wants that (#1479: an explicit `field &lt;- expr` init
@@ -835,6 +833,13 @@ public sealed partial class JavaEmitter
     /// unrelated behavior. Pass <see langword="false"/> there so only the numeric dimensions
     /// (<c>NeedsWiden</c>/<c>NeedsOptionalWiden</c>) apply, composing with that gap's eventual fix later
     /// rather than accidentally closing it now.</para>
+    /// <para>The two default-initializer sites (#1880) want it ON, like the factory ctor arg and unlike
+    /// <c>result</c>/payload: both assign STRAIGHT INTO the declared slot — the entity's own
+    /// <c>Optional&lt;T&gt;</c> field, or the canonical record constructor's <c>Optional&lt;T&gt;</c>
+    /// component — so the lift is precisely what that slot's type requires. That deliberately also fixes
+    /// the NON-numeric sibling of the defect at these two sites: <c>note: String? = "hi"</c> previously
+    /// emitted a bare <c>String</c> into an <c>Optional&lt;String&gt;</c> field, a hard <c>javac</c>
+    /// error.</para>
     /// </summary>
     private static string ReconcileAgainstDeclared(TypeRef? valueType, TypeRef declared, string body, bool allowOptionalWrap = true)
     {

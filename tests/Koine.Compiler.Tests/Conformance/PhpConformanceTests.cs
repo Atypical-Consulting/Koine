@@ -2658,6 +2658,7 @@ public class PhpConformanceTests
         // (b) the factory's ctor-arg fallback — the #1880 gap.
         invoice.ShouldContain(@"new self($id, (new \Koine\Runtime\Decimal('5')))");
         invoice.ShouldNotContain("new self($id, 5)");
+        invoice.ShouldNotContain(@"\Koine\Runtime\Decimal $total = 5");
 
         var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
         money.ShouldContain(@"\Koine\Runtime\Decimal $amount = new \Koine\Runtime\Decimal('7')");

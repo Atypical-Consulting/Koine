@@ -2183,6 +2183,7 @@ public class PythonConformanceTests
         // (b) the factory's ctor-arg fallback.
         invoice.ShouldContain("total=Decimal(5)");
         invoice.ShouldNotContain("total: Decimal = 5\n");
+        invoice.ShouldNotContain("total=5");
 
         var money = result.Files.Single(f => f.RelativePath.EndsWith("money.py", StringComparison.Ordinal)).Contents;
         money.ShouldContain("amount: Decimal = Decimal(7)");
