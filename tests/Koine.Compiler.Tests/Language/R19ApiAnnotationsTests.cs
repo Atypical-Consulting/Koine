@@ -83,6 +83,34 @@ public class R19ApiAnnotationsTests
         Build(src);
     }
 
+    /// <summary>
+    /// A <c>create</c> factory carries the very same annotation vocabulary (#1846) — the grammar's
+    /// <c>annotation*</c> prefix now sits on <c>factoryDecl</c> too, so this parses clean and the emitted
+    /// C# still compiles.
+    /// </summary>
+    [Fact]
+    public void Annotations_on_a_factory_parse_and_compile()
+    {
+        const string src = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders")
+                  @post
+                  @auth("admin")
+                  create open {
+                  }
+                }
+              }
+            }
+            """;
+        Diagnose(src).ShouldBeEmpty();
+        Build(src);
+    }
+
     // ---- the annotations reach the semantic model ---------------------------
 
     /// <summary>
