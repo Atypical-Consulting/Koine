@@ -92,7 +92,7 @@ public sealed partial class CSharpEmitter
         // Members backed by a mutable list (issue #171), classified once and shared by the property
         // declarations, the all-args assignments, and the parameterless-ctor gate so the three stay in
         // lockstep. A field reassigned by a command is excluded (the backing field has no replace path).
-        var backedListMembers = BackedListMembers(ctorMembers, index, mutated);
+        var backedListMembers = BackedListMembers(ctorMembers, index, mutated, translator.Context);
 
         foreach (var m in ctorMembers)
         {
@@ -151,7 +151,7 @@ public sealed partial class CSharpEmitter
                 continue;
             }
 
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index, translator.Context));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 

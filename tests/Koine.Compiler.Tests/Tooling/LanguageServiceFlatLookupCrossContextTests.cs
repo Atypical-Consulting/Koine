@@ -249,6 +249,54 @@ public class LanguageServiceFlatLookupCrossContextTests
     }
 
     // ------------------------------------------------------------------
+    // KoineLanguageService.cs IncomingCalls -> FindEvent
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// The OTHER <c>FindEvent</c> caller: incoming calls on a COMMAND are the events whose policies react
+    /// with that <c>(type, command)</c> pair, and each policy's event name is resolved in the context that
+    /// DECLARES the policy. Resolved flat, <c>Zeta</c>'s same-named <c>value</c> wins whenever it is
+    /// declared last, <c>FindEvent</c> returns null (the decl is not an <see cref="Ast.EventDecl"/>), and
+    /// call hierarchy reports NO incoming edge for a command a policy plainly triggers.
+    /// </summary>
+    private const string PolicyIncomingAlpha = """
+        context Alpha {
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          entity Shipment identified by ShipmentId {
+            order: OrderId
+
+            command ship(order: OrderId) {
+              order -> order
+            }
+          }
+
+          policy ShipOnOrder when OrderPlaced then Shipment.ship(order: order)
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Incoming_calls_resolve_a_policys_event_in_the_policys_own_context(bool zetaLast)
+    {
+        var source = Model(PolicyIncomingAlpha, zetaLast, ZetaOrderPlacedValue);
+        var compilation = Compile(source);
+        var (line, character) = PosInside(source, "command ship", "ship");
+
+        var command = Svc.PrepareCallHierarchy(compilation, Uri, line, character).ShouldHaveSingleItem();
+        command.Kind.ShouldBe(CallHierarchyItemKind.Command);
+        command.OwningType.ShouldBe("Shipment");
+
+        var incoming = Svc.IncomingCalls(compilation, command).ShouldHaveSingleItem();
+
+        incoming.From.Name.ShouldBe("OrderPlaced");
+        incoming.From.Kind.ShouldBe(CallHierarchyItemKind.Event);
+    }
+
+    // ------------------------------------------------------------------
     // KoineLanguageService.cs ItemFor (type hierarchy)
     // ------------------------------------------------------------------
 

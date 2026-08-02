@@ -919,9 +919,18 @@ public sealed partial class RustEmitter
     /// declared a type of that simple name LAST in source order (R13.2 lets two contexts legally share
     /// one), so an unrelated <c>value Kind</c> in a sibling context suppressed the hint and the bare
     /// variant bound to the wrong enum — on this target a hard <c>rustc</c> E0308, since the emitted
-    /// path names a variant of the wrong enum type. <see cref="ModelIndex.Classify(string?, string)"/>
-    /// still falls back to the flat answer when the context resolves nothing, so this is strictly
-    /// additive.</para>
+    /// path names a variant of the wrong enum type.</para>
+    /// <para>This is NOT "strictly additive", and must not be justified that way:
+    /// <see cref="ModelIndex.Classify(string?, string)"/> consults the CONTEXT-LOCAL declaration BEFORE
+    /// <c>ClassifyBuiltIn</c>, so on a model declaring <c>value List</c> a context-aware call answers
+    /// <c>Value</c> where the flat one answered <c>List</c>. That inversion is precisely why
+    /// <c>ExpressionChecker</c>'s built-in-only queries must NOT be threaded with a context (see the
+    /// allowlist note in <c>FlatModelIndexLookupGuardTests</c>, and the #1715 regression it cites).</para>
+    /// <para>What is true for THESE sites is narrower: the result is only ever compared against
+    /// <see cref="TypeKind.Enum"/> — a kind <c>ClassifyBuiltIn</c> can never return — so the answer is
+    /// never consumed as "is this a built-in?", and resolving the context-local declaration first can only
+    /// move the hint towards the declaration the reference site actually sees. Safe here; do not copy this
+    /// justification to a site that asks a built-in-only question.</para>
     /// </summary>
     private static string? ExpectedEnum(TypeRef type, ModelIndex index, string? context) =>
         index.Classify(type.Qualifier ?? context, type.Name) == TypeKind.Enum ? type.Name : null;

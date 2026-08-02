@@ -56,7 +56,7 @@ public sealed partial class CSharpEmitter
             // A nested value-object collection is backed by a mutable private List<T> so the EF Core
             // infrastructure layer can materialize the owned children of a nested OwnsMany (issue #171);
             // the public surface stays a read-only IReadOnlyList<T>.
-            if (IsValueObjectList(m.Type, index))
+            if (IsValueObjectList(m.Type, index, context))
             {
                 var elem = typeMapper.Map(m.Type.Element ?? ObjectType);
                 var field = BackingFieldName(f.Name);
@@ -104,7 +104,7 @@ public sealed partial class CSharpEmitter
 
             // Render the derived body from its LOWERED bound initializer (Commit 6): resolved types come
             // from the bound tree rather than being re-inferred by the translator.
-            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index, translator.Context));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 

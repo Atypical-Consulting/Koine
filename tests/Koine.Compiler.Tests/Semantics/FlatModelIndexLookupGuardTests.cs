@@ -34,9 +34,12 @@ namespace Koine.Compiler.Tests;
 /// the same arity as the flat overloads (would show up as a spurious new site here — a false positive
 /// needing an allowlist note, not a false negative); or a caller that stores <c>ModelIndex.Classify</c>
 /// as a delegate/method-group and invokes it indirectly (no invocation syntax to see with that shape).
-/// It also does not fix anything — an allowlisted site with an available context it doesn't use would
-/// stay a latent bug until someone fixed it; #1870 worked that backlog down to zero, so every remaining
-/// entry below is justified by a real reason rather than parked. The robust, complete fix
+/// It also does not fix anything — an allowlisted site with an available context it doesn't use stays a
+/// latent bug until someone fixes it. #1870 worked that backlog down to the point where no site is left
+/// holding a bounded context in a LOCAL of the same method and ignoring it; what remains are shared or
+/// static helpers with no context parameter of their own, some of which nonetheless have a caller that
+/// does carry one (see <c>CSharpEmitter.Api.cs:205</c> below) and could be threaded by a signature
+/// refactor. Every entry below is justified by a stated reason rather than parked. The robust, complete fix
 /// is Option C from #1863's own brainstorm — renaming/obsoleting the flat overloads so the compiler
 /// enforces the distinction — deliberately deferred as a separate, larger public-API decision.
 /// </para>
@@ -163,11 +166,8 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 284, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 303, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 309, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 601, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1348, "Classify", "IsValueObjectList: shared static classification helper, no context param"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1374, "Classify", "ClassifyMember: same shared static-helper shape as IsValueObjectList"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 2293, "Classify", "EnumExpected: same shared static-helper shape"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable's mutation-endpoint chain carries no context param; only the Enum branch is context-sensitive, and Primitive/IdValueObject are universal"),
+        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 608, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable: only the Enum branch is context-sensitive (Primitive/IdValueObject are universal), and the WriteMutationEndpoint chain carries no context — but NOT fully clean: WriteQueryEndpoint(sb, ContextNode ctx, ...) reaches the same helper through BuildRouteTokenBindings with ctx.Name in scope, so one of the two callers could thread a context today (out of #1870's scope; the shared helper's other caller cannot)"),
 
         // --- Built-in-only query: inert by RANGE DISJOINTNESS, not by name reservation (verified for
         //     #1870, correcting an earlier note here that claimed the built-in names are "lexically
@@ -208,12 +208,18 @@ public class FlatModelIndexLookupGuardTests
         //     AstSymbolCrossContextClassificationTests, which pin the outcome under BOTH context orders. ---
         ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
 
-        // --- The "context IS available and unused" bucket is now EMPTY: #1870 worked through every site
-        //     that had a bounded context in scope and left it on the table.
+        // --- No site remains with a bounded context in a LOCAL of the same method that it then ignores:
+        //     #1870 worked through every one of those. That is the literal claim, and it is weaker than
+        //     "nothing is left to fix" — several entries above are shared/static helpers whose own
+        //     signature carries no context but whose CALLERS do (CSharpEmitter.Api.cs:205's
+        //     WriteQueryEndpoint is the clearest); threading those needs a signature refactor, which is
+        //     out of #1870's scope, not a one-line fix that was judged unnecessary.
         //
-        //     The nine C#-emitter sites that used to sit here are GONE: #1870's C# task confirmed every
-        //     one of them order-dependent with a two-order fixture and fixed them to
-        //     Classify(context, name). See CSharpFlatClassifyCrossContextTests.
+        //     The twelve C#-emitter sites that used to sit here are GONE: #1870's C# task confirmed nine
+        //     of them order-dependent with a two-order fixture and fixed them to Classify(context, name),
+        //     and its own code review caught three more — the shared static helpers IsValueObjectList /
+        //     ClassifyMember / EnumExpected, each of which every caller could already supply a context to.
+        //     See CSharpFlatClassifyCrossContextTests and CSharpValueConverterContextScopeTests.
         //
         //     The three Rust-emitter sites (RustEmitter.Entities.cs — BuildFactoryCtorArgs' required and
         //     defaulted loops, and TransitionEnum) are GONE for the same reason: #1870's Rust task

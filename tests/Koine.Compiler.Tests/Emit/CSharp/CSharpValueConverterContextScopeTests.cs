@@ -13,8 +13,13 @@ namespace Koine.Compiler.Tests;
 /// order.
 /// </summary>
 /// <remarks>
-/// The fixture ships in BOTH context declaration orders and asserts the SAME converter holder in each — a
-/// one-order test proves only that the last-declared context happened to be the right one.
+/// <para>The fixture ships in BOTH context declaration orders and asserts the SAME converter holder in
+/// each — a one-order test proves only that the last-declared context happened to be the right one.</para>
+/// <para>The converter holder is only half the story: <c>&lt;Root&gt;Configuration</c> is what REFERENCES
+/// the converter, and it dispatches on <c>CSharpEmitter.ClassifyMember</c>. While that consumer stayed
+/// flat, producer and consumer disagreed — the converter file was emitted while the configuration mapped
+/// the very same smart enum as an empty <c>OwnsOne</c>, leaving the new converter dead. So the mapping
+/// LINE is asserted here too, under both orders.</para>
 /// </remarks>
 public class CSharpValueConverterContextScopeTests
 {
@@ -71,5 +76,25 @@ public class CSharpValueConverterContextScopeTests
             .ShouldHaveSingleItem();
 
         converters.Contents.ShouldContain("ValueConverter<Status, string> StatusConverter");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Persisted_smart_enum_is_mapped_through_its_contexts_converter(bool zetaLast)
+    {
+        // The consumer half (#1870, review follow-up): WriteMemberMapping dispatches on
+        // CSharpEmitter.ClassifyMember. Classified flat with Zeta declared last, `Status` reads as a value
+        // object and the configuration emits `builder.OwnsOne(x => x.Lifecycle, lifecycle => { })` — a
+        // smart enum mapped as an empty owned entity, with the emitted converter never referenced.
+        IReadOnlyList<EmittedFile> files = EmitAll(Model(zetaLast));
+
+        EmittedFile configuration = files
+            .Where(f => f.RelativePath.EndsWith("/OrderConfiguration.cs", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+
+        configuration.Contents.ShouldContain(
+            "builder.Property(x => x.Lifecycle).HasConversion(AlphaValueConverters.StatusConverter);");
+        configuration.Contents.ShouldNotContain("OwnsOne(x => x.Lifecycle");
     }
 }

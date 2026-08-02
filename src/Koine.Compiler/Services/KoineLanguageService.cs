@@ -447,6 +447,13 @@ public sealed class KoineLanguageService
         }
 
         var scope = TypeScope.FromMembers(members, semantic.Index);
+        // NOTE (#1870): this reuses the `context` computed above, so the chain's member types now also
+        // resolve from the CURSOR's enclosing context when the position has one — previously they always
+        // resolved from ContextOf(semantic, scopeType), the declaring context of the (flatly-resolved)
+        // enclosing type. That is a behaviour change beyond the lookup itself, and a deliberate one: the
+        // enclosing type's declaration and the chain hops must agree on one context, or the route can
+        // type a member against a decl the cursor's context never sees. The two only differ when the
+        // cursor sits in a context that is not the enclosing type's own declaring context.
         var type = semantic.GetTypeInfo(expr, scope, context);
         if (type.IsError || type.Name is not { } typeName)
         {

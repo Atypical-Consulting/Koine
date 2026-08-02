@@ -4,11 +4,13 @@ using Koine.Compiler.Services;
 namespace Koine.Compiler.Tests;
 
 /// <summary>
-/// Issue #1870, the C#-emitter cluster: nine <c>CSharpEmitter</c>/<c>CSharpExpressionTranslator</c>
+/// Issue #1870, the C#-emitter cluster: twelve <c>CSharpEmitter</c>/<c>CSharpExpressionTranslator</c>
 /// call sites asked <see cref="Ast.ModelIndex"/> "what kind of type is this name?" through the FLAT,
 /// last-declaration-wins <c>Classify(string)</c> overload while a bounded-context value was already in
-/// scope. R13.2 lets two contexts legally declare a type with the same simple name, so the answer —
-/// and therefore the emitted C# — silently depended on <c>.koi</c> source order.
+/// scope (nine directly, plus <c>IsValueObjectList</c>/<c>ClassifyMember</c>/<c>EnumExpected</c> — three
+/// shared static helpers whose callers all had one to thread in, caught by this branch's own review).
+/// R13.2 lets two contexts legally declare a type with the same simple name, so the answer — and
+/// therefore the emitted C# — silently depended on <c>.koi</c> source order.
 /// </summary>
 /// <remarks>
 /// <para>Every fixture ships in BOTH context declaration orders and asserts the SAME emitted text in
@@ -336,10 +338,11 @@ public class CSharpFlatClassifyCrossContextTests
     /// translator's constructor computed for that member.
     /// </summary>
     /// <remarks>
-    /// The derived PROPERTY body is rendered from a separate, still-flat helper
-    /// (<c>CSharpEmitter.EnumExpected</c>, allowlisted in <see cref="FlatModelIndexLookupGuardTests"/>
-    /// as a context-less static helper and out of scope here), so this fixture's emitted C# is not
-    /// compile-asserted — only the inlined guard, which is what the translator's constructor owns.
+    /// The derived PROPERTY body is rendered from a SECOND helper — <c>CSharpEmitter.EnumExpected</c> —
+    /// which was left flat when the translator's constructor was fixed, so the two disagreed about the
+    /// same member: the guard qualified it against <c>Status</c> while the property body emitted
+    /// <c>=&gt; (Urgent ? Phase.Active : Status.Draft)</c> (CS0029). Both are now classified in the
+    /// emitting context, which is why this fixture is compile-asserted like every other one here.
     /// </remarks>
     private const string DerivedMemberAlpha = """
         context Alpha {
@@ -362,6 +365,21 @@ public class CSharpFlatClassifyCrossContextTests
         var ticket = EmitFile(Model(DerivedMemberAlpha, zetaLast), "/Ticket.cs");
 
         ticket.ShouldContain("(urgent ? Status.Active : Status.Draft)");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Derived_member_expected_enum_emits_compiling_csharp(bool zetaLast)
+    {
+        // The derived PROPERTY body comes from CSharpEmitter.EnumExpected, not the translator's
+        // constructor. While that helper stayed flat, the two hints disagreed on the same member and the
+        // property emitted `=> (Urgent ? Phase.Active : Status.Draft)` — CS0029 (cannot convert
+        // 'Alpha.Phase' to 'Alpha.Status'), which only Roslyn catches.
+        var (assembly, errors) = TestSupport.Compile(EmitAll(Model(DerivedMemberAlpha, zetaLast)));
+
+        errors.ShouldBeEmpty();
+        assembly.ShouldNotBeNull();
     }
 
     // ------------------------------------------------------------------
