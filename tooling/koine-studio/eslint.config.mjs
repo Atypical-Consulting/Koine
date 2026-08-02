@@ -73,22 +73,25 @@ function selectorsExcept(...excluded) {
 // Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on day
 // one; the 8 cheapest of the remaining 17 were fixed and enforced in the PR that opened this table
 // (#1720); `no-unsafe-argument` was the 9th (#1785), `no-unsafe-assignment` the 10th (#1814),
-// `no-explicit-any` the 11th (#1817), and `no-unsafe-call`/`no-unsafe-member-access` the 12th/13th —
+// `no-explicit-any` the 11th (#1817), `no-unsafe-call`/`no-unsafe-member-access` the 12th/13th —
 // fixed together since #1817's `no-explicit-any`/`no-unsafe-assignment` fixes had already collapsed
 // their finding counts from the ~1,700-finding day-one measurement down to 5/32 (test-only sites: a
 // `ReturnType<typeof vi.fn>` cast that erased a mock's real parameter types, a couple of bare `vi.fn()`
 // mocks with no signature, and two unannotated `JSON.parse` results) — each fixed and enforced in its
-// own follow-up PR that removed it.
+// own follow-up PR that removed it — and `no-unused-vars` the 14th: configured below with an
+// underscore ignore pattern (matching the codebase's pre-existing, pervasive `_name` convention for
+// deliberately-unused bindings — 71 of its 73 day-of findings were already `_`-prefixed identifiers
+// the default rule doesn't recognize) plus two genuine fixes (a dangling type-only import, and a
+// declaration-merging interface's unused type parameter renamed to match the pattern).
 // Burn-down order is cheapest-first. Counts are LIVE — re-measure before editing this table, with
 // `npx eslint . -f json` under a config that adds the preset with no `off` entries, grouped by rule.
 // Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
 // down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
 // (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-unused-vars': 'off', //                 73 findings / 29 files
   '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 236 findings / 71 files
   '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files
-  '@typescript-eslint/unbound-method': 'off', //                569 findings / 62 files
+  '@typescript-eslint/unbound-method': 'off', //                570 findings / 62 files
 };
 
 export default tseslint.config(
@@ -109,6 +112,21 @@ export default tseslint.config(
     },
     rules: {
       ...RATCHET_PENDING,
+      // The codebase's pre-existing convention for a deliberately-unused binding is a leading
+      // underscore (`_opts`, `_files`, …) — already pervasive across the tree before this rule was
+      // ever enforced. The default rule doesn't recognize that idiom, so it's configured to match it
+      // rather than forcing every call site to either delete the parameter (breaking a shared
+      // signature) or grow an inline disable.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
       // `with-single-extends` (not the default `never`) is the rule's own sanctioned allowance for
       // declaration-MERGING interfaces: src/vitest-axe.d.ts augments vitest's `Assertion` /
       // `AsymmetricMatchersContaining` with the vitest-axe matchers, and augmentation only works

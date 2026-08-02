@@ -11,7 +11,6 @@ import reactHooks from 'eslint-plugin-react-hooks';
 // the whole preset is on, and every rule that still has findings is listed here as 'off' with its
 // live count; each ratchet PR fixes one rule and DELETES its entry. Never re-add an entry.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-unused-vars': 'off', //                  1 finding  / 1 file
   '@typescript-eslint/no-unnecessary-type-assertion': 'off', //  15 findings / 3 files
   '@typescript-eslint/unbound-method': 'off', //                 22 findings / 5 files
 };
@@ -28,6 +27,18 @@ export default tseslint.config(
     },
     rules: {
       ...RATCHET_PENDING,
+      // Same underscore-ignore config as koine-studio's (see its header comment for the rationale):
+      // matches the codebase's pre-existing `_name` convention for deliberately-unused bindings.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
       // Same narrowing as koine-studio's config: `with-single-extends` is the rule's own allowance for
       // declaration-MERGING interfaces (src/vitest-axe.d.ts augments vitest's `Assertion` /
       // `AsymmetricMatchersContaining`), where an empty body is unavoidable — augmentation only works
