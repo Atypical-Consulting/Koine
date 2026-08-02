@@ -187,6 +187,19 @@ public class EmitCrossContextResolutionTests
     /// one-field <c>Shipped</c>, in both context orders. A half-conversion — the validator alone, or
     /// one emitter alone — fails here loudly rather than silently emitting another context's payload.
     /// </summary>
+    /// <remarks>
+    /// <para><b>The eight sites that must move together</b> (#1834), each resolving the event name
+    /// through <c>ModelIndex.TryGetDecl(context, name, out _)</c> rather than the flat overload:
+    /// <c>EntityBehaviorValidator.ValidateEmit</c>, <c>CSharpEmitter.BuildEmitStatement</c>,
+    /// <c>TypeScriptEmitter.BuildEmitStatement</c>, <c>PythonEmitter.BuildEmitStatement</c>,
+    /// <c>PhpEmitter.BuildEmitStatement</c>, and the <c>BuildEmitExpression</c> call sites in the
+    /// Rust, Java and Kotlin emitters (which forward the context into the <c>BuildEventExpression</c>
+    /// core #1816 already added for <c>publish</c>).</para>
+    /// <para>Revert any ONE of them and this test fails — which is the point. #1816 (implementing
+    /// #1796) closed the mirror-image hole for <c>publish</c>, and #1739 shipped the regression #1797
+    /// had to fix precisely because a resolution rule was relaxed on one side without checking what
+    /// the other side then produced.</para>
+    /// </remarks>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
