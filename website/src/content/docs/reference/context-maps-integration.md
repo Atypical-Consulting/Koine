@@ -465,7 +465,7 @@ Three diagnostics are specific to the clause:
 | --- | --- | --- |
 | `publish X(…)` | `X` is an integration event of the **enclosing** context | `PublishUnknownIntegrationEvent` (KOI1420) |
 | `publish X(…)` | That context also declares `publishes X` | `PublishNotDeclared` (KOI1421) |
-| `publish X(…)` | The command belongs to the aggregate **root** | `PublishOutsideRoot` (KOI1422) |
+| `publish X(…)` | The command belongs to an aggregate **root** | `PublishOutsideRoot` (KOI1422) |
 
 :::caution
 `publishes X` stays **required**. A producer does not auto-declare its own published language:
@@ -477,8 +477,13 @@ name gets KOI1420 and the payload is not checked further.
 
 :::note
 A non-root entity may still declare and `emit` its own domain events; only leaving the context is
-reserved to the root. The rationale — why `publish` is a distinct keyword rather than `emit`
-inferring the event kind from its name — is recorded in
+reserved to the root. That reservation is stricter than `emit`'s in one further way: an entity
+declared **outside** any `aggregate` may `emit` but may not `publish`. `emit` is fine there because
+the domain event is still recorded and observable on the entity itself, whereas a published contract
+only leaves the context when the aggregate's Unit of Work drains `IntegrationEvents` into the outbox
+at commit — with no aggregate there is no Unit of Work, so the event would be recorded and never
+delivered. KOI1422 covers both shapes. The rationale — why `publish` is a distinct keyword rather
+than `emit` inferring the event kind from its name — is recorded in
 [ADR 0017 — `publish` is a distinct clause from `emit`](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0017-publish-is-a-distinct-clause-from-emit.md).
 :::
 

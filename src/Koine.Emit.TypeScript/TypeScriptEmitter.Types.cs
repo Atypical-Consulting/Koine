@@ -595,11 +595,13 @@ public sealed partial class TypeScriptEmitter
         // reference parameters), but rendered AFTER the post-mutation invariant re-check so an
         // invalid state throws before any event is recorded — mirroring the C# emitter's order.
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.", context, resultExpr)).ToList();
-        bool hoistResult = emitStatements.Any(s => s.Hoisted);
 
         // Publish payloads translate in the SAME scope, for the same reason (they may reference the
-        // command's parameters), and render right after the emits (R19).
-        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index, context)).ToList();
+        // command's parameters), and render right after the emits (R19). They join the SAME `__result`
+        // hoist: a non-deterministic expression such as `now` must be evaluated ONCE per command, so an
+        // `emit` and a `publish` of the same expression record the identical instant — mirroring C#.
+        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index, context, resultExpr)).ToList();
+        bool hoistResult = emitStatements.Any(s => s.Hoisted) || publishStatements.Any(s => s.Hoisted);
 
         foreach (Param p in cmd.Parameters)
         {
@@ -626,7 +628,7 @@ public sealed partial class TypeScriptEmitter
         // …then the integration events leaving the context, so the recording order reads inside-out.
         foreach (var stmt in publishStatements)
         {
-            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+            sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
         }
 
         if (resultExpr is not null)
@@ -899,30 +901,48 @@ public sealed partial class TypeScriptEmitter
     /// <c>publish</c> clause (R19) — the published-language counterpart of
     /// <see cref="BuildEmitStatement"/>. The name resolves to an <see cref="IntegrationEventDecl"/>
     /// (KOI1420 guarantees it by emit time) and the payload binds positionally through
-    /// <see cref="OrderCtorParams"/>, exactly as an emit does. No <c>__result</c> hoist and no
-    /// target prefix, for the same reasons as the C# emitter's <c>BuildPublishStatement</c>: only an
-    /// emit argument triggers the hoist, and <c>publish</c> is legal in command bodies only, so the
-    /// target is always <c>this</c>.
+    /// <see cref="OrderCtorParams"/>, exactly as an emit does — including the <c>__result</c> hoist:
+    /// when <paramref name="hoistedResultExpr"/> is supplied, an argument whose WHOLE rendered form
+    /// equals it becomes the <c>__result</c> local and <c>Hoisted</c> is returned true, so a
+    /// non-deterministic expression (<c>now</c>) is evaluated once and an <c>emit</c> and a
+    /// <c>publish</c> of it cannot disagree. No target prefix: <c>publish</c> is legal in command
+    /// bodies only, so the target is always <c>this</c>.
     /// </summary>
-    private string BuildPublishStatement(
-        PublishClause publish, TypeScriptExpressionTranslator translator, ModelIndex index, string? context)
+    private (string Text, bool Hoisted) BuildPublishStatement(
+        PublishClause publish, TypeScriptExpressionTranslator translator, ModelIndex index, string? context,
+        string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
         {
-            return $"/* unknown integration event '{publish.EventName}' */";
+            return ($"/* unknown integration event '{publish.EventName}' */", false);
         }
 
         var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
+        bool hoisted = false;
         var args = ctorFields.Select(f =>
-            argByField.TryGetValue(f.Name, out Expr? value)
-                ? translator.Translate(value, EnumExpected(f, index, context))
-                : "undefined as never"); // validator guarantees presence; defensive
+        {
+            if (!argByField.TryGetValue(f.Name, out Expr? value))
+            {
+                return "undefined as never"; // validator guarantees presence; defensive
+            }
+
+            var rendered = translator.Translate(value, EnumExpected(f, index, context));
+            // Substitute the hoisted local only on a WHOLE-argument match; a sibling argument that
+            // merely shares a prefix must NOT be rewritten.
+            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
+            {
+                hoisted = true;
+                return "__result";
+            }
+
+            return rendered;
+        }).ToList();
 
         var eventName = TypeScriptNaming.ToPascalCase(ev.Name);
-        return $"this._integrationEvents.push(new {eventName}({string.Join(", ", args)}));";
+        return ($"this._integrationEvents.push(new {eventName}({string.Join(", ", args)}));", hoisted);
     }
 
     /// <summary>

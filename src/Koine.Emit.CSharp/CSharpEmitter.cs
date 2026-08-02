@@ -1675,11 +1675,14 @@ public sealed partial class CSharpEmitter : IEmitter
         // payloads may reference parameters); they are written AFTER the re-check so
         // an invalid post-state throws before any event is recorded.
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "", resultExpr)).ToList();
-        bool hoistResult = emitStatements.Any(s => s.Hoisted);
 
         // Publish payloads are translated in the SAME scope, for the same reason (they may reference
-        // the command's parameters), and are written right after the emits (R19).
-        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index)).ToList();
+        // the command's parameters), and are written right after the emits (R19). They take part in
+        // the SAME `__result` hoist: a non-deterministic expression such as `now` must be evaluated
+        // ONCE per command, so `emit Closed(at: now)` and `publish PubClosed(at: now)` in one body
+        // record the identical instant instead of two `DateTimeOffset.UtcNow` readings.
+        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index, resultExpr)).ToList();
+        bool hoistResult = emitStatements.Any(s => s.Hoisted) || publishStatements.Any(s => s.Hoisted);
 
         // Parameters leave scope BEFORE the re-check: entity invariants reference
         // only entity state, which must render as the just-assigned properties (not
@@ -1722,7 +1725,7 @@ public sealed partial class CSharpEmitter : IEmitter
 
             foreach (var stmt in publishStatements)
             {
-                sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+                sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
             }
         }
 
@@ -2021,19 +2024,22 @@ public sealed partial class CSharpEmitter : IEmitter
     /// (R19) — the published-language counterpart of <see cref="BuildEmitStatement"/>. The name must
     /// resolve to an <see cref="IntegrationEventDecl"/> (KOI1420 guarantees it by emit time), and the
     /// payload binds positionally through <see cref="OrderCtorParams"/> exactly as an emit does.
-    /// <para>Unlike an emit, a publish takes no <c>__result</c> hoist: the hoist exists so a value
-    /// returned by the command is computed once, and only an emit argument triggers it. A publish
-    /// argument that happens to be the same expression simply renders inline — same value, and the
-    /// flag-off emit path stays byte-identical. There is no <c>targetPrefix</c> either: the grammar
-    /// admits <c>publish</c> only in a command body (never a factory), so the target is always
-    /// <c>this</c>.</para>
+    /// <para>A publish argument takes part in the SAME <c>__result</c> hoist as an emit one: when
+    /// <paramref name="hoistedResultExpr"/> is supplied, any argument whose WHOLE rendered form equals
+    /// it is replaced with the <c>__result</c> local and <c>Hoisted</c> is returned true. That is not
+    /// cosmetic — a non-deterministic expression (<c>now</c>) rendered inline would be evaluated a
+    /// SECOND time, so an <c>emit</c> and a <c>publish</c> of the same expression would disagree and
+    /// the published contract would no longer mirror the domain event it accompanies.</para>
+    /// <para>There is no <c>targetPrefix</c>: the grammar admits <c>publish</c> only in a command body
+    /// (never a factory), so the target is always <c>this</c>.</para>
     /// </summary>
-    private string BuildPublishStatement(
-        PublishClause publish, CSharpExpressionTranslator translator, ModelIndex index)
+    private (string Text, bool Hoisted) BuildPublishStatement(
+        PublishClause publish, CSharpExpressionTranslator translator, ModelIndex index,
+        string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
         {
-            return $"/* unknown integration event '{publish.EventName}' */";
+            return ($"/* unknown integration event '{publish.EventName}' */", false);
         }
 
         var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
@@ -2042,6 +2048,7 @@ public sealed partial class CSharpEmitter : IEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
+        bool hoisted = false;
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
@@ -2050,10 +2057,19 @@ public sealed partial class CSharpEmitter : IEmitter
             }
 
             var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
-            return translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
-        });
+            var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
+            // Substitute the hoisted local only when the WHOLE argument is the result expression; a
+            // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
+            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
+            {
+                hoisted = true;
+                return "__result";
+            }
 
-        return $"_integrationEvents.Add(new {ev.Name}({string.Join(", ", args)}));";
+            return rendered;
+        }).ToList();
+
+        return ($"_integrationEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoisted);
     }
 
     /// <summary>

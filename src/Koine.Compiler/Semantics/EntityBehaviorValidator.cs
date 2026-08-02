@@ -18,6 +18,14 @@ internal static class EntityBehaviorValidator
     /// mutable, non-derived member; value must be type-compatible). Scope for
     /// expressions is the entity's members plus the command's parameters.
     /// </summary>
+    /// <param name="emitAllowed">
+    /// Whether <c>emit</c> is legal here: true for a standalone entity or the aggregate root.
+    /// </param>
+    /// <param name="aggregateRoot">
+    /// The root name of the enclosing aggregate, or <see langword="null"/> when the entity stands
+    /// alone. Distinct from <paramref name="emitAllowed"/> because <c>publish</c> (R19) is stricter:
+    /// it needs a REAL aggregate root, so the standalone case must be told apart from the root case.
+    /// </param>
     public static void ValidateCommands(
         EntityDecl entity,
         ModelIndex index,
@@ -25,8 +33,17 @@ internal static class EntityBehaviorValidator
         IReadOnlySet<string> enumMembers,
         List<Diagnostic> diagnostics,
         bool emitAllowed,
+        string? aggregateRoot = null,
         IReadOnlySet<string>? specNames = null)
     {
+        // R19 — `publish` is confined to the aggregate ROOT, and unlike `emit` a standalone entity is
+        // NOT an acceptable stand-in. An emitted domain event is still observable on the entity that
+        // recorded it, so a standalone `emit` is meaningful; a published integration event only ever
+        // leaves the context when the aggregate's Unit of Work drains `_integrationEvents` into the
+        // outbox at commit. With no aggregate there is no Unit of Work, no application handler, and
+        // therefore no drain — the contract would silently never reach a subscriber.
+        var publishAllowed = aggregateRoot is not null && aggregateRoot == entity.Name;
+
         var memberNames = SemanticValidator.MemberNameSet(entity.Members);
         var memberByName = new Dictionary<string, Member>(entity.Members.Count, StringComparer.Ordinal);
         foreach (var m in entity.Members)
@@ -124,13 +141,16 @@ internal static class EntityBehaviorValidator
                         ValidateEmit(emit, index, checker, scope, diagnostics);
                         break;
 
-                    // R19 — `publish` leaves the context, so like `emit` it is the aggregate ROOT's
-                    // prerogative: an inner entity has no business speaking for the whole aggregate.
+                    // R19 — `publish` leaves the context, so it is the aggregate ROOT's prerogative:
+                    // an inner entity has no business speaking for the whole aggregate, and an entity
+                    // with no aggregate at all has no outbox seam to speak through.
                     case PublishClause published:
-                        if (!emitAllowed)
+                        if (!publishAllowed)
                         {
                             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PublishOutsideRoot,
-                                $"integration events may only be published from the aggregate root, not from '{entity.Name}'",
+                                aggregateRoot is null
+                                    ? $"integration events may only be published from an aggregate root; entity '{entity.Name}' does not belong to an aggregate"
+                                    : $"integration events may only be published from the aggregate root, not from '{entity.Name}'",
                                 published.Span));
                         }
 

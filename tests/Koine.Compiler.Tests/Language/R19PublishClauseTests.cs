@@ -273,6 +273,56 @@ public class R19PublishClauseTests
             """;
 
         ErrorCodes(src).ShouldBe([DiagnosticCodes.PublishOutsideRoot]);
+        Diagnose(src).Single(d => d.Code == DiagnosticCodes.PublishOutsideRoot)
+            .Message.ShouldBe("integration events may only be published from the aggregate root, not from 'OrderLine'");
+    }
+
+    /// <summary>
+    /// A STANDALONE entity — one declared outside any <c>aggregate</c> — may not publish either.
+    /// KOI1422 is deliberately stricter than KOI0601 here: `emit` on a standalone entity is fine
+    /// (the domain event is still recorded and observable on that entity), but a published contract
+    /// only leaves the context when the aggregate's Unit of Work drains <c>IntegrationEvents</c> into
+    /// the outbox at commit. With no aggregate there is no Unit of Work and no handler, so
+    /// <c>_integrationEvents</c> would fill and never be delivered — silently, with no signal.
+    /// </summary>
+    [Fact]
+    public void Publish_from_a_standalone_entity_is_reported()
+    {
+        const string src = """
+            context Solo version 1 {
+              publishes Pinged
+              integration event Pinged { looseId: LooseId }
+
+              entity Loose identified by LooseId {
+                n: Int
+                command ping { n -> n + 1  publish Pinged(looseId: id) }
+              }
+            }
+            """;
+
+        ErrorCodes(src).ShouldBe([DiagnosticCodes.PublishOutsideRoot]);
+        // The message must not claim an aggregate root the model does not have.
+        Diagnose(src).Single(d => d.Code == DiagnosticCodes.PublishOutsideRoot)
+            .Message.ShouldBe("integration events may only be published from an aggregate root; entity 'Loose' does not belong to an aggregate");
+    }
+
+    [Fact]
+    public void Emit_from_a_standalone_entity_stays_legal()
+    {
+        // The negative control for the test above: tightening KOI1422 must NOT tighten `emit`, whose
+        // events remain meaningful on an entity that presides over no aggregate.
+        const string src = """
+            context Solo version 1 {
+              event Pinged { looseId: LooseId }
+
+              entity Loose identified by LooseId {
+                n: Int
+                command ping { n -> n + 1  emit Pinged(looseId: id) }
+              }
+            }
+            """;
+
+        ErrorCodes(src).ShouldBeEmpty();
     }
 
     [Fact]

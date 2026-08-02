@@ -111,6 +111,11 @@ byte-identical output.
   one explicit coordination point with ADR 0014, and it is a widening of a read, not a change to that
   ADR's decision: fan-out still dispatches reflectively inside the same sandbox child, `Ast/` stays
   target-agnostic, and a `subscribes` handler remains a bodiless seam reported as declared-only.
+* `publish` becomes a soft keyword, which reserves the bare word `publish` wherever the grammar needs a
+  plain `Identifier` — `command publish { … }`, `find publish(…)` and `operation publish(…)` no longer
+  parse. That is the same break class `emit` already carries, and the same trade the language accepted
+  for every other soft keyword: a domain that genuinely needs the noun can still use it as a *field*
+  name, which is where it most often appears.
 * The declarative `translate`/ACL-mapping route (better long-term modelling of published-language
   translation) is deferred, not rejected. It can be layered later as sugar over this producer link —
   which has to exist first, because a producer that never touches the aggregate stays invisible to an

@@ -70,6 +70,31 @@ public class R19PublishEmissionTests
         }
         """;
 
+    /// <summary>
+    /// A root whose command returns a NON-DETERMINISTIC value (<c>now</c>) that both an <c>emit</c>
+    /// and a <c>publish</c> payload carry. Only the C# and TypeScript emitters hoist such a value
+    /// into a single <c>__result</c> local; the other five re-render the result expression inline for
+    /// <c>emit</c> too, so there is no publish-specific asymmetry there to assert.
+    /// </summary>
+    private const string HoistingRoot = """
+        context Sales {
+          publishes OrderClosed
+          integration event OrderClosed { orderId: OrderId  at: Instant }
+          event OrderClosedInternally { orderId: OrderId  at: Instant }
+
+          aggregate Ordering root Order {
+            entity Order identified by OrderId {
+              closedAt: Instant?
+              command close: Instant {
+                emit OrderClosedInternally(orderId: id, at: now)
+                publish OrderClosed(orderId: id, at: now)
+                result now
+              }
+            }
+          }
+        }
+        """;
+
     private static string EmitFile(string source, IEmitter emitter, string pathSuffix)
     {
         CompileResult result = new KoineCompiler().Compile(source, emitter);
@@ -107,6 +132,20 @@ public class R19PublishEmissionTests
 
         order.ShouldContain("_domainEvents");
         order.ShouldNotContain("_integrationEvents");
+    }
+
+    [Fact]
+    public void TypeScript_publish_shares_the_hoisted_result_with_emit()
+    {
+        // TypeScript is the only other target with a `__result` hoist (C# is the first), so it is the
+        // only other one where a publish payload could diverge from an emit payload of the same
+        // expression. `now` → `Instant.now()`: read twice, the two events would carry two instants.
+        var order = EmitFile(HoistingRoot, new TypeScriptEmitter(), "/Order.ts");
+
+        order.ShouldContain("const __result = Instant.now();");
+        order.ShouldContain("this._domainEvents.push(new OrderClosedInternally(this.id, __result));");
+        order.ShouldContain("this._integrationEvents.push(new OrderClosed(this.id, __result));");
+        order.ShouldNotContain("new OrderClosed(this.id, Instant.now())");
     }
 
     // ---- Python -------------------------------------------------------------

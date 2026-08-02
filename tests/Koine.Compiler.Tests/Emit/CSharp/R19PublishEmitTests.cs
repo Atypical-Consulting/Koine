@@ -298,7 +298,94 @@ public class R19PublishEmitTests
             .ShouldContain(d => d.Code == DiagnosticCodes.FactoryNameCollision);
     }
 
+    // ---- the __result hoist: `emit` and `publish` must see ONE value ---------
+
+    /// <summary>
+    /// A command whose result is NON-DETERMINISTIC (<c>now</c> → <c>DateTimeOffset.UtcNow</c>) and
+    /// whose value is carried by BOTH an <c>emit</c> and a <c>publish</c>. Rendering the publish
+    /// argument inline would read the clock a second time, so the domain event and the published
+    /// contract it is meant to mirror would carry two different instants for one execution.
+    /// </summary>
+    private const string HoistFixture = """
+        context Sales {
+          publishes OrderClosed
+          integration event OrderClosed { orderId: OrderId  at: Instant }
+          event OrderClosedInternally { orderId: OrderId  at: Instant }
+
+          aggregate Ordering root Order {
+            entity Order identified by OrderId {
+              closedAt: Instant?
+              command close: Instant {
+                closedAt -> now
+                emit OrderClosedInternally(orderId: id, at: now)
+                publish OrderClosed(orderId: id, at: now)
+                result now
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>The same command with the <c>emit</c> removed: the hoist must not need one.</summary>
+    private const string PublishOnlyHoistFixture = """
+        context Sales {
+          publishes OrderClosed
+          integration event OrderClosed { orderId: OrderId  at: Instant }
+
+          aggregate Ordering root Order {
+            entity Order identified by OrderId {
+              closedAt: Instant?
+              command close: Instant {
+                publish OrderClosed(orderId: id, at: now)
+                result now
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Publish_and_emit_of_the_same_expression_share_one_hoisted_local()
+    {
+        var order = RootSource(HoistFixture);
+
+        order.ShouldContain("var __result = DateTimeOffset.UtcNow;");
+        order.ShouldContain("_domainEvents.Add(new OrderClosedInternally(Id, __result));");
+        order.ShouldContain("_integrationEvents.Add(new OrderClosed(Id, __result));");
+    }
+
+    [Fact]
+    public void Publish_does_not_re_read_a_non_deterministic_result_expression()
+    {
+        var order = RootSource(HoistFixture);
+
+        // The exact shape of the bug: a SECOND `DateTimeOffset.UtcNow` inside the publish, which
+        // would make OrderClosedInternally.At and OrderClosed.At disagree for one command run.
+        order.ShouldNotContain("_integrationEvents.Add(new OrderClosed(Id, DateTimeOffset.UtcNow));");
+    }
+
+    [Fact]
+    public void A_publish_only_command_still_hoists_its_result()
+    {
+        // The hoist is not keyed on there being an `emit`: a lone `publish` of the returned value
+        // must read it once too.
+        var order = RootSource(PublishOnlyHoistFixture);
+
+        order.ShouldContain("var __result = DateTimeOffset.UtcNow;");
+        order.ShouldContain("_integrationEvents.Add(new OrderClosed(Id, __result));");
+        order.ShouldContain("return __result;");
+    }
+
     // ---- the load-bearing check: it actually compiles -------------------------
+
+    [Fact]
+    public void Emitted_hoisted_publish_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(HoistFixture));
+
+        errors.ShouldBeEmpty("generated C# failed to compile:\n" + string.Join("\n", errors));
+        assembly.ShouldNotBeNull();
+    }
 
     [Fact]
     public void Emitted_publish_output_compiles()
