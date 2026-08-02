@@ -1042,6 +1042,57 @@ public class ScenarioExecutionTests
         fanOut.Dropped.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// #1854 review finding: a policy with NO local declaration, import, or context-map permit
+    /// relation to the event it names — but where the model declares that event name in exactly ONE
+    /// place — still validates today via <c>ModelIndex.TryGetDecl</c>'s flat fallback (the same ladder
+    /// <c>SemanticValidator.ValidatePolicies</c> uses). The fix must resolve through that same fallback
+    /// rather than the narrower <c>TryGetDeclIn</c> alone, or it would drop a policy the compiler itself
+    /// accepts. <c>Billing</c> has no relationship whatsoever to <c>Ordering</c>.
+    /// </summary>
+    internal const string FlatFallbackSingletonEventFixture = """
+        context Billing {
+          aggregate Books root Invoice {
+            entity Invoice identified by InvoiceId {
+              status: String
+
+              command close { status -> "Closed" }
+            }
+          }
+
+          policy CloseOnShip when Shipped then Invoice.close()
+        }
+
+        context Ordering {
+          event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command ship {
+                shipped -> true
+                emit Shipped(orderId: code)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void A_policy_with_no_declared_relationship_still_dispatches_when_the_event_name_is_globally_unique()
+    {
+        SemanticModel sema = Build(FlatFallbackSingletonEventFixture);
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Ordering", "Shipped");
+
+        FanOutTarget target = fanOut.Executable.ShouldHaveSingleItem();
+        target.PolicyName.ShouldBe("CloseOnShip");
+        target.Context.ShouldBe("Billing");
+        fanOut.Dropped.ShouldBeEmpty();
+    }
+
     // ------------------------------------------------------------------------
     // The downstream aggregate's STARTING state (#1758, D2): a per-aggregate
     // `given` slice, a factory that needs no prior instance, or an honest note —

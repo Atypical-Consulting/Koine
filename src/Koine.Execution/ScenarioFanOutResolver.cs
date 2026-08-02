@@ -86,13 +86,17 @@ internal sealed record FanOutResolution(
 /// <para>A policy's trigger is matched context-first (#1854), the same rule the validator's
 /// <c>ValidatePolicies</c> and every code emitter use (#1849): candidates are gathered by bare event
 /// NAME, then each is kept only when its trigger — resolved from ITS OWN declaring context via
-/// <see cref="ModelIndex.TryGetDeclIn"/> — names the SAME declaration as the one <c>emittingContext</c>
-/// actually emitted. R13.2 lets two bounded contexts each declare an <c>event Shipped</c> with a
-/// different payload, and a bare name match alone cannot tell them apart — without this rule a policy in
-/// an unrelated context could fire for an event it never really reacts to. A policy dropped this way is
-/// reported, never silently skipped (<see cref="FanOutResolution.Dropped"/>). The reaction TARGET, a few
-/// lines below, is — and always was — resolved declaring-context-first (its own context, then the rest
-/// of the model), so both halves of a reaction now agree on which context decides.</para>
+/// <see cref="ModelIndex.TryGetDecl(string?, string, out TypeDecl)"/>, the same context-first-then-flat
+/// ladder the validator calls — names the SAME declaration as the one <c>emittingContext</c> actually
+/// emitted. R13.2 lets two bounded contexts each declare an <c>event Shipped</c> with a different
+/// payload, and a bare name match alone cannot tell them apart — without this rule a policy in an
+/// unrelated context could fire for an event it never really reacts to. A policy naming an event with
+/// no local declaration, import, or context-map permit relation — but that is the model's only
+/// declaration of that name — still resolves via the same flat fallback the validator falls back to,
+/// so it is unaffected. A policy dropped this way is reported, never silently skipped (see
+/// <see cref="FanOutResolution.Dropped"/>). The reaction TARGET, a few lines below, is — and always
+/// was — resolved declaring-context-first (its own context, then the rest of the model), so both
+/// halves of a reaction now agree on which context decides.</para>
 /// </summary>
 internal sealed class ScenarioFanOutResolver(SemanticModel sema)
 {
@@ -130,8 +134,14 @@ internal sealed class ScenarioFanOutResolver(SemanticModel sema)
         var dropped = new List<FanOutDroppedPolicy>();
 
         // The event as declared where it was actually emitted — every name-matching policy's own
-        // trigger is compared against THIS declaration's identity, not the bare event name.
-        _index.TryGetDeclIn(emittingContext, eventName, out TypeDecl emittedDecl);
+        // trigger is compared against THIS declaration's identity, not the bare event name. Resolved
+        // via ModelIndex.TryGetDecl(context, name, out _) — the SAME context-first-then-flat-fallback
+        // ladder SemanticValidator.ValidatePolicies (SemanticValidator.cs:1180) and every code emitter
+        // use (#1849), not the narrower TryGetDeclIn alone: a policy naming an event with no local
+        // declaration, import, or context-map permit relation to it — but that is the model's ONLY
+        // declaration of that name — still validates today via the flat fallback, and must still
+        // dispatch here for the same reason.
+        _index.TryGetDecl(emittingContext, eventName, out TypeDecl emittedDecl);
 
         foreach (ContextNode ctx in _sema.Model.Contexts)
         {
@@ -142,11 +152,10 @@ internal sealed class ScenarioFanOutResolver(SemanticModel sema)
                     continue;
                 }
 
-                // Resolved from the POLICY's OWN declaring context — the same context-first rule
-                // SemanticValidator.ValidatePolicies and every code emitter use (#1849). A same-named
-                // event declared in an unrelated context resolves to a DIFFERENT node, so it is dropped
-                // rather than dispatched.
-                if (!_index.TryGetDeclIn(ctx.Name, policy.EventName, out TypeDecl triggerDecl)
+                // Resolved from the POLICY's OWN declaring context, through the identical ladder above.
+                // A same-named event declared (or otherwise resolved) in an unrelated context resolves
+                // to a DIFFERENT node, so it is dropped rather than dispatched.
+                if (!_index.TryGetDecl(ctx.Name, policy.EventName, out TypeDecl triggerDecl)
                     || !ReferenceEquals(triggerDecl, emittedDecl))
                 {
                     dropped.Add(new FanOutDroppedPolicy(ctx.Name, policy.Name, policy.EventName));

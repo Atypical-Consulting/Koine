@@ -346,6 +346,25 @@ internal sealed class ScenarioExecutor
         return declaring.Count == 1 ? declaring[0] : null;
     }
 
+    /// <summary>
+    /// The bounded context declaring THIS EXACT <paramref name="entity"/> instance, by reference —
+    /// unlike <see cref="ContextOf(string)"/>, never ambiguous even when the entity's simple NAME is
+    /// also declared by another context (R13.2), because it never re-derives the answer from a name at
+    /// all. Empty when the entity is (unexpectedly) not reachable from any context in the model.
+    /// </summary>
+    private string DeclaringContextOf(EntityDecl entity)
+    {
+        foreach (ContextNode ctx in _sema.Model.Contexts)
+        {
+            if (ctx.AllTypeDecls().OfType<EntityDecl>().Any(e => ReferenceEquals(e, entity)))
+            {
+                return ctx.Name;
+            }
+        }
+
+        return string.Empty;
+    }
+
     // ------------------------------------------------------------------------
     // Inputs: given state and arguments
     // ------------------------------------------------------------------------
@@ -649,7 +668,16 @@ internal sealed class ScenarioExecutor
             return;
         }
 
-        string context = ContextOf(subjectEntity.Name) ?? string.Empty;
+        // By-reference, not by name (#1854 review): `subjectEntity`'s simple name COULD be declared by
+        // more than one context (R13.2), which would make the name-based `ContextOf` return null and
+        // silently drop every otherwise-legitimate in-context reaction below — a regression the old,
+        // context-blind fan-out never had a way to expose. `TryResolveType`'s own ambiguity refusal
+        // happens to gate every entity that ever reaches here today (both `_entity` at the top level and
+        // every `Dispatch`-resolved downstream entity already had their CLR type resolved successfully,
+        // which needs the same name to be unambiguous), so this is not independently reproducible
+        // end-to-end right now — but resolving by reference is strictly more correct regardless, and
+        // doesn't rely on that gate never changing.
+        string context = DeclaringContextOf(subjectEntity);
 
         foreach (object recorded in events)
         {
@@ -679,13 +707,15 @@ internal sealed class ScenarioExecutor
                          + "handler seam), so no downstream step was run for it.");
             }
 
-            // #1854: a policy in another context can declare its own same-named event (R13.2) — that is
-            // a coincidence, not a connection, so it is reported and never dispatched.
+            // #1854: a policy in another context can resolve a same-named trigger to an unrelated event
+            // (R13.2 lets two contexts each own an event with the same simple name) — that is a
+            // coincidence, not a connection, so it is reported and never dispatched.
             foreach (FanOutDroppedPolicy droppedPolicy in resolution.Dropped)
             {
-                NoteOnce($"Policy '{droppedPolicy.PolicyName}' in '{droppedPolicy.Context}' also reacts to an "
-                         + $"event named '{eventName}', but that context declares its own '{eventName}' — a "
-                         + "different event that merely shares the name — so it was not dispatched.");
+                NoteOnce($"Policy '{droppedPolicy.PolicyName}' in '{droppedPolicy.Context}' names a trigger "
+                         + $"also called '{eventName}', but it resolves to a different event than the one "
+                         + $"'{eventName}' emitted here — a coincidence of naming, not a connection between "
+                         + "the two — so it was not dispatched.");
             }
 
             foreach (FanOutTarget target in resolution.Executable)
