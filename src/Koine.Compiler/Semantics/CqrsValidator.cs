@@ -280,10 +280,11 @@ internal static class CqrsValidator
     /// second (and each later) colliding declaration, so the first one — the one already "holding" the
     /// route — stays clean.
     ///
-    /// <para>Scope: every entity's commands (top-level and aggregate-nested) and every query, i.e. the
-    /// superset the <c>openapi</c> emitter maps. The C# <c>api</c> layer maps a narrower set (aggregate
-    /// roots whose repository exposes <c>getById</c>, top-level queries), so a collision this reports is
-    /// always real for at least one HTTP target.</para>
+    /// <para>Scope: every entity's commands and factories (top-level and aggregate-nested) and every
+    /// query, i.e. the superset the <c>openapi</c> emitter maps (#1747). The C# <c>api</c> layer maps a
+    /// narrower set (a command needs its aggregate's repository to expose <c>getById</c>, a factory
+    /// <c>add</c>, and only top-level queries), so a collision this reports is always real for at least
+    /// one HTTP target.</para>
     ///
     /// <para>Routes are compared <b>ordinally</b> — exactly the criterion that makes an OpenAPI mapping key
     /// a duplicate. Two templates that differ only in letter case, or only in the <i>name</i> of a route
@@ -305,6 +306,16 @@ internal static class CqrsValidator
                     $"command '{command.Name}' on '{entity.Name}'",
                     command.Span);
             }
+
+            foreach (FactoryDecl factory in entity.Factories)
+            {
+                Claim(
+                    $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}",
+                    "POST",
+                    $"factory '{factory.Name}' on '{entity.Name}'",
+                    factory.Span,
+                    conventionalOnly: true);
+            }
         }
 
         foreach (QueryDecl query in ctx.AllTypeDecls().OfType<QueryDecl>())
@@ -316,13 +327,20 @@ internal static class CqrsValidator
                 query.Span);
         }
 
-        void Claim(string route, string verb, string subject, SourceSpan span)
+        void Claim(string route, string verb, string subject, SourceSpan span, bool conventionalOnly = false)
         {
             if (claimed.TryGetValue((route, verb), out var first))
             {
+                // A factory's route/verb has no annotation axis to move (#1747) — the generic "share a
+                // route only when their verbs differ" advice is not actionable for it, so the reported
+                // claimant gets a pointer to the only declaration that CAN move.
+                var hint = conventionalOnly
+                    ? "; a factory's route is conventional and cannot be annotated, so move the " +
+                      "@route/verb on the other declaration"
+                    : "";
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,
                     $"{subject} maps '{verb} {route}', which {first} already maps; two declarations may " +
-                    "share a route only when their verbs differ",
+                    "share a route only when their verbs differ" + hint,
                     span));
                 return;
             }
