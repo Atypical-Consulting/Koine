@@ -385,7 +385,15 @@ public sealed partial class JavaEmitter
         StringBuilder sb, Member m, JavaTypeMapper typeMapper, JavaExpressionTranslator translator)
     {
         WriteJavadoc(sb, m.Doc, Indent);
+        // Reconciled against the member's OWN declared type (#1888) through the same
+        // ReconcileAgainstDeclared every sibling call site in this family uses — including the
+        // DEFAULT-initializer half of the very `MemberAnalysis.IsDerived` split that routes a member here
+        // (#1880). The accessor's return type IS the declared type, so all three dimensions apply: an
+        // `Int`-typed body on a `Decimal` member emitted a bare `long` under a `BigDecimal` return type,
+        // and a non-optional body on an optional-declared member emitted a bare `T` under an
+        // `Optional<T>` — both hard `javac` "incompatible types". Rust closed this site at #961/#1329.
         var body = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Property);
+        body = ReconcileAgainstDeclared(InferReconcilableValueType(translator, m.Initializer!), m.Type, body);
         sb.Append(Indent).Append("public ").Append(typeMapper.Map(m.Type)).Append(' ')
           .Append(JavaNaming.Member(m.Name)).Append("() {\n");
         sb.Append(Indent).Append(Indent).Append("return ").Append(body).Append(";\n");
