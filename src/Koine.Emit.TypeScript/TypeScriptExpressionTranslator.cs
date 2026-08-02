@@ -148,6 +148,13 @@ internal sealed class TypeScriptExpressionTranslator
     /// <c>field -&gt; expr</c> initialization emits a <c>tsc --strict</c>-clean value instead of a bare
     /// mismatched literal (mirrors Java's #1519 <c>ReconcileFactoryCtorArg</c>/Kotlin's #1732 counterpart).
     /// Type inference stays entirely inside the translator — <c>_resolver.Infer</c> is never exposed.
+    /// <para>It has since grown past that first caller to serve every site that reconciles a value
+    /// against a declared type — including BOTH halves of a member's own initializer: the STORED-DEFAULT
+    /// half at the constructor parameter and the factory's ctor-arg fallback (#1880), and the DERIVED
+    /// half at the entity's and the value object's get-only getters (#1888, the site Rust closed at
+    /// #961/#1329). Those last two are the two arms of one <c>MemberAnalysis.IsDerived</c> branch, so
+    /// they route through this one method deliberately — reconciling them separately is exactly how they
+    /// drifted apart between #1880 and #1888.</para>
     /// </summary>
     internal string TranslateReconciled(Expr value, string? expectedEnum, TypeRef declared)
     {

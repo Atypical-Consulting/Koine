@@ -102,7 +102,13 @@ public sealed partial class PythonEmitter
             }
         }
 
-        // Computed (derived) members as read-only @property getters.
+        // Computed (derived) members as read-only @property getters. The body is reconciled against the
+        // member's OWN declared type (#1888) via the same TranslateReconciled the sibling call sites in
+        // this family already use — including the DEFAULT-initializer half of the very
+        // `MemberAnalysis.IsDerived` split that routes a member here (#1880). The property's return
+        // annotation IS the declared type, so an `Int`-typed body on a `Decimal` member emitted a bare
+        // `int` under a `Decimal` annotation: a real `mypy --strict` error. Rust closed this site at
+        // #961 (and #1329 for the optional-declared variant).
         foreach (Member m in derived)
         {
             sb.Append('\n');
@@ -111,7 +117,7 @@ public sealed partial class PythonEmitter
               .Append("(self) -> ").Append(typeMapper.Map(m.Type, translator.Context)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');
+              .Append(translator.TranslateReconciled(m.Initializer!, PythonExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context), m.Type)).Append('\n');
         }
 
         // A quantity gets unit-checked add/sub and scalar mul/truediv dunder operators. A plain value

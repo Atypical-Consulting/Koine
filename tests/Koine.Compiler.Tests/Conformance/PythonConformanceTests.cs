@@ -2253,6 +2253,133 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1888 — the SIBLING HALF of the <c>if</c> #1880 fixed. <c>MemberAnalysis.IsDerived</c> splits
+    /// <c>total: Decimal = amount + surcharge</c> (references siblings → an <c>@property</c> getter) from
+    /// <c>total: Decimal = 5</c> (a constant → a dataclass default); #1880 reconciled only the stored half,
+    /// leaving the property's BODY unreconciled against its own declared return annotation. Python emitted
+    /// <c>def total(self) -> Decimal: return (self.amount + self.surcharge)</c> — an <c>int</c> body under
+    /// a <c>Decimal</c> annotation, a hard <c>mypy --strict</c> error. Routed through the very same
+    /// <c>TranslateReconciled</c> the stored half uses, so the two halves cannot drift apart. Python has a
+    /// THIRD rendering of this site the other targets lack: a derived member on an <c>event</c>. Rust
+    /// closed this site at #961 (and #1329 for the optional variant).
+    /// </summary>
+    [Fact]
+    public void Derived_member_body_widens_an_int_to_decimal_against_its_declared_type()
+    {
+        const string src =
+            """
+            context Billing {
+              value Money {
+                amount: Int
+                surcharge: Int
+                total: Decimal = amount + surcharge
+              }
+
+              entity Invoice identified by InvoiceId {
+                amount: Int
+                surcharge: Int
+                total: Decimal = amount + surcharge
+              }
+
+              event PriceQuoted {
+                amount: Int
+                surcharge: Int
+                total: Decimal = amount + surcharge
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("money.py", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("return Decimal((self.amount + self.surcharge))");
+        money.ShouldNotContain("return (self.amount + self.surcharge)\n");
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return Decimal((self.amount + self.surcharge))");
+
+        // The event variant — the call site only Python renders (PythonEmitter.Behaviors.cs).
+        var quoted = result.Files.Single(f => f.RelativePath.EndsWith("price_quoted.py", StringComparison.Ordinal)).Contents;
+        quoted.ShouldContain("return Decimal((self.amount + self.surcharge))");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1888 — the optional-declared variant (Rust's #1329 shape). Python's optional is a plain
+    /// <c>T | None</c> union, so only the NUMERIC dimension renders: the body still widens to
+    /// <c>Decimal</c>, and a non-optional value flows into the union unchanged (no <c>NeedsSomeWrap</c>
+    /// lift, which is why the <c>String? = tag</c> member stays byte-identical here while Java's lifts).
+    /// </summary>
+    [Fact]
+    public void Optional_declared_derived_member_body_widens_without_a_lift()
+    {
+        const string src =
+            """
+            context Billing {
+              value Money {
+                amount: Int
+                surcharge: Int
+                tag: String
+                total: Decimal? = amount + surcharge
+                label: String? = tag
+              }
+
+              entity Invoice identified by InvoiceId {
+                amount: Int
+                surcharge: Int
+                total: Decimal? = amount + surcharge
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("money.py", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("def total(self) -> Decimal | None:");
+        money.ShouldContain("return Decimal((self.amount + self.surcharge))");
+        money.ShouldContain("return self.tag");
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return Decimal((self.amount + self.surcharge))");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1888's zero-change guard — a matching-type (<c>Decimal</c>) derived body and non-numeric
+    /// (<c>String</c>/<c>Int</c>) ones must render byte-identically to before the reconciliation was wired
+    /// in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_derived_member_bodies_render_unchanged()
+    {
+        const string src =
+            """
+            context Billing {
+              value Money {
+                price: Decimal
+                qty: Int
+                tag: String
+                exact: Decimal = price
+                label: String = tag
+                count: Int = qty
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("money.py", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("return self.price");
+        money.ShouldContain("return self.tag");
+        money.ShouldContain("return self.qty");
+        money.ShouldNotContain("return Decimal(");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()

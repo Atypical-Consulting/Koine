@@ -1546,6 +1546,130 @@ public class JavaConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1888 — the SIBLING HALF of the <c>if</c> #1880 fixed. <c>MemberAnalysis.IsDerived</c> splits
+    /// <c>total: Decimal = amount + surcharge</c> (references siblings → a derived accessor) from
+    /// <c>total: Decimal = 5</c> (a constant → a stored default); #1880 reconciled only the stored half,
+    /// leaving the derived accessor's BODY unreconciled against the accessor's own declared return type.
+    /// Java emitted <c>public java.math.BigDecimal total() { return this.amount() + this.surcharge(); }</c>
+    /// — a <c>long</c> body under a <c>BigDecimal</c> return type, a hard <c>javac</c> "incompatible types".
+    /// Routed through the very same <c>ReconcileAgainstDeclared</c> the stored half uses, so the two halves
+    /// cannot drift apart. Rust closed this site at #961 (and #1329 for the optional variant).
+    /// </summary>
+    [Fact]
+    public void Derived_member_body_widens_an_int_to_bigdecimal_against_its_declared_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Decimal = amount + surcharge\n" +
+            "  }\n" +
+            "\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Decimal = amount + surcharge\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // A value object's derived accessor reads siblings through the record's component accessors.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("return java.math.BigDecimal.valueOf(this.amount() + this.surcharge());");
+        money.ShouldNotContain("return this.amount() + this.surcharge();");
+
+        // An entity's reads its own fields directly — same reconciliation, different NameMode.
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return java.math.BigDecimal.valueOf(this.amount + this.surcharge);");
+        invoice.ShouldNotContain("return this.amount + this.surcharge;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1888 — the optional-declared variant (Rust's #1329 shape). Java's optional is a real
+    /// <c>java.util.Optional&lt;T&gt;</c> return type, so the shared decision's <c>NeedsSomeWrap</c>
+    /// dimension applies here too and composes with the widen exactly as <c>BranchReconciliation</c>
+    /// documents (widen inside, lift outside). That also closes the non-numeric sibling of the same defect
+    /// at this call site — a <c>String? = tag</c> derived member previously returned a bare <c>String</c>
+    /// from an <c>Optional&lt;String&gt;</c> accessor.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_derived_member_body_widens_and_lifts_into_optional()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    tag: String\n" +
+            "    total: Decimal? = amount + surcharge\n" +
+            "    label: String? = tag\n" +
+            "  }\n" +
+            "\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Decimal? = amount + surcharge\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("return java.util.Optional.of(java.math.BigDecimal.valueOf(this.amount() + this.surcharge()));");
+        money.ShouldContain("return java.util.Optional.of(this.tag());");
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return java.util.Optional.of(java.math.BigDecimal.valueOf(this.amount + this.surcharge));");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1888's zero-change guard — a matching-type (<c>Decimal</c>) derived body and non-numeric
+    /// (<c>String</c>/<c>Int</c>) ones on NON-optional members must render byte-identically to before the
+    /// reconciliation was wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_derived_member_bodies_render_unchanged()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  value Money {\n" +
+            "    price: Decimal\n" +
+            "    qty: Int\n" +
+            "    tag: String\n" +
+            "    exact: Decimal = price\n" +
+            "    label: String = tag\n" +
+            "    count: Int = qty\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("return this.price();");
+        money.ShouldContain("return this.tag();");
+        money.ShouldContain("return this.qty();");
+        money.ShouldNotContain("java.math.BigDecimal.valueOf");
+        money.ShouldNotContain("java.util.Optional.of");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Issue #1866: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_bigdecimal_against_a_decimal_return_type()

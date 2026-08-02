@@ -140,6 +140,14 @@ internal sealed class PhpExpressionTranslator
     /// included), and <c>NeedsOptionalWiden</c> is a new null-check-and-widen arrow-function shell —
     /// PHP's <c>??</c> cannot itself transform a present value, so this follows the same immediately-
     /// invoked-closure idiom <see cref="WriteLet"/> already uses.
+    /// <para>It has since grown past that first caller to serve every site that reconciles a value
+    /// against a declared type — including BOTH halves of a member's own initializer: the STORED-DEFAULT
+    /// half at the factory's ctor-arg fallback (#1880 — the promoted-property default was already
+    /// correct via <c>FoldDecimalConstantDefault</c>, #1030), and the DERIVED half at the entity's and
+    /// the value object's getter methods (#1888, the site Rust closed at #961/#1329). Those last two are
+    /// the two arms of one <c>MemberAnalysis.IsDerived</c> branch, so they route through this one method
+    /// deliberately — reconciling them separately is exactly how they drifted apart between #1880 and
+    /// #1888.</para>
     /// </summary>
     internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
     {
