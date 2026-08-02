@@ -124,7 +124,7 @@ function StartOrJoin({ session }: { session: CollabSession }) {
           type="text"
           value={token}
           placeholder="Paste the invitation you were given"
-          onInput={(e) => setToken((e.currentTarget).value)}
+          onInput={(e) => setToken(e.currentTarget.value)}
         />
       </label>
       <div class="koi-collab-actions">

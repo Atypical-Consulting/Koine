@@ -941,7 +941,7 @@ export function SourceControlPanel(props: {
             aria-label="Current branch — switch branch"
             value={status?.branch ?? ''}
             disabled={busy}
-            onChange={(e) => onCheckout((e.currentTarget).value)}
+            onChange={(e) => onCheckout(e.currentTarget.value)}
           >
             {branchOptions.map((b) => (
               <option key={b} value={b}>
@@ -1034,7 +1034,7 @@ export function SourceControlPanel(props: {
               placeholder="Message (what changed and why)"
               value={message}
               disabled={busy}
-              onInput={(e) => setMessage((e.currentTarget).value)}
+              onInput={(e) => setMessage(e.currentTarget.value)}
               onKeyDown={(e) => {
                 // ⌘⏎ / Ctrl+⏎ commits straight from the message box — but only when the Commit
                 // button would itself be enabled, so the shortcut can never bypass the guards.

@@ -910,7 +910,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const menu = await openOverflow(view);
 
     expect(
-      (within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' })).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' }).disabled,
     ).toBe(true);
   });
 
@@ -957,7 +957,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const menu = await openOverflow(view);
 
     expect(
-      (within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' })).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' }).disabled,
     ).toBe(true);
     expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Push' }).disabled).toBe(true);
     expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Pull' }).disabled).toBe(true);
@@ -1083,7 +1083,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
 
     // No message typed — the composer stays at its default empty string.
     expect(
-      (within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' })).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }).disabled,
     ).toBe(true);
   });
 
@@ -1094,7 +1094,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     const menu = await openCaret(view);
 
     expect(
-      (within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Amend last commit' })).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Amend last commit' }).disabled,
     ).toBe(true);
   });
 
@@ -1105,7 +1105,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     const menu = await openCaret(view);
 
     expect(
-      (within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' })).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }).disabled,
     ).toBe(true);
   });
 

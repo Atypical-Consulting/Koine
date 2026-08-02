@@ -983,7 +983,7 @@ export function DomainNavigator({
         spellcheck={false}
         hidden={filterHidden}
         value={outlineFilter}
-        onInput={(e) => store.getState().setOutlineFilter((e.currentTarget).value)}
+        onInput={(e) => store.getState().setOutlineFilter(e.currentTarget.value)}
       />
       <div class="koi-domain-body">{level}</div>
     </>

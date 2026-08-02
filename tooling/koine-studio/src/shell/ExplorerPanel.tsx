@@ -1083,7 +1083,7 @@ export function ExplorerPanel(props: ExplorerPanelProps): JSX.Element {
             aria-label="Filter workspace files"
             spellcheck={false}
             value={explorerFilter}
-            onInput={(e) => setExplorerFilter((e.currentTarget).value)}
+            onInput={(e) => setExplorerFilter(e.currentTarget.value)}
             onKeyDown={(e) => {
               // Escape clears immediately, bypassing the debounce (matches explorer.ts).
               if (e.key === 'Escape' && explorerFilter) {

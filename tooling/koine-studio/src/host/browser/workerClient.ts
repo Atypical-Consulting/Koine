@@ -162,7 +162,7 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
     }, BOOT_TIMEOUT_MS);
     // Prevent Node.js from keeping the process alive during tests.
     if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
-      (timer).unref();
+      timer.unref();
     }
     bootTimer = timer;
 
@@ -276,7 +276,7 @@ export function createWorkerClient(workerFactory: () => WorkerLike): WorkerClien
           }, timeoutMs);
           // Prevent the timer from keeping Node.js / the test runner alive (mirrors the boot-timer).
           if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
-            (timer).unref();
+            timer.unref();
           }
           entry.timer = timer;
         }

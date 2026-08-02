@@ -222,7 +222,7 @@ function ToolCard({ call, open, onToggle }: { call: ChatToolCall; open: boolean;
       class="koi-assistant-tool"
       data-state={call.state}
       open={open}
-      onToggle={(e) => onToggle((e.currentTarget).open)}
+      onToggle={(e) => onToggle(e.currentTarget.open)}
     >
       <summary>
         <span class="koi-tool-glyph" aria-hidden="true">
