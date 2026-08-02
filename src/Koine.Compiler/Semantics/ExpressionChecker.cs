@@ -1037,7 +1037,7 @@ internal sealed class ExpressionChecker
             else if (HasKnownMemberSet(target) && !_index.TryGetMemberType(target.Qualifier ?? _resolver.Context, target.Name, op, out _))
             {
                 Report(DiagnosticCodes.UnknownMember,
-                    $"unknown member '{op}' on type '{target.Name}'{Suggestions.For(op, _index.MemberNames(target.Name))}", ma);
+                    $"unknown member '{op}' on type '{target.Name}'{Suggestions.For(op, _index.MemberNames(target.Qualifier ?? _resolver.Context, target.Name))}", ma);
             }
             else if (_index.Classify(target.Name) is TypeKind.Primitive or TypeKind.Range)
             // A primitive (Int/Decimal/Bool/Instant) or a Range has no accessible members.
