@@ -1007,6 +1007,31 @@ public class R18CSharpApplicationTests
             $"endpoints.MapPost(\"{expectedRoute}\", async (OrderOpenDraftRequest request, OrderOpenDraftHandler handler, CancellationToken ct) =>");
     }
 
+    /// <summary>
+    /// Cross-target parity (#1747, mirroring <c>CrossEmitterSubscriberParityTests</c>): for one model,
+    /// the path the C# <c>api</c> layer maps for a factory is byte-identical to the <c>paths</c> key the
+    /// <c>openapi</c> target emits for the same factory. Both consumers read
+    /// <see cref="RouteDerivation.ForFactory"/>, so this is the regression lock that keeps them from
+    /// ever drifting apart again.
+    /// </summary>
+    [Fact]
+    public void Api_layer_factory_route_matches_the_openapi_path_key_for_the_same_model()
+    {
+        var endpoints = File(Emit(ApiOn, MultiWordFactoryFixture), "SalesEndpoints.cs").Contents;
+
+        var openApiResult = new KoineCompiler().Compile(
+            new[] { new SourceFile("sales.koi", MultiWordFactoryFixture) }, new OpenApiEmitter());
+        openApiResult.Success.ShouldBeTrue(string.Join("\n", openApiResult.Diagnostics.Select(d => d.ToString())));
+        var yaml = openApiResult.Files.ShouldHaveSingleItem().Contents;
+
+        var entity = new EntityDecl("Order", "OrderId", [], [], [], [], []);
+        var factory = new FactoryDecl("OpenDraft", Parameters: [], Body: []);
+        var route = RouteDerivation.ForFactory(entity, factory).Route;
+
+        endpoints.ShouldContain($"endpoints.MapPost(\"{route}\", ");
+        yaml.ShouldContain($"{route}:");
+    }
+
     [Fact]
     public void Api_layer_nullable_not_found_maps_a_missing_aggregate_to_404()
     {
