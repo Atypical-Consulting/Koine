@@ -11,8 +11,9 @@ namespace Koine.Compiler.Semantics;
 /// order. (Use cases, which co-emit with services, stay in the services pass.)
 ///
 /// <para><see cref="ValidateApiAnnotations"/> (R19) is shared: queries reach it from
-/// <see cref="ValidateQuery"/>, commands from <c>EntityBehaviorValidator.ValidateCommands</c>,
-/// so both surfaces of the API annotations obey one set of rules. <see cref="ValidateApiRoutes"/> is
+/// <see cref="ValidateQuery"/>, commands from <c>EntityBehaviorValidator.ValidateCommands</c>, and
+/// factories from <c>EntityBehaviorValidator.ValidateFactories</c> (#1846), so every surface of the API
+/// annotations obeys one set of rules. <see cref="ValidateApiRoutes"/> is
 /// the one check that cannot be per-declaration — a route collision is a property of the whole
 /// context — so <c>PerContextAnalyzer</c> drives it once per context.</para>
 /// </summary>
@@ -139,7 +140,7 @@ internal static class CqrsValidator
     }
 
     /// <summary>
-    /// Validates the API annotations preceding a command or query (R19): <c>@route</c> must name a
+    /// Validates the API annotations preceding a command, query or factory (R19/#1846): <c>@route</c> must name a
     /// well-formed absolute path (see <see cref="DescribeRouteProblem"/>), each annotation may appear at
     /// most once, at most one verb annotation may precede a declaration (one declaration is one
     /// endpoint), a verb annotation takes no argument, and <c>@auth</c> must name a non-blank role. An
@@ -148,11 +149,12 @@ internal static class CqrsValidator
     /// diagnostic lands on its own annotation.
     /// </summary>
     /// <param name="subject">How the declaration reads in the message, e.g. <c>command 'place'</c>.</param>
-    /// <param name="members">The declaration's own parameters (a command) or criteria (a query) — what a
-    /// route token can name-match (#1748).</param>
+    /// <param name="members">The declaration's own parameters (a command or factory) or criteria (a query) —
+    /// what a route token can name-match (#1748).</param>
     /// <param name="identityTypeName">The aggregate identity's type name when <paramref name="subject"/>
     /// is a command on an entity, so an <c>id</c> token with no matching parameter still resolves; <c>null</c>
-    /// for a query, which has no identity fallback (#1748).</param>
+    /// for a query, which has no identity fallback, and for a factory, which mints the identity it creates
+    /// and so has no identity property on its request for a token to bind to (#1748/#1846).</param>
     public static void ValidateApiAnnotations(
         ApiAnnotationInfo? api,
         string? route,
@@ -223,8 +225,10 @@ internal static class CqrsValidator
         if (!api.UnsupportedVersionSpan.IsNone)
         {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.VersionAnnotationOnCommand,
+                // Phrased about the subject rather than "not to a command": #1846 let a factory carry
+                // these annotations too, so the same diagnostic now fires on two kinds of declaration.
                 $"'@since'/'@deprecated' on {subject} has no effect; evolution annotations apply to type " +
-                "declarations (value, entity, event, query, …), not to a command",
+                "declarations (value, entity, event, query, …), which this is not",
                 At(api.UnsupportedVersionSpan, declSpan)));
         }
 
@@ -311,12 +315,14 @@ internal static class CqrsValidator
 
             foreach (FactoryDecl factory in entity.Factories)
             {
+                // #1846 — a factory carries the same `@route`/verb annotations a command does, so it claims
+                // the pair it actually maps: the override where one is given, the convention otherwise.
                 Claim(
-                    $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}",
-                    "POST",
+                    factory.RouteOverride ?? $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}",
+                    factory.VerbOverride ?? "POST",
                     $"factory '{factory.Name}' on '{entity.Name}'",
                     factory.Span,
-                    conventionalOnly: true);
+                    conventionalOnly: factory.RouteOverride is null && factory.VerbOverride is null);
             }
         }
 
@@ -333,18 +339,22 @@ internal static class CqrsValidator
         {
             if (claimed.TryGetValue((route, verb), out var first))
             {
-                // A factory's route/verb has no annotation axis to move (#1747) — the generic "share a
-                // route only when their verbs differ" advice is not actionable for it, so the reported
-                // claimant gets a pointer to the only declaration that CAN move. When BOTH sides are
-                // factories, neither can move an annotation — the fix has to rename one declaration or
-                // its entity instead, so that gets its own hint rather than pointing at a side that is
-                // equally stuck.
+                // `conventionalOnly` says "this factory derives BOTH its route and its verb by convention"
+                // — since #1846 gave factories an annotation axis of their own it no longer means "can
+                // never be annotated". Only factories pass it (a command/query keeps the `false` default),
+                // so the generic "share a route only when their verbs differ" advice, which assumes the
+                // reported claimant already names its own route/verb, is the one that needs supplementing:
+                // the hint points at the annotation the author can NOW add to the reported factory. The
+                // both-conventional case still gets its own wording, because pointing one un-annotated
+                // factory at another un-annotated one is not actionable — either side may take the
+                // annotation, or a rename can separate their conventional paths.
                 var hint = (conventionalOnly, first.ConventionalOnly) switch
                 {
-                    (true, true) => "; two factories resolve to the same conventional route — rename one " +
-                                     "factory, or one entity, so their conventional paths differ",
-                    (true, false) => "; a factory's route is conventional and cannot be annotated, so move " +
-                                      "the @route/verb on the other declaration",
+                    (true, true) => "; neither factory names a @route or a verb, so both fall on the same conventional " +
+                                     "path — annotate one with @route (or a different verb), or rename one factory or one " +
+                                     "entity so their conventional paths differ",
+                    (true, false) => "; this factory's route is still conventional — give it a @route/verb annotation of " +
+                                      "its own, or move the one on the other declaration",
                     _ => "",
                 };
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,

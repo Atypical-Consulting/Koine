@@ -760,6 +760,164 @@ public class R19ApiAnnotationsTests
         Diagnose(CommandSource("""@route("/orders/{id}")""", "@put", """@auth("admin")"""))
             .ShouldNotContain(d => d.Code == DiagnosticCodes.VersionAnnotationOnCommand);
 
+    // ---- the per-declaration checks run over a factory too (#1846) ----------
+
+    /// <summary>
+    /// A factory reaches the very same <c>CqrsValidator.ValidateApiAnnotations</c> a command does
+    /// (#1846), so KOI1208 catches the same shapes there: a bare <c>@route</c> (which names no path and
+    /// configures nothing), a relative or empty one, and a template the routing stack would reject at
+    /// startup.
+    /// </summary>
+    [Theory]
+    [InlineData("@route")]
+    [InlineData("""@route("orders")""")]
+    [InlineData("""@route("")""")]
+    [InlineData("""@route("/orders/{id")""")]
+    public void An_invalid_route_override_is_rejected_on_a_factory(string annotation) =>
+        Diagnose(FactorySource(annotation))
+            .ShouldContain(d => d.Code == DiagnosticCodes.InvalidRouteOverride);
+
+    /// <summary>A factory is one endpoint too, so it may carry at most one verb annotation.</summary>
+    [Fact]
+    public void Two_verb_annotations_are_rejected_on_a_factory() =>
+        Diagnose(FactorySource("@get", "@post"))
+            .ShouldContain(d => d.Code == DiagnosticCodes.MultipleVerbAnnotations);
+
+    /// <summary>A role that is blank — or absent entirely — guards nothing on a factory either.</summary>
+    [Theory]
+    [InlineData("""@auth("")""")]
+    [InlineData("""@auth("   ")""")]
+    [InlineData("@auth")]
+    public void A_blank_auth_role_is_rejected_on_a_factory(string annotation) =>
+        Diagnose(FactorySource(annotation))
+            .ShouldContain(d => d.Code == DiagnosticCodes.EmptyAuthRole);
+
+    /// <summary><c>@route</c>/<c>@auth</c> are single-valued on a factory as well: repeating one kept the
+    /// last and dropped the rest, which is exactly what the reader promises never to do silently.</summary>
+    [Fact]
+    public void A_repeated_route_or_auth_annotation_is_rejected_on_a_factory()
+    {
+        Diagnose(FactorySource("""@route("/a")""", """@route("/b")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation);
+
+        Diagnose(FactorySource("""@auth("a")""", """@auth("b")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.DuplicateApiAnnotation);
+    }
+
+    /// <summary>A verb annotation is a bare marker on a factory too — <c>@get("/x")</c> reads as a route
+    /// that would never be applied, so it is rejected rather than discarded.</summary>
+    [Fact]
+    public void A_verb_annotation_with_an_argument_is_rejected_on_a_factory() =>
+        Diagnose(FactorySource("""@get("/x")"""))
+            .ShouldContain(d => d.Code == DiagnosticCodes.VerbAnnotationArgument);
+
+    /// <summary>
+    /// A factory is no more a type declaration than a command is: the new <c>annotation*</c> prefix on
+    /// <c>factoryDecl</c> (#1846) makes <c>@since</c>/<c>@deprecated</c> parse there, but a
+    /// <see cref="FactoryDecl"/> has no <c>Since</c>/<c>Deprecated</c> to hold them — so they are
+    /// rejected (KOI1214) rather than read and dropped, exactly as on a command.
+    /// </summary>
+    [Theory]
+    [InlineData("""@deprecated("use openDraft")""")]
+    [InlineData("@since(2)")]
+    public void An_evolution_annotation_on_a_factory_is_rejected(string annotation) =>
+        Diagnose(FactorySource(annotation))
+            .ShouldContain(d => d.Code == DiagnosticCodes.VersionAnnotationOnCommand);
+
+    /// <summary>
+    /// Each factory diagnostic lands on its own annotation. <see cref="FactorySource"/> is line-for-line
+    /// congruent with <see cref="CommandSource"/>, so the expected lines are literally
+    /// <see cref="Each_api_diagnostic_points_at_its_own_annotation"/>'s — the pin that a factory's span
+    /// positioning matches a command's rather than drifting by a line.
+    /// </summary>
+    [Fact]
+    public void Each_factory_api_diagnostic_points_at_its_own_annotation()
+    {
+        // Annotations start on line 7 (see FactorySource): @route, then @get, @post, then @auth.
+        IReadOnlyList<Diagnostic> diagnostics =
+            Diagnose(FactorySource("""@route("orders")""", "@get", "@post", """@auth(" ")"""));
+
+        diagnostics.Single(d => d.Code == DiagnosticCodes.InvalidRouteOverride).Line.ShouldBe(7);
+        diagnostics.Single(d => d.Code == DiagnosticCodes.MultipleVerbAnnotations).Line.ShouldBe(9);
+        diagnostics.Single(d => d.Code == DiagnosticCodes.EmptyAuthRole).Line.ShouldBe(10);
+    }
+
+    // ---- KOI1215 on a factory, and the {id} divergence (#1846) --------------
+
+    /// <summary>A factory route token naming no parameter binds to nothing — KOI1215 warns once, on the
+    /// <c>@route</c> annotation's own line (7, exactly where its command counterpart lands).</summary>
+    [Fact]
+    public void A_token_naming_nothing_on_a_factory_is_a_KOI1215_warning()
+    {
+        Diagnostic warning = Diagnose(FactorySource("""@route("/orders/{ref}")"""))
+            .ShouldHaveSingleItem();
+
+        warning.Code.ShouldBe(DiagnosticCodes.UnboundRouteToken);
+        warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
+        warning.Line.ShouldBe(7);
+        warning.Message.ShouldContain("{ref}");
+    }
+
+    /// <summary>
+    /// The one place a factory's rules deliberately DIVERGE from a command's (#1846): <c>{id}</c> gets no
+    /// aggregate-identity fallback, so it warns here where
+    /// <see cref="An_id_token_on_a_command_is_not_flagged"/> stays silent. A command loads an existing
+    /// aggregate, so its emitted request record carries an identity property for <c>{id}</c> to bind to;
+    /// a factory <b>creates</b> one — <c>CSharpEmitter.Application.cs</c>'s <c>EmitFactoryHandler</c>
+    /// builds the request record from the factory's parameters alone, and
+    /// <c>CSharpEmitter.Api.cs</c>'s <c>WriteFactoryEndpoint</c> passes an empty identity property — so
+    /// there is nothing to bind, and letting <c>{id}</c> resolve would emit
+    /// <c>request with {  = id }</c>, which is not valid C#. Hence <c>identityTypeName: null</c> at the
+    /// call site, and hence a warning here.
+    /// </summary>
+    [Fact]
+    public void An_id_token_on_a_factory_is_a_KOI1215_warning_because_a_factory_mints_its_identity()
+    {
+        Diagnostic warning = Diagnose(FactorySource("""@route("/orders/{id}")"""))
+            .ShouldHaveSingleItem();
+
+        warning.Code.ShouldBe(DiagnosticCodes.UnboundRouteToken);
+        warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
+        warning.Message.ShouldContain("{id}");
+    }
+
+    /// <summary>
+    /// The positive half of the rule above: on a factory a token binds by ORDINARY NAME MATCH against the
+    /// declaration's parameters, so a factory that really declares one is silent. Two shapes are pinned —
+    /// an everyday parameter (<c>{title}</c>), and <c>id</c> itself, which needs the #324 explicit-identity
+    /// opt-in to be declarable at all: on a Guid identity the factory mints <c>var id = …</c>, so a
+    /// parameter of that name is rejected outright (KOI0807 <c>ReservedFactoryParameter</c>), and only a
+    /// non-Guid key lets one through (see <c>MemberAnalysis.IdentityParameters</c>). Hence the
+    /// <c>natural(String)</c> fixture.
+    /// </summary>
+    [Fact]
+    public void A_factory_token_naming_a_real_parameter_is_not_flagged()
+    {
+        Diagnose("""
+            context Catalog {
+              entity Book identified by BookId as natural(String) {
+                title: String
+
+                @route("/books/{title}")
+                create register(id: BookId, title: String) {
+                }
+              }
+            }
+            """).ShouldBeEmpty();
+
+        Diagnose("""
+            context Catalog {
+              entity Book identified by BookId as natural(String) {
+                title: String
+
+                @route("/books/{id}")
+                create register(id: BookId, title: String) {
+                }
+              }
+            }
+            """).ShouldBeEmpty();
+    }
+
     // ---- KOI1211: route + verb collisions across a context (#1219 review) ---
 
     /// <summary>
@@ -966,7 +1124,8 @@ public class R19ApiAnnotationsTests
     /// of this mistake — a factory was the one construct left outside KOI1211's collision namespace.
     /// The grammar requires every <c>commandDecl</c> before any <c>factoryDecl</c> in one entity body, so
     /// the factory is necessarily the SECOND (reported) declaration here — exactly the case the
-    /// conventional-route hint exists for.
+    /// conventional-route hint exists for. Since #1846 the hint points the author at the annotation the
+    /// factory can NOW carry itself, rather than claiming it can never carry one.
     /// </summary>
     [Fact]
     public void A_factorys_conventional_route_colliding_with_an_annotated_command_is_rejected()
@@ -998,7 +1157,8 @@ public class R19ApiAnnotationsTests
         collision.Message.ShouldContain("factory 'open' on 'Order'");
         collision.Message.ShouldContain("command 'reopen' on 'Order'");
         collision.Message.ShouldContain(
-            "a factory's route is conventional and cannot be annotated, so move the @route/verb on the other declaration");
+            "this factory's route is still conventional — give it a @route/verb annotation of its own, " +
+            "or move the one on the other declaration");
     }
 
     /// <summary>
@@ -1113,10 +1273,12 @@ public class R19ApiAnnotationsTests
     /// <summary>
     /// Two factories can collide with EACH OTHER too — not just with a command/query. Type names are
     /// unique case-<b>sensitively</b>, so <c>Order</c>/<c>ORDER</c> are distinct entities whose factories
-    /// (<c>open</c>/<c>OPEN</c>) both kebab to the same conventional route. Neither side has an
-    /// annotation axis to move, so the one-factory hint ("move the @route/verb on the other
-    /// declaration") would be actionable for neither — code-review catch on #1747: the hint must branch
-    /// on BOTH claimants' shape, not just the reported one's.
+    /// (<c>open</c>/<c>OPEN</c>) both kebab to the same conventional route. With NEITHER side annotated,
+    /// pointing the reported factory at the other one is not actionable — the other is equally
+    /// un-annotated — so this pair keeps its own hint (code-review catch on #1747: the hint must branch
+    /// on BOTH claimants' shape, not just the reported one's). Since #1846 the wording offers the
+    /// annotation as the first fix and renaming as the fallback, because a factory now HAS an
+    /// annotation axis.
     /// </summary>
     [Fact]
     public void Two_factories_colliding_on_their_conventional_route_get_a_two_factory_hint()
@@ -1139,9 +1301,177 @@ public class R19ApiAnnotationsTests
 
         collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
         collision.Message.ShouldContain(
-            "two factories resolve to the same conventional route — rename one factory, or one entity, " +
-            "so their conventional paths differ");
-        collision.Message.ShouldNotContain("cannot be annotated, so move the @route/verb on the other declaration");
+            "neither factory names a @route or a verb, so both fall on the same conventional path — " +
+            "annotate one with @route (or a different verb), or rename one factory or one entity so " +
+            "their conventional paths differ");
+        collision.Message.ShouldNotContain("cannot be annotated");
+    }
+
+    /// <summary>
+    /// An annotated factory claims its OVERRIDDEN pair, not its conventional one (#1846) — so an
+    /// <c>@route</c> aimed at a command's route+verb collides just as a command's would. And because the
+    /// reported claimant IS the annotated side here, <c>conventionalOnly</c> is false and NO factory hint
+    /// is appended: the message is the plain two-declarations one, asserted whole.
+    /// </summary>
+    [Fact]
+    public void An_annotated_factorys_overridden_route_collides_with_a_command()
+    {
+        const string source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/open")
+                  @post
+                  command reopen {
+                    requires status == Placed "order is not placed"
+                    status -> Draft
+                  }
+
+                  @route("/orders/open")
+                  create open {
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldBe(
+            "factory 'open' on 'Order' maps 'POST /orders/open', which command 'reopen' on 'Order' " +
+            "already maps; two declarations may share a route only when their verbs differ");
+    }
+
+    /// <summary>
+    /// Factory vs factory with exactly ONE side annotated: the hint follows the REPORTED (second)
+    /// claimant's shape, not the pair's. Declared annotated-first, the un-annotated factory is the one
+    /// reported, and — now that #1846 gives it an annotation axis — it is told to add one of its own;
+    /// declared the other way round, the annotated factory is reported and gets no hint, because it
+    /// already carries the axis the hint would point at. This is the regression guard for the pre-#1846
+    /// wording, which told the author a factory "cannot be annotated".
+    /// </summary>
+    [Fact]
+    public void A_factory_vs_factory_collision_hints_at_the_reported_sides_own_annotation()
+    {
+        const string annotatedFirst = """
+            context Sales {
+              entity Invoice identified by InvoiceId {
+                @route("/order/open")
+                create draft {
+                }
+              }
+
+              entity Order identified by OrderId {
+                create open {
+                }
+              }
+            }
+            """;
+
+        Diagnostic conventionalReported = Diagnose(annotatedFirst).ShouldHaveSingleItem();
+
+        conventionalReported.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        conventionalReported.Message.ShouldBe(
+            "factory 'open' on 'Order' maps 'POST /order/open', which factory 'draft' on 'Invoice' " +
+            "already maps; two declarations may share a route only when their verbs differ" +
+            "; this factory's route is still conventional — give it a @route/verb annotation of its " +
+            "own, or move the one on the other declaration");
+
+        const string conventionalFirst = """
+            context Sales {
+              entity Order identified by OrderId {
+                create open {
+                }
+              }
+
+              entity Invoice identified by InvoiceId {
+                @route("/order/open")
+                create draft {
+                }
+              }
+            }
+            """;
+
+        Diagnostic annotatedReported = Diagnose(conventionalFirst).ShouldHaveSingleItem();
+
+        annotatedReported.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        annotatedReported.Message.ShouldBe(
+            "factory 'draft' on 'Invoice' maps 'POST /order/open', which factory 'open' on 'Order' " +
+            "already maps; two declarations may share a route only when their verbs differ");
+    }
+
+    /// <summary>
+    /// An override MOVES a factory out of a collision (#1846): the very entity that trips KOI1211 in
+    /// <see cref="A_factorys_conventional_route_colliding_with_an_annotated_command_is_rejected"/> is
+    /// silent once the factory carries a <c>@route</c> of its own — proof the collision check reads the
+    /// override rather than always deriving the conventional pair.
+    /// </summary>
+    [Fact]
+    public void An_annotated_factory_moved_off_the_colliding_route_is_accepted() =>
+        Diagnose("""
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/order/open")
+                  @post
+                  command reopen {
+                    requires status == Placed "order is not placed"
+                    status -> Draft
+                  }
+
+                  @route("/orders")
+                  create open {
+                  }
+                }
+              }
+            }
+            """).ShouldBeEmpty();
+
+    /// <summary>
+    /// <c>conventionalOnly</c> keys off route/verb, NOT off "carries any annotation at all": a factory
+    /// with only <c>@auth</c> still derives both HTTP axes by convention, so it still claims the
+    /// conventional pair and still gets the conventional-side hint. Pins the predicate against silently
+    /// drifting to <c>ApiAnnotations is null</c>.
+    /// </summary>
+    [Fact]
+    public void An_auth_only_factory_still_claims_its_conventional_route()
+    {
+        const string source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/order/open")
+                  @post
+                  command reopen {
+                    requires status == Placed "order is not placed"
+                    status -> Draft
+                  }
+
+                  @auth("admin")
+                  create open {
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldContain("factory 'open' on 'Order'");
+        collision.Message.ShouldEndWith(
+            "; this factory's route is still conventional — give it a @route/verb annotation of its " +
+            "own, or move the one on the other declaration");
     }
 
     /// <summary>The conventional route the emit side derives for <c>entity.command</c>.</summary>
