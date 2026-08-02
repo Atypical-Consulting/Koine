@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Semantics.Scenarios;
@@ -300,6 +301,134 @@ public class ScenarioSandboxTests
 
         // Saturating, never wrapping — a ceiling near the top of the range must not come out as a tiny cap.
         ScenarioConfinement.WindowsJobCommitLimitFor(long.MaxValue).ShouldBe(long.MaxValue);
+    }
+
+    // ------------------------------------------------------------------------
+    // Wrapper-tolerant ceiling classification (#1858): a heap-ceiling OutOfMemoryException raised
+    // inside a static constructor is REQUIRED by the CLR to surface as a TypeInitializationException,
+    // and a sandboxed child hosting Roslyn runs a great deal of first-touch static initialization right
+    // at the ceiling — so ResourceCeilingNote has to see through that wrapper, not just match the
+    // outermost exception type.
+    // ------------------------------------------------------------------------
+
+    /// <remarks>
+    /// A real reproduction of the wrapper race is not something to gate a regression guard on: it costs
+    /// dozens of real child processes and, even then, only fires on whichever platform/load combination
+    /// happens to tip the allocator into a Roslyn static constructor (#1858 measured roughly 1 failure in
+    /// 3 against the real child, and 0 in 20 on a different run of the same machine). This theory is the
+    /// actual guard — it drives <see cref="ScenarioSandbox.ResourceCeilingNote"/> with synthetic
+    /// exceptions shaped exactly like the wrappers the CLR is known to produce, so a future narrowing of
+    /// the match (e.g. reverting to a bare <c>is OutOfMemoryException</c> check) fails loudly and
+    /// instantly on every platform — the same reasoning
+    /// <see cref="The_windows_job_commit_cap_stays_clear_of_the_managed_heap_ceiling"/> documents for
+    /// #1791's margin.
+    /// </remarks>
+    [Theory]
+    [InlineData("bare", true)]
+    [InlineData("typeInitialization", true)]
+    [InlineData("aggregate", true)]
+    [InlineData("aggregateWithMixedChildren", true)]
+    [InlineData("twoDeepNest", true)]
+    [InlineData("noOutOfMemoryAnywhere", false)]
+    public void ResourceCeilingNote_attributes_every_observed_wrapper_shape_to_the_ceiling(
+        string shape, bool expectCeilingNote)
+    {
+        using (WithHeapCeiling(ExhaustibleMemoryLimitBytes))
+        {
+            string? note = ScenarioSandbox.ResourceCeilingNote(WrapperShape(shape));
+
+            if (expectCeilingNote)
+            {
+                note.ShouldNotBeNull(shape);
+                note.ShouldContain("memory ceiling of 16 MiB", customMessage: shape);
+            }
+            else
+            {
+                note.ShouldBeNull(shape);
+            }
+        }
+    }
+
+    /// <summary>One exception per wrapper shape this classifier has to see through — named by a plain
+    /// string rather than passed as <see cref="TheoryAttribute"/> data directly, because
+    /// <c>Exception</c> instances are not valid <see cref="InlineDataAttribute"/> arguments (they are not
+    /// compile-time constants).</summary>
+    private static Exception WrapperShape(string shape) => shape switch
+    {
+        // The bare shape ordinary allocating code raises — the ONE shape the pre-#1858 check matched.
+        "bare" => new OutOfMemoryException(),
+
+        // The shape a static constructor is REQUIRED to raise — the specific gap #1858 closes.
+        "typeInitialization" => new TypeInitializationException(
+            "Roslyn.Utilities.TextKeyedCache`1", new OutOfMemoryException()),
+
+        "aggregate" => new AggregateException(new OutOfMemoryException()),
+
+        // One ceiling breach among several unrelated faults still means the ceiling was hit.
+        "aggregateWithMixedChildren" => new AggregateException(
+            new InvalidOperationException("an unrelated fault"), new OutOfMemoryException()),
+
+        // The exact chain #1858 observed against the real child: TargetInvocationException (reflective
+        // invoke) wrapping TypeInitializationException (Roslyn's static ctor) wrapping the OOM.
+        "twoDeepNest" => new TargetInvocationException(
+            new TypeInitializationException(
+                "Microsoft.CodeAnalysis.PooledObjects.ArrayBuilder`1", new OutOfMemoryException())),
+
+        "noOutOfMemoryAnywhere" => new InvalidOperationException(
+            "not a resource ceiling", new InvalidOperationException("still not one")),
+
+        _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, "unknown wrapper shape"),
+    };
+
+    [Fact]
+    public void ResourceCeilingNote_does_not_spin_on_a_chain_deeper_than_the_cap()
+    {
+        using (WithHeapCeiling(ExhaustibleMemoryLimitBytes))
+        {
+            // 20 hops of wrapping puts the OOM well past the depth cap. The property under test is that
+            // the walk TERMINATES and reports no ceiling, not that it is exhaustive — a chain this
+            // pathological is deliberately sacrificed so a cyclic one can never spin the classifier.
+            Exception failure = new OutOfMemoryException();
+            for (int i = 0; i < 20; i++)
+            {
+                failure = new InvalidOperationException($"wrapper layer {i}", failure);
+            }
+
+            ScenarioSandbox.ResourceCeilingNote(failure).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public void ResourceCeilingNote_is_null_when_no_heap_ceiling_is_configured_however_the_exception_is_shaped()
+    {
+        using (WithoutHeapCeiling())
+        {
+            ScenarioSandbox.ResourceCeilingNote(new OutOfMemoryException()).ShouldBeNull();
+            ScenarioSandbox.ResourceCeilingNote(
+                new TypeInitializationException("X", new OutOfMemoryException())).ShouldBeNull();
+        }
+    }
+
+    /// <summary>Sets <c>DOTNET_GCHeapHardLimit</c> in THIS process for the duration of a test — the same
+    /// variable the sandboxed child reads from its own environment, so <see cref="HeapCeilingNote"/>-backed
+    /// assertions can run in-process without racing a real child's allocator.</summary>
+    private static IDisposable WithHeapCeiling(long bytes) =>
+        new HeapCeilingEnvironmentScope(bytes.ToString("X", CultureInfo.InvariantCulture));
+
+    private static IDisposable WithoutHeapCeiling() => new HeapCeilingEnvironmentScope(null);
+
+    private sealed class HeapCeilingEnvironmentScope : IDisposable
+    {
+        private readonly string? _previous;
+
+        public HeapCeilingEnvironmentScope(string? value)
+        {
+            _previous = Environment.GetEnvironmentVariable(ScenarioSandbox.HeapHardLimitVariable);
+            Environment.SetEnvironmentVariable(ScenarioSandbox.HeapHardLimitVariable, value);
+        }
+
+        public void Dispose() =>
+            Environment.SetEnvironmentVariable(ScenarioSandbox.HeapHardLimitVariable, _previous);
     }
 
     [Fact]
