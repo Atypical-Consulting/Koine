@@ -266,6 +266,25 @@ internal static class EntityBehaviorValidator
                     $"factory '{factory.Name}' collides with a property or command of '{entity.Name}'", factory.Span));
             }
 
+            // R19/#1846 — the `@route`/verb/`@auth` annotations preceding the factory, checked by the very
+            // rules a command's go through. `identityTypeName: null` is deliberate, NOT an oversight: a
+            // command LOADS an existing aggregate, so its emitted request record carries an identity
+            // property and an `{id}` token can bind to it — a factory CREATES one, and the emitted request
+            // record is built from `factory.Parameters` alone (the C# api layer passes an empty identity
+            // property), so there is nothing for `{id}` to bind to. On a factory `{id}` therefore binds only
+            // when the factory DECLARES a parameter named `id` (an ordinary name match; see
+            // `MemberAnalysis.IdentityParameters` for the explicit-id opt-in that makes one declarable on a
+            // non-Guid identity), and is otherwise correctly an unbound token — KOI1215. Note that on the
+            // DEFAULT Guid identity that parameter cannot be declared at all — KOI0807
+            // (`ReservedFactoryParameter`, above) rejects it, since the factory mints `var id = <Id>.New();`
+            // — so `{id}` on a Guid-identity factory is a permanent KOI1215: the author must name the token
+            // after a real parameter, or move to a `natural`/`sequence` identity and take the explicit-id
+            // opt-in. This is the same story `RouteDerivation.ForFactory` tells emit-side.
+            CqrsValidator.ValidateApiAnnotations(
+                factory.ApiAnnotations, factory.RouteOverride, factory.AuthRole,
+                $"factory '{factory.Name}' on '{entity.Name}'", factory.Span, diagnostics,
+                factory.Parameters, identityTypeName: null);
+
             // A `create` factory on a Guid identity auto-generates the new aggregate's id (`<Id>.New()` /
             // `<Id>::generate()`), the only key with a meaningful client-side generator. A `natural` key is
             // caller-supplied and a `sequence` key is store-assigned, so neither can be minted — the opt-in

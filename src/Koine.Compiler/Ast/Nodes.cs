@@ -523,11 +523,28 @@ public sealed record Param(string Name, TypeRef Type) : KoineNode;
 /// Named, with typed parameters, preconditions (<c>requires</c>), field
 /// initializations (<c>field &lt;- expr</c>), and creation events (<c>emit</c>).
 /// Identity is generated automatically. TARGET-AGNOSTIC.
+///
+/// <para><see cref="RouteOverride"/>, <see cref="VerbOverride"/> and <see cref="AuthRole"/> carry the
+/// R19 <c>@route</c>/verb/<c>@auth</c> annotations (#1846), mirroring <see cref="CommandDecl"/>'s field
+/// set exactly — same names, same order, same fall-back-to-<c>null</c> meaning — so a reader who knows
+/// how a command is annotated needs to learn nothing new for a factory. Plain strings: an HTTP method
+/// and a path template, not a framework type.</para>
 /// </summary>
 public sealed record FactoryDecl(
     string Name,
     IReadOnlyList<Param> Parameters,
-    IReadOnlyList<CommandStmt> Body) : KoineNode;
+    IReadOnlyList<CommandStmt> Body,
+    string? RouteOverride = null,
+    string? VerbOverride = null,
+    string? AuthRole = null) : KoineNode
+{
+    /// <summary>
+    /// Where the API annotations sat and how many verbs were seen (R19); <c>null</c> when the factory
+    /// carries none. Consumed by <c>Semantics/</c> to position <c>@route</c>/verb/<c>@auth</c> diagnostics
+    /// — the same carrier <see cref="CommandDecl.ApiAnnotations"/> uses.
+    /// </summary>
+    public ApiAnnotationInfo? ApiAnnotations { get; init; }
+}
 
 /// <summary>Base type for the statements that make up a command body.</summary>
 public abstract record CommandStmt : KoineNode;

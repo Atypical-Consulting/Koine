@@ -413,7 +413,7 @@ public class RouteDerivationTests
         RouteDerivation.ForFactory(entity, factory).RequestShape.ShouldBeEmpty();
     }
 
-    /// <summary>A factory carries no R19 annotations (#1219) — no route tokens to resolve.</summary>
+    /// <summary>An unannotated factory's conventional route has no tokens, so nothing to resolve.</summary>
     [Fact]
     public void ForFactory_resolves_no_token_bindings()
     {
@@ -421,5 +421,126 @@ public class RouteDerivationTests
         var factory = new FactoryDecl("Open", Parameters: [], Body: []);
 
         RouteDerivation.ForFactory(entity, factory).TokenBindings.ShouldBeEmpty();
+    }
+
+    // ---- ForFactory honors R19 annotations (#1846) ----------------------------
+
+    /// <summary>All three override axes reach a factory's <see cref="RouteInfo"/> at once, exactly as
+    /// <see cref="ForCommand_honors_route_verb_and_auth_overrides"/> pins for a command (#1846).</summary>
+    [Fact]
+    public void ForFactory_honors_route_verb_and_auth_overrides()
+    {
+        var entity = Order();
+        var factory = new FactoryDecl(
+            "Open",
+            Parameters: [new Param("customer", new TypeRef("CustomerId"))],
+            Body: [],
+            RouteOverride: "/orders",
+            VerbOverride: "PUT",
+            AuthRole: "admin");
+
+        var info = RouteDerivation.ForFactory(entity, factory);
+
+        info.Verb.ShouldBe("PUT");
+        info.Route.ShouldBe("/orders");
+        info.AuthRole.ShouldBe("admin");
+        info.OperationId.ShouldBe("Order_Open");
+        info.RequestShape.ShouldBeSameAs(factory.Parameters);
+        // The response is still the created aggregate — @route never redefines what a factory returns.
+        info.ResponseShape.ShouldBe(new TypeRef(entity.Name));
+    }
+
+    /// <summary>
+    /// Each axis falls back to the convention on its own — annotating the route leaves the verb at
+    /// <c>POST</c>, annotating the verb leaves the conventional path, and <c>@auth</c> moves neither.
+    /// </summary>
+    [Theory]
+    [InlineData(null, null, null, "POST", "/order/open", null)]
+    [InlineData("/orders", null, null, "POST", "/orders", null)]
+    [InlineData(null, "PUT", null, "PUT", "/order/open", null)]
+    [InlineData(null, null, "admin", "POST", "/order/open", "admin")]
+    [InlineData("/orders", "PATCH", "admin", "PATCH", "/orders", "admin")]
+    public void ForFactory_applies_each_override_axis_independently(
+        string? routeOverride,
+        string? verbOverride,
+        string? authRole,
+        string expectedVerb,
+        string expectedRoute,
+        string? expectedAuthRole)
+    {
+        var factory = new FactoryDecl(
+            "Open",
+            Parameters: [],
+            Body: [],
+            RouteOverride: routeOverride,
+            VerbOverride: verbOverride,
+            AuthRole: authRole);
+
+        var info = RouteDerivation.ForFactory(Order(), factory);
+
+        info.Verb.ShouldBe(expectedVerb);
+        info.Route.ShouldBe(expectedRoute);
+        info.AuthRole.ShouldBe(expectedAuthRole);
+    }
+
+    /// <summary>An annotated factory's <c>{token}</c> binds to the parameter of that name, exactly as a
+    /// command's does — the token machinery (#1748) needed no change to serve factories.</summary>
+    [Fact]
+    public void ForFactory_binds_a_route_token_to_a_matching_parameter()
+    {
+        var factory = new FactoryDecl(
+            "Open",
+            Parameters: [new Param("customer", new TypeRef("CustomerId"))],
+            Body: [],
+            RouteOverride: "/orders/{customer}");
+
+        RouteTokenBinding binding = RouteDerivation.ForFactory(Order(), factory).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Token.ShouldBe("customer");
+        binding.Target.ShouldBe(RouteTokenTarget.Member);
+        binding.Member!.Name.ShouldBe("customer");
+        binding.Type.ShouldBe(new TypeRef("CustomerId"));
+    }
+
+    /// <summary>
+    /// The one place a factory deliberately DIVERGES from a command: an <c>{id}</c> token with no
+    /// matching parameter is <see cref="RouteTokenTarget.Unbound"/>, not
+    /// <see cref="RouteTokenTarget.Identity"/>. A factory mints its identity, so its emitted request
+    /// record has no identity property to rebind — an <c>Identity</c> binding would emit uncompilable
+    /// C#. <c>Semantics/</c> warns (KOI1215) on exactly this shape, so the two layers agree.
+    /// </summary>
+    [Fact]
+    public void ForFactory_leaves_an_id_token_unbound_because_a_factory_mints_its_identity()
+    {
+        var factory = new FactoryDecl("Open", Parameters: [], Body: [], RouteOverride: "/orders/{id}");
+
+        RouteTokenBinding binding = RouteDerivation.ForFactory(Order(), factory).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Target.ShouldBe(RouteTokenTarget.Unbound);
+        binding.Member.ShouldBeNull();
+        binding.Type.ShouldBeNull();
+
+        // The very same route on a COMMAND does bind to the aggregate identity — the divergence is real,
+        // not an accident of this fixture.
+        var command = new CommandDecl("Place", Parameters: [], Body: [], RouteOverride: "/orders/{id}");
+        RouteDerivation.ForCommand(Order(), command).TokenBindings.ShouldHaveSingleItem()
+            .Target.ShouldBe(RouteTokenTarget.Identity);
+    }
+
+    /// <summary>A factory that DOES declare an <c>id</c> parameter (the explicit-id opt-in for a
+    /// non-Guid identity, #324) binds <c>{id}</c> by ordinary name-match.</summary>
+    [Fact]
+    public void ForFactory_binds_an_id_token_to_an_explicit_id_parameter()
+    {
+        var factory = new FactoryDecl(
+            "Open",
+            Parameters: [new Param("id", new TypeRef("OrderId"))],
+            Body: [],
+            RouteOverride: "/orders/{id}");
+
+        RouteTokenBinding binding = RouteDerivation.ForFactory(Order(), factory).TokenBindings.ShouldHaveSingleItem();
+
+        binding.Target.ShouldBe(RouteTokenTarget.Member);
+        binding.Type.ShouldBe(new TypeRef("OrderId"));
     }
 }
