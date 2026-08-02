@@ -506,8 +506,11 @@ public sealed partial class JavaEmitter
         JavaEmitContext emit, EmitClause em, JavaExpressionTranslator translator,
         string eventsField, string receiver, string? hoistedResultExpr = null)
     {
+        // Passes the context for the same reason `publish` does (#1834): `ValidateEmit` resolves the
+        // event name context-aware, so this must too or it builds the payload from another context's
+        // same-named declaration. The two halves are one contract.
         (var expr, var hoisted) = BuildEventExpression(
-            emit, em.EventName, em.Args, translator, hoistedResultExpr: hoistedResultExpr);
+            emit, em.EventName, em.Args, translator, translator.Context, hoistedResultExpr);
 
         return expr is null
             ? null
@@ -545,11 +548,11 @@ public sealed partial class JavaEmitter
     /// than being re-derived per clause. Arguments bind by field name in the event record's declaration
     /// order, with a bare enum member qualified; a missing field falls back to a benign type default so
     /// the emitted code still compiles.
-    /// <para><paramref name="context"/> is the bounded context the NAME resolves within. A
-    /// <c>publish</c> passes it (its validator, <c>ValidatePublish</c>, resolves context-aware, so the
-    /// emitter must too or it builds the payload from another context's same-named declaration); an
-    /// <c>emit</c> leaves it null, which falls back to the flat lookup its own flat validator agrees
-    /// with.</para>
+    /// <para><paramref name="context"/> is the bounded context the NAME resolves within, and BOTH
+    /// clauses pass it: <c>ValidatePublish</c> has always resolved context-aware, and <c>ValidateEmit</c>
+    /// does since #1834, so the emitter must too or it builds the payload from another context's
+    /// same-named declaration. Null falls back to the flat, last-write-wins lookup — no caller relies on
+    /// that any more.</para>
     /// <para><paramref name="hoistedResultExpr"/> is the behavior's rendered <c>result</c> expression,
     /// when it has one (#1838). An argument whose WHOLE rendering equals it is replaced by
     /// <see cref="ResultHoist.LocalName"/> and <c>Hoisted</c> comes back true, so the caller knows to

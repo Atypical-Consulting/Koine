@@ -564,8 +564,11 @@ public sealed partial class RustEmitter
         RustExpressionTranslator translator, RustTypeMapper typeMapper, string eventsField,
         HoistedResult? hoistedResult = null)
     {
+        // Passes the context for the same reason `publish` does (#1834): `ValidateEmit` resolves the
+        // event name context-aware, so this must too or it builds the payload from another context's
+        // same-named declaration. The two halves are one contract.
         (var expr, var hoisted) = BuildEventExpression(
-            emit, emitClause.EventName, emitClause.Args, translator, typeMapper, hoistedResult: hoistedResult);
+            emit, emitClause.EventName, emitClause.Args, translator, typeMapper, translator.Context, hoistedResult);
 
         return expr is null
             ? null
@@ -583,18 +586,21 @@ public sealed partial class RustEmitter
     private static string? BuildEmitExpression(
         RustEmitContext emit, EmitClause emitClause,
         RustExpressionTranslator translator, RustTypeMapper typeMapper) =>
-        BuildEventExpression(emit, emitClause.EventName, emitClause.Args, translator, typeMapper).Expr;
+        // Passes the context for the same reason `publish` does (#1834): `ValidateEmit` resolves the
+        // event name context-aware, so this must too or it builds the payload from another context's
+        // same-named declaration. The two halves are one contract.
+        BuildEventExpression(emit, emitClause.EventName, emitClause.Args, translator, typeMapper, translator.Context).Expr;
 
     /// <summary>
     /// The name/payload-only core of <see cref="BuildEmitExpression"/>, shared verbatim with a
     /// <c>publish</c> clause (R19) — the two clauses carry the same <see cref="EmitArg"/> payload shape
     /// and both lower to a <c>DomainEvent</c> variant, so the argument binding, numeric widening, and
     /// optional-wrapping rules must stay identical rather than be re-derived per clause.
-    /// <para><paramref name="context"/> is the bounded context the NAME resolves within. A
-    /// <c>publish</c> passes it (its validator, <c>ValidatePublish</c>, resolves context-aware, so the
-    /// emitter must too or it builds the payload from another context's same-named declaration); an
-    /// <c>emit</c> leaves it null, which falls back to the flat lookup its own flat validator agrees
-    /// with.</para>
+    /// <para><paramref name="context"/> is the bounded context the NAME resolves within, and BOTH
+    /// clauses pass it: <c>ValidatePublish</c> has always resolved context-aware, and <c>ValidateEmit</c>
+    /// does since #1834, so the emitter must too or it builds the payload from another context's
+    /// same-named declaration. Null falls back to the flat, last-write-wins lookup — no caller relies on
+    /// that any more.</para>
     /// <para><paramref name="hoistedResult"/> is the command's <c>result</c> value, when it has one
     /// (#1838). An argument whose WHOLE BARE rendering equals <see cref="HoistedResult.Inner"/> — before
     /// this site's numeric widening and <c>Some(...)</c> wrap, and parenthesis-stripped on both sides —
@@ -631,7 +637,12 @@ public sealed partial class RustEmitter
                 return "Default::default()"; // validator guarantees presence; defensive
             }
 
-            var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+            // Context-aware, like the name lookup above (#1834): an explicit `Context.Type` qualifier
+            // wins, else the enclosing context — otherwise a same-named enum in a sibling context
+            // decides whether this payload argument is rendered as an enum member.
+            var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum
+                ? m.Type.Name
+                : null;
             var owned = translator.TranslateOwned(value, expectedEnum);
 
             // Matched BEFORE this site's own coercions, on the parenthesis-stripped bare rendering —

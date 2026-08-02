@@ -189,11 +189,19 @@ public sealed partial class CSharpEmitter
         var policyType = CSharpNaming.ToPascalCase(policy.Name) + "Policy";
         var iface = "I" + policyType;
 
+        var context = ContextOf(ns);
+
         // Render the reaction sketch with event fields rooted at the handler param `e`.
-        IReadOnlyList<Member> eventMembers = index.TryGetDecl(policy.EventName, out TypeDecl ed) && ed is EventDecl ev
+        //
+        // The trigger is resolved CONTEXT-AWARE, in lockstep with `ValidatePolicies` (#1849): two
+        // contexts may each legally declare a same-named event with DIFFERENT payloads (R13.2/R14),
+        // and the flat ModelIndex view is last-write-wins. Resolving without a context handed this
+        // policy the OTHER context's member list, so a reaction argument naming a real field of the
+        // local event was not recognised as one and silently lost its `e.` receiver.
+        IReadOnlyList<Member> eventMembers = index.TryGetDecl(context, policy.EventName, out TypeDecl ed) && ed is EventDecl ev
             ? ev.Members
             : Array.Empty<Member>();
-        var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e", context: ContextOf(ns), options: _options);
+        var translator = new CSharpExpressionTranslator(index, eventMembers, enumMemberToType, memberReceiver: "e", context: context, options: _options);
         PolicyReaction r = policy.Reaction;
         // Reference-only emit must not leak business logic: the translated argument expressions are
         // elided to `…`, keeping only the command's parameter-name contract in the doc sketch.

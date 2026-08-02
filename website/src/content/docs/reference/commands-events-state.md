@@ -503,4 +503,4 @@ context Payments version 1 {
   `policy … when Event then Target.command(…)`.
 - [Invariants (§10)](/Koine/reference/invariants/) — the guard expression grammar shared with `requires` and `invariant`.
 - [Expressions (§9)](/Koine/reference/expressions/) — the expression grammar used in `requires`, `transition`, and `emit` payloads.
-- [Application layer & CQRS (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) — the `@route`/verb/`@auth` annotations a command shares with a `query`.
+- [Application layer & CQRS (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) — the `@route`/verb/`@auth` annotations a command shares with a `query` and a `create` factory.

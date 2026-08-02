@@ -1032,6 +1032,73 @@ public class R18CSharpApplicationTests
         yaml.ShouldContain($"{route}:");
     }
 
+    /// <summary>The annotated sibling of <see cref="MultiWordFactoryFixture"/> (#1846): one factory
+    /// carrying all three R19 axes at once — an authored path, an overridden verb, and a role.</summary>
+    internal const string AnnotatedFactoryFixture = """
+        context Sales {
+          aggregate Order root Order {
+            repository {
+              operations: add, getById
+            }
+
+            entity Order identified by OrderId {
+              @route("/orders")
+              @put
+              @auth("admin")
+              create open(customer: CustomerId) {
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Cross-target parity for an <b>annotated</b> factory (#1846) — the sibling of
+    /// <see cref="Api_layer_factory_route_matches_the_openapi_path_key_for_the_same_model"/>. The
+    /// overridden verb has to pick <c>MapPut</c> over the conventional <c>MapPost</c>, <c>@auth</c> has to
+    /// append <c>.RequireAuthorization</c>, and the C# path and the <c>openapi</c> <c>paths</c> key are
+    /// both asserted against the one <see cref="RouteDerivation.ForFactory"/> answer rather than against a
+    /// literal — so neither consumer can drift from the shared derivation, or from the other.
+    /// </summary>
+    [Fact]
+    public void Api_layer_annotated_factory_route_and_verb_match_the_openapi_operation()
+    {
+        var endpoints = File(Emit(ApiOn, AnnotatedFactoryFixture), "SalesEndpoints.cs").Contents;
+
+        var openApiResult = new KoineCompiler().Compile(
+            new[] { new SourceFile("sales.koi", AnnotatedFactoryFixture) }, new OpenApiEmitter());
+        openApiResult.Success.ShouldBeTrue(string.Join("\n", openApiResult.Diagnostics.Select(d => d.ToString())));
+        var yaml = openApiResult.Files.ShouldHaveSingleItem().Contents;
+
+        var entity = new EntityDecl("Order", "OrderId", [], [], [], [], []);
+        var factory = new FactoryDecl("Open", Parameters: [], Body: [],
+            RouteOverride: "/orders", VerbOverride: "PUT", AuthRole: "admin");
+        RouteInfo info = RouteDerivation.ForFactory(entity, factory);
+        info.Route.ShouldBe("/orders");
+        info.Verb.ShouldBe("PUT");
+
+        // C#: the @put picks the per-verb mapping call, and the conventional POST /order/open is gone.
+        endpoints.ShouldContain(
+            $"endpoints.MapPut(\"{info.Route}\", async (OrderOpenRequest request, OrderOpenHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldNotContain("MapPost");
+        endpoints.ShouldNotContain("/order/open");
+        endpoints.ShouldContain("}).RequireAuthorization(\"admin\");");
+
+        // openapi: the very same path string keys the document, under the same (lower-cased) verb.
+        yaml.ShouldContain($"{info.Route}:");
+        yaml.ShouldContain($"{info.Verb.ToLowerInvariant()}:");
+        yaml.ShouldNotContain("post:");
+    }
+
+    /// <summary>And the annotated factory's <c>MapPut</c>/<c>RequireAuthorization</c> chain still has to
+    /// resolve against the ASP.NET shared framework, not merely read right (#1148's harness).</summary>
+    [Fact]
+    public void Api_layer_annotated_factory_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn, AnnotatedFactoryFixture));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
     [Fact]
     public void Api_layer_nullable_not_found_maps_a_missing_aggregate_to_404()
     {

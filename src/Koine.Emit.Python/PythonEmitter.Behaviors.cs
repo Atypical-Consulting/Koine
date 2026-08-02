@@ -547,7 +547,9 @@ public sealed partial class PythonEmitter
         EmitClause emit, PythonExpressionTranslator translator, ModelIndex index, string targetPrefix,
         string? hoistedResultExpr = null)
     {
-        if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
+        // Context-aware, in lockstep with `ValidateEmit` (#1834) — see BuildPublishStatement below:
+        // the flat ModelIndex view is last-write-wins across same-named events in sibling contexts.
+        if (!index.TryGetDecl(translator.Context, emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
             return ($"# unknown event '{emit.EventName}'", false);
         }

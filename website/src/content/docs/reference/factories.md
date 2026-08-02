@@ -33,7 +33,7 @@ A factory is introduced with the `create` keyword followed by a name and an opti
 
 ```ebnf
 factoryDecl
-    : 'create' Identifier ( '(' paramList? ')' )? '{' factoryStmt* '}'
+    : annotation* 'create' Identifier ( '(' paramList? ')' )? '{' factoryStmt* '}'
     ;
 
 factoryStmt
@@ -70,6 +70,8 @@ The body of a factory is a fixed sequence of clauses: zero or more `requires` gu
 The name `Identifier` is PascalCased in the emitted C# static method. The parameter list follows
 the same `softName ':' type_ref` convention as commands (see
 [Commands, events & state (§11)](/Koine/reference/commands-events-state/)).
+The leading `annotation*` carries the optional HTTP surface — `@route`, a verb, `@auth` — exactly as a
+command's does; see [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations).
 The expression grammar used in `requiresClause` and `initialization` is specified in
 [Expressions (§9)](/Koine/reference/expressions/).
 
@@ -359,3 +361,4 @@ for how `DomainEvents` is collected and cleared.
 - [Value objects (§5)](/Koine/reference/value-objects/) — invariants, operators, and derived members.
 - [Commands, events & state (§11)](/Koine/reference/commands-events-state/) — the shared `requires`, `emit`, and `->` syntax used in commands.
 - [Expressions (§9)](/Koine/reference/expressions/) — the expression grammar used in guards and initializations.
+- [Application layer & CQRS (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) — the `@route`/verb/`@auth` annotations a factory shares with a `command` and a `query`.

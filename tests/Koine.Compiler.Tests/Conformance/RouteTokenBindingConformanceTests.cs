@@ -56,4 +56,51 @@ public class RouteTokenBindingConformanceTests
         // identical token as the corresponding JSON Schema representation of a Guid.
         yaml.ShouldContain("type: string\n            format: uuid");
     }
+
+    /// <summary>
+    /// A factory carries the same <c>@route</c> axis since #1846, so it needs the same anti-drift guard.
+    /// The <c>{customer}</c> token name-matches the factory's own <c>customer</c> parameter — the ONLY way
+    /// a factory's token ever binds, since a factory mints its identity and so has no identity fallback
+    /// (<c>RouteDerivation.ForFactory</c> passes <c>entity: null</c>) — and both targets have to resolve it
+    /// to that member and to that member's type.
+    /// </summary>
+    private const string FactoryFixture = """
+        context Ordering {
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              customer: CustomerId
+
+              @route("/orders/{customer}")
+              create open(customer: CustomerId) {
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void The_csharp_and_openapi_targets_agree_on_a_factorys_member_bound_route_token()
+    {
+        var csharpOptions = CSharpEmitterOptions.Empty with
+        {
+            Layers = new HashSet<CSharpLayer> { CSharpLayer.Domain, CSharpLayer.Application, CSharpLayer.Api },
+        };
+        var csharpResult = new KoineCompiler().Compile(FactoryFixture, new CSharpEmitter(csharpOptions));
+        csharpResult.Success.ShouldBeTrue(string.Join("\n", csharpResult.Diagnostics.Select(d => d.ToString())));
+
+        var openApiResult = new KoineCompiler().Compile(FactoryFixture, new OpenApiEmitter());
+        openApiResult.Success.ShouldBeTrue(string.Join("\n", openApiResult.Diagnostics.Select(d => d.ToString())));
+
+        var endpoints = csharpResult.Files.Single(f => f.RelativePath.EndsWith("OrderingEndpoints.cs", StringComparison.Ordinal)).Contents;
+        var yaml = openApiResult.Files.Single(f => f.RelativePath.EndsWith("openapi.yaml", StringComparison.Ordinal)).Contents;
+
+        // Same name: both resolve the token "customer" to the factory's `customer` parameter, and the C#
+        // side re-binds the request record from it so the URL and the created aggregate cannot disagree.
+        endpoints.ShouldContain("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"customer\")] CustomerId customer");
+        endpoints.ShouldContain("request with { Customer = customer }");
+        yaml.ShouldContain("name: customer\n          in: path");
+
+        // Same type: CustomerId is a Guid-wrapping id value object on both sides.
+        yaml.ShouldContain("type: string\n            format: uuid");
+    }
 }

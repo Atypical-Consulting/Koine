@@ -957,7 +957,9 @@ public sealed partial class TypeScriptEmitter
         EmitClause emit, TypeScriptExpressionTranslator translator, ModelIndex index,
         string targetPrefix, string? context, string? hoistedResultExpr = null)
     {
-        if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
+        // Context-aware, in lockstep with `ValidateEmit` (#1834) — see BuildPublishStatement above:
+        // the flat ModelIndex view is last-write-wins across same-named events in sibling contexts.
+        if (!index.TryGetDecl(context, emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
             return ($"/* unknown event '{emit.EventName}' */", false);
         }

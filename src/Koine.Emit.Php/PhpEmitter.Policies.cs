@@ -29,8 +29,12 @@ public sealed partial class PhpEmitter
 
         // The reaction sketch renders the target command's args rooted at the handler parameter
         // `$event`, so a value like `capturedAmount` reads as `$event->capturedAmount`.
+        //
+        // Resolved CONTEXT-AWARE, in lockstep with `ValidatePolicies` and every other emitter
+        // (#1849): the flat ModelIndex view is last-write-wins across same-named events in sibling
+        // contexts, so resolving without a context rooted the reaction in the wrong payload.
         IReadOnlyList<Member> eventMembers =
-            emit.Index.TryGetDecl(policy.EventName, out TypeDecl ed) && ed is EventDecl ev
+            emit.Index.TryGetDecl(contextName, policy.EventName, out TypeDecl ed) && ed is EventDecl ev
                 ? ev.Members
                 : Array.Empty<Member>();
         var translator = new PhpExpressionTranslator(

@@ -1986,7 +1986,11 @@ public sealed partial class CSharpEmitter : IEmitter
         EmitClause emit, CSharpExpressionTranslator translator, ModelIndex index,
         string targetPrefix = "", string? hoistedResultExpr = null)
     {
-        if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
+        // Resolved CONTEXT-AWARE, in lockstep with `ValidateEmit` (#1834): two contexts may each
+        // legally declare a same-named domain event with DIFFERENT payloads (R13.2/R14), and the flat
+        // ModelIndex view is last-write-wins — so resolving without a context built the payload from
+        // whichever declaration happened to be indexed last, i.e. from the other context's event.
+        if (!index.TryGetDecl(translator.Context, emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
             return ($"/* unknown event '{emit.EventName}' */", false);
         }
@@ -2005,7 +2009,12 @@ public sealed partial class CSharpEmitter : IEmitter
                 return "default!"; // validator guarantees presence; defensive
             }
 
-            var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
+            // Context-aware, like the name lookup above (#1834): an explicit `Context.Type` qualifier
+            // wins, else the enclosing context — otherwise a same-named enum in a sibling context
+            // decides whether this payload argument is rendered as an enum member.
+            var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum
+                ? f.Type.Name
+                : null;
             var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
@@ -2059,7 +2068,12 @@ public sealed partial class CSharpEmitter : IEmitter
                 return "default!"; // validator guarantees presence; defensive
             }
 
-            var expectedEnum = index.Classify(f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
+            // Context-aware, like the name lookup above (#1834): an explicit `Context.Type` qualifier
+            // wins, else the enclosing context — otherwise a same-named enum in a sibling context
+            // decides whether this payload argument is rendered as an enum member.
+            var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum
+                ? f.Type.Name
+                : null;
             var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.

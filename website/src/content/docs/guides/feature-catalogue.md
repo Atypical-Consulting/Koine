@@ -140,7 +140,7 @@ See [application layer & CQRS](/Koine/reference/application-cqrs/) and the
 | Application service | `service OrderingService { usecase PlaceOrder(…): OrderId }` | `IOrderingService` with one async method per use case (`Task`/`Task<T>`; `List<T>` params → `IReadOnlyList<T>`) | `Ordering.IOrderingService` |
 | Read model + projection | `readmodel OrderSummary from Order { id  customer  lineCount: Int = lines.count }` | a `sealed record` + a static `ToOrderSummary(this Order src)` projection mapper | `Menu.MenuItem`, `Ordering.OrderSummary` |
 | Query object | `query OrdersByStatus(status: OrderStatus): List<OrderSummary>` | a query DTO `record` + the shared `Koine.Runtime.IQueryHandler<TQuery, TResult>` | `PizzasBySize`, `PizzaByCode`, `OrdersByStatus` |
-| API annotations | `@route("/orders/{id}") @put @auth("admin")` before a `command` or `query` | nothing in the domain C#; with `--layers api` the endpoint becomes `endpoints.MapPut("/orders/{id}", …).RequireAuthorization("admin")`, and with `--target openapi` the operation is keyed at that path/verb with a `security` requirement | — |
+| API annotations | `@route("/orders/{id}") @put @auth("admin")` before a `command`, a `query` or a `create` factory | nothing in the domain C#; with `--layers api` the endpoint becomes `endpoints.MapPut("/orders/{id}", …).RequireAuthorization("admin")`, and with `--target openapi` the operation is keyed at that path/verb with a `security` requirement | — |
 
 :::note
 A query's result type is required and must be a read model (or `List<readmodel>`). `IQueryHandler<TQuery, TResult>`
