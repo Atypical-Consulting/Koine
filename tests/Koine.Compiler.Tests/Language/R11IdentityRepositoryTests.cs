@@ -260,7 +260,7 @@ public class R11IdentityRepositoryTests
             """;
 
         var run = Task.Run(() => Diagnose(src));
-        var finished = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10)));
+        var finished = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
         finished.ShouldBeSameAs(run, "the hash-compatibility check must terminate on a recursive value-object graph");
     }
 
