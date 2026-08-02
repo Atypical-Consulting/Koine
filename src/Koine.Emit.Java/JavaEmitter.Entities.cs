@@ -394,7 +394,7 @@ public sealed partial class JavaEmitter
         //    the event RECORDS would drift from the one the behavior RETURNS.
         ResultClause? resultClause = cmd.Body.OfType<ResultClause>().FirstOrDefault();
         string? resultExpr = resultClause is { } result
-            ? translator.Translate(result.Value, JavaExpressionTranslator.NameMode.Property)
+            ? translator.Translate(result.Value, JavaExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
 
         //    The statements are BUILT here and WRITTEN below: the binding has to precede the first
