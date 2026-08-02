@@ -344,12 +344,14 @@ public class PolicyCrossContextResolutionTests
     /// shared overload and this test pins them to the same answer. Revert any of the four
     /// <b>newly-converted</b> sites — validator, C#, Python, PHP — and this fails; TypeScript and Java
     /// were already context-first, and are pinned here against a future flattening.</para>
-    /// <para><b>Scope of the guarantee.</b> "One answer" means the emit-time sites listed above. Two
-    /// known consumers stay outside it: <c>ScenarioFanOutResolver</c> matches policies model-wide by
-    /// bare event name (deliberately, and predating this rule), and <c>ModelIndex.TryGetDeclIn</c>
-    /// resolves only local declarations plus unambiguous imports — a type made visible purely by a
-    /// context-map permit (<c>conformist</c> and friends, with no <c>import</c>) still falls through to
-    /// the flat view. Both are tracked separately; neither is introduced here.</para>
+    /// <para><b>Scope of the guarantee.</b> "One answer" means the emit-time sites listed above, but the
+    /// two consumers this remark used to carve out as exceptions are no longer that: <c>ModelIndex
+    /// .TryGetDeclIn</c> has resolved a context-map-permit-visible type (<c>conformist</c> and friends,
+    /// with no <c>import</c>) since #1853 — see <see cref="PermitVisibleCrossContextResolutionTests"/> —
+    /// and <c>ScenarioFanOutResolver</c>, which matched policies model-wide by bare event name, now uses
+    /// that same seam to compare a candidate policy's resolved trigger DECLARATION against the emitted
+    /// one, dropping (and reporting) a same-named policy in an unrelated context — #1854, pinned in
+    /// <c>ScenarioExecutionTests</c>' fan-out tests.</para>
     /// </remarks>
     [Theory]
     [InlineData(false)]

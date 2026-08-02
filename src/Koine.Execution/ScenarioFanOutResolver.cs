@@ -40,19 +40,30 @@ internal sealed record FanOutTarget(
 internal sealed record FanOutSubscriber(string Context, string EventName);
 
 /// <summary>
+/// A policy whose trigger event NAME matched the emitted event but whose DECLARATION did not (#1854):
+/// resolved from ITS OWN declaring context, <see cref="PolicyName"/>'s trigger names a different event
+/// than the one actually emitted — two bounded contexts each legally declaring an <c>event</c> with the
+/// same simple name (R13.2), a coincidence rather than a connection. Reported so the drop is visible
+/// rather than silent; never dispatched as a <see cref="FanOutTarget"/>.
+/// </summary>
+internal sealed record FanOutDroppedPolicy(string Context, string PolicyName, string EventName);
+
+/// <summary>
 /// What the model declares downstream of one emitted event: the reactions that can really be RUN
-/// (<see cref="Executable"/>) and the ones it only DECLARES (<see cref="DeclaredOnly"/>). Both lists
-/// are deterministically ordered.
+/// (<see cref="Executable"/>), the ones it only DECLARES (<see cref="DeclaredOnly"/>), and the
+/// name-matched policies that were DROPPED because their trigger resolved to a different declaration
+/// (<see cref="Dropped"/>). All three lists are deterministically ordered.
 /// </summary>
 internal sealed record FanOutResolution(
     IReadOnlyList<FanOutTarget> Executable,
-    IReadOnlyList<FanOutSubscriber> DeclaredOnly)
+    IReadOnlyList<FanOutSubscriber> DeclaredOnly,
+    IReadOnlyList<FanOutDroppedPolicy> Dropped)
 {
     /// <summary>Nothing downstream — the answer for an unknown or un-reacted-to event.</summary>
-    public static readonly FanOutResolution Empty = new([], []);
+    public static readonly FanOutResolution Empty = new([], [], []);
 
-    /// <summary>True when the event has no declared downstream of either kind.</summary>
-    public bool IsEmpty => Executable.Count == 0 && DeclaredOnly.Count == 0;
+    /// <summary>True when the event has no declared downstream, and nothing was dropped either.</summary>
+    public bool IsEmpty => Executable.Count == 0 && DeclaredOnly.Count == 0 && Dropped.Count == 0;
 }
 
 /// <summary>
@@ -72,11 +83,20 @@ internal sealed record FanOutResolution(
 /// step.</description></item>
 /// </list>
 ///
-/// <para>Policies are matched model-wide by event name, the way
-/// <see cref="ModelIndex.PoliciesTriggeredByEvent"/> builds the same graph; each one is resolved inside
-/// the context that DECLARES it, so a policy always reaches its own context's types first. The
-/// <c>emittingContext</c> argument therefore only scopes the integration-event branch, whose
-/// <c>subscribes</c> lines name the publisher explicitly.</para>
+/// <para>A policy's trigger is matched context-first (#1854), the same rule the validator's
+/// <c>ValidatePolicies</c> and every code emitter use (#1849): candidates are gathered by bare event
+/// NAME, then each is kept only when its trigger — resolved from ITS OWN declaring context via
+/// <see cref="ModelIndex.TryGetDecl(string?, string, out TypeDecl)"/>, the same context-first-then-flat
+/// ladder the validator calls — names the SAME declaration as the one <c>emittingContext</c> actually
+/// emitted. R13.2 lets two bounded contexts each declare an <c>event Shipped</c> with a different
+/// payload, and a bare name match alone cannot tell them apart — without this rule a policy in an
+/// unrelated context could fire for an event it never really reacts to. A policy naming an event with
+/// no local declaration, import, or context-map permit relation — but that is the model's only
+/// declaration of that name — still resolves via the same flat fallback the validator falls back to,
+/// so it is unaffected. A policy dropped this way is reported, never silently skipped (see
+/// <see cref="FanOutResolution.Dropped"/>). The reaction TARGET, a few lines below, is — and always
+/// was — resolved declaring-context-first (its own context, then the rest of the model), so both
+/// halves of a reaction now agree on which context decides.</para>
 /// </summary>
 internal sealed class ScenarioFanOutResolver(SemanticModel sema)
 {
@@ -95,20 +115,33 @@ internal sealed class ScenarioFanOutResolver(SemanticModel sema)
             return FanOutResolution.Empty;
         }
 
-        IReadOnlyList<FanOutTarget> executable = ResolveExecutable(eventName);
+        (IReadOnlyList<FanOutTarget> executable, IReadOnlyList<FanOutDroppedPolicy> dropped) =
+            ResolveExecutable(emittingContext, eventName);
         IReadOnlyList<FanOutSubscriber> declaredOnly = ResolveDeclaredOnly(emittingContext, eventName);
-        return executable.Count == 0 && declaredOnly.Count == 0
+        return executable.Count == 0 && declaredOnly.Count == 0 && dropped.Count == 0
             ? FanOutResolution.Empty
-            : new FanOutResolution(executable, declaredOnly);
+            : new FanOutResolution(executable, declaredOnly, dropped);
     }
 
     // ------------------------------------------------------------------------
     // Executable: policy reactions.
     // ------------------------------------------------------------------------
 
-    private IReadOnlyList<FanOutTarget> ResolveExecutable(string eventName)
+    private (IReadOnlyList<FanOutTarget> Targets, IReadOnlyList<FanOutDroppedPolicy> Dropped) ResolveExecutable(
+        string emittingContext, string eventName)
     {
         var targets = new List<FanOutTarget>();
+        var dropped = new List<FanOutDroppedPolicy>();
+
+        // The event as declared where it was actually emitted — every name-matching policy's own
+        // trigger is compared against THIS declaration's identity, not the bare event name. Resolved
+        // via ModelIndex.TryGetDecl(context, name, out _) — the SAME context-first-then-flat-fallback
+        // ladder SemanticValidator.ValidatePolicies (SemanticValidator.cs:1180) and every code emitter
+        // use (#1849), not the narrower TryGetDeclIn alone: a policy naming an event with no local
+        // declaration, import, or context-map permit relation to it — but that is the model's ONLY
+        // declaration of that name — still validates today via the flat fallback, and must still
+        // dispatch here for the same reason.
+        _index.TryGetDecl(emittingContext, eventName, out TypeDecl emittedDecl);
 
         foreach (ContextNode ctx in _sema.Model.Contexts)
         {
@@ -116,6 +149,16 @@ internal sealed class ScenarioFanOutResolver(SemanticModel sema)
             {
                 if (!string.Equals(policy.EventName, eventName, StringComparison.Ordinal))
                 {
+                    continue;
+                }
+
+                // Resolved from the POLICY's OWN declaring context, through the identical ladder above.
+                // A same-named event declared (or otherwise resolved) in an unrelated context resolves
+                // to a DIFFERENT node, so it is dropped rather than dispatched.
+                if (!_index.TryGetDecl(ctx.Name, policy.EventName, out TypeDecl triggerDecl)
+                    || !ReferenceEquals(triggerDecl, emittedDecl))
+                {
+                    dropped.Add(new FanOutDroppedPolicy(ctx.Name, policy.Name, policy.EventName));
                     continue;
                 }
 
@@ -127,12 +170,19 @@ internal sealed class ScenarioFanOutResolver(SemanticModel sema)
         }
 
         // Deterministic: context, then entity, then member, then the declaring policy.
-        return targets
+        IReadOnlyList<FanOutTarget> orderedTargets = targets
             .OrderBy(t => t.Context, StringComparer.Ordinal)
             .ThenBy(t => t.EntityName, StringComparer.Ordinal)
             .ThenBy(t => t.MemberName, StringComparer.Ordinal)
             .ThenBy(t => t.PolicyName, StringComparer.Ordinal)
             .ToList();
+
+        IReadOnlyList<FanOutDroppedPolicy> orderedDropped = dropped
+            .OrderBy(d => d.Context, StringComparer.Ordinal)
+            .ThenBy(d => d.PolicyName, StringComparer.Ordinal)
+            .ToList();
+
+        return (orderedTargets, orderedDropped);
     }
 
     /// <summary>
