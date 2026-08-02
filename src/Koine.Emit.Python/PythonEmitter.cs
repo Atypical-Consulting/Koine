@@ -206,7 +206,13 @@ public sealed partial class PythonEmitter : IEmitter
             case EntityDecl entity:
                 var isRoot = ReferenceEquals(entity, root);
                 files.Add(EmitEntity(emit, entity, ns, isRoot, isRoot && versioned, typeMapper));
-                files.Add(EmitIdType(emit, entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
+                // #1848: an identity type the model ALSO declares explicitly (`value OrderId { … }`)
+                // is already emitted via the ValueObjectDecl case above — synthesizing a second one
+                // here would duplicate it under the same RelativePath and fail to compile.
+                if (!DeclaredIdentityValueObject.IsDeclaredIn(emit.Index, ContextOf(ns), entity.IdentityName))
+                {
+                    files.Add(EmitIdType(emit, entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
+                }
                 break;
             // A domain `event` and an `integration event` both emit as frozen-dataclass DTOs (Task 8).
             case EventDecl ev:

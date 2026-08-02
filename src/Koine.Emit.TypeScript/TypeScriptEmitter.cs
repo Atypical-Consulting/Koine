@@ -283,7 +283,13 @@ public sealed partial class TypeScriptEmitter : IEmitter
                 break;
             case EntityDecl entity:
                 files.Add(EmitEntity(emit, entity, ns, ReferenceEquals(entity, root), typeMapper));
-                files.Add(EmitIdType(emit, entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
+                // #1848: an identity type the model ALSO declares explicitly (`value OrderId { … }`)
+                // is already emitted via the ValueObjectDecl case above — synthesizing a second one
+                // here would duplicate it under the same RelativePath and fail to compile.
+                if (!DeclaredIdentityValueObject.IsDeclaredIn(emit.Index, ContextOf(ns), entity.IdentityName))
+                {
+                    files.Add(EmitIdType(emit, entity.IdentityName, ns, entity.IdStrategy, entity.IdBackingType));
+                }
                 break;
             case EventDecl ev:
                 files.Add(EmitEvent(emit, ev, ns, typeMapper));

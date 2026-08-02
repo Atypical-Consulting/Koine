@@ -41,8 +41,13 @@ public sealed partial class PhpEmitter
         string contextName,
         PhpTypeMapper typeMapper)
     {
-        // 1. Emit the branded identity value object.
-        files.Add(EmitIdType(entity.IdentityName, contextName, entity.IdStrategy, entity.IdBackingType));
+        // 1. Emit the branded identity value object — unless the model ALSO declares it explicitly
+        // (`value OrderId { … }`), which is already emitted via the ValueObjectDecl case elsewhere;
+        // synthesizing a second one here would duplicate it under the same RelativePath (#1848).
+        if (!DeclaredIdentityValueObject.IsDeclaredIn(emit.Index, contextName, entity.IdentityName))
+        {
+            files.Add(EmitIdType(entity.IdentityName, contextName, entity.IdStrategy, entity.IdBackingType));
+        }
 
         // 2. Emit the entity class itself.
         files.Add(EmitEntityClass(emit, entity, contextName, typeMapper));

@@ -31,7 +31,13 @@ public sealed partial class CSharpEmitter
         // The entity's ID value object lives in the context BASE namespace (R13.3) — not a
         // module sub-namespace — so any module's types can reference it via one `using`.
         // For a non-module entity the base namespace equals its own, so output is unchanged.
-        files.Add(EmitIdValueObject(emit, entity.IdentityName, ContextOf(ns), entity.IdStrategy, entity.IdBackingType));
+        // #1848: an identity type the model ALSO declares explicitly (`value OrderId { … }`) is
+        // already emitted via the normal ValueObjectDecl path — synthesizing a second one here
+        // would duplicate it under the same RelativePath and fail to compile.
+        if (!DeclaredIdentityValueObject.IsDeclaredIn(index, ContextOf(ns), entity.IdentityName))
+        {
+            files.Add(EmitIdValueObject(emit, entity.IdentityName, ContextOf(ns), entity.IdStrategy, entity.IdBackingType));
+        }
     }
 
     private EmittedFile EmitEntity(
