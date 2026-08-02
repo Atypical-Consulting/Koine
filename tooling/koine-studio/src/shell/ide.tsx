@@ -257,7 +257,7 @@ export function init(hooks: IdeHooks = {}): () => void {
   // needed. (The button stays index.html's element, so the controller's `domById(...)` lookups and the
   // test's getElementById are untouched.)
   const baseTitle = document.title;
-  const unsavedEl = domById('unsaved-indicator') as HTMLButtonElement;
+  const unsavedEl = domById<HTMLButtonElement>('unsaved-indicator');
   // <UnsavedIndicator> renders no tree of its own (it governs the static button via effects), so it
   // mounts into a throwaway holder rather than the button — keeping the reconciler off the button node.
   const unsavedHost = document.createElement('div');

@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe } from 'vitest-axe';
 import { EditorView } from '@codemirror/view';
-import { DEFAULT_SETTINGS, effectiveSettings } from '@/settings/persistence';
+import { DEFAULT_SETTINGS, effectiveSettings, type Settings } from '@/settings/persistence';
 
 // vi.mock is hoisted above module-scope consts, so the spies must come from vi.hoisted(). loadSettings()
 // returns a COMPLETE Settings incl the live secret `aiApiKey: 'sk-LIVE'` — settingsToJsonDoc must strip
 // it from the JSON seed, and jsonDocToSettings must re-inject it on a valid edit.
 const { saveSettings, loadSettings } = vi.hoisted(() => ({
-  saveSettings: vi.fn(),
-  loadSettings: vi.fn(() => ({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-LIVE' })),
+  saveSettings: vi.fn<(s: Settings) => void>(),
+  loadSettings: vi.fn((): Settings => ({ ...DEFAULT_SETTINGS, aiApiKey: 'sk-LIVE' })),
 }));
 // Partial mock: keep DEFAULT_SETTINGS, patchSettings, whenSecretsReady, … real (mountPreferencesPane
 // needs them) but swap save/load so the page's persist/read path is observable + deterministic.
@@ -681,7 +681,7 @@ describe('createSettingsPage', () => {
     expect(blobAfterTwo.lspTrace).toBe('verbose');
     expect(cbWs.onChange).toHaveBeenCalledTimes(1);
     // onChange receives user-level settings (not merged); verify the effective merge separately.
-    const effectiveAfterTwo = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
+    const effectiveAfterTwo = effectiveSettings(loadSettings(), WS_KEY);
     expect(effectiveAfterTwo.previewTarget).toBe('typescript');
     expect(effectiveAfterTwo.lspTrace).toBe('verbose');
 
@@ -698,7 +698,7 @@ describe('createSettingsPage', () => {
     // The effective merge now shows the revert: previewTarget is the User default, lspTrace stays.
     // onChange receives user-level settings; the host's effectiveSettings() is the source of truth.
     expect(cbWs.onChange).toHaveBeenCalledTimes(1);
-    const effectiveAfterOne = effectiveSettings(loadSettings(), WS_KEY) as typeof DEFAULT_SETTINGS;
+    const effectiveAfterOne = effectiveSettings(loadSettings(), WS_KEY);
     expect(effectiveAfterOne.previewTarget).toBe(DEFAULT_SETTINGS.previewTarget); // reverted to user default
     expect(effectiveAfterOne.lspTrace).toBe('verbose'); // still overridden
   });

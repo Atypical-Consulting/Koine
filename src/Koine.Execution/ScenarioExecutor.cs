@@ -666,7 +666,7 @@ internal sealed class ScenarioExecutor
             // D1: a cross-context subscription is DECLARED and not executable — every emitter gives it
             // only a bodiless handler seam — so it is said out loud and never fabricated into a step.
             //
-            // Reached from a real run since `publish X(…)` (#1796, ADR 0017): the emitted root records the
+            // Reached from a real run since `publish X(…)` (#1796, ADR 0019): the emitted root records the
             // published contract into its own `_integrationEvents` list, which RecordedEventsSince reads
             // beside `_domainEvents`. Said ONCE per event: a command publishing the same contract twice
             // makes the same statement about the same boundary, and repeating it would read as two

@@ -24,7 +24,7 @@ function stubRect(el: HTMLElement, rect: Partial<DOMRect>): void {
     y: 0,
     toJSON: () => ({}),
     ...rect,
-  } as DOMRect;
+  };
   el.getBoundingClientRect = () => full;
 }
 

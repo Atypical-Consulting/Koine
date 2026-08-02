@@ -29,7 +29,7 @@ beforeEach(() => {
 
 describe('TauriTerminalTransport', () => {
   it('subscribes to pty://data and pty://exit and starts the shell with the given cwd', async () => {
-    const transport = new TauriPlatform().createTerminal!();
+    const transport = new TauriPlatform().createTerminal();
     await transport.start('/work');
 
     expect(listenMock).toHaveBeenCalledWith('pty://data', expect.any(Function));
@@ -38,7 +38,7 @@ describe('TauriTerminalTransport', () => {
   });
 
   it('forwards a configured shell-args override to pty_start (#467)', async () => {
-    const transport = new TauriPlatform().createTerminal!();
+    const transport = new TauriPlatform().createTerminal();
     await transport.start('/work', ['-l', '-i']);
 
     // camelCase `shellArgs` maps to the Rust `shell_args` param; the override reaches the invoke verbatim.
@@ -46,7 +46,7 @@ describe('TauriTerminalTransport', () => {
   });
 
   it('omits shell args from pty_start when none are configured — empty or null (#467)', async () => {
-    const transport = new TauriPlatform().createTerminal!();
+    const transport = new TauriPlatform().createTerminal();
 
     // An empty list means "unset" — pty_start gets only the cwd, so the Rust default `["-l"]` wins.
     await transport.start('/work', []);
@@ -57,7 +57,7 @@ describe('TauriTerminalTransport', () => {
   });
 
   it('is idempotent: a restart detaches the prior listeners before re-subscribing (no leak)', async () => {
-    const transport = new TauriPlatform().createTerminal!();
+    const transport = new TauriPlatform().createTerminal();
 
     await transport.start(null);
     expect(listenMock).toHaveBeenCalledTimes(2); // one data + one exit listener
@@ -75,7 +75,7 @@ describe('TauriTerminalTransport', () => {
   });
 
   it('pause()/resume() invoke the host flow-control commands (#441)', async () => {
-    const transport = new TauriPlatform().createTerminal!();
+    const transport = new TauriPlatform().createTerminal();
 
     await transport.pause();
     expect(invokeMock).toHaveBeenCalledWith('pty_pause');
@@ -85,7 +85,7 @@ describe('TauriTerminalTransport', () => {
   });
 
   it('stop() detaches the live listeners and asks the host to stop the PTY', async () => {
-    const transport = new TauriPlatform().createTerminal!();
+    const transport = new TauriPlatform().createTerminal();
     await transport.start(null);
     await transport.stop();
 

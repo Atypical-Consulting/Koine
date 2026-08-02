@@ -332,6 +332,6 @@ export function extractRelationships(graph: DiagramGraph): RelationRow[] {
  * (optionally) select an element so the Properties inspector loads it — the Events table wires this
  * so clicking an event row inspects it, mirroring a diagram-node click. */
 export interface TableHandlers {
-  goto(span: SourceSpan): void;
-  onSelect?(qualifiedName: string, context: string): void;
+  goto: (span: SourceSpan) => void;
+  onSelect?: (qualifiedName: string, context: string) => void;
 }

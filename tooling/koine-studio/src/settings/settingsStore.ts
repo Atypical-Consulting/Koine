@@ -432,7 +432,7 @@ export function saveWorkspaceOverride<K extends keyof Settings>(
   field: K,
   value: Settings[K] | null,
 ): void {
-  patchJsonBlob(WORKSPACE_OVERRIDE_KEY_PREFIX + key, field as string, value);
+  patchJsonBlob(WORKSPACE_OVERRIDE_KEY_PREFIX + key, field, value);
 }
 
 /**
@@ -446,7 +446,7 @@ export function replaceWorkspaceOverrides(key: string, overrides: Partial<Settin
   const blob = readJsonObject(storageKey);
   for (const k of WORKSPACE_SCOPED_KEYS) {
     if (Object.prototype.hasOwnProperty.call(overrides, k)) {
-      blob[k as string] = overrides[k as keyof Settings];
+      blob[k as string] = overrides[k];
     } else {
       delete blob[k as string];
     }

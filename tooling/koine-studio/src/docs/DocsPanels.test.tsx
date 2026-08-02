@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import { AdrPanel, NotesPanel, type DocsPanelData, type DocsPanelHandlers } from '@/docs/DocsPanels';
-import { parseAdr } from '@/docs/adr';
+import { parseAdr, type Adr } from '@/docs/adr';
 import type { AdrFile, NoteFile } from '@/docs/docsStore';
 import { renderMarkdown as realRenderMarkdown } from '@/editor/markdown';
 
@@ -167,7 +167,7 @@ describe('AdrPanel', () => {
       fireEvent.click(container.querySelector<HTMLButtonElement>('.koi-docs-detail .koi-docs-save')!);
 
       expect(handlers.onSaveAdr).toHaveBeenCalledTimes(1);
-      const [file, adr] = (handlers.onSaveAdr as ReturnType<typeof vi.fn>).mock.calls[0];
+      const [file, adr] = (handlers.onSaveAdr as ReturnType<typeof vi.fn>).mock.calls[0] as [AdrFile, Adr];
       expect(file.number).toBe(3);
       expect(adr.number).toBe(3); // filename wins over the body's 999
       expect(adr.title).toBe('New title');

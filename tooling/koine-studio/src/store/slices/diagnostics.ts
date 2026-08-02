@@ -8,7 +8,7 @@ export interface DiagnosticsSlice {
   setDiagnostics(uri: string, diags: LspDiagnostic[]): void;
   dropDiagnostics(uri: string): void;
   renameDiagnostics(oldUri: string, newUri: string): void;
-  clearDiagnostics(): void;
+  clearDiagnostics: () => void;
 }
 
 export function createDiagnosticsSlice(

@@ -10,7 +10,7 @@ import { axe } from 'vitest-axe';
 
 import { MdHtml } from '@/ai/components/MdHtml';
 
-const root = (c: Element) => c.querySelector('.koi-md') as HTMLElement | null;
+const root = (c: Element) => c.querySelector('.koi-md');
 
 describe('MdHtml (#990)', () => {
   it('renders headings, lists and fenced code as elements inside .koi-md', () => {

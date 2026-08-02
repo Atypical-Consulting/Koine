@@ -31,8 +31,8 @@ export interface LifecycleBootDeps {
    *  store it is handed, not the global singleton — the composition root passes `appStore`. */
   store: AppStore;
   lsp: {
-    onServerRestart(cb: () => void): void;
-    start(): Promise<void>;
+    onServerRestart: (cb: () => void) => void;
+    start: () => Promise<void>;
     emitTargets(): Promise<Parameters<typeof setEmitTargets>[0]>;
   };
   /** The model carried in the URL hash (a shared playground link), or null. */
@@ -42,26 +42,26 @@ export interface LifecycleBootDeps {
   /** The Billing SEED — the default-workspace seed when there's no legacy scratch. */
   seed: string;
   /** Returns whether a workspace was actually opened, so the boot ladder can fall back to the default. */
-  importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<boolean>;
-  openWorkspaceWith1File(text: string): Promise<void>;
-  openFolderPath(folder: string, opts?: { recent?: boolean; userInitiated?: boolean }): Promise<{ ok: boolean }>;
+  importSharedWorkspace: (files: { relPath: string; text: string }[], active?: string) => Promise<boolean>;
+  openWorkspaceWith1File: (text: string) => Promise<void>;
+  openFolderPath: (folder: string, opts?: { recent?: boolean; userInitiated?: boolean }) => Promise<{ ok: boolean }>;
   /** Host capability: may the cold-boot ladder silently re-open this persisted last-workspace token? */
-  isAutoRestorableToken(token: string): Promise<boolean>;
+  isAutoRestorableToken: (token: string) => Promise<boolean>;
   /** True when a workspace is already open (the user opened one while the server was still connecting),
    *  so the intent-less restore ladder must not tear it down. */
   hasOpenWorkspace(): boolean;
   /** Overlays.confirmReplaceWork — resolves true when nothing is dirty or the user confirmed the loss. */
-  confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean>;
+  confirmReplaceWork: (title: string, confirmLabel: string) => Promise<boolean>;
   /** The boot-wide workspace-open mutex, owned by ide.tsx's composition root so the toolbar / keyboard /
    *  palette / onWorkspaceEmptied entry points serialize against this ladder's opens too (#1088). */
   workspaceOpLock: WorkspaceOpLock;
   /** Open the host's persistent default workspace (workspace.openDefaultWorkspaceFlow). */
-  openHostDefaultWorkspaceFlow(seed: string): Promise<{ opened: boolean }>;
-  setStatus(text: string, kind: 'error'): void;
+  openHostDefaultWorkspaceFlow: (seed: string) => Promise<{ opened: boolean }>;
+  setStatus: (text: string, kind: 'error') => void;
   /** Write a plain message into the emitted-code viewer (output.setContent). */
-  setOutput(content: string, lang: 'plain'): void;
-  invalidateDocViews(): void;
-  refreshActiveSurfaces(): void;
+  setOutput: (content: string, lang: 'plain') => void;
+  invalidateDocViews: () => void;
+  refreshActiveSurfaces: () => void;
   persistsWorkspace: boolean;
   showMemoryOnlyBanner(): void;
   // Start-intent actions — reused from the in-editor start console so Home and the editor share one path.
@@ -71,11 +71,11 @@ export interface LifecycleBootDeps {
    * very op awaiting it and deadlock the boot. This is the ONLY legitimate bypass; every other consumer
    * gets ide.tsx's locked `openWorkspace` facade. Reach for that unless you are inside the lock.
    */
-  newModelUnlocked(): Promise<void>;
+  newModelUnlocked: () => Promise<void>;
   /** UNLOCKED on purpose — same deadlock reason as {@link newModelUnlocked}. */
   openFolderUnlocked(): Promise<void>;
-  openRecentFolder(path: string): Promise<void>;
-  openExample(template: Template): Promise<void>;
+  openRecentFolder: (path: string) => Promise<void>;
+  openExample: (template: Template) => Promise<void>;
   // Teardown fan-out, called in order; lifecycleBoot adds its own route-intent unsubscribe.
   disposers: {
     controller(): void;
@@ -290,7 +290,7 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
             if (deps.hasOpenWorkspace()) return;
             const last = getLastWorkspace();
             const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
-            const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
+            const restoredExample = restorable ? (await deps.openFolderPath(last, { recent: false })).ok : false;
             // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
             // content is only ever preserved by being seeded into the default workspace.
             if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? seed);

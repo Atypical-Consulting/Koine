@@ -27,7 +27,7 @@ export interface DocViewsSlice {
    * just that surface — the targeted invalidations (a theme flip touches only the diagram; a
    * destination-language switch touches only the preview) that must NOT make every other surface stale.
    */
-  invalidate(key?: DocViewKey): void;
+  invalidate: (key?: DocViewKey) => void;
   /** Store-owned 350ms doc-edit debounce (moved out of inspectorController). */
   scheduleRefresh(fn: () => void): void;
 }

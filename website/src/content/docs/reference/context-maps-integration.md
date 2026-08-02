@@ -484,7 +484,7 @@ only leaves the context when the aggregate's Unit of Work drains `IntegrationEve
 at commit — with no aggregate there is no Unit of Work, so the event would be recorded and never
 delivered. KOI1422 covers both shapes. The rationale — why `publish` is a distinct keyword rather
 than `emit` inferring the event kind from its name — is recorded in
-[ADR 0017 — `publish` is a distinct clause from `emit`](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0017-publish-is-a-distinct-clause-from-emit.md).
+[ADR 0019 — `publish` is a distinct clause from `emit`](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0019-publish-is-a-distinct-clause-from-emit.md).
 :::
 
 ### 17.7.4 Translation to C# (the outbox path)

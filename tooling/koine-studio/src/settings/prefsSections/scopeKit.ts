@@ -40,10 +40,10 @@ export interface ScopeKitDeps {
     workspaceKey(): string | null;
     /** Commit a User-scope patch — same shape/behavior as prefs.ts's own `commit(patch)`
      *  (`cb.onChange(patchSettings(patch))`), called here with a single-field patch via `[field]`. */
-    commit(patch: Partial<Settings>): void;
+    commit: (patch: Partial<Settings>) => void;
     /** Report the merged Settings back to the host — used directly for the Workspace-scope commit path
      *  (`onChange(loadSettings())`) and by the segmented toggle's own scope-flip handler. */
-    onChange(s: Settings): void;
+    onChange: (s: Settings) => void;
 }
 
 export interface ScopeKit {
@@ -62,7 +62,7 @@ export interface ScopeKit {
         field: K,
         title: string,
         setValue: (value: Settings[K]) => void,
-    ): { seg: HTMLElement; scopedCommit(value: Settings[K]): void };
+    ): { seg: HTMLElement; scopedCommit: (value: Settings[K]) => void };
 
     /**
      * Build a labelled scoped ROW (label/description on the left; value control + User/Workspace toggle
@@ -95,7 +95,7 @@ export function createScopeKit(deps: ScopeKitDeps): ScopeKit {
         field: K,
         title: string,
         setValue: (value: Settings[K]) => void,
-    ): { seg: HTMLElement; scopedCommit(value: Settings[K]): void } {
+    ): { seg: HTMLElement; scopedCommit: (value: Settings[K]) => void } {
         let scope: Scope = "user";
 
         function scopedCommit(value: Settings[K]): void {
@@ -104,7 +104,7 @@ export function createScopeKit(deps: ScopeKitDeps): ScopeKit {
                 saveWorkspaceOverride(key, field, value);
                 deps.onChange(loadSettings());
             } else {
-                deps.commit({ [field]: value } as Partial<Settings>);
+                deps.commit({ [field]: value });
             }
         }
 

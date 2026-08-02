@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { act, render } from '@testing-library/preact';
 import { axe } from 'vitest-axe';
 import type { FsEntry } from '@/host';
@@ -135,7 +135,7 @@ describe('ExplorerPanel', () => {
 
     const trees = container.querySelectorAll('ul[role="tree"]');
     expect(trees.length).toBe(1);
-    const tree = trees[0]!;
+    const tree = trees[0];
 
     const salesGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/sales"]');
     const billingGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/billing"]');
@@ -725,7 +725,7 @@ describe('ExplorerPanel', () => {
       expect(input.value).toBe('shared.koi'); // prefilled with the current name
 
       commitRename(container, 'ROOT/shared.koi', 'common.koi');
-      const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
+      const renamed = (cb.onRename as Mock<(entry: FsEntry, newName: string) => void>).mock.calls[0];
       expect(renamed[0].token).toBe('ROOT/shared.koi');
       expect(renamed[1]).toBe('common.koi');
     });
@@ -737,7 +737,7 @@ describe('ExplorerPanel', () => {
       fileRow(container, 'shared.koi').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 5, clientY: 5 }));
       clickMenuItem('Duplicate');
       expect(cb.onDuplicate).toHaveBeenCalledTimes(1);
-      expect((cb.onDuplicate as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+      expect((cb.onDuplicate as Mock<(entry: FsEntry) => void>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
     });
 
     it('Delete (menu) opens the confirm dialog before deleting, then deletes on confirm', async () => {
@@ -754,7 +754,7 @@ describe('ExplorerPanel', () => {
         document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
       });
       await flush();
-      expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+      expect((cb.onDelete as Mock<(entry: FsEntry) => void>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
       expect(confirmShown()).toBe(false); // dialog dismissed
     });
 
@@ -775,7 +775,7 @@ describe('ExplorerPanel', () => {
         document.querySelector<HTMLElement>('.explorer-confirm-btn-danger')!.click();
       });
       await flush();
-      expect((cb.onDelete as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+      expect((cb.onDelete as Mock<(entry: FsEntry) => void>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
       expect(confirmShown()).toBe(false);
     });
 
@@ -1012,7 +1012,7 @@ describe('ExplorerPanel', () => {
       });
       await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
-      const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
+      const renamed = (cb.onRename as Mock<(entry: FsEntry, newName: string) => void>).mock.calls[0];
       expect(renamed[0].token).toBe('ROOT/shared.koi');
       expect(renamed[1]).toBe('common.koi');
       expect(container.querySelector('.explorer-rename')).toBeNull();
@@ -1035,7 +1035,7 @@ describe('ExplorerPanel', () => {
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
       await act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
-      const renamed = (cb.onRename as ReturnType<typeof vi.fn>).mock.calls[0];
+      const renamed = (cb.onRename as Mock<(entry: FsEntry, newName: string) => void>).mock.calls[0];
       expect(renamed[0].token).toBe('ROOT/orders');
       expect(renamed[1]).toBe('purchase-orders');
     });
@@ -1149,7 +1149,7 @@ describe('ExplorerPanel', () => {
       // Enter now commits exactly once, with the (still-current) typed value.
       await act(() => { stillInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
       expect(dirtyCb.onRename).toHaveBeenCalledTimes(1);
-      expect((dirtyCb.onRename as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ren');
+      expect((dirtyCb.onRename as Mock<(entry: FsEntry, newName: string) => void>).mock.calls[0][1]).toBe('ren');
     });
 
     // Design decision #3 (#989): an upstream deletion of the edited entry mid-edit cancels rather than
@@ -1292,7 +1292,7 @@ describe('ExplorerPanel', () => {
       fireDrag(dirRow(container), 'dragover');
       fireDrag(dirRow(container), 'drop');
 
-      const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+      const call = (cb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0];
       expect(call[0].token).toBe('ROOT/shared.koi');
       expect(call[1]).toBe('ROOT/orders');
     });
@@ -1305,7 +1305,7 @@ describe('ExplorerPanel', () => {
       fireDrag(fileRow(container, 'shared.koi'), 'dragstart'); // top-level file
       fireDrag(fileRow(container, 'order.koi'), 'drop'); // onto a file inside orders/
 
-      const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+      const call = (cb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0];
       expect(call[0].token).toBe('ROOT/shared.koi');
       expect(call[1]).toBe('ROOT/orders'); // routed to the file's parent directory, not a no-op
     });
@@ -1349,7 +1349,7 @@ describe('ExplorerPanel', () => {
       // Nested -> moves to the primary root.
       fireDrag(fileRow(container, 'order.koi'), 'dragstart');
       fireDrag(tree, 'drop');
-      const call = (cb.onMove as ReturnType<typeof vi.fn>).mock.calls[0];
+      const call = (cb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0];
       expect(call[0].token).toBe('ROOT/orders/order.koi');
       expect(call[1]).toBe('ROOT');
     });
@@ -1405,8 +1405,8 @@ describe('ExplorerPanel', () => {
       // Drop still validates against the live `drag` state and fires the move.
       fireDrag(dirRow(container), 'dragover');
       fireDrag(dirRow(container), 'drop');
-      expect((dirtyCb.onMove as ReturnType<typeof vi.fn>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
-      expect((dirtyCb.onMove as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe('ROOT/orders');
+      expect((dirtyCb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0][0].token).toBe('ROOT/shared.koi');
+      expect((dirtyCb.onMove as Mock<(entry: FsEntry, destDirToken: string) => void>).mock.calls[0][1]).toBe('ROOT/orders');
     });
   });
 
@@ -1615,7 +1615,10 @@ describe('ExplorerPanel', () => {
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       const scrolled: Element[] = [];
-      const orig = Element.prototype.scrollIntoView;
+      // Save/restore the DESCRIPTOR, not the method value (reading a prototype method as a value is
+      // what unbound-method flags) — and happy-dom doesn't implement scrollIntoView, so the descriptor
+      // round-trips the not-implemented case honestly: absent before, absent after.
+      const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
       // happy-dom doesn't implement scrollIntoView; install a spy that records the element it lands on
       // (same pattern as GlossaryPanel.test.tsx's own scroll-target test).
       Element.prototype.scrollIntoView = function (this: Element) {
@@ -1627,7 +1630,8 @@ describe('ExplorerPanel', () => {
         const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
         expect(scrolled).toContain(targetLi);
       } finally {
-        Element.prototype.scrollIntoView = orig;
+        if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+        else delete (Element.prototype as Partial<Element>).scrollIntoView;
       }
     });
 
@@ -1640,7 +1644,10 @@ describe('ExplorerPanel', () => {
       expect(dirRow(container).closest('li')!.getAttribute('aria-expanded')).toBe('false');
 
       const scrolled: Element[] = [];
-      const orig = Element.prototype.scrollIntoView;
+      // Save/restore the DESCRIPTOR, not the method value (reading a prototype method as a value is
+      // what unbound-method flags) — and happy-dom doesn't implement scrollIntoView, so the descriptor
+      // round-trips the not-implemented case honestly: absent before, absent after.
+      const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
       Element.prototype.scrollIntoView = function (this: Element) {
         scrolled.push(this);
       };
@@ -1651,7 +1658,8 @@ describe('ExplorerPanel', () => {
         const targetLi = container.querySelector<HTMLElement>('li[data-token="ROOT/orders/order.koi"]')!;
         expect(scrolled).toContain(targetLi);
       } finally {
-        Element.prototype.scrollIntoView = orig;
+        if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+        else delete (Element.prototype as Partial<Element>).scrollIntoView;
       }
     });
 
@@ -1707,7 +1715,10 @@ describe('ExplorerPanel', () => {
       expect(document.querySelector('.explorer-menu[role="menu"]')).not.toBeNull();
 
       const scrolled: Element[] = [];
-      const orig = Element.prototype.scrollIntoView;
+      // Save/restore the DESCRIPTOR, not the method value (reading a prototype method as a value is
+      // what unbound-method flags) — and happy-dom doesn't implement scrollIntoView, so the descriptor
+      // round-trips the not-implemented case honestly: absent before, absent after.
+      const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
       Element.prototype.scrollIntoView = function (this: Element) {
         scrolled.push(this);
       };
@@ -1716,7 +1727,8 @@ describe('ExplorerPanel', () => {
         expect(fileRow(container, 'order.koi').classList.contains('is-revealed')).toBe(true);
         expect(scrolled.length).toBe(0);
       } finally {
-        Element.prototype.scrollIntoView = orig;
+        if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+        else delete (Element.prototype as Partial<Element>).scrollIntoView;
       }
     });
   });

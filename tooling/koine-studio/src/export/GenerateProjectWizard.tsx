@@ -29,15 +29,15 @@ type StatusKind = 'info' | 'error' | 'success';
 /** Everything the wizard needs from the rest of the app, injected so it can be wired to any host. */
 export interface GenerateProjectDeps {
   /** Compile the active model to the given target and return its emitted files / diagnostics. */
-  emitPreview(target: Target): Promise<EmitPreviewResult>;
+  emitPreview: (target: Target) => Promise<EmitPreviewResult>;
   /** The ubiquitous-language glossary for the active model, as markdown. */
-  glossary(): Promise<{ markdown: string }>;
+  glossary: () => Promise<{ markdown: string }>;
   /**
    * Save the generated archive bytes to a host destination (download / native save dialog).
    * Resolves `true` when the bytes were delivered and `false` when the user cancelled a native
    * save dialog, so the wizard only reports success on a real save.
    */
-  saveZip(defaultName: string, data: Uint8Array): Promise<boolean>;
+  saveZip: (defaultName: string, data: Uint8Array) => Promise<boolean>;
 }
 
 // Steps, named so the navigation/render logic never hinges on bare magic numbers.
@@ -414,7 +414,7 @@ function CheckboxRow(props: {
         class="koi-checkbox"
         checked={props.checked}
         disabled={props.disabled}
-        onChange={onToggle ? (e) => onToggle((e.currentTarget as HTMLInputElement).checked) : undefined}
+        onChange={onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined}
       />
       <span class="koi-wizard-check-text">
         <span class="koi-wizard-check-label">{props.label}</span>
@@ -479,7 +479,7 @@ function NameStep(props: { state: WizardState; dispatch: Dispatch; onEnter: () =
         spellcheck={false}
         aria-invalid={valid ? 'false' : 'true'}
         aria-describedby={valid ? undefined : NAME_ERR_ID}
-        onInput={(e) => dispatch({ type: 'setName', value: (e.currentTarget as HTMLInputElement).value })}
+        onInput={(e) => dispatch({ type: 'setName', value: e.currentTarget.value })}
         onKeyDown={(e) => {
           // Enter advances when the name is valid.
           if (e.key === 'Enter' && isValidProjectName(state.projectName)) {

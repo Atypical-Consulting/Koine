@@ -18,7 +18,7 @@ import { createAppStore, type AppState } from '@/store/index';
  * `src/**\/*.test.ts` include glob in `vitest.config.ts` — it is a shared helper,
  * not a suite.
  */
-export function createCountingStore(): { store: StoreApi<AppState>; active(): number } {
+export function createCountingStore(): { store: StoreApi<AppState>; active: () => number } {
   const store = createAppStore();
   let count = 0;
   const rawSubscribe = store.subscribe.bind(store);
@@ -33,7 +33,7 @@ export function createCountingStore(): { store: StoreApi<AppState>; active(): nu
       }
       rawUnsubscribe();
     };
-  }) as StoreApi<AppState>['subscribe'];
+  });
   return { store, active: () => count };
 }
 
@@ -51,6 +51,6 @@ export function createRecordingStore(): { store: StoreApi<AppState>; subscribeSn
   store.subscribe = ((listener: Parameters<StoreApi<AppState>['subscribe']>[0]) => {
     subscribeSnapshots.push(store.getState());
     return rawSubscribe(listener);
-  }) as StoreApi<AppState>['subscribe'];
+  });
   return { store, subscribeSnapshots };
 }

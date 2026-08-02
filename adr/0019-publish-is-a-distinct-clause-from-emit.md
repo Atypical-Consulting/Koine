@@ -1,5 +1,5 @@
 ---
-id: 0017
+id: 0019
 title: A command publishes an integration event through a distinct `publish` clause, not a widened `emit`
 status: proposed
 date: 2026-08-02

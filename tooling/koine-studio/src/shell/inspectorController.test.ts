@@ -12,7 +12,6 @@ import {
   createInspectorController,
   type InspectorAssistant,
   type InspectorControllerDeps,
-  type InspectorControllerLsp,
 } from '@/shell/inspectorController';
 import { createElement, render } from 'preact';
 import { LeftRail, RightStrip } from '@atypical/koine-ui';
@@ -255,7 +254,7 @@ function makeAssistant(): InspectorAssistant & { syncWorkspace: ReturnType<typeo
 
 function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): InspectorControllerDeps {
   return {
-    lsp: lsp as unknown as InspectorControllerLsp,
+    lsp: lsp,
     editor: fakeEditor(),
     output: fakeOutput(),
     platform: fakePlatform(),
@@ -2032,7 +2031,7 @@ describe('createInspectorController — deck center layout', () => {
     ctl.selectCenter('docs');
     expect(saveWorkspaceDeck).toHaveBeenCalled();
     const calls = saveWorkspaceDeck.mock.calls;
-    const lastDeck = calls[calls.length - 1][0];
+    const lastDeck = calls[calls.length - 1][0] as DeckState;
     expect(lastDeck.primary).toBe('docs');
     ctl.dispose();
   });

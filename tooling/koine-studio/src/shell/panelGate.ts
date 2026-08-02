@@ -22,7 +22,7 @@ const KEY_PREFIX = 'koine.studio.panel.';
 /** A default-closed capability gate over a single named panel-readiness flag. */
 export interface PanelGate {
   /** True iff the panel should render: the capability flag is set, or a dev build forces it on. */
-  enabled(): boolean;
+  enabled: () => boolean;
   /** Persist the capability as enabled (best-effort; never throws). */
   enable(): void;
   /** Remove the capability flag so the panel hides again (best-effort; never throws). */

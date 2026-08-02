@@ -20,9 +20,9 @@ export interface LifecycleSequence {
 
 export interface LifecycleGuard {
   /** Marks the guard torn down. Idempotent — every sequence's isCurrent() returns false from here on. */
-  dispose(): void;
+  dispose: () => void;
   /** True once dispose() has been called. */
-  isDisposed(): boolean;
+  isDisposed: () => boolean;
   /** An independent staleness axis — call once per concurrent async race a controller runs. */
   createSequence(): LifecycleSequence;
 }

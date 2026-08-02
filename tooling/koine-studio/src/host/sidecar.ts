@@ -25,7 +25,7 @@ export interface FolderSidecar {
    * overwrite by the cached token; a lost create-race re-locates and overwrites. A no-op when no folder
    * is open.
    */
-  write(contents: string): Promise<void>;
+  write: (contents: string) => Promise<void>;
 }
 
 /**

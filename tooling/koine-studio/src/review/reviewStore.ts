@@ -53,11 +53,11 @@ export interface ReviewStore {
   /** The current threads (a fresh array; safe for the caller to keep). */
   list(): ReviewThread[];
   /** Open a new thread on `span` in `file` with an initial comment; returns the created thread. */
-  add(file: string, span: SourceSpan, body: string, author: string): ReviewThread;
+  add: (file: string, span: SourceSpan, body: string, author: string) => ReviewThread;
   /** Append a comment to an existing thread (no-op when the id is unknown). */
   reply(id: string, body: string, author: string): void;
   /** Change a thread's status, e.g. resolve or re-open it (no-op when the id is unknown). */
-  setStatus(id: string, status: ReviewThread['status']): void;
+  setStatus: (id: string, status: ReviewThread['status']) => void;
   /** Delete a thread (no-op when the id is unknown). */
   remove(id: string): void;
   /**
@@ -68,7 +68,7 @@ export interface ReviewStore {
    */
   remap(file: string, change: ChangeSet, doc: Text): void;
   /** Register a callback fired after every mutation; returns a function that unsubscribes it. */
-  subscribe(cb: () => void): () => void;
+  subscribe: (cb: () => void) => () => void;
 }
 
 /** The on-disk envelope. */

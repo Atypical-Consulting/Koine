@@ -54,6 +54,7 @@ import {
 } from '@/settings/persistence';
 import { DEFAULT_DECK_STATE, isValidDeckState } from '@/store/slices/uiChrome';
 import type { DeckState } from '@/store/slices/uiChrome';
+import type { Settings } from '@/settings/settingsStore';
 import { BUILTIN_EMIT_TARGETS, setEmitTargets } from '@/shared/emitTargets';
 import { DEFAULT_BINDINGS } from '@/editor/keybindings';
 import type { ChatMessage } from '@/ai/ai';
@@ -77,6 +78,37 @@ describe('MCP settings', () => {
     saveSettings({ ...DEFAULT_SETTINGS, mcpEnabled: true, mcpClient: 'cursor' });
     expect(loadSettings().mcpEnabled).toBe(true);
     expect(loadSettings().mcpClient).toBe('cursor');
+  });
+});
+
+describe('Collaboration transport settings (#1811)', () => {
+  beforeEach(() => localStorage.clear());
+
+  // The relay address gained a pinned public key when the transport became encrypted, so it is now
+  // 66 characters longer than it used to be. `coerceCollabHost` bounds these strings; this pins that
+  // the bound still leaves room for the shape the Rust host actually requires.
+  const RELAY_WITH_PINNED_KEY = `relay.example:4321/${'9f'.repeat(32)}`;
+
+  test('defaults keep the session on this machine', () => {
+    expect(DEFAULT_SETTINGS.collabBindAddress).toBe('127.0.0.1');
+    expect(DEFAULT_SETTINGS.collabRelayUrl).toBe('');
+  });
+
+  test('round-trips a relay address carrying its pinned public key', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, collabRelayUrl: RELAY_WITH_PINNED_KEY });
+    expect(loadSettings().collabRelayUrl).toBe(RELAY_WITH_PINNED_KEY);
+  });
+
+  test('round-trips a LAN bind address', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, collabBindAddress: '192.168.1.42' });
+    expect(loadSettings().collabBindAddress).toBe('192.168.1.42');
+  });
+
+  test('falls back to the defaults for a non-string or whitespace-bearing value', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, collabRelayUrl: 42 as never });
+    expect(loadSettings().collabRelayUrl).toBe('');
+    saveSettings({ ...DEFAULT_SETTINGS, collabBindAddress: 'a b' });
+    expect(loadSettings().collabBindAddress).toBe('127.0.0.1');
   });
 });
 
@@ -353,7 +385,7 @@ describe('API key secret', () => {
     // The migration ran: the vault has the key, the plaintext blob is scrubbed.
     const rawAfterFirst = localStorage.getItem('koine.studio.settings') ?? '';
     expect(rawAfterFirst).not.toContain('sk-legacy-once');
-    expect(JSON.parse(rawAfterFirst).aiApiKey).toBeUndefined();
+    expect((JSON.parse(rawAfterFirst) as Partial<Settings>).aiApiKey).toBeUndefined();
 
     // A THIRD call, made after resolution, must also return the very same promise and must NOT re-run
     // the migration: re-seed a DIFFERENT legacy key and confirm it survives untouched (proves "exactly
@@ -915,7 +947,7 @@ describe('Output / previewTarget setting', () => {
   });
 
   test('coerces a bogus stored target back to the default', () => {
-    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'cobol' as never });
+    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'cobol' });
     expect(loadSettings().previewTarget).toBe('csharp');
   });
 

@@ -45,11 +45,11 @@ export interface InstallController {
   /** Show the browser dialog for the stashed (single-use) event; clears the stash regardless of outcome. */
   promptInstall(): Promise<InstallOutcome>;
   /** Persist the dismissal flag and drop the stashed event so the affordance stays hidden. */
-  dismiss(): void;
+  dismiss: () => void;
   /** Whether the user has previously dismissed the affordance (persisted across loads). */
   isDismissed(): boolean;
   /** Subscribe to state changes (arm / prompt / dismiss / appinstalled). Returns an unsubscribe fn. */
-  subscribe(listener: () => void): () => void;
+  subscribe: (listener: () => void) => () => void;
 }
 
 export function createInstallController(opts: { storage?: InstallStorage } = {}): InstallController {

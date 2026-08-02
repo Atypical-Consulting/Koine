@@ -28,15 +28,15 @@ export interface DocsPanelData {
 
 export interface DocsPanelHandlers {
   /** Create a new ADR from the template with this title (then the panel is reloaded by the host). */
-  onCreateAdr(title: string): void;
+  onCreateAdr: (title: string) => void;
   /** Persist an edited ADR back to its file. */
-  onSaveAdr(file: AdrFile, adr: Adr): void;
+  onSaveAdr: (file: AdrFile, adr: Adr) => void;
   /** Create a new note with this title. */
-  onCreateNote(title: string): void;
+  onCreateNote: (title: string) => void;
   /** Read a note's raw Markdown (lazily, on open). */
-  onReadNote(file: NoteFile): Promise<string>;
+  onReadNote: (file: NoteFile) => Promise<string>;
   /** Persist an edited note's raw Markdown. */
-  onSaveNote(file: NoteFile, markdown: string): void;
+  onSaveNote: (file: NoteFile, markdown: string) => void;
 }
 
 /** The shared `.koi-docs` shell + an optional read-only banner — the common frame for both pages. */
@@ -84,7 +84,7 @@ function NewTitleForm(props: { placeholder: string; onSubmit: (title: string) =>
         placeholder={props.placeholder}
         aria-label={props.placeholder}
         value={title}
-        onInput={(e) => setTitle((e.currentTarget as HTMLInputElement).value)}
+        onInput={(e) => setTitle(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
@@ -220,7 +220,7 @@ function AdrRow(props: {
                 rows={16}
                 aria-label={`Markdown for ADR ${file.number}: ${adr.title}`}
                 value={draft}
-                onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
+                onInput={(e) => setDraft(e.currentTarget.value)}
                 // Escape → the hook's cancel: revert-and-close, same path as the Cancel button.
                 onKeyDown={editorOnKeyDown}
               />
@@ -373,7 +373,7 @@ function NoteRow(props: {
                   rows={16}
                   aria-label={`Markdown for note: ${file.title}`}
                   value={draft}
-                  onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
+                  onInput={(e) => setDraft(e.currentTarget.value)}
                   // Escape → the hook's cancel: revert-and-close, same path as the Cancel button.
                   onKeyDown={editorOnKeyDown}
                 />

@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAssistantChat, inferNewFileRoot, MAX_REPAIR_ROUNDS, type AssistantPanelOptions } from '@/ai/aiPanel';
 import { newFileKeyInRoot, type StagedEdit } from '@/ai/editSession';
-import { runAssistant } from '@/ai/ai';
+import { runAssistant, type AssistantRequest } from '@/ai/ai';
 import { GRAMMAR_PROBE_GBNF, GRAMMAR_PROBE_SENTINEL, resetGrammarCapabilityCache } from '@/ai/grammarConstraint';
 import { loadChat, saveChat } from '@/settings/persistence';
 import { createAppStore } from '@/store/index';
@@ -594,7 +594,7 @@ describe('tool-call cards (panel integration)', () => {
     const gate = new Promise<void>((res) => {
       finishTurn = res;
     });
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{"source":"context X {}"}' });
       await gate; // stay in-flight so the card is observable in its pending state
       req.onText('done');
@@ -626,7 +626,7 @@ describe('tool-call cards (panel integration)', () => {
   });
 
   test('the matching end event flips the card to ok: summary, duration, and a pretty-printed body', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{"source":"context X {}"}' });
       req.onToolCallEnd?.({
         id: 1,
@@ -657,7 +657,7 @@ describe('tool-call cards (panel integration)', () => {
   });
 
   test('an ok:false end renders an error card with the error message in the body, and formats seconds', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onToolCallStart?.({ id: 1, name: 'koine_compile', argsJson: '{"target":"csharp"}' });
       req.onToolCallEnd?.({
         id: 1,
@@ -687,7 +687,7 @@ describe('tool-call cards (panel integration)', () => {
 
   test('a result larger than 8 KB is clamped with a visible (truncated) note', async () => {
     const big = 'x'.repeat(9 * 1024);
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{}' });
       req.onToolCallEnd?.({ id: 1, name: 'koine_validate', ok: true, summary: 'big', resultText: big, durationMs: 5 });
       req.onText('done');
@@ -701,7 +701,7 @@ describe('tool-call cards (panel integration)', () => {
     const card = container.querySelector('.koi-assistant-tool')!;
     const resultPre = card.querySelectorAll('pre')[1];
     // The result <pre> is clamped to the 8 KB cap …
-    expect(resultPre.textContent!.length).toBe(8 * 1024);
+    expect(resultPre.textContent.length).toBe(8 * 1024);
     // … and the truncation is announced with a visible note.
     expect(card.querySelector('.koi-tool-truncated')?.textContent).toContain('(truncated)');
   });
@@ -711,7 +711,7 @@ describe('tool-call cards (panel integration)', () => {
     const gate = new Promise<string>((_res, rej) => {
       failTurn = rej;
     });
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{}' });
       req.onToolCallEnd?.({ id: 1, name: 'koine_validate', ok: true, summary: 's', resultText: 'r', durationMs: 1 });
       return gate; // stay in-flight until the test rejects it (a real error, nothing streamed)
@@ -733,7 +733,7 @@ describe('tool-call cards (panel integration)', () => {
   // so a failed follow-up's rollback (which pops only the trailing USER message) leaves a PRIOR
   // turn's cards untouched, and a stop-mid-stream partial commits its cards along with it.
   test('a failed follow-up send rollback leaves the PREVIOUS turn cards in the DOM, no dangling user bubble', async () => {
-    vi.mocked(runAssistant).mockImplementationOnce(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementationOnce(async (req: AssistantRequest) => {
       req.onToolCallStart?.({ id: 1, name: 'koine_compile', argsJson: '{}' });
       req.onToolCallEnd?.({ id: 1, name: 'koine_compile', ok: true, summary: 'ok', resultText: 'compiled', durationMs: 5 });
       req.onText('First reply.');
@@ -758,7 +758,7 @@ describe('tool-call cards (panel integration)', () => {
 
   test('stop-mid-stream with a usable partial commits it WITH its cards (rendered from the message)', async () => {
     const container = document.createElement('div');
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onToolCallStart?.({ id: 1, name: 'koine_validate', argsJson: '{}' });
       req.onToolCallEnd?.({ id: 1, name: 'koine_validate', ok: true, summary: 'ok', resultText: 'validated', durationMs: 5 });
       req.onText('Partial reply.');
@@ -814,7 +814,7 @@ describe('multi-file change set (agentic edits)', () => {
   test('renders a per-file review for a staged multi-file turn, Apply writes only accepted files', async () => {
     // The model stages two full-file edits into the per-turn session: one revising an existing file
     // (orders.koi, present in the workspace snapshot → "modified") and one brand-new (events.koi → "new").
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }'); // modified (in initial)
       req.editSession?.stage('events.koi', 'integration event OrderPlaced {}'); // new (absent from snapshot)
       req.onText('Stationed two edits.');
@@ -868,7 +868,7 @@ describe('multi-file change set (agentic edits)', () => {
   // applyFileEdit resolves unambiguously across a multi-root workspace; the display relPath rides
   // along for the partial-apply report. (Carrying the key through the review UI itself is Task 4.)
   test('apply forwards the snapshot key (uri / new-file key) alongside the display relPath', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // revision, by uri key
       req.editSession?.stage('new:fresh.koi', 'context Fresh {}'); // brand-new file
       req.onText('Staged.');
@@ -906,7 +906,7 @@ describe('multi-file change set (agentic edits)', () => {
   // SAME relPath review as two disambiguated rows and apply to their OWN buffers — not a first-match
   // duplicate resolved back from the colliding relPath at payload time.
   test('colliding relPaths across roots: two disambiguated rows, apply forwards BOTH distinct keys', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('file:///wsA/model.koi', 'context A { v2 }');
       req.editSession?.stage('file:///wsB/model.koi', 'context B { v2 }');
       req.onText('Staged.');
@@ -955,7 +955,7 @@ describe('multi-file change set (agentic edits)', () => {
   // re-derivation would label the first row `model.koi@1` — but that row is wsB, the file the tool loop
   // called `model.koi@2` — so the user would uncheck/accept the wrong root's file.
   test('reverse-staged colliding twins: review labels still equal the tool-visible paths, per KEY', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('file:///wsB/model.koi', 'context B { v2 }'); // wsB staged FIRST
       req.editSession?.stage('file:///wsA/model.koi', 'context A { v2 }');
       req.onText('Staged.');
@@ -1002,7 +1002,7 @@ describe('multi-file change set (agentic edits)', () => {
   // for a later explicit choice, Task 4's picker).
   describe('new-file target-root inference (#1132)', () => {
     test('one existing-file edit under a root plus one new file: the new file infers that root', async () => {
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('file:///wsB/orders.koi', 'context Orders { v2 }'); // revision, under root B
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}'); // brand-new
         req.onText('Staged.');
@@ -1032,7 +1032,7 @@ describe('multi-file change set (agentic edits)', () => {
     });
 
     test('existing-file edits under TWO different roots leave the new file’s targetRoot null (ambiguous)', async () => {
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('file:///wsA/orders.koi', 'context Orders A { v2 }');
         req.editSession?.stage('file:///wsB/billing.koi', 'context Billing { v2 }');
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
@@ -1072,7 +1072,7 @@ describe('multi-file change set (agentic edits)', () => {
     });
 
     test('a new-file-only turn (no existing-file edits to infer from) leaves targetRoot null', async () => {
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
         req.onText('Staged.');
         return 'Staged.';
@@ -1148,7 +1148,7 @@ describe('multi-file change set (agentic edits)', () => {
   // the plain `new:<relPath>` key exactly as before (unresolved ⇒ today's primary-root behavior).
   describe('apply payload key routing by targetRoot (#1132)', () => {
     test('a resolved targetRoot mints a newFileKeyInRoot payload key', async () => {
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('file:///wsB/orders.koi', 'context Orders { v2 }');
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
         req.onText('Staged.');
@@ -1179,7 +1179,7 @@ describe('multi-file change set (agentic edits)', () => {
     });
 
     test('no resolved targetRoot keeps the plain new: payload key', async () => {
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
         req.onText('Staged.');
         return 'Staged.';
@@ -1210,7 +1210,7 @@ describe('multi-file change set (agentic edits)', () => {
     // error via onStagedValidation. The change-set panel must show those diagnostics alongside the
     // staged file so a write that broke the model is visible BEFORE the user applies anything.
     const DIAG = 'ok: false — 1 error(s), 0 warning(s):\n- [error] 1:16 unexpected end of input';
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders {'); // unbalanced — broken
       req.onStagedValidation?.(DIAG);
       req.onText('Staged one edit.');
@@ -1239,7 +1239,7 @@ describe('multi-file change set (agentic edits)', () => {
   });
 
   test('a CLEAN end-of-turn validation shows the change set without a diagnostics block', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* ok */ }');
       req.onStagedValidation?.('ok: true — no diagnostics. The model compiles.');
       req.onText('Staged one edit.');
@@ -1266,7 +1266,7 @@ describe('multi-file change set (agentic edits)', () => {
     // When the end-of-turn validation could not run (e.g. desktop MCP sidecar unreachable), the panel
     // must show the note so the user knows the staged set was NOT validated before applying.
     const NOTE = 'ok: false — could not validate the staged workspace: MCP koine_validate failed: HTTP 503';
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders {}');
       req.onStagedValidation?.(NOTE);
       req.onText('Staged one edit.');
@@ -1293,7 +1293,7 @@ describe('multi-file change set (agentic edits)', () => {
   // FIX: Clear conversation must retire the pending change set with the transcript it reviewed —
   // the retired imperative panel's rebuild destroyed the island; the slice is the one owner now.
   test('Clear conversation retires the pending change set (the review panel is gone after Clear)', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
       req.onText('Edit.');
       return 'Edit.';
@@ -1317,7 +1317,7 @@ describe('multi-file change set (agentic edits)', () => {
 
   test('a non-staged generative turn still shows single-file Apply (no change set)', async () => {
     // An ordinary generative reply (a fenced koine block, nothing staged) → the legacy single-file gate.
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       const body = 'Here:\n```koine\ncontext X {}\n```';
       req.onText(body);
       return body;
@@ -1338,7 +1338,7 @@ describe('multi-file change set (agentic edits)', () => {
   });
 
   test('a partial-apply failure is surfaced (no false "Applied ✓"), and a successful apply locks the review', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
       req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
       req.onText('Two edits.');
@@ -1377,7 +1377,7 @@ describe('multi-file change set (agentic edits)', () => {
   // disabled forever, the error is swallowed, and the rejection is unhandled. A rejected apply must
   // re-enable Apply and surface the error in the status live region.
   test('a REJECTED apply re-enables Apply and surfaces the error (no stuck-disabled button)', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
       req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
       req.onText('Two edits.');
@@ -1417,7 +1417,7 @@ describe('multi-file change set (agentic edits)', () => {
   // even though the accept checkboxes stay togglable — so a mid-apply toggle can't re-enable Apply and
   // let a second click run a CONCURRENT apply.
   test('toggling an accept checkbox mid-apply keeps Apply disabled (no second concurrent apply)', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* edited */ }');
       req.editSession?.stage('events.koi', 'integration event OrderPlaced {}');
       req.onText('Two edits.');
@@ -1474,7 +1474,7 @@ describe('multi-file change set (agentic edits)', () => {
     // turn 1's set is observable before the replacement set stages.
     let releaseTurn2: (() => void) | null = null;
     let turn = 0;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       turn++;
       if (turn === 2) {
         await new Promise<void>((r) => {
@@ -1523,7 +1523,7 @@ describe('multi-file change set (agentic edits)', () => {
   test('superseding an already-applied change set is a no-op (keeps "Applied ✓", no "superseded")', async () => {
     let releaseTurn2: (() => void) | null = null;
     let turn = 0;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       turn++;
       if (turn === 2) {
         await new Promise<void>((r) => {
@@ -1571,7 +1571,7 @@ describe('multi-file change set (agentic edits)', () => {
   test('superseded mid-apply: a later REJECTED apply does not un-retire the panel (#684)', async () => {
     let releaseTurn2: (() => void) | null = null;
     let turn = 0;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       turn++;
       if (turn === 2) {
         await new Promise<void>((r) => {
@@ -1629,7 +1629,7 @@ describe('multi-file change set (agentic edits)', () => {
   test('superseded mid-apply: a later { failed } apply does not un-retire the panel (#684)', async () => {
     let releaseTurn2: (() => void) | null = null;
     let turn = 0;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       turn++;
       if (turn === 2) {
         await new Promise<void>((r) => {
@@ -1687,7 +1687,7 @@ describe('multi-file change set (agentic edits)', () => {
   test('superseded mid-apply: a later SUCCESSFUL apply still shows "superseded", not "Applied ✓" (#684)', async () => {
     let releaseTurn2: (() => void) | null = null;
     let turn = 0;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       turn++;
       if (turn === 2) {
         await new Promise<void>((r) => {
@@ -1743,7 +1743,7 @@ describe('multi-file change set (agentic edits)', () => {
   test('drift: a file changed between send and apply is warned + skipped; clean files still apply', async () => {
     // The live workspace read; reassigned (not mutated) to simulate a concurrent edit after SEND.
     let ws: Record<string, string> = { 'orders.koi': 'context Orders {}', 'events.koi': 'context Events {}' };
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* a */ }');
       req.editSession?.stage('events.koi', 'context Events { /* b */ }');
       req.onText('Two edits.');
@@ -1789,7 +1789,7 @@ describe('multi-file change set (agentic edits)', () => {
 
   test('drift: every accepted file changed ⇒ nothing is written and Apply stays usable for a fresh review', async () => {
     let ws: Record<string, string> = { 'orders.koi': 'context Orders {}' };
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('orders.koi', 'context Orders { /* staged */ }');
       req.onText('One edit.');
       return 'One edit.';
@@ -1824,7 +1824,7 @@ describe('multi-file change set (agentic edits)', () => {
 
   test('drift edge: a new file whose path now EXISTS is treated as drift (not clobbered)', async () => {
     let ws: Record<string, string> = { 'orders.koi': 'context Orders {}' };
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.editSession?.stage('events.koi', 'integration event OrderPlaced {}'); // NEW (absent at send)
       req.onText('New file.');
       return 'New file.';
@@ -1866,7 +1866,7 @@ describe('multi-file change set (agentic edits)', () => {
         displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
         rootOf: { 'file:///wsA/orders.koi': 'wsA' },
       };
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // infers targetRoot wsA
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
         req.onText('Staged.');
@@ -1904,7 +1904,7 @@ describe('multi-file change set (agentic edits)', () => {
         displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
         rootOf: { 'file:///wsA/orders.koi': 'wsA' },
       };
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // infers targetRoot wsA
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
         req.onText('Staged.');
@@ -1942,7 +1942,7 @@ describe('multi-file change set (agentic edits)', () => {
         displayPath: { 'file:///wsA/orders.koi': 'orders.koi' },
         rootOf: { 'file:///wsA/orders.koi': 'wsA' },
       };
-      vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+      vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
         req.editSession?.stage('file:///wsA/orders.koi', 'context Orders { v2 }'); // infers targetRoot wsA
         req.editSession?.stage('new:events.koi', 'integration event OrderPlaced {}');
         req.onText('Staged.');
@@ -1984,7 +1984,7 @@ describe('multi-file change set (agentic edits)', () => {
     let ws: Record<string, string> = { 'a.koi': 'context A {}', 'b.koi': 'context B {}' };
     let releaseTurn2: (() => void) | null = null;
     let turn = 0;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       turn++;
       if (turn === 1) {
         req.editSession?.stage('a.koi', 'context A { /* t1 */ }');
@@ -2361,7 +2361,7 @@ describe('workspace switching around send (per-workspace transcript integrity)',
   }
 
   test('a send after an in-place folder switch lands on the NEW workspace transcript (no cross-workspace bleed)', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onText('reply');
       return 'reply';
     });
@@ -2399,14 +2399,19 @@ describe('workspace switching around send (per-workspace transcript integrity)',
   // DEFERRED (the store hook flushes async), so a focus() fired right after it would land on a
   // still-disabled textarea and silently no-op. The host must flush the render synchronously first.
   test('after a completed send, focus lands on the ENABLED composer textarea (not a disabled no-op)', async () => {
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onText('reply');
       return 'reply';
     });
     // Spy on focus() to record the textarea's disabled state AT CALL TIME — asserting the final DOM
     // alone would be false-green, since the deferred re-render enables the textarea soon afterwards.
     const disabledAtFocus: boolean[] = [];
-    const origFocus = HTMLElement.prototype.focus;
+    // Read the base implementation through its DESCRIPTOR — `HTMLElement.prototype.focus` as a bare
+    // value is an unbound method read (the very thing unbound-method flags); the explicit `.call(this)`
+    // below is what makes detaching it safe here, and the cast restores the type the descriptor erases.
+    const origFocus = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'focus')?.value as (
+      this: HTMLElement,
+    ) => void;
     const focusSpy = vi
       .spyOn(HTMLTextAreaElement.prototype, 'focus')
       .mockImplementation(function (this: HTMLTextAreaElement) {
@@ -2437,7 +2442,7 @@ describe('workspace switching around send (per-workspace transcript integrity)',
     saveChat('B', [{ role: 'user', content: 'b history' }]);
     let key = 'A';
     let finish!: () => void;
-    vi.mocked(runAssistant).mockImplementation(async (req: any) => {
+    vi.mocked(runAssistant).mockImplementation(async (req: AssistantRequest) => {
       req.onText('partial…');
       await new Promise<void>((r) => {
         finish = r;

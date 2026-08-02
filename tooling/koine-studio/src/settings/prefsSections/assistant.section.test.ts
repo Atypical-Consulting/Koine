@@ -10,7 +10,6 @@ import {
     DEFAULT_SETTINGS,
     saveSettings,
     loadSettings,
-    type Settings,
 } from "@/settings/persistence";
 
 beforeEach(() => {
@@ -99,7 +98,7 @@ describe("buildAssistantSection — provider switch reports via ctx.onChange", (
 
         expect(loadSettings().aiProvider).toBe("openai");
         expect(ctx.onChange).toHaveBeenCalled();
-        const last = ctx.onChange.mock.calls.at(-1)![0] as Settings;
+        const last = ctx.onChange.mock.calls.at(-1)![0];
         expect(last.aiProvider).toBe("openai");
     });
 });

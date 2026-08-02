@@ -74,7 +74,7 @@ describe('scenarioPanel', () => {
     await panel.refresh();
 
     const given = container.querySelector<HTMLTextAreaElement>('.koi-scenario-json')!;
-    const scaffold = JSON.parse(given.value);
+    const scaffold: unknown = JSON.parse(given.value);
     expect(scaffold).toEqual({ lines: [], status: '' });
   });
 

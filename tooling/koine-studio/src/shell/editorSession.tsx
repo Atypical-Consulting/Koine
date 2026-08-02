@@ -107,9 +107,9 @@ export interface EditorSessionDeps {
   sbCursor: HTMLElement;
 
   /** The uri the editor currently shows / all LSP requests target (read live from ide.ts). */
-  activeUri(): string;
+  activeUri: () => string;
   /** Map a file:// uri to a short label for the references picker (its relPath). */
-  uriLabel(uri: string): string;
+  uriLabel: (uri: string) => string;
 
   /** Navigate to a resolved definition/reference Location (ide.ts switches files then jumps). */
   onNavigate(loc: Location): void;
@@ -154,10 +154,10 @@ export interface EditorSession {
   /** Move the cached diagnostics from `oldUri` to `newUri` (a file rename/move). Does not repaint. */
   renameDiagnostics(oldUri: string, newUri: string): void;
   /** Forget every cached diagnostic (a workspace swap). Does not repaint. */
-  clearDiagnostics(): void;
+  clearDiagnostics: () => void;
 
   /** Write the status pill + mirror the connection state into the status bar. */
-  setStatus(text: string, kind: StatusKind): void;
+  setStatus: (text: string, kind: StatusKind) => void;
   /** Re-derive the status pill from a diagnostics set (empty/cleared when clean, N errors / N warnings otherwise). */
   updateStatus(diags: LspDiagnostic[]): void;
 
@@ -165,11 +165,11 @@ export interface EditorSession {
    * Register the downstream onChange callback ide.ts uses for buffer/dirty/tree side effects. The
    * callback receives the new full text AND the active uri so ide.ts syncs the edit into the right buffer.
    */
-  onChange(cb: (doc: string, uri: string) => void): void;
+  onChange: (cb: (doc: string, uri: string) => void) => void;
 
   /** Repaint the editor's review-thread decorations after the review store changed — ide.ts calls this
    *  from the store subscription + after add/load. */
-  refreshReviewDecorations(): void;
+  refreshReviewDecorations: () => void;
 
   // The editor's LSP forwarders, exposed so callers (and tests) can reach the wall directly.
   hover(line: number, character: number): Promise<HoverResult | null>;

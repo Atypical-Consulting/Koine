@@ -4,7 +4,7 @@ import { axe } from 'vitest-axe';
 import { createAppStore } from '@/store/index';
 import { MobileZoneBar } from '@/shell/MobileZoneBar';
 
-const tabs = (c: Element) => Array.from(c.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
+const tabs = (c: Element) => Array.from(c.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 
 describe('MobileZoneBar', () => {
   test('renders four tabs in a tablist', () => {

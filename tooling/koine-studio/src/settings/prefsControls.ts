@@ -123,7 +123,7 @@ export function segmented<T extends string>(
 export function stringListInput(
     ariaLabel: string,
     onCommit: (values: string[]) => void,
-): { el: HTMLElement; set(values: string[]): void } {
+): { el: HTMLElement; set: (values: string[]) => void } {
     let current: string[] = [];
 
     const chipList = document.createElement("ul");
@@ -210,7 +210,7 @@ export interface TextInputOptions {
     readOnly?: boolean;
     list?: string; // wires <input list="..."> to a sibling <datalist id="...">
     ariaLabel?: string;
-    onChange?(value: string): void; // wired to 'change'; call sites do their own trim/fallback logic
+    onChange?: (value: string) => void; // wired to 'change'; call sites do their own trim/fallback logic
 }
 
 // A "koi-text" text input, generalizing the six hand-rolled inputs across the settings sections
@@ -264,7 +264,7 @@ export function actionButton(
 export interface CopyButtonOptions {
     /** Veto this click BEFORE it reaches the clipboard write (no copy, no label flash) — e.g.
      *  mcpCopyBtn's empty-URL guard. Return true to let the copy proceed. */
-    guard?(): boolean;
+    guard?: () => boolean;
 }
 
 // A "koi-set-action" copy-to-clipboard button: an actionButton() wired via the shared
@@ -450,7 +450,7 @@ export function accentPicker(onSelect: (value: AccentName) => void): {
 export function langPicker(onSelect: (value: PreviewTarget) => void): {
     el: HTMLElement;
     set(value: PreviewTarget): void;
-    refresh(): void;
+    refresh: () => void;
 } {
     const group = document.createElement("div");
     group.className = "koi-lang-picker";

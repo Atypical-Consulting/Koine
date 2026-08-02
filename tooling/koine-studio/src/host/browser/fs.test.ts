@@ -123,7 +123,7 @@ describe('browser fs file management', () => {
   });
 
   it('listEntries returns the nested folders-then-files tree and skips obj/', async () => {
-    __setFolderForTest('workspace', sampleRoot() as never);
+    __setFolderForTest('workspace', sampleRoot());
     const tree = await listEntries('workspace');
 
     // Top level: folders first (alpha), then files. readme.md and obj/ are gone.
@@ -158,7 +158,7 @@ describe('browser fs file management', () => {
 
   it('createFile writes contents and returns the right token', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
 
     const token = await createFile('workspace', 'billing/new.koi', 'context New {}');
     expect(token).toBe('workspace/billing/new.koi');
@@ -170,7 +170,7 @@ describe('browser fs file management', () => {
 
   it('createFile creates intermediate dirs for a nested new path', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
 
     const token = await createFile('workspace', 'fresh/deep/model.koi', 'x');
     expect(token).toBe('workspace/fresh/deep/model.koi');
@@ -183,7 +183,7 @@ describe('browser fs file management', () => {
 
   it('createFile defaults to empty contents and rejects an existing leaf', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
 
     const token = await createFile('workspace', 'blank.koi');
     const file = root.entries.get('blank.koi') as MockFile;
@@ -195,7 +195,7 @@ describe('browser fs file management', () => {
 
   it('createFolder makes a nested directory and returns its token', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
 
     const token = await createFolder('workspace', 'a/b/c');
     expect(token).toBe('workspace/a/b/c');
@@ -207,7 +207,7 @@ describe('browser fs file management', () => {
 
   it('deleteEntry removes the handle from its parent', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace'); // populate registries
 
     await deleteEntry('workspace/billing/order.koi');
@@ -222,7 +222,7 @@ describe('browser fs file management', () => {
 
   it('renameEntry on a file copies+deletes and returns the new token', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await renameEntry('workspace/billing/order.koi', 'purchase.koi');
@@ -241,7 +241,7 @@ describe('browser fs file management', () => {
 
   it('renameEntry on a directory recreates the subtree under the new name', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await renameEntry('workspace/shipping', 'logistics');
@@ -256,7 +256,7 @@ describe('browser fs file management', () => {
 
   it('moveEntry with copy:true keeps the source (duplicate)', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await moveEntry('workspace/billing/order.koi', 'workspace', 'empty/order.koi', true);
@@ -273,7 +273,7 @@ describe('browser fs file management', () => {
 
   it('moveEntry without copy deletes the source', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await moveEntry('workspace/billing/invoice.koi', 'workspace', 'empty/invoice.koi');
@@ -296,7 +296,7 @@ describe('browser fs file management', () => {
     objDir.entries.set('Order.cs', new MockFile('Order.cs', '// generated'));
     orders.entries.set('obj', objDir);
     root.entries.set('orders', orders);
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await renameEntry('workspace/orders', 'purchasing');
@@ -313,7 +313,7 @@ describe('browser fs file management', () => {
 
   it('moveEntry rejects an existing destination name instead of overwriting', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     // billing already has invoice.koi; moving order.koi onto it must not clobber it.
@@ -327,7 +327,7 @@ describe('browser fs file management', () => {
 
   it('moveEntry moves a whole directory without copy', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await moveEntry('workspace/shipping', 'workspace', 'empty/shipping');
@@ -350,7 +350,7 @@ describe('browser fs file management', () => {
     order.move = vi.fn(async () => {
       throw new DOMException('cannot move between file systems', 'NotSupportedError');
     });
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await moveEntry('workspace/billing/order.koi', 'workspace', 'empty/order.koi');
@@ -367,7 +367,7 @@ describe('browser fs file management', () => {
     shipping.move = vi.fn(async () => {
       throw new DOMException('cannot move between file systems', 'NotSupportedError');
     });
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     const newToken = await moveEntry('workspace/shipping', 'workspace', 'empty/shipping');
@@ -383,7 +383,7 @@ describe('browser fs file management', () => {
 
   it('rejects malformed names and paths', async () => {
     const root = sampleRoot();
-    __setFolderForTest('workspace', root as never);
+    __setFolderForTest('workspace', root);
     await listEntries('workspace');
 
     await expect(createFolder('workspace', '')).rejects.toThrow('invalid path');
@@ -412,7 +412,7 @@ describe('listDir (flat, any-extension docs listing)', () => {
   }
 
   it('lists immediate children of any extension, folders first then alpha', async () => {
-    __setFolderForTest('workspace', docsRoot() as never);
+    __setFolderForTest('workspace', docsRoot());
     const entries = await listDir('workspace', 'docs/adr');
 
     expect(entries.map((e) => e.name)).toEqual(['archive', '0001-first.md', '0002-second.md', 'README.txt']);
@@ -426,14 +426,14 @@ describe('listDir (flat, any-extension docs listing)', () => {
   });
 
   it('registers listed files so a later readTextFile resolves them (the .koi walk would not)', async () => {
-    __setFolderForTest('workspace', docsRoot() as never);
+    __setFolderForTest('workspace', docsRoot());
     await listDir('workspace', 'docs/adr');
     // The markdown ADR is readable purely because listDir registered its handle.
     expect(await readTextFile('workspace/docs/adr/0001-first.md')).toBe('# 1. First');
   });
 
   it('rejects when the directory does not exist (callers treat it as empty)', async () => {
-    __setFolderForTest('workspace', docsRoot() as never);
+    __setFolderForTest('workspace', docsRoot());
     await expect(listDir('workspace', 'docs/nope')).rejects.toThrow();
   });
 });
@@ -441,7 +441,7 @@ describe('listDir (flat, any-extension docs listing)', () => {
 describe('default workspace (OPFS)', () => {
   function mockOpfs(root: MockDir): void {
     (navigator as unknown as { storage: { getDirectory(): Promise<unknown> } }).storage = {
-      getDirectory: async () => root as never,
+      getDirectory: async () => root,
     };
   }
 
@@ -485,7 +485,7 @@ describe('default workspace (OPFS)', () => {
 describe('materializeWorkspace (examples vs shared imports)', () => {
   function mockOpfs(root: MockDir): void {
     (navigator as unknown as { storage: { getDirectory(): Promise<unknown> } }).storage = {
-      getDirectory: async () => root as never,
+      getDirectory: async () => root,
     };
   }
   const originalStorage = (navigator as unknown as { storage?: unknown }).storage;
@@ -685,7 +685,9 @@ describe('materializeWorkspace persisted-example IndexedDB reload round-trip (#5
   // not-called assertion therefore documents/guards that the re-acquire stays on the permission-free path
   // (it can't catch a regression that re-adds a prompt — the restored handle has no method to call — but
   // it pins the OPFS-vs-picked asymmetry the #535 design rests on).
-  const requestPermissionSpy = vi.fn(async (_opts?: { mode: string }) => 'granted' as PermissionState);
+  const requestPermissionSpy = vi.fn(
+    async (_opts?: { mode: string }): Promise<PermissionState> => 'granted',
+  );
 
   /** A file handle seeded into the OPFS tree (materialize only exercises createWritable; walk reads name). */
   class CloneFile {
@@ -755,7 +757,7 @@ describe('materializeWorkspace persisted-example IndexedDB reload round-trip (#5
 
   function mockOpfs(root: CloneDir): void {
     (navigator as unknown as { storage: { getDirectory(): Promise<unknown> } }).storage = {
-      getDirectory: async () => root as never,
+      getDirectory: async () => root,
     };
   }
 
@@ -802,7 +804,7 @@ describe('folderName', () => {
   });
 
   it('returns the cached display name for a registered token', () => {
-    __setFolderForTest('my-folder', new MockDir('My Workspace') as never);
+    __setFolderForTest('my-folder', new MockDir('My Workspace'));
     expect(folderName('my-folder')).toBe('My Workspace');
   });
 
@@ -815,7 +817,7 @@ describe('folderName', () => {
   });
 
   it('cached name wins over path-segment fallback', () => {
-    __setFolderForTest('a/b/project', new MockDir('Custom Name') as never);
+    __setFolderForTest('a/b/project', new MockDir('Custom Name'));
     expect(folderName('a/b/project')).toBe('Custom Name');
   });
 });

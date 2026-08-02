@@ -23,7 +23,7 @@ export interface ExportShareDeps {
     'buffers' | 'activeUri' | 'folderRootToken' | 'syncActiveBuffer' | 'openFolderPath' | 'activateFile'
   >;
   editor: { getDoc(): string };
-  setStatus(text: string, kind: 'error'): void;
+  setStatus: (text: string, kind: 'error') => void;
   /** Re-derive the status pill from the CURRENT diagnostics after a transient flash (#271), so a fresh
    *  push isn't clobbered. Wraps editorSession.updateStatus(editorSession.diagnosticsFor(activeUri)). */
   refreshStatusFromDiagnostics(): void;
@@ -35,9 +35,9 @@ export interface ExportShare {
   exportSourceZip(): Promise<void>;
   exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): Promise<void>;
   copyActiveDiagramMermaid(): Promise<void>;
-  saveProjectToDisk(): Promise<void>;
+  saveProjectToDisk: () => Promise<void>;
   /** Returns whether a workspace was actually opened, so the boot ladder can fall back to the default. */
-  importSharedWorkspace(files: { relPath: string; text: string }[], active?: string): Promise<boolean>;
+  importSharedWorkspace: (files: { relPath: string; text: string }[], active?: string) => Promise<boolean>;
   /** The Generate Project wizard handle (the toolbar button + palette command open it). */
   readonly generateProject: { open(): void };
 }

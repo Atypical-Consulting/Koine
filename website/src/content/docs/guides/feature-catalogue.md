@@ -198,7 +198,7 @@ subscribers, the map, the AsyncAPI operations and the docs graph read. The claus
 integration event of its *own* context (`PublishUnknownIntegrationEvent`, KOI1420) and sit in an aggregate
 **root**'s command (`PublishOutsideRoot`, KOI1422); its payload is completeness- and type-checked exactly like
 `emit`'s (KOI0602). See
-[ADR 0017](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0017-publish-is-a-distinct-clause-from-emit.md)
+[ADR 0019](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0019-publish-is-a-distinct-clause-from-emit.md)
 for why it is a distinct keyword rather than an inference over the event's name.
 :::
 

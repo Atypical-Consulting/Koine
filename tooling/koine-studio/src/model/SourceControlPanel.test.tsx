@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { fireEvent, render, waitFor, within } from '@testing-library/preact';
+import { fireEvent, render, type RenderResult, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
 import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, GitUpstream } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
@@ -775,7 +775,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
   });
 
   // Open the ⋮ menu (a REAL createFloatingMenu, mounted on document.body) and return its role="menu".
-  async function openOverflow(view: ReturnType<typeof render>) {
+  async function openOverflow(view: RenderResult) {
     const trigger = (await view.findByRole('button', { name: 'Views and more actions' })) as HTMLButtonElement;
     fireEvent.click(trigger);
     return waitFor(() => {
@@ -816,7 +816,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
-    const item = (name: string | RegExp) => within(menu).getByRole('menuitem', { name }) as HTMLButtonElement;
+    const item = (name: string | RegExp) => within(menu).getByRole<HTMLButtonElement>('menuitem', { name });
 
     // Live items — already backed by the panel's existing handlers/data.
     expect(item('Refresh').disabled).toBe(false);
@@ -845,7 +845,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Discard all changes' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' }));
 
     // Destructive, so it asks first — through the same danger confirm every other Discard control uses.
     await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
@@ -877,7 +877,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Discard all changes' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' }));
 
     await waitFor(() => expect(git.gitDiscard).toHaveBeenCalledWith(TOKEN, ['b.koi'], ['scratch/']));
     const req = vi.mocked(koiConfirm).mock.calls[0][0];
@@ -895,7 +895,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Discard all changes' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' }));
 
     await waitFor(() => expect(koiConfirm).toHaveBeenCalledTimes(1));
     await new Promise((r) => setTimeout(r, 20)); // let any (erroneous) discard microtask flush
@@ -910,7 +910,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const menu = await openOverflow(view);
 
     expect(
-      (within(menu).getByRole('menuitem', { name: 'Discard all changes' }) as HTMLButtonElement).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' }).disabled,
     ).toBe(true);
   });
 
@@ -924,7 +924,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const menu = await openOverflow(view);
     const statusCallsBefore = git.gitStatus.mock.calls.length;
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Push' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Push' }));
 
     await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
     // The mutate() follow-up reload re-reads status, so the ahead count tracks the pushed repository.
@@ -937,7 +937,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
 
-    expect((within(menu).getByRole('menuitem', { name: 'Push' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Push' }).disabled).toBe(true);
   });
 
   test('the ⋮ menu "Discard all changes" and "Push" are both disabled while busy', async () => {
@@ -957,11 +957,11 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const menu = await openOverflow(view);
 
     expect(
-      (within(menu).getByRole('menuitem', { name: 'Discard all changes' }) as HTMLButtonElement).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Discard all changes' }).disabled,
     ).toBe(true);
-    expect((within(menu).getByRole('menuitem', { name: 'Push' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((within(menu).getByRole('menuitem', { name: 'Pull' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((within(menu).getByRole('menuitem', { name: 'Fetch' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Push' }).disabled).toBe(true);
+    expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Pull' }).disabled).toBe(true);
+    expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Fetch' }).disabled).toBe(true);
   });
 
   test('the ⋮ menu "Pull" calls gitPull and re-fetches status (#1401)', async () => {
@@ -974,7 +974,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const menu = await openOverflow(view);
     const statusCallsBefore = git.gitStatus.mock.calls.length;
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Pull' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Pull' }));
 
     await waitFor(() => expect(git.gitPull).toHaveBeenCalledWith(TOKEN));
     // The mutate() follow-up reload re-reads status, tracking the fast-forwarded branch.
@@ -987,7 +987,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
 
-    expect((within(menu).getByRole('menuitem', { name: 'Pull' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Pull' }).disabled).toBe(true);
   });
 
   test('a Pull rejected by local divergence (--ff-only) surfaces via the action-error alert, no other state change (#1401)', async () => {
@@ -1000,7 +1000,7 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Pull' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Pull' }));
 
     const alert = await view.findByRole('alert');
     expect(alert.textContent).toContain('Not possible to fast-forward');
@@ -1016,8 +1016,8 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     const statusCallsBefore = git.gitStatus.mock.calls.length;
 
     // Fetch is enabled with no upstream — it only needs a remote, not a tracked branch.
-    expect((within(menu).getByRole('menuitem', { name: 'Fetch' }) as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Fetch' }));
+    expect(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Fetch' }).disabled).toBe(false);
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Fetch' }));
 
     await waitFor(() => expect(git.gitFetch).toHaveBeenCalledWith(TOKEN));
     await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
@@ -1033,14 +1033,14 @@ describe('SourceControlPanel — overflow ⋮ actions menu (#1153)', () => {
     await view.findByDisplayValue('main');
     const menu = await openOverflow(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Stage all changes' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Stage all changes' }));
     await waitFor(() => expect(git.gitStage).toHaveBeenCalledWith(TOKEN, ['b.koi', 'c.koi']));
   });
 });
 
 describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
   // Open the caret menu (a REAL createFloatingMenu on document.body) and return its role="menu".
-  async function openCaret(view: ReturnType<typeof render>) {
+  async function openCaret(view: RenderResult) {
     const trigger = (await view.findByRole('button', { name: 'Commit options' })) as HTMLButtonElement;
     fireEvent.click(trigger);
     return waitFor(() => {
@@ -1069,8 +1069,8 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: 'Fix the typo' } });
     const menu = await openCaret(view);
-    const amend = within(menu).getByRole('menuitem', { name: 'Amend last commit' }) as HTMLButtonElement;
-    const commitPush = within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement;
+    const amend = within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Amend last commit' });
+    const commitPush = within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' });
     expect(amend.disabled).toBe(false);
     expect(commitPush.disabled).toBe(false);
   });
@@ -1083,7 +1083,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
 
     // No message typed — the composer stays at its default empty string.
     expect(
-      (within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }).disabled,
     ).toBe(true);
   });
 
@@ -1094,7 +1094,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     const menu = await openCaret(view);
 
     expect(
-      (within(menu).getByRole('menuitem', { name: 'Amend last commit' }) as HTMLButtonElement).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Amend last commit' }).disabled,
     ).toBe(true);
   });
 
@@ -1105,7 +1105,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     const menu = await openCaret(view);
 
     expect(
-      (within(menu).getByRole('menuitem', { name: 'Commit & Push' }) as HTMLButtonElement).disabled,
+      within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }).disabled,
     ).toBe(true);
   });
 
@@ -1117,7 +1117,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     const menu = await openCaret(view);
     const statusCallsBefore = git.gitStatus.mock.calls.length;
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Amend last commit' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Amend last commit' }));
 
     await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Fix the typo', { amend: true }));
     await waitFor(() => expect(git.gitStatus.mock.calls.length).toBeGreaterThan(statusCallsBefore));
@@ -1140,7 +1140,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
     const menu = await openCaret(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }));
 
     await waitFor(() => expect(git.gitCommit).toHaveBeenCalledWith(TOKEN, 'Add order total'));
     await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
@@ -1155,7 +1155,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
     const menu = await openCaret(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }));
 
     const alert = await view.findByRole('alert');
     expect(alert.textContent).toContain('nothing staged');
@@ -1170,7 +1170,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
     const menu = await openCaret(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }));
 
     await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN, { setUpstream: true }));
   });
@@ -1185,7 +1185,7 @@ describe('SourceControlPanel — split-commit caret menu (#1153)', () => {
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
     const menu = await openCaret(view);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }));
 
     await waitFor(() => expect(git.gitPush).toHaveBeenCalledWith(TOKEN));
   });
@@ -1276,7 +1276,7 @@ describe('SourceControlPanel — full commit history (#1153)', () => {
       expect(m).not.toBeNull();
       return m!;
     });
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'View all commits' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'View all commits' }));
     await waitFor(() => expect(recent.querySelectorAll('.koi-sc-log-item').length).toBe(12));
   });
 });
@@ -1365,7 +1365,7 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
   // to-be-pushed. Both now route through the same shared ensureSaved() helper onCommit uses, so they get
   // the identical prompt/decline/failure behavior — these tests mirror the onCommit cases above via the
   // caret menu instead of the split Commit button.
-  async function openCaret(view: ReturnType<typeof render>) {
+  async function openCaret(view: RenderResult) {
     const trigger = (await view.findByRole('button', { name: 'Commit options' })) as HTMLButtonElement;
     fireEvent.click(trigger);
     return waitFor(() => {
@@ -1393,7 +1393,7 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
     const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: 'Fix the typo' } });
     const menu = await openCaret(view);
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Amend last commit' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Amend last commit' }));
     return { git, onSaveAll, order };
   }
 
@@ -1418,7 +1418,7 @@ describe('SourceControlPanel — save-all-before-commit prompt (#470)', () => {
     const textarea = (await view.findByLabelText('Commit message')) as HTMLTextAreaElement;
     fireEvent.input(textarea, { target: { value: 'Add order total' } });
     const menu = await openCaret(view);
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Commit & Push' }));
+    fireEvent.click(within(menu).getByRole<HTMLButtonElement>('menuitem', { name: 'Commit & Push' }));
     return { git, onSaveAll, order };
   }
 

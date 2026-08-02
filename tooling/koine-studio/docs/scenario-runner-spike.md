@@ -303,7 +303,7 @@ kind*:
   which the dispatcher reads beside `_domainEvents` — so running the pizzeria's `Order.place` reports
   `OrderPlaced` crossing to Delivery, Kitchen and Payment, and runs nothing for it. (`emit` still takes a
   domain event only; the two verbs stay distinct — [ADR
-  0017](../../../adr/0017-publish-is-a-distinct-clause-from-emit.md).)
+  0017](../../../adr/0019-publish-is-a-distinct-clause-from-emit.md).)
 
 **Attribution.** Steps gained one additive, optional property: `aggregate`. It is written **only** on a
 fanned-out step — a primary-aggregate step (i.e. every step interpreted mode ever produces, and every step

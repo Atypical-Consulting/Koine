@@ -74,8 +74,8 @@ export interface ActionMenuProps {
   /** The result's title, shown as the popover's header — ported from the prototype's `.lx-actmenu-head`. */
   title: string;
   selectedIndex: number;
-  onSelect(index: number): void;
-  onRun(index: number): void;
+  onSelect: (index: number) => void;
+  onRun: (index: number) => void;
 }
 
 /**

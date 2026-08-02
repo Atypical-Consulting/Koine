@@ -59,13 +59,13 @@ export interface ActiveContextControllerDeps {
   store: StoreApi<AppState>;
   lsp: ActiveContextControllerLsp;
   /** The uri the editor currently shows (read live from ide.ts, forwarded by the facade). */
-  activeUri(): string;
+  activeUri: () => string;
   /** The opened-folder token (or '' in no-folder mode) — keys the per-workspace scope persistence. */
-  folderRootToken(): string;
+  folderRootToken: () => string;
   /** Persist/restore the active scope for a workspace key (ide.ts's storage seam, forwarded verbatim by
    *  the facade). */
-  saveActiveContext(workspaceKey: string, scope: string): void;
-  loadActiveContext(workspaceKey: string): string | null;
+  saveActiveContext: (workspaceKey: string, scope: string) => void;
+  loadActiveContext: (workspaceKey: string) => string | null;
   /** The status-bar "Context" segment (`#sb-context`) this controller writes its readout into. Owned by
    *  the facade (which also wires the scope-picker MENU on the same node), injected here so this module
    *  never does its own DOM lookup. */
@@ -75,7 +75,7 @@ export interface ActiveContextControllerDeps {
    *  subscription this controller owns — never called directly by this module's own writers (they only
    *  ever write the slice; the subscription is the sole place the hook fires from). */
   hooks: {
-    rerenderScopedSurfaces(): void;
+    rerenderScopedSurfaces: () => void;
   };
 }
 
@@ -85,17 +85,17 @@ export interface ActiveContextController {
   /** A deliberate scope change (the status-bar picker, or any equivalent explicit pick) — persisted so a
    *  reload restores it. The SAME choke point a direct store write (e.g. the Domain-navigator drill)
    *  ultimately lands on via the subscription below, so both stay in lockstep (#531). */
-  setActiveContext(scope: ContextScope): void;
+  setActiveContext: (scope: ContextScope) => void;
   /** Refresh the switcher's context list from the workspace model (best-effort; empties on failure). */
-  refreshContextList(): Promise<void>;
+  refreshContextList: () => Promise<void>;
   /** Restore the persisted scope for the just-opened workspace, before the first scoped render. */
-  restoreActiveContext(): void;
+  restoreActiveContext: () => void;
   /** Follow the active `.koi` file's bounded context (view-only — never persisted). */
-  followActiveFileContext(): Promise<void>;
+  followActiveFileContext: () => Promise<void>;
   /** The per-workspace storage key for the active scope (folder identity, or 'scratch'). */
   contextWorkspaceKey(): string;
   /** Drop the store subscription so a deferred scope change can't fire the hook into a torn-down host. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 /** The human label for a scope: the context name, or "All contexts" for the unscoped sentinel. Exported
