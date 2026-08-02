@@ -368,4 +368,58 @@ public class RouteDerivationTests
         var query = new QueryDecl("OrderById", Criteria: [new Param("id", new TypeRef("OrderId"))], ResultType: new TypeRef("Order"));
         RouteDerivation.ForQuery(query).TokenBindings.ShouldBeEmpty();
     }
+
+    // ---- ForFactory (#1747) ---------------------------------------------------
+
+    /// <summary>A factory → <c>POST /{entity}/{factory}</c>, its parameters the request body, the created
+    /// aggregate the response — the conventional shape <c>WriteFactoryEndpoint</c> and the <c>openapi</c>
+    /// emitter both read (#1747).</summary>
+    [Fact]
+    public void ForFactory_derives_verb_route_operationId_and_shapes()
+    {
+        var entity = Order();
+        var factory = new FactoryDecl("Open", Parameters: [new Param("customer", new TypeRef("CustomerId"))], Body: []);
+
+        var info = RouteDerivation.ForFactory(entity, factory);
+
+        info.Verb.ShouldBe("POST");
+        info.Route.ShouldBe("/order/open");
+        info.OperationId.ShouldBe("Order_Open");
+        info.RequestShape.ShouldBeSameAs(factory.Parameters);
+        info.ResponseShape.ShouldBe(new TypeRef(entity.Name));
+        info.AuthRole.ShouldBeNull();
+    }
+
+    /// <summary>Multi-word entity and factory names both kebab, exactly like a command's (#1042).</summary>
+    [Fact]
+    public void ForFactory_kebabs_multi_word_entity_and_factory_names()
+    {
+        var entity = new EntityDecl("OrderLine", "OrderLineId", [], [], [], [], []);
+        var factory = new FactoryDecl("OpenDraft", Parameters: [], Body: []);
+
+        var info = RouteDerivation.ForFactory(entity, factory);
+
+        info.Route.ShouldBe("/order-line/open-draft");
+        info.OperationId.ShouldBe("OrderLine_OpenDraft");
+    }
+
+    /// <summary>A no-argument factory still derives a valid (empty) request shape.</summary>
+    [Fact]
+    public void ForFactory_with_no_parameters_has_an_empty_request_shape()
+    {
+        var entity = Order();
+        var factory = new FactoryDecl("Open", Parameters: [], Body: []);
+
+        RouteDerivation.ForFactory(entity, factory).RequestShape.ShouldBeEmpty();
+    }
+
+    /// <summary>A factory carries no R19 annotations (#1219) — no route tokens to resolve.</summary>
+    [Fact]
+    public void ForFactory_resolves_no_token_bindings()
+    {
+        var entity = Order();
+        var factory = new FactoryDecl("Open", Parameters: [], Body: []);
+
+        RouteDerivation.ForFactory(entity, factory).TokenBindings.ShouldBeEmpty();
+    }
 }

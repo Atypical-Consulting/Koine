@@ -866,6 +866,192 @@ public class R19ApiAnnotationsTests
     public void A_conventional_context_reports_no_route_collision() =>
         Diagnose(TwoCommandSource([], [])).ShouldBeEmpty();
 
+    // ---- KOI1211: factory routes (#1747) -------------------------------------
+
+    /// <summary>
+    /// The headline case from the issue: a factory's conventional route collides with a command
+    /// annotated onto the very same <c>(route, verb)</c> pair. #1734 already catches every other shape
+    /// of this mistake — a factory was the one construct left outside KOI1211's collision namespace.
+    /// The grammar requires every <c>commandDecl</c> before any <c>factoryDecl</c> in one entity body, so
+    /// the factory is necessarily the SECOND (reported) declaration here — exactly the case the
+    /// conventional-route hint exists for.
+    /// </summary>
+    [Fact]
+    public void A_factorys_conventional_route_colliding_with_an_annotated_command_is_rejected()
+    {
+        const string source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/order/open")
+                  @post
+                  command reopen {
+                    requires status == Placed "order is not placed"
+                    status -> Draft
+                  }
+
+                  create open {
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldContain("factory 'open' on 'Order'");
+        collision.Message.ShouldContain("command 'reopen' on 'Order'");
+        collision.Message.ShouldContain(
+            "a factory's route is conventional and cannot be annotated, so move the @route/verb on the other declaration");
+    }
+
+    /// <summary>
+    /// The validator sees a factory's CONVENTIONAL route too: an <c>@route</c> aimed at the path a
+    /// factory already derives collides just as hard. The expected path is computed through
+    /// <see cref="RouteDerivation.ForFactory"/> itself rather than hard-coded, so this doubles as the pin
+    /// that keeps <c>CqrsValidator</c>'s restated convention and the emit-side one from drifting for
+    /// factories, mirroring <see cref="An_override_colliding_with_a_conventional_route_is_rejected"/>.
+    /// </summary>
+    [Theory]
+    [InlineData("open")]
+    [InlineData("openDraft")]
+    [InlineData("XMLImport")]
+    [InlineData("order2Ship")]
+    public void An_override_colliding_with_a_conventional_factory_route_is_rejected(string factoryName)
+    {
+        var source = $$"""
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("{{ConventionalFactoryRoute("Order", factoryName)}}")
+                  @post
+                  command cancel {
+                    requires status == Draft "order already placed"
+                    status -> Placed
+                  }
+
+                  create {{factoryName}} {
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnose(source).ShouldHaveSingleItem().Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+    }
+
+    /// <summary>Two factories on different entities never collide — different entity segments.</summary>
+    [Fact]
+    public void Two_factories_on_different_entities_do_not_collide() =>
+        Diagnose("""
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  create open {
+                  }
+                }
+              }
+
+              aggregate Invoices root Invoice {
+                entity Invoice identified by InvoiceId {
+                  create open {
+                  }
+                }
+              }
+            }
+            """).ShouldBeEmpty();
+
+    /// <summary>A factory alone — no colliding command or query — produces no diagnostic.</summary>
+    [Fact]
+    public void A_lone_factory_produces_no_diagnostic() =>
+        Diagnose("""
+            context Sales {
+              aggregate Orders root Order {
+                entity Order identified by OrderId {
+                  create open {
+                  }
+                }
+              }
+            }
+            """).ShouldBeEmpty();
+
+    /// <summary>A command whose route does not match any factory's still produces no diagnostic.</summary>
+    [Fact]
+    public void A_command_not_colliding_with_a_factory_produces_no_diagnostic() =>
+        Diagnose("""
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  command place {
+                    requires status == Draft "order already placed"
+                    status -> Placed
+                  }
+
+                  create open {
+                  }
+                }
+              }
+            }
+            """).ShouldBeEmpty();
+
+    /// <summary>
+    /// Non-regression (#1747): a command-vs-command collision message is exactly what it was before this
+    /// issue — the factory-specific hint is appended only when the reported claimant IS a factory.
+    /// </summary>
+    [Fact]
+    public void Command_vs_command_collision_message_carries_no_factory_hint()
+    {
+        Diagnostic collision = Diagnose(TwoCommandSource(PutOrdersId, PutOrdersId)).ShouldHaveSingleItem();
+
+        collision.Message.ShouldBe(
+            "command 'cancel' on 'Order' maps 'PUT /orders/{id}', which command 'place' on 'Order' " +
+            "already maps; two declarations may share a route only when their verbs differ");
+    }
+
+    /// <summary>
+    /// Two factories can collide with EACH OTHER too — not just with a command/query. Type names are
+    /// unique case-<b>sensitively</b>, so <c>Order</c>/<c>ORDER</c> are distinct entities whose factories
+    /// (<c>open</c>/<c>OPEN</c>) both kebab to the same conventional route. Neither side has an
+    /// annotation axis to move, so the one-factory hint ("move the @route/verb on the other
+    /// declaration") would be actionable for neither — code-review catch on #1747: the hint must branch
+    /// on BOTH claimants' shape, not just the reported one's.
+    /// </summary>
+    [Fact]
+    public void Two_factories_colliding_on_their_conventional_route_get_a_two_factory_hint()
+    {
+        const string source = """
+            context Sales {
+              entity Order identified by OrderId {
+                create open {
+                }
+              }
+
+              entity ORDER identified by OrderTwoId {
+                create OPEN {
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldContain(
+            "two factories resolve to the same conventional route — rename one factory, or one entity, " +
+            "so their conventional paths differ");
+        collision.Message.ShouldNotContain("cannot be annotated, so move the @route/verb on the other declaration");
+    }
+
     /// <summary>The conventional route the emit side derives for <c>entity.command</c>.</summary>
     private static string ConventionalCommandRoute(string entity, string command) =>
         RouteDerivation.ForCommand(
@@ -875,6 +1061,12 @@ public class R19ApiAnnotationsTests
     /// <summary>The conventional route the emit side derives for a query.</summary>
     private static string ConventionalQueryRoute(string query) =>
         RouteDerivation.ForQuery(new QueryDecl(query, [], new TypeRef("Unused"))).Route;
+
+    /// <summary>The conventional route the emit side derives for <c>entity.factory</c> (#1747).</summary>
+    private static string ConventionalFactoryRoute(string entity, string factory) =>
+        RouteDerivation.ForFactory(
+            new EntityDecl(entity, entity + "Id", [], [], [], [], []),
+            new FactoryDecl(factory, [], [])).Route;
 
     private static string FileEndingWith(IEnumerable<Emit.EmittedFile> files, string suffix) =>
         files.Single(f => f.RelativePath.EndsWith(suffix, StringComparison.Ordinal)).Contents;

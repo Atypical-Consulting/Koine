@@ -1034,12 +1034,17 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
 
+        // `m.Identifier()` is null when a keyword takes an enum member's position and ANTLR
+        // error-recovers into an EnumMemberContext missing its Identifier token (#1836); the
+        // parser's error listener already reports the mismatched-input syntax error for it, so
+        // NameOf's empty-string fallback (same as the enum's own name below) just avoids the
+        // NullReferenceException without double-reporting.
         KoineParser.EnumMemberContext[] memberCtxs = ctx.enumMember();
         var members = new List<EnumMember>(memberCtxs.Length);
         foreach (KoineParser.EnumMemberContext m in memberCtxs)
         {
             members.Add(new EnumMember(
-                m.Identifier().GetText(),
+                NameOf(m.Identifier()),
                 Map(m.expression(), BuildExpression))
             { Span = SpanOf(m), NameSpan = SpanOf(m.Identifier()) });
         }
