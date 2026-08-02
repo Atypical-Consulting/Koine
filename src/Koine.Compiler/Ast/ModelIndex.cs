@@ -542,7 +542,35 @@ public sealed class ModelIndex
         return TryGetMemberType(typeName, memberName, out type);
     }
 
-    /// <summary>Resolves a type name to its declaration as seen from <paramref name="context"/> (local, then an unambiguous import).</summary>
+    /// <summary>
+    /// Resolves a type name to its declaration as seen from <paramref name="context"/>, walking the
+    /// visibility ladder in order: the context's own <b>local</b> declarations, then a single
+    /// <b>import</b> owner, then the single owner the <b>context map permits</b> an un-imported
+    /// reference to (R14.1 — <c>conformist</c>, <c>shared-kernel</c>, <c>open-host</c>,
+    /// <c>published-language</c>, <c>partnership</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>Each rung is strictly narrower than the next, so an explicit statement of intent always
+    /// outranks an inferred one: a local declaration shadows an import, an import shadows a permit.
+    /// A relation that is <i>not</i> a permit kind (<c>anti-corruption-layer</c>,
+    /// <c>customer-supplier</c>) grants no visibility at all.</para>
+    /// <para><b>Ambiguity deliberately resolves to no answer.</b> Two import owners, or two
+    /// map-permitted owners, return <c>false</c> rather than an arbitrary winner — the caller then
+    /// reports an unresolved name instead of silently binding one of two same-named declarations.
+    /// See <see cref="ResolveOwner(string, string?, string)"/> for the sibling policy that answers
+    /// the different question of which module a name is <i>emitted</i> into, and which therefore
+    /// must produce an owner even when ambiguous (it flags the tie-break instead).</para>
+    /// <para>This is the one seam every context-aware caller resolves through — the validators, all
+    /// five code emitters, <see cref="Classify(string?, string)"/>,
+    /// <see cref="TryGetDecl(string?, string, out TypeDecl)"/>,
+    /// <see cref="TryGetMemberType(string?, string, string, out TypeRef)"/> — each of which falls back
+    /// to the flat, last-declaration-wins <c>_byName</c> view when it answers <c>false</c>. The permit
+    /// rung was missing until #1853, so a permit-visible type reached every one of those callers
+    /// through that flat fallback, making the model's legality depend on <b>context source order</b>.
+    /// That single gap is what surfaced construct-by-construct as #1632, #1711/#1715, #1739/#1797,
+    /// #1796/#1816, #1834/#1844 and #1849/#1851. <b>A new context-aware call site belongs here, not on
+    /// <c>_byName</c>:</b> reaching for the flat view directly is how that family kept re-opening.</para>
+    /// </remarks>
     public bool TryGetDeclIn(string context, string typeName, out TypeDecl decl)
     {
         if (_declsByContext.TryGetValue(context, out Dictionary<string, TypeDecl>? local) && local.TryGetValue(typeName, out decl!))
@@ -555,6 +583,29 @@ public sealed class ModelIndex
             && _declsByContext.TryGetValue(owners[0], out Dictionary<string, TypeDecl>? theirs) && theirs.TryGetValue(typeName, out decl!))
         {
             return true;
+        }
+
+        // The map-permit rung. `context` itself is excluded: it declares the name or it does not, and
+        // the local rung above already settled that — leaving it in would let a self-relation answer
+        // for a name the context never declared.
+        IReadOnlyList<string> declaring = DeclaringContextsOf(typeName);
+        if (declaring.Count > 0)
+        {
+            var elsewhere = new List<string>(declaring.Count);
+            foreach (var c in declaring)
+            {
+                if (!string.Equals(c, context, StringComparison.Ordinal))
+                {
+                    elsewhere.Add(c);
+                }
+            }
+
+            if (SingleMapPermittedOwner(elsewhere, context) is { } permitted
+                && _declsByContext.TryGetValue(permitted, out Dictionary<string, TypeDecl>? permittedDecls)
+                && permittedDecls.TryGetValue(typeName, out decl!))
+            {
+                return true;
+            }
         }
 
         decl = null!;
