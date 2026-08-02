@@ -577,7 +577,58 @@ internal static class ScenarioSandbox
     /// problem, when what happened is a model-derived allocation meeting its budget.</para>
     /// </summary>
     public static string? ResourceCeilingNote(Exception failure) =>
-        failure is OutOfMemoryException ? HeapCeilingNote() : null;
+        IsResourceCeilingBreach(failure) ? HeapCeilingNote() : null;
+
+    /// <summary>How many <see cref="Exception.InnerException"/>/<see cref="AggregateException"/> hops
+    /// <see cref="IsResourceCeilingBreach(Exception)"/> will follow. The deepest real shape observed
+    /// (#1858) is two (<c>TargetInvocationException</c> → <c>TypeInitializationException</c> →
+    /// <see cref="OutOfMemoryException"/>), so 8 is ample headroom without letting a pathological or
+    /// cyclic chain spin unbounded.</summary>
+    private const int MaxExceptionChainDepth = 8;
+
+    /// <summary>
+    /// Whether <paramref name="failure"/> IS, or WRAPS, a heap-ceiling <see cref="OutOfMemoryException"/>.
+    ///
+    /// <para>The wrapper matters because the CLR chooses it, not us: an OOM raised inside a static
+    /// constructor is REQUIRED to surface as <see cref="TypeInitializationException"/>, and a sandboxed
+    /// child hosting Roslyn runs a great deal of first-touch static initialization right at the ceiling.
+    /// Matching the outermost type alone therefore misattributes a genuine ceiling breach as a generic
+    /// fault about one run in three (#1858).</para>
+    ///
+    /// <para>Bounded and depth-capped: an exception chain is attacker-adjacent input (it can be shaped
+    /// by the model's own emitted code) and a cyclic <see cref="Exception.InnerException"/> chain, while
+    /// pathological, is constructible.</para>
+    /// </summary>
+    internal static bool IsResourceCeilingBreach(Exception failure) =>
+        IsResourceCeilingBreach(failure, depth: 0);
+
+    private static bool IsResourceCeilingBreach(Exception failure, int depth)
+    {
+        if (depth >= MaxExceptionChainDepth)
+        {
+            return false;
+        }
+
+        if (failure is OutOfMemoryException)
+        {
+            return true;
+        }
+
+        if (failure is AggregateException aggregate)
+        {
+            foreach (Exception inner in aggregate.InnerExceptions)
+            {
+                if (IsResourceCeilingBreach(inner, depth + 1))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return failure.InnerException is { } wrapped && IsResourceCeilingBreach(wrapped, depth + 1);
+    }
 
     /// <summary>
     /// The note a CHILD writes when it dies of the heap hard limit — read from its own environment, so

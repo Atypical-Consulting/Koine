@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Semantics.Scenarios;
@@ -300,6 +301,112 @@ public class ScenarioSandboxTests
 
         // Saturating, never wrapping — a ceiling near the top of the range must not come out as a tiny cap.
         ScenarioConfinement.WindowsJobCommitLimitFor(long.MaxValue).ShouldBe(long.MaxValue);
+    }
+
+    // ------------------------------------------------------------------------
+    // Wrapper-tolerant ceiling classification (#1858): a heap-ceiling OutOfMemoryException raised
+    // inside a static constructor is REQUIRED by the CLR to surface as a TypeInitializationException,
+    // and a sandboxed child hosting Roslyn runs a great deal of first-touch static initialization right
+    // at the ceiling — so ResourceCeilingNote has to see through that wrapper, not just match the
+    // outermost exception type.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void ResourceCeilingNote_names_the_ceiling_for_a_bare_OutOfMemoryException()
+    {
+        using (WithHeapCeiling(ExhaustibleMemoryLimitBytes))
+        {
+            string? note = ScenarioSandbox.ResourceCeilingNote(new OutOfMemoryException());
+            note.ShouldNotBeNull();
+            note.ShouldContain("memory ceiling of 16 MiB");
+        }
+    }
+
+    [Fact]
+    public void ResourceCeilingNote_sees_through_a_TypeInitializationException_wrapper()
+    {
+        using (WithHeapCeiling(ExhaustibleMemoryLimitBytes))
+        {
+            var failure = new TypeInitializationException(
+                "Roslyn.Utilities.TextKeyedCache`1", new OutOfMemoryException());
+
+            string? note = ScenarioSandbox.ResourceCeilingNote(failure);
+            note.ShouldNotBeNull();
+            note.ShouldContain("memory ceiling of 16 MiB");
+        }
+    }
+
+    [Fact]
+    public void ResourceCeilingNote_sees_through_an_AggregateException_wrapper()
+    {
+        using (WithHeapCeiling(ExhaustibleMemoryLimitBytes))
+        {
+            var failure = new AggregateException(new OutOfMemoryException());
+
+            string? note = ScenarioSandbox.ResourceCeilingNote(failure);
+            note.ShouldNotBeNull();
+            note.ShouldContain("memory ceiling of 16 MiB");
+        }
+    }
+
+    [Fact]
+    public void ResourceCeilingNote_sees_through_a_two_deep_nested_wrapper()
+    {
+        using (WithHeapCeiling(ExhaustibleMemoryLimitBytes))
+        {
+            var failure = new TargetInvocationException(
+                new TypeInitializationException(
+                    "Microsoft.CodeAnalysis.PooledObjects.ArrayBuilder`1", new OutOfMemoryException()));
+
+            string? note = ScenarioSandbox.ResourceCeilingNote(failure);
+            note.ShouldNotBeNull();
+            note.ShouldContain("memory ceiling of 16 MiB");
+        }
+    }
+
+    [Fact]
+    public void ResourceCeilingNote_is_null_for_a_fault_with_no_OutOfMemoryException_anywhere_in_the_chain()
+    {
+        using (WithHeapCeiling(ExhaustibleMemoryLimitBytes))
+        {
+            var failure = new InvalidOperationException(
+                "not a resource ceiling", new InvalidOperationException("still not one"));
+
+            ScenarioSandbox.ResourceCeilingNote(failure).ShouldBeNull();
+        }
+    }
+
+    [Fact]
+    public void ResourceCeilingNote_is_null_when_no_heap_ceiling_is_configured_however_the_exception_is_shaped()
+    {
+        using (WithoutHeapCeiling())
+        {
+            ScenarioSandbox.ResourceCeilingNote(new OutOfMemoryException()).ShouldBeNull();
+            ScenarioSandbox.ResourceCeilingNote(
+                new TypeInitializationException("X", new OutOfMemoryException())).ShouldBeNull();
+        }
+    }
+
+    /// <summary>Sets <c>DOTNET_GCHeapHardLimit</c> in THIS process for the duration of a test — the same
+    /// variable the sandboxed child reads from its own environment, so <see cref="HeapCeilingNote"/>-backed
+    /// assertions can run in-process without racing a real child's allocator.</summary>
+    private static IDisposable WithHeapCeiling(long bytes) =>
+        new HeapCeilingEnvironmentScope(bytes.ToString("X", CultureInfo.InvariantCulture));
+
+    private static IDisposable WithoutHeapCeiling() => new HeapCeilingEnvironmentScope(null);
+
+    private sealed class HeapCeilingEnvironmentScope : IDisposable
+    {
+        private readonly string? _previous;
+
+        public HeapCeilingEnvironmentScope(string? value)
+        {
+            _previous = Environment.GetEnvironmentVariable(ScenarioSandbox.HeapHardLimitVariable);
+            Environment.SetEnvironmentVariable(ScenarioSandbox.HeapHardLimitVariable, value);
+        }
+
+        public void Dispose() =>
+            Environment.SetEnvironmentVariable(ScenarioSandbox.HeapHardLimitVariable, _previous);
     }
 
     [Fact]
