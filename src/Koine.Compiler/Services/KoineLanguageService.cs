@@ -356,8 +356,14 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        // 1. `EnumType.` -> its members (a static enum reference, not a value).
-        if (index.IsEnumType(receiver) && index.TryGetDecl(receiver, out var ed) && ed is EnumDecl en)
+        // 1. `EnumType.` -> its members (a static enum reference, not a value). Resolved in the cursor's
+        //    own bounded context (R13.2, #1870): with the flat view, an `enum Status` here and a
+        //    `value Status` in another context made this branch — and therefore what the editor offers —
+        //    depend on `.koi` source order (the losing order fell through to step 3 and listed the OTHER
+        //    context's fields).
+        var receiverContext = ctx.EnclosingContextName;
+        if (index.Classify(receiverContext, receiver) == TypeKind.Enum
+            && index.TryGetDecl(receiverContext, receiver, out var ed) && ed is EnumDecl en)
         {
             return en.Members
                 .Select(m => new CompletionItem(m.Name, CompletionItemKind.EnumMember, receiver, m.Doc))
@@ -396,15 +402,28 @@ public sealed class KoineLanguageService
     /// via the binder. Builds the chain from the default-channel tokens immediately before the '.',
     /// constructs an <see cref="Expr"/> (an <see cref="IdentifierExpr"/> root threaded through
     /// <see cref="MemberAccessExpr"/> hops), and types it in a <see cref="TypeScope"/> of the
-    /// enclosing fielded type's members, resolving from that type's bounded context (R13.2). Returns
-    /// an empty list when there is no enclosing type, the chain doesn't reconstruct, or the receiver
-    /// types to <see cref="ErrorType"/>.
+    /// enclosing fielded type's members. Everything — the enclosing type's own declaration and the
+    /// chain's member types — resolves from ONE bounded context (R13.2): the cursor's enclosing
+    /// <c>context</c>, falling back to the enclosing type's declaring context when the position has
+    /// none. Returns an empty list when there is no enclosing type, the chain doesn't reconstruct, or
+    /// the receiver types to <see cref="ErrorType"/>.
     /// </summary>
     private static IReadOnlyList<CompletionItem> BinderReceiverMembers(
         TokenContext ctx, SemanticModel semantic, string source, int line, int character)
     {
-        if (ctx.EnclosingTypeName is not { } scopeType
-            || semantic.Index.TryGetDecl(scopeType, out var scopeDecl) is false)
+        if (ctx.EnclosingTypeName is not { } scopeType)
+        {
+            return [];
+        }
+
+        // The one bounded context this whole route resolves through (R13.2): the cursor's own enclosing
+        // `context` when the position has one, else the enclosing type's declaring context. #1870: the
+        // enclosing type's own declaration used to be looked up FLAT, so with the same simple name
+        // declared in two contexts the in-scope member set came from the wrong one and the receiver
+        // typed to an error — the doc comment above promised context-aware resolution the lookup never
+        // performed.
+        var context = ctx.EnclosingContextName ?? ContextOf(semantic, scopeType);
+        if (!semantic.Index.TryGetDecl(context, scopeType, out var scopeDecl))
         {
             return [];
         }
@@ -428,7 +447,6 @@ public sealed class KoineLanguageService
         }
 
         var scope = TypeScope.FromMembers(members, semantic.Index);
-        var context = ContextOf(semantic, scopeType);
         var type = semantic.GetTypeInfo(expr, scope, context);
         if (type.IsError || type.Name is not { } typeName)
         {
@@ -593,10 +611,13 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        // Resolve the governing enum from the type name just before '=' .
+        // Resolve the governing enum from the type name just before '=', in the cursor's own bounded
+        // context (R13.2, #1870): resolved flat, a name another context declares as a non-enum sank this
+        // branch and dumped the model-wide member list below on the user instead.
+        var context = ctx.EnclosingContextName;
         var typeName = ctx.TokenBeforePreceding?.Text;
-        if (typeName is not null && index.IsEnumType(typeName)
-            && index.TryGetDecl(typeName, out var decl) && decl is EnumDecl e)
+        if (typeName is not null && index.Classify(context, typeName) == TypeKind.Enum
+            && index.TryGetDecl(context, typeName, out var decl) && decl is EnumDecl e)
         {
             return e.Members
                 .Select(m => new CompletionItem(m.Name, CompletionItemKind.EnumMember, typeName, m.Doc))
@@ -1593,8 +1614,12 @@ public sealed class KoineLanguageService
         var model = compilation.SemanticModel.Model;
         var index = compilation.SemanticModel.Index;
 
-        // An event under the cursor -> a single Event item at its declaration.
-        if (index.Classify(name) == TypeKind.Event && FindEvent(index, name) is { } ev)
+        // An event under the cursor -> a single Event item at its declaration, classified and resolved in
+        // the cursor's own bounded context (R13.2, #1870): with the flat view, another context declaring
+        // the same simple name as a non-event made this branch decline, and prepare then anchored on
+        // nothing at all.
+        if (index.Classify(ctx.EnclosingContextName, name) == TypeKind.Event
+            && FindEvent(index, ctx.EnclosingContextName, name) is { } ev)
         {
             return [EventItem(ev.Name, ev)];
         }
@@ -1654,7 +1679,8 @@ public sealed class KoineLanguageService
                     continue;
                 }
 
-                if (seen.Add(policy.EventName) && FindEvent(index, policy.EventName) is { } ev)
+                // The event name is resolved in the context that DECLARES the policy naming it (#1870).
+                if (seen.Add(policy.EventName) && FindEvent(index, policyCtx.Name, policy.EventName) is { } ev)
                 {
                     calls.Add(new CallHierarchyIncomingCall(EventItem(ev.Name, ev)));
                 }
@@ -1682,10 +1708,12 @@ public sealed class KoineLanguageService
 
         if (item.Kind == CallHierarchyItemKind.Event)
         {
-            // What E triggers = the (target, command) reactions of its policies. The owning context is
-            // resolved from the already-found EventDecl BY REFERENCE (ModelIndex.DeclaringContextOf),
-            // not re-derived from item.Name, which two contexts may share under R13.2.
-            if (FindEvent(index, item.Name) is { } ev)
+            // What E triggers = the (target, command) reactions of its policies. A CallHierarchyItem
+            // carries no bounded context, so the lookup has none to resolve in; the owning context is
+            // instead recovered from the already-found EventDecl BY REFERENCE
+            // (ModelIndex.DeclaringContextOf), not re-derived from item.Name, which two contexts may
+            // share under R13.2.
+            if (FindEvent(index, context: null, item.Name) is { } ev)
             {
                 foreach (var (targetType, commandName) in index.PoliciesTriggeredByEvent(index.DeclaringContextOf(ev), item.Name))
                 {
@@ -1702,7 +1730,8 @@ public sealed class KoineLanguageService
         // The events command C on type T emits.
         foreach (var eventName in index.EventsEmittedBy(item.OwningType!, item.Name))
         {
-            if (FindEvent(index, eventName) is { } ev)
+            // Same as above: the item carries no context to resolve the emitted event name in.
+            if (FindEvent(index, context: null, eventName) is { } ev)
             {
                 calls.Add(new CallHierarchyOutgoingCall(EventItem(ev.Name, ev)));
             }
@@ -1781,10 +1810,18 @@ public sealed class KoineLanguageService
             .SelectMany(e => e.Commands)
             .FirstOrDefault(cmd => string.Equals(cmd.Name, name, StringComparison.Ordinal));
 
-    /// <summary>The event declaration named <paramref name="name"/>, or <c>null</c>. Resolved via the
-    /// index's O(1) name map (events are types) rather than re-walking the model per call.</summary>
-    private static EventDecl? FindEvent(ModelIndex index, string name) =>
-        index.TryGetDecl(name, out var decl) && decl is EventDecl ev ? ev : null;
+    /// <summary>
+    /// The event declaration named <paramref name="name"/> as seen from <paramref name="context"/>, or
+    /// <c>null</c>. Resolved via the index's O(1) name map (events are types) rather than re-walking the
+    /// model per call. <paramref name="context"/> is threaded in BY REFERENCE from whatever the caller
+    /// already holds (#1870) — the cursor's enclosing context at prepare, the declaring context of the
+    /// policy whose reaction named the event — and is <c>null</c> only where the caller genuinely has
+    /// none (a <see cref="CallHierarchyItem"/> carries no context), in which case
+    /// <see cref="ModelIndex.TryGetDecl(string?, string, out TypeDecl)"/> falls back to the flat view,
+    /// exactly as before.
+    /// </summary>
+    private static EventDecl? FindEvent(ModelIndex index, string? context, string name) =>
+        index.TryGetDecl(context, name, out var decl) && decl is EventDecl ev ? ev : null;
 
     // ---- Type hierarchy (#331, Task 3) ------------------------------------
 
@@ -2099,7 +2136,11 @@ public sealed class KoineLanguageService
             return null;
         }
 
-        return new TypeHierarchyItem(decl.Name, TypeHierarchyKindOf(index.Classify(decl.Name)), span.File ?? "", span)
+        // Classified in the declaration's OWN context (R13.2, #1870) — the same value carried on the item
+        // below. Classified flat, an `enum Status` in one context and a `value Status` in another gave the
+        // two items the SAME kind (whichever context was declared last), so the editor showed one of them
+        // under the other's icon.
+        return new TypeHierarchyItem(decl.Name, TypeHierarchyKindOf(index.Classify(context, decl.Name)), span.File ?? "", span)
         {
             Context = context,
         };

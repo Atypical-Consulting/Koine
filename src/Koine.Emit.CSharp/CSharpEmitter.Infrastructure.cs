@@ -455,7 +455,11 @@ public sealed partial class CSharpEmitter
                     continue;
                 }
 
-                switch (index.Classify(typeName))
+                // Classified in the OWNING context (R13.2, #1870): two contexts may legally declare the
+                // same simple name, so the flat, last-declaration-wins view would make this context's
+                // converter set depend on `.koi` source order. `context` is the same value the value-object
+                // branch below already resolves through.
+                switch (index.Classify(context, typeName))
                 {
                     // A *scalar* smart-enum member is mapped via HasConversion, so it needs a converter.
                     // A List<Enum> is emitted as a primitive collection (no HasConversion), so collecting

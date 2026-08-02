@@ -34,8 +34,9 @@ namespace Koine.Compiler.Tests;
 /// the same arity as the flat overloads (would show up as a spurious new site here — a false positive
 /// needing an allowlist note, not a false negative); or a caller that stores <c>ModelIndex.Classify</c>
 /// as a delegate/method-group and invokes it indirectly (no invocation syntax to see with that shape).
-/// It also does not fix anything — an allowlisted site with an available context it doesn't use stays
-/// a latent bug until someone fixes it (tracked for ~15 such sites in #1870). The robust, complete fix
+/// It also does not fix anything — an allowlisted site with an available context it doesn't use would
+/// stay a latent bug until someone fixed it; #1870 worked that backlog down to zero, so every remaining
+/// entry below is justified by a real reason rather than parked. The robust, complete fix
 /// is Option C from #1863's own brainstorm — renaming/obsoleting the flat overloads so the compiler
 /// enforces the distinction — deliberately deferred as a separate, larger public-API decision.
 /// </para>
@@ -162,7 +163,7 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 284, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 303, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 309, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 583, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
+        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 601, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1348, "Classify", "IsValueObjectList: shared static classification helper, no context param"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1374, "Classify", "ClassifyMember: same shared static-helper shape as IsValueObjectList"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 2293, "Classify", "EnumExpected: same shared static-helper shape"),
@@ -207,8 +208,8 @@ public class FlatModelIndexLookupGuardTests
         //     AstSymbolCrossContextClassificationTests, which pin the outcome under BOTH context orders. ---
         ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
 
-        // --- Context IS available and unused — genuine latent bugs in the same shape #1863 fixed,
-        //     tracked for a follow-up fix rather than fixed here (see #1870).
+        // --- The "context IS available and unused" bucket is now EMPTY: #1870 worked through every site
+        //     that had a bounded context in scope and left it on the table.
         //
         //     The nine C#-emitter sites that used to sit here are GONE: #1870's C# task confirmed every
         //     one of them order-dependent with a two-order fixture and fixed them to
@@ -218,14 +219,16 @@ public class FlatModelIndexLookupGuardTests
         //     defaulted loops, and TransitionEnum) are GONE for the same reason: #1870's Rust task
         //     reproduced all three, fixed them to Classify(context, name) via the shared ExpectedEnum
         //     helper (TransitionEnum took a threaded-in context parameter), and pinned them under both
-        //     context orders in RustEntityEnumContextScopeTests. ---
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Infrastructure.cs", 458, "Classify", "CollectAggregateEnumTypes: parameter context available, used two lines later at :473, unused here (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 360, "TryGetDecl", "DotCandidates' single-hop enum fallback: ctx.EnclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 407, "TryGetDecl", "BinderReceiverMembers: ctx.EnclosingContextName available; the method's own doc comment claims context-aware resolution this call doesn't perform (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 599, "TryGetDecl", "EnumMemberCandidates: ctx.EnclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 1597, "Classify", "PrepareCallHierarchy: ctx.EnclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 1787, "TryGetDecl", "FindEvent: context available at its sole caller (:1597), not threaded into this helper's own signature (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 2102, "Classify", "ItemFor: parameter context available, used two lines later for the result's Context property, unused for the Classify call itself (#1870)"),
+        //     context orders in RustEntityEnumContextScopeTests.
+        //
+        //     The seven LSP/tooling-cluster sites (CSharpEmitter.Infrastructure's CollectAggregateEnumTypes,
+        //     and KoineLanguageService's DotCandidates / BinderReceiverMembers / EnumMemberCandidates /
+        //     PrepareCallHierarchy / FindEvent / ItemFor) are GONE too: each was reproduced under both
+        //     context orders through its REAL entry point — the emitted converter holder, CompleteAt,
+        //     PrepareCallHierarchy, PrepareTypeHierarchy — and fixed by threading the context already in
+        //     scope (ctx.EnclosingContextName, or the method's own `context` parameter; FindEvent took a
+        //     threaded-in one). See CSharpValueConverterContextScopeTests and
+        //     LanguageServiceFlatLookupCrossContextTests. ---
     ];
 
     [Fact]
