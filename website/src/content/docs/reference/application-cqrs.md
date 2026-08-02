@@ -379,7 +379,7 @@ From that single context Koine emits, in the `Ordering/` folder: the `Order` agg
 
 ## 15.9 API annotations
 
-A `command` and a `query` each already describe one HTTP operation, and two emitters derive it from the same convention: the [`openapi` target](/Koine/guides/cli/#emit-an-openapi-spec) and the C# **api** layer (`koine build … --layers api`). A command is `POST /{entity}/{command}`, a query is `GET /{query}`, both kebab-cased. Three optional annotations override that convention one declaration at a time. They precede the declaration, in any order:
+A `command`, a `query` and a `create` [factory (§12)](/Koine/reference/factories/) each already describe one HTTP operation, and two emitters derive it from the same convention: the [`openapi` target](/Koine/guides/cli/#emit-an-openapi-spec) and the C# **api** layer (`koine build … --layers api`). A command is `POST /{entity}/{command}`, a factory `POST /{entity}/{factory}`, a query `GET /{query}` — all kebab-cased. Three optional annotations override that convention one declaration at a time. They precede the declaration, in any order:
 
 | Annotation | What it does | Rule |
 | --- | --- | --- |
@@ -392,6 +392,8 @@ The three axes are **independent**: each falls back to the convention on its own
 A `@route` path is pasted into the host's route table verbatim, so it is checked as a **route template**, not just as a string: `{}` parameters must be balanced, named, and un-nested, and the path may not contain whitespace or control characters. Constraints, optional and catch-all parameters, and the `{{`/`}}` escape for a literal brace are all accepted — `/orders/{id:int}`, `/orders/{id?}`, `/files/{*path}`, `/a/{{literal}}`. A malformed template such as `/orders/{id` would otherwise compile fine and then throw `RoutePatternException` when the host builds its routes, so it is a `KOI1208` error instead.
 
 A `{token}` in a `@route` path is also **bound**: it resolves by name against the declaration's own parameters/criteria, or — for a command, when the token is `id` and nothing else claims it — the aggregate identity. A bound token is lifted into an explicit `[FromRoute]` parameter in the generated C# and re-bound into the request/query record with a non-destructive `with { … }`, so the URL and the value the handler actually uses can never silently disagree. See [§15.9.1](#1591-translation-to-c---layers-api) for the emitted shape and [§15.9.3](#1593-rules-and-diagnostics) for `KOI1215`, the diagnostic that catches a token naming nothing at all.
+
+That identity fallback is a **command's** alone. A factory *mints* the identity it creates, so its generated request record is built from the factory's own parameters and carries no identity property at all — there is nothing for `{id}` to bind to. On a factory `{id}` therefore binds only when the factory declares a parameter of that name, and is otherwise an unbound token like any other. And on the default **Guid** identity a factory cannot declare one: `id` is reserved for the generated identity local (`KOI0807`), so `{id}` on a Guid-identity factory is *always* unbound — name the token after a real parameter, or take the explicit-id opt-in that a `natural`/`sequence` identity allows (`create register(id: BookId, …)` — [§12](/Koine/reference/factories/)).
 
 ```koine
 context Ordering {
@@ -430,6 +432,20 @@ context Ordering {
 }
 ```
 
+A factory annotates exactly the same way — same three axes, same rules, same fall-back-to-the-convention:
+
+```koine
+entity Order identified by OrderId {
+  /// Open a new order for a customer.
+  @route("/orders")
+  @auth("admin")
+  create open(customer: CustomerId) {
+  }
+}
+```
+
+That maps `POST /orders` — `@route` moved the path, no verb annotation was given so the conventional `POST` stands — behind the `admin` authorization policy, instead of the conventional `POST /order/open`.
+
 ### 15.9.1 Translation to C# (`--layers api`)
 
 The annotated command maps through ASP.NET's per-verb Minimal-API method at the overridden path, and its chain gains `.RequireAuthorization(...)`. The route's `{id}` token names no parameter of `submit`, so it resolves to the aggregate identity: a fully-qualified `[FromRoute]` parameter is lifted ahead of the request, and the request is re-bound from it with `with { Id = id }` before the handler ever sees it:
@@ -466,7 +482,7 @@ endpoints.MapDelete("/orders/{id}", async ([Microsoft.AspNetCore.Mvc.FromRoute(N
 
 ASP.NET only *infers* a complex parameter as the request body for verbs that define body semantics; for `GET`/`DELETE`/`HEAD`/`OPTIONS`/`TRACE`/`CONNECT` inferred-body binding is disabled, and an endpoint that relies on it throws `InvalidOperationException: Body was inferred but the method does not allow inferred body parameters` when the route table is built — at startup, not at compile time. The explicit attribute overrides that restriction. It is written by fully-qualified name, so the endpoints file needs no extra `using`. The body-taking verbs are untouched and keep the inferred binding.
 
-A token resolves by name against the declaration's own parameters/criteria first — `OrdinalIgnoreCase`, mirroring ASP.NET's own route-value binding — and only falls back to the aggregate identity for a bare `id` on a command with no `id`-named parameter of its own. A command parameter *named* `id` therefore wins the match: the token binds to it, not the identity, and the identity's own request property is pushed to `AggregateId` instead of colliding with it (`CSharpNaming.CommandIdProperty`, shared by the handler and the endpoint so the two can never disagree). Only a **route-bindable** type lifts into `[FromRoute]` — a scalar (`String`/`Int`/`Decimal`/`Bool`/`Instant`), an enum, or an identity value object, all `TryParse`-able. A token that matches a parameter typed as a general value object stays unbound, with an explanatory `// route token '{x}': <Type> is not route-bindable` comment in the emitted lambda rather than code that would not compile or would compile and fail to bind at request time. A query has no aggregate identity to fall back to, so only its criteria can ever bind one of its tokens.
+A token resolves by name against the declaration's own parameters/criteria first — `OrdinalIgnoreCase`, mirroring ASP.NET's own route-value binding — and only falls back to the aggregate identity for a bare `id` on a command with no `id`-named parameter of its own. A command parameter *named* `id` therefore wins the match: the token binds to it, not the identity, and the identity's own request property is pushed to `AggregateId` instead of colliding with it (`CSharpNaming.CommandIdProperty`, shared by the handler and the endpoint so the two can never disagree). Only a **route-bindable** type lifts into `[FromRoute]` — a scalar (`String`/`Int`/`Decimal`/`Bool`/`Instant`), an enum, or an identity value object, all `TryParse`-able. A token that matches a parameter typed as a general value object stays unbound, with an explanatory `// route token '{x}': <Type> is not route-bindable` comment in the emitted lambda rather than code that would not compile or would compile and fail to bind at request time. A query has no aggregate identity to fall back to, so only its criteria can ever bind one of its tokens — and neither has a factory, which mints the identity it creates rather than loading one, so only its parameters can.
 
 :::caution
 `@auth("admin")` names an authorization **policy**, not a role. ASP.NET's `RequireAuthorization(params string[])` takes policy names, so the host app has to register a policy literally called `admin`:
@@ -534,16 +550,16 @@ Koine emits no `components/securitySchemes`. The `@auth` value names a scheme th
 | `@route` names no path (a bare `@route`), or a malformed one — not absolute, containing whitespace or control characters, or with unbalanced, nested, or empty `{}` parameters | `KOI1208` `InvalidRouteOverride` |
 | a declaration carries more than one verb annotation | `KOI1209` `MultipleVerbAnnotations` |
 | `@auth` names no role (a bare `@auth`), or a blank one | `KOI1210` `EmptyAuthRole` |
-| two commands/queries in one context resolve to the same route **and** verb | `KOI1211` `DuplicateApiRoute` |
+| two commands/queries/factories in one context resolve to the same route **and** verb | `KOI1211` `DuplicateApiRoute` |
 | a declaration repeats `@route` or `@auth` | `KOI1212` `DuplicateApiAnnotation` |
 | a verb annotation is given an argument (`@get("/orders")`) | `KOI1213` `VerbAnnotationArgument` |
-| a `command` carries `@since`/`@deprecated` | `KOI1214` `VersionAnnotationOnCommand` |
-| a `@route` `{token}` names neither a parameter/criterion of the declaration nor (for a command) the aggregate identity — a *warning*, since a purely decorative token was legal before this axis bound anything at all | `KOI1215` `UnboundRouteToken` |
+| a `command` or a `create` factory carries `@since`/`@deprecated` | `KOI1214` `VersionAnnotationOnCommand` |
+| a `@route` `{token}` names neither a parameter/criterion of the declaration nor — **for a command only** — the aggregate identity. A factory has no `{id}` fallback at all: it mints the identity it creates, so its request carries no identity property to bind one to. A *warning*, since a purely decorative token was legal before this axis bound anything at all | `KOI1215` `UnboundRouteToken` |
 
-- The annotations attach to `command` and `query` only. A [factory (§12)](/Koine/reference/factories/) keeps the conventional `POST /{entity}/{factory}`, and a `usecase` has no HTTP surface to override.
+- The annotations attach to a `command`, a `query` and a `create` [factory (§12)](/Koine/reference/factories/) — one declaration, one endpoint, one set of rules. A factory that carries none of them keeps the conventional `POST /{entity}/{factory}`; either way it gets its own `openapi` operation (a `200` for the created aggregate, a `400` for a precondition/invariant violation) and claims its route in the `KOI1211` check below. A `usecase` has no HTTP surface at all.
 - Every axis is single-valued. Repeating one would quietly keep the last and drop the rest, so it is an error rather than a silent last-one-wins.
-- The `KOI1211` collision check compares whole route strings *exactly*, across every command and query of one bounded context, whether the route came from `@route` or from the convention. Two templates that differ only in letter case, or only in the *name* of a token (`/orders/{id}` vs `/orders/{orderId}`), are distinct OpenAPI keys and so are not reported — but ASP.NET would still consider them ambiguous, so avoid them.
-- Any other `@name` before a declaration parses and is silently ignored, per the [annotation ignorance rule (§18.3.4)](/Koine/reference/versioning/#1834-annotation-ignorance-rule) — with one exception. A `query` is a type declaration, so the [evolution annotations (§18.3)](/Koine/reference/versioning/) `@since`/`@deprecated` apply to it exactly as they do to a `value` or an `event` (a deprecated query emits `[Obsolete]`). A `command` is *not* a type declaration and has nowhere to keep them, so `@since`/`@deprecated` on one is a `KOI1214` error rather than an annotation that vanishes.
+- The `KOI1211` collision check compares whole route strings *exactly*, across every command, query, and factory of one bounded context, whether the route came from `@route` or from the convention. Two templates that differ only in letter case, or only in the *name* of a token (`/orders/{id}` vs `/orders/{orderId}`), are distinct OpenAPI keys and so are not reported — but ASP.NET would still consider them ambiguous, so avoid them. When the reported claimant is a factory that annotates **neither** its route nor its verb — so both still come from the convention — the message adds a hint: give that factory a `@route`/verb of its own, or move the one on the other declaration. If both sides are un-annotated factories, neither names a path yet, so the hint suggests annotating one, or renaming one factory or one entity so the conventional paths differ.
+- Any other `@name` before a declaration parses and is silently ignored, per the [annotation ignorance rule (§18.3.4)](/Koine/reference/versioning/#1834-annotation-ignorance-rule) — with one exception. A `query` is a type declaration, so the [evolution annotations (§18.3)](/Koine/reference/versioning/) `@since`/`@deprecated` apply to it exactly as they do to a `value` or an `event` (a deprecated query emits `[Obsolete]`). A `command` and a `create` factory are *not* type declarations and have nowhere to keep them, so `@since`/`@deprecated` on either is a `KOI1214` error rather than an annotation that vanishes.
 - Nothing here reaches the domain or application C#. Without `--layers api` or `--target openapi`, an annotated model emits exactly what an un-annotated one does.
 
 ## See also

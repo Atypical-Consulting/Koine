@@ -193,6 +193,149 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
 
+    /// <summary>A factory whose repository exposes <c>add</c> — the fixture the C# <c>api</c> layer would
+    /// also map (#1747).</summary>
+    private const string FactoryFixture = """
+        context Ordering {
+          aggregate Order root Order {
+            repository {
+              operations: add, getById
+            }
+
+            entity Order identified by OrderId {
+              /// Open a new order for a customer.
+              create open(customer: String) {
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Paths_map_factories_to_post_with_a_created_response()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", FactoryFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("/order/open:");
+        yaml.ShouldContain("post:");
+        yaml.ShouldContain("operationId: Order_open");
+        yaml.ShouldContain("summary: \"Open a new order for a customer.\"");
+        yaml.ShouldContain("requestBody:");
+        yaml.ShouldContain("required: true");
+        yaml.ShouldContain("\"200\":");
+        yaml.ShouldContain("description: \"The created Order.\"");
+        yaml.ShouldContain("\"400\":");
+        yaml.ShouldContain("description: \"A precondition or invariant was violated.\"");
+    }
+
+    /// <summary>The deliberate superset (#1747): a factory on an aggregate whose repository does NOT
+    /// expose <c>add</c> still gets an OpenAPI operation, even though <c>CSharpEmitter.Api.cs</c> would
+    /// emit no endpoint for it (gated on <c>repoOps.Contains("add")</c>).</summary>
+    private const string FactoryWithoutAddFixture = """
+        context Ordering {
+          aggregate Order root Order {
+            repository {
+              operations: getById
+            }
+
+            entity Order identified by OrderId {
+              create open(customer: String) {
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Paths_map_a_factory_even_when_the_repository_omits_add()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", FactoryWithoutAddFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("/order/open:");
+        yaml.ShouldContain("operationId: Order_open");
+    }
+
+    /// <summary>A factory carrying all three R19 axes at once (#1846) — an authored, token-carrying path,
+    /// an overridden verb, and a role — the shape a command's <see cref="AnnotatedOrderingFixture"/>
+    /// exercises, now on the declaration kind that was conventional-only until #1846.</summary>
+    private const string AnnotatedFactoryFixture = """
+        context Ordering {
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              /// Open a new order for a customer.
+              @route("/orders/{customer}")
+              @put
+              @auth("admin")
+              create open(customer: CustomerId) {
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The annotated factory's operation is keyed under the <c>@route</c> path and the <c>@put</c> verb —
+    /// the conventional <c>POST /order/open</c> is gone entirely — and every <c>{token}</c> of that path
+    /// is declared as a required <c>in: path</c> parameter typed off what it binds to, exactly as a
+    /// command's is.
+    /// </summary>
+    [Fact]
+    public void Paths_honor_a_factorys_route_and_verb_annotations()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", AnnotatedFactoryFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("\"/orders/{customer}\":");
+        yaml.ShouldContain("put:");
+        yaml.ShouldNotContain("post:");
+        yaml.ShouldNotContain("/order/open:");
+        yaml.ShouldContain("operationId: Order_open");
+        yaml.ShouldContain("summary: \"Open a new order for a customer.\"");
+
+        // The path token is declared, and typed off the parameter it name-matches (a factory has no
+        // identity fallback — it mints the identity it creates).
+        yaml.ShouldContain("- name: customer");
+        yaml.ShouldContain("in: path");
+
+        // The created aggregate is still the 200, unchanged by the annotations.
+        yaml.ShouldContain("description: \"The created Order.\"");
+    }
+
+    /// <summary>A factory's <c>@auth("role")</c> lowers to the identical per-operation security
+    /// requirement a command's does (<see cref="Paths_honor_the_route_verb_and_auth_annotations"/>) —
+    /// both go through <c>OpenApiEmitter.Paths.AddSecurity</c> off the shared <c>RouteInfo</c>.</summary>
+    [Fact]
+    public void A_factorys_auth_annotation_emits_the_same_security_shape_a_commands_does()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", AnnotatedFactoryFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("security:");
+        yaml.ShouldContain("- admin: []");
+    }
+
+    /// <summary>
+    /// The same real-validator harness the annotated command document goes through (#1219 code review):
+    /// substring assertions cannot see a <c>path-parameters-defined</c> violation, which is precisely the
+    /// class of bug an authored <c>@route</c> on a new declaration kind can reintroduce. INCONCLUSIVE
+    /// when no validator is available — see <see cref="ExternallyValidate"/>.
+    /// </summary>
+    [Fact]
+    public void Annotated_factory_document_passes_external_openapi_validation_when_available() =>
+        ExternallyValidate(AnnotatedFactoryFixture);
+
     [Fact]
     public void Model_with_no_commands_or_queries_emits_an_empty_paths_object()
     {

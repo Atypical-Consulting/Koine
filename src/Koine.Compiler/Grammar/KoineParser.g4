@@ -191,7 +191,7 @@ emitArg        : softName COLON expression ;
 
 // ---- Factories (intention-revealing creation of an aggregate root) ----------
 
-factoryDecl    : CREATE Identifier ( LPAREN paramList? RPAREN )? LBRACE factoryStmt* RBRACE ;
+factoryDecl    : annotation* CREATE Identifier ( LPAREN paramList? RPAREN )? LBRACE factoryStmt* RBRACE ;
 
 factoryStmt    : requiresClause
                | initialization

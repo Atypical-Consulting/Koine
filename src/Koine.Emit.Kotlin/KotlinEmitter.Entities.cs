@@ -330,7 +330,10 @@ public sealed partial class KotlinEmitter
     /// benign type default so the emitted code still compiles.
     /// </summary>
     private static string? BuildEmitExpression(KotlinEmitContext emit, EmitClause em, KotlinExpressionTranslator translator) =>
-        BuildEventExpression(emit, em.EventName, em.Args, translator);
+        // Passes the context for the same reason `publish` does (#1834): `ValidateEmit` resolves the
+        // event name context-aware, so this must too or it builds the payload from another context's
+        // same-named declaration. The two halves are one contract.
+        BuildEventExpression(emit, em.EventName, em.Args, translator, translator.Context);
 
     /// <summary>
     /// Records a published integration event (R19):

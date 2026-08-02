@@ -27,14 +27,20 @@ public sealed partial class PythonEmitter
         var ns = ctxName;
         var eventName = PythonNaming.ToPascalCase(policy.EventName);
 
+        var context = ContextOf(ns);
+
         // The reaction sketch renders the target command's args rooted at the handler parameter
         // `event`, so a value like `orderId` reads as `event.order_id`.
+        //
+        // Resolved CONTEXT-AWARE, in lockstep with `ValidatePolicies` and every other emitter
+        // (#1849): the flat ModelIndex view is last-write-wins across same-named events in sibling
+        // contexts, so resolving without a context rooted the reaction in the wrong payload.
         IReadOnlyList<Member> eventMembers =
-            emit.Index.TryGetDecl(policy.EventName, out TypeDecl ed) && ed is EventDecl ev
+            emit.Index.TryGetDecl(context, policy.EventName, out TypeDecl ed) && ed is EventDecl ev
                 ? ev.Members
                 : Array.Empty<Member>();
         var translator = new PythonExpressionTranslator(
-            emit.Index, eventMembers, emit.EnumMemberToType, typeMapper, ContextOf(ns), memberReceiver: "event",
+            emit.Index, eventMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "event",
             regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         PolicyReaction r = policy.Reaction;

@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Koine.Cli;
 using Koine.Cli.Commands;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
@@ -947,10 +948,10 @@ public class R18CSharpApplicationTests
     }
 
     /// <summary>An acronym-bearing entity name with a <c>create</c> factory rather than a <c>command</c>
-    /// (#1238): <c>WriteFactoryEndpoint</c> builds its route via <see cref="RouteDerivation.Kebab"/>
-    /// directly (factories have no <see cref="RouteInfo"/> representation, so they can't go through
-    /// <c>RouteDerivation.ForCommand</c>/<c>ForQuery</c> like the command/query endpoint writers do) —
-    /// this is the one call site #1042 left unasserted for an acronym-bearing name.</summary>
+    /// (#1238): <c>WriteFactoryEndpoint</c> builds its route via <see cref="RouteDerivation.ForFactory"/>
+    /// (#1747), which kebabs through the same acronym-aware <see cref="RouteDerivation.Kebab"/> the
+    /// command/query endpoint writers use — this is the one call site #1042 left unasserted for an
+    /// acronym-bearing name.</summary>
     internal const string XmlImportFactoryFixture = """
         context Imports {
           aggregate XMLImport root XMLImport {
@@ -971,6 +972,131 @@ public class R18CSharpApplicationTests
     {
         var endpoints = File(Emit(ApiOn, XmlImportFactoryFixture), "ImportsEndpoints.cs").Contents;
         endpoints.ShouldContain("endpoints.MapPost(\"/xml-import/open\", ");
+    }
+
+    /// <summary>A multi-word factory name, asserted against <see cref="RouteDerivation.ForFactory"/>
+    /// directly rather than a literal (#1747): the emitted path can never silently drift from the
+    /// shared derivation, since <c>WriteFactoryEndpoint</c> now reads <see cref="RouteInfo.Route"/>
+    /// off it instead of hand-concatenating <see cref="RouteDerivation.Kebab"/> calls.</summary>
+    internal const string MultiWordFactoryFixture = """
+        context Sales {
+          aggregate Order root Order {
+            repository {
+              operations: add, getById
+            }
+
+            entity Order identified by OrderId {
+              create openDraft() {
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Api_layer_factory_endpoint_route_matches_RouteDerivation_ForFactory()
+    {
+        var endpoints = File(Emit(ApiOn, MultiWordFactoryFixture), "SalesEndpoints.cs").Contents;
+
+        var entity = new EntityDecl("Order", "OrderId", [], [], [], [], []);
+        var factory = new FactoryDecl("OpenDraft", Parameters: [], Body: []);
+        var expectedRoute = RouteDerivation.ForFactory(entity, factory).Route;
+
+        expectedRoute.ShouldBe("/order/open-draft");
+        endpoints.ShouldContain(
+            $"endpoints.MapPost(\"{expectedRoute}\", async (OrderOpenDraftRequest request, OrderOpenDraftHandler handler, CancellationToken ct) =>");
+    }
+
+    /// <summary>
+    /// Cross-target parity (#1747, mirroring <c>CrossEmitterSubscriberParityTests</c>): for one model,
+    /// the path the C# <c>api</c> layer maps for a factory is byte-identical to the <c>paths</c> key the
+    /// <c>openapi</c> target emits for the same factory. Both consumers read
+    /// <see cref="RouteDerivation.ForFactory"/>, so this is the regression lock that keeps them from
+    /// ever drifting apart again.
+    /// </summary>
+    [Fact]
+    public void Api_layer_factory_route_matches_the_openapi_path_key_for_the_same_model()
+    {
+        var endpoints = File(Emit(ApiOn, MultiWordFactoryFixture), "SalesEndpoints.cs").Contents;
+
+        var openApiResult = new KoineCompiler().Compile(
+            new[] { new SourceFile("sales.koi", MultiWordFactoryFixture) }, new OpenApiEmitter());
+        openApiResult.Success.ShouldBeTrue(string.Join("\n", openApiResult.Diagnostics.Select(d => d.ToString())));
+        var yaml = openApiResult.Files.ShouldHaveSingleItem().Contents;
+
+        var entity = new EntityDecl("Order", "OrderId", [], [], [], [], []);
+        var factory = new FactoryDecl("OpenDraft", Parameters: [], Body: []);
+        var route = RouteDerivation.ForFactory(entity, factory).Route;
+
+        endpoints.ShouldContain($"endpoints.MapPost(\"{route}\", ");
+        yaml.ShouldContain($"{route}:");
+    }
+
+    /// <summary>The annotated sibling of <see cref="MultiWordFactoryFixture"/> (#1846): one factory
+    /// carrying all three R19 axes at once — an authored path, an overridden verb, and a role.</summary>
+    internal const string AnnotatedFactoryFixture = """
+        context Sales {
+          aggregate Order root Order {
+            repository {
+              operations: add, getById
+            }
+
+            entity Order identified by OrderId {
+              @route("/orders")
+              @put
+              @auth("admin")
+              create open(customer: CustomerId) {
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Cross-target parity for an <b>annotated</b> factory (#1846) — the sibling of
+    /// <see cref="Api_layer_factory_route_matches_the_openapi_path_key_for_the_same_model"/>. The
+    /// overridden verb has to pick <c>MapPut</c> over the conventional <c>MapPost</c>, <c>@auth</c> has to
+    /// append <c>.RequireAuthorization</c>, and the C# path and the <c>openapi</c> <c>paths</c> key are
+    /// both asserted against the one <see cref="RouteDerivation.ForFactory"/> answer rather than against a
+    /// literal — so neither consumer can drift from the shared derivation, or from the other.
+    /// </summary>
+    [Fact]
+    public void Api_layer_annotated_factory_route_and_verb_match_the_openapi_operation()
+    {
+        var endpoints = File(Emit(ApiOn, AnnotatedFactoryFixture), "SalesEndpoints.cs").Contents;
+
+        var openApiResult = new KoineCompiler().Compile(
+            new[] { new SourceFile("sales.koi", AnnotatedFactoryFixture) }, new OpenApiEmitter());
+        openApiResult.Success.ShouldBeTrue(string.Join("\n", openApiResult.Diagnostics.Select(d => d.ToString())));
+        var yaml = openApiResult.Files.ShouldHaveSingleItem().Contents;
+
+        var entity = new EntityDecl("Order", "OrderId", [], [], [], [], []);
+        var factory = new FactoryDecl("Open", Parameters: [], Body: [],
+            RouteOverride: "/orders", VerbOverride: "PUT", AuthRole: "admin");
+        RouteInfo info = RouteDerivation.ForFactory(entity, factory);
+        info.Route.ShouldBe("/orders");
+        info.Verb.ShouldBe("PUT");
+
+        // C#: the @put picks the per-verb mapping call, and the conventional POST /order/open is gone.
+        endpoints.ShouldContain(
+            $"endpoints.MapPut(\"{info.Route}\", async (OrderOpenRequest request, OrderOpenHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldNotContain("MapPost");
+        endpoints.ShouldNotContain("/order/open");
+        endpoints.ShouldContain("}).RequireAuthorization(\"admin\");");
+
+        // openapi: the very same path string keys the document, under the same (lower-cased) verb.
+        yaml.ShouldContain($"{info.Route}:");
+        yaml.ShouldContain($"{info.Verb.ToLowerInvariant()}:");
+        yaml.ShouldNotContain("post:");
+    }
+
+    /// <summary>And the annotated factory's <c>MapPut</c>/<c>RequireAuthorization</c> chain still has to
+    /// resolve against the ASP.NET shared framework, not merely read right (#1148's harness).</summary>
+    [Fact]
+    public void Api_layer_annotated_factory_output_compiles()
+    {
+        var (assembly, errors) = TestSupport.Compile(Emit(ApiOn, AnnotatedFactoryFixture));
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
     }
 
     [Fact]

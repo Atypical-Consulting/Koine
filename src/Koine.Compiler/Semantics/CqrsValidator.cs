@@ -11,8 +11,9 @@ namespace Koine.Compiler.Semantics;
 /// order. (Use cases, which co-emit with services, stay in the services pass.)
 ///
 /// <para><see cref="ValidateApiAnnotations"/> (R19) is shared: queries reach it from
-/// <see cref="ValidateQuery"/>, commands from <c>EntityBehaviorValidator.ValidateCommands</c>,
-/// so both surfaces of the API annotations obey one set of rules. <see cref="ValidateApiRoutes"/> is
+/// <see cref="ValidateQuery"/>, commands from <c>EntityBehaviorValidator.ValidateCommands</c>, and
+/// factories from <c>EntityBehaviorValidator.ValidateFactories</c> (#1846), so every surface of the API
+/// annotations obeys one set of rules. <see cref="ValidateApiRoutes"/> is
 /// the one check that cannot be per-declaration — a route collision is a property of the whole
 /// context — so <c>PerContextAnalyzer</c> drives it once per context.</para>
 /// </summary>
@@ -139,7 +140,7 @@ internal static class CqrsValidator
     }
 
     /// <summary>
-    /// Validates the API annotations preceding a command or query (R19): <c>@route</c> must name a
+    /// Validates the API annotations preceding a command, query or factory (R19/#1846): <c>@route</c> must name a
     /// well-formed absolute path (see <see cref="DescribeRouteProblem"/>), each annotation may appear at
     /// most once, at most one verb annotation may precede a declaration (one declaration is one
     /// endpoint), a verb annotation takes no argument, and <c>@auth</c> must name a non-blank role. An
@@ -148,11 +149,12 @@ internal static class CqrsValidator
     /// diagnostic lands on its own annotation.
     /// </summary>
     /// <param name="subject">How the declaration reads in the message, e.g. <c>command 'place'</c>.</param>
-    /// <param name="members">The declaration's own parameters (a command) or criteria (a query) — what a
-    /// route token can name-match (#1748).</param>
+    /// <param name="members">The declaration's own parameters (a command or factory) or criteria (a query) —
+    /// what a route token can name-match (#1748).</param>
     /// <param name="identityTypeName">The aggregate identity's type name when <paramref name="subject"/>
     /// is a command on an entity, so an <c>id</c> token with no matching parameter still resolves; <c>null</c>
-    /// for a query, which has no identity fallback (#1748).</param>
+    /// for a query, which has no identity fallback, and for a factory, which mints the identity it creates
+    /// and so has no identity property on its request for a token to bind to (#1748/#1846).</param>
     public static void ValidateApiAnnotations(
         ApiAnnotationInfo? api,
         string? route,
@@ -223,8 +225,10 @@ internal static class CqrsValidator
         if (!api.UnsupportedVersionSpan.IsNone)
         {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.VersionAnnotationOnCommand,
+                // Phrased about the subject rather than "not to a command": #1846 let a factory carry
+                // these annotations too, so the same diagnostic now fires on two kinds of declaration.
                 $"'@since'/'@deprecated' on {subject} has no effect; evolution annotations apply to type " +
-                "declarations (value, entity, event, query, …), not to a command",
+                "declarations (value, entity, event, query, …), which this is not",
                 At(api.UnsupportedVersionSpan, declSpan)));
         }
 
@@ -263,9 +267,16 @@ internal static class CqrsValidator
                 continue;
             }
 
+            // Only offer the 'id' remedy where it actually exists. A query has no aggregate identity, and
+            // a factory MINTS the one it creates — and on a Guid identity it may not even declare an 'id'
+            // parameter (KOI0807 reserves the name), so advising 'id' there would name the one fix the
+            // author cannot apply (#1846).
+            var remedy = identityTypeName is not null
+                ? "name it after a parameter of the declaration, or 'id' for the aggregate identity"
+                : "name it after a parameter of the declaration";
             diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.UnboundRouteToken,
                 $"route override '{route}' on {subject} names a token '{{{token}}}' that binds to nothing; " +
-                "name it after a parameter of the declaration, or 'id' for the aggregate identity",
+                remedy,
                 span));
         }
     }
@@ -280,10 +291,11 @@ internal static class CqrsValidator
     /// second (and each later) colliding declaration, so the first one — the one already "holding" the
     /// route — stays clean.
     ///
-    /// <para>Scope: every entity's commands (top-level and aggregate-nested) and every query, i.e. the
-    /// superset the <c>openapi</c> emitter maps. The C# <c>api</c> layer maps a narrower set (aggregate
-    /// roots whose repository exposes <c>getById</c>, top-level queries), so a collision this reports is
-    /// always real for at least one HTTP target.</para>
+    /// <para>Scope: every entity's commands and factories (top-level and aggregate-nested) and every
+    /// query, i.e. the superset the <c>openapi</c> emitter maps (#1747). The C# <c>api</c> layer maps a
+    /// narrower set (a command needs its aggregate's repository to expose <c>getById</c>, a factory
+    /// <c>add</c>, and only top-level queries), so a collision this reports is always real for at least
+    /// one HTTP target.</para>
     ///
     /// <para>Routes are compared <b>ordinally</b> — exactly the criterion that makes an OpenAPI mapping key
     /// a duplicate. Two templates that differ only in letter case, or only in the <i>name</i> of a route
@@ -292,8 +304,10 @@ internal static class CqrsValidator
     /// </summary>
     public static void ValidateApiRoutes(ContextNode ctx, List<Diagnostic> diagnostics)
     {
-        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a message.
-        var claimed = new Dictionary<(string Route, string Verb), string>();
+        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a
+        // message, plus whether IT was a factory too — the hint below needs both sides' shape, not just
+        // the reported claimant's.
+        var claimed = new Dictionary<(string Route, string Verb), (string Subject, bool ConventionalOnly)>();
 
         foreach (EntityDecl entity in ctx.AllEntities())
         {
@@ -304,6 +318,18 @@ internal static class CqrsValidator
                     command.VerbOverride ?? "POST",
                     $"command '{command.Name}' on '{entity.Name}'",
                     command.Span);
+            }
+
+            foreach (FactoryDecl factory in entity.Factories)
+            {
+                // #1846 — a factory carries the same `@route`/verb annotations a command does, so it claims
+                // the pair it actually maps: the override where one is given, the convention otherwise.
+                Claim(
+                    factory.RouteOverride ?? $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}",
+                    factory.VerbOverride ?? "POST",
+                    $"factory '{factory.Name}' on '{entity.Name}'",
+                    factory.Span,
+                    conventionalOnly: factory.RouteOverride is null && factory.VerbOverride is null);
             }
         }
 
@@ -316,18 +342,39 @@ internal static class CqrsValidator
                 query.Span);
         }
 
-        void Claim(string route, string verb, string subject, SourceSpan span)
+        void Claim(string route, string verb, string subject, SourceSpan span, bool conventionalOnly = false)
         {
             if (claimed.TryGetValue((route, verb), out var first))
             {
+                // `conventionalOnly` says "this factory derives BOTH its route and its verb by convention"
+                // — since #1846 gave factories an annotation axis of their own it no longer means "can
+                // never be annotated". Only factories pass it (a command/query keeps the `false` default),
+                // so the generic "share a route only when their verbs differ" advice, which assumes the
+                // reported claimant already names its own route/verb, is the one that needs supplementing.
+                //
+                // Both hints deliberately advise the REPORTED declaration only, never the other side: the
+                // reported one is always fixable (it can take a @route or a verb of its own), whereas
+                // `first` may itself be un-annotated — an ordinary conventional command, or a factory that
+                // annotates nothing — in which case telling the author to "move" an annotation that does
+                // not exist would be a dead end. The both-conventional case keeps its own wording because
+                // a rename is the other real fix there.
+                var hint = (conventionalOnly, first.ConventionalOnly) switch
+                {
+                    (true, true) => "; neither factory annotates a route or a verb, so both fall on the same " +
+                                     "conventional path — give one a @route (or a different verb), or rename one " +
+                                     "factory or one entity so their conventional paths differ",
+                    (true, false) => "; this factory derives both its route and its verb by convention — give it a " +
+                                      "@route or a verb annotation of its own to move it off this path",
+                    _ => "",
+                };
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,
-                    $"{subject} maps '{verb} {route}', which {first} already maps; two declarations may " +
-                    "share a route only when their verbs differ",
+                    $"{subject} maps '{verb} {route}', which {first.Subject} already maps; two declarations may " +
+                    "share a route only when their verbs differ" + hint,
                     span));
                 return;
             }
 
-            claimed[(route, verb)] = subject;
+            claimed[(route, verb)] = (subject, conventionalOnly);
         }
     }
 
