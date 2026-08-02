@@ -15,7 +15,7 @@ export class OrderLine extends ValueObject {
   }
 
   get subtotal(): Decimal {
-    return this.unitPrice.multiply(this.quantity);
+    return this.unitPrice.multiply(Decimal.fromInt(this.quantity));
   }
 
   protected equalityComponents(): readonly unknown[] {

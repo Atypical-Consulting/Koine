@@ -21,6 +21,13 @@ The `.rs.txt` suffix is on purpose: `demo/rust/run.sh` only ever builds `demo/ru
 as a crate (via `Cargo.toml`'s `koine-domain = { path = "generated" }`), so this reference copy is
 never picked up as a duplicate module.
 
+**This folder is test-guarded** (issue #1903, the polyglot analogue of #1841):
+`Koine.Compiler.Tests.PolyglotDemoReferenceGuardTests.Rust_reference_matches_committed_snapshot`
+regenerates the file above in-process and asserts it is byte-identical (line-ending-normalized) to
+what's committed here. A red run means the emitter's output has moved — run that test's
+regeneration command (in its failure message) and commit the result; it does **not** mean the
+emitter is wrong.
+
 ## Constructor parity across targets
 
 `Order::new`'s trailing `status: Option<OrderStatus>` parameter (defaulting to `Draft` when
