@@ -158,10 +158,10 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 674, "Classify", "StrongHover: workspace-wide hover, no context in the hover path"),
         ("src/Koine.Compiler/Semantics/Scenarios/ScenarioInterpreter.cs", 223, "TryGetDecl", "MembersOf: dynamic scenario interpreter, no per-entity context value carried"),
         ("src/Koine.Execution/ScenarioValueBinder.cs", 471, "TryGetDecl", "DisplayCore: reflects over an arbitrary emitted runtime object by CLR type, genuinely dynamic"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 260, "TryGetDecl", "EnumMemberIn reproduces SemanticModel.GetSymbol's legacy flat contract byte-for-byte; no context"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 281, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 300, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 306, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 263, "TryGetDecl", "EnumMemberIn reproduces SemanticModel.GetSymbol's legacy flat contract byte-for-byte; no context"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 284, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 303, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 309, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
         ("src/Koine.Compiler/Services/KoineLanguageService.cs", 583, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1344, "Classify", "IsValueObjectList: shared static classification helper, no context param"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1370, "Classify", "ClassifyMember: same shared static-helper shape as IsValueObjectList"),
@@ -176,11 +176,13 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1063, "Classify", "IsCollection queries only List/Set/Map, builtin-only"),
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1067, "Classify", "IsIterable queries only List/Set, builtin-only"),
 
+        // --- Provably inert despite an available context: the kind is consumed ONLY for questions whose
+        //     answer cannot differ per context. Verified against the fixtures in
+        //     AstSymbolCrossContextClassificationTests, which pin the outcome under BOTH context orders. ---
+        ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
+
         // --- Context IS available and unused — genuine latent bugs in the same shape #1863 fixed,
         //     tracked for a follow-up fix rather than fixed here (see #1870). ---
-        ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef: _enclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Ast/Bound/Lowerer.cs", 83, "Classify", "ClassifyDefault: instance field _context available, unused (#1870)"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 167, "Classify", "InternType: parameter ctxSym.Name available, unused (#1870)"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 137, "Classify", "EmitReadModel: local context available, unused (#1870)"),
         ("src/Koine.Emit.CSharp/CSharpExpressionTranslator.cs", 319, "Classify", "ctor: parameter context available, unused (#1870)"),
         ("src/Koine.Emit.CSharp/CSharpExpressionTranslator.cs", 609, "Classify", "EnumTypeName: instance property Context available, unused (#1870)"),

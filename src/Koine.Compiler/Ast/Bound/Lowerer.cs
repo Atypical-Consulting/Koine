@@ -72,6 +72,9 @@ internal sealed class Lowerer : KoineSyntaxVisitor<BoundNode>
     /// <c>FormatParam</c>/<c>WriteEnumDefaultCoalesce</c> classification but named target-neutrally: an
     /// enum-typed initializer is not a compile-time constant (<see cref="DefaultKind.EnumDefault"/>); any
     /// other initializer is a constant default; an optional field with no initializer is omittable.
+    /// <para>Classified in <see cref="_context"/> (R13.2), exactly like <see cref="TypeOf"/>: two bounded
+    /// contexts may each declare a <c>Status</c>, one an <c>enum</c> and one a <c>value</c>, so the flat
+    /// last-declaration-wins lookup answered by <c>.koi</c> source order (#1870).</para>
     /// </summary>
     private DefaultKind ClassifyDefault(Member m)
     {
@@ -80,7 +83,7 @@ internal sealed class Lowerer : KoineSyntaxVisitor<BoundNode>
             return m.Type.IsOptional ? DefaultKind.OptionalNull : DefaultKind.None;
         }
 
-        return _model.Index.Classify(m.Type.Name) == TypeKind.Enum
+        return _model.Index.Classify(_context, m.Type.Name) == TypeKind.Enum
             ? DefaultKind.EnumDefault
             : DefaultKind.ConstantDefault;
     }

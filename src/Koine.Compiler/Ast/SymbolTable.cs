@@ -164,7 +164,10 @@ internal sealed class SymbolTable
         // exposes; we fill it below as members intern (the type symbol must exist first to be each
         // member's container, so the list can only be populated after construction).
         var memberList = new List<Symbol>();
-        var typeSym = new TypeSymbol(t.Name, t.NameSpan, _index.Classify(t.Name), t) { ContainingSymbol = ctxSym, Members = memberList };
+        // Classified in the context that DECLARES it (R13.2): two bounded contexts may each declare a
+        // `Status`, one an `enum` and one a `value`, and the flat last-declaration-wins lookup stamped
+        // both interned symbols with whichever kind was indexed last — by `.koi` source order (#1870).
+        var typeSym = new TypeSymbol(t.Name, t.NameSpan, _index.Classify(ctxSym.Name, t.Name), t) { ContainingSymbol = ctxSym, Members = memberList };
         _types[t] = typeSym;
         _typeContext[t] = ctxSym;
         _typeMemberLists[typeSym] = memberList;
