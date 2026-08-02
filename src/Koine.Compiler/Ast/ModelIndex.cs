@@ -1353,18 +1353,52 @@ public sealed class ModelIndex
         CommandsByEvent.TryGetValue(eventName, out List<(string, string)>? commands) ? commands : Array.Empty<(string, string)>();
 
     /// <summary>
-    /// The reaction targets of every policy that reacts to <paramref name="eventName"/>:
-    /// the <c>(TargetType, CommandName)</c> each such <c>PolicyDecl</c> invokes. Empty for an
-    /// event no policy reacts to.
+    /// The reaction targets of every policy that reacts to <paramref name="context"/>'s
+    /// <paramref name="eventName"/>: the <c>(TargetType, CommandName)</c> each such <c>PolicyDecl</c>
+    /// invokes. R13.2 lets two bounded contexts each legally declare an event with the same simple
+    /// name and a different payload, so the event is resolved by declaration identity — the same
+    /// context-first-then-flat-fallback ladder <see cref="TryGetDecl(string?, string, out TypeDecl)"/>
+    /// uses, and the same rule <c>ScenarioFanOutResolver</c> established for policy matching (#1854) —
+    /// not merged across the whole model by bare name (#1876). Empty for an unknown context, an
+    /// unknown event, or an event no policy reacts to; never throws.
     /// </summary>
-    public IReadOnlyList<(string targetType, string commandName)> PoliciesTriggeredByEvent(string eventName) =>
-        PolicyReactionsByEvent.TryGetValue(eventName, out List<(string, string)>? reactions) ? reactions : Array.Empty<(string, string)>();
+    public IReadOnlyList<(string targetType, string commandName)> PoliciesTriggeredByEvent(string context, string eventName)
+    {
+        if (!TryGetDecl(context, eventName, out TypeDecl requestedDecl))
+        {
+            return Array.Empty<(string, string)>();
+        }
+
+        var key = (DeclaringContextOf(requestedDecl), requestedDecl.Name);
+        return PolicyReactionsByEvent.TryGetValue(key, out List<(string, string)>? reactions) ? reactions : Array.Empty<(string, string)>();
+    }
 
     private Dictionary<(string, string), List<string>> EmitsByCommand { get => field ??= BuildEmitGraph().forward; set; }
 
     private Dictionary<string, List<(string, string)>> CommandsByEvent { get => field ??= BuildEmitGraph().reverse; set; }
 
-    private Dictionary<string, List<(string, string)>> PolicyReactionsByEvent => field ??= BuildPolicyGraph();
+    private Dictionary<(string Context, string EventName), List<(string, string)>> PolicyReactionsByEvent => field ??= BuildPolicyGraph();
+
+    /// <summary>
+    /// The bounded context that DECLARES <paramref name="decl"/>, found by REFERENCE rather than by
+    /// re-deriving it from <paramref name="decl"/>'s simple name (which two contexts may share under
+    /// R13.2, and which <see cref="DeclaringContextsOf(string)"/> alone therefore cannot disambiguate).
+    /// Empty when <paramref name="decl"/> is (unexpectedly) not reachable from any context in the model.
+    /// Internal (not public API): <c>KoineLanguageService.OutgoingCalls</c> reuses it to resolve an
+    /// already-known <c>EventDecl</c>'s owning context for <see cref="PoliciesTriggeredByEvent"/>.
+    /// </summary>
+    internal string DeclaringContextOf(TypeDecl decl)
+    {
+        foreach (KeyValuePair<string, Dictionary<string, TypeDecl>> ctx in _declsByContext)
+        {
+            if (ctx.Value.TryGetValue(decl.Name, out TypeDecl? candidate) && ReferenceEquals(candidate, decl))
+            {
+                return ctx.Key;
+            }
+        }
+
+        return string.Empty;
+    }
 
     /// <summary>
     /// Builds both directions of the command-emit graph in one pass and caches them together (the
@@ -1418,18 +1452,35 @@ public sealed class ModelIndex
         return (forward, reverse);
     }
 
-    /// <summary>Builds the event -&gt; policy-reaction graph (deduped edges).</summary>
-    private Dictionary<string, List<(string, string)>> BuildPolicyGraph()
+    /// <summary>
+    /// Builds the event -&gt; policy-reaction graph (deduped edges), keyed by <c>(Context, EventName)</c>
+    /// rather than a bare event name: R13.2 lets two bounded contexts each legally declare an event
+    /// with the same simple name, so a flat key would silently merge unrelated events' reactions
+    /// (#1876). Each policy's trigger is resolved from ITS OWN declaring context via
+    /// <see cref="TryGetDecl(string?, string, out TypeDecl)"/> — the same context-first-then-flat-
+    /// fallback ladder the validator and every code emitter use (#1849), not <see cref="TryGetDeclIn"/>
+    /// alone — and the entry is keyed by that resolved declaration's OWN owning context (via
+    /// <see cref="DeclaringContextOf"/>), which may differ from the policy's own context for an
+    /// imported or context-map-permit-visible trigger. A policy whose trigger doesn't resolve at all
+    /// is already a validation error elsewhere and contributes nothing here.
+    /// </summary>
+    private Dictionary<(string Context, string EventName), List<(string, string)>> BuildPolicyGraph()
     {
-        var byEvent = new Dictionary<string, List<(string, string)>>(StringComparer.Ordinal);
+        var byEvent = new Dictionary<(string, string), List<(string, string)>>();
         foreach (ContextNode ctx in Model.Contexts)
         {
             foreach (PolicyDecl policy in ctx.Policies)
             {
-                var edge = (policy.Reaction.TargetType, policy.Reaction.CommandName);
-                if (!byEvent.TryGetValue(policy.EventName, out List<(string, string)>? reactions))
+                if (!TryGetDecl(ctx.Name, policy.EventName, out TypeDecl triggerDecl))
                 {
-                    byEvent[policy.EventName] = reactions = new List<(string, string)>();
+                    continue;
+                }
+
+                var key = (DeclaringContextOf(triggerDecl), triggerDecl.Name);
+                var edge = (policy.Reaction.TargetType, policy.Reaction.CommandName);
+                if (!byEvent.TryGetValue(key, out List<(string, string)>? reactions))
+                {
+                    byEvent[key] = reactions = new List<(string, string)>();
                 }
 
                 if (!reactions.Contains(edge))

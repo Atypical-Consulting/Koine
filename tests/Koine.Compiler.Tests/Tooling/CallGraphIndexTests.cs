@@ -132,7 +132,7 @@ public class CallGraphIndexTests
         index.EventsEmittedBy("Nope", "nope").ShouldBeEmpty();
         index.CommandsEmitting("NoSuchEvent").ShouldBeEmpty();
         index.PoliciesTriggeredByEvent("Ordering", "NoSuchEvent").ShouldBeEmpty();
-        index.PoliciesTriggeredByEvent("NoSuchContext", "OrderPlaced").ShouldBeEmpty();
+        index.PoliciesTriggeredByEvent("NoSuchContext", "NoSuchEvent").ShouldBeEmpty();
     }
 
     /// <summary>

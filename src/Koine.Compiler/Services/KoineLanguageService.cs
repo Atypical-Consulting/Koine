@@ -1682,12 +1682,17 @@ public sealed class KoineLanguageService
 
         if (item.Kind == CallHierarchyItemKind.Event)
         {
-            // What E triggers = the (target, command) reactions of its policies.
-            foreach (var (targetType, commandName) in index.PoliciesTriggeredByEvent(item.Name))
+            // What E triggers = the (target, command) reactions of its policies. The owning context is
+            // resolved from the already-found EventDecl BY REFERENCE (ModelIndex.DeclaringContextOf),
+            // not re-derived from item.Name, which two contexts may share under R13.2.
+            if (FindEvent(index, item.Name) is { } ev)
             {
-                if (CommandItemFor(model, targetType, commandName) is { } to)
+                foreach (var (targetType, commandName) in index.PoliciesTriggeredByEvent(index.DeclaringContextOf(ev), item.Name))
                 {
-                    calls.Add(new CallHierarchyOutgoingCall(to));
+                    if (CommandItemFor(model, targetType, commandName) is { } to)
+                    {
+                        calls.Add(new CallHierarchyOutgoingCall(to));
+                    }
                 }
             }
 
