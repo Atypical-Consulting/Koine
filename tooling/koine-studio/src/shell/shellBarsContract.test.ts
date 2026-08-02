@@ -72,8 +72,8 @@ describe('shell bars single-home contract (#756)', () => {
     for (const id of STATUS_BAR_ITEMS) {
       const elt = doc.getElementById(id);
       expect(elt, `#${id} must exist in the shell`).not.toBeNull();
-      expect(statusbar!.contains(elt!), `#${id} must live in #statusbar`).toBe(true);
-      expect(toolbar!.contains(elt!), `#${id} must NOT also be in #toolbar (no mirroring)`).toBe(false);
+      expect(statusbar!.contains(elt), `#${id} must live in #statusbar`).toBe(true);
+      expect(toolbar!.contains(elt), `#${id} must NOT also be in #toolbar (no mirroring)`).toBe(false);
     }
   });
 
@@ -86,8 +86,8 @@ describe('shell bars single-home contract (#756)', () => {
     for (const id of TOOLBAR_ITEMS) {
       const elt = doc.getElementById(id);
       expect(elt, `#${id} must exist in the shell`).not.toBeNull();
-      expect(toolbar!.contains(elt!), `#${id} must live in #toolbar`).toBe(true);
-      expect(statusbar!.contains(elt!), `#${id} must NOT also be in #statusbar (no mirroring)`).toBe(false);
+      expect(toolbar!.contains(elt), `#${id} must live in #toolbar`).toBe(true);
+      expect(statusbar!.contains(elt), `#${id} must NOT also be in #statusbar (no mirroring)`).toBe(false);
     }
   });
 

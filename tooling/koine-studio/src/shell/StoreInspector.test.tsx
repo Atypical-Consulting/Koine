@@ -111,7 +111,7 @@ describe('StoreInspector', () => {
         vi.advanceTimersByTime(THROTTLE_MS);
       });
 
-      const raw = container.querySelector('[data-field="rawState"]')!.textContent!;
+      const raw = container.querySelector('[data-field="rawState"]')!.textContent;
       expect(raw).toContain('"canUndo": true');
     });
 

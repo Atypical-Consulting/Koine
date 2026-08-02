@@ -71,7 +71,7 @@ class TauriLspTransport implements LspTransport {
   }
 
   send(message: string): Promise<void> {
-    return invoke('lsp_send', { message }) as Promise<void>;
+    return invoke('lsp_send', { message });
   }
 
   async stop(): Promise<void> {
@@ -128,22 +128,22 @@ class TauriTerminalTransport implements TerminalTransport {
   }
 
   write(data: string): Promise<void> {
-    return invoke('pty_write', { data }) as Promise<void>;
+    return invoke('pty_write', { data });
   }
 
   resize(cols: number, rows: number): Promise<void> {
-    return invoke('pty_resize', { cols, rows }) as Promise<void>;
+    return invoke('pty_resize', { cols, rows });
   }
 
   // Flow control (#441): the panel calls these when xterm's backlog crosses its water marks. The Rust
   // reader parks while paused, so the kernel PTY buffer fills and the shell blocks on write — real
   // backpressure — and drains again on resume.
   pause(): Promise<void> {
-    return invoke('pty_pause') as Promise<void>;
+    return invoke('pty_pause');
   }
 
   resume(): Promise<void> {
-    return invoke('pty_resume') as Promise<void>;
+    return invoke('pty_resume');
   }
 
   async stop(): Promise<void> {
@@ -222,11 +222,11 @@ class TauriCollabTransport implements CollabTransport {
 
   send(update: Uint8Array): Promise<void> {
     // `Array.from` because Tauri IPC carries JSON, not binary — the Rust side reads it back as Vec<u8>.
-    return invoke('collab_send', { update: Array.from(update) }) as Promise<void>;
+    return invoke('collab_send', { update: Array.from(update) });
   }
 
   sendPresence(presence: CollabPresence): Promise<void> {
-    return invoke('collab_send_presence', { presence }) as Promise<void>;
+    return invoke('collab_send_presence', { presence });
   }
 
   async stop(): Promise<void> {
@@ -314,7 +314,7 @@ export class TauriPlatform implements Platform {
   // Kill the `koine mcp --http` sidecar (and clear its cached endpoint) so disabling MCP in Settings
   // actually stops the background server; a later mcpEndpoint() re-spawns a fresh one.
   mcpStop(): Promise<void> {
-    return invoke('mcp_stop') as Promise<void>;
+    return invoke('mcp_stop');
   }
 
   // The Assistant's koine tools run through the `koine mcp --http` sidecar (the same server the MCP
@@ -580,19 +580,19 @@ export class TauriPlatform implements Platform {
 
   /** Stage (`git add`) the given paths, moving each worktree/untracked change into the index. */
   gitStage(folderToken: string, relPaths: string[]): Promise<void> {
-    return invoke('git_stage', { dir: folderToken, relPaths }) as Promise<void>;
+    return invoke('git_stage', { dir: folderToken, relPaths });
   }
 
   /** Unstage (`git restore --staged`) the given paths, moving each change back out of the index. */
   gitUnstage(folderToken: string, relPaths: string[]): Promise<void> {
-    return invoke('git_unstage', { dir: folderToken, relPaths }) as Promise<void>;
+    return invoke('git_unstage', { dir: folderToken, relPaths });
   }
 
   /** Discard the worktree changes of the given paths — revert `trackedPaths`, DELETE `untrackedPaths`.
    *  The caller supplies the tracked/untracked split (the panel knows each row's status); the host runs
    *  each bucket verbatim. Destructive and unrecoverable; the caller confirms before invoking. */
   gitDiscard(folderToken: string, trackedPaths: string[], untrackedPaths: string[]): Promise<void> {
-    return invoke('git_discard', { dir: folderToken, trackedPaths, untrackedPaths }) as Promise<void>;
+    return invoke('git_discard', { dir: folderToken, trackedPaths, untrackedPaths });
   }
 
   /** Commit the currently-staged changes with `message` (`git commit -m`); `opts.amend` rewrites the
@@ -602,7 +602,7 @@ export class TauriPlatform implements Platform {
       dir: folderToken,
       message,
       amend: opts?.amend ?? false,
-    }) as Promise<void>;
+    });
   }
 
   /** Push the current branch to its upstream (`git push`); rejects with git's stderr when it refuses.
@@ -611,22 +611,22 @@ export class TauriPlatform implements Platform {
     return invoke('git_push', {
       dir: folderToken,
       setUpstream: opts?.setUpstream ?? false,
-    }) as Promise<void>;
+    });
   }
 
   /** Fetch the default remote (`git fetch`) — updates remote-tracking refs, never the worktree. */
   gitFetch(folderToken: string): Promise<void> {
-    return invoke('git_fetch', { dir: folderToken }) as Promise<void>;
+    return invoke('git_fetch', { dir: folderToken });
   }
 
   /** Pull the current branch's upstream with a fast-forward-only merge (`git pull --ff-only`). */
   gitPull(folderToken: string): Promise<void> {
-    return invoke('git_pull', { dir: folderToken }) as Promise<void>;
+    return invoke('git_pull', { dir: folderToken });
   }
 
   /** Revert the commit `sha`, recording a new commit that undoes it (`git revert --no-edit <sha>`). */
   gitRevert(folderToken: string, sha: string): Promise<void> {
-    return invoke('git_revert', { dir: folderToken, sha }) as Promise<void>;
+    return invoke('git_revert', { dir: folderToken, sha });
   }
 
   /** The local branch names of the workspace folder (the current one is reported by {@link gitStatus}). */
@@ -636,7 +636,7 @@ export class TauriPlatform implements Platform {
 
   /** Check out an existing local branch of the workspace folder (`git checkout <branch>`). */
   gitCheckout(folderToken: string, branch: string): Promise<void> {
-    return invoke('git_checkout', { dir: folderToken, branch }) as Promise<void>;
+    return invoke('git_checkout', { dir: folderToken, branch });
   }
 
   /** The commit history newest-first — whole repo, or only commits touching `relPath` when given. */
@@ -646,12 +646,12 @@ export class TauriPlatform implements Platform {
 
   /** Initialize a new git repository in the workspace folder (`git init`). */
   gitInit(folderToken: string): Promise<void> {
-    return invoke('git_init', { dir: folderToken }) as Promise<void>;
+    return invoke('git_init', { dir: folderToken });
   }
 
   /** Clone `url` into `parentDir` (`dirName` names the folder; defaults to the repo name); returns the cloned path. */
   gitClone(url: string, parentDir: string, dirName?: string): Promise<string> {
-    return invoke('git_clone', { url, parentDir, dirName }) as Promise<string>;
+    return invoke('git_clone', { url, parentDir, dirName });
   }
 
   readTextFile(path: string): Promise<string> {
@@ -659,7 +659,7 @@ export class TauriPlatform implements Platform {
   }
 
   writeTextFile(path: string, contents: string): Promise<void> {
-    return invoke('write_text_file', { path, contents }) as Promise<void>;
+    return invoke('write_text_file', { path, contents });
   }
 
   // Save generated-project bytes: prompt for a destination, then write the raw zip via the Rust
@@ -720,7 +720,7 @@ export class TauriPlatform implements Platform {
   }
 
   deleteEntry(token: string): Promise<void> {
-    return invoke('delete_entry', { token }) as Promise<void>;
+    return invoke('delete_entry', { token });
   }
 
   moveEntry(token: string, destFolderToken: string, newRelPath: string, copy?: boolean): Promise<string> {

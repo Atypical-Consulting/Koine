@@ -18,7 +18,7 @@ const api = vi.hoisted(() => ({
 }));
 // The transport reads getWasmWorkerClient() to route DiagnoseWorkspace through the cancellable worker
 // client (#353). Default null → the main-thread path (api proxy). Supersede tests set a fake client.
-const wasmState = vi.hoisted(() => ({ workerClient: null as unknown }));
+const wasmState = vi.hoisted((): { workerClient: unknown } => ({ workerClient: null }));
 vi.mock('@/host/browser/wasm', () => ({
   loadWasmApi: () => Promise.resolve(api),
   getWasmWorkerClient: () => wasmState.workerClient,

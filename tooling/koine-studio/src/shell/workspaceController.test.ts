@@ -318,9 +318,9 @@ function makeDeps(
   overrides: Partial<WorkspaceControllerDeps> = {},
 ): WorkspaceControllerDeps {
   return {
-    platform: platform as unknown as Platform,
-    lsp: lsp as unknown as WorkspaceControllerDeps['lsp'],
-    editor: editor as unknown as WorkspaceControllerDeps['editor'],
+    platform: platform,
+    lsp: lsp,
+    editor: editor,
     explorer: { renderRoots: vi.fn() },
     setStatus: vi.fn(),
     // #982: the controller writes workspace state THROUGH the store (its single owner). Each test gets a

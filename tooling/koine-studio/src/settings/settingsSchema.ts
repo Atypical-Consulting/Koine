@@ -287,7 +287,7 @@ const validateFlat = ajv.compile(LEGACY_FLAT_SCHEMA);
 // an old hand-saved or tool-generated document without rejecting it.
 
 /** Set of workspace-scoped runtime keys; used to detect a legacy flat workspace document. */
-const WORKSPACE_SCOPED_KEY_SET = new Set<string>(WORKSPACE_SCOPED_KEYS as unknown as string[]);
+const WORKSPACE_SCOPED_KEY_SET = new Set<string>(WORKSPACE_SCOPED_KEYS);
 
 /** Build the grouped workspace schema: one object group per namespace (preview, editor, lsp),
  *  each `additionalProperties:false`, covering only the {@link WORKSPACE_SCOPED_KEYS} subset.
@@ -297,7 +297,7 @@ const WORKSPACE_SCOPED_KEY_SET = new Set<string>(WORKSPACE_SCOPED_KEYS as unknow
 function buildWorkspaceGroupedSchema() {
   const groups: Record<string, { type: 'object'; additionalProperties: false; properties: Record<string, LeafSchema> }> = {};
   for (const f of SETTINGS_FIELDS) {
-    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey as string)) continue;
+    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey)) continue;
     (groups[f.group] ??= { type: 'object', additionalProperties: false, properties: {} }).properties[f.docKey] =
       LEAF_SCHEMAS[f.runtimeKey];
   }
@@ -326,7 +326,7 @@ const validateWorkspaceFlat = ajv.compile(LEGACY_WORKSPACE_FLAT_SCHEMA);
  *  the two shapes are unambiguous; `{}` is treated as grouped (valid, empty partial). */
 function isWorkspaceLegacyFlat(parsed: unknown): boolean {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-  return Object.keys(parsed as Record<string, unknown>).some((k) => WORKSPACE_SCOPED_KEY_SET.has(k));
+  return Object.keys(parsed).some((k) => WORKSPACE_SCOPED_KEY_SET.has(k));
 }
 
 /**
@@ -338,7 +338,7 @@ function isWorkspaceLegacyFlat(parsed: unknown): boolean {
 export function workspaceOverridesToJsonDoc(overrides: Partial<Settings>): string {
   const out: Record<string, Record<string, unknown>> = {};
   for (const f of SETTINGS_FIELDS) {
-    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey as string)) continue;
+    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey)) continue;
     if (!Object.prototype.hasOwnProperty.call(overrides, f.runtimeKey)) continue;
     (out[f.group] ??= {})[f.docKey] = overrides[f.runtimeKey as keyof Settings];
   }
@@ -395,7 +395,7 @@ export function jsonDocToWorkspaceOverrides(
   const obj = parsed as Record<string, Record<string, unknown>>;
   const out: Partial<Settings> = {};
   for (const f of SETTINGS_FIELDS) {
-    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey as string)) continue;
+    if (!WORKSPACE_SCOPED_KEY_SET.has(f.runtimeKey)) continue;
     const group = obj[f.group];
     if (group === undefined || group === null || typeof group !== 'object') continue;
     if (!Object.prototype.hasOwnProperty.call(group, f.docKey)) continue;
@@ -469,7 +469,7 @@ function rejectBadPreviewTarget(out: Partial<Settings>): Array<{ message: string
  *  two shapes are unambiguous; `{}` is treated as grouped (a valid, empty partial). */
 function isLegacyFlat(parsed: unknown): boolean {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
-  return Object.keys(parsed as Record<string, unknown>).some((k) => RUNTIME_KEYS.has(k));
+  return Object.keys(parsed).some((k) => RUNTIME_KEYS.has(k));
 }
 
 /** Flatten a validated document to a Partial<Settings> of ONLY the keys it actually carries, so
@@ -492,7 +492,7 @@ function flattenDoc(parsed: unknown, flat: boolean): Partial<Settings> {
       }
     }
   }
-  return out as Partial<Settings>;
+  return out;
 }
 
 /**

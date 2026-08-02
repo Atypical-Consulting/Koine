@@ -89,7 +89,6 @@ function selectorsExcept(...excluded) {
 // down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
 // (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table.
 const RATCHET_PENDING = {
-  '@typescript-eslint/no-unnecessary-type-assertion': 'off', // 236 findings / 71 files
   '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files
   '@typescript-eslint/unbound-method': 'off', //                570 findings / 62 files
 };

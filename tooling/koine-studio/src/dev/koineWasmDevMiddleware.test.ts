@@ -13,7 +13,7 @@ function mockRes() {
       this.headers[k.toLowerCase()] = v;
     },
     end(b?: Buffer) {
-      this.body = b as Buffer;
+      this.body = b;
     },
   };
 }

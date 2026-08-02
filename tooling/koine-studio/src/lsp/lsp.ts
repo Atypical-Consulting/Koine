@@ -227,7 +227,7 @@ export class KoineLsp {
   }
 
   private send(obj: object): Promise<void> {
-    this.traceLog('→', obj as JsonRpcMessage);
+    this.traceLog('→', obj);
     return this.transport.send(JSON.stringify(obj));
   }
 

@@ -88,7 +88,7 @@ describe('createFolderSidecar', () => {
 
     // A located-but-unreadable file reads as null (read swallows the error).
     void files;
-    platform.readTextFile = (() => Promise.reject(new Error('io'))) as Platform['readTextFile'];
+    platform.readTextFile = (() => Promise.reject(new Error('io')));
     expect(await sc.read()).toBeNull();
   });
 
@@ -124,7 +124,7 @@ describe('createFolderSidecar', () => {
     platform.createFile = ((folderToken: string, relPath: string) => {
       files.set(`${folderToken}/${relPath}`, 'raced'); // a racer planted the file…
       return Promise.reject(new Error('already exists (raced)')); // …then our create lost
-    }) as Platform['createFile'];
+    });
 
     await sc.write('ours');
     expect(files.get('R/.koine/reviews.json')).toBe('ours'); // re-located and overwrote the racer's file
@@ -143,7 +143,7 @@ describe('createFolderSidecar', () => {
       root = 'B'; // the user switched folders during our create…
       files.set(`${folderToken}/${relPath}`, 'raced'); // …and a racer planted the file under that root
       return Promise.reject(new Error('already exists (raced)'));
-    }) as Platform['createFile'];
+    });
 
     await sc.write('ours');
     expect(files.get('A/.koine/reviews.json')).toBe('ours'); // re-located under A and overwrote — not B
@@ -153,7 +153,7 @@ describe('createFolderSidecar', () => {
   it('a genuine create failure with no file to fall back to is swallowed (no throw, no file)', async () => {
     const { platform, files } = fakeFs();
     const sc = createFolderSidecar(platform, () => 'R', RELPATH);
-    platform.createFile = (() => Promise.reject(new Error('EACCES'))) as Platform['createFile'];
+    platform.createFile = (() => Promise.reject(new Error('EACCES')));
 
     await expect(sc.write('x')).resolves.toBeUndefined();
     expect(files.has('R/.koine/reviews.json')).toBe(false);

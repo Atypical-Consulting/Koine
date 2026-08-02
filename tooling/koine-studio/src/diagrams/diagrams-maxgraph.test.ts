@@ -44,7 +44,7 @@ import { formatAclMapping } from '@/shell/ideUtils';
 // Shim it so the graph constructs with a sane size, and assert on the MODEL (never on pixels).
 beforeAll(() => {
   Element.prototype.getBoundingClientRect = () =>
-    ({ x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} }) as DOMRect;
+    ({ x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} });
 });
 
 afterEach(() => {
@@ -296,13 +296,13 @@ describe('edges', () => {
     try {
       const edge = handle.cells.get('Ordering.Order')!.getEdgeAt(0);
       expect(edge).toBeTruthy();
-      expect(edge!.getStyle().startArrow).toBe('diamond');
-      expect(edge!.getStyle().startFill).toBe(true);
-      expect(edge!.getStyle().endArrow).not.toBe('none');
+      expect(edge.getStyle().startArrow).toBe('diamond');
+      expect(edge.getStyle().startFill).toBe(true);
+      expect(edge.getStyle().endArrow).not.toBe('none');
       // the DiagramEdge stays on the cell so a disconnect gesture can read its backing field
-      expect(edge!.value).toMatchObject({ backingMember: 'Ordering.Order.lines' });
+      expect(edge.value).toMatchObject({ backingMember: 'Ordering.Order.lines' });
       // the two multiplicity labels are child cells of the edge
-      expect(edge!.getChildCount()).toBe(2);
+      expect(edge.getChildCount()).toBe(2);
     } finally {
       handle.dispose();
     }
@@ -336,9 +336,9 @@ describe('edges', () => {
     const handle = buildCanvas(mx, container, merged);
     try {
       const edge = handle.cells.get('Sales')!.getEdgeAt(0);
-      expect(edge!.getStyle().startArrow).not.toBe('none'); // two-headed → arrow at the source end too
-      expect(edge!.getStyle().endArrow).not.toBe('none');
-      expect(edge!.getStyle().startArrow).not.toBe('diamond'); // not a composition diamond
+      expect(edge.getStyle().startArrow).not.toBe('none'); // two-headed → arrow at the source end too
+      expect(edge.getStyle().endArrow).not.toBe('none');
+      expect(edge.getStyle().startArrow).not.toBe('diamond'); // not a composition diamond
     } finally {
       handle.dispose();
     }
@@ -353,9 +353,9 @@ describe('edges', () => {
     const handle = buildCanvas(mx, container, merged);
     try {
       const edge = handle.cells.get('Sales.Customer')!.getEdgeAt(0);
-      expect(edge!.getStyle().startArrow).toBe('none');
-      expect(edge!.getStyle().endArrow).not.toBe('none');
-      expect(edge!.getChildCount()).toBe(0);
+      expect(edge.getStyle().startArrow).toBe('none');
+      expect(edge.getStyle().endArrow).not.toBe('none');
+      expect(edge.getChildCount()).toBe(0);
     } finally {
       handle.dispose();
     }
@@ -828,7 +828,7 @@ describe('canvas authoring: connect + disconnect', () => {
     const handle = buildCanvas(mx, container, merged);
     try {
       const edgeCell = handle.cells.get('Ordering.Order')!.getEdgeAt(0);
-      handle.graph.getCellAt = (() => edgeCell) as typeof handle.graph.getCellAt;
+      handle.graph.getCellAt = (() => edgeCell);
       let detail: unknown = null;
       container.addEventListener('koi-diagram-disconnect', (e) => { detail = (e as CustomEvent).detail; });
       container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 2 }));
@@ -1186,7 +1186,7 @@ describe('canvas annotations (#255)', () => {
     const handle = buildCanvas(mx, container, twoNodes, { positions, notes: [note], groups: [] });
     try {
       const cell = handle.noteCells.get('note-1')!;
-      handle.graph.getCellAt = (() => cell) as typeof handle.graph.getCellAt; // happy-dom can't hit-test by pixel
+      handle.graph.getCellAt = (() => cell); // happy-dom can't hit-test by pixel
       container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
       await tick();
 
@@ -1266,20 +1266,20 @@ describe('buildEventFlowCanvas', () => {
 
       // flow edge: command card → event card
       const flowEdge = handle.cells.get('cmd')!.getEdgeAt(0);
-      expect(flowEdge!.value).toMatchObject({ kind: 'flow' });
-      expect(flowEdge!.getTerminal(false)).toBe(handle.cells.get('evt'));
+      expect(flowEdge.value).toMatchObject({ kind: 'flow' });
+      expect(flowEdge.getTerminal(false)).toBe(handle.cells.get('evt'));
 
       // publish edge: Sales swimlane → integration-event card
       const pub = handle.containers.get('Sales')!.getEdgeAt(0);
-      expect(pub!.value).toMatchObject({ kind: 'publish' });
-      expect(pub!.getTerminal(true)).toBe(handle.containers.get('Sales'));
-      expect(pub!.getTerminal(false)).toBe(handle.cells.get('int'));
+      expect(pub.value).toMatchObject({ kind: 'publish' });
+      expect(pub.getTerminal(true)).toBe(handle.containers.get('Sales'));
+      expect(pub.getTerminal(false)).toBe(handle.cells.get('int'));
 
       // subscribe edge: integration-event card → Shipping swimlane
       const sub = handle.containers.get('Shipping')!.getEdgeAt(0);
-      expect(sub!.value).toMatchObject({ kind: 'subscribe' });
-      expect(sub!.getTerminal(true)).toBe(handle.cells.get('int'));
-      expect(sub!.getTerminal(false)).toBe(handle.containers.get('Shipping'));
+      expect(sub.value).toMatchObject({ kind: 'subscribe' });
+      expect(sub.getTerminal(true)).toBe(handle.cells.get('int'));
+      expect(sub.getTerminal(false)).toBe(handle.containers.get('Shipping'));
     } finally {
       handle.dispose();
     }

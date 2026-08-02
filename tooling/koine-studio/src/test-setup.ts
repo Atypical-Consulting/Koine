@@ -38,7 +38,7 @@ function makeStorage(): Storage {
     key: (i: number) => Array.from(m.keys())[i] ?? null,
     removeItem: (k: string) => void m.delete(k),
     setItem: (k: string, v: string) => void m.set(k, String(v)),
-  } as Storage;
+  };
 }
 
 const g = globalThis as unknown as { localStorage?: Storage; sessionStorage?: Storage; crypto?: Crypto };
@@ -72,7 +72,7 @@ export function installRafShim(target: Record<string, unknown>): void {
     clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
 }
 
-installRafShim(globalThis as unknown as Record<string, unknown>);
+installRafShim(globalThis);
 if (typeof window !== 'undefined') installRafShim(window as unknown as Record<string, unknown>);
 
 // happy-dom 20.x's GlobalEventHandlers mixin omits `ondragstart`/`ondragover`/`ondrop`/&c. on

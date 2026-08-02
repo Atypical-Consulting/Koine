@@ -290,7 +290,7 @@ export function createLifecycleBoot(deps: LifecycleBootDeps): LifecycleBoot {
             if (deps.hasOpenWorkspace()) return;
             const last = getLastWorkspace();
             const restorable = !!last && last !== DEFAULT_WS_TOKEN && (await deps.isAutoRestorableToken(last));
-            const restoredExample = restorable ? (await deps.openFolderPath(last as string, { recent: false })).ok : false;
+            const restoredExample = restorable ? (await deps.openFolderPath(last, { recent: false })).ok : false;
             // Legacy-scratch migration is deliberately NOT done on the example-restore path: the scratch
             // content is only ever preserved by being seeded into the default workspace.
             if (!restoredExample) await openDefaultWorkspaceFlow(legacyScratch ?? seed);

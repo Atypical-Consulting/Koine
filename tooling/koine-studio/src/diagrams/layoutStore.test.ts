@@ -366,7 +366,7 @@ describe('createFolderLayoutStore — load', () => {
   it('returns an empty layout when reading the located file throws', async () => {
     const { platform, files } = fakeFs({ [LAYOUT_FILE]: '{}' });
     // The file is listed so locate() finds a token, but reading it fails.
-    platform.readTextFile = (() => Promise.reject(new Error('io'))) as Platform['readTextFile'];
+    platform.readTextFile = (() => Promise.reject(new Error('io')));
     void files; // (kept for symmetry; not otherwise used)
     expect(await createFolderLayoutStore(platform, FOLDER).load()).toEqual(emptyDiagramLayout());
   });
@@ -430,7 +430,7 @@ describe('createFolderLayoutStore — save (debounced) + create/overwrite', () =
       // Plant the file as if a racer created it, then reject this create.
       fs.files.set(`${folderToken}/${relPath}`, JSON.stringify({ version: 2, positions: {} }));
       return Promise.reject(new Error('already exists (raced)'));
-    }) as Platform['createFile'];
+    });
     void realCreate;
 
     store.save(lay({ A: { x: 4, y: 4 } }));
@@ -447,7 +447,7 @@ describe('createFolderLayoutStore — save (debounced) + create/overwrite', () =
 
     // createFile rejects WITHOUT planting a file (e.g. permission denied), so the re-locate also finds
     // nothing: the `if (t)` write is skipped and write() returns without throwing.
-    fs.platform.createFile = (() => Promise.reject(new Error('EACCES'))) as Platform['createFile'];
+    fs.platform.createFile = (() => Promise.reject(new Error('EACCES')));
 
     store.save(lay({ A: { x: 1, y: 1 } }));
     await vi.runAllTimersAsync();

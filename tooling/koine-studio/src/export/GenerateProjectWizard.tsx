@@ -414,7 +414,7 @@ function CheckboxRow(props: {
         class="koi-checkbox"
         checked={props.checked}
         disabled={props.disabled}
-        onChange={onToggle ? (e) => onToggle((e.currentTarget as HTMLInputElement).checked) : undefined}
+        onChange={onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined}
       />
       <span class="koi-wizard-check-text">
         <span class="koi-wizard-check-label">{props.label}</span>
@@ -479,7 +479,7 @@ function NameStep(props: { state: WizardState; dispatch: Dispatch; onEnter: () =
         spellcheck={false}
         aria-invalid={valid ? 'false' : 'true'}
         aria-describedby={valid ? undefined : NAME_ERR_ID}
-        onInput={(e) => dispatch({ type: 'setName', value: (e.currentTarget as HTMLInputElement).value })}
+        onInput={(e) => dispatch({ type: 'setName', value: e.currentTarget.value })}
         onKeyDown={(e) => {
           // Enter advances when the name is valid.
           if (e.key === 'Enter' && isValidProjectName(state.projectName)) {

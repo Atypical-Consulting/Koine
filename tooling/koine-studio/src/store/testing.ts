@@ -33,7 +33,7 @@ export function createCountingStore(): { store: StoreApi<AppState>; active(): nu
       }
       rawUnsubscribe();
     };
-  }) as StoreApi<AppState>['subscribe'];
+  });
   return { store, active: () => count };
 }
 
@@ -51,6 +51,6 @@ export function createRecordingStore(): { store: StoreApi<AppState>; subscribeSn
   store.subscribe = ((listener: Parameters<StoreApi<AppState>['subscribe']>[0]) => {
     subscribeSnapshots.push(store.getState());
     return rawSubscribe(listener);
-  }) as StoreApi<AppState>['subscribe'];
+  });
   return { store, subscribeSnapshots };
 }

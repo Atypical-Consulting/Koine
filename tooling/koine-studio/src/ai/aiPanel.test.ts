@@ -701,7 +701,7 @@ describe('tool-call cards (panel integration)', () => {
     const card = container.querySelector('.koi-assistant-tool')!;
     const resultPre = card.querySelectorAll('pre')[1];
     // The result <pre> is clamped to the 8 KB cap …
-    expect(resultPre.textContent!.length).toBe(8 * 1024);
+    expect(resultPre.textContent.length).toBe(8 * 1024);
     // … and the truncation is announced with a visible note.
     expect(card.querySelector('.koi-tool-truncated')?.textContent).toContain('(truncated)');
   });

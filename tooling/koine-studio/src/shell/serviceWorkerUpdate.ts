@@ -229,7 +229,7 @@ export function registerStudioServiceWorker(deps: RegisterServiceWorkerDeps = {}
   registered = true;
   const swContainer = nav.serviceWorker;
   const { url, scope } = serviceWorkerUrl(
-    deps.base ?? (import.meta.env.BASE_URL as string | undefined),
+    deps.base ?? (import.meta.env.BASE_URL),
   );
   const onUpdateReady = deps.onUpdateReady ?? ((): void => {});
 
@@ -240,7 +240,7 @@ export function registerStudioServiceWorker(deps: RegisterServiceWorkerDeps = {}
     swContainer
       .register(url, { type: 'module', scope })
       .then((registration) => {
-        watchForUpdates(registration as unknown as RegistrationLike, onUpdateReady, hadController);
+        watchForUpdates(registration, onUpdateReady, hadController);
         // NB: the WASM bundle is NOT precached here — that's gated to editor-route entry
         // (scheduleCompilerPrecache, called from main.ts) so a Home-only visit never downloads it.
       })
