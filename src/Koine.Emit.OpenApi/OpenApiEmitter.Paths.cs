@@ -212,12 +212,12 @@ public sealed partial class OpenApiEmitter
         return operation;
     }
 
-    /// <summary>A factory → a <c>POST</c> operation (#1747): its parameters a required JSON request body
-    /// (when any), <c>200</c> the created aggregate, <c>400</c> a precondition/invariant violation — the
-    /// same shape as <see cref="CommandOperation"/>, minus any R19 annotation surface (a factory carries
-    /// none). <see cref="PathParameters"/> is called for symmetry even though <paramref name="route"/>'s
-    /// template is always token-free (a derived path, never an authored one) and so always returns
-    /// <c>null</c>.</summary>
+    /// <summary>A factory → a <c>POST</c> operation (#1747) — or whatever verb its R19 annotations name
+    /// (#1846): its parameters a required JSON request body (when any), <c>200</c> the created aggregate,
+    /// <c>400</c> a precondition/invariant violation — the same shape as <see cref="CommandOperation"/>.
+    /// <see cref="PathParameters"/> and <see cref="AddSecurity"/> were already called here for symmetry
+    /// when a factory's path was always a token-free derived route; #1846 made both live, since an
+    /// authored <c>@route</c> may carry <c>{token}</c>s and an <c>@auth</c> a role.</summary>
     private static YamlObject FactoryOperation(EntityDecl entity, FactoryDecl factory, RouteInfo route, ModelIndex index, HashSet<string> emitted)
     {
         var operation = new YamlObject();

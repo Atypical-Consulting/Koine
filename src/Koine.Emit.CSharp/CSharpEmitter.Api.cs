@@ -124,9 +124,15 @@ public sealed partial class CSharpEmitter
     }
 
     /// <summary>A factory → <c>POST /{entity}/{factory}</c> (<see cref="RouteDerivation.ForFactory"/> —
-    /// #1747), always returning the created aggregate. Factories carry no API annotations (and no
-    /// <c>@route</c> tokens to bind — #1748 is commands/queries only), so this one stays purely
-    /// conventional.</summary>
+    /// #1747), always returning the created aggregate — or the verb/route/role its R19
+    /// <c>@route</c>/<c>@put</c>/<c>@auth</c> annotations named (#1846), through the very same
+    /// <see cref="RouteInfo"/> a command's endpoint reads.
+    ///
+    /// <para><c>identityProperty</c> is passed empty because it is unreachable here:
+    /// <see cref="RouteDerivation.ForFactory"/> never resolves an <see cref="RouteTokenTarget.Identity"/>
+    /// binding — a factory mints its identity, so its request record (built from the factory's parameters
+    /// alone) has no identity property to rebind. A factory's <c>{id}</c> token binds only by ordinary
+    /// name-match against an explicit <c>id</c> parameter, and is otherwise KOI1215-unbound.</para></summary>
     private void WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory, CSharpTypeMapper typeMapper, ModelIndex index)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(factory.Name);
