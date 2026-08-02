@@ -1842,4 +1842,41 @@ public class JavaConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1865 code review: the numeric widen dimension (#1866) and the optional lift dimension (#1865)
+    /// compose — widen inside, wrap outside — at a hoisted call site too. A non-optional <c>Int</c> member
+    /// <c>result</c>-ed AND emitted against a <c>Decimal?</c> return/payload must hoist a SINGLE
+    /// <c>Optional&lt;BigDecimal&gt;</c>-typed <c>__result</c> local initialized with
+    /// <c>Optional.of(BigDecimal.valueOf(...))</c>, exercising the same
+    /// <c>needs.NeedsOptionalWiden || needs.NeedsSomeWrap</c> composition in the hoisted-local type fix as
+    /// the non-hoisted case, but through the <c>#1838</c> hoist path.
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_into_a_widened_and_optional_lifted_payload_declares_the_local_with_both()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  event Charged { amount: Decimal? }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeC: Decimal? {\n" +
+            "      emit Charged(amount: tax)\n" +
+            "      result tax\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("java.util.Optional<java.math.BigDecimal> __result = java.util.Optional.of(java.math.BigDecimal.valueOf(this.tax));");
+        invoice.ShouldContain("new Charged(__result)");
+        invoice.ShouldContain("return __result;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
