@@ -342,7 +342,10 @@ public sealed partial class KotlinEmitter
         StringBuilder sb, KotlinEmitContext emit, PublishClause pub, KotlinExpressionTranslator translator,
         string integrationEventsField, string indent)
     {
-        if (BuildEventExpression(emit, pub.EventName, pub.Args, translator) is { } expr)
+        // Resolved CONTEXT-AWARE (unlike `emit`, whose validator is itself flat): two contexts may each
+        // legally publish a same-named integration event with DIFFERENT payloads (R14), and the flat
+        // ModelIndex view is last-write-wins — see BuildEventExpression's `context` parameter (#1796 review).
+        if (BuildEventExpression(emit, pub.EventName, pub.Args, translator, translator.Context) is { } expr)
         {
             sb.Append(indent).Append("this.").Append(integrationEventsField).Append(".add(").Append(expr).Append(")\n");
         }
@@ -353,11 +356,17 @@ public sealed partial class KotlinEmitter
     /// <c>publish</c> clause (R19): both clauses carry the same <see cref="EmitArg"/> payload and both
     /// construct a data class, so the argument binding and enum-qualification rules stay identical
     /// rather than being re-derived per clause.
+    /// <para><paramref name="context"/> is the bounded context the NAME resolves within. A
+    /// <c>publish</c> passes it (its validator, <c>ValidatePublish</c>, resolves context-aware, so the
+    /// emitter must too or it builds the payload from another context's same-named declaration); an
+    /// <c>emit</c> leaves it null, which falls back to the flat lookup its own flat validator agrees
+    /// with.</para>
     /// </summary>
     private static string? BuildEventExpression(
-        KotlinEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs, KotlinExpressionTranslator translator)
+        KotlinEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs, KotlinExpressionTranslator translator,
+        string? context = null)
     {
-        if (!emit.Index.TryGetDecl(eventName, out TypeDecl decl))
+        if (!emit.Index.TryGetDecl(context, eventName, out TypeDecl decl))
         {
             return null;
         }

@@ -89,7 +89,14 @@ byte-identical output.
 
 * `publishes`/`subscribes` becomes a modelled choreography rather than a declaration pair. The
   producer is in the model, so the docs emitters, AsyncApi's `send` operation, and the scenario runner
-  can all attribute a published event to the command that causes it.
+  can all attribute a published event to the command that causes it. On the `koine/runScenario` wire
+  that attribution is an **additive `"published": true` flag** on the existing `kind: "emit"` step,
+  written only when the step came from a `publish` — a `publish` and an `emit` are otherwise
+  shape-identical, and a timeline that cannot tell them apart cannot show a contract leaving the
+  context. A fourth `kind` was rejected: `kind` is the wire's discriminated union and the Studio
+  panel's `renderStep` switch has no default arm, so a new value would render a published event as an
+  empty row on any client not upgraded in lockstep, whereas an unread flag degrades to the previous
+  rendering. Both engines set it, so executed and interpreted mode stay at parity.
 * The outbox is complete. The enqueue call site — the one piece every emitter was missing — is now
   generated, and `IUnitOfWork` exposes the seam rather than hiding it on the concrete class.
 * ADR 0014's declared-only cross-context branch becomes reachable from a real executed run, so it can

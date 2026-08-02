@@ -196,6 +196,9 @@ internal sealed class RustExpressionTranslator
     /// </summary>
     private TypeScope EffectiveScope() => _locals.Overlay(_scope, _index, ErrorType.Instance);
 
+    /// <summary>The bounded context this translator resolves identifiers within (null = global/legacy mode).</summary>
+    internal string? Context => _resolver.Context;
+
     /// <summary>Translates an expression to a Rust expression string (members render as <c>self.x</c>).</summary>
     public string Translate(Expr expr, string? expectedEnum = null) => Translate(expr, NameMode.Property, expectedEnum);
 

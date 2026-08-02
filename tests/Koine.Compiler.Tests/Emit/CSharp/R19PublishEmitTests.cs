@@ -409,4 +409,105 @@ public class R19PublishEmitTests
         errors.ShouldBeEmpty("generated C# failed to compile:\n" + string.Join("\n", errors));
         assembly.ShouldNotBeNull();
     }
+
+    // ---- cross-context resolution (the same-named integration event) ----------
+
+    /// <summary>
+    /// Two contexts that each legitimately publish a SAME-NAMED integration event with a DIFFERENT
+    /// payload — the shape <c>R14IntegrationEventsTests.SameNameCrossPublisher</c> already blesses,
+    /// here with each publisher actually running a <c>publish</c>.
+    /// <para><c>ValidatePublish</c> resolves the name context-aware, so it checks Alpha's payload
+    /// against Alpha's declaration. The emitter used to resolve it through the FLAT, last-write-wins
+    /// <c>ModelIndex</c> view, so it built the constructor call from whichever declaration was indexed
+    /// last: this model validated with ZERO diagnostics and emitted
+    /// <c>new Shipped(default!, default!)</c> into <c>Alpha.Order</c> — CS1729 against Alpha's
+    /// one-argument <c>Shipped</c>, with <c>orderId: code</c> dropped. It was also source-order
+    /// dependent, so reordering the two contexts silently moved the breakage to the other one.</para>
+    /// </summary>
+    private const string CrossContextSameNameFixture = """
+        context Alpha version 1 {
+          publishes Shipped
+          integration event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              command ship { publish Shipped(orderId: code) }
+            }
+          }
+        }
+        context Beta version 1 {
+          publishes Shipped
+          integration event Shipped { trackingCode: String  carrier: String }
+
+          aggregate Freight root Consignment {
+            entity Consignment identified by ConsignmentId {
+              label: String
+              hauler: String
+              command dispatch { publish Shipped(trackingCode: label, carrier: hauler) }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The SAME model with the two contexts written in the other order. The emitted publish statements
+    /// must be byte-identical to <see cref="CrossContextSameNameFixture"/>'s — resolution keyed on the
+    /// enclosing context, never on which declaration the flat index happened to see last.
+    /// </summary>
+    private const string CrossContextSameNameReorderedFixture = """
+        context Beta version 1 {
+          publishes Shipped
+          integration event Shipped { trackingCode: String  carrier: String }
+
+          aggregate Freight root Consignment {
+            entity Consignment identified by ConsignmentId {
+              label: String
+              hauler: String
+              command dispatch { publish Shipped(trackingCode: label, carrier: hauler) }
+            }
+          }
+        }
+        context Alpha version 1 {
+          publishes Shipped
+          integration event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              command ship { publish Shipped(orderId: code) }
+            }
+          }
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Publish_resolves_a_same_named_integration_event_in_its_own_context(bool reordered)
+    {
+        var files = Emit(reordered ? CrossContextSameNameReorderedFixture : CrossContextSameNameFixture);
+
+        // Each root constructs ITS OWN context's Shipped, with the payload the validator checked.
+        File(files, "Alpha/Order.cs").ShouldContain("_integrationEvents.Add(new Shipped(Code));");
+        File(files, "Beta/Consignment.cs").ShouldContain("_integrationEvents.Add(new Shipped(Label, Hauler));");
+
+        // The exact shape of the bug: the other context's arity, with every argument dropped.
+        File(files, "Alpha/Order.cs").ShouldNotContain("default!");
+        File(files, "Beta/Consignment.cs").ShouldNotContain("default!");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Emitted_cross_context_publish_output_compiles(bool reordered)
+    {
+        // The load-bearing half: a wrong-context resolution yields a wrong-arity constructor call
+        // (CS1729), which only a real compile catches.
+        var (assembly, errors) =
+            TestSupport.Compile(Emit(reordered ? CrossContextSameNameReorderedFixture : CrossContextSameNameFixture));
+
+        errors.ShouldBeEmpty("generated C# failed to compile:\n" + string.Join("\n", errors));
+        assembly.ShouldNotBeNull();
+    }
 }

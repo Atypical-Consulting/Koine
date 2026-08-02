@@ -427,7 +427,10 @@ public sealed partial class RustEmitter
         StringBuilder body, RustEmitContext emit, PublishClause publish,
         RustExpressionTranslator translator, RustTypeMapper typeMapper, string integrationEventsField)
     {
-        if (BuildEventExpression(emit, publish.EventName, publish.Args, translator, typeMapper) is { } expr)
+        // Resolved CONTEXT-AWARE (unlike `emit`, whose validator is itself flat): two contexts may each
+        // legally publish a same-named integration event with DIFFERENT payloads (R14), and the flat
+        // ModelIndex view is last-write-wins — see BuildEventExpression's `context` parameter (#1796 review).
+        if (BuildEventExpression(emit, publish.EventName, publish.Args, translator, typeMapper, translator.Context) is { } expr)
         {
             body.Append(Indent).Append(Indent).Append("self.").Append(integrationEventsField)
                 .Append(".push(").Append(expr).Append(");\n");
@@ -461,12 +464,17 @@ public sealed partial class RustEmitter
     /// <c>publish</c> clause (R19) — the two clauses carry the same <see cref="EmitArg"/> payload shape
     /// and both lower to a <c>DomainEvent</c> variant, so the argument binding, numeric widening, and
     /// optional-wrapping rules must stay identical rather than be re-derived per clause.
+    /// <para><paramref name="context"/> is the bounded context the NAME resolves within. A
+    /// <c>publish</c> passes it (its validator, <c>ValidatePublish</c>, resolves context-aware, so the
+    /// emitter must too or it builds the payload from another context's same-named declaration); an
+    /// <c>emit</c> leaves it null, which falls back to the flat lookup its own flat validator agrees
+    /// with.</para>
     /// </summary>
     private static string? BuildEventExpression(
         RustEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs,
-        RustExpressionTranslator translator, RustTypeMapper typeMapper)
+        RustExpressionTranslator translator, RustTypeMapper typeMapper, string? context = null)
     {
-        if (!emit.Index.TryGetDecl(eventName, out TypeDecl decl))
+        if (!emit.Index.TryGetDecl(context, eventName, out TypeDecl decl))
         {
             return null;
         }

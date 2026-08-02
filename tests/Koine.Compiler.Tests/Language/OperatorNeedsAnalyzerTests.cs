@@ -162,8 +162,8 @@ public class OperatorNeedsAnalyzerTests
         IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
             OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
 
-        // `publish CartTotalled(total: a + b)` folds two Lengths — the analyzer must see it, or the
-        // emitted Length has no `+` for the emitted publish statement to call.
+        // `publish CartTotalled(total: (a + b).meters)` folds two Lengths — the analyzer must see it, or
+        // the emitted Length has no `+` for the emitted publish statement to call.
         needs["Length"].BinaryOps.ShouldBe(new[] { BinaryOp.Add });
         needs["Length"].NeedsAdd.ShouldBeTrue();
     }

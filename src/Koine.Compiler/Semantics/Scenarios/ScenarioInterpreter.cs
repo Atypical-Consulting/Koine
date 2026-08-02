@@ -281,11 +281,13 @@ internal sealed class ScenarioInterpreter
                     break;
 
                 // A `publish` is announced on the same timeline as an `emit` (#1796): both are payloads the
-                // command records, and the step contract has one shape for a recorded event. What the
-                // interpreter deliberately does NOT do is follow it — ADR 0014 D7 keeps Approach B
-                // single-aggregate, so no subscriber is constructed and no fan-out is dispatched here.
+                // command records, and the step contract has one shape for a recorded event — but it is
+                // FLAGGED as published, so a reader (and the Studio panel) can tell a contract leaving the
+                // context from an intra-aggregate domain event. What the interpreter deliberately does NOT
+                // do is follow it — ADR 0014 D7 keeps Approach B single-aggregate, so no subscriber is
+                // constructed and no fan-out is dispatched here.
                 case PublishClause publish:
-                    steps.Add(RecordedStep(publish.EventName, publish.Args, env));
+                    steps.Add(RecordedStep(publish.EventName, publish.Args, env) with { Published = true });
                     break;
 
                 case ResultClause res:

@@ -2032,12 +2032,19 @@ public sealed partial class CSharpEmitter : IEmitter
     /// the published contract would no longer mirror the domain event it accompanies.</para>
     /// <para>There is no <c>targetPrefix</c>: the grammar admits <c>publish</c> only in a command body
     /// (never a factory), so the target is always <c>this</c>.</para>
+    /// <para>The name is resolved CONTEXT-AWARE (<see cref="CSharpExpressionTranslator.Context"/>),
+    /// exactly as <c>EntityBehaviorValidator.ValidatePublish</c> resolves it. Two contexts may each
+    /// legally publish a same-named integration event with DIFFERENT payloads (R14 —
+    /// <c>SameNameCrossPublisher</c>); the flat <c>ModelIndex</c> view is last-write-wins, so resolving
+    /// flat here would have built the constructor call from whichever declaration happened to be indexed
+    /// last while the validator checked the payload against this context's — silently emitting a
+    /// wrong-arity <c>new Ev(default!, …)</c> that varies with source order (#1796 review).</para>
     /// </summary>
     private (string Text, bool Hoisted) BuildPublishStatement(
         PublishClause publish, CSharpExpressionTranslator translator, ModelIndex index,
         string? hoistedResultExpr = null)
     {
-        if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
+        if (!index.TryGetDecl(translator.Context, publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
         {
             return ($"/* unknown integration event '{publish.EventName}' */", false);
         }

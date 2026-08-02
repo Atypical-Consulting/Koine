@@ -907,12 +907,15 @@ public sealed partial class TypeScriptEmitter
     /// non-deterministic expression (<c>now</c>) is evaluated once and an <c>emit</c> and a
     /// <c>publish</c> of it cannot disagree. No target prefix: <c>publish</c> is legal in command
     /// bodies only, so the target is always <c>this</c>.
+    /// <para>The name is resolved CONTEXT-AWARE, exactly as <c>EntityBehaviorValidator.ValidatePublish</c>
+    /// resolves it: two contexts may each legally publish a same-named integration event with DIFFERENT
+    /// payloads (R14), and the flat <see cref="ModelIndex"/> view is last-write-wins (#1796 review).</para>
     /// </summary>
     private (string Text, bool Hoisted) BuildPublishStatement(
         PublishClause publish, TypeScriptExpressionTranslator translator, ModelIndex index, string? context,
         string? hoistedResultExpr = null)
     {
-        if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
+        if (!index.TryGetDecl(context, publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
         {
             return ($"/* unknown integration event '{publish.EventName}' */", false);
         }

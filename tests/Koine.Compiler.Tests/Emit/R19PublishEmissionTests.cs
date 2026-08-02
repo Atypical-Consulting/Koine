@@ -95,6 +95,40 @@ public class R19PublishEmissionTests
         }
         """;
 
+    /// <summary>
+    /// Two contexts that each legitimately publish a SAME-NAMED integration event with a DIFFERENT
+    /// payload (the shape <c>R14IntegrationEventsTests.SameNameCrossPublisher</c> blesses), each
+    /// actually running a <c>publish</c>. <c>ValidatePublish</c> resolves the name context-aware; every
+    /// emitter used to resolve it through the FLAT, last-write-wins <c>ModelIndex</c> view, so it built
+    /// the payload from whichever declaration was indexed last — zero diagnostics, wrong constructor
+    /// call, and the breakage moved to the other context if the two were reordered.
+    /// </summary>
+    private const string CrossContextSameName = """
+        context Alpha version 1 {
+          publishes Shipped
+          integration event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              command ship { publish Shipped(orderId: code) }
+            }
+          }
+        }
+        context Beta version 1 {
+          publishes Shipped
+          integration event Shipped { trackingCode: String  carrier: String }
+
+          aggregate Freight root Consignment {
+            entity Consignment identified by ConsignmentId {
+              label: String
+              hauler: String
+              command dispatch { publish Shipped(trackingCode: label, carrier: hauler) }
+            }
+          }
+        }
+        """;
+
     private static string EmitFile(string source, IEmitter emitter, string pathSuffix)
     {
         CompileResult result = new KoineCompiler().Compile(source, emitter);
@@ -280,5 +314,48 @@ public class R19PublishEmissionTests
 
         order.ShouldContain("_domainEvents");
         order.ShouldNotContain("_integrationEvents");
+    }
+
+    // ---- cross-context resolution (the same-named integration event) ----------
+
+    /// <summary>
+    /// Every backend must resolve a published event in the publishing context, not through the flat
+    /// index. Before the fix each of these rendered the OTHER context's payload: Python and PHP emitted
+    /// an argument-less constructor (every field silently dropped), TypeScript
+    /// <c>new Shipped(undefined as never, undefined as never)</c>, Rust two <c>Default::default()</c>s,
+    /// Java two <c>null</c>s and Kotlin two <c>TODO()</c>s.
+    /// </summary>
+    [Fact]
+    public void Every_backend_resolves_a_same_named_published_event_in_its_own_context()
+    {
+        EmitFile(CrossContextSameName, new TypeScriptEmitter(), "/Order.ts")
+            .ShouldContain("this._integrationEvents.push(new Shipped(this.code));");
+        EmitFile(CrossContextSameName, new TypeScriptEmitter(), "/Consignment.ts")
+            .ShouldContain("this._integrationEvents.push(new Shipped(this.label, this.hauler));");
+
+        EmitFile(CrossContextSameName, new PythonEmitter(), "/order.py")
+            .ShouldContain("self._integration_events.append(Shipped(order_id=self.code))");
+        EmitFile(CrossContextSameName, new PythonEmitter(), "/consignment.py")
+            .ShouldContain("self._integration_events.append(Shipped(tracking_code=self.label, carrier=self.hauler))");
+
+        EmitFile(CrossContextSameName, new PhpEmitter(), "/Order.php")
+            .ShouldContain("$this->integrationEvents[] = new Shipped($this->code);");
+        EmitFile(CrossContextSameName, new PhpEmitter(), "/Consignment.php")
+            .ShouldContain("$this->integrationEvents[] = new Shipped($this->label, $this->hauler);");
+
+        EmitFile(CrossContextSameName, new RustEmitter(), "/alpha.rs")
+            .ShouldContain("self.integration_events.push(DomainEvent::Shipped(Shipped::new(self.code.to_string())));");
+        EmitFile(CrossContextSameName, new RustEmitter(), "/beta.rs")
+            .ShouldContain("self.integration_events.push(DomainEvent::Shipped(Shipped::new(self.label.to_string(), self.hauler.to_string())));");
+
+        EmitFile(CrossContextSameName, new JavaEmitter(), "/Order.java")
+            .ShouldContain("this.integrationEvents.add(new Shipped(this.code));");
+        EmitFile(CrossContextSameName, new JavaEmitter(), "/Consignment.java")
+            .ShouldContain("this.integrationEvents.add(new Shipped(this.label, this.hauler));");
+
+        EmitFile(CrossContextSameName, new KotlinEmitter(), "/Order.kt")
+            .ShouldContain("this._integrationEvents.add(Shipped(this.code))");
+        EmitFile(CrossContextSameName, new KotlinEmitter(), "/Consignment.kt")
+            .ShouldContain("this._integrationEvents.add(Shipped(this.label, this.hauler))");
     }
 }

@@ -552,6 +552,9 @@ public sealed partial class PhpEmitter
     /// resolves to an <see cref="IntegrationEventDecl"/> (KOI1420 guarantees it by emit time). No target
     /// prefix parameter: the grammar admits <c>publish</c> in a command body only, so the target is
     /// always <c>$this</c>.
+    /// <para>Resolution is CONTEXT-AWARE, exactly as <c>EntityBehaviorValidator.ValidatePublish</c>
+    /// resolves it: two contexts may each legally publish a same-named integration event with DIFFERENT
+    /// payloads (R14), and the flat <see cref="ModelIndex"/> view is last-write-wins (#1796 review).</para>
     /// </summary>
     private string BuildPublishStatement(
         PublishClause publish,
@@ -559,7 +562,7 @@ public sealed partial class PhpEmitter
         ModelIndex index,
         PhpExpressionTranslator.NameMode mode)
     {
-        if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
+        if (!index.TryGetDecl(translator.Context, publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
         {
             return $"/* unknown integration event '{publish.EventName}' */";
         }

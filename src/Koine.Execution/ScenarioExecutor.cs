@@ -1162,10 +1162,13 @@ internal sealed class ScenarioExecutor
                     break;
 
                 // A publication is the command's own recorded action, exactly like an emit — it is read
-                // off the OTHER list (#1796) and rendered on the same timeline. What it does NOT do is
-                // reach a subscriber: that stays a declared-only note (ADR 0014 D1).
+                // off the OTHER list (#1796) and rendered on the same timeline, FLAGGED as published so a
+                // contract leaving the context is not read as an intra-aggregate domain event. What it does
+                // NOT do is reach a subscriber: that stays a declared-only note (ADR 0014 D1).
                 case PublishClause publish:
-                    steps.Add(RecordedStep(publish.EventName, publish.Args, "published", published, ref publishedCursor));
+                    ScenarioStep.Emit recordedPublication =
+                        RecordedStep(publish.EventName, publish.Args, "published", published, ref publishedCursor);
+                    steps.Add(recordedPublication with { Published = true });
                     break;
 
                 case ResultClause:
