@@ -20,6 +20,11 @@ namespace Koine.Compiler.Tests;
 /// constructor call of the wrong arity. Moving only one half of <c>emit</c> re-opens exactly that hole
 /// — so these tests deliberately assert on <b>both</b> halves (no diagnostics <i>and</i> the emitted
 /// payload, for every target).</para>
+/// <para><b>The permit path is covered elsewhere.</b> Every fixture below has <c>Ordering</c>
+/// declaring the event itself. A context can also see a type purely through the context map (R14.1),
+/// with no local declaration and no <c>import</c> — that route bypassed all of this until #1853 fixed
+/// the shared seam <c>ModelIndex.TryGetDeclIn</c>, which is what actually closed the family. See
+/// <see cref="PermitVisibleCrossContextResolutionTests"/>.</para>
 /// </remarks>
 public class EmitCrossContextResolutionTests
 {
