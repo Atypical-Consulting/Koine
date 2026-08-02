@@ -128,7 +128,7 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Ast/Binder.cs", 295, "TryGetDecl", "final fallback of ResolveTypeName's own ladder (TryGetDeclIn tried at :290)"),
         ("src/Koine.Emit.Rust/RustExpressionTranslator.cs", 1464, "TryGetDecl", "final fallback of ResolveDecl's own ladder (TryGetDeclIn tried at :1459)"),
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 486, "TryGetDecl", "final fallback of ResolveDecl's own ladder"),
-        ("src/Koine.Compiler/Semantics/SemanticValidator.cs", 955, "TryGetDecl", "final fallback after TryGetDeclIn(ctx.Name, target, ...) in ValidateSpecs"),
+        ("src/Koine.Compiler/Semantics/SemanticValidator.cs", 956, "TryGetDecl", "final fallback after TryGetDeclIn(ctx.Name, target, ...) in ValidateSpecs"),
         ("src/Koine.Compiler/Semantics/CqrsValidator.cs", 480, "TryGetDecl", "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
         ("src/Koine.Execution/ScenarioExecutor.cs", 1579, "TryGetDecl", "final fallback within a DeclaringContextsOf/TryGetDeclIn walk in InvariantsDeclaredOn"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Application.cs", 571, "TryGetDecl", "combined TryGetDeclIn(context,...) || TryGetDecl(...) ladder"),
