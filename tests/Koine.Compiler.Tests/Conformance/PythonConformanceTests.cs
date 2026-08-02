@@ -2380,6 +2380,114 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1887 — a command-body state transition (<c>amount -&gt; 5</c>) assigns STRAIGHT INTO the
+    /// target member's declared slot, but that value was never reconciled against the member's declared
+    /// type, unlike every sibling call site in this family: the factory's explicit <c>field -&gt; expr</c>
+    /// initialization (#1732), the <c>result</c> expression and the emit/publish payload (#1875), the
+    /// member default initializer (#1880) and the derived-member body (#1888). Before the fix Python
+    /// emitted a bare <c>self.amount = 5</c> into a <c>Decimal</c>-annotated field — a real
+    /// <c>mypy --strict</c> assignment error. Routed through the same <c>TranslateReconciled</c> the
+    /// sibling call sites already use. Rust closed this same site at #1511.
+    /// </summary>
+    [Fact]
+    public void Command_transition_widens_an_int_value_into_a_decimal_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                qty: Int
+                amount: Decimal
+
+                command bump() {
+                  amount -> 5
+                }
+
+                command scale() {
+                  amount -> qty * 2
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("self.amount = Decimal(5)");
+        product.ShouldContain("self.amount = Decimal((self.qty * 2))");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1887 — the optional-declared variant (Rust's #1511 shape). Python's optional is a plain
+    /// <c>T | None</c> union, so only the NUMERIC dimension renders: the transitioned value still widens
+    /// to <c>Decimal</c>, with no <c>NeedsSomeWrap</c> lift on top.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_command_transition_widens_without_a_lift()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                qty: Int
+                amount: Decimal
+                note: Decimal?
+
+                command annotate() {
+                  note -> 7
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("self.note = Decimal(7)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1887's zero-change guard — a matching-type (<c>Decimal</c>) transition and a non-numeric
+    /// (<c>String</c>) one must render byte-identically to before the reconciliation was wired in. Every
+    /// sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_command_transitions_render_unchanged()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                label: String
+
+                command hold(d: Decimal) {
+                  amount -> d
+                }
+
+                command retitle(t: String) {
+                  label -> t
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = FileText(result.Files, "shop/entities/product.py");
+        product.ShouldContain("self.amount = d");
+        product.ShouldContain("self.label = t");
+        product.ShouldNotContain("Decimal(d)");
+        product.ShouldNotContain("Decimal(t)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()

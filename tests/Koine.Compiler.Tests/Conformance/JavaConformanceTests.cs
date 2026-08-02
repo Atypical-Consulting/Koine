@@ -946,9 +946,12 @@ public class JavaConformanceTests
     /// <summary>
     /// #1548 (Task 2): the same numeric-type-mismatch reconciliation must also hold through a
     /// <c>field -&gt; a ?? b</c> STATE TRANSITION (a mutating behavior), not just a factory ctor arg —
-    /// <c>WriteTransition</c> applies no numeric reconciliation of its own (only an <c>Optional.of(...)</c>
-    /// wrap for a bare value into an optional field), so this exercises that the fix living inside the
-    /// shared <c>CoalesceExpr</c> case covers this call site for free.
+    /// so this exercises that the fix living inside the shared <c>CoalesceExpr</c> case covers this call
+    /// site for free. (At the time this test was written <c>WriteTransition</c> applied no numeric
+    /// reconciliation of its own, only an <c>Optional.of(...)</c> wrap for a bare value into an optional
+    /// field; #1887 has since routed it through <c>ReconcileAgainstDeclared</c> like every sibling call
+    /// site. The rendering here is unaffected — <c>a ?? b</c> with <c>a: Int?</c> and <c>b: Decimal?</c>
+    /// already infers <c>Decimal?</c>, so the added reconcile is a no-op on this fixture.)
     /// </summary>
     [Fact]
     public void Coalesce_numeric_reconciliation_covers_state_transitions()
@@ -1663,6 +1666,160 @@ public class JavaConformanceTests
         money.ShouldContain("return this.qty();");
         money.ShouldNotContain("java.math.BigDecimal.valueOf");
         money.ShouldNotContain("java.util.Optional.of");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887 — a command <c>transition</c> (<c>amount -&gt; 5</c>) is never numerically reconciled
+    /// against the target member's declared type. Java emitted a bare <c>this.amount = 5L;</c> into a
+    /// <c>java.math.BigDecimal</c>-typed field — a hard <c>javac</c> "incompatible types: long cannot be
+    /// converted to BigDecimal". Routed through the very same <c>ReconcileAgainstDeclared</c> the
+    /// derived-member body (#1888) and member-default (#1880) halves already use. Rust closed this call
+    /// site at #1511.
+    /// </summary>
+    [Fact]
+    public void Command_transition_widens_an_int_value_into_a_decimal_member()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    qty: Int\n" +
+            "    amount: Decimal\n" +
+            "\n" +
+            "    command bump() {\n" +
+            "      amount -> 5\n" +
+            "    }\n" +
+            "\n" +
+            "    command scale() {\n" +
+            "      amount -> qty * 2\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.amount = java.math.BigDecimal.valueOf(5L);");
+        product.ShouldContain("this.amount = java.math.BigDecimal.valueOf(this.qty * 2L);");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887 — the optional-declared variant (Rust's #1511 shape), and the important half of this
+    /// family for Java specifically: it is the only target where the widen COMPOSES with a lift. Java's
+    /// optional is a real <c>java.util.Optional&lt;T&gt;</c> field, so <c>note: Decimal?</c> + <c>note -&gt;
+    /// 7</c> must become <c>Optional.of(BigDecimal.valueOf(7L))</c>, not <c>Optional.of(7L)</c>. Pre-fix,
+    /// <c>WriteTransition</c> had its OWN hand-rolled <c>Optional.of(...)</c> lift that covered only the
+    /// <c>NeedsSomeWrap</c> dimension, so this emitted <c>this.note = Optional.of(7L);</c> — an
+    /// <c>Optional&lt;Long&gt;</c> into an <c>Optional&lt;BigDecimal&gt;</c> field, a hard <c>javac</c>
+    /// error. The fix DELETED that hand-rolled lift and replaced it with <c>ReconcileAgainstDeclared</c>,
+    /// which applies both dimensions (widen inside, lift outside) in one place, so the two can no longer
+    /// drift apart.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_command_transition_composes_the_widen_with_the_lift()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    qty: Int\n" +
+            "    amount: Decimal\n" +
+            "    note: Decimal?\n" +
+            "\n" +
+            "    command annotate() {\n" +
+            "      note -> 7\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.note = java.util.Optional.of(java.math.BigDecimal.valueOf(7L));");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887's zero-change guard — a matching-type (<c>Decimal</c>) command transition and a
+    /// non-numeric (<c>String</c>) one must render byte-identically to before the reconciliation was
+    /// wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_command_transitions_render_unchanged()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    label: String\n" +
+            "\n" +
+            "    command hold(d: Decimal) {\n" +
+            "      amount -> d\n" +
+            "    }\n" +
+            "\n" +
+            "    command retitle(t: String) {\n" +
+            "      label -> t\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.amount = d;");
+        product.ShouldContain("this.label = t;");
+        product.ShouldNotContain("java.math.BigDecimal.valueOf");
+        product.ShouldNotContain("java.util.Optional.of");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887 — the REGRESSION guard for the hand-rolled <c>Optional.of(...)</c> lift that #1887
+    /// DELETED from <c>WriteTransition</c>. That lift was type-agnostic: it wrapped any bare value
+    /// flowing into an optional-declared field, numeric or not. Replacing it with
+    /// <c>ReconcileAgainstDeclared</c> is only safe if the helper's <c>NeedsSomeWrap</c> dimension still
+    /// covers the NON-NUMERIC case the lift originally existed for — and nothing else in the suite
+    /// pinned that: the sibling #1887 tests all widen a <c>Decimal</c>, and the only other
+    /// <c>Optional.of</c> transition assertions belong to the #1880 constructor site.
+    /// <para>So this fixes a <c>String?</c>-declared member with a plain <c>String</c> transition: no
+    /// widening is possible, and the ONLY thing standing between the emitted code and a hard
+    /// <c>javac</c> "incompatible types: String cannot be converted to Optional&lt;String&gt;" is the
+    /// lift. Drop it and this test goes red.</para>
+    /// </summary>
+    [Fact]
+    public void Optional_declared_non_numeric_command_transition_still_lifts_into_optional()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    note: String?\n" +
+            "\n" +
+            "    command retitle(t: String) {\n" +
+            "      note -> t\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.note = java.util.Optional.of(t);");
 
         var r = TestSupport.CompileJava(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);

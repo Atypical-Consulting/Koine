@@ -586,12 +586,23 @@ public sealed partial class TypeScriptEmitter
             WriteGuard(sb, entityName, req.Condition, req.Message ?? SynthesizeMessage(), translator, TypeScriptExpressionTranslator.NameMode.Property);
         }
 
+        // A transition assigns STRAIGHT INTO the target member's declared slot, so its value is
+        // reconciled against that member's declared type (#1887) through the same TranslateReconciled
+        // every sibling call site in this family already uses — the factory's explicit `field -> expr`
+        // initialization (#1732), the `result` expression and the emit/publish payload (#1875), the
+        // member default initializer (#1880) and the derived-member body (#1888). An `Int`-typed value
+        // on a `Decimal`-declared member previously emitted a bare `this.amount = 5;` into an
+        // `amount: Decimal` field: a `tsc --strict` TS2322. Rust closed this same site at #1511.
         foreach (Transition tr in transitions)
         {
-            var expectedEnum = entity.Members.FirstOrDefault(m => m.Name == tr.Field) is { } fm && index.Classify(fm.Type.Qualifier ?? context, fm.Type.Name) == TypeKind.Enum
+            Member? fm = entity.Members.FirstOrDefault(m => m.Name == tr.Field);
+            var expectedEnum = fm is not null && index.Classify(fm.Type.Qualifier ?? context, fm.Type.Name) == TypeKind.Enum
                 ? fm.Type.Name : null;
+            var value = fm is not null
+                ? translator.TranslateReconciled(tr.Value, expectedEnum, fm.Type)
+                : translator.Translate(tr.Value, expectedEnum);
             sb.Append(Indent).Append(Indent).Append("this.").Append(TypeScriptNaming.ToCamelCase(tr.Field))
-              .Append(" = ").Append(translator.Translate(tr.Value, expectedEnum)).Append(";\n");
+              .Append(" = ").Append(value).Append(";\n");
         }
 
         // Translate the result FIRST, in the same scope as the emit payloads, so the emit builder

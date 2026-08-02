@@ -537,9 +537,20 @@ public sealed partial class JavaEmitter
                 : null;
         var value = translator.Translate(t.Value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
 
-        if (field is { Type.IsOptional: true } && translator.InferType(t.Value)?.IsOptional != true)
+        // A transition assigns STRAIGHT INTO the target member's declared field, so its value is
+        // reconciled against that member's declared type (#1887) through the same
+        // ReconcileAgainstDeclared every sibling call site in this family already uses — factory ctor
+        // args (#1519), the `result` expression and the emit/publish payload (#1866/#1865), the member
+        // default initializer (#1880) and the derived-member body (#1888). This SUPERSEDES the
+        // hand-rolled `Optional.of(...)` lift that used to sit here: that lift covered only the
+        // NeedsSomeWrap dimension, so `amount: Decimal` + `amount -> 5` still emitted `this.amount = 5L`
+        // into a `java.math.BigDecimal` field — a hard `javac` "incompatible types". Routing through the
+        // shared helper composes the widen WITH the lift, which the optional-declared case needs both
+        // of (`note: Decimal?` + `note -> 7` must become `Optional.of(BigDecimal.valueOf(7L))`, not
+        // `Optional.of(7L)`). Rust closed this same site at #1511.
+        if (field is not null)
         {
-            value = "java.util.Optional.of(" + value + ")";
+            value = ReconcileAgainstDeclared(InferReconcilableValueType(translator, t.Value), field.Type, value);
         }
 
         sb.Append(Indent).Append(Indent).Append("this.").Append(JavaNaming.Member(t.Field)).Append(" = ").Append(value).Append(";\n");
@@ -647,7 +658,8 @@ public sealed partial class JavaEmitter
             // Widen/lift a payload argument toward its event member's declared type — an Int-inferred
             // argument against a Decimal-declared field would otherwise emit an uncoerced value that javac
             // rejects (#1511/#1866), and a bare value against an Optional-declared field needs
-            // Optional.of(...) (#1865), mirroring WriteTransition's identical gate for state transitions.
+            // Optional.of(...) (#1865) — the same helper WriteTransition now routes through for a
+            // command's state transitions (#1887).
             rendered = ReconcileAgainstDeclared(InferReconcilableValueType(translator, value), m.Type, rendered);
 
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a

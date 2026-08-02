@@ -186,7 +186,17 @@ public sealed partial class PythonEmitter
                 WriteStateMachineGuard(sb, entityName, conds, tr.Field, ((IdentifierExpr)tr.Value).Name);
             }
 
-            var value = translator.Translate(tr.Value, PythonExpressionTranslator.NameMode.Property, expectedEnum);
+            // A transition assigns STRAIGHT INTO the target member's declared slot, so its value is
+            // reconciled against that member's declared type (#1887) through the same
+            // TranslateReconciled every sibling call site in this family already uses — the factory's
+            // explicit `field -> expr` initialization (#1732), the `result` expression and the
+            // emit/publish payload (#1875), the member default initializer (#1880) and the
+            // derived-member body (#1888). An `Int`-typed value on a `Decimal`-declared member
+            // previously emitted a bare `self.amount = 5` into a `Decimal`-annotated field: a real
+            // `mypy --strict` assignment error. Rust closed this same site at #1511.
+            var value = ft is not null
+                ? translator.TranslateReconciled(tr.Value, PythonExpressionTranslator.NameMode.Property, expectedEnum, ft)
+                : translator.Translate(tr.Value, PythonExpressionTranslator.NameMode.Property, expectedEnum);
             sb.Append(Indent).Append(Indent).Append("self.")
               .Append(PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(tr.Field)))
               .Append(" = ").Append(value).Append('\n');
