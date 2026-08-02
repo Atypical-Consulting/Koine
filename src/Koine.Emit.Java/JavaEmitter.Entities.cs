@@ -397,13 +397,28 @@ public sealed partial class JavaEmitter
             ? translator.Translate(result.Value, JavaExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
 
+        // The type resultExpr actually renders AS — starts as the value's own inferred type (what the
+        // #1838 hoisted local below is declared with) and is corrected when reconciliation widens the
+        // rendering. Declaring the hoisted local from a STALE pre-widen type while initializing it from
+        // the WIDENED expression is a real javac "incompatible types" error (#1866 code review: an
+        // Int-typed `result` shared with a Decimal-widened payload hoisted to `long __result =
+        // BigDecimal.valueOf(...)`).
+        TypeRef? resultRenderedType = resultClause is { } r0 ? translator.InferType(r0.Value) : null;
+
         // Widen the result expression toward the command's declared return type (#1511) — an Int-inferred
         // `result` against a `: Decimal` return would otherwise emit an uncoerced `return this.tax;` that
         // javac rejects. Reuses the same ReconcileAgainstDeclared decision the factory-ctor-arg (#1519) and
         // event-payload (below, #1866) call sites already apply.
         if (resultClause is { } widenResult && cmd.ReturnType is { } returnDecl)
         {
-            resultExpr = ReconcileAgainstDeclared(InferReconcilableValueType(translator, widenResult.Value), returnDecl, resultExpr!, allowOptionalWrap: false);
+            TypeRef? valueType = InferReconcilableValueType(translator, widenResult.Value);
+            resultExpr = ReconcileAgainstDeclared(valueType, returnDecl, resultExpr!, allowOptionalWrap: false);
+
+            BranchReconciliation needs = BranchReconciliation.Classify(valueType, returnDecl);
+            if (needs.NeedsWiden || needs.NeedsOptionalWiden)
+            {
+                resultRenderedType = new TypeRef("Decimal", IsOptional: needs.NeedsOptionalWiden);
+            }
         }
 
         //    The statements are BUILT here and WRITTEN below: the binding has to precede the first
@@ -445,8 +460,7 @@ public sealed partial class JavaEmitter
         //    predates the hoist — and binding the value's own type keeps the hoist from widening it.
         if (hoistResult)
         {
-            TypeRef? bound = resultClause is { } hoisted ? translator.InferType(hoisted.Value) : null;
-            sb.Append(Indent).Append(Indent).Append(bound is not null ? typeMapper.Map(bound) : "var")
+            sb.Append(Indent).Append(Indent).Append(resultRenderedType is not null ? typeMapper.Map(resultRenderedType) : "var")
               .Append(' ').Append(ResultHoist.LocalName).Append(" = ").Append(resultExpr).Append(";\n");
         }
 

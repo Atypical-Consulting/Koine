@@ -279,6 +279,23 @@ public sealed partial class KotlinEmitter
                 : translator.Translate(result.Value, KotlinExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
 
+        // The type resultExpr actually renders AS — starts as the value's own inferred type (what the
+        // #1838 hoisted local below is annotated with) and is corrected when reconciliation widens the
+        // rendering. Annotating the hoisted local with a STALE pre-widen type while initializing it from
+        // the WIDENED expression is a real kotlinc "initializer type mismatch" error (#1866 code review:
+        // an Int-typed `result` shared with a Decimal-widened payload hoisted to `val __result: Long =
+        // BigDecimal.valueOf(...)`).
+        TypeRef? resultRenderedType = resultClause is { } r0 ? translator.InferType(r0.Value) : null;
+        if (resultClause is { } widenResult && cmd.ReturnType is { } widenReturnDecl)
+        {
+            TypeRef? valueType = translator.InferCtorArgValueType(widenResult.Value);
+            BranchReconciliation needs = BranchReconciliation.Classify(valueType, widenReturnDecl);
+            if (needs.NeedsWiden || needs.NeedsOptionalWiden)
+            {
+                resultRenderedType = new TypeRef("Decimal", IsOptional: needs.NeedsOptionalWiden);
+            }
+        }
+
         // The statements are BUILT here and WRITTEN below: the binding has to precede the first
         // `add(...)`, yet whether it is needed at all is only known once every payload has been
         // rendered and compared. Integration events (R19) join the SAME hoist — `emit` and `publish`
@@ -319,8 +336,7 @@ public sealed partial class KotlinEmitter
         // inference rather than to a type the expression may not have.
         if (hoistResult)
         {
-            TypeRef? bound = resultClause is { } hoisted ? translator.InferType(hoisted.Value) : null;
-            var annotation = bound is not null ? ": " + typeMapper.Map(bound) : string.Empty;
+            var annotation = resultRenderedType is not null ? ": " + typeMapper.Map(resultRenderedType) : string.Empty;
             sb.Append(Indent).Append(Indent).Append("val ").Append(ResultHoist.LocalName).Append(annotation)
               .Append(" = ").Append(resultExpr).Append('\n');
         }

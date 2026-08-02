@@ -1564,4 +1564,43 @@ public class JavaConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1866 code review: a widened <c>result</c> expression that is ALSO hoisted into the
+    /// <c>#1838</c> <c>__result</c> local (because it's shared verbatim with an <c>emit</c> payload)
+    /// must declare that local with the WIDENED type, not the value's raw pre-widen inferred type. The
+    /// initial fix widened <c>resultExpr</c>'s RENDERING but left the hoist-binding type computation
+    /// reading the unwidened <c>InferType(hoisted.Value)</c> — producing <c>long __result =
+    /// java.math.BigDecimal.valueOf(this.tax);</c>, a real <c>javac</c> "incompatible types" error on
+    /// the declaration, the payload argument, AND the return statement (three errors from one bug).
+    /// Caught by code review before ready; this pins the fix.
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_into_a_widened_payload_declares_the_local_with_the_widened_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  event Charged { amount: Decimal }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeC: Decimal {\n" +
+            "      emit Charged(amount: tax)\n" +
+            "      result tax\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("java.math.BigDecimal __result = java.math.BigDecimal.valueOf(this.tax);");
+        invoice.ShouldNotContain("long __result");
+        invoice.ShouldContain("new Charged(__result)");
+        invoice.ShouldContain("return __result;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

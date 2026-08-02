@@ -165,8 +165,13 @@ internal sealed class KotlinExpressionTranslator
     /// elvis-result-type computation locally, scoped to this one caller, without touching the shared
     /// resolver (mirrors Java's <c>InferReconcilableValueType</c>). Serves all three <see
     /// cref="TranslateReconciled"/> callers, not just the factory ctor-arg one its name still reflects.
+    /// <c>internal</c> (not <c>private</c>) so <c>KotlinEmitter.Entities.cs</c>'s <c>WriteBehavior</c>
+    /// can classify a hoisted <c>result</c> local's TYPE with this exact same coalesce-aware inference
+    /// (#1866 code review) — using the naive <see cref="InferType"/> there instead would disagree with
+    /// what <see cref="TranslateReconciled"/> actually rendered for a coalesce value, and could declare
+    /// the hoisted local from a type its own initializer doesn't have.
     /// </summary>
-    private TypeRef? InferCtorArgValueType(Expr value)
+    internal TypeRef? InferCtorArgValueType(Expr value)
     {
         if (value is not CoalesceExpr co)
         {
