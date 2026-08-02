@@ -2728,6 +2728,146 @@ public class PhpConformanceTests
         AssertPhpIsWellTyped(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1888 — the SIBLING HALF of the <c>if</c> #1880 fixed. <c>MemberAnalysis.IsDerived</c> splits
+    /// <c>total: Decimal = amount + surcharge</c> (references siblings → a getter method) from
+    /// <c>total: Decimal = 5</c> (a constant → a promoted-property default); #1880 reconciled only the
+    /// stored half, leaving the getter's BODY unreconciled against its own declared return type. PHP
+    /// emitted <c>public function total(): \Koine\Runtime\Decimal { return ($this->amount +
+    /// $this->surcharge); }</c> — an <c>int</c> body under a <c>Decimal</c> return type, a real
+    /// <c>phpstan analyse --level max</c> <c>return.type</c> error. Routed through the very same
+    /// <c>TranslateReconciled</c> the stored half uses, so the two halves cannot drift apart. Rust closed
+    /// this site at #961 (and #1329 for the optional variant).
+    /// </summary>
+    [Fact]
+    public void Derived_member_body_widens_an_int_to_decimal_against_its_declared_type()
+    {
+        const string src =
+            """
+            context Billing {
+              value Money {
+                amount: Int
+                surcharge: Int
+                total: Decimal = amount + surcharge
+              }
+
+              entity Invoice identified by InvoiceId {
+                amount: Int
+                surcharge: Int
+                total: Decimal = amount + surcharge
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain(@"return (new \Koine\Runtime\Decimal(($this->amount + $this->surcharge)));");
+        money.ShouldNotContain("return ($this->amount + $this->surcharge);");
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain(@"return (new \Koine\Runtime\Decimal(($this->amount + $this->surcharge)));");
+        invoice.ShouldNotContain("return ($this->amount + $this->surcharge);");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1888 — the optional-declared variant (Rust's #1329 shape). PHP's optional is a plain
+    /// <c>?T</c> nullable, so only the NUMERIC dimension renders: the body still widens to a runtime
+    /// <c>Decimal</c>, and a non-optional value flows into the nullable return type unchanged (no
+    /// <c>NeedsSomeWrap</c> lift, which is why the <c>String? = tag</c> member stays byte-identical here
+    /// while Java's lifts).
+    /// <para><b>Why this gates on the absence of <c>return.type</c> rather than on a fully clean
+    /// <c>phpstan --level max</c>:</b> an optional-DECLARED derived member whose body can never be null
+    /// makes phpstan report <c>Method …::total() never returns null so it can be removed from the return
+    /// type</c> (<c>return.unusedType</c>) against the emitted <c>?T</c> signature. That is a SEPARATE,
+    /// PRE-EXISTING defect, not this fix's: it reproduces byte-identically on <c>label(): ?string</c>,
+    /// whose body this change does not touch at all, and it is present on the pre-fix emission too
+    /// (verified on #1888's branch — pre-fix phpstan reports <c>return.unusedType</c> ×2 plus the
+    /// <c>return.type</c> error this fix removes; post-fix only the <c>return.unusedType</c> pair
+    /// remains). Tracked separately at #1895. So this test gates precisely on what #1888 owns — the
+    /// <c>return.type</c> mismatch is gone — and stays a real toolchain check rather than being
+    /// downgraded to a shape-only assertion.</para>
+    /// </summary>
+    [Fact]
+    public void Optional_declared_derived_member_body_widens_without_a_lift()
+    {
+        const string src =
+            """
+            context Billing {
+              value Money {
+                amount: Int
+                surcharge: Int
+                tag: String
+                total: Decimal? = amount + surcharge
+                label: String? = tag
+              }
+
+              entity Invoice identified by InvoiceId {
+                amount: Int
+                surcharge: Int
+                total: Decimal? = amount + surcharge
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain(@"public function total(): ?\Koine\Runtime\Decimal");
+        money.ShouldContain(@"return (new \Koine\Runtime\Decimal(($this->amount + $this->surcharge)));");
+        money.ShouldContain("return $this->tag;");
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain(@"return (new \Koine\Runtime\Decimal(($this->amount + $this->surcharge)));");
+
+        TestSupport.PhpCheck syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        // The #1888 defect itself — `should return Decimal|null but returns int` — must be gone. The
+        // residual `return.unusedType` noise is #1895's, as the summary above explains.
+        TestSupport.PhpCheck types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Errors.ShouldNotContain(
+            e => e.Contains("return.type", StringComparison.Ordinal),
+            "phpstan should no longer report a return-type mismatch for a derived member's body:\n" + string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1888's zero-change guard — a matching-type (<c>Decimal</c>) derived body and non-numeric
+    /// (<c>String</c>/<c>Int</c>) ones must render byte-identically to before the reconciliation was wired
+    /// in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_derived_member_bodies_render_unchanged()
+    {
+        const string src =
+            """
+            context Billing {
+              value Money {
+                price: Decimal
+                qty: Int
+                tag: String
+                exact: Decimal = price
+                label: String = tag
+                count: Int = qty
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("return $this->price;");
+        money.ShouldContain("return $this->tag;");
+        money.ShouldContain("return $this->qty;");
+        money.ShouldNotContain(@"return (new \Koine\Runtime\Decimal(");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()

@@ -41,7 +41,12 @@ public sealed partial class TypeScriptEmitter
 
         WriteConstructor(sb, name, ctorMembers, vo.Invariants, translator, typeMapper, context);
 
-        // Derived members as getters.
+        // Derived members as getters. The body is reconciled against the member's OWN declared type
+        // (#1888) via the same TranslateReconciled the sibling call sites in this family already use —
+        // including the DEFAULT-initializer half of the very `MemberAnalysis.IsDerived` split that routes
+        // a member here (#1880). The getter's return type IS the declared type, so an `Int`-typed body on
+        // a `Decimal` member emitted a bare `number` under a `Decimal` return type: a `tsc --strict`
+        // TS2322. Rust closed this site at #961 (and #1329 for the optional-declared variant).
         foreach (Member m in derived)
         {
             sb.Append('\n');
@@ -55,7 +60,7 @@ public sealed partial class TypeScriptEmitter
             else
             {
                 sb.Append(Indent).Append(Indent).Append("return ")
-                  .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, context))).Append(";\n");
+                  .Append(translator.TranslateReconciled(m.Initializer!, EnumExpected(m, emit.Index, context), m.Type)).Append(";\n");
             }
 
             sb.Append(Indent).Append("}\n");
@@ -444,7 +449,9 @@ public sealed partial class TypeScriptEmitter
             }
         }
 
-        // Derived members.
+        // Derived members. Reconciled against the member's OWN declared type (#1888) — the entity half of
+        // the same fix applied to a value object's derived getter above, and the sibling half of the
+        // `MemberAnalysis.IsDerived` split whose stored-default arm #1880 closed.
         foreach (Member m in derived)
         {
             sb.Append('\n');
@@ -457,7 +464,7 @@ public sealed partial class TypeScriptEmitter
             }
             else
             {
-                sb.Append(Indent).Append(Indent).Append("return ").Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, context))).Append(";\n");
+                sb.Append(Indent).Append(Indent).Append("return ").Append(translator.TranslateReconciled(m.Initializer!, EnumExpected(m, emit.Index, context), m.Type)).Append(";\n");
             }
 
             sb.Append(Indent).Append("}\n");

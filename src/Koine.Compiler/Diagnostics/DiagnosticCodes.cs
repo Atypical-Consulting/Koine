@@ -178,6 +178,7 @@ public static class DiagnosticCodes
     public const string ReservedVersionMember = "KOI1105";
     public const string FinderNameCollision = "KOI1106";
     public const string ReservedFinderParameter = "KOI1107";
+    public const string IdentityNotHashCompatible = "KOI1108";
 
     // ---- Application services, read models, CQRS (KOI1200–1299) -----------
     public const string DuplicateUseCase = "KOI1201";
@@ -391,6 +392,7 @@ public static class DiagnosticCodes
             [ReservedVersionMember] = D(ReservedVersionMember, "A versioned aggregate's root declares a member that collides with the generated 'Version' token.", DiagnosticCategory.Identity, DiagnosticSeverity.Error),
             [FinderNameCollision] = D(FinderNameCollision, "A repository finder's name collides with a built-in operation method (getById/add/update/remove).", DiagnosticCategory.Identity, DiagnosticSeverity.Error),
             [ReservedFinderParameter] = D(ReservedFinderParameter, "A repository finder parameter uses the reserved name 'ct' (the generated CancellationToken).", DiagnosticCategory.Identity, DiagnosticSeverity.Error),
+            [IdentityNotHashCompatible] = D(IdentityNotHashCompatible, "An entity's declared identity value object has a field that is not usable as a map/set key (a List/Set/Map, or a nested value object that itself is not hash-compatible).", DiagnosticCategory.Identity, DiagnosticSeverity.Error),
 
             // ---- Application services, read models, CQRS ---------------------
             [DuplicateUseCase] = D(DuplicateUseCase, "A service declares the same use-case name more than once.", DiagnosticCategory.Cqrs, DiagnosticSeverity.Error),

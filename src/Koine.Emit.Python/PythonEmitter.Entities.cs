@@ -147,7 +147,10 @@ public sealed partial class PythonEmitter
             }
         }
 
-        // Computed (derived) members as read-only @property getters.
+        // Computed (derived) members as read-only @property getters. Reconciled against the member's OWN
+        // declared type (#1888) — the entity half of the same fix applied to a value object's derived
+        // property in PythonEmitter.ValueObjects.cs, and the sibling half of the
+        // `MemberAnalysis.IsDerived` split whose stored-default arm #1880 closed.
         foreach (Member m in derived)
         {
             sb.Append('\n');
@@ -156,7 +159,7 @@ public sealed partial class PythonEmitter
               .Append("(self) -> ").Append(typeMapper.Map(m.Type, context)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');
+              .Append(translator.TranslateReconciled(m.Initializer!, PythonExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context), m.Type)).Append('\n');
         }
 
         // Commands: mutating instance methods (guards -> transitions -> re-check -> emit -> return).

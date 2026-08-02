@@ -273,7 +273,13 @@ public sealed partial class KotlinEmitter
         StringBuilder sb, KotlinEmitContext emit, Member m, KotlinTypeMapper typeMapper, KotlinExpressionTranslator translator)
     {
         WriteKdoc(sb, m.Doc, Indent);
-        var body = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context));
+        // Reconciled against the member's OWN declared type (#1888) via the same TranslateReconciled the
+        // sibling call sites in this family already use — including the DEFAULT-initializer half of the
+        // very `MemberAnalysis.IsDerived` split that routes a member here (#1880). The property carries
+        // the declared Kotlin type, so an `Int`-typed body on a `Decimal` member emitted
+        // `val total: java.math.BigDecimal get() = this.amount + this.surcharge`, a hard `kotlinc` type
+        // mismatch. Rust closed this site at #961 (and #1329 for the optional-declared variant).
+        var body = translator.TranslateReconciled(m.Initializer!, KotlinExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context), m.Type);
         sb.Append(Indent).Append("val ").Append(KotlinNaming.ToMemberName(m.Name)).Append(": ")
           .Append(typeMapper.Map(m.Type)).Append(" get() = ").Append(body).Append('\n');
     }

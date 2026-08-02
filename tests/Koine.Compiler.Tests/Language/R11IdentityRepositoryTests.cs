@@ -101,6 +101,169 @@ public class R11IdentityRepositoryTests
         Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.NaturalIdBackingType);
     }
 
+    // ---- A declared identity value object must be hash-compatible (#1873, following #1848) ----
+
+    [Fact]
+    public void Declared_identity_with_a_collection_field_is_reported()
+    {
+        const string src = """
+            context Ordering {
+              value Tag { text: String }
+              value OrderId { tags: List<Tag> }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.IdentityNotHashCompatible);
+    }
+
+    [Fact]
+    public void Declared_identity_with_a_collection_nested_two_levels_deep_is_reported()
+    {
+        // The collection is not a direct field of the identity itself — it is reached only by
+        // recursing through an intermediate, otherwise-clean nested value object.
+        const string src = """
+            context Ordering {
+              value Tag { text: String }
+              value ProductCode { tags: List<Tag> }
+              value OrderId { code: ProductCode }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldContain(d => d.Code == DiagnosticCodes.IdentityNotHashCompatible);
+    }
+
+    [Fact]
+    public void Declared_identity_backed_only_by_primitives_is_not_reported()
+    {
+        const string src = """
+            context Ordering {
+              value OrderId { code: String  revision: Int }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Declared_identity_with_a_transitively_hashable_nested_value_object_is_not_reported()
+    {
+        const string src = """
+            context Ordering {
+              value ProductCode { code: String }
+              value OrderId { code: ProductCode }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Declared_identity_with_an_enum_field_is_not_reported()
+    {
+        const string src = """
+            context Ordering {
+              enum Region { North South }
+              value OrderId { code: String  region: Region }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Declared_identity_shaped_as_a_quantity_is_not_reported()
+    {
+        // A quantity (numeric amount + enum unit) is exactly the shape the issue calls out as an
+        // edge case that must keep passing.
+        const string src = """
+            context Ordering {
+              enum WeightUnit { Kg Lb }
+              quantity OrderId { amount: Decimal  unit: WeightUnit }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Synthesized_identity_is_never_reported()
+    {
+        // No `value OrderId { … }` declaration at all — the identity is synthesized (always a
+        // primitive Guid wrapper), so the check must not even look at it.
+        const string src = """
+            context Ordering {
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldNotContain(d => d.Code == DiagnosticCodes.IdentityNotHashCompatible);
+    }
+
+    [Fact]
+    public async Task Mutually_recursive_declared_identity_graph_does_not_hang()
+    {
+        // A self-referential/mutually-recursive value-object graph must not send the recursive
+        // hash-compatibility walk into infinite recursion — it must terminate (bounded by a
+        // path-scoped visited set), whatever it concludes about hashability.
+        const string src = """
+            context Ordering {
+              value A { b: B }
+              value B { a: A }
+              value OrderId { a: A }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  shipped: Bool = false
+                }
+              }
+            }
+            """;
+
+        var run = Task.Run(() => Diagnose(src));
+        var finished = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        finished.ShouldBeSameAs(run, "the hash-compatibility check must terminate on a recursive value-object graph");
+    }
+
     // ---- Identity value objects emit TryParse for ASP.NET Core query/route binding (#1649) --
 
     [Fact]

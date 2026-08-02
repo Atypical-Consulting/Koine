@@ -357,6 +357,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityFieldReferencesMessageTyp
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityOperandArithmetic = "KOI0220" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.EntityReferencesForeignAggregate = "KOI1602" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.FactoryNeedsGeneratableIdentity = "KOI0808" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.IdentityNotHashCompatible = "KOI1108" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.InvalidRouteOverride = "KOI1208" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.MultipleVerbAnnotations = "KOI1209" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.NumericNarrowingConversion = "KOI0217" -> string!

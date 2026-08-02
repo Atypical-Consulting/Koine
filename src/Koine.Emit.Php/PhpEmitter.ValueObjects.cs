@@ -86,7 +86,13 @@ public sealed partial class PhpEmitter
         // Constructor with promoted readonly properties.
         WriteConstructor(sb, name, fields, vo.Invariants, translator, typeMapper);
 
-        // Derived (computed) members as public getter methods.
+        // Derived (computed) members as public getter methods. The body is reconciled against the
+        // member's OWN declared type (#1888) via the same TranslateReconciled the sibling call sites in
+        // this family already use — including the DEFAULT-initializer half of the very
+        // `MemberAnalysis.IsDerived` split that routes a member here (#1880). The getter's return type IS
+        // the declared type, so an `Int`-typed body on a `Decimal` member emitted a bare `int` under a
+        // `\Koine\Runtime\Decimal` return type: a real `phpstan analyse --level max` return.type error.
+        // Rust closed this site at #961 (and #1329 for the optional-declared variant).
         foreach (Member m in derived)
         {
             sb.Append('\n');
@@ -96,7 +102,7 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!)).Append(";\n");
+              .Append(translator.TranslateReconciled(m.Initializer!, PhpExpressionTranslator.NameMode.Property, expectedEnum: null, m.Type)).Append(";\n");
             sb.Append(Indent).Append("}\n");
         }
 

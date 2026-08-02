@@ -331,7 +331,11 @@ public sealed partial class JavaEmitter
         StringBuilder sb, JavaEmitContext emit, Member m, JavaTypeMapper typeMapper, JavaExpressionTranslator translator)
     {
         WriteJavadoc(sb, m.Doc, Indent);
+        // Reconciled against the member's OWN declared type (#1888) — the entity half of the same fix
+        // applied to a value object's derived accessor in JavaEmitter.ValueObjects.cs, and the sibling
+        // half of the `MemberAnalysis.IsDerived` split whose stored-default arm #1880 closed.
         var body = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context));
+        body = ReconcileAgainstDeclared(InferReconcilableValueType(translator, m.Initializer!), m.Type, body);
         sb.Append(Indent).Append("public ").Append(typeMapper.Map(m.Type)).Append(' ')
           .Append(JavaNaming.Member(m.Name)).Append("() {\n");
         sb.Append(Indent).Append(Indent).Append("return ").Append(body).Append(";\n");
@@ -800,8 +804,12 @@ public sealed partial class JavaEmitter
     /// the shared resolver.
     /// <para>Shared by every call site that reconciles a translated value against a declared type — factory
     /// ctor args (#1519), a command's <c>result</c> expression, an <c>emit</c>/<c>publish</c> payload
-    /// argument (#1866, the #1511 Rust fix ported here), and a member's own default initializer at both
-    /// the entity constructor and the value object's defaulting constructor (#1880).</para>
+    /// argument (#1866, the #1511 Rust fix ported here), and BOTH halves of a member's own initializer:
+    /// the stored-default half at the entity constructor and the value object's defaulting constructor
+    /// (#1880), and the derived half at the entity's and the value object's derived accessors (#1888).
+    /// Those last two are the two arms of one <c>MemberAnalysis.IsDerived</c> branch, so they route
+    /// through this one helper deliberately — reconciling them separately is exactly how they drifted
+    /// apart between #1880 and #1888.</para>
     /// </summary>
     private static TypeRef? InferReconcilableValueType(JavaExpressionTranslator translator, Expr value)
     {
@@ -832,16 +840,19 @@ public sealed partial class JavaEmitter
     /// #1865). <c>NeedsWiden</c> and <c>NeedsOptionalWiden</c> are mutually exclusive and
     /// <c>NeedsOptionalWiden</c> never composes with <c>NeedsSomeWrap</c> (see
     /// <see cref="BranchReconciliation"/>'s own remarks), so applying all three in sequence is safe.
-    /// <para>Applied at five call sites, all three dimensions enabled at every one: an explicit-init
+    /// <para>Applied at seven call sites, all three dimensions enabled at every one: an explicit-init
     /// factory ctor argument (#1479/#1519), a command's <c>result</c> expression, an
     /// <c>emit</c>/<c>publish</c> payload argument (#1866/#1865, the #1511/#1523 Rust fixes ported here),
-    /// and a member's own default initializer — rendered both in the entity constructor body and in a
-    /// value object's defaulting convenience constructor (#1880, the site Rust closed at
-    /// #1319/#1324/#1325). Both #1880 sites assign STRAIGHT INTO the declared slot (the entity's own
-    /// <c>Optional&lt;T&gt;</c> field, or the canonical record constructor's <c>Optional&lt;T&gt;</c>
-    /// component), so the type-agnostic <c>NeedsSomeWrap</c> lift #1865 made unconditional is exactly what
-    /// those slots require: <c>note: String? = "hi"</c> previously emitted a bare <c>String</c> into an
-    /// <c>Optional&lt;String&gt;</c> field, a hard <c>javac</c> error.</para>
+    /// and both halves of a member's own initializer — the STORED-DEFAULT half rendered in the entity
+    /// constructor body and in a value object's defaulting convenience constructor (#1880, the site Rust
+    /// closed at #1319/#1324/#1325), and the DERIVED half rendered as the entity's and the value object's
+    /// get-only accessors (#1888, the site Rust closed at #961/#1329). All four member sites target the
+    /// declared slot directly — the entity's own <c>Optional&lt;T&gt;</c> field, the canonical record
+    /// constructor's <c>Optional&lt;T&gt;</c> component, or the accessor's own <c>Optional&lt;T&gt;</c>
+    /// return type — so the type-agnostic <c>NeedsSomeWrap</c> lift #1865 made unconditional is exactly
+    /// what they require: <c>note: String? = "hi"</c> previously emitted a bare <c>String</c> into an
+    /// <c>Optional&lt;String&gt;</c> field, and <c>label: String? = tag</c> returned a bare <c>String</c>
+    /// from an <c>Optional&lt;String&gt;</c> accessor — both hard <c>javac</c> errors.</para>
     /// </summary>
     private static string ReconcileAgainstDeclared(TypeRef? valueType, TypeRef declared, string body)
     {
