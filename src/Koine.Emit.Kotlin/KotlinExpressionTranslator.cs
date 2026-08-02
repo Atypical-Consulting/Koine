@@ -117,9 +117,11 @@ internal sealed class KotlinExpressionTranslator
     /// <see cref="WriteReconciledBranch"/> (#1344), reusing the same shared
     /// <see cref="BranchReconciliation.Classify"/> decision (#1368) and the same target-local widen
     /// renderings (mirrors Java's <c>ReconcileAgainstDeclared</c>/Rust's <c>CoerceNumericBody</c>).
-    /// Applied at three call sites: a factory's explicit <c>field -&gt; expr</c> initialization (#1732), a
-    /// command's <c>result</c> expression, and an <c>emit</c>/<c>publish</c> payload argument (#1866) —
-    /// the two call sites the Rust emitter already closed at #1511. Only the NUMERIC dimensions
+    /// Applied at five call sites: a factory's explicit <c>field -&gt; expr</c> initialization (#1732), a
+    /// command's <c>result</c> expression, an <c>emit</c>/<c>publish</c> payload argument (#1866) — the
+    /// two call sites the Rust emitter already closed at #1511 — and a member's own default initializer,
+    /// rendered both as an entity's stored property and as a value object's primary-constructor parameter
+    /// (#1880, the site Rust closed at #1319/#1324/#1325). Only the NUMERIC dimensions
     /// (<c>NeedsWiden</c>/<c>NeedsOptionalWiden</c>) ever render here — <c>NeedsSomeWrap</c> (a bare value
     /// into an optional-declared target) is a Java-only concern; Kotlin nullability is subtyping, so a
     /// non-optional value already flows into a nullable-declared target unchanged, and this method never
@@ -163,8 +165,8 @@ internal sealed class KotlinExpressionTranslator
     /// the outer ctor-arg wrap against that same naive (unwidened) type would double-widen an already-
     /// widened value — a real <c>kotlinc</c> "type mismatch" error. This mirrors <c>WriteCoalesce</c>'s own
     /// elvis-result-type computation locally, scoped to this one caller, without touching the shared
-    /// resolver (mirrors Java's <c>InferReconcilableValueType</c>). Serves all three <see
-    /// cref="TranslateReconciled"/> callers, not just the factory ctor-arg one its name still reflects.
+    /// resolver (mirrors Java's <c>InferReconcilableValueType</c>). Serves every <see
+    /// cref="TranslateReconciled"/> caller, not just the factory ctor-arg one its name still reflects.
     /// <c>internal</c> (not <c>private</c>) so <c>KotlinEmitter.Entities.cs</c>'s <c>WriteBehavior</c>
     /// can classify a hoisted <c>result</c> local's TYPE with this exact same coalesce-aware inference
     /// (#1866 code review) — using the naive <see cref="InferType"/> there instead would disagree with

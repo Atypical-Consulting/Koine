@@ -1559,6 +1559,115 @@ public class TypeScriptConformanceTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// Issue #1880 — a member's OWN default initializer (<c>total: Decimal = 5</c>) never numerically
+    /// reconciled against its declared type, the seventh call site of the family #1732 (factory ctor
+    /// args), #1762/#1829 (coalesce), #1761 (ternary), #1866/#1875 (result/payload) closed one by one.
+    /// It renders twice — as the generated constructor parameter's own default AND as the factory's
+    /// ctor-arg fallback — and both emitted a bare <c>number</c> into a <c>Decimal</c> slot: a real
+    /// <c>tsc --strict</c> TS2322/TS2345. Rust closed the same site at #1319/#1324/#1325.
+    /// </summary>
+    [Fact]
+    public void Member_default_initializer_widens_an_int_to_decimal_against_its_declared_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal = 5\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal = 7\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        // (a) the constructor parameter's own default value.
+        invoice.ShouldContain("total: Decimal = Decimal.fromInt(5)");
+        // (b) the factory's ctor-arg fallback.
+        invoice.ShouldContain("return new Invoice(id, Decimal.fromInt(5));");
+        invoice.ShouldNotContain("total: Decimal = 5");
+        invoice.ShouldNotContain("new Invoice(id, 5)");
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.ts", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("amount: Decimal = Decimal.fromInt(7)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1880 — the optional-declared half of the default-initializer fix: an <c>Int</c> default on
+    /// a <c>Decimal?</c> member still needs the widen (TypeScript's optional is a plain union, so no
+    /// extra lift), mirroring #1325's optional-constant-default fix for Rust.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_member_default_initializer_widens_an_int_to_decimal()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal? = 5\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("total: Decimal | undefined = Decimal.fromInt(5)");
+        invoice.ShouldContain("return new Invoice(id, Decimal.fromInt(5));");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1880's zero-change guard — a matching-type (<c>Decimal</c>) default and a non-numeric
+    /// (<c>String</c>) default must render byte-identically to before the reconciliation was wired in.
+    /// Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_member_defaults_render_unchanged()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    exact: Decimal = 2.5\n" +
+            "    label: String = \"x\"\n" +
+            "    count: Int = 3\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("exact: Decimal = new Decimal('2.5')");
+        invoice.ShouldContain("label: string = 'x'");
+        invoice.ShouldContain("count: number = 3");
+        invoice.ShouldContain("return new Invoice(id, new Decimal('2.5'), 'x', 3);");
+        invoice.ShouldNotContain("Decimal.fromInt");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()

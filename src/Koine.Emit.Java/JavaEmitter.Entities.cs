@@ -223,6 +223,9 @@ public sealed partial class JavaEmitter
         foreach (Member m in defaulted)
         {
             var value = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context));
+            // Reconciled against the member's OWN declared type (#1880) — this assigns straight into the
+            // declared field, so the NeedsSomeWrap lift applies here too (see ReconcileAgainstDeclared).
+            value = ReconcileAgainstDeclared(InferReconcilableValueType(translator, m.Initializer!), m.Type, value);
             sb.Append(Indent).Append(Indent).Append("this.").Append(JavaNaming.Member(m.Name)).Append(" = ")
               .Append(value).Append(";\n");
         }
@@ -796,8 +799,9 @@ public sealed partial class JavaEmitter
     /// <c>VisitConditional</c>'s own numeric widening locally, scoped to this one caller, without touching
     /// the shared resolver.
     /// <para>Shared by every call site that reconciles a translated value against a declared type — factory
-    /// ctor args (#1519), a command's <c>result</c> expression, and an <c>emit</c>/<c>publish</c> payload
-    /// argument (#1866, the #1511 Rust fix ported here).</para>
+    /// ctor args (#1519), a command's <c>result</c> expression, an <c>emit</c>/<c>publish</c> payload
+    /// argument (#1866, the #1511 Rust fix ported here), and a member's own default initializer at both
+    /// the entity constructor and the value object's defaulting constructor (#1880).</para>
     /// </summary>
     private static TypeRef? InferReconcilableValueType(JavaExpressionTranslator translator, Expr value)
     {
@@ -828,9 +832,16 @@ public sealed partial class JavaEmitter
     /// #1865). <c>NeedsWiden</c> and <c>NeedsOptionalWiden</c> are mutually exclusive and
     /// <c>NeedsOptionalWiden</c> never composes with <c>NeedsSomeWrap</c> (see
     /// <see cref="BranchReconciliation"/>'s own remarks), so applying all three in sequence is safe.
-    /// <para>Applied at three call sites, all three dimensions enabled at every one: an explicit-init
-    /// factory ctor argument (#1479/#1519), a command's <c>result</c> expression, and an
-    /// <c>emit</c>/<c>publish</c> payload argument (#1866/#1865, the #1511/#1523 Rust fixes ported here).</para>
+    /// <para>Applied at five call sites, all three dimensions enabled at every one: an explicit-init
+    /// factory ctor argument (#1479/#1519), a command's <c>result</c> expression, an
+    /// <c>emit</c>/<c>publish</c> payload argument (#1866/#1865, the #1511/#1523 Rust fixes ported here),
+    /// and a member's own default initializer — rendered both in the entity constructor body and in a
+    /// value object's defaulting convenience constructor (#1880, the site Rust closed at
+    /// #1319/#1324/#1325). Both #1880 sites assign STRAIGHT INTO the declared slot (the entity's own
+    /// <c>Optional&lt;T&gt;</c> field, or the canonical record constructor's <c>Optional&lt;T&gt;</c>
+    /// component), so the type-agnostic <c>NeedsSomeWrap</c> lift #1865 made unconditional is exactly what
+    /// those slots require: <c>note: String? = "hi"</c> previously emitted a bare <c>String</c> into an
+    /// <c>Optional&lt;String&gt;</c> field, a hard <c>javac</c> error.</para>
     /// </summary>
     private static string ReconcileAgainstDeclared(TypeRef? valueType, TypeRef declared, string body)
     {

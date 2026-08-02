@@ -303,9 +303,17 @@ public sealed partial class JavaEmitter
             translator.PushLocal(m.Name, m.Type);
         }
 
+        // Each default is reconciled against the member's OWN declared type (#1880): this convenience
+        // constructor forwards straight into the canonical one, whose component carries that declared
+        // type. ToDictionary is EAGER, so both the translate and the inference run inside the PushLocal
+        // window above — required for NameMode.Parameter to read the constructor's own parameters.
         var defaultedArgs = defaulted.ToDictionary(
             m => m.Name,
-            m => translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context)));
+            m =>
+            {
+                var value = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context));
+                return ReconcileAgainstDeclared(InferReconcilableValueType(translator, m.Initializer!), m.Type, value);
+            });
 
         foreach (Member m in required)
         {

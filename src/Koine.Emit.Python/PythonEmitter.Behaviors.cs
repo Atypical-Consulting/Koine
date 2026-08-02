@@ -481,7 +481,9 @@ public sealed partial class PythonEmitter
             }
             else if (m.Initializer is not null)
             {
-                args.Add($"{field}={translator.Translate(m.Initializer, NameModeForDefault(), m.Type.Name)}");
+                // Reconciled against the member's declared type exactly like the explicit-init branch
+                // above (#1880) — the fallback fed a bare `int` into a `Decimal` constructor argument.
+                args.Add($"{field}={translator.TranslateReconciled(m.Initializer, NameModeForDefault(), m.Type.Name, m.Type)}");
             }
             else if (m.Type.IsOptional)
             {
