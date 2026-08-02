@@ -4746,4 +4746,34 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1801's generalization beyond the enum reproducer: <c>IsCopy</c> also classifies the
+    /// scalar primitives (<c>Int</c>/<c>Bool</c>/<c>Decimal</c>/<c>Instant</c>) as <c>Copy</c>, so a
+    /// quantifier over a <c>List&lt;Int&gt;</c> takes the same by-value binder — and, unlike the enum
+    /// case, must be pinned against a REAL <c>cargo check</c> here, not just a shape assertion (the only
+    /// other scalar-binder coverage is a shape-only pin in
+    /// <c>RustEmitterTests.Lambda_parameter_shadowing_an_outer_binding_restores_the_outer_binding_after_the_lambda_pop</c>).
+    /// </summary>
+    [Fact]
+    public void Collection_quantifier_lambda_binder_of_a_copy_scalar_element_binds_by_value()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amounts: List<Int>\n" +
+            "    invariant amounts.any(n => n > 0) \"needs a positive amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("amounts.iter().any(|&n| n > 0)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
