@@ -303,9 +303,17 @@ public sealed partial class JavaEmitter
             translator.PushLocal(m.Name, m.Type);
         }
 
+        // Each default is reconciled against the member's OWN declared type (#1880) through the same
+        // helper the entity constructor and the factory-ctor-arg/result/payload sites share — the
+        // convenience constructor forwards straight into the canonical one, whose parameter carries the
+        // component's declared type, so an unwidened `Int` default was a hard `javac` "incompatible
+        // types: long cannot be converted to BigDecimal".
         var defaultedArgs = defaulted.ToDictionary(
             m => m.Name,
-            m => translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context)));
+            m => ReconcileAgainstDeclared(
+                InferReconcilableValueType(translator, m.Initializer!),
+                m.Type,
+                translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context))));
 
         foreach (Member m in required)
         {

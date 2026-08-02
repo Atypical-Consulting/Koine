@@ -223,6 +223,14 @@ public sealed partial class JavaEmitter
         foreach (Member m in defaulted)
         {
             var value = translator.Translate(m.Initializer!, JavaExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context));
+            // The default is reconciled against the member's OWN declared type (#1880) through the same
+            // helper the factory-ctor-arg (#1519), result and payload (#1866) sites already share: an
+            // `Int` default on a `Decimal` field emitted a bare `5L` into a `BigDecimal` field, and an
+            // optional-declared member's default a bare value into an `Optional<T>` field — both hard
+            // `javac` "incompatible types" errors. allowOptionalWrap stays ON (the default): unlike the
+            // result/payload sites, this one assigns straight into the declared field, so the lift is
+            // exactly what the field's own type requires.
+            value = ReconcileAgainstDeclared(InferReconcilableValueType(translator, m.Initializer!), m.Type, value);
             sb.Append(Indent).Append(Indent).Append("this.").Append(JavaNaming.Member(m.Name)).Append(" = ")
               .Append(value).Append(";\n");
         }
