@@ -2404,6 +2404,162 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1829 (the reproducer): a <c>CoalesceExpr</c> whose optional <c>Int?</c> left operand is
+    /// numerically narrower than its non-optional <c>Decimal</c> right (fallback) operand must widen the
+    /// left operand INSIDE its <c>Option</c> (<c>.map(Decimal::from)</c>) ahead of the
+    /// <c>.unwrap_or_else(...)</c> combinator — a bare <c>Decimal::from(...)</c> wrap around the whole
+    /// <c>Option&lt;i64&gt;</c> receiver does not compile. Mirrors Kotlin's <c>WriteCoalesce</c> (#1615),
+    /// Java's <c>Optional.or</c>/<c>.orElse</c> widening (#1548), and TypeScript's/Python's/PHP's #1762 —
+    /// Rust's <c>CoalesceExpr</c> was the one target never given this reconciliation.
+    /// </summary>
+    [Fact]
+    public void Coalesce_left_optional_int_widens_to_decimal_sibling_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int?\n" +
+            "    amountDecimal: Decimal\n" +
+            "    total: Decimal = amount ?? amountDecimal\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the left operand must be widened INSIDE its
+        // Option via `.map(Decimal::from)`, ahead of the `.unwrap_or_else` combinator — not a bare
+        // `Decimal::from(...)` wrap around the whole `Option<i64>` receiver.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.amount.map(Decimal::from).unwrap_or_else(|| self.amount_decimal)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1829 edge case: the mirror direction of the reproducer above — the coalesce's RIGHT
+    /// (fallback) operand is the numerically narrower, non-optional <c>Int</c>, while the left is
+    /// <c>Decimal?</c>. The right operand's widen sits inside the <c>.unwrap_or_else(|| ...)</c> closure
+    /// body, reusing the same rendering <see cref="RustExpressionTranslator.WriteReconciledBranch"/> uses
+    /// for a ternary arm.
+    /// </summary>
+    [Fact]
+    public void Coalesce_right_int_widens_to_decimal_sibling_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    overridden: Decimal?\n" +
+            "    fallback: Int\n" +
+            "    total: Decimal = overridden ?? fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the right (fallback) operand must be widened
+        // inside the `.unwrap_or_else` closure body, and the left must NOT be touched (it is already
+        // `Decimal?`).
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.overridden.unwrap_or_else(|| Decimal::from(self.fallback))");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1829, Task 1 Step 5 — both operands are optional AND numerically mismatched
+    /// (<c>Int?</c> vs <c>Decimal?</c>): the left operand's <c>NeedsOptionalWiden</c> widen must compose
+    /// with the <c>.or_else(...)</c> combinator (#1333's own optionality choice), not
+    /// <c>.unwrap_or_else(...)</c> — a still-absent fallback must not be silently force-unwrapped.
+    /// </summary>
+    [Fact]
+    public void Coalesce_both_operands_optional_and_numerically_mismatched_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amount: Int?\n" +
+            "    amountDecimal: Decimal?\n" +
+            "    total: Decimal? = amount ?? amountDecimal\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.amount.map(Decimal::from).or_else(|| self.amount_decimal)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1829, Task 1 Step 5 — a nested <c>CoalesceExpr</c> as the left operand of an outer
+    /// coalesce (<c>(a ?? b) ?? c</c>), where the inner coalesce's own numeric reconciliation
+    /// (<c>Int?</c> vs <c>Decimal?</c>) widens it to render as <c>Decimal?</c> — the outer coalesce must
+    /// classify the inner coalesce by its RENDERED (post-reconciliation) type, not its raw
+    /// resolver-reported leftmost-leaf type (which would incorrectly report <c>Int?</c> and either skip
+    /// a needed widen or double-widen).
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_nested_coalesce_left_operand_numeric_mismatch_emits_compiling_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    a: Int?\n" +
+            "    b: Decimal?\n" +
+            "    c: Decimal\n" +
+            "    total: Decimal = (a ?? b) ?? c\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1829, Task 1 Step 4 — a same-typed coalesce (no numeric mismatch on either side) must
+    /// render exactly as before this fix: no spurious <c>.map(Decimal::from)</c>/<c>Decimal::from(...)</c>
+    /// widen appears when both operands already agree numerically.
+    /// </summary>
+    [Fact]
+    public void Coalesce_with_same_numeric_type_operands_emits_unchanged_rust()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    primary: Decimal?\n" +
+            "    fallback: Decimal\n" +
+            "    total: Decimal = primary ?? fallback\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // The exact expected rendering below already pins an unwidened coalesce — a spurious
+        // `.map(Decimal::from)`/`Decimal::from(...)` wrap on either operand would fail this match.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("self.primary.unwrap_or_else(|| self.fallback)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1332: an optional-declared <c>String?</c> derived member whose bare body ends in
     /// <c>.trim()</c> must own the result (<c>.to_string()</c>) before <c>WriteDerived</c>'s
     /// <c>Some(...)</c>-wrap is applied, or the emitted crate does not compile — the accessor's
