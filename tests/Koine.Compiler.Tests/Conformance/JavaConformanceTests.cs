@@ -1309,20 +1309,24 @@ public class JavaConformanceTests
     }
 
     /// <summary>
-    /// Issue #1838 code review: the hoisted local must be declared with the RESULT EXPRESSION's own type,
-    /// never the command's declared return type. <c>command maybeStamp: Instant?</c> emitting a
-    /// NON-optional <c>Stamped.at</c> is the shape that separates them — the expression is a bare
-    /// <c>Instant</c> while the method returns <c>Optional&lt;Instant&gt;</c> — and declaring the local
-    /// <c>Optional&lt;Instant&gt;</c> broke BOTH its own initializer and the payload constructor, two
-    /// <c>javac</c> errors the hoist itself introduced.
-    /// <para>Asserted textually rather than through <c>javac</c> because this fixture does NOT compile on
-    /// either side of the fix: the Java emitter has a separate, PRE-EXISTING gap — it never bridges a
-    /// bare value into an <c>Optional</c>-typed return or payload field (already true before any hoist
-    /// existed) — which is out of scope here and tracked on its own. What this test pins is that the
-    /// hoist adds no error of its own on top of it.</para>
+    /// Issue #1838 code review, upgraded by #1865: <c>command maybeStamp: Instant?</c> emitting a
+    /// NON-optional <c>Stamped.at</c> is a MISMATCHED-optionality shape — the payload target stays bare
+    /// <c>Instant</c> while the return target is <c>Optional&lt;Instant&gt;</c>. Before #1865 neither side
+    /// bridged the mismatch at all, so both renderings were the identical unwrapped <c>now()</c> call and
+    /// the <c>#1838</c> hoist fired (this test originally pinned that its declared type followed the
+    /// value's own bare type, not blindly the return type). #1865 lifts the RETURN side into
+    /// <c>Optional.of(...)</c> while correctly leaving the non-optional-declared PAYLOAD side unwrapped
+    /// (<c>ReconcileAgainstDeclared</c> reconciles each site against its OWN declared target) — the two
+    /// renderings now genuinely differ, so the hoist correctly declines to fire at all, and each site
+    /// renders and compiles independently. <c>Optional</c>-typed hoisting itself is covered by
+    /// <see cref="Result_hoisted_into_an_optional_lifted_payload_declares_the_local_with_the_optional_type"/>,
+    /// the matching-optionality analogue of <see cref="Result_hoisted_into_a_widened_payload_declares_the_local_with_the_widened_type"/>.
+    /// <para>Was asserted textually only, because this fixture did not compile on either side of the
+    /// original hoist fix (the Java emitter's separate, pre-existing Optional-bridging gap, #1865) — that
+    /// gap is now closed, so this upgrades to a real <c>javac</c> gate.</para>
     /// </summary>
     [Fact]
-    public void Result_hoist_declares_the_expressions_own_type_not_the_declared_return_type()
+    public void Result_hoist_declines_when_the_payload_and_return_targets_disagree_on_optionality()
     {
         const string src =
             "context Sales {\n" +
@@ -1341,9 +1345,51 @@ public class JavaConformanceTests
 
         var order = result.Files
             .Single(f => f.RelativePath.EndsWith("sales/Order.java", StringComparison.Ordinal)).Contents;
-        order.ShouldContain("java.time.Instant __result = java.time.Instant.now();");
-        order.ShouldNotContain("java.util.Optional<java.time.Instant> __result");
-        order.ShouldContain("new Stamped(__result)");
+        order.ShouldNotContain("__result");
+        order.ShouldContain("new Stamped(java.time.Instant.now())");
+        order.ShouldContain("return java.util.Optional.of(java.time.Instant.now());");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865, the optional-lift analogue of
+    /// <see cref="Result_hoisted_into_a_widened_payload_declares_the_local_with_the_widened_type"/>: when
+    /// the payload target and the return target agree on optionality (both <c>Optional&lt;Instant&gt;</c>
+    /// here, matching the issue's own repro model), the two reconciled renderings are identical and the
+    /// <c>#1838</c> hoist fires — the hoisted local must then be declared with the LIFTED
+    /// <c>Optional&lt;Instant&gt;</c> type, not the value's pre-lift bare <c>Instant</c>, or its own
+    /// initializer, the payload constructor, and the <c>return</c> all fail to compile.
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_into_an_optional_lifted_payload_declares_the_local_with_the_optional_type()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  event ClosedAt { at: Instant? }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command maybeStamp: Instant? {\n" +
+            "      emit ClosedAt(at: now)\n" +
+            "      result now\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("java.util.Optional<java.time.Instant> __result = java.util.Optional.of(java.time.Instant.now());");
+        order.ShouldNotContain("java.time.Instant __result = java.util.Optional");
+        order.ShouldContain("new ClosedAt(__result)");
+        order.ShouldContain("return __result;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
     /// <summary>
@@ -1595,6 +1641,236 @@ public class JavaConformanceTests
         var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
         invoice.ShouldContain("java.math.BigDecimal __result = java.math.BigDecimal.valueOf(this.tax);");
         invoice.ShouldNotContain("long __result");
+        invoice.ShouldContain("new Charged(__result)");
+        invoice.ShouldContain("return __result;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865: a command's <c>result</c> expression never lifted a bare value into
+    /// <c>java.util.Optional.of(...)</c> against the command's <c>Optional</c>-declared return type.
+    /// <see cref="ReconcileAgainstDeclared"/> already computes this dimension via
+    /// <c>BranchReconciliation.NeedsSomeWrap</c> for the numeric call sites (#1866), but the result/payload
+    /// call sites passed <c>allowOptionalWrap: false</c> to keep the numeric fix scoped — this closes that
+    /// gate, mirroring the already-correct <c>WriteTransition</c> gate for state transitions.
+    /// </summary>
+    [Fact]
+    public void Result_expression_lifts_a_bare_value_into_optional_of_against_an_optional_declared_return_type()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command maybeStamp: Instant? {\n" +
+            "      result now\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("return java.util.Optional.of(java.time.Instant.now());");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865: an <c>emit</c> payload argument never lifted a bare value into
+    /// <c>java.util.Optional.of(...)</c> against the event member's <c>Optional</c>-declared type — the
+    /// payload-argument dual of the <c>result</c> gap above, sharing <c>BuildEventExpression</c> with
+    /// <c>publish</c>.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_lifts_a_bare_value_into_optional_of_against_an_optional_declared_member()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  event ClosedAt { at: Instant? }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command close {\n" +
+            "      emit ClosedAt(at: now)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("new ClosedAt(java.util.Optional.of(java.time.Instant.now()))");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865: the <c>publish</c> half of the shared <c>BuildEventExpression</c> gets the same
+    /// optional lift as <c>emit</c> above — a published integration event's <c>Optional</c>-declared field
+    /// fed a bare argument emitted an unwrapped value too.
+    /// </summary>
+    [Fact]
+    public void Publish_payload_argument_lifts_a_bare_value_into_optional_of_against_an_optional_declared_member()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  publishes ClosedOut\n" +
+            "  integration event ClosedOut { at: Instant? }\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      command close {\n" +
+            "        publish ClosedOut(at: now)\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("new ClosedOut(java.util.Optional.of(java.time.Instant.now()))");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865 zero-change regression guards on the <c>result</c> path: an already-<c>Optional</c>-typed
+    /// value flows into an optional-declared return unwrapped (no <c>Optional&lt;Optional&lt;T&gt;&gt;</c>
+    /// double-wrap), and a non-optional-declared return renders byte-identical to before this fix.
+    /// </summary>
+    [Fact]
+    public void Result_optional_lift_zero_change_regression_guards()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command echoStamp(at: Instant?): Instant? {\n" +
+            "      result at\n" +
+            "    }\n" +
+            "    command stamp: Instant {\n" +
+            "      result now\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("return at;");
+        order.ShouldNotContain("Optional.of(at)");
+        order.ShouldContain("return java.time.Instant.now();");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865 zero-change regression guards on the payload path: an already-<c>Optional</c>-typed
+    /// argument flows into an optional-declared member unwrapped, and a non-optional-declared member
+    /// renders byte-identical to before this fix.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_optional_lift_zero_change_regression_guards()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  event ClosedAt { at: Instant? }\n" +
+            "  event Noted { note: String }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command relay(at: Instant?) {\n" +
+            "      emit ClosedAt(at: at)\n" +
+            "    }\n" +
+            "    command note(msg: String) {\n" +
+            "      emit Noted(note: msg)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("new ClosedAt(at)");
+        order.ShouldNotContain("Optional.of(at)");
+        order.ShouldContain("new Noted(msg)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865: a coalesce (<c>??</c>) whose right operand is ITSELF <c>Optional</c>-typed already
+    /// renders <c>Optional</c>-shaped via <c>.or(() -&gt; ...)</c> (#1520) — the <c>result</c> path's new
+    /// optional lift must NOT wrap that a second time into
+    /// <c>Optional&lt;Optional&lt;T&gt;&gt;</c>. <c>InferReconcilableValueType</c> already reads the
+    /// coalesce's own optionality off its right operand (mirrors <c>WriteCoalesce</c>'s own choice), so this
+    /// pins that the two stay in sync.
+    /// </summary>
+    [Fact]
+    public void Result_expression_over_an_optional_shaped_coalesce_does_not_double_wrap()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command combine(a: Instant?, b: Instant?): Instant? {\n" +
+            "      result a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("a.or(() -> b)");
+        order.ShouldNotContain("Optional.of(a.or");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865 code review: the numeric widen dimension (#1866) and the optional lift dimension (#1865)
+    /// compose — widen inside, wrap outside — at a hoisted call site too. A non-optional <c>Int</c> member
+    /// <c>result</c>-ed AND emitted against a <c>Decimal?</c> return/payload must hoist a SINGLE
+    /// <c>Optional&lt;BigDecimal&gt;</c>-typed <c>__result</c> local initialized with
+    /// <c>Optional.of(BigDecimal.valueOf(...))</c>, exercising the same
+    /// <c>needs.NeedsOptionalWiden || needs.NeedsSomeWrap</c> composition in the hoisted-local type fix as
+    /// the non-hoisted case, but through the <c>#1838</c> hoist path.
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_into_a_widened_and_optional_lifted_payload_declares_the_local_with_both()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  event Charged { amount: Decimal? }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeC: Decimal? {\n" +
+            "      emit Charged(amount: tax)\n" +
+            "      result tax\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("java.util.Optional<java.math.BigDecimal> __result = java.util.Optional.of(java.math.BigDecimal.valueOf(this.tax));");
         invoice.ShouldContain("new Charged(__result)");
         invoice.ShouldContain("return __result;");
 
