@@ -326,7 +326,9 @@ public sealed class KoineLanguageService
         // noise at a declaration or parameter position.
         if (index is not null && ctx.EnclosingTypeName is { } scopeType && IsExpressionOperand(trigger))
         {
-            return FieldCandidates(index, scopeType).Concat(SpecCandidates(index, scopeType)).ToList();
+            return FieldCandidates(index, ctx.EnclosingContextName, scopeType)
+                .Concat(SpecCandidates(index, scopeType))
+                .ToList();
         }
 
         return [];
@@ -380,7 +382,11 @@ public sealed class KoineLanguageService
         }
 
         // 3. Fallback — `Type.` where the receiver is itself a declared value/entity type name.
-        if (index.IsKnownType(receiver) && MembersOf(index, receiver) is { Count: > 0 } directMembers)
+        //    Scoped to `receiverContext` (#1897): step 1 above already resolves in the cursor's own
+        //    context, and these two steps ignoring it is how the SAME method stayed order-dependent
+        //    behind a green guard.
+        if (index.IsKnownType(receiverContext, receiver)
+            && MembersOf(index, receiverContext, receiver) is { Count: > 0 } directMembers)
         {
             return directMembers;
         }
@@ -388,8 +394,8 @@ public sealed class KoineLanguageService
         // 4. Fallback — `field.` where the receiver is a field of the enclosing fielded type:
         //    resolve the field's declared type and offer ITS members.
         if (ctx.EnclosingTypeName is { } scopeType
-            && index.TryGetMemberType(scopeType, receiver, out var fieldType)
-            && MembersOf(index, fieldType.Name) is { Count: > 0 } members)
+            && index.TryGetMemberType(receiverContext, scopeType, receiver, out var fieldType)
+            && MembersOf(index, receiverContext, fieldType.Name) is { Count: > 0 } members)
         {
             return members;
         }
@@ -460,7 +466,7 @@ public sealed class KoineLanguageService
             return [];
         }
 
-        return BinderMembersOf(semantic, typeName);
+        return BinderMembersOf(semantic, context, typeName);
     }
 
     /// <summary>
@@ -525,15 +531,20 @@ public sealed class KoineLanguageService
         semantic.Index.DeclaringContextsOf(typeName).FirstOrDefault();
 
     /// <summary>The member completions of the type the binder resolved the receiver to.</summary>
-    private static IReadOnlyList<CompletionItem> BinderMembersOf(SemanticModel semantic, string typeName) =>
-        MembersOf(semantic.Index, typeName);
+    private static IReadOnlyList<CompletionItem> BinderMembersOf(SemanticModel semantic, string? context, string typeName) =>
+        MembersOf(semantic.Index, context, typeName);
 
-    /// <summary>The member completions (name + type detail) of a value/entity type, or an empty list.</summary>
-    private static IReadOnlyList<CompletionItem> MembersOf(ModelIndex index, string typeName) =>
-        index.MemberNames(typeName)
+    /// <summary>
+    /// The member completions (name + type detail) of a value/entity type, or an empty list, resolved
+    /// in <paramref name="context"/> (R13.2, #1897). Every caller has a bounded context available —
+    /// the cursor's enclosing one — so this shared helper takes it rather than falling back to the
+    /// flat, last-declaration-wins view and listing another context's same-named type's fields.
+    /// </summary>
+    private static IReadOnlyList<CompletionItem> MembersOf(ModelIndex index, string? context, string typeName) =>
+        index.MemberNames(context, typeName)
             .Select(name =>
             {
-                var detail = index.TryGetMemberType(typeName, name, out var t) ? RenderType(t) : "field";
+                var detail = index.TryGetMemberType(context, typeName, name, out var t) ? RenderType(t) : "field";
                 return new CompletionItem(name, CompletionItemKind.Property, detail, null);
             })
             .ToList();
@@ -547,11 +558,16 @@ public sealed class KoineLanguageService
         or KoineLexer.NEQ or KoineLexer.LT or KoineLexer.LE or KoineLexer.GT or KoineLexer.GE
         or KoineLexer.AND or KoineLexer.OR or KoineLexer.MATCHES or KoineLexer.RARROW;
 
-    private static IReadOnlyList<CompletionItem> FieldCandidates(ModelIndex index, string typeName) =>
-        index.MemberNames(typeName)
+    /// <summary>
+    /// The field-name completions of a fielded type, resolved in <paramref name="context"/> (R13.2,
+    /// #1897) — same reasoning as <see cref="MembersOf"/>: the cursor's enclosing context is always
+    /// available at the one call site, so the flat view has no business answering here.
+    /// </summary>
+    private static IReadOnlyList<CompletionItem> FieldCandidates(ModelIndex index, string? context, string typeName) =>
+        index.MemberNames(context, typeName)
             .Select(name =>
             {
-                var detail = index.TryGetMemberType(typeName, name, out var t) ? RenderType(t) : "field";
+                var detail = index.TryGetMemberType(context, typeName, name, out var t) ? RenderType(t) : "field";
                 return new CompletionItem(name, CompletionItemKind.Field, detail, null);
             })
             .ToList();
@@ -588,7 +604,7 @@ public sealed class KoineLanguageService
         }
 
         var before = ctx.TokenBeforePreceding?.Text;
-        return before is not null && index.IsKnownType(before);
+        return before is not null && index.IsKnownType(ctx.EnclosingContextName, before);
     }
 
     private IReadOnlyList<CompletionItem> TypeCandidates(ModelIndex? index)

@@ -109,8 +109,13 @@ public sealed partial class OpenApiEmitter
             // A direct field (no declared type) maps to the source member of the same name; a derived
             // field carries its own declared type. When a direct field cannot be resolved (e.g. it
             // names an identity), fall back to an opaque string so the schema stays valid.
+            // Resolved against `sourceContext` (#1897): the flat overload here contradicted the two
+            // lines above — ResolveOwner had already worked out which context OWNS the source type,
+            // and QualifyForeignReference below already uses it, but the member lookup itself fell
+            // back to the last-declaration-wins view and could read members off a same-named type in
+            // an unrelated context.
             TypeRef type = field.Type
-                ?? (index.TryGetMemberType(rm.SourceType, field.Name, out TypeRef resolved)
+                ?? (index.TryGetMemberType(sourceContext, rm.SourceType, field.Name, out TypeRef resolved)
                     ? QualifyForeignReference(resolved, index, sourceContext, ownerContext)
                     : new TypeRef("String"));
             fields.Add((field.Name, type, field.Doc, null));

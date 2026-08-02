@@ -286,8 +286,10 @@ public sealed class TypeResolver
 
         protected override KoineType VisitMemberAccess(MemberAccessExpr n)
         {
-            // Qualified enum reference: `EnumType.Member` -> the enum type.
-            if (n.Target is IdentifierExpr typeId && Index.IsEnumType(typeId.Name))
+            // Qualified enum reference: `EnumType.Member` -> the enum type. Resolved in this resolver's
+            // own context (R13.2, #1897) — the flat IsEnumType let an `enum Phase` in ANOTHER context
+            // decide this branch for a context that declares `Phase` as a value object, by source order.
+            if (n.Target is IdentifierExpr typeId && Index.Classify(_owner.Context, typeId.Name) == TypeKind.Enum)
             {
                 return new NamedType(typeId.Name, TypeKind.Enum);
             }

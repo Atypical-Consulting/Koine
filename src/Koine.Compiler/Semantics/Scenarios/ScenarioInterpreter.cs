@@ -26,6 +26,7 @@ internal sealed class ScenarioInterpreter
     private readonly List<string> _notes = new();
 
     private EntityDecl _entity = null!;
+    private string? _entityContext;
     private HashSet<string> _memberNames = new(StringComparer.Ordinal);
 
     // Derived members are evaluated lazily from their initializer; this tracks the ones currently being
@@ -53,6 +54,13 @@ internal sealed class ScenarioInterpreter
         }
 
         _entity = entity;
+
+        // The context that DECLARES the entity under test — found by reference, so two contexts
+        // legally declaring a same-named entity (R13.2) can't be confused. Everything this run
+        // resolves is a field/parameter type of THAT entity, so this is the right R13.2 scope for
+        // every type-name lookup below (#1897 — these lookups used to be flat).
+        _entityContext = _index.DeclaringContextOf(entity) is { Length: > 0 } ctx ? ctx : null;
+
         _memberNames = entity.Members.Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
 
         CommandDecl? command = entity.Commands.FirstOrDefault(c => c.Name == s.Operation);
@@ -190,7 +198,8 @@ internal sealed class ScenarioInterpreter
             return value;
         }
 
-        if (value is ScenarioValue.Text text && _index.IsEnumType(type.Name))
+        if (value is ScenarioValue.Text text
+            && _index.Classify(type.Qualifier ?? _entityContext, type.Name) == TypeKind.Enum)
         {
             return new ScenarioValue.EnumMember(text.Value);
         }
@@ -219,8 +228,11 @@ internal sealed class ScenarioInterpreter
         return value;
     }
 
+    // Resolved in the entity-under-test's own context (#1897). This site was previously allowlisted as
+    // "no per-entity context value carried", which _entityContext above now falsifies — an allowlist
+    // reason that has stopped being true is worse than no entry, so it is fixed rather than re-parked.
     private IReadOnlyList<Member>? MembersOf(string typeName) =>
-        _index.TryGetDecl(typeName, out TypeDecl decl)
+        _index.TryGetDecl(_entityContext, typeName, out TypeDecl decl)
             ? decl switch
             {
                 ValueObjectDecl vo => vo.Members,

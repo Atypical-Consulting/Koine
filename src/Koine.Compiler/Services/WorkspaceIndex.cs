@@ -357,8 +357,13 @@ public sealed class WorkspaceIndex
             // up within the model that OWNS the target (the active document) — so a same-simple-name
             // type in a different context cannot drive the collision decision.
             case MemberSymbol member:
+                // Scoped to the member's OWN owning context (#1897): the comment above is what the
+                // flat overload could not actually deliver — within a single document declaring two
+                // contexts that both name a type `Money`, the last-declaration-wins lookup answered
+                // the collision question against whichever `Money` came last in the file.
                 return _byUri.TryGetValue(activeUri, out SemanticModel? memberOwner)
-                    && memberOwner.Index.TryGetMemberType(member.OwnerType, newName, out _);
+                    && memberOwner.Index.TryGetMemberType(
+                        OwningContextName(member), member.OwnerType, newName, out _);
 
             default:
                 return false; // parameters / locals: not gated

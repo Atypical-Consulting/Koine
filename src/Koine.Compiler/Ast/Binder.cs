@@ -188,7 +188,11 @@ internal sealed class Binder : KoineSyntaxVisitor
     /// </summary>
     private Symbol? ResolveMemberAccessSelector(MemberAccessExpr node)
     {
-        if (node.Target is IdentifierExpr id && _index.IsEnumType(id.Name))
+        // Resolved in the binder's OWN enclosing context (R13.2, #1897): with the flat IsEnumType, an
+        // `enum Phase` here and a `value Phase` in another context made `Phase.Active` bind — or not —
+        // by .koi source order. The same _enclosingContextName the TypeResolver below already uses.
+        if (node.Target is IdentifierExpr id
+            && _index.Classify(_enclosingContextName, id.Name) == TypeKind.Enum)
         {
             return _symbols.EnumMemberIn(id.Name, node.MemberName);
         }

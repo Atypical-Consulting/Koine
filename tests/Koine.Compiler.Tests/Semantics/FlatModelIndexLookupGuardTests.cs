@@ -17,23 +17,66 @@ namespace Koine.Compiler.Tests;
 /// </para>
 /// <para>
 /// <b>What this test catches:</b> a Roslyn syntax parse (not a line-based text scan) of every
-/// <c>.cs</c> file under <c>src/</c> finds every invocation of a method named <c>Classify</c> with
-/// exactly 1 argument, or <c>TryGetDecl</c> with exactly 2 arguments — the flat overloads'
-/// unambiguous arity (their context-aware siblings take one more argument). This works regardless of
-/// formatting, line-wrapping, or how the argument expression is written, because it inspects the
-/// parsed syntax tree, not the source text. Method-name + arity is enough to identify these two
-/// specific overloads without full semantic binding <i>in this codebase specifically</i> — verified by
-/// auditing every existing call site: no other type exposes a 1-arg <c>Classify</c> or a 2-arg
-/// <c>TryGetDecl</c> with an <c>out</c> parameter (<c>BranchReconciliation.Classify</c> is the one
-/// unrelated same-named method in the tree, and it always takes 2 args, so it can never collide with
-/// the 1-arg flat bucket).
+/// <c>.cs</c> file under <c>src/</c> finds every invocation of one of the SIX flat seams below, keyed
+/// by method name + argument count — the flat overloads' unambiguous arity (each context-aware sibling
+/// takes one more argument). This works regardless of formatting, line-wrapping, or how the argument
+/// expression is written, because it inspects the parsed syntax tree, not the source text.
+/// </para>
+/// <para>
+/// <b>The scanned seams, and why exactly these six (#1897).</b> The scan originally covered only
+/// <c>Classify</c>/<c>TryGetDecl</c>, which under-reported: #1870 found two LSP sites that routed
+/// through <c>IsEnumType(receiver)</c> <i>as well as</i> the flagged <c>TryGetDecl</c>, so fixing only
+/// the flagged half would have left both sites order-dependent behind a GREEN guard. #1897 therefore
+/// re-derived the seam set from the source rather than adding the two names by hand: every member of
+/// <c>ModelIndex</c> that reads the <c>_byName</c> dictionary, plus every thin wrapper over one of
+/// those. That enumeration is exhaustive and mechanical — <c>_byName</c> is read at exactly six places
+/// in <c>ModelIndex.cs</c> — and it yields:
+/// <list type="table">
+///   <item><term><c>Classify(string)</c> — 1 arg</term>
+///     <description>reads <c>_byName</c>; sibling <c>Classify(string?, string)</c>.</description></item>
+///   <item><term><c>TryGetDecl(string, out TypeDecl)</c> — 2 args</term>
+///     <description>reads <c>_byName</c>; sibling <c>TryGetDecl(string?, string, out TypeDecl)</c>.</description></item>
+///   <item><term><c>TryGetMemberType(string, string, out TypeRef)</c> — 3 args</term>
+///     <description>reads <c>_byName</c>; sibling <c>TryGetMemberType(string?, string, string, out TypeRef)</c>.</description></item>
+///   <item><term><c>MemberNames(string)</c> — 1 arg</term>
+///     <description>reads <c>_byName</c>; has NO context-aware sibling, so every call is flat by
+///     construction.</description></item>
+///   <item><term><c>IsEnumType(string)</c> — 1 arg</term>
+///     <description>thin wrapper: <c>Classify(name) == TypeKind.Enum</c>. No sibling — a context-aware
+///     caller must spell out <c>Classify(context, name) == TypeKind.Enum</c>.</description></item>
+///   <item><term><c>IsKnownType(string)</c> — 1 arg</term>
+///     <description>thin wrapper: <c>Classify(name) != TypeKind.Unknown</c>; sibling
+///     <c>IsKnownType(string?, string)</c>.</description></item>
+/// </list>
+/// The two remaining <c>_byName</c> readers are deliberately NOT scanned because they are provably
+/// order-independent rather than merely unaudited: <c>AllTypes()</c> iterates <c>_byName.Values</c>
+/// only as an additive second pass over a <c>seen</c> set (it can only ever ADD visibility, never
+/// shadow), and <c>CandidateTypeNames</c> unions <c>_byName.Keys</c> into a name list where a name
+/// shadowed in the dictionary is still present in the union. Neither can return a different answer
+/// under a different <c>.koi</c> declaration order. <c>ModelIndex</c>'s other last-write-wins map,
+/// <c>_enumMemberToType</c> (and its <c>EnumsDeclaring</c> reader), is a distinct seam tracked by
+/// #1886 and #1739, not part of the <c>_byName</c> family this guard polices.
+/// </para>
+/// <para>
+/// Method-name + arity is enough to identify these six specific overloads without full semantic
+/// binding <i>in this codebase specifically</i> — re-verified for #1897 by grepping every declaration
+/// of each name in <c>src/</c>, <c>tests/</c> and <c>tooling/</c>: <c>IsEnumType</c>,
+/// <c>TryGetMemberType</c> and the method <c>MemberNames</c> are declared ONLY on <c>ModelIndex</c>,
+/// and <c>IsKnownType</c>'s only other declaration is its own context-aware 2-arg sibling.
+/// (<c>EnumDecl.MemberNames</c> shares the name but is a PROPERTY, so it never produces invocation
+/// syntax — <c>decl.MemberNames.Contains(x)</c> parses with <c>Contains</c>, not <c>MemberNames</c>, as
+/// the invoked name.) <c>BranchReconciliation.Classify</c> is the one unrelated same-named method in
+/// the tree, and it always takes 2 args, so it can never collide with the 1-arg flat bucket.
 /// </para>
 /// <para>
 /// <b>What this test does NOT catch:</b> a caller that reaches the flat behavior another way — a new
-/// helper method on a THIRD type that happens to also be named <c>Classify</c>/<c>TryGetDecl</c> with
-/// the same arity as the flat overloads (would show up as a spurious new site here — a false positive
-/// needing an allowlist note, not a false negative); or a caller that stores <c>ModelIndex.Classify</c>
+/// helper method on a THIRD type that happens to also carry one of the six scanned names with the same
+/// arity as the flat overload (would show up as a spurious new site here — a false positive needing an
+/// allowlist note, not a false negative); or a caller that stores <c>ModelIndex.Classify</c>
 /// as a delegate/method-group and invokes it indirectly (no invocation syntax to see with that shape).
+/// A NEW flat member added to <c>ModelIndex</c> tomorrow is also invisible until its name is added
+/// here — the enumeration above is a snapshot of the type, re-derive it when <c>ModelIndex</c> grows a
+/// <c>_byName</c> reader (the principled fix, scanning by semantic binding, is #1863's Option C).
 /// It also does not fix anything — an allowlisted site with an available context it doesn't use stays a
 /// latent bug until someone fixes it. #1870 worked that backlog down to the point where no site is left
 /// holding a bounded context in a LOCAL of the same method and ignoring it; what remains are shared or
@@ -91,7 +134,11 @@ public class FlatModelIndexLookupGuardTests
 
             foreach (InvocationExpressionSyntax invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
-                if (invocation.Expression is not MemberAccessExpressionSyntax { Name.Identifier.Text: "Classify" or "TryGetDecl" } member)
+                if (invocation.Expression is not MemberAccessExpressionSyntax
+                    {
+                        Name.Identifier.Text: "Classify" or "TryGetDecl" or "IsEnumType" or "IsKnownType"
+                            or "TryGetMemberType" or "MemberNames"
+                    } member)
                 {
                     continue;
                 }
@@ -102,6 +149,10 @@ public class FlatModelIndexLookupGuardTests
                 {
                     "Classify" => argCount == 1,
                     "TryGetDecl" => argCount == 2,
+                    "IsEnumType" => argCount == 1,
+                    "IsKnownType" => argCount == 1,
+                    "TryGetMemberType" => argCount == 3,
+                    "MemberNames" => argCount == 1,
                     _ => false
                 };
 
@@ -129,7 +180,7 @@ public class FlatModelIndexLookupGuardTests
         // --- Deliberate final-fallback step of a local context-first ladder: TryGetDeclIn (or the
         //     context-aware overload) is tried FIRST in the same expression/method; the flat call only
         //     ever answers when that already failed, mirroring TryGetDecl(context, ...)'s own last step. ---
-        ("src/Koine.Compiler/Ast/Binder.cs", 295, "TryGetDecl", "final fallback of ResolveTypeName's own ladder (TryGetDeclIn tried at :290)"),
+        ("src/Koine.Compiler/Ast/Binder.cs", 299, "TryGetDecl", "final fallback of ResolveTypeName's own ladder (TryGetDeclIn tried at :290)"),
         ("src/Koine.Emit.Rust/RustExpressionTranslator.cs", 1464, "TryGetDecl", "final fallback of ResolveDecl's own ladder (TryGetDeclIn tried at :1459)"),
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 486, "TryGetDecl", "final fallback of ResolveDecl's own ladder"),
         ("src/Koine.Compiler/Semantics/SemanticValidator.cs", 956, "TryGetDecl", "final fallback after TryGetDeclIn(ctx.Name, target, ...) in ValidateSpecs"),
@@ -155,18 +206,17 @@ public class FlatModelIndexLookupGuardTests
 
         // --- No context parameter/field anywhere in the call chain: a real signature-threading
         //     refactor, not a one-line fix (same category as #1863's own SymbolTable non-goal). ---
-        ("src/Koine.Emit.OpenApi/OpenApiEmitter.Schemas.cs", 261, "Classify", "static SchemaForType/Array recursion carries no context parameter"),
+        ("src/Koine.Emit.OpenApi/OpenApiEmitter.Schemas.cs", 266, "Classify", "static SchemaForType/Array recursion carries no context parameter"),
         ("src/Koine.Compiler/Ast/KoineType.cs", 79, "Classify", "static From(TypeRef?, ModelIndex) has no context param; none of its ~8 call sites thread one in"),
         ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", 255, "Classify", "whole-document semantic-token coloring; no per-reference context concept"),
-        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 671, "TryGetDecl", "StrongHover: workspace-wide hover, no context in the hover path"),
-        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 674, "Classify", "StrongHover: workspace-wide hover, no context in the hover path"),
-        ("src/Koine.Compiler/Semantics/Scenarios/ScenarioInterpreter.cs", 223, "TryGetDecl", "MembersOf: dynamic scenario interpreter, no per-entity context value carried"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 676, "TryGetDecl", "StrongHover: workspace-wide hover, no context in the hover path"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 679, "Classify", "StrongHover: workspace-wide hover, no context in the hover path"),
         ("src/Koine.Execution/ScenarioValueBinder.cs", 471, "TryGetDecl", "DisplayCore: reflects over an arbitrary emitted runtime object by CLR type, genuinely dynamic"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 263, "TryGetDecl", "EnumMemberIn reproduces SemanticModel.GetSymbol's legacy flat contract byte-for-byte; no context"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 284, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 303, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 309, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 608, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
+        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 624, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable: only the Enum branch is context-sensitive (Primitive/IdValueObject are universal), and the WriteMutationEndpoint chain carries no context — but NOT fully clean: WriteQueryEndpoint(sb, ContextNode ctx, ...) reaches the same helper through BuildRouteTokenBindings with ctx.Name in scope, so one of the two callers could thread a context today (out of #1870's scope; the shared helper's other caller cannot)"),
 
         // --- Built-in-only query: inert by RANGE DISJOINTNESS, not by name reservation (verified for
@@ -203,10 +253,42 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1063, "Classify", "IsCollection: result only tested against List/Set/Map, kinds no ClassifyDecl branch can return"),
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1067, "Classify", "IsIterable: result only tested against List/Set, kinds no ClassifyDecl branch can return"),
 
+        // --- IsKnownType(string): provably EQUIVALENT to its own context-aware sibling, so these are
+        //     inert by construction rather than by a per-site argument (#1897).
+        //
+        //     `IsKnownType(ctx, n)` is `Classify(ctx, n) != Unknown`, and `Classify(ctx, n)` returns
+        //     `ClassifyDecl(decl)` when `TryGetDeclIn(ctx, n, ...)` hits, else falls through to the flat
+        //     `Classify(n)`. So the two answers can only diverge if `ClassifyDecl` can return `Unknown`
+        //     for a real declaration — and it cannot: its switch covers all EIGHT concrete `TypeDecl`
+        //     subtypes in the tree (ValueObjectDecl, EntityDecl, AggregateDecl, EnumDecl, EventDecl,
+        //     IntegrationEventDecl, ReadModelDecl, QueryDecl — Nodes.cs:257/289/326/356/378/388/626/654),
+        //     leaving its `_ => Unknown` arm unreachable. The converse divergence is impossible too:
+        //     anything `TryGetDeclIn` can reach was written to `_byName` by the same `IndexType` pass, so
+        //     the flat view is a superset. Pinned by
+        //     ModelIndexFlatSeamEquivalenceTests.IsKnownType_answers_identically_with_and_without_a_context.
+        //
+        //     These entries are therefore justified but NOT permanent: add a ninth TypeDecl subtype
+        //     without extending ClassifyDecl and the equivalence breaks — which is what that test exists
+        //     to catch. Sites that could cheaply pass a context were threaded anyway (KoineLanguageService
+        //     :383/:591 now call the 2-arg overload) rather than parked here. ---
+        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", 222, "IsKnownType", "Classify(text,…): whole-document token coloring, no per-reference context concept (same method as the :217/:255 entries) — and inert regardless, per the equivalence proof above"),
+
+        // --- IsEnumType(string) in whole-document semantic-token coloring: the one seam here that is
+        //     NOT provably inert, kept flat only because the method genuinely has no context to thread.
+        //     `SemanticTokenProvider.Classify(text, line, col, index, …)` is a static per-TOKEN classifier
+        //     over a whole document; it is handed a bare identifier string and no enclosing-context
+        //     value, and the surrounding pipeline builds none (that is the same judgement #1870 recorded
+        //     for the Classify site at :255 in this very method). A document declaring `enum Phase` in
+        //     one context and `value Phase` in another can therefore colour a `Phase` reference by .koi
+        //     source order. That is a real, if cosmetic, limitation of token colouring — filed as its own
+        //     issue rather than hidden here, because giving this method a context means teaching the
+        //     token pipeline an enclosing-context notion it does not have (see the follow-up on #1897). ---
+        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", 217, "IsEnumType", "same static per-token Classify as the :222/:255 entries: no enclosing-context value exists in the token-colouring pipeline to thread — a real cosmetic limitation, tracked as a follow-up on #1897, not a one-line fix"),
+
         // --- Provably inert despite an available context: the kind is consumed ONLY for questions whose
         //     answer cannot differ per context. Verified against the fixtures in
         //     AstSymbolCrossContextClassificationTests, which pin the outcome under BOTH context orders. ---
-        ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
+        ("src/Koine.Compiler/Ast/Binder.cs", 270, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
 
         // --- No site remains with a bounded context in a LOCAL of the same method that it then ignores:
         //     #1870 worked through every one of those. That is the literal claim, and it is weaker than
@@ -246,13 +328,19 @@ public class FlatModelIndexLookupGuardTests
         List<FlatCallSite> unlisted = actual.Where(s => !allowed.Contains((s.RelativePath, s.Line, s.Method))).ToList();
 
         unlisted.ShouldBeEmpty(
-            "New call site(s) to ModelIndex's flat, last-declaration-wins overload — Classify(string) " +
-            "or TryGetDecl(string, out TypeDecl). R13.2 lets two bounded contexts legally declare a " +
-            "type with the same simple name, so a context-blind lookup silently depends on .koi source " +
-            "order (the defect family behind #1632 through #1863). If the caller has a bounded-context " +
-            "value in scope, route through ModelIndex.TryGetDeclIn(context, name, out decl) — or the " +
-            "Classify(context, name) / TryGetDecl(context, name, out decl) overloads — instead. If it " +
-            "is genuinely context-less, add it to this test's Allowlist with a real one-line reason.\n\n" +
+            "New call site(s) to one of ModelIndex's flat, last-declaration-wins seams — Classify(string), " +
+            "TryGetDecl(string, out TypeDecl), TryGetMemberType(string, string, out TypeRef), " +
+            "MemberNames(string), IsEnumType(string) or IsKnownType(string). R13.2 lets two bounded " +
+            "contexts legally declare a type with the same simple name, so a context-blind lookup " +
+            "silently depends on .koi source order (the defect family behind #1632 through #1897). If " +
+            "the caller has a bounded-context value in scope, route through " +
+            "ModelIndex.TryGetDeclIn(context, name, out decl) — or the context-aware sibling overload: " +
+            "Classify(context, name), TryGetDecl(context, name, out decl), " +
+            "TryGetMemberType(context, name, member, out type), IsKnownType(context, name), and for " +
+            "IsEnumType (which has no sibling) spell out Classify(context, name) == TypeKind.Enum. " +
+            "MemberNames(string) has no sibling either — resolve the decl with TryGetDeclIn(context, ...) " +
+            "first and read its members off that. If the site is genuinely context-less, add it to this " +
+            "test's Allowlist with a real one-line reason.\n\n" +
             string.Join("\n", unlisted));
     }
 
