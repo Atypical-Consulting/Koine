@@ -1142,7 +1142,9 @@ public class RustEmitterTests
     /// the lambda parameter <c>n</c> (shadowing the outer <c>let n = amount</c>) is popped cleanly once
     /// <c>items.any(n =&gt; n &gt; 0)</c> closes, restoring the outer <c>n: Int?</c> binding for the trailing
     /// <c>n == rate</c> comparison — which still needs <c>.map(Decimal::from)</c>/<c>Some(...)</c> to
-    /// compare against the <c>Decimal</c>-typed <c>rate</c>.
+    /// compare against the <c>Decimal</c>-typed <c>rate</c>. The closure parameter itself renders
+    /// <c>|&amp;n|</c> (#1801): <c>Int</c> is <c>Copy</c>, so the binder deref-binds by value the same way
+    /// every other by-value-binding target does.
     /// </summary>
     [Fact]
     public void Lambda_parameter_shadowing_an_outer_binding_restores_the_outer_binding_after_the_lambda_pop()
@@ -1153,7 +1155,7 @@ public class RustEmitterTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
 
         rust.ShouldContain(
-            "{ let n = self.amount; self.items.iter().any(|n| n > 0) && " +
+            "{ let n = self.amount; self.items.iter().any(|&n| n > 0) && " +
             "(n.map(Decimal::from) == Some(self.rate)) }");
     }
 

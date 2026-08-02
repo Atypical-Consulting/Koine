@@ -219,6 +219,53 @@ public class RDocsTests
         page.ShouldContain("_This bounded context has no declared types yet._");
     }
 
+    /// <summary>
+    /// R19 — the narrative must render a <c>publish</c> under its own heading, so a reader can tell a
+    /// published-language contract leaving the context from an intra-aggregate <c>emit</c>. Without the
+    /// clause arm the published event was simply absent from the behavior's docs.
+    /// </summary>
+    [Fact]
+    public void A_published_integration_event_renders_under_its_own_leaves_the_context_heading()
+    {
+        const string src = """
+            context Shipping {
+              publishes ParcelDispatched
+
+              integration event ParcelDispatched {
+                parcel:  String
+                carrier: String
+              }
+
+              aggregate Deliveries root Parcel {
+                event ParcelPacked { parcel: ParcelId }
+
+                entity Parcel identified by ParcelId {
+                  carrier: String
+
+                  command dispatch {
+                    emit ParcelPacked(parcel: id)
+                    publish ParcelDispatched(parcel: id.value, carrier: carrier)
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("shipping.koi", src) }, new DocsEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var page = result.Files.Single(f => f.RelativePath == "docs/Shipping.md").Contents;
+
+        page.ShouldContain("**Events:**");
+        page.ShouldContain("- `ParcelPacked(parcel: id)`");
+
+        // The published contract lands under its own heading, below the emitted domain event.
+        page.ShouldContain("**Published — leaves the context:**");
+        page.ShouldContain("- `ParcelDispatched(parcel: id.value, carrier: carrier)`");
+        page.IndexOf("**Published — leaves the context:**", StringComparison.Ordinal)
+            .ShouldBeGreaterThan(page.IndexOf("**Events:**", StringComparison.Ordinal));
+    }
+
     [Fact]
     public Task Billing_fixture_emits_baseline_docs()
     {

@@ -216,12 +216,21 @@ public class ScenarioExecutionTests
                 .Select(t => (t.Field, t.From, t.IsInitialization)));
         executed.Steps.OfType<ScenarioStep.Transition>().First(t => t.Field == "status").To.ShouldBe("Placed");
 
-        // The emitted event and its payload keys match; `lineCount` is the real computed count.
-        ScenarioStep.Emit executedEmit = executed.Steps.OfType<ScenarioStep.Emit>().ShouldHaveSingleItem();
-        ScenarioStep.Emit interpretedEmit = interpreted.Steps.OfType<ScenarioStep.Emit>().ShouldHaveSingleItem();
-        executedEmit.EventName.ShouldBe(interpretedEmit.EventName);
-        executedEmit.Args.Keys.ShouldBe(interpretedEmit.Args.Keys);
-        executedEmit.Args["lineCount"].ShouldBe("1");
+        // Both recorded events — the `emit`ted domain event and the `publish`ed integration event (#1796)
+        // — and their payload keys match, in order; `lineCount` is the real computed count.
+        List<ScenarioStep.Emit> executedEmits = executed.Steps.OfType<ScenarioStep.Emit>().ToList();
+        List<ScenarioStep.Emit> interpretedEmits = interpreted.Steps.OfType<ScenarioStep.Emit>().ToList();
+        executedEmits.Select(e => e.EventName).ShouldBe(interpretedEmits.Select(e => e.EventName));
+        executedEmits.Select(e => e.Args.Keys).ShouldBe(interpretedEmits.Select(e => e.Args.Keys));
+        executedEmits[0].EventName.ShouldBe("OrderPlacedInternally");
+        executedEmits[0].Args["lineCount"].ShouldBe("1");
+        executedEmits[1].EventName.ShouldBe("OrderPlaced");
+
+        // …including WHICH of the two verbs recorded each: both engines must agree that the second one
+        // crossed the context boundary and the first did not, or one Studio timeline would read the same
+        // model two different ways depending on which engine answered.
+        executedEmits.Select(e => e.Published).ShouldBe(interpretedEmits.Select(e => e.Published));
+        executedEmits.Select(e => e.Published).ShouldBe(new[] { false, true });
 
         // Invariants and resulting-state keys are identical.
         executed.Invariants.Select(i => (i.Message, i.Condition, i.Outcome))
@@ -1362,11 +1371,255 @@ public class ScenarioExecutionTests
         executed.ResultingState["LedgerEntry.balance"].ShouldBe("17");
     }
 
-    // D1's declared-only surface has NO executed-mode test on purpose: a command cannot `emit` an
-    // integration event at all today — `EntityBehaviorValidator.ValidateEmit` resolves the name to an
-    // `EventDecl`, and `integration event X` builds an `IntegrationEventDecl`, so `emit X` is the hard
-    // error KOI0601 "unknown event". A published event therefore never reaches the runner as a RECORDED
-    // runtime event, and the dispatcher's declared-only branch cannot fire from one. The resolution
-    // itself is covered directly, above, by
-    // <see cref="A_published_integration_event_resolves_to_its_subscribers_and_to_no_executable_target"/>.
+    /// <summary>
+    /// The same twin-policy shape, but the aggregate the two reactions land on PUBLISHES — the only
+    /// shape in which the per-list resume cursor (<c>RecordedCount</c>) is exercised at a non-zero
+    /// value, and therefore the only one that can catch it being read off the wrong list.
+    ///
+    /// <para>The counts are deliberately ASYMMETRIC (the first reaction leaves 2 domain events and 1
+    /// integration event behind) and the second reaction re-publishes the SAME contract with a NEW
+    /// payload, so the two ways the split can be wired backwards both become visible:</para>
+    /// <list type="bullet">
+    ///   <item><description>reading the integration cursor off the domain count (or vice versa) sends
+    ///   <c>RecordedStep</c> past the end of the published list, so <c>LedgerSettled</c> is reported as
+    ///   "no such event was recorded" with an empty payload instead of the value it really carried;
+    ///   </description></item>
+    ///   <item><description>resuming the published list at the DOMAIN count drops the second reaction's
+    ///   publications from the fan-out, so <c>LedgerSettled</c>'s boundary crossing is never
+    ///   noted.</description></item>
+    /// </list>
+    /// <para><c>settle</c> sorts after <c>post</c>, and the resolver orders executable targets by member
+    /// name, so the reactions run in that order deterministically.</para>
+    /// </summary>
+    private const string TwinPolicyPublishingModel = """
+        context Twinned {
+          publishes LedgerPosted
+          publishes LedgerSettled
+
+          integration event LedgerPosted  { postedAmount:   Decimal }
+          integration event LedgerSettled { settledBalance: Decimal }
+
+          event ChargeCaptured        { capturedAmount: Decimal }
+          event LedgerBalanceChanged  { entryBalance:   Decimal }
+          event LedgerEntryReconciled { entryBalance:   Decimal }
+
+          aggregate Billing root Charge {
+            entity Charge identified by ChargeId {
+              amount:  Decimal
+              settled: Bool = false
+
+              command capture {
+                settled -> true
+                emit ChargeCaptured(capturedAmount: amount)
+              }
+            }
+          }
+
+          aggregate Books root LedgerEntry {
+            entity LedgerEntry identified by LedgerEntryId {
+              balance: Decimal
+              audited: Bool = false
+
+              command post(amount: Decimal) {
+                balance -> balance + amount
+                emit LedgerBalanceChanged(entryBalance: balance)
+                emit LedgerEntryReconciled(entryBalance: balance)
+                publish LedgerPosted(postedAmount: balance)
+              }
+
+              command settle {
+                audited -> true
+                balance -> balance + 1
+                publish LedgerSettled(settledBalance: balance)
+                publish LedgerPosted(postedAmount: balance)
+              }
+            }
+          }
+
+          policy PostToLedger when ChargeCaptured then Books.post(amount: capturedAmount)
+          policy SettleLedger when ChargeCaptured then Books.settle
+        }
+
+        context Reporting {
+          subscribes Twinned.LedgerPosted
+          subscribes Twinned.LedgerSettled
+        }
+
+        contextmap {
+          Twinned -> Reporting : open-host
+        }
+        """;
+
+    [Fact]
+    public void A_second_reaction_onto_a_publishing_root_reads_its_own_publications_not_the_first_ones()
+    {
+        SemanticModel sema = Build(TwinPolicyPublishingModel);
+        var scenario = new Scenario(
+            "Charge",
+            "capture",
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+            {
+                ["amount"] = ScenarioValue.FromDecimal(12m),
+                ["settled"] = ScenarioValue.FromBool(false),
+                ["LedgerEntry.balance"] = ScenarioValue.FromDecimal(5m),
+                ["LedgerEntry.audited"] = ScenarioValue.FromBool(false),
+            },
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+
+        // Both reactions ran against the ONE live LedgerEntry: 5 + 12 = 17, then + 1 = 18.
+        executed.ResultingState["LedgerEntry.balance"].ShouldBe("18");
+
+        List<ScenarioStep.Emit> ledger = executed.Steps
+            .OfType<ScenarioStep.Emit>()
+            .Where(e => e.Aggregate == "LedgerEntry")
+            .ToList();
+        ledger.Select(e => e.EventName).ShouldBe(new[]
+        {
+            "LedgerBalanceChanged", "LedgerEntryReconciled", "LedgerPosted", "LedgerSettled", "LedgerPosted",
+        });
+        ledger.Select(e => e.Published).ShouldBe(new[] { false, false, true, true, true });
+
+        // Every publication is matched to the one THIS invocation recorded. `LedgerSettled` is the
+        // second reaction's FIRST publication, so it is only reachable through a published cursor that
+        // resumed at 1 — not at the domain count (2), which is past its position.
+        ledger[3].Args.ShouldContainKey("settledBalance");
+        ledger[3].Args["settledBalance"].ShouldBe("18");
+
+        // …and the re-published `LedgerPosted` carries the SECOND payload, never a re-report of the
+        // first reaction's 17.
+        ledger[2].Args["postedAmount"].ShouldBe("17");
+        ledger[4].Args["postedAmount"].ShouldBe("18");
+
+        executed.Notes.ShouldNotContain(
+            n => n.Contains("no such event was recorded", StringComparison.Ordinal),
+            string.Join(" | ", executed.Notes));
+
+        // The fan-out resumed the published list at ITS OWN count too, so the second reaction's
+        // publications were seen and `LedgerSettled` reached the boundary resolver at all.
+        executed.Notes.ShouldContain(
+            n => n.Contains("'LedgerPosted' crosses a context boundary", StringComparison.Ordinal),
+            string.Join(" | ", executed.Notes));
+        executed.Notes.ShouldContain(
+            n => n.Contains("'LedgerSettled' crosses a context boundary", StringComparison.Ordinal),
+            string.Join(" | ", executed.Notes));
+    }
+
+    // ------------------------------------------------------------------------
+    // D1's declared-only surface, END TO END (#1796). `publish X(…)` gives a command a way to record a
+    // published integration event, so the resolution covered above by
+    // A_published_integration_event_resolves_to_its_subscribers_and_to_no_executable_target now really
+    // fires from an EXECUTED run: the emitted root keeps `_integrationEvents` beside `_domainEvents`,
+    // and the dispatcher reads both.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void A_published_integration_event_is_reported_as_declared_only_by_an_executed_run()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        Scenario scenario = OrderScenario("place", "Draft", Line("MARG", 2, 10m));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+
+        // The published event crosses a boundary to the three contexts that `subscribes
+        // Ordering.OrderPlaced` — said exactly once, however many recorded events resolve to it.
+        string crossing = executed.Notes
+            .Where(n => n.Contains("crosses a context boundary", StringComparison.Ordinal))
+            .ShouldHaveSingleItem(string.Join(" | ", executed.Notes));
+        crossing.ShouldContain("'OrderPlaced'");
+        crossing.ShouldContain("Delivery, Kitchen and Payment");
+        crossing.ShouldContain("no downstream step was run for it");
+
+        // `command place` records BOTH lists: the internal domain event, and the published contract —
+        // whose payload is read off the REAL recorded integration event (10 x 2 = 20, a figure the
+        // interpreter can only report as `?` because `total` is a derived value-object sum).
+        List<ScenarioStep.Emit> recorded = executed.Steps.OfType<ScenarioStep.Emit>().ToList();
+        recorded.Select(e => e.EventName).ShouldBe(new[] { "OrderPlacedInternally", "OrderPlaced" });
+        recorded[1].Args["total"].ShouldBe("20");
+
+        // The timeline says WHICH verb recorded each: without the flag the two steps are shape-identical,
+        // and a published contract would read as an ordinary intra-aggregate domain event.
+        recorded.Select(e => e.Published).ShouldBe(new[] { false, true });
+
+        // …and nothing was FABRICATED for it: a subscriber is a bodiless handler seam, so no downstream
+        // step and no downstream state may appear (ADR 0014 D1/D7).
+        executed.Steps.ShouldAllBe(s => s.Aggregate == null);
+        executed.ResultingState.Keys.ShouldNotContain(k => k.Contains('.', StringComparison.Ordinal));
+
+        // The INTERNAL event is not mistaken for a boundary crossing: it is nobody's published contract.
+        executed.Notes.ShouldNotContain(n => n.Contains("OrderPlacedInternally", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The regression half: widening the recorded-event source must be INERT for every model that
+    /// publishes nothing. The pizzeria's `Payment` context declares no `publishes`, so the emitted
+    /// `Charge` root has no `IntegrationEvents` property at all — and this run must report exactly the
+    /// notes it reported before the widening.
+    /// </summary>
+    [Fact]
+    public void A_root_that_publishes_nothing_reports_exactly_the_notes_it_reported_before()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        var scenario = new Scenario(
+            "Charge",
+            "capture",
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+            {
+                ["order"] = ScenarioValue.FromString("22222222-2222-2222-2222-222222222222"),
+                ["amount"] = ScenarioValue.RecordOf(
+                    ("amount", ScenarioValue.FromDecimal(10m)),
+                    ("currency", ScenarioValue.FromString("EUR"))),
+                ["method"] = ScenarioValue.Enum("Card"),
+                ["status"] = ScenarioValue.Enum("Authorized"),
+            },
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+        executed.Steps.OfType<ScenarioStep.Emit>().Select(e => e.EventName).ShouldBe(new[] { "ChargeCaptured" });
+
+        // Exactly the one note the un-widened runner produced: the LedgerEntry state it refused to invent.
+        executed.Notes.ShouldHaveSingleItem()
+            .ShouldStartWith("No state was established for LedgerEntry");
+    }
+
+    /// <summary>
+    /// The interpreted (Approach B) arm of the same clause. It reports the publication on the same
+    /// timeline as an emitted event — FLAGGED as published, so the two stay distinguishable — and stops
+    /// there: ADR 0014 D7 keeps `ScenarioInterpreter` single-aggregate, so it constructs no downstream
+    /// aggregate and dispatches no fan-out. The boundary NOTE is a fan-out product, so its absence here
+    /// is that documented limit, not the publication going unlabelled.
+    /// </summary>
+    [Fact]
+    public void The_interpreter_flags_a_publication_without_following_it()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        Scenario scenario = OrderScenario("place", "Draft", Line("MARG", 2, 10m));
+
+        ScenarioResult interpreted = ScenarioInterpreter.Run(sema, scenario);
+
+        interpreted.Steps.OfType<ScenarioStep.Emit>().Select(e => e.EventName)
+            .ShouldBe(new[] { "OrderPlacedInternally", "OrderPlaced" });
+
+        // The distinction the timeline could NOT previously make: an intra-aggregate `emit` and a
+        // published-language `publish` produce shape-identical steps, told apart only by this flag.
+        interpreted.Steps.OfType<ScenarioStep.Emit>().Select(e => e.Published).ShouldBe(new[] { false, true });
+
+        ScenarioStep.Emit published = interpreted.Steps.OfType<ScenarioStep.Emit>().Last();
+        published.Args.Keys.OrderBy(k => k, StringComparer.Ordinal)
+            .ShouldBe(new[] { "customer", "fulfillment", "orderId", "placedAt", "total" });
+        published.Args["fulfillment"].ShouldBe("Delivery");
+
+        // D7: no attribution, no downstream state, no fan-out note — the interpreter did not grow a
+        // second execution engine.
+        interpreted.Steps.ShouldAllBe(s => s.Aggregate == null);
+        interpreted.ResultingState.Keys.ShouldNotContain(k => k.Contains('.', StringComparison.Ordinal));
+        interpreted.Notes.ShouldNotContain(n => n.Contains("crosses a context boundary", StringComparison.Ordinal));
+    }
 }

@@ -219,6 +219,14 @@ export interface ScenarioEmitStep extends ScenarioStepAttribution {
   kind: 'emit';
   event: string;
   args: Record<string, string>;
+  // R19 (#1796): true when the command `publish`ed this as an INTEGRATION event — a published-language
+  // contract leaving the bounded context — rather than `emit`ting an intra-aggregate domain event. The
+  // emitted code records the two on separate lists and they mean different things to a reader, so the
+  // timeline must be able to tell them apart. Additive, and absent (never `false`) for a domain emit,
+  // so an older result parses unchanged: `kind` stays `'emit'` on purpose — the union is what
+  // `renderStep` switches on, and a new kind would render a published event as an empty row on any
+  // client not upgraded in lockstep, whereas an unread flag just degrades to the previous rendering.
+  published?: boolean;
 }
 export interface ScenarioResultStep extends ScenarioStepAttribution {
   kind: 'result';

@@ -82,8 +82,8 @@ may name a field after it. The soft keywords are:
 `context`, `value`, `quantity`, `entity`, `aggregate`, `enum`, `identified`, `by`, `root`, `command`,
 `requires`, `result`, `event`, `emit`, `states`, `create`, `spec`, `on`, `service`, `operation`,
 `policy`, `as`, `natural`, `sequence`, `guid`, `versioned`, `repository`, `operations`, `find`,
-`usecase`, `readmodel`, `from`, `query`, `import`, `module`, `acl`, `integration`, `publishes`,
-`subscribes`, `version`, `let`, `in`.
+`usecase`, `readmodel`, `from`, `query`, `import`, `module`, `acl`, `integration`, `publish`,
+`publishes`, `subscribes`, `version`, `let`, `in`.
 
 `if`, `then`, `else`, and `when` are also usable as member names; `let` and `in` are reserved only as
 the *leading* token of an expression (the `let … in` binding form — see

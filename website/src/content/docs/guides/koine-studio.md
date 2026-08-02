@@ -267,6 +267,14 @@ for it. There is nothing to execute, so the runner says so: the subscribing cont
 notes as declared with no executable handler. That is a fact about your model worth knowing, not a
 limitation being hidden — a `policy` is what makes a reaction runnable.
 
+**Told apart on the timeline: `emit` vs `publish`.** A step a command `publish`ed carries a **`published`**
+chip instead of the usual `event` one, and hovering it says which contract left the context. Both verbs
+record an event, but they mean different things — an `emit` stays inside the aggregate, a `publish` is a
+published-language contract crossing the boundary — so the timeline shows which one you are reading rather
+than rendering the two identically. Both engines label it, so an interpreted run says the same thing an
+executed one does (only the executed one also *resolves* the subscribers into a note, because that comes
+out of fan-out).
+
 ### Timeouts, and what a runaway model costs you
 
 An executed run happens in a **child process with a wall-clock deadline — 5 seconds by default**. When

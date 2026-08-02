@@ -77,6 +77,35 @@ public class ModelRoundTripTests
         }
         """;
 
+    /// <summary>
+    /// R19 — a root command whose body both <c>emit</c>s an intra-aggregate domain event and
+    /// <c>publish</c>es a published-language integration event, so the projection has to keep the two
+    /// apart rather than surface (or drop) either one.
+    /// </summary>
+    private const string PublishSample = """
+        context Ordering {
+          publishes OrderPlaced
+
+          event OrderSubmitted { orderId: OrderId }
+
+          integration event OrderPlaced {
+            orderId: OrderId
+            total:   Decimal
+          }
+
+          aggregate Order root Order {
+            entity Order identified by OrderId {
+              total: Decimal = 0
+
+              command place {
+                emit OrderSubmitted(orderId: id)
+                publish OrderPlaced(orderId: id, total: total)
+              }
+            }
+          }
+        }
+        """;
+
     private static KoineModel Compile(string src) =>
         new KoineCompiler().Parse(new[] { new SourceFile("t.koi", src) }).Model!;
 
@@ -473,6 +502,63 @@ public class ModelRoundTripTests
         // An emitted event is named by the event, with its payload arguments rendered canonically.
         members[1].Name.ShouldBe("OrderSubmitted");
         members[1].Value.ShouldBe("orderId: id");
+    }
+
+    [Fact]
+    public void MembersOf_lists_a_commands_published_integration_events_beside_its_emitted_ones()
+    {
+        var members = ModelRoundTripService.MembersOf(
+            Compile(PublishSample), "Ordering.Order.Order.commands.place");
+
+        // `publish` is its own kind: an editor must be able to tell a published-language contract
+        // leaving the context from an intra-aggregate domain event.
+        members.Select(m => m.Kind).ShouldBe(new[] { "emit", "publish" });
+        members[0].Name.ShouldBe("OrderSubmitted");
+        members[0].Value.ShouldBe("orderId: id");
+        members[1].Name.ShouldBe("OrderPlaced");
+        members[1].Value.ShouldBe("orderId: id, total: total");
+    }
+
+    [Fact]
+    public void MembersOf_round_trips_a_published_events_payload_back_into_a_parsable_publish_clause()
+    {
+        // The projected member is canonical `.koi`: splicing it back into a `publish` clause has to
+        // re-parse into the very clause it came from — the property `koine fmt` relies on.
+        ModelMember published = ModelRoundTripService
+            .MembersOf(Compile(PublishSample), "Ordering.Order.Order.commands.place")
+            .Single(m => m.Kind == "publish");
+
+        string clause = $"publish {published.Name}({published.Value})";
+        clause.ShouldBe("publish OrderPlaced(orderId: id, total: total)");
+
+        // Splice the projected clause back into a fresh model: it re-parses into an equivalent
+        // PublishClause, event name and payload intact.
+        KoineModel rebuilt = Compile($$"""
+            context Ordering {
+              publishes OrderPlaced
+
+              integration event OrderPlaced {
+                orderId: OrderId
+                total:   Decimal
+              }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  total: Decimal = 0
+
+                  command place {
+                    {{clause}}
+                  }
+                }
+              }
+            }
+            """);
+
+        PublishClause reparsed = rebuilt.Contexts.Single().AllEntities().Single(e => e.Name == "Order")
+            .Commands.Single().Body.OfType<PublishClause>().Single();
+
+        reparsed.EventName.ShouldBe("OrderPlaced");
+        reparsed.Args.Select(a => a.Field).ShouldBe(new[] { "orderId", "total" });
     }
 
     [Fact]

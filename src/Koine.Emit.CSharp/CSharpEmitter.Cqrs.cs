@@ -22,9 +22,12 @@ public sealed partial class CSharpEmitter
     /// <summary>
     /// Emits the context's <c>IUnitOfWork</c> (R12.1): a repository property per aggregate
     /// (in declaration order) plus <c>SaveChangesAsync</c>. A pure abstraction — no
-    /// infrastructure type appears.
+    /// infrastructure type appears. A context that publishes integration events also declares the
+    /// outbox <c>Enqueue</c> seam (R19), gated on exactly the condition
+    /// <see cref="EmitUnitOfWorkImpl"/> uses for the concrete member, so the contract and its
+    /// realization can never disagree — and a non-publishing context's interface is unchanged.
     /// </summary>
-    private EmittedFile EmitUnitOfWork(EmitContext emit, string ns, IReadOnlyList<AggregateDecl> aggregates)
+    private EmittedFile EmitUnitOfWork(EmitContext emit, string ns, IReadOnlyList<AggregateDecl> aggregates, bool publishesEvents)
     {
         var sb = new StringBuilder();
         WriteXmlDoc(sb, "Transactional boundary over this context's aggregate repositories.", "");
@@ -38,6 +41,15 @@ public sealed partial class CSharpEmitter
             sb.Append(Indent).Append(repo).Append(' ').Append(Pluralize(agg.RootName)).Append(" { get; }\n");
         }
         sb.Append('\n');
+
+        // The outbox enqueue seam. Declared here (not only on the concrete UnitOfWork) so an
+        // application handler holding the abstraction can hand its aggregate's published
+        // integration events over BEFORE the commit — the flush then rides the same transaction.
+        if (publishesEvents)
+        {
+            sb.Append(Indent).Append("void Enqueue(IIntegrationEvent integrationEvent);\n\n");
+        }
+
         sb.Append(Indent).Append("Task<int> SaveChangesAsync(CancellationToken ct = default);\n");
         sb.Append("}\n");
         return new EmittedFile(PathFor(emit, ns, KindFolder.Abstractions, "IUnitOfWork.cs"), Assemble(emit, ns, sb.ToString(), usesLinq: false));

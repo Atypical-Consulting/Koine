@@ -129,6 +129,13 @@ public sealed partial class PythonEmitter
             WriteDomainEventsBuffer(sb);
         }
 
+        // Integration-event buffer (R19): a command's `publish` records a published-language contract
+        // on a SEPARATE collection from the domain events above.
+        if (PublishesEvents(entity))
+        {
+            WriteIntegrationEventsBuffer(sb);
+        }
+
         // Invariants run in __post_init__ once all fields are bound (self.<field> reads).
         if (entity.Invariants.Count > 0)
         {

@@ -60,6 +60,7 @@ See [commands, events & state](/Koine/reference/commands-events-state/).
 | Command returning a value | `command cancel(): OrderId { …; result id }` | a typed method (`public <T> Name(…)`) that returns the `result` expression as its terminal statement (the create-and-return-id idiom) | — |
 | Command with an HTTP surface | `@route("/orders/{id}") @put @auth("admin") command submit { … }` | the same domain method; the overridden path/verb/authorization is read only by the `api` layer and the `openapi` target (see [API annotations](/Koine/reference/application-cqrs/#159-api-annotations)) | — |
 | Domain event | `event OrderSubmitted { … }` + `emit OrderSubmitted(…)` | a record recorded into the root's `DomainEvents` collection | `OrderOpened`, `OrderPlacedInternally`, `DeliveryScheduled`, `ChargeAuthorized` |
+| Published integration event | `publish OrderPlaced(orderId: id, …)` in a root command | the event recorded into the root's *separate* `IntegrationEvents` collection — `emit` stays inside the boundary, `publish` leaves it (see [context maps & integration events](#context-maps--integration-events) below) | `Order.place` |
 | State machine | `states { Draft -> Placed; … }` | runtime-checked legal transitions; illegal transition throws | `Order`, `Delivery`, `Charge`, `KitchenTicket` lifecycles |
 
 :::caution
@@ -179,7 +180,8 @@ See [context maps & integration events](/Koine/reference/context-maps-integratio
 | Shared kernel | `Menu <-> Ordering : shared-kernel { Currency }` | the shared type emitted **once** into `Menu__Ordering/Kernel/`; partners get a precise `using` | `Currency` |
 | Anti-corruption layer | `Gateway -> Payment : anti-corruption-layer` + `acl { Gateway.GatewayResult -> Payment.PaymentReceipt }` | a translator interface `IGatewayToPaymentTranslator` in the downstream context | `Gateway -> Payment` |
 | Integration event | `integration event OrderPlaced { … }` | a `sealed record : IIntegrationEvent`; the marker is emitted once | `Ordering.OrderPlaced`, `Kitchen.TicketReady` |
-| Publish | `publishes OrderPlaced` | marks the event as a published surface; authorizes subscribers | `Ordering`, `Kitchen` |
+| Publish declaration | `publishes OrderPlaced` | marks the event as a published surface; authorizes subscribers | `Ordering`, `Kitchen` |
+| Publish clause | `publish OrderPlaced(orderId: id, …)` in a root `command` | records the event into the root's `IntegrationEvents`; the application handler relays it to `IUnitOfWork.Enqueue` before the commit, and the infrastructure `UnitOfWork` writes it as an `OutboxMessage` row in that same transaction | `Order.place` |
 | Subscribe | `subscribes Ordering.OrderPlaced` | an `IHandleOrderPlaced` handler interface with the fully-qualified event type | `Kitchen`, `Delivery`, `Payment` |
 
 :::caution
@@ -187,6 +189,17 @@ A `subscribes` needs an authorizing relation in the map: `open-host` or `custome
 subscriber. `conformist` does **not** authorize a subscription. Integration-event fields must be
 cross-boundary-safe (primitives, enums, `*Id`s, other integration events) — leaking a value object or domain
 event is an error.
+:::
+
+:::note
+The declaration and the clause are separate on purpose, and both are required: a `publish X(…)` in a context
+that never declared `publishes X` is `PublishNotDeclared` (KOI1421), because `publishes` is what the
+subscribers, the map, the AsyncAPI operations and the docs graph read. The clause must also name an
+integration event of its *own* context (`PublishUnknownIntegrationEvent`, KOI1420) and sit in an aggregate
+**root**'s command (`PublishOutsideRoot`, KOI1422); its payload is completeness- and type-checked exactly like
+`emit`'s (KOI0602). See
+[ADR 0019](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0019-publish-is-a-distinct-clause-from-emit.md)
+for why it is a distinct keyword rather than an inference over the event's name.
 :::
 
 A context may even subscribe to **two same-named events from different publishers** (e.g. both

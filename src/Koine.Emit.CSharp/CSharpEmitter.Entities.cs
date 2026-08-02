@@ -170,6 +170,30 @@ public sealed partial class CSharpEmitter
             }
         }
 
+        // Integration-event recording (R19): a command's `publish` puts a published-language
+        // contract on a SEPARATE list. Gated on the entity actually publishing — KOI1422 confines
+        // `publish` to the aggregate root, so the list and the statements that feed it always
+        // land on the same type. Deliberately parallel to, never merged with, the domain-event
+        // block above: IDomainEvent stays intra-aggregate, IIntegrationEvent crosses the boundary.
+        if (PublishesEvents(entity))
+        {
+            sb.Append('\n');
+            sb.Append(Indent).Append("private readonly List<IIntegrationEvent> _integrationEvents = new();\n");
+            sb.Append(Indent).Append("public IReadOnlyList<IIntegrationEvent> IntegrationEvents\n");
+            if (RefOnly)
+            {
+                WriteRefStubExpressionBody(sb);
+                sb.Append(Indent).Append("public void ClearIntegrationEvents()\n");
+                WriteRefStubExpressionBody(sb);
+            }
+            else
+            {
+                sb.Append(Indent).Append(Indent).Append("=> _integrationEvents;\n");
+                sb.Append(Indent).Append("public void ClearIntegrationEvents()\n");
+                sb.Append(Indent).Append(Indent).Append("=> _integrationEvents.Clear();\n");
+            }
+        }
+
         // Commands: intention-revealing state-changing methods.
         foreach (var cmd in entity.Commands)
         {

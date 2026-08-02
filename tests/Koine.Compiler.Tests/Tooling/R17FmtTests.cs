@@ -1,6 +1,8 @@
 using Antlr4.Runtime;
+using Koine.Compiler.Ast;
 using Koine.Compiler.Formatting;
 using Koine.Compiler.Grammar;
+using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
 
@@ -91,6 +93,36 @@ public class R17FmtTests
         formatted.ShouldContain("  customer: CustomerId");
         formatted.ShouldContain("  lines:    List<OrderLine>");
         formatted.ShouldContain("  note:     String?");
+    }
+
+    [Fact]
+    public void Formatting_round_trips_a_publish_clause()
+    {
+        // R19 — `publish` is a soft keyword read through the same token stream as any other clause, so
+        // canonicalising must neither drop it nor rewrite it into an `emit`.
+        const string messy =
+            "context Ordering {\n" +
+            "publishes OrderPlaced\n" +
+            "integration event OrderPlaced{orderId:OrderId}\n" +
+            "aggregate Sales root Order {\n" +
+            "entity Order identified by OrderId {\n" +
+            "lineCount:Int=0\n" +
+            "command place{publish OrderPlaced(orderId:id)}\n" +
+            "}\n" +
+            "}\n" +
+            "}\n";
+
+        var formatted = Fmt.Format(messy).Text;
+
+        formatted.ShouldContain("publish OrderPlaced(orderId: id)");
+        Fmt.Format(formatted).Text.ShouldBe(formatted);   // idempotent
+
+        // …and the re-parsed model still carries the clause.
+        var reparsed = new KoineCompiler().Parse(formatted).Model;
+        reparsed.ShouldNotBeNull();
+        reparsed!.Contexts.Single().AllEntities().Single(e => e.Name == "Order")
+            .Commands.Single().Body.OfType<PublishClause>().Single()
+            .EventName.ShouldBe("OrderPlaced");
     }
 
     [Fact]

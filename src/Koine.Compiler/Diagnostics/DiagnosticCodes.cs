@@ -223,6 +223,9 @@ public static class DiagnosticCodes
     public const string SubscribeHandlerNameCollision = "KOI1417";
     public const string SharedKernelNotShareable = "KOI1418";
     public const string AmbiguousMultiOwnerReference = "KOI1419";
+    public const string PublishUnknownIntegrationEvent = "KOI1420";
+    public const string PublishNotDeclared = "KOI1421";
+    public const string PublishOutsideRoot = "KOI1422";
 
     // ---- Model versioning & evolution (KOI1500–1599) ----------------------
     public const string AnnotationVersionAboveContext = "KOI1501";
@@ -433,6 +436,9 @@ public static class DiagnosticCodes
             [SubscribeHandlerNameCollision] = D(SubscribeHandlerNameCollision, "A context subscribes to two integration events with the same name from different publishers.", DiagnosticCategory.ContextMaps, DiagnosticSeverity.Error),
             [SharedKernelNotShareable] = D(SharedKernelNotShareable, "A shared-kernel type is an entity or aggregate; only value objects and enums may be shared.", DiagnosticCategory.ContextMaps, DiagnosticSeverity.Error),
             [AmbiguousMultiOwnerReference] = D(AmbiguousMultiOwnerReference, "A type declared in more than one context is referenced from a third; the flat-module emitters qualify it to a deterministic canonical owner.", DiagnosticCategory.ContextMaps, DiagnosticSeverity.Warning),
+            [PublishUnknownIntegrationEvent] = D(PublishUnknownIntegrationEvent, "A 'publish' clause names something that is not an integration event of the enclosing context.", DiagnosticCategory.ContextMaps, DiagnosticSeverity.Error),
+            [PublishNotDeclared] = D(PublishNotDeclared, "A 'publish' clause names an integration event the enclosing context does not declare with 'publishes'.", DiagnosticCategory.ContextMaps, DiagnosticSeverity.Error),
+            [PublishOutsideRoot] = D(PublishOutsideRoot, "Integration events may only be published from an aggregate root; neither an inner entity nor a standalone entity may publish.", DiagnosticCategory.ContextMaps, DiagnosticSeverity.Error),
 
             // ---- Model versioning & evolution --------------------------------
             [AnnotationVersionAboveContext] = D(AnnotationVersionAboveContext, "A @since annotation names a version higher than the context's declared version.", DiagnosticCategory.Versioning, DiagnosticSeverity.Warning),

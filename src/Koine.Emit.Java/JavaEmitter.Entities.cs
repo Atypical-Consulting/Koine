@@ -63,6 +63,11 @@ public sealed partial class JavaEmitter
         var hasEmits = EmitsEvents(entity);
         var eventsField = SyntheticEventsField(entity);
 
+        // The same pair for the R19 published-language collector, seeded with `eventsField` so the two
+        // synthetic fields can never collide with each other either.
+        var hasPublishes = PublishesEvents(entity);
+        var integrationEventsField = SyntheticIntegrationEventsField(entity, eventsField);
+
         // A synthetic `id` member (of the identity type) so an `id` reference in a behavior body or an
         // `emit` argument resolves to the entity's identity field (`this.id`), mirroring the other backends.
         var bodyMembers = entity.Members
@@ -92,6 +97,16 @@ public sealed partial class JavaEmitter
         if (hasEmits)
         {
             sb.Append(Indent).Append("private final java.util.List<DomainEvent> ").Append(eventsField)
+              .Append(" = new java.util.ArrayList<>();\n");
+        }
+
+        // The published-integration-events collector (R19): a SEPARATE list from the domain events
+        // above — the two have distinct delivery (in-process dispatch vs. the transactional outbox).
+        // The element type stays the per-context `DomainEvent` sealed interface, which this emitter
+        // already permits every integration-event record to implement (see EmitDomainEventInterface).
+        if (hasPublishes)
+        {
+            sb.Append(Indent).Append("private final java.util.List<DomainEvent> ").Append(integrationEventsField)
               .Append(" = new java.util.ArrayList<>();\n");
         }
 
@@ -133,11 +148,21 @@ public sealed partial class JavaEmitter
             sb.Append(Indent).Append("}\n");
         }
 
+        // The published-integration-events accessor (R19), parallel to the domain-event one above.
+        if (hasPublishes)
+        {
+            sb.Append('\n');
+            WriteJavadoc(sb, "The integration events published so far, as an unmodifiable snapshot.", Indent);
+            sb.Append(Indent).Append("public java.util.List<DomainEvent> ").Append(integrationEventsField).Append("() {\n");
+            sb.Append(Indent).Append(Indent).Append("return java.util.List.copyOf(this.").Append(integrationEventsField).Append(");\n");
+            sb.Append(Indent).Append("}\n");
+        }
+
         // Mutating behaviors.
         foreach (CommandDecl cmd in entity.Commands)
         {
             sb.Append('\n');
-            WriteBehavior(sb, emit, name, entity, cmd, translator, typeMapper, eventsField);
+            WriteBehavior(sb, emit, name, entity, cmd, translator, typeMapper, eventsField, integrationEventsField);
         }
 
         // Factories: static creation methods that mint identity, check preconditions, build, and record events.
@@ -312,7 +337,8 @@ public sealed partial class JavaEmitter
     /// </summary>
     private void WriteBehavior(
         StringBuilder sb, JavaEmitContext emit, string typeName, EntityDecl entity, CommandDecl cmd,
-        JavaExpressionTranslator translator, JavaTypeMapper typeMapper, string eventsField)
+        JavaExpressionTranslator translator, JavaTypeMapper typeMapper, string eventsField,
+        string integrationEventsField)
     {
         var method = JavaNaming.Member(cmd.Name);
         var paramList = string.Join(", ", cmd.Parameters.Select(p => typeMapper.Map(p.Type) + " " + JavaNaming.Member(p.Name)));
@@ -360,10 +386,16 @@ public sealed partial class JavaEmitter
             sb.Append(Indent).Append(Indent).Append("checkInvariants();\n");
         }
 
-        // 4. Record the domain events this behavior raises.
+        // 4. Record the domain events this behavior raises, then the integration events it publishes
+        //    (R19) — inside-out recording order, onto their separate collectors.
         foreach (EmitClause em in cmd.Body.OfType<EmitClause>())
         {
             WriteEmitStatement(sb, emit, em, translator, eventsField, "this.");
+        }
+
+        foreach (PublishClause pub in cmd.Body.OfType<PublishClause>())
+        {
+            WritePublishStatement(sb, emit, pub, translator, integrationEventsField);
         }
 
         // 5. Result (only when the behavior declares a return type).
@@ -431,9 +463,45 @@ public sealed partial class JavaEmitter
     /// event record's declaration order, with a bare enum member qualified; a missing field falls back to a
     /// benign type default so the emitted code still compiles.
     /// </summary>
-    private static string? BuildEmitExpression(JavaEmitContext emit, EmitClause em, JavaExpressionTranslator translator)
+    private static string? BuildEmitExpression(JavaEmitContext emit, EmitClause em, JavaExpressionTranslator translator) =>
+        BuildEventExpression(emit, em.EventName, em.Args, translator);
+
+    /// <summary>
+    /// Records a published integration event (R19):
+    /// <c>this.&lt;integrationEvents&gt;.add(new EventName(args…));</c> — the published-language
+    /// counterpart of <see cref="WriteEmitStatement"/>, adding to a SEPARATE collector. No receiver
+    /// parameter: the grammar admits <c>publish</c> in a behavior body only, so it is always
+    /// <c>this.</c>.
+    /// </summary>
+    private void WritePublishStatement(
+        StringBuilder sb, JavaEmitContext emit, PublishClause pub, JavaExpressionTranslator translator,
+        string integrationEventsField)
     {
-        if (!emit.Index.TryGetDecl(em.EventName, out TypeDecl decl))
+        // Resolved CONTEXT-AWARE (unlike `emit`, whose validator is itself flat): two contexts may each
+        // legally publish a same-named integration event with DIFFERENT payloads (R14), and the flat
+        // ModelIndex view is last-write-wins — see BuildEventExpression's `context` parameter (#1796 review).
+        if (BuildEventExpression(emit, pub.EventName, pub.Args, translator, translator.Context) is { } expr)
+        {
+            sb.Append(Indent).Append(Indent).Append("this.").Append(integrationEventsField).Append(".add(").Append(expr).Append(");\n");
+        }
+    }
+
+    /// <summary>
+    /// The name/payload-only core of <see cref="BuildEmitExpression"/>, shared verbatim with a
+    /// <c>publish</c> clause (R19): both clauses carry the same <see cref="EmitArg"/> payload and both
+    /// construct a record, so the argument binding and enum-qualification rules stay identical rather
+    /// than being re-derived per clause.
+    /// <para><paramref name="context"/> is the bounded context the NAME resolves within. A
+    /// <c>publish</c> passes it (its validator, <c>ValidatePublish</c>, resolves context-aware, so the
+    /// emitter must too or it builds the payload from another context's same-named declaration); an
+    /// <c>emit</c> leaves it null, which falls back to the flat lookup its own flat validator agrees
+    /// with.</para>
+    /// </summary>
+    private static string? BuildEventExpression(
+        JavaEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs, JavaExpressionTranslator translator,
+        string? context = null)
+    {
+        if (!emit.Index.TryGetDecl(context, eventName, out TypeDecl decl))
         {
             return null;
         }
@@ -445,7 +513,7 @@ public sealed partial class JavaEmitter
             _ => Array.Empty<Member>(),
         };
 
-        var argByField = em.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+        var argByField = clauseArgs.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
         var args = members.Select(m =>
         {
             if (!argByField.TryGetValue(m.Name, out Expr? value))
@@ -457,7 +525,7 @@ public sealed partial class JavaEmitter
             return translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
         });
 
-        return "new " + JavaNaming.Type(em.EventName) + "(" + string.Join(", ", args) + ")";
+        return "new " + JavaNaming.Type(eventName) + "(" + string.Join(", ", args) + ")";
     }
 
     /// <summary>
@@ -730,11 +798,35 @@ public sealed partial class JavaEmitter
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
     /// <summary>
+    /// True when any behavior of the entity <c>publish</c>es an integration event (R19). No factory
+    /// counterpart: the grammar admits <c>publish</c> in command bodies only.
+    /// </summary>
+    private static bool PublishesEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<PublishClause>().Any();
+
+    /// <summary>
     /// A collision-free name for the entity's synthetic recorded-events list (base <c>domainEvents</c>,
     /// underscore-suffixed until it clears every emitted member/behavior/factory name plus the fixed
     /// <c>id</c>) — so the collector never duplicates a user member literally named <c>domainEvents</c>.
     /// </summary>
-    private static string SyntheticEventsField(EntityDecl entity)
+    private static string SyntheticEventsField(EntityDecl entity) =>
+        FreeFieldName(ReservedFieldNames(entity), "domainEvents");
+
+    /// <summary>
+    /// A collision-free name for the entity's synthetic published-integration-events list (R19), base
+    /// <c>integrationEvents</c>. Seeded with the same user names as <see cref="SyntheticEventsField"/>
+    /// <em>plus</em> the domain-event collector's chosen name, so the two synthetic fields can never
+    /// collide with each other.
+    /// </summary>
+    private static string SyntheticIntegrationEventsField(EntityDecl entity, string eventsField)
+    {
+        var used = ReservedFieldNames(entity);
+        used.Add(eventsField);
+        return FreeFieldName(used, "integrationEvents");
+    }
+
+    /// <summary>Every user-visible member/behavior/factory name a synthetic field must dodge.</summary>
+    private static HashSet<string> ReservedFieldNames(EntityDecl entity)
     {
         var used = new HashSet<string>(StringComparer.Ordinal) { "id" };
         foreach (Member m in entity.Members)
@@ -752,7 +844,13 @@ public sealed partial class JavaEmitter
             used.Add(JavaNaming.Member(f.Name));
         }
 
-        var name = "domainEvents";
+        return used;
+    }
+
+    /// <summary><paramref name="preferred"/>, underscore-suffixed until it clears <paramref name="used"/>.</summary>
+    private static string FreeFieldName(HashSet<string> used, string preferred)
+    {
+        var name = preferred;
         while (used.Contains(name))
         {
             name += "_";

@@ -28,6 +28,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0016](0016-collaboration-broker-is-a-loopback-first-tcp-server-with-connection-bound-authority.md) | The collaboration broker is a loopback-first TCP server with connection-bound authority | Proposed |
 | [0017](0017-noise-encrypted-collaboration-transport-with-a-token-pinned-broker-key.md) | Collaboration traffic is Noise-encrypted with the broker's key pinned in the join token | Proposed |
 | [0018](0018-collaboration-fan-out-is-per-peer-queues-with-a-bounded-backlog.md) | Collaboration fan-out is per-peer queues with a bounded backlog | Proposed |
+| [0019](0019-publish-is-a-distinct-clause-from-emit.md) | A command publishes an integration event through a distinct `publish` clause, not a widened `emit` | Proposed |
 
 ## When to write one
 

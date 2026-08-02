@@ -250,6 +250,18 @@ internal static class OperatorNeedsAnalyzer
                                     yield return (arg.Value, cmdScope, ctx.Name);
                                 }
                             }
+                            else if (stmt is PublishClause pub)
+                            {
+                                // R19 — a `publish` payload is the same kind of expression site as an
+                                // `emit` payload's: a value object folded there still needs its generated
+                                // operator, so miss this arm and the emitted publish statement calls an
+                                // operator no emitter was ever asked to write. (No factory counterpart
+                                // below: the grammar admits `publish` in command bodies only.)
+                                foreach (EmitArg arg in pub.Args)
+                                {
+                                    yield return (arg.Value, cmdScope, ctx.Name);
+                                }
+                            }
                         }
                     }
                     foreach (FactoryDecl factory in entity.Factories)

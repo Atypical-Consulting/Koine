@@ -42,7 +42,7 @@ const KEYWORDS = [
   'context', 'module', 'import', 'version', 'value', 'quantity', 'entity', 'aggregate',
   'enum', 'identified', 'by', 'root', 'as', 'natural', 'sequence', 'guid', 'versioned',
   'invariant', 'matches', 'when', 'if', 'then', 'else', 'command', 'create', 'requires',
-  'emit', 'states', 'event', 'integration', 'publishes', 'subscribes', 'spec', 'on',
+  'emit', 'states', 'event', 'integration', 'publish', 'publishes', 'subscribes', 'spec', 'on',
   'service', 'operation', 'usecase', 'policy', 'repository', 'operations', 'find',
   'readmodel', 'from', 'query', 'now',
 ];

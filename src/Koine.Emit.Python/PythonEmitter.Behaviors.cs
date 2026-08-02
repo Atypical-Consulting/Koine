@@ -66,6 +66,35 @@ public sealed partial class PythonEmitter
         sb.Append(Indent).Append(Indent).Append("self._domain_events.clear()\n");
     }
 
+    /// <summary>
+    /// True when any command of the entity <c>publish</c>es an integration event (R19). No factory
+    /// counterpart: the grammar admits <c>publish</c> in command bodies only.
+    /// </summary>
+    private static bool PublishesEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<PublishClause>().Any();
+
+    /// <summary>
+    /// Emits the integration-event buffer onto an entity that publishes (R19): the published-language
+    /// counterpart of <see cref="WriteDomainEventsBuffer"/>, deliberately a SEPARATE collection —
+    /// the two have distinct delivery (in-process dispatch vs. the transactional outbox), so they are
+    /// never merged. Same <c>list[object]</c>/<c>tuple[object, ...]</c> shape, matching this emitter's
+    /// own published-language convention at the outbox seam (<c>enqueue(integration_event: object)</c>).
+    /// </summary>
+    private static void WriteIntegrationEventsBuffer(StringBuilder sb)
+    {
+        sb.Append('\n');
+        sb.Append(Indent).Append("_integration_events: list[object] = field(default_factory=list, init=False)\n");
+        sb.Append('\n');
+        sb.Append(Indent).Append("@property\n");
+        sb.Append(Indent).Append("def integration_events(self) -> tuple[object, ...]:\n");
+        sb.Append(Indent).Append(Indent).Append("\"\"\"The integration events published so far, in order (a read-only snapshot).\"\"\"\n");
+        sb.Append(Indent).Append(Indent).Append("return tuple(self._integration_events)\n");
+        sb.Append('\n');
+        sb.Append(Indent).Append("def clear_integration_events(self) -> None:\n");
+        sb.Append(Indent).Append(Indent).Append("\"\"\"Drains the published integration events after they have been enqueued.\"\"\"\n");
+        sb.Append(Indent).Append(Indent).Append("self._integration_events.clear()\n");
+    }
+
     // ----------------------------------------------------------------------
     // Command — mutating instance method
     // ----------------------------------------------------------------------
@@ -121,6 +150,7 @@ public sealed partial class PythonEmitter
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
         var emits = cmd.Body.OfType<EmitClause>().ToList();
+        var publishes = cmd.Body.OfType<PublishClause>().ToList();
         ResultClause? result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
 
         // 1. Preconditions — checked before any mutation.
@@ -165,6 +195,8 @@ public sealed partial class PythonEmitter
         // Translate the emit payloads and the result while parameters are still in scope (their
         // payloads may reference parameters); they are written AFTER the re-check.
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "self.")).ToList();
+        // Publish payloads translate in the SAME scope, for the same reason (R19).
+        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index)).ToList();
         string? resultExpr = result is not null
             ? translator.Translate(result.Value, PythonExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
@@ -183,8 +215,15 @@ public sealed partial class PythonEmitter
             sb.Append(Indent).Append(Indent).Append("self.__post_init__()\n");
         }
 
-        // 4. Record domain events (only reached once preconditions + re-check pass).
+        // 4. Record events (only reached once preconditions + re-check pass): the intra-aggregate
+        //    domain events first, then the integration events leaving the context (R19), so the
+        //    recording order reads inside-out.
         foreach (var stmt in emitStatements)
+        {
+            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+        }
+
+        foreach (var stmt in publishStatements)
         {
             sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
         }
@@ -500,6 +539,40 @@ public sealed partial class PythonEmitter
 
         var eventName = PythonNaming.ToPascalCase(ev.Name);
         return $"{targetPrefix}_domain_events.append({eventName}({string.Join(", ", args)}))";
+    }
+
+    /// <summary>
+    /// Builds the <c>self._integration_events.append(Ev(&lt;field&gt;=&lt;value&gt;, …))</c> statement for
+    /// a <c>publish</c> clause (R19) — the published-language counterpart of
+    /// <see cref="BuildEmitStatement"/>. The name resolves to an <see cref="IntegrationEventDecl"/>
+    /// (KOI1420 guarantees it by emit time). No target prefix: the grammar admits <c>publish</c> in a
+    /// command body only, so the target is always <c>self</c>.
+    /// <para>Resolution is CONTEXT-AWARE, exactly as <c>EntityBehaviorValidator.ValidatePublish</c>
+    /// resolves it: two contexts may each legally publish a same-named integration event with DIFFERENT
+    /// payloads (R14), and the flat <see cref="ModelIndex"/> view is last-write-wins (#1796 review).</para>
+    /// </summary>
+    private string BuildPublishStatement(PublishClause publish, PythonExpressionTranslator translator, ModelIndex index)
+    {
+        if (!index.TryGetDecl(translator.Context, publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
+        {
+            return $"# unknown integration event '{publish.EventName}'";
+        }
+
+        var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var ctorFields = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames)).ToList();
+        var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+
+        var args = ctorFields
+            .Where(f => argByField.ContainsKey(f.Name))
+            .Select(f =>
+            {
+                var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(f.Name));
+                var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
+                return $"{field}={translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum)}";
+            });
+
+        var eventName = PythonNaming.ToPascalCase(ev.Name);
+        return $"self._integration_events.append({eventName}({string.Join(", ", args)}))";
     }
 
     // ----------------------------------------------------------------------
