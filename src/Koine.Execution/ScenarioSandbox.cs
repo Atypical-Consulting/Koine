@@ -580,10 +580,11 @@ internal static class ScenarioSandbox
         IsResourceCeilingBreach(failure) ? HeapCeilingNote() : null;
 
     /// <summary>How many <see cref="Exception.InnerException"/>/<see cref="AggregateException"/> hops
-    /// <see cref="IsResourceCeilingBreach(Exception)"/> will follow. The deepest real shape observed
-    /// (#1858) is two (<c>TargetInvocationException</c> → <c>TypeInitializationException</c> →
-    /// <see cref="OutOfMemoryException"/>), so 8 is ample headroom without letting a pathological or
-    /// cyclic chain spin unbounded.</summary>
+    /// <see cref="IsResourceCeilingBreach(Exception)"/> will follow. The shape actually observed against
+    /// the real child (#1858) is one hop — <c>TypeInitializationException</c> →
+    /// <see cref="OutOfMemoryException"/> — but a reflective invoke can add a
+    /// <c>TargetInvocationException</c> on top, so 8 is ample headroom for that and any other wrapper
+    /// without letting a pathological or cyclic chain spin unbounded.</summary>
     private const int MaxExceptionChainDepth = 8;
 
     /// <summary>
