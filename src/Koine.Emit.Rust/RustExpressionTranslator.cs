@@ -1298,9 +1298,29 @@ internal sealed class RustExpressionTranslator
         }
     }
 
-    /// <summary>The escaped Rust lambda parameter name for a collection-op call.</summary>
-    private static string LambdaParam(CallExpr call) =>
-        call.Args is [LambdaExpr lambda] ? RustNaming.Field(lambda.Parameter) : "_x";
+    /// <summary>
+    /// The Rust closure parameter PATTERN for a collection-predicate call (<c>all</c>/<c>any</c>/
+    /// <c>none</c>): a bare escaped name when the element type is not <c>Copy</c> (left bound to the
+    /// <c>&amp;T</c> reference <c>.iter()</c> yields — member/accessor calls in the body already resolve
+    /// through Rust's auto-ref/deref regardless), or a <c>&amp;name</c> deref pattern when it IS
+    /// <c>Copy</c> (#1801) — binding the parameter BY VALUE so a body comparison against a bare value
+    /// (e.g. an enum member, <c>k != Kind::Idle</c>) type-checks the same way it does on every other
+    /// by-value-binding target, without threading a "by-ref binder" bit through
+    /// <see cref="WriteLambdaBody"/> or every comparison call site. A non-<c>Copy</c> element (a value
+    /// object) must NOT take this pattern — deref-binding it would try to move it out of the reference
+    /// <c>.iter()</c> yields (E0507).
+    /// </summary>
+    private string LambdaParam(CallExpr call)
+    {
+        if (call.Args is not [LambdaExpr lambda])
+        {
+            return "_x";
+        }
+
+        var name = RustNaming.Field(lambda.Parameter);
+        TypeRef? element = TypeResolver.ElementOf(_resolver.Infer(call.Target, EffectiveScope()));
+        return element is { } el && _typeMapper.IsCopy(el) ? "&" + name : name;
+    }
 
     /// <summary>Writes a predicate lambda body with its parameter pushed as a local (element type).</summary>
     private void WriteLambdaBody(CallExpr call, StringBuilder sb)
