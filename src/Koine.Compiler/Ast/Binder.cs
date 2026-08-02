@@ -210,7 +210,7 @@ internal sealed class Binder : KoineSyntaxVisitor
     private TypeScope BuildReceiverScope()
     {
         IReadOnlyList<Member> members =
-            _enclosingTypeName is not null && _index.TryGetDecl(_enclosingTypeName, out TypeDecl decl)
+            _enclosingTypeName is not null && _index.TryGetDecl(_enclosingContextName, _enclosingTypeName, out TypeDecl decl)
                 ? decl.MembersOf()
                 : Array.Empty<Member>();
 
