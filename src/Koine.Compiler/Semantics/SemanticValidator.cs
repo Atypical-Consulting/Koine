@@ -1159,7 +1159,20 @@ public sealed class SemanticValidator
                     $"policy '{policy.Name}' is declared more than once", policy.Span));
             }
 
-            EventDecl? ev = index.TryGetDecl(policy.EventName, out TypeDecl ed) && ed is EventDecl e ? e : null;
+            // Resolved CONTEXT-AWARE (#1849): two contexts may each legally declare a same-named
+            // domain event with DIFFERENT payloads (R13.2/R14), and ModelIndex's flat view is
+            // last-declaration-wins — so resolving without a context checked this policy's reaction
+            // arguments against whichever `Shipped` happened to be indexed last, making a legal
+            // model's legality depend on the SOURCE ORDER of its contexts.
+            //
+            // This is half of a contract: every emitter resolves a policy's trigger identically, via
+            // the same `TryGetDecl(context, …)` overload (see the lockstep guard in
+            // PolicyCrossContextResolutionTests). #1844 fixed the same defect one construct over for
+            // `emit`; #1816 (implementing #1796) hit the mirror-image hazard on `publish`, where a
+            // context-aware validator over flat emitters type-checked a legal model and then built
+            // its payload from another context's same-named declaration. Moving one half without the
+            // other re-opens exactly that hole.
+            EventDecl? ev = index.TryGetDecl(ctx.Name, policy.EventName, out TypeDecl ed) && ed is EventDecl e ? e : null;
             if (ev is null)
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyUnknownEvent,
