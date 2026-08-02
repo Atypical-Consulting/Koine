@@ -2483,6 +2483,7 @@ public class PythonConformanceTests
         product.ShouldContain("self.amount = d");
         product.ShouldContain("self.label = t");
         product.ShouldNotContain("Decimal(d)");
+        product.ShouldNotContain("Decimal(t)");
 
         AssertStrictlyTypeChecks(result.Files);
     }
