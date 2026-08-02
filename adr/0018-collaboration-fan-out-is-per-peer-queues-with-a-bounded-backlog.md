@@ -113,6 +113,12 @@ the window where a delivery addressed to a just-joined member found no writer an
   frame relies on to precede every delivery. It also means teardown has to *wait* for a flush it used
   to get for free, which is a new ordering hazard rather than a removed one: anything that hangs up on
   a peer must first give what it just queued a chance to leave.
-* **The tests that prove this cost real seconds.** Wedging a socket means filling a kernel buffer, and
-  tripping a write deadline means waiting for it. Two tests dominate the Rust suite's runtime as a
-  result; the alternative was asserting the shape of the code rather than the behaviour.
+* **The send path had to become injectable to be testable.** `Outbound` is generic over its writer,
+  which is one more type parameter than production needs — production only ever has
+  `NoiseWriter<TcpStream>`. It is there because the realistic test, a real peer that stops reading, is
+  not portable: how much a loopback connection absorbs before it blocks is a platform property, and
+  Windows CI swallowed tens of megabytes without ever wedging. Blocking the writer directly is the
+  same condition, deterministically and in milliseconds.
+* **`WRITE_TIMEOUT` itself is not covered by a behavioural test**, for the same reason — provoking it
+  means filling an OS socket buffer first. What is covered is that it is armed on both halves of every
+  connection; that tripping it fails the write is `std`'s contract, not this module's.
