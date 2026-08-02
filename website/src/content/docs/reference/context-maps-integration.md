@@ -428,7 +428,13 @@ publishClause
 ```
 
 The payload grammar is `emit`'s, so the same `field: expression` pairs apply, evaluated in the
-same scope and at the same point in the body:
+same scope and at the same point in the body. A `publish` argument also participates in the
+command's [evaluate-the-result-once rule](/Koine/reference/commands-events-state/#1133-returning-a-value):
+when the command's `result` expression is a *whole* one of these arguments, every code target binds it
+to a single `__result` local, so a `publish`, a sibling `emit` of the same expression, and the returned
+value all carry the identical value — they never re-read a non-deterministic expression such as `now`.
+(A target that has to convert the value at one of those sites wraps the conversion around the local, so
+the single evaluation survives; an argument that merely *contains* the result is never rewritten.)
 
 ```koine
 command place {

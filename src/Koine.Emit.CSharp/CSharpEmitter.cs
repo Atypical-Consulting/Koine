@@ -1664,9 +1664,9 @@ public sealed partial class CSharpEmitter : IEmitter
         // as locals, members as properties) so it can reference parameters, `id`, and
         // just-assigned fields. If the same value also appears as a WHOLE emit argument,
         // hoist it into a single `var __result` so it is computed once (single source of
-        // truth). The match is per-argument and exact — not a substring of the rendered
-        // statement — so a sibling argument sharing a prefix (e.g. `TaxRate` vs a `Tax`
-        // result) is left untouched.
+        // truth). The whole-argument rule is <see cref="ResultHoist.ShouldSubstitute"/>'s —
+        // exact, never a substring of the rendered statement — so a sibling argument sharing
+        // a prefix (e.g. `TaxRate` vs a `Tax` result) is left untouched.
         string? resultExpr = result is null ? null
             : translator.TranslateTopLevel(
                 result.Value, CSharpExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name);
@@ -1704,7 +1704,8 @@ public sealed partial class CSharpEmitter : IEmitter
         if (hoistResult)
         {
             sb.Append('\n');
-            sb.Append(Indent).Append(Indent).Append("var __result = ").Append(resultExpr).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append("var ").Append(ResultHoist.LocalName)
+              .Append(" = ").Append(resultExpr).Append(";\n");
         }
 
         // 5. Record events (only reached if preconditions + re-check pass): the intra-aggregate
@@ -1735,7 +1736,7 @@ public sealed partial class CSharpEmitter : IEmitter
         {
             sb.Append('\n');
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(hoistResult ? "__result" : resultExpr).Append(";\n");
+              .Append(hoistResult ? ResultHoist.LocalName : resultExpr).Append(";\n");
         }
 
         sb.Append(Indent).Append("}\n");
@@ -2000,7 +2001,7 @@ public sealed partial class CSharpEmitter : IEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        bool hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
@@ -2017,15 +2018,10 @@ public sealed partial class CSharpEmitter : IEmitter
             var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
-            {
-                hoisted = true;
-                return "__result";
-            }
-            return rendered;
-        }).ToList();
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
-        return ($"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoisted);
+        return ($"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoist.Hoisted);
     }
 
     /// <summary>
@@ -2064,7 +2060,7 @@ public sealed partial class CSharpEmitter : IEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        bool hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
@@ -2081,16 +2077,10 @@ public sealed partial class CSharpEmitter : IEmitter
             var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
-            {
-                hoisted = true;
-                return "__result";
-            }
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
-            return rendered;
-        }).ToList();
-
-        return ($"_integrationEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoisted);
+        return ($"_integrationEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoist.Hoisted);
     }
 
     /// <summary>

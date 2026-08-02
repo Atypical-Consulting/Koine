@@ -192,14 +192,24 @@ public sealed partial class PythonEmitter
               .Append(" = ").Append(value).Append('\n');
         }
 
-        // Translate the emit payloads and the result while parameters are still in scope (their
-        // payloads may reference parameters); they are written AFTER the re-check.
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "self.")).ToList();
-        // Publish payloads translate in the SAME scope, for the same reason (R19).
-        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index)).ToList();
+        // Translate the result FIRST, in the same scope as the emit payloads (parameters as locals,
+        // members as `self.*`), so the statement builders can substitute it. If the same value is
+        // also a WHOLE payload argument it is hoisted into a single `__result` computed once —
+        // mirroring the C#/TS emitters. The whole-argument rule is
+        // <see cref="ResultHoist.ShouldSubstitute"/>'s — exact, never a substring — so a sibling
+        // argument that merely shares a prefix (`self.tax_rate` vs a `self.tax` result) is intact.
         string? resultExpr = result is not null
             ? translator.Translate(result.Value, PythonExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
+
+        // The emit payloads translate while parameters are still in scope (they may reference
+        // parameters); they are written AFTER the re-check.
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "self.", resultExpr)).ToList();
+        // Publish payloads translate in the SAME scope, for the same reason (R19), and join the SAME
+        // `__result` hoist: a non-deterministic expression such as `now` must be evaluated ONCE per
+        // command, so an `emit` and a `publish` of it record the identical instant.
+        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index, resultExpr)).ToList();
+        var hoistResult = emitStatements.Any(s => s.Hoisted) || publishStatements.Any(s => s.Hoisted);
 
         // Parameters leave scope BEFORE the re-check: entity invariants reference only persisted
         // state, which must render as `self.*`, not a parameter that shares a field's name.
@@ -215,23 +225,32 @@ public sealed partial class PythonEmitter
             sb.Append(Indent).Append(Indent).Append("self.__post_init__()\n");
         }
 
-        // 4. Record events (only reached once preconditions + re-check pass): the intra-aggregate
+        // 4. Compute the hoisted result (once) BEFORE the events so a payload can carry the same
+        //    value without recomputing it — but AFTER the re-check, so an invalid post-state still
+        //    throws before anything is computed or recorded.
+        if (hoistResult)
+        {
+            sb.Append(Indent).Append(Indent).Append(ResultHoist.LocalName).Append(" = ").Append(resultExpr).Append('\n');
+        }
+
+        // 5. Record events (only reached once preconditions + re-check pass): the intra-aggregate
         //    domain events first, then the integration events leaving the context (R19), so the
         //    recording order reads inside-out.
         foreach (var stmt in emitStatements)
         {
-            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+            sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
         }
 
         foreach (var stmt in publishStatements)
         {
-            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
+            sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
         }
 
-        // 5. Return the result value (the terminal statement). An effect-only command has no return.
+        // 6. Return the result value (the terminal statement). An effect-only command has no return.
         if (resultExpr is not null)
         {
-            sb.Append(Indent).Append(Indent).Append("return ").Append(resultExpr).Append('\n');
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(hoistResult ? ResultHoist.LocalName : resultExpr).Append('\n');
         }
     }
 
@@ -466,7 +485,8 @@ public sealed partial class PythonEmitter
         sb.Append(Indent).Append(Indent).Append("instance = cls(").Append(string.Join(", ", args)).Append(")\n");
 
         // 4. Record creation events (payloads may reference `id` and parameters) onto the instance.
-        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.")).ToList();
+        // A factory has no `result` clause, so no hoist ever applies here — take the text only.
+        var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "instance.").Text).ToList();
 
         foreach (Param p in factory.Parameters)
         {
@@ -516,31 +536,45 @@ public sealed partial class PythonEmitter
     /// statement for an <c>emit</c> clause. Arguments are keyword-named per the event's emitted field
     /// names (so positional ordering is irrelevant) and translated in the surrounding scope (params as
     /// locals, members as <c>self.*</c>). The Python analogue of the C#/TS <c>BuildEmitStatement</c>.
+    /// <para>When <paramref name="hoistedResultExpr"/> is supplied, an argument whose WHOLE rendered
+    /// form equals it becomes the <see cref="ResultHoist.LocalName"/> local and <c>Hoisted</c> is
+    /// returned true, so the caller knows to bind it (#1838). Because Python emits KEYWORD arguments,
+    /// the match runs against the VALUE half alone — comparing the <c>field=value</c> composite would
+    /// never match and would silently disable the hoist — and the substitution keeps the keyword:
+    /// <c>at=__result</c>.</para>
     /// </summary>
-    private string BuildEmitStatement(EmitClause emit, PythonExpressionTranslator translator, ModelIndex index, string targetPrefix)
+    private (string Text, bool Hoisted) BuildEmitStatement(
+        EmitClause emit, PythonExpressionTranslator translator, ModelIndex index, string targetPrefix,
+        string? hoistedResultExpr = null)
     {
         // Context-aware, in lockstep with `ValidateEmit` (#1834) — see BuildPublishStatement below:
         // the flat ModelIndex view is last-write-wins across same-named events in sibling contexts.
         if (!index.TryGetDecl(translator.Context, emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
-            return $"# unknown event '{emit.EventName}'";
+            return ($"# unknown event '{emit.EventName}'", false);
         }
 
         var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorFields = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames)).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
             {
                 var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(f.Name));
                 var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
-                return $"{field}={translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum)}";
-            });
+                var rendered = translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum);
+                // Substitute the hoisted local only when the WHOLE value is the result expression; a
+                // substring match (a sibling argument sharing a prefix) must NOT be rewritten. The
+                // comparison is on the VALUE half alone — the emitted `field=value` pair never matches.
+                return hoist.Substitute(rendered, $"{field}={rendered}", $"{field}={ResultHoist.LocalName}");
+            })
+            .ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = PythonNaming.ToPascalCase(ev.Name);
-        return $"{targetPrefix}_domain_events.append({eventName}({string.Join(", ", args)}))";
+        return ($"{targetPrefix}_domain_events.append({eventName}({string.Join(", ", args)}))", hoist.Hoisted);
     }
 
     /// <summary>
@@ -552,29 +586,41 @@ public sealed partial class PythonEmitter
     /// <para>Resolution is CONTEXT-AWARE, exactly as <c>EntityBehaviorValidator.ValidatePublish</c>
     /// resolves it: two contexts may each legally publish a same-named integration event with DIFFERENT
     /// payloads (R14), and the flat <see cref="ModelIndex"/> view is last-write-wins (#1796 review).</para>
+    /// <para>A publish argument takes part in the SAME hoist as an emit one (#1838): a
+    /// non-deterministic expression rendered inline here would be a SECOND evaluation, so the
+    /// published contract would stop mirroring the domain event it accompanies. Keyword-argument
+    /// caveat as in <see cref="BuildEmitStatement"/>: the match is against the VALUE half only.</para>
     /// </summary>
-    private string BuildPublishStatement(PublishClause publish, PythonExpressionTranslator translator, ModelIndex index)
+    private (string Text, bool Hoisted) BuildPublishStatement(
+        PublishClause publish, PythonExpressionTranslator translator, ModelIndex index,
+        string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(translator.Context, publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
         {
-            return $"# unknown integration event '{publish.EventName}'";
+            return ($"# unknown integration event '{publish.EventName}'", false);
         }
 
         var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorFields = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames)).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
             {
                 var field = PythonNaming.EscapeIdentifier(PythonNaming.ToSnakeCase(f.Name));
                 var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
-                return $"{field}={translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum)}";
-            });
+                var rendered = translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum);
+                // Substitute the hoisted local only when the WHOLE value is the result expression; a
+                // substring match (a sibling argument sharing a prefix) must NOT be rewritten. The
+                // comparison is on the VALUE half alone — the emitted `field=value` pair never matches.
+                return hoist.Substitute(rendered, $"{field}={rendered}", $"{field}={ResultHoist.LocalName}");
+            })
+            .ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = PythonNaming.ToPascalCase(ev.Name);
-        return $"self._integration_events.append({eventName}({string.Join(", ", args)}))";
+        return ($"self._integration_events.append({eventName}({string.Join(", ", args)}))", hoist.Hoisted);
     }
 
     // ----------------------------------------------------------------------
