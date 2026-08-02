@@ -590,7 +590,16 @@ public sealed partial class TypeScriptEmitter
         // rule is <see cref="ResultHoist.ShouldSubstitute"/>'s — exact, not a substring of the
         // rendered statement — so a sibling argument that merely shares a prefix (e.g. `this.taxRate`
         // vs a `this.tax` result) is left intact.
-        string? resultExpr = result is not null ? translator.Translate(result.Value, cmd.ReturnType?.Name) : null;
+        //
+        // Widen the result expression toward the command's declared return type (#1511) — an
+        // Int-inferred `result` against a `: Decimal` return would otherwise emit an uncoerced
+        // `return this.tax;` that tsc --strict rejects. Reuses the same TranslateReconciled decision
+        // the factory-ctor-arg (#1732) and event-payload (below, #1875) call sites already apply.
+        string? resultExpr = result is not null
+            ? cmd.ReturnType is { } returnDecl
+                ? translator.TranslateReconciled(result.Value, cmd.ReturnType?.Name, returnDecl)
+                : translator.Translate(result.Value, cmd.ReturnType?.Name)
+            : null;
 
         // Domain events are recorded while parameters are still in scope (their payloads may
         // reference parameters), but rendered AFTER the post-mutation invariant re-check so an
@@ -934,7 +943,10 @@ public sealed partial class TypeScriptEmitter
                 return "undefined as never"; // validator guarantees presence; defensive
             }
 
-            var rendered = translator.Translate(value, EnumExpected(f, index, context));
+            // Widen a payload argument toward its event member's declared type (#1511) — an
+            // Int-inferred argument against a Decimal-declared field would otherwise emit an
+            // uncoerced value that tsc --strict rejects (#1875).
+            var rendered = translator.TranslateReconciled(value, EnumExpected(f, index, context), f.Type);
             // Substitute the hoisted local only on a WHOLE-argument match; a sibling argument that
             // merely shares a prefix must NOT be rewritten.
             return hoist.Substitute(rendered, ResultHoist.LocalName);
@@ -976,7 +988,10 @@ public sealed partial class TypeScriptEmitter
                 return "undefined as never"; // validator guarantees presence; defensive
             }
 
-            var rendered = translator.Translate(value, EnumExpected(f, index, context));
+            // Widen a payload argument toward its event member's declared type (#1511) — an
+            // Int-inferred argument against a Decimal-declared field would otherwise emit an
+            // uncoerced value that tsc --strict rejects (#1875).
+            var rendered = translator.TranslateReconciled(value, EnumExpected(f, index, context), f.Type);
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
             return hoist.Substitute(rendered, ResultHoist.LocalName);
