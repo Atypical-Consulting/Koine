@@ -1033,6 +1033,114 @@ public class CrossEmitterConformanceTests
         TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
     }
 
+    /// <summary>
+    /// Issue #1889 — the SAME guard again, pointed at a read-model PROJECTED field (<c>total: Decimal =
+    /// lines</c>, projected from an <c>Int</c>-declared source member): a value copied out of a source
+    /// aggregate into a flat DTO, unlike the transition (#1887, straight into a mutable slot) or the
+    /// derived-member body (#1888, a getter over the SAME instance) — the read model's own new instance is
+    /// built from a DIFFERENT instance (<c>src</c>) entirely. Every sibling site already reconciled while
+    /// this one did not, so an <c>Int</c>-projected value on a <c>Decimal</c>-declared field emitted an
+    /// unwidened integer on every reconciled target at once.
+    /// <para><b>Only SIX targets</b> — Kotlin has no read-model emitter at all (unaffected, not merely
+    /// already-correct), so this guard omits it rather than asserting a no-op. C# needs no widening
+    /// (<c>src.Lines</c> is an <c>int</c> and C# has a built-in implicit <c>int</c>-to-<c>decimal</c>
+    /// conversion — verified by the Roslyn compile below, not assumed); Rust was fixed at #1378 (the
+    /// reference implementation for THIS call site); TypeScript, Python, PHP and Java are fixed here.</para>
+    /// </summary>
+    [Fact]
+    public void Readmodel_projected_field_int_decimal_reconciliation_agrees_across_reconciled_targets()
+    {
+        const string koi =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      lines: Int\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow from Order {\n" +
+            "    id\n" +
+            "    total: Decimal = lines\n" +
+            "  }\n" +
+            "}\n";
+
+        // C#: always runs and always asserts — genuinely decimal-transparent, no widening idiom to pin.
+        CompileResult cs = new KoineCompiler().Compile(koi, new CSharpEmitter());
+        cs.Success.ShouldBeTrue("C# emit failed:\n" + string.Join("\n", cs.Diagnostics.Select(d => d.ToString())));
+        var (asm, csErrors) = TestSupport.Compile(cs.Files.ToList());
+        (asm is not null).ShouldBeTrue("C# read-model projection failed to compile:\n" + string.Join("\n", csErrors));
+
+        // Rust: emit + cargo check, asserted when the toolchain is present (#1378's idiom).
+        CompileResult rs = new KoineCompiler().Compile(koi, new RustEmitter());
+        rs.Success.ShouldBeTrue("Rust emit failed:\n" + string.Join("\n", rs.Diagnostics.Select(d => d.ToString())));
+        rs.Files.Single(f => f.RelativePath.EndsWith("sales.rs", StringComparison.Ordinal)).Contents
+            .ShouldContain("total: Decimal::from(src.lines()),");
+        TestSupport.RustCheck rsCheck = TestSupport.CompileRust(rs.Files);
+        if (rsCheck.ToolchainAvailable)
+        {
+            rsCheck.Ok.ShouldBeTrue("Rust read-model projection should compile under cargo check:\n" + string.Join("\n", rsCheck.Errors));
+        }
+
+        // Java: emit + javac, asserted when the toolchain is present (#1889's widening idiom).
+        CompileResult java = new KoineCompiler().Compile(koi, new JavaEmitter());
+        java.Success.ShouldBeTrue("Java emit failed:\n" + string.Join("\n", java.Diagnostics.Select(d => d.ToString())));
+        java.Files.Single(f => f.RelativePath.EndsWith("OrderRow.java", StringComparison.Ordinal)).Contents
+            .ShouldContain("java.math.BigDecimal.valueOf(src.lines())");
+        TestSupport.JavaCheck javaCheck = TestSupport.CompileJava(java.Files);
+        if (javaCheck.ToolchainAvailable)
+        {
+            javaCheck.Ok.ShouldBeTrue("Java read-model projection should compile under javac:\n" + string.Join("\n", javaCheck.Errors));
+        }
+
+        // TypeScript: emit + tsc --strict, asserted when the toolchain is present (#1889's idiom).
+        CompileResult ts = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
+        ts.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", ts.Diagnostics.Select(d => d.ToString())));
+        ts.Files.Single(f => f.RelativePath.EndsWith("OrderRow.ts", StringComparison.Ordinal)).Contents
+            .ShouldContain("total: Decimal.fromInt(src.lines),");
+        TestSupport.TypeScriptCheck tsCheck = TestSupport.TypeCheckTypeScript(ts.Files);
+        if (tsCheck.ToolchainAvailable)
+        {
+            tsCheck.Ok.ShouldBeTrue("TypeScript read-model projection should type-check under tsc --strict:\n" + string.Join("\n", tsCheck.Errors));
+        }
+
+        // Python: emit + mypy --strict, asserted when the toolchain is present (#1889's idiom).
+        CompileResult py = new KoineCompiler().Compile(koi, new PythonEmitter());
+        py.Success.ShouldBeTrue("Python emit failed:\n" + string.Join("\n", py.Diagnostics.Select(d => d.ToString())));
+        py.Files.Single(f => f.RelativePath.EndsWith("order_row.py", StringComparison.Ordinal)).Contents
+            .ShouldContain("total=Decimal(src.lines),");
+        TestSupport.PythonCheck pyCheck = TestSupport.TypeCheckPython(py.Files);
+        if (pyCheck.ToolchainAvailable)
+        {
+            pyCheck.Ok.ShouldBeTrue("Python read-model projection should type-check under mypy --strict:\n" + string.Join("\n", pyCheck.Errors));
+        }
+
+        // PHP: emit + php -l + phpstan --level max (#1889's idiom).
+        CompileResult php = new KoineCompiler().Compile(koi, new PhpEmitter());
+        php.Success.ShouldBeTrue("PHP emit failed:\n" + string.Join("\n", php.Diagnostics.Select(d => d.ToString())));
+        php.Files.Single(f => f.RelativePath.EndsWith("OrderRow.php", StringComparison.Ordinal)).Contents
+            .ShouldContain(@"(new \Koine\Runtime\Decimal($src->lines)),");
+        TestSupport.PhpCheck phpSyntax = TestSupport.SyntaxCheckPhp(php.Files);
+        TestSupport.PhpCheck phpCheck = TestSupport.TypeCheckPhp(php.Files);
+        if (phpSyntax.ToolchainAvailable)
+        {
+            phpSyntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", phpSyntax.Errors));
+        }
+        if (phpCheck.ToolchainAvailable)
+        {
+            phpCheck.Ok.ShouldBeTrue("PHP read-model projection should type-check under phpstan --level max:\n" + string.Join("\n", phpCheck.Errors));
+        }
+
+        // Same trailing gate as the sibling guards above: funnel every absent toolchain through
+        // RequireOrSkip AFTER the assertions so a missing one reports Skipped — or, under
+        // KOINE_REQUIRE_CONFORMANCE, Failed — instead of silently passing.
+        TestSupport.RequireOrSkip(rsCheck.ToolchainAvailable, NoRustToolchainNotice);
+        TestSupport.RequireOrSkip(javaCheck.ToolchainAvailable, NoJavaToolchainNotice);
+        TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
+        TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
+        TestSupport.RequireOrSkip(phpSyntax.ToolchainAvailable, NoPhpInterpreterNotice);
+        TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
+    }
+
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";
 
     // ---- C# side: Roslyn compile + reflective invoke --------------------------------------------
