@@ -457,7 +457,10 @@ public sealed partial class RustEmitter
     private static string? BuildEmitExpression(
         RustEmitContext emit, EmitClause emitClause,
         RustExpressionTranslator translator, RustTypeMapper typeMapper) =>
-        BuildEventExpression(emit, emitClause.EventName, emitClause.Args, translator, typeMapper);
+        // Passes the context for the same reason `publish` does (#1834): `ValidateEmit` resolves the
+        // event name context-aware, so this must too or it builds the payload from another context's
+        // same-named declaration. The two halves are one contract.
+        BuildEventExpression(emit, emitClause.EventName, emitClause.Args, translator, typeMapper, translator.Context);
 
     /// <summary>
     /// The name/payload-only core of <see cref="BuildEmitExpression"/>, shared verbatim with a
@@ -494,7 +497,12 @@ public sealed partial class RustEmitter
                 return "Default::default()"; // validator guarantees presence; defensive
             }
 
-            var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+            // Context-aware, like the name lookup above (#1834): an explicit `Context.Type` qualifier
+            // wins, else the enclosing context — otherwise a same-named enum in a sibling context
+            // decides whether this payload argument is rendered as an enum member.
+            var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum
+                ? m.Type.Name
+                : null;
             var owned = translator.TranslateOwned(value, expectedEnum);
 
             // Widen an Int-inferred argument toward a Decimal-declared payload field (#1511) — the

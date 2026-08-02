@@ -181,4 +181,32 @@ public class EmitCrossContextResolutionTests
         EmitFile(source, new TypeScriptEmitter(), "/Order.ts")
             .ShouldContain("this._domainEvents.push(new Shipped(this.code));");
     }
+
+    /// <summary>
+    /// The lockstep guard: every backend builds the <c>emit</c> payload from <b>Ordering's</b>
+    /// one-field <c>Shipped</c>, in both context orders. A half-conversion — the validator alone, or
+    /// one emitter alone — fails here loudly rather than silently emitting another context's payload.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Every_backend_resolves_a_same_named_emitted_event_in_its_own_context(bool warehouseFirst)
+    {
+        var source = warehouseFirst ? WarehouseFirstFixture : OrderingFirstFixture;
+
+        EmitFile(source, new CSharpEmitter(), "/Order.cs")
+            .ShouldContain("_domainEvents.Add(new Shipped(Code));");
+        EmitFile(source, new TypeScriptEmitter(), "/Order.ts")
+            .ShouldContain("this._domainEvents.push(new Shipped(this.code));");
+        EmitFile(source, new PythonEmitter(), "/order.py")
+            .ShouldContain("self._domain_events.append(Shipped(order_id=self.code))");
+        EmitFile(source, new PhpEmitter(), "/Order.php")
+            .ShouldContain("$this->domainEvents[] = new Shipped($this->code);");
+        EmitFile(source, new RustEmitter(), "/ordering.rs")
+            .ShouldContain("self.events.push(DomainEvent::Shipped(Shipped::new(self.code.to_string())));");
+        EmitFile(source, new JavaEmitter(), "/Order.java")
+            .ShouldContain("this.domainEvents.add(new Shipped(this.code));");
+        EmitFile(source, new KotlinEmitter(), "/Order.kt")
+            .ShouldContain("this._domainEvents.add(Shipped(this.code))");
+    }
 }
