@@ -1655,7 +1655,7 @@ internal sealed class RustExpressionTranslator
 
     /// <summary>True when a type resolves to a <c>quantity</c> value object (mirrors the emitter-side <c>vo.IsQuantity</c> branch).</summary>
     private bool IsQuantityType(TypeRef? type) =>
-        type is not null && _index.TryGetDecl(type.Name, out TypeDecl decl) && decl is ValueObjectDecl { IsQuantity: true };
+        type is not null && _index.TryGetDecl(Context, type.Name, out TypeDecl decl) && decl is ValueObjectDecl { IsQuantity: true };
 
     private static string RawRegexLiteral(string pattern)
     {
