@@ -101,7 +101,12 @@ public sealed partial class PhpEmitter
                 fieldType = f.Type;
                 docContext = contextName;
                 var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? translator.Context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
-                rhs = translator.Translate(f.Projection, PhpExpressionTranslator.NameMode.Property, expectedEnum);
+                // A derived read-model field is reconciled against ITS OWN declared type (#1889),
+                // through the same TranslateReconciled every sibling call site in this family already
+                // uses. An Int-projected value on a Decimal-declared field previously emitted a bare
+                // `$src->lines` into a `\Koine\Runtime\Decimal` property — a real `phpstan analyse
+                // --level max` error. Rust closed this call site at #1378.
+                rhs = translator.TranslateReconciled(f.Projection, PhpExpressionTranslator.NameMode.Property, expectedEnum, f.Type!);
             }
 
             fields.Add((phpType, prop, rhs, fieldType, docContext));
