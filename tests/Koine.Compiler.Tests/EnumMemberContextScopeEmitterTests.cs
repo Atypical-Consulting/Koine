@@ -209,6 +209,26 @@ public class EnumMemberContextScopeEmitterTests
     }
 
     /// <summary>
+    /// Issue #1799's own docs tracked the Rust leg of this exact model separately rather than fixing or
+    /// masking it there: Rust rejected <c>kinds.iter().all(|k| k != …)</c> with <c>E0277</c> for a
+    /// SAME-context enum too — a pre-existing, unrelated lambda-binder defect (#1801), now fixed. This
+    /// closes that gap: the cross-context owner qualification composes cleanly with the by-value binder.
+    /// </summary>
+    [Fact]
+    public void Rust_module_qualifies_a_bare_enum_member_inside_a_lambda()
+    {
+        var result = new KoineCompiler().Compile(CrossContextQualifiedEnumInLambda, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var item = result.Files.Single(f => f.RelativePath.EndsWith("c.rs", StringComparison.Ordinal)).Contents;
+        item.ShouldContain("kinds.iter().all(|&k| k != crate::other::Kind::Idle)");
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable cargo toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
     /// Issue #1802 — the sibling of <see cref="CrossContextQualifiedEnum"/>: the modeller writes the
     /// enum-TYPE qualifier explicitly (<c>Kind.Active</c>) rather than leaving it bare. #1799 fixed the
     /// bare-member branch, which resolves an owner via <c>ModelIndex.EnumsDeclaring(context, member)</c>;

@@ -4678,4 +4678,102 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1801 (the reproducer): a collection quantifier's lambda binder is emitted by reference
+    /// (<c>.iter().all(|k| ...)</c>, matching what <c>Vec::iter()</c> yields) while the body renders a
+    /// comparison against a bare enum member (<c>k != Kind::Idle</c>) as if <c>k</c> were owned — Rust
+    /// has no <c>PartialEq&lt;Kind&gt;</c> impl for <c>&amp;Kind</c>, so this is a real <c>cargo check</c>
+    /// <c>E0277</c>. A fieldless smart enum is <c>Copy</c>
+    /// (<see cref="RustTypeMapper.IsCopy"/>), so the binder must deref-bind by value
+    /// (<c>.all(|&amp;k| ...)</c>) instead.
+    /// </summary>
+    [Fact]
+    public void Collection_quantifier_lambda_binder_of_a_copy_enum_element_binds_by_value()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  enum Kind { Active, Idle }\n" +
+            "  entity Item identified by ItemId {\n" +
+            "    kinds: List<Kind>\n" +
+            "    invariant kinds.all(k => k != Idle) \"same-context enum member inside a lambda\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the binder must deref-bind (`|&k|`), not bind by
+        // reference (`|k|`), so the body's `k != Kind::Idle` compares an owned `Kind` on both sides.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("kinds.iter().all(|&k| k != Kind::Idle)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1801's non-<c>Copy</c> sibling: a <c>List&lt;T&gt;</c> element that is a value object
+    /// (<c>LineItem</c>, not <c>Copy</c>) must keep the by-reference binder unchanged — deref-binding a
+    /// non-<c>Copy</c> element would try to move it out of the <c>&amp;LineItem</c> <c>.iter()</c> yields,
+    /// a real <c>cargo check</c> <c>E0507</c>. The body's <c>i.amount()</c> accessor call already
+    /// resolves correctly through Rust's auto-ref/deref regardless of whether <c>i</c> is bound by
+    /// reference or by value.
+    /// </summary>
+    [Fact]
+    public void Collection_quantifier_lambda_binder_of_a_non_copy_element_stays_by_reference()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value LineItem {\n" +
+            "    amount: Decimal\n" +
+            "  }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    items: List<LineItem>\n" +
+            "    invariant items.all(i => i.amount >= 0) \"no negative line item\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the binder must stay a bare `|i|`, not `|&i|`.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("items.iter().all(|i| i.amount() >= Decimal::from(0i64))");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1801's generalization beyond the enum reproducer: <c>IsCopy</c> also classifies the
+    /// scalar primitives (<c>Int</c>/<c>Bool</c>/<c>Decimal</c>/<c>Instant</c>) as <c>Copy</c>, so a
+    /// quantifier over a <c>List&lt;Int&gt;</c> takes the same by-value binder — and, unlike the enum
+    /// case, must be pinned against a REAL <c>cargo check</c> here, not just a shape assertion (the only
+    /// other scalar-binder coverage is a shape-only pin in
+    /// <c>RustEmitterTests.Lambda_parameter_shadowing_an_outer_binding_restores_the_outer_binding_after_the_lambda_pop</c>).
+    /// </summary>
+    [Fact]
+    public void Collection_quantifier_lambda_binder_of_a_copy_scalar_element_binds_by_value()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Money {\n" +
+            "    amounts: List<Int>\n" +
+            "    invariant amounts.any(n => n > 0) \"needs a positive amount\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("amounts.iter().any(|&n| n > 0)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
