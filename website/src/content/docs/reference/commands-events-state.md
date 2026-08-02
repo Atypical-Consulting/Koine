@@ -183,9 +183,44 @@ command cancel(): OrderId {
 The `result` expression is evaluated over the **post-mutation** state, in the same scope as `emit` payloads, so
 it can reference parameters, `id`, and just-assigned fields. It is the **terminal** statement: the value is only
 returned from a fully-valid, fully-eventful aggregate (after the precondition guards, the post-transition
-invariant re-check, and every `emit`). When the same value is also carried by an event — the *create-and-return-id*
-idiom — Koine hoists it into a single `var __result`, computing it once. A result that no event references is
-returned inline (`return <expr>;`).
+invariant re-check, and every `emit`).
+
+**Evaluated exactly once, on every target.** When the `result` expression is *also* a whole payload argument of an `emit` **or** a `publish` — the
+*create-and-return-id* idiom — Koine **evaluates it exactly once**: it is bound to a single `__result` local
+right after the invariant re-check, and both the recorded event payload and the returned value read that one
+local. This is a guarantee of the language, not of one backend — **all seven code targets** hoist it, each in
+its own binding syntax:
+
+| Target | Binding |
+| --- | --- |
+| C# | `var __result = …;` |
+| TypeScript | `const __result = …;` |
+| Python | `__result = …` |
+| PHP | `$__result = …;` |
+| Rust | `let __result = …;` |
+| Java | `<Type> __result = …;` |
+| Kotlin | `val __result: <Type> = …` |
+
+Java and Kotlin are the two that spell the type out, because a bare `var`/`val` would re-infer a target-typed
+expression against no target at all. It is the **expression's** own type, not the command's declared return
+type — so `command maybeStamp: Instant?` emitting a non-optional `Stamped.at` still binds an `Instant` that
+both the payload constructor and the optional return accept.
+
+Where a target needs a conversion at one of the two sites — Rust's `Some(…)` wrap toward an optional payload
+field, or its widening toward a `Decimal` one — the conversion is applied *around* the local, never folded
+into it: `Some(__result)` in the payload beside a bare `Ok(__result)` at the return is still one evaluation.
+
+It is correctness, not tidiness: a Koine expression need not be pure. `result now` beside
+`emit Closed(at: now)` would, if rendered twice, read the clock at two different instants — so the instant the
+event *records* and the instant the command *returns* would be different facts, and with an `emit` *and* a
+`publish` of the same expression the domain event and the integration event meant to mirror it would disagree
+too.
+
+Two shapes deliberately do **not** hoist: a `result` no payload argument reuses is returned inline
+(`return <expr>;`), and a sibling argument that merely shares the result's prefix (a `taxRate` next to a `tax`
+result) is left alone — the match is per *whole* argument, never a substring. The comparison is made on each
+target's own rendering of the two, so an argument that renders differently from the result for a reason the
+backend cannot bridge is likewise left inline: a missed hoist is safe where a wrong one would not compile.
 
 Rules:
 

@@ -925,6 +925,74 @@ public class KotlinConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1838, the Kotlin half — and the regression its own code review caught. The <c>__result</c>
+    /// hoist introduces a TYPED local declaration, the one construct in the port a textual parity
+    /// assertion cannot vouch for: annotating it with the command's DECLARED RETURN type made
+    /// <c>command maybeStamp: Instant?</c> emit <c>val __result: Instant? = …</c> and then hand it to a
+    /// NON-optional <c>Stamped.at</c> — a real <c>kotlinc</c> "argument type mismatch: actual type is
+    /// 'Instant?', but 'Instant' was expected" on a model that compiled clean before the hoist existed.
+    /// The annotation is the EXPRESSION's own type instead, which both readers accept because Kotlin
+    /// nullability is subtyping: a bare <c>Instant</c> flows into an <c>Instant?</c> payload field AND
+    /// out of an <c>Instant?</c> return.
+    /// <para><c>maybeStamp</c> below is that exact shape, kept in the compiled fixture so the regression
+    /// cannot come back. The other two commands cover the rest of the contract: one local serving an
+    /// <c>emit</c>, a <c>publish</c> AND the return, and a sibling argument that merely shares the
+    /// result's prefix surviving untouched. The <c>kotlinc</c> run is the real assertion; the shape pins
+    /// above it only say what it is checking.</para>
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_into_an_emit_and_a_publish_payload_compiles()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  publishes Settled\n" +
+            "  integration event Settled {\n" +
+            "    at: Instant\n" +
+            "  }\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    event Stamped { at: Instant }\n" +
+            "    event Quoted { amount: Int  rate: Int }\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      tax:     Int = 0\n" +
+            "      taxRate: Int = 0\n" +
+            "      command maybeStamp: Instant? {\n" +
+            "        emit Stamped(at: now)\n" +
+            "        result now\n" +
+            "      }\n" +
+            "      command stamp: Instant {\n" +
+            "        emit Stamped(at: now)\n" +
+            "        publish Settled(at: now)\n" +
+            "        result now\n" +
+            "      }\n" +
+            "      command quote: Int {\n" +
+            "        emit Quoted(amount: tax, rate: taxRate)\n" +
+            "        result tax\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guards (no kotlinc required): the local carries the EXPRESSION's type, never the
+        // optional declared return type, and one binding per command serves every reader.
+        var order = result.Files
+            .Single(f => f.RelativePath.EndsWith("sales/Order.kt", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("val __result: java.time.Instant = java.time.Instant.now()");
+        order.ShouldNotContain("val __result: java.time.Instant? =");
+        order.ShouldContain("this._domainEvents.add(Stamped(__result))");
+        order.ShouldContain("this._integrationEvents.add(Settled(__result))");
+        order.ShouldContain("val __result: Long = this.tax");
+        order.ShouldContain("Quoted(__result, this.taxRate)");
+        order.ShouldNotContain("__resultRate");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Loads every <c>.koi</c> file under a <c>templates/&lt;folder&gt;</c> directory as one model's sources.</summary>
     private static IReadOnlyList<SourceFile>? FindTemplateDir(string folder)
     {
