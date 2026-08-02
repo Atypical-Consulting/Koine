@@ -63,11 +63,18 @@ connection's single `NoiseWriter`. `Hub::dispatch` enqueues under the links mute
 socket while holding it.
 
 The backlog is charged in bytes and capped at `MAX_OUTBOUND_BACKLOG_BYTES`, with an empty queue always
-admitting so that no member is ever dropped for one large update it could have absorbed. A member that
-exceeds it is **disconnected**, not buffered further and not silently starved: its link is dropped,
-which hangs up its socket, which wakes its connection thread into the ordinary `Hub::depart` — so the
-rest of the session receives a `PeerLeave` and the dropped participant's own `read_loop` announces the
-peers it lost.
+admitting so that no member is ever dropped for one large update it could have absorbed. Because that
+rule already guarantees any single legal frame gets through, the cap is not sized against
+`MAX_FRAME_BYTES` — it answers the separate question of *how far behind a member may fall*, and 4 MiB
+is hundreds of kilobyte-sized Yjs updates of slack for someone on bad wifi. A member that exceeds it is
+**disconnected**, not buffered further and not silently starved: its link is dropped, which hangs up its
+socket, which wakes its connection thread into the ordinary `Hub::depart` — so the rest of the session
+receives a `PeerLeave` and the dropped participant's own `read_loop` announces the peers it lost.
+
+Because delivery is now asynchronous, a deliberate teardown gives the writer threads a short, shared
+grace period to put what is already queued on the wire before the sockets are shut down. Without it a
+closing session would routinely hang up on its own goodbye, leaving peers to *infer* the departure from
+a dead connection — the ungraceful fallback, taken on purpose rather than as a fallback.
 
 A write deadline alone was rejected as the whole answer: it caps the stall instead of removing it, so
 the broker would still go deaf for the length of the timeout every time a peer wedges, and it does
@@ -95,13 +102,17 @@ the window where a delivery addressed to a just-joined member found no writer an
   the "std + threads only" property holds — but it is a real increase, not a free one.
 * **A participant can now be disconnected for being slow.** That is a new way to be removed from a
   session, and the cap is a judgement call: too low and a bad minute on wifi ends your session, too
-  high and the memory bound stops meaning much. It is set to `MAX_FRAME_BYTES` and stated as a
-  constant so it can be revisited against real use rather than guessed at twice.
+  high and the memory bound stops meaning much. It is a stated constant so it can be revisited against
+  real use rather than guessed at twice. Multiply it out before changing it — a full session holds
+  `MAX_MEMBERS_PER_SESSION` of these and a relay `MAX_SESSIONS` of those, so at 4 MiB a desktop host
+  risks ~60 MiB and a saturated relay ~480 MiB.
 * **Delivery is now asynchronous to `dispatch`.** A frame that `dispatch` accepted may still fail on
   the wire afterwards, so "enqueued" is not "delivered". Nothing in the protocol depended on the
   stronger reading — the CRDT replica is the source of truth and re-merges on reconnect (ADR 0013) —
   but the ordering guarantee is now "one queue per connection, in order", which is what the admission
-  frame relies on to precede every delivery.
+  frame relies on to precede every delivery. It also means teardown has to *wait* for a flush it used
+  to get for free, which is a new ordering hazard rather than a removed one: anything that hangs up on
+  a peer must first give what it just queued a chance to leave.
 * **The tests that prove this cost real seconds.** Wedging a socket means filling a kernel buffer, and
   tripping a write deadline means waiting for it. Two tests dominate the Rust suite's runtime as a
   result; the alternative was asserting the shape of the code rather than the behaviour.

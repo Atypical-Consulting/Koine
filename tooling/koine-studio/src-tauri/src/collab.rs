@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use crate::noise::PUBLIC_KEY_HEX_LEN;
@@ -684,10 +684,12 @@ pub const MAX_CONNECTIONS: usize = MAX_SESSIONS * MAX_MEMBERS_PER_SESSION + 16;
 /// *unbounded* queue would only trade the stall for a memory exhaustion — the same member, the same
 /// denial of service, a different resource. So the backlog is charged in bytes and capped here.
 ///
-/// The cap is `MAX_FRAME_BYTES` and an empty queue always admits, so any single legal frame fits
-/// whatever its size: nobody is ever dropped for one large update they could have absorbed. Past
-/// that, a member a whole frame's worth of traffic behind is not catching up.
-pub const MAX_OUTBOUND_BACKLOG_BYTES: usize = MAX_FRAME_BYTES;
+/// An empty queue always admits, whatever the size, so this is not the "largest frame" bound —
+/// nobody is ever dropped for one large update they could have absorbed. It is the "how far behind
+/// may you fall" bound, and a Yjs update is kilobytes, so 4 MiB is hundreds of edits of slack for a
+/// peer on bad wifi. Multiply it out before changing it: a full session is
+/// `MAX_MEMBERS_PER_SESSION` of these, and a relay `MAX_SESSIONS` of those.
+pub const MAX_OUTBOUND_BACKLOG_BYTES: usize = 4 * 1024 * 1024;
 
 /// Where the frames addressed to *this* machine's participant go — Tauri events in the app, a
 /// channel in tests. Keeps this module free of any Tauri dependency.
@@ -779,6 +781,11 @@ impl Outbound {
         }
     }
 
+    /// Whether anything this member was sent is still waiting to go out.
+    fn pending(&self) -> bool {
+        self.queued.load(Ordering::SeqCst) > 0
+    }
+
     /// Queue a frame for this member. Never blocks, and never touches a socket.
     ///
     /// `false` means the member has fallen further behind than `MAX_OUTBOUND_BACKLOG_BYTES` (or its
@@ -801,6 +808,24 @@ impl Outbound {
             return false;
         }
         true
+    }
+}
+
+/// Let the writer threads put what is already queued on the wire, then let the caller hang up.
+///
+/// Needed because delivery became asynchronous: when a session closes, the broker queues the closing
+/// frames and then shuts the sockets down, and without this the shutdown would routinely overtake the
+/// frames — peers would learn the session ended only from their connection dying, which is the
+/// ungraceful path this module keeps as a fallback, not the one it should take on purpose.
+///
+/// The budget is shared across every link and deliberately short: these are small frames on an
+/// otherwise idle connection. A peer that cannot take one in this long is the wedged peer this whole
+/// change is about, and it gets hung up on regardless.
+fn drain_briefly(links: &[Outbound]) {
+    const GRACE: Duration = Duration::from_millis(500);
+    let deadline = Instant::now() + GRACE;
+    while links.iter().any(Outbound::pending) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -861,18 +886,30 @@ impl Hub {
         let departure = lock(&self.broker).leave(member);
         self.dispatch(departure.deliveries);
 
-        // Removing a link hangs up on it — see `Drop for Outbound`.
-        let mut links = lock(&self.links);
-        links.remove(&member);
-        if departure.session_closed {
-            for stranded in departure.remaining {
-                links.remove(&stranded);
+        // Removing a link hangs up on it — see `Drop for Outbound`. The leaver has nothing left to
+        // hear, so it goes immediately; the peers it stranded were just told the session closed, so
+        // they are held out of the map (which is what stops any further delivery) and hung up on
+        // only once that frame has had a chance to reach them.
+        let stranded: Vec<Outbound> = {
+            let mut links = lock(&self.links);
+            links.remove(&member);
+            if departure.session_closed {
+                departure
+                    .remaining
+                    .iter()
+                    .filter_map(|id| links.remove(id))
+                    .collect()
+            } else {
+                Vec::new()
             }
-        }
+        };
+        // Outside the links lock, so a graceful close never stalls another thread's dispatch.
+        drain_briefly(&stranded);
     }
 
     fn close_all(&self) {
-        lock(&self.links).clear();
+        let links: Vec<Outbound> = lock(&self.links).drain().map(|(_, link)| link).collect();
+        drain_briefly(&links);
     }
 }
 
@@ -1457,7 +1494,6 @@ mod tests {
     use super::*;
     use std::io::Cursor;
     use std::sync::mpsc::{self, Receiver, Sender};
-    use std::time::Instant;
 
     fn participant(id: &str) -> Participant {
         Participant {
@@ -2562,12 +2598,15 @@ mod tests {
 
     // --- back-pressure: a slow peer is one peer's problem (#1822) --------------------------------
 
-    /// A participant that really joins — Noise handshake, `Join`, admitted — and then stops reading.
-    /// The laptop that went to sleep mid-session.
+    /// A participant that really joins — Noise handshake, `Join`, admitted — and then reads only
+    /// when the test tells it to.
     ///
-    /// Returns its socket: the connection lives exactly as long as that handle, so the caller has to
-    /// hold it for the peer to stay wedged rather than merely gone.
-    fn wedged_peer(token: &str, identity: Participant) -> TcpStream {
+    /// Both halves of the return matter. Hold the reader and never poll it and you have the laptop
+    /// that went to sleep mid-session; poll it and you see *what actually arrived on the wire*,
+    /// which `RemoteSession` cannot show you because its `read_loop` manufactures peer departures
+    /// from a disconnect. The socket is the connection's lifetime — drop it and the peer is merely
+    /// gone rather than wedged.
+    fn raw_peer(token: &str, identity: Participant) -> (NoiseReader<TcpStream>, TcpStream) {
         let (host, port, secret, broker_key) = parse_token(token).expect("token");
         let addr = (host.as_str(), port)
             .to_socket_addrs()
@@ -2583,13 +2622,41 @@ mod tests {
         );
         write_frame(&mut writer, &ClientFrame::Join { secret, identity }).expect("join");
 
-        // Read the admission and nothing ever again — from here its receive buffer only fills.
         let admitted: Option<ServerFrame> = read_frame(&mut reader).expect("admission");
         assert!(
             matches!(admitted, Some(ServerFrame::Admitted { .. })),
-            "the wedged peer has to be a real admitted member, not a stranger on the listener"
+            "a raw peer has to be a real admitted member, not a stranger on the listener"
         );
-        stream
+        (reader, stream)
+    }
+
+    #[test]
+    fn a_closing_session_tells_its_peers_before_it_hangs_up_on_them() {
+        let (host_sink, _host_rx) = sink();
+        let mut hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
+        let (mut peer, _socket) = raw_peer(&hosted.info.token, participant("grace"));
+        // The incumbent replay a joiner is owed, read off so the next frame is the one under test.
+        let replay: Option<ServerFrame> = read_frame(&mut peer).expect("peer replay");
+        assert_eq!(
+            replay,
+            Some(ServerFrame::PeerJoin {
+                peer: participant("ada")
+            })
+        );
+
+        hosted.stop();
+
+        // Delivery is asynchronous now, so a session that closes queues this frame and then shuts
+        // the socket down. If the shutdown wins, the peer sees a bare EOF and has to *infer* the
+        // departure — the ungraceful fallback, taken on purpose. It must not be.
+        let frame: Option<ServerFrame> = read_frame(&mut peer).expect("a frame, not a broken pipe");
+        assert_eq!(
+            frame,
+            Some(ServerFrame::PeerLeave {
+                participant_id: "ada".into()
+            }),
+            "the closing session hung up before its own goodbye reached the wire"
+        );
     }
 
     #[test]
@@ -2614,7 +2681,7 @@ mod tests {
             "a joiner is replayed the incumbents"
         );
 
-        let _wedged = wedged_peer(&hosted.info.token, participant("hopper"));
+        let _wedged = raw_peer(&hosted.info.token, participant("hopper"));
         for rx in [&host_rx, &guest_rx] {
             assert_eq!(
                 next(rx),
@@ -2626,7 +2693,7 @@ mod tests {
 
         // Enough traffic to fill the wedged peer's socket buffers and then its whole backlog.
         let chunk = vec![7u8; 256 * 1024];
-        let rounds = MAX_OUTBOUND_BACKLOG_BYTES / chunk.len() + 16;
+        let rounds = MAX_OUTBOUND_BACKLOG_BYTES / chunk.len() + 32;
 
         // THE bug: before #1822 the first write to `hopper` parked `dispatch` inside `write_frame`
         // with the writers mutex held, and nothing in the session moved again — not grace's
