@@ -559,7 +559,7 @@ public sealed partial class PhpEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        var hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
@@ -568,18 +568,12 @@ public sealed partial class PhpEmitter
                 var rendered = translator.Translate(argByField[f.Name], mode, expectedEnum);
                 // Substitute the hoisted local only when the WHOLE argument is the result expression;
                 // a substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-                if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-                {
-                    hoisted = true;
-                    return "$" + ResultHoist.LocalName;
-                }
-
-                return rendered;
+                return hoist.Substitute(rendered, "$" + ResultHoist.LocalName);
             })
-            .ToList();
+            .ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = PhpNaming.ClassName(ev.Name);
-        return ($"{targetPrefix}domainEvents[] = new {eventName}({string.Join(", ", args)})", hoisted);
+        return ($"{targetPrefix}domainEvents[] = new {eventName}({string.Join(", ", args)})", hoist.Hoisted);
     }
 
     /// <summary>
@@ -611,7 +605,7 @@ public sealed partial class PhpEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        var hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
@@ -620,18 +614,12 @@ public sealed partial class PhpEmitter
                 var rendered = translator.Translate(argByField[f.Name], mode, expectedEnum);
                 // Substitute the hoisted local only when the WHOLE argument is the result expression;
                 // a substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-                if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-                {
-                    hoisted = true;
-                    return "$" + ResultHoist.LocalName;
-                }
-
-                return rendered;
+                return hoist.Substitute(rendered, "$" + ResultHoist.LocalName);
             })
-            .ToList();
+            .ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = PhpNaming.ClassName(ev.Name);
-        return ($"$this->integrationEvents[] = new {eventName}({string.Join(", ", args)})", hoisted);
+        return ($"$this->integrationEvents[] = new {eventName}({string.Join(", ", args)})", hoist.Hoisted);
     }
 
     // -----------------------------------------------------------------------

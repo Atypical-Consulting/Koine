@@ -1249,4 +1249,100 @@ public class JavaConformanceTests
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
         r.Ok.ShouldBeTrue($"template '{name}' emitted Java that does not compile:\n" + string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1838, the Java half. The <c>__result</c> hoist introduces a TYPED local declaration, which
+    /// is the one construct in the port that a textual parity assertion cannot vouch for — a declaration
+    /// can read perfectly and still be rejected by <c>javac</c>. This runs the three hoisting shapes
+    /// through the real compiler: an <c>emit</c>-shared result, an <c>emit</c>+<c>publish</c>-shared one
+    /// (ONE local serving both payloads and the return), and a sibling argument that merely shares the
+    /// result's prefix and must survive untouched.
+    /// <para>The <c>javac</c> run is the real assertion; the shape pins above it only say what it is
+    /// checking. Their absence is what let the Kotlin regression in this issue's review ship — the two
+    /// typed-declaration targets were the only ones with no compile coverage of the hoist at all.</para>
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_into_an_emit_and_a_publish_payload_compiles()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  publishes Settled\n" +
+            "  integration event Settled {\n" +
+            "    at: Instant\n" +
+            "  }\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    event Stamped { at: Instant }\n" +
+            "    event Quoted { amount: Int  rate: Int }\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      tax:     Int = 0\n" +
+            "      taxRate: Int = 0\n" +
+            "      command stamp: Instant {\n" +
+            "        emit Stamped(at: now)\n" +
+            "        publish Settled(at: now)\n" +
+            "        result now\n" +
+            "      }\n" +
+            "      command quote: Int {\n" +
+            "        emit Quoted(amount: tax, rate: taxRate)\n" +
+            "        result tax\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guards (no javac required): one binding per command, read by both payloads and the
+        // return, with the prefix-sharing sibling left verbatim.
+        var order = result.Files
+            .Single(f => f.RelativePath.EndsWith("sales/Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("java.time.Instant __result = java.time.Instant.now();");
+        order.ShouldContain("this.domainEvents.add(new Stamped(__result));");
+        order.ShouldContain("this.integrationEvents.add(new Settled(__result));");
+        order.ShouldContain("long __result = this.tax;");
+        order.ShouldContain("new Quoted(__result, this.taxRate)");
+        order.ShouldNotContain("__resultRate");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1838 code review: the hoisted local must be declared with the RESULT EXPRESSION's own type,
+    /// never the command's declared return type. <c>command maybeStamp: Instant?</c> emitting a
+    /// NON-optional <c>Stamped.at</c> is the shape that separates them — the expression is a bare
+    /// <c>Instant</c> while the method returns <c>Optional&lt;Instant&gt;</c> — and declaring the local
+    /// <c>Optional&lt;Instant&gt;</c> broke BOTH its own initializer and the payload constructor, two
+    /// <c>javac</c> errors the hoist itself introduced.
+    /// <para>Asserted textually rather than through <c>javac</c> because this fixture does NOT compile on
+    /// either side of the fix: the Java emitter has a separate, PRE-EXISTING gap — it never bridges a
+    /// bare value into an <c>Optional</c>-typed return or payload field (already true before any hoist
+    /// existed) — which is out of scope here and tracked on its own. What this test pins is that the
+    /// hoist adds no error of its own on top of it.</para>
+    /// </summary>
+    [Fact]
+    public void Result_hoist_declares_the_expressions_own_type_not_the_declared_return_type()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    event Stamped { at: Instant }\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      command maybeStamp: Instant? {\n" +
+            "        emit Stamped(at: now)\n" +
+            "        result now\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files
+            .Single(f => f.RelativePath.EndsWith("sales/Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("java.time.Instant __result = java.time.Instant.now();");
+        order.ShouldNotContain("java.util.Optional<java.time.Instant> __result");
+        order.ShouldContain("new Stamped(__result)");
+    }
 }

@@ -11,6 +11,8 @@ Koine.Compiler.FactoryIdSource.Alias = 2 -> Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.Generate = 0 -> Koine.Compiler.FactoryIdSource
 Koine.Compiler.FactoryIdSource.ParamProvidesIdDirectly = 1 -> Koine.Compiler.FactoryIdSource
 Koine.Compiler.MarkdownDoc
+Koine.Compiler.ResultHoist
+Koine.Compiler.ResultHoist.HoistTracker
 Koine.Compiler.RouteDerivation
 Koine.Compiler.RouteInfo
 Koine.Compiler.RouteInfo.AuthRole.get -> string?
@@ -40,7 +42,6 @@ Koine.Compiler.RouteTokenBinding.Token.get -> string!
 Koine.Compiler.RouteTokenBinding.Token.init -> void
 Koine.Compiler.RouteTokenBinding.Type.get -> Koine.Compiler.Ast.TypeRef?
 Koine.Compiler.RouteTokenBinding.Type.init -> void
-Koine.Compiler.ResultHoist
 Koine.Compiler.RouteTokenTarget
 Koine.Compiler.RouteTokenTarget.Identity = 2 -> Koine.Compiler.RouteTokenTarget
 Koine.Compiler.RouteTokenTarget.Member = 1 -> Koine.Compiler.RouteTokenTarget
@@ -55,6 +56,10 @@ static Koine.Compiler.MarkdownDoc.Tag(int? since, string? deprecated) -> string!
 static Koine.Compiler.MarkdownDoc.Tag(Koine.Compiler.Ast.TypeDecl! t) -> string!
 static Koine.Compiler.MarkdownDoc.WriteFields(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! members) -> void
 static Koine.Compiler.MarkdownDoc.WriteRules(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! invariants) -> void
+Koine.Compiler.ResultHoist.HoistTracker.Hoisted.get -> bool
+Koine.Compiler.ResultHoist.HoistTracker.HoistTracker(string? renderedResultExpr) -> void
+Koine.Compiler.ResultHoist.HoistTracker.Substitute(string! comparand, string! rendered, string! localRead) -> string!
+Koine.Compiler.ResultHoist.HoistTracker.Substitute(string! renderedArgument, string! localRead) -> string!
 const Koine.Compiler.ResultHoist.LocalName = "__result" -> string!
 static Koine.Compiler.ResultHoist.ShouldSubstitute(string! renderedArgument, string? renderedResultExpr) -> bool
 static Koine.Compiler.RouteDerivation.ForCommand(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.CommandDecl! command) -> Koine.Compiler.RouteInfo

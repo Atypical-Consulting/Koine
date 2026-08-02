@@ -926,7 +926,7 @@ public sealed partial class TypeScriptEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        bool hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
@@ -937,17 +937,11 @@ public sealed partial class TypeScriptEmitter
             var rendered = translator.Translate(value, EnumExpected(f, index, context));
             // Substitute the hoisted local only on a WHOLE-argument match; a sibling argument that
             // merely shares a prefix must NOT be rewritten.
-            if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-            {
-                hoisted = true;
-                return ResultHoist.LocalName;
-            }
-
-            return rendered;
-        }).ToList();
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = TypeScriptNaming.ToPascalCase(ev.Name);
-        return ($"this._integrationEvents.push(new {eventName}({string.Join(", ", args)}));", hoisted);
+        return ($"this._integrationEvents.push(new {eventName}({string.Join(", ", args)}));", hoist.Hoisted);
     }
 
     /// <summary>
@@ -972,7 +966,7 @@ public sealed partial class TypeScriptEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        bool hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
@@ -983,16 +977,11 @@ public sealed partial class TypeScriptEmitter
             var rendered = translator.Translate(value, EnumExpected(f, index, context));
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-            if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-            {
-                hoisted = true;
-                return ResultHoist.LocalName;
-            }
-            return rendered;
-        }).ToList();
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = TypeScriptNaming.ToPascalCase(ev.Name);
-        return ($"{targetPrefix}_domainEvents.push(new {eventName}({string.Join(", ", args)}));", hoisted);
+        return ($"{targetPrefix}_domainEvents.push(new {eventName}({string.Join(", ", args)}));", hoist.Hoisted);
     }
 
     /// <summary>A readable fallback rule message synthesized from a condition (mirrors the C# emitter's intent).</summary>

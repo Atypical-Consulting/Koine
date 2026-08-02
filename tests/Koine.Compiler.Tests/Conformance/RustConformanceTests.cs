@@ -4867,4 +4867,123 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1838 code review: Rust alone applies a <c>Some(...)</c> wrap toward an OPTIONAL declared
+    /// type, and it applies it on the payload side and the return side independently. Comparing the two
+    /// sides AFTER that wrap meant an optional payload field beside a non-optional return (and its dual,
+    /// a non-optional field beside an optional return) never matched — so Rust silently re-rendered the
+    /// expression and read the clock TWICE, exactly the defect #1838 exists to remove, on shapes all six
+    /// other targets already hoisted.
+    /// <para>The fix compares the BARE value and re-applies each site's own wrap around the local:
+    /// <c>Some(__result)</c> in the payload beside a bare <c>Ok(__result)</c>, and a bare
+    /// <c>Stamped::new(__result)</c> beside <c>Ok(Some(__result))</c>. One evaluation, two differently
+    /// typed readers. Both <c>now</c> renderings below must therefore be single.</para>
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_across_an_optional_wrap_is_still_evaluated_once()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  publishes Settled\n" +
+            "  integration event Settled {\n" +
+            "    at: Instant?\n" +
+            "  }\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    event ClosedAt { at: Instant? }\n" +
+            "    event Stamped { at: Instant }\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      note: String\n" +
+            "      command close: Instant {\n" +
+            "        emit ClosedAt(at: now)\n" +
+            "        publish Settled(at: now)\n" +
+            "        result now\n" +
+            "      }\n" +
+            "      command maybeStamp: Instant? {\n" +
+            "        emit Stamped(at: now)\n" +
+            "        result now\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        // Optional payload FIELD, non-optional return: the wrap goes around the local, not into it.
+        rust.ShouldContain("ClosedAt::new(Some(__result))");
+        rust.ShouldContain("Settled::new(Some(__result))");
+        // Non-optional payload field, optional RETURN: the dual, wrapped at the Ok instead.
+        rust.ShouldContain("Stamped::new(__result)");
+        rust.ShouldContain("Ok(Some(__result))");
+        // The whole point: ONE clock read per command (two commands), not one per site. Before the fix
+        // this was four — two per command, and the recorded instant could differ from the returned one.
+        (rust.Split("crate::koine_runtime::now()").Length - 1).ShouldBe(2, rust);
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// The other half of the same #1838 review finding. A COMPOUND result expression is
+    /// parenthesis-stripped on the result side and left parenthesised as a payload argument, and an
+    /// <c>Int</c> argument against a <c>Decimal</c>-declared payload field picks up a
+    /// <c>Decimal::from(...)</c> widening the return does not — two more everyday shapes where comparing
+    /// the FINISHED renderings found no match and Rust emitted the expression twice.
+    /// <para>Both now bind one local and re-apply the per-site coercion around it, and the non-Copy
+    /// clone policy the two tests above pin is unchanged: <c>Some(__result.clone())</c> at the payload,
+    /// a moving <c>Ok(__result)</c> at the return.</para>
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_across_a_paren_or_numeric_coercion_difference_is_still_evaluated_once()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    event Spread { total: Int }\n" +
+            "    event Wide { total: Decimal }\n" +
+            "    event Labelled { label: String? }\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      tax:     Int = 0\n" +
+            "      taxRate: Int = 0\n" +
+            "      note:    String\n" +
+            "      command spread: Int {\n" +
+            "        emit Spread(total: tax + taxRate)\n" +
+            "        result tax + taxRate\n" +
+            "      }\n" +
+            "      command widen: Int {\n" +
+            "        emit Wide(total: tax)\n" +
+            "        result tax\n" +
+            "      }\n" +
+            "      command relabel: String {\n" +
+            "        emit Labelled(label: note)\n" +
+            "        result note\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+
+        // (b) Compound expression: bound once, read from the local at both sites.
+        rust.ShouldContain("let __result = self.tax + self.tax_rate;");
+        rust.ShouldContain("Spread::new(__result)");
+        rust.ShouldNotContain("Spread::new((self.tax + self.tax_rate))");
+        // Numeric widening: applied around the local, so the Int return still reads it bare.
+        rust.ShouldContain("Wide::new(Decimal::from(__result))");
+        // Non-Copy + optional field: cloned at the payload, moved at the terminal Ok.
+        rust.ShouldContain("let __result = self.note.to_string();");
+        rust.ShouldContain("Labelled::new(Some(__result.clone()))");
+        rust.ShouldContain("Ok(__result)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }

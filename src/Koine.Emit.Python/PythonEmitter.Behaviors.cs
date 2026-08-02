@@ -556,7 +556,7 @@ public sealed partial class PythonEmitter
         var ctorFields = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames)).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        var hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
@@ -565,19 +565,14 @@ public sealed partial class PythonEmitter
                 var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
                 var rendered = translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum);
                 // Substitute the hoisted local only when the WHOLE value is the result expression; a
-                // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-                if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-                {
-                    hoisted = true;
-                    return $"{field}={ResultHoist.LocalName}";
-                }
-
-                return $"{field}={rendered}";
+                // substring match (a sibling argument sharing a prefix) must NOT be rewritten. The
+                // comparison is on the VALUE half alone — the emitted `field=value` pair never matches.
+                return hoist.Substitute(rendered, $"{field}={rendered}", $"{field}={ResultHoist.LocalName}");
             })
-            .ToList();
+            .ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = PythonNaming.ToPascalCase(ev.Name);
-        return ($"{targetPrefix}_domain_events.append({eventName}({string.Join(", ", args)}))", hoisted);
+        return ($"{targetPrefix}_domain_events.append({eventName}({string.Join(", ", args)}))", hoist.Hoisted);
     }
 
     /// <summary>
@@ -607,7 +602,7 @@ public sealed partial class PythonEmitter
         var ctorFields = ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames)).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        var hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
@@ -616,19 +611,14 @@ public sealed partial class PythonEmitter
                 var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
                 var rendered = translator.Translate(argByField[f.Name], PythonExpressionTranslator.NameMode.Property, expectedEnum);
                 // Substitute the hoisted local only when the WHOLE value is the result expression; a
-                // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-                if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-                {
-                    hoisted = true;
-                    return $"{field}={ResultHoist.LocalName}";
-                }
-
-                return $"{field}={rendered}";
+                // substring match (a sibling argument sharing a prefix) must NOT be rewritten. The
+                // comparison is on the VALUE half alone — the emitted `field=value` pair never matches.
+                return hoist.Substitute(rendered, $"{field}={rendered}", $"{field}={ResultHoist.LocalName}");
             })
-            .ToList();
+            .ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var eventName = PythonNaming.ToPascalCase(ev.Name);
-        return ($"self._integration_events.append({eventName}({string.Join(", ", args)}))", hoisted);
+        return ($"self._integration_events.append({eventName}({string.Join(", ", args)}))", hoist.Hoisted);
     }
 
     // ----------------------------------------------------------------------

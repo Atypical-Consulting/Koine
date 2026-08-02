@@ -331,10 +331,13 @@ public sealed partial class RustEmitter
 
         // 3c. Bind the hoisted local AFTER the invariant re-check above and BEFORE the first recorded
         //     event, so an invalid post-state still throws before anything is computed or recorded.
+        //     What is BOUND is the bare inner value — before either site's numeric widening or
+        //     `Some(...)` wrap — because those two coercions are per-site: the payload's are toward its
+        //     FIELD's type and the return's toward the DECLARED return type, and they routinely differ.
         if (hoistResult)
         {
             body.Append(Indent).Append(Indent).Append("let ").Append(ResultHoist.LocalName).Append(" = ")
-                .Append(candidate!.Value.Rendered).Append(";\n");
+                .Append(candidate!.Value.Inner).Append(";\n");
         }
 
         // 3d. Record the domain events the command raises (over the valid post-transition state),
@@ -344,14 +347,16 @@ public sealed partial class RustEmitter
             body.Append(text);
         }
 
-        // 4. Result (or unit). Already widened toward the command's declared return type by
-        // `ResultCandidate` the same way a transition widens toward its field's declared type (#1511).
-        // `Ok(__result)` is the LAST read of the hoisted local, so it takes the value by move — the
-        // reason only the payload substitutions above have to clone a non-Copy one.
+        // 4. Result (or unit). Widened toward the command's declared return type by `ResultCandidate`
+        // the same way a transition widens toward its field's declared type (#1511) — around the inline
+        // rendering when nothing was hoisted, and around the LOCAL when something was, which is why the
+        // candidate carries both strings. `Ok(...)` is the LAST read of the hoisted local, so it takes
+        // the value by move — the reason only the payload substitutions above have to clone a non-Copy
+        // one.
         if (candidate is { } result)
         {
             body.Append(Indent).Append(Indent).Append("Ok(")
-                .Append(hoistResult ? ResultHoist.LocalName : result.Rendered).Append(")\n");
+                .Append(hoistResult ? result.HoistedReturn : result.Rendered).Append(")\n");
         }
         else
         {
@@ -367,18 +372,34 @@ public sealed partial class RustEmitter
     }
 
     /// <summary>
-    /// A command's <c>result</c> expression, rendered as the owned value the method returns, paired with
-    /// the one extra fact Rust's ownership model needs to reuse it (#1838).
+    /// A command's <c>result</c> expression in the three renderings the hoist needs, plus the one extra
+    /// fact Rust's ownership model needs to reuse it (#1838).
     /// </summary>
+    /// <param name="Inner">
+    /// The bare owned rendering, parenthesis-stripped and BEFORE any numeric widening or
+    /// <c>Some(...)</c> wrap — the string bound to <see cref="ResultHoist.LocalName"/>, and the string a
+    /// payload argument's own bare rendering must equal WHOLE to take part in the hoist.
+    /// <para>Matching here rather than on the coerced form is what makes the two common shapes hoist at
+    /// all: an <c>Instant?</c> payload field wraps its argument in <c>Some(...)</c> while a non-optional
+    /// declared return does not, and a compound expression such as <c>tax + taxRate</c> renders
+    /// parenthesised as an argument and stripped as a result — in both cases the coerced strings differ
+    /// even though the VALUE is the same one, and comparing them re-rendered the expression twice
+    /// (#1838 review). The coercions are per-site by nature — the payload's is toward its FIELD's type,
+    /// the return's toward the DECLARED return type — so each is re-applied around this local
+    /// afterwards instead of being required to agree.</para>
+    /// </param>
     /// <param name="Rendered">
-    /// The owned rendering — the string bound to <see cref="ResultHoist.LocalName"/> and the string a
-    /// payload argument must equal WHOLE to take part in the hoist. Matching on exactly what is bound is
-    /// what keeps the comparison like-for-like: a payload argument that picked up a different numeric
-    /// coercion or <c>Some(...)</c> wrap simply does not match, and a missed hoist is safe where a wrong
-    /// one is not.
+    /// The full inline rendering — <paramref name="Inner"/> widened toward the declared return type and
+    /// <c>Some(...)</c>-wrapped toward an optional one. What <c>Ok(...)</c> returns when NOTHING was
+    /// hoisted.
+    /// </param>
+    /// <param name="HoistedReturn">
+    /// The same two return-site coercions applied around a bare read of the local instead. What
+    /// <c>Ok(...)</c> returns when something WAS hoisted — a bare <c>__result</c> in the common case,
+    /// <c>Some(__result)</c> for an optional return, <c>Decimal::from(__result)</c> for a widened one.
     /// </param>
     /// <param name="IsCopy">Whether the bound value's type is <c>Copy</c> — see <see cref="Read"/>.</param>
-    private readonly record struct HoistedResult(string Rendered, bool IsCopy)
+    private readonly record struct HoistedResult(string Inner, string Rendered, string HoistedReturn, bool IsCopy)
     {
         /// <summary>
         /// How a substituted payload argument READS the local. The local is read two or three times (an
@@ -394,7 +415,8 @@ public sealed partial class RustEmitter
     /// Renders a command's <c>result</c> expression as the value <c>Ok(...)</c> returns, or null for an
     /// effect-only command (which therefore never grows a hoisted local). Widened toward the declared
     /// return type (#1511) and <c>Some(...)</c>-wrapped toward an optional one (#1523) — widen inside,
-    /// wrap outside — exactly as the transition loop does for a field.
+    /// wrap outside — exactly as the transition loop does for a field. Both the inline form and the
+    /// hoisted form get those coercions, over the same bare <see cref="HoistedResult.Inner"/> value.
     /// </summary>
     private static HoistedResult? ResultCandidate(
         CommandDecl cmd, RustExpressionTranslator translator, RustTypeMapper typeMapper)
@@ -404,23 +426,34 @@ public sealed partial class RustEmitter
             return null;
         }
 
-        var rendered = RustExpressionTranslator.StripOuterParens(translator.TranslateOwned(result.Value));
-        if (cmd.ReturnType is { } returnDecl)
-        {
-            rendered = CoerceNumericBody(UnderlyingType(returnDecl), translator.InferType(result.Value), rendered);
-        }
+        var inner = RustExpressionTranslator.StripOuterParens(translator.TranslateOwned(result.Value));
+        TypeRef? valueType = translator.InferType(result.Value);
 
-        if (cmd.ReturnType is { IsOptional: true } && !translator.IsOptional(result.Value))
+        // The return site's own two coercions, applied identically to the inline rendering and to a bare
+        // read of the local — so which of the two `Ok(...)` takes never changes the TYPE it returns.
+        string CoerceToReturn(string value)
         {
-            rendered = $"Some({rendered})";
+            if (cmd.ReturnType is { } returnDecl)
+            {
+                value = CoerceNumericBody(UnderlyingType(returnDecl), valueType, value);
+            }
+
+            return cmd.ReturnType is { IsOptional: true } && !translator.IsOptional(result.Value)
+                ? $"Some({value})"
+                : value;
         }
 
         // Classify with the emitter's own `IsCopy` (which already treats `Option<T>` as `Copy` exactly
-        // when `T` is). The DECLARED return type wins because it is what the widening above coerced
-        // toward; an undeclared one falls back to the inferred type, and an unknown type to "not Copy" —
-        // a conservative answer that only clones a value it need not have, and always compiles.
-        TypeRef? bound = cmd.ReturnType ?? translator.InferType(result.Value);
-        return new HoistedResult(rendered, bound is not null && typeMapper.IsCopy(bound, translator.Context));
+        // when `T` is). The value's OWN inferred type wins because that — not the declared return type —
+        // is what the local is bound to now that the coercions live outside the binding; an
+        // uninferrable expression falls back to the declared return type, and an unknown type to "not
+        // Copy", a conservative answer that only clones a value it need not have and always compiles.
+        TypeRef? bound = valueType ?? cmd.ReturnType;
+        return new HoistedResult(
+            inner,
+            CoerceToReturn(inner),
+            CoerceToReturn(ResultHoist.LocalName),
+            bound is not null && typeMapper.IsCopy(bound, translator.Context));
     }
 
     /// <summary>
@@ -562,9 +595,11 @@ public sealed partial class RustEmitter
     /// emitter must too or it builds the payload from another context's same-named declaration); an
     /// <c>emit</c> leaves it null, which falls back to the flat lookup its own flat validator agrees
     /// with.</para>
-    /// <para><paramref name="hoistedResult"/> is the command's rendered <c>result</c> value, when it has
-    /// one (#1838). An argument whose WHOLE rendering equals it is replaced by a read of the hoisted
-    /// local and <c>Hoisted</c> comes back true, so the caller knows to bind it. The rule is
+    /// <para><paramref name="hoistedResult"/> is the command's <c>result</c> value, when it has one
+    /// (#1838). An argument whose WHOLE BARE rendering equals <see cref="HoistedResult.Inner"/> — before
+    /// this site's numeric widening and <c>Some(...)</c> wrap, and parenthesis-stripped on both sides —
+    /// is replaced by a read of the hoisted local, which then takes those coercions itself; <c>Hoisted</c>
+    /// comes back true, so the caller knows to bind it. The rule is
     /// <see cref="ResultHoist.ShouldSubstitute"/>'s — exact, never a substring — because the comparison
     /// runs on rendered source: a <c>self.tax_rate</c> sibling next to a <c>self.tax</c> result contains
     /// the result's rendering, and a substring splice would produce <c>__result_rate</c>, which does not
@@ -588,7 +623,7 @@ public sealed partial class RustEmitter
         };
 
         var argByField = clauseArgs.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
-        var hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResult?.Inner);
         var args = members.Select(m =>
         {
             if (!argByField.TryGetValue(m.Name, out Expr? value))
@@ -599,36 +634,45 @@ public sealed partial class RustEmitter
             var expectedEnum = emit.Index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
             var owned = translator.TranslateOwned(value, expectedEnum);
 
+            // Matched BEFORE this site's own coercions, on the parenthesis-stripped bare rendering —
+            // against `HoistedResult.Inner`, which is stripped the same way. Comparing the COERCED
+            // forms instead made two everyday shapes silently miss the hoist and read the expression
+            // twice (#1838 review): an optional payload field wraps its argument in `Some(...)` where a
+            // non-optional return does not, and a compound expression is parenthesised as an argument
+            // but stripped as a result. The value is the same value in both; only the wrapping differs,
+            // and the wrapping is re-applied below — around the local rather than around the expression.
+            // A non-Copy local is MOVED by its first read, and this is not the last one — the terminal
+            // `Ok(...)` is — so a payload read clones. Parens are moot on a bare place, which is why the
+            // substitution drops them while the non-matching path keeps the rendering verbatim.
+            owned = hoist.Substitute(
+                RustExpressionTranslator.StripOuterParens(owned), owned, hoistedResult?.Read ?? owned);
+
             // Widen an Int-inferred argument toward a Decimal-declared payload field (#1511) — the
             // event-payload dual of the transition/result fixes above; an unwidened arg emits an
             // uncoerced literal/place against `Ev::new`'s `Decimal` parameter (E0308). Post-wraps the
             // already-rendered, opaque `owned` string (mirroring the transition/result fixes and
-            // BuildFactoryCtorArgs below) so it applies uniformly regardless of the argument's shape.
+            // BuildFactoryCtorArgs below) so it applies uniformly regardless of the argument's shape —
+            // including when that string is now a read of the hoisted local, whose type is the
+            // expression's own and so needs exactly the same widening the expression would have.
             owned = CoerceNumericBody(UnderlyingType(m.Type), translator.InferType(value), owned);
 
             // Some(...)-wrap a non-optional argument toward an optional-declared payload field (#1523),
             // mirroring the transition/result fixes above — composes with the widening just above as
-            // Some(Decimal::from(...)), widen inside, wrap outside.
+            // Some(Decimal::from(...)), widen inside, wrap outside. This is the wrap that must sit
+            // OUTSIDE the substitution, not be required to match it: `Some(__result)` here alongside a
+            // bare `Ok(__result)` there is one evaluation serving two differently-typed sites.
             if (m.Type.IsOptional && !translator.IsOptional(value))
             {
                 owned = $"Some({owned})";
             }
 
-            // Compared AFTER the widening and the optional wrap, so the argument is matched against the
-            // very string `ResultCandidate` binds to the local — like for like.
-            if (hoistedResult is { } hoist && ResultHoist.ShouldSubstitute(owned, hoist.Rendered))
-            {
-                hoisted = true;
-                return hoist.Read;
-            }
-
             return owned;
-        }).ToList(); // Materialise: `hoisted` is only set while the sequence is enumerated.
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
         var expr = $"DomainEvent::{RustNaming.ToPascalCase(eventName)}"
             + $"({typeMapper.QualifyTypeName(eventName)}::new({string.Join(", ", args)}))";
 
-        return (expr, hoisted);
+        return (expr, hoist.Hoisted);
     }
 
     /// <summary>

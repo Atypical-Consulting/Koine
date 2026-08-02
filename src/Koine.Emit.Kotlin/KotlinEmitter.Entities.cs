@@ -268,7 +268,8 @@ public sealed partial class KotlinEmitter
         // it is hoisted into one `__result` binding evaluated once (#1838): Koine's `now` reads the
         // clock, so a second rendering is a second reading, and the instant the event RECORDS would
         // drift from the one the behavior RETURNS.
-        string? resultExpr = cmd.Body.OfType<ResultClause>().FirstOrDefault() is { } result
+        ResultClause? resultClause = cmd.Body.OfType<ResultClause>().FirstOrDefault();
+        string? resultExpr = resultClause is { } result
             ? translator.Translate(result.Value, KotlinExpressionTranslator.NameMode.Property)
             : null;
 
@@ -298,13 +299,23 @@ public sealed partial class KotlinEmitter
 
         // Bind the hoisted local AFTER the invariant re-check above and BEFORE the first recorded event,
         // so an invalid post-state still throws before anything is computed or recorded. Annotated with
-        // the function's own return type rather than left to inference: a target-typed expression (a
+        // the EXPRESSION'S OWN inferred type rather than left to inference: a target-typed expression (a
         // generic factory call such as `listOf()`) infers a different type without a target, and this
         // local is both passed to a payload constructor and returned, so it must keep exactly the typing
-        // the inline rendering had. (`returnType` already carries its leading `": "`.)
+        // the inline rendering had.
+        //
+        // NOT the declared return type: `command maybeStamp: Instant? { emit Stamped(at: now) … }` over a
+        // NON-optional `Stamped.at` would then bind `val __result: Instant? = …` and fail the payload
+        // constructor with "actual type is 'Instant?', but 'Instant' was expected". The bound value's own
+        // type is the only annotation both readers accept — Kotlin nullability is subtyping, so a
+        // non-optional `T` flows into a `T?` payload field AND out of a `T?` return unchanged. When the
+        // type cannot be inferred there is nothing truthful to write, so the binding falls back to plain
+        // inference rather than to a type the expression may not have.
         if (hoistResult)
         {
-            sb.Append(Indent).Append(Indent).Append("val ").Append(ResultHoist.LocalName).Append(returnType)
+            TypeRef? bound = resultClause is { } hoisted ? translator.InferType(hoisted.Value) : null;
+            var annotation = bound is not null ? ": " + typeMapper.Map(bound) : string.Empty;
+            sb.Append(Indent).Append(Indent).Append("val ").Append(ResultHoist.LocalName).Append(annotation)
               .Append(" = ").Append(resultExpr).Append('\n');
         }
 
@@ -372,17 +383,6 @@ public sealed partial class KotlinEmitter
     }
 
     /// <summary>
-    /// Builds the <c>EventName(args…)</c> constructor call for an <c>emit EventName(field: value, …)</c> clause
-    /// (null for an unknown event — the validator guarantees presence). Arguments bind by field name in the
-    /// event data class's declaration order, with a bare enum member qualified; a missing field falls back to a
-    /// benign type default so the emitted code still compiles.
-    /// <para>The FACTORY path only: a factory has no <c>result</c> clause, so no hoist can ever apply
-    /// there and the flag is dropped. A behavior goes through <see cref="BuildEmitStatement"/>.</para>
-    /// </summary>
-    private static string? BuildEmitExpression(KotlinEmitContext emit, EmitClause em, KotlinExpressionTranslator translator) =>
-        BuildEventExpression(emit, em.EventName, em.Args, translator).Expr;
-
-    /// <summary>
     /// Records a published integration event (R19):
     /// <c>this.&lt;integrationEvents&gt;.add(EventName(args…))</c> — the published-language counterpart
     /// of <see cref="BuildEmitStatement"/>, adding to a SEPARATE collector. No receiver parameter: the
@@ -406,10 +406,12 @@ public sealed partial class KotlinEmitter
     }
 
     /// <summary>
-    /// The name/payload-only core of <see cref="BuildEmitExpression"/>, shared verbatim with a
+    /// The name/payload-only core of <see cref="BuildEmitStatement"/>, shared verbatim with a
     /// <c>publish</c> clause (R19): both clauses carry the same <see cref="EmitArg"/> payload and both
     /// construct a data class, so the argument binding and enum-qualification rules stay identical
-    /// rather than being re-derived per clause.
+    /// rather than being re-derived per clause. Arguments bind by field name in the event data class's
+    /// declaration order, with a bare enum member qualified; a missing field falls back to a benign type
+    /// default so the emitted code still compiles.
     /// <para><paramref name="context"/> is the bounded context the NAME resolves within. A
     /// <c>publish</c> passes it (its validator, <c>ValidatePublish</c>, resolves context-aware, so the
     /// emitter must too or it builds the payload from another context's same-named declaration); an
@@ -422,10 +424,12 @@ public sealed partial class KotlinEmitter
     /// because the comparison runs on rendered source: a <c>this.taxRate</c> sibling next to a
     /// <c>this.tax</c> result contains the result's rendering, and a substring splice would produce
     /// <c>__resultRate</c>, which does not compile.</para>
-    /// <para>Note the two sides are NOT rendered identically: an argument passes its field's enum type
-    /// as <c>expectedEnum</c> while the caller translates the result without one, so a bare enum member
-    /// used as a result renders unqualified and simply fails to match. That is a pre-existing asymmetry;
-    /// the hoist stays conservative around it, since a missed hoist is safe where a wrong one is not.</para>
+    /// <para>Note the two sides are not translated through identical calls: an argument passes its
+    /// field's enum type as <c>expectedEnum</c> while the caller translates the result without one. In
+    /// practice a bare enum member still qualifies on both sides (the command's declared return type
+    /// gives the translator the same frame), but nothing forces that — where two renderings of one
+    /// expression ever do diverge the argument simply fails to match and stays inline, which is the
+    /// deliberate posture: a missed hoist is safe where a wrong one is not.</para>
     /// </summary>
     private static (string? Expr, bool Hoisted) BuildEventExpression(
         KotlinEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs, KotlinExpressionTranslator translator,
@@ -444,7 +448,7 @@ public sealed partial class KotlinEmitter
         };
 
         var argByField = clauseArgs.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
-        var hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = members.Select(m =>
         {
             if (!argByField.TryGetValue(m.Name, out Expr? value))
@@ -457,16 +461,10 @@ public sealed partial class KotlinEmitter
 
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-            if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-            {
-                hoisted = true;
-                return ResultHoist.LocalName;
-            }
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
-            return rendered;
-        }).ToList(); // Materialise: `hoisted` is only set while the sequence is enumerated.
-
-        return (KotlinNaming.ToTypeName(eventName) + "(" + string.Join(", ", args) + ")", hoisted);
+        return (KotlinNaming.ToTypeName(eventName) + "(" + string.Join(", ", args) + ")", hoist.Hoisted);
     }
 
     /// <summary>

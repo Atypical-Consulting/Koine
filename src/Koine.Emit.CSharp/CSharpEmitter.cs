@@ -1997,7 +1997,7 @@ public sealed partial class CSharpEmitter : IEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        bool hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
@@ -2009,15 +2009,10 @@ public sealed partial class CSharpEmitter : IEmitter
             var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-            if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-            {
-                hoisted = true;
-                return ResultHoist.LocalName;
-            }
-            return rendered;
-        }).ToList();
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
-        return ($"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoisted);
+        return ($"{targetPrefix}_domainEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoist.Hoisted);
     }
 
     /// <summary>
@@ -2056,7 +2051,7 @@ public sealed partial class CSharpEmitter : IEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
-        bool hoisted = false;
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = ctorFields.Select(f =>
         {
             if (!argByField.TryGetValue(f.Name, out Expr? value))
@@ -2068,16 +2063,10 @@ public sealed partial class CSharpEmitter : IEmitter
             var rendered = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-            if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
-            {
-                hoisted = true;
-                return ResultHoist.LocalName;
-            }
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
 
-            return rendered;
-        }).ToList();
-
-        return ($"_integrationEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoisted);
+        return ($"_integrationEvents.Add(new {ev.Name}({string.Join(", ", args)}));", hoist.Hoisted);
     }
 
     /// <summary>
