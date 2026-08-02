@@ -22,6 +22,9 @@ public class R19ApiAnnotationsTests
     private static QueryDecl QueryOf(string source, string query) =>
         Context(source).AllTypeDecls().OfType<QueryDecl>().Single(q => q.Name == query);
 
+    private static FactoryDecl FactoryOf(string source, string entity, string factory) =>
+        Context(source).AllEntities().Single(e => e.Name == entity).Factories.Single(f => f.Name == factory);
+
     private static IReadOnlyList<Emit.EmittedFile> Build(string source)
     {
         var result = new KoineCompiler().Compile(source, new CSharpEmitter());
@@ -162,6 +165,31 @@ public class R19ApiAnnotationsTests
             """;
     }
 
+    /// <summary>
+    /// A factory source carrying <paramref name="annotations"/> ahead of <c>create open</c> (#1846).
+    /// Deliberately line-for-line congruent with <see cref="CommandSource"/> — same six-line preamble, so
+    /// the first annotation always sits on line 7 and a factory diagnostic's line assertion reads exactly
+    /// like its command counterpart's.
+    /// </summary>
+    private static string FactorySource(params string[] annotations)
+    {
+        var block = string.Join("\n      ", annotations);
+        return $$"""
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  {{block}}
+                  create open {
+                  }
+                }
+              }
+            }
+            """;
+    }
+
     [Fact]
     public void Route_and_verb_annotations_land_on_the_command()
     {
@@ -218,6 +246,42 @@ public class R19ApiAnnotationsTests
         byId.VerbOverride.ShouldBeNull();
         byId.AuthRole.ShouldBeNull();
         byId.ApiAnnotations.ShouldBeNull();
+
+        FactoryDecl open = FactoryOf(FactorySource(), "Order", "open");
+        open.RouteOverride.ShouldBeNull();
+        open.VerbOverride.ShouldBeNull();
+        open.AuthRole.ShouldBeNull();
+        open.ApiAnnotations.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// All three axes reach a <c>FactoryDecl</c> (#1846) exactly as they reach a
+    /// <see cref="CommandDecl"/> — same field names, same uppercased verb, same raw route string.
+    /// </summary>
+    [Fact]
+    public void Route_verb_and_auth_annotations_land_on_the_factory()
+    {
+        FactoryDecl open = FactoryOf(
+            FactorySource("""@route("/orders")""", "@put", """@auth("admin")"""), "Order", "open");
+
+        open.RouteOverride.ShouldBe("/orders");
+        open.VerbOverride.ShouldBe("PUT");
+        open.AuthRole.ShouldBe("admin");
+    }
+
+    /// <summary>The three axes are independent on a factory too — annotating one leaves the others null.</summary>
+    [Theory]
+    [InlineData("""@route("/orders")""", "/orders", null, null)]
+    [InlineData("@delete", null, "DELETE", null)]
+    [InlineData("""@auth("admin")""", null, null, "admin")]
+    public void Each_factory_annotation_axis_lands_independently(
+        string annotation, string? route, string? verb, string? auth)
+    {
+        FactoryDecl open = FactoryOf(FactorySource(annotation), "Order", "open");
+
+        open.RouteOverride.ShouldBe(route);
+        open.VerbOverride.ShouldBe(verb);
+        open.AuthRole.ShouldBe(auth);
     }
 
     /// <summary>An unknown annotation name is ignored, exactly as <c>@since</c>/<c>@deprecated</c> reading does.</summary>

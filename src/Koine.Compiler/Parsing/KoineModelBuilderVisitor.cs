@@ -843,14 +843,23 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             ? Map(pl.param(), BuildParam)
             : new List<Param>();
         var body = Map(ctx.factoryStmt(), BuildFactoryStmt);
+        var (route, verb, auth, api) = ReadApiAnnotations(ctx.annotation());
+        // Same reasoning as BuildCommand: a factory is not a TypeDecl either, so it has no
+        // Since/Deprecated to hold an evolution annotation — keep the span and let Semantics/ reject it
+        // (KOI1214) rather than dropping it silently (#1846).
+        if (UnsupportedVersionAnnotationSpan(ctx.annotation()) is { IsNone: false } versionSpan)
+        {
+            api = (api ?? new ApiAnnotationInfo()) with { UnsupportedVersionSpan = versionSpan };
+        }
 
-        return new FactoryDecl(NameOf(ctx.Identifier()), parameters, body)
+        return new FactoryDecl(NameOf(ctx.Identifier()), parameters, body, route, verb, auth)
         {
             Span = SpanOf(ctx),
             NameSpan = SpanOf(ctx.Identifier()),
             Doc = DocFor(ctx),
             LeadingTrivia = LeadingTriviaFor(ctx),
-            TrailingTrivia = TrailingTriviaFor(ctx)
+            TrailingTrivia = TrailingTriviaFor(ctx),
+            ApiAnnotations = api
         };
     }
 
