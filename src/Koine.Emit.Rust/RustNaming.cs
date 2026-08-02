@@ -170,6 +170,32 @@ internal static class RustNaming
         }
     }
 
+    /// <summary>
+    /// Chooses the name of the Rust emitter's synthetic <b>integration</b>-event collector field (R19),
+    /// guaranteed not to collide with any of <paramref name="usedNames"/> — which the caller seeds with
+    /// the domain-event collector's own chosen name, so the two synthetic fields never collide with each
+    /// other either. Prefers <c>integration_events</c>, then numbered suffixes; the drain accessor
+    /// (<c>drain_&lt;name&gt;</c>) is kept collision-free the same way
+    /// <see cref="SyntheticEventsField"/> does.
+    /// </summary>
+    public static string SyntheticIntegrationEventsField(IEnumerable<string> usedNames)
+    {
+        var used = new HashSet<string>(usedNames, StringComparer.Ordinal);
+        if (IsFree("integration_events", used))
+        {
+            return "integration_events";
+        }
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = "integration_events_" + i;
+            if (IsFree(candidate, used))
+            {
+                return candidate;
+            }
+        }
+    }
+
     /// <summary>A synthetic field name is free when neither it nor its <c>drain_</c> accessor collides.</summary>
     private static bool IsFree(string name, HashSet<string> used) =>
         !used.Contains(name) && !used.Contains("drain_" + name);

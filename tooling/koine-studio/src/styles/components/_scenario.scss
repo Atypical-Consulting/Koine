@@ -187,6 +187,14 @@
   color: var(--koi-accent);
   border-color: color-mix(in srgb, var(--koi-accent) 40%, transparent);
 }
+/* R19 (#1796): a `publish`ed integration event — a published-language contract leaving the bounded
+   context, not an intra-aggregate domain event. The chip already SAYS "published" and carries a title
+   explaining the crossing, so this only reinforces a distinction the text has already made. */
+.koi-scenario-tag-published {
+  color: var(--koi-warn);
+  border-color: color-mix(in srgb, var(--koi-warn) 45%, transparent);
+  background: color-mix(in srgb, var(--koi-warn) 10%, transparent);
+}
 /* Fan-out attribution (#1758): a step executed mode dispatched onto ANOTHER aggregate, because a
    policy in the model reacts to the event above it. The chip names that aggregate — colour and the
    indent rule below only reinforce what the text already says (and a visually-hidden "downstream

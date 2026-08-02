@@ -162,6 +162,13 @@ public sealed partial class PhpEmitter
             WriteDomainEventsBuffer(sb);
         }
 
+        // Integration-event buffer (R19) — emitted when any command publishes a published-language
+        // contract; a SEPARATE buffer from the domain events above.
+        if (PublishesEvents(entity))
+        {
+            WriteIntegrationEventsBuffer(sb);
+        }
+
         // Commands — mutating instance methods.
         foreach (CommandDecl cmd in entity.Commands)
         {

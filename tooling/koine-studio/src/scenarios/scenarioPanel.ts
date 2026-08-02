@@ -338,7 +338,20 @@ export function createScenarioPanel(opts: ScenarioPanelOptions): ScenarioPanel {
       case 'emit': {
         const text = h('span', 'koi-scenario-step-text');
         text.textContent = step.event;
-        li.append(tag('event'), text);
+        // R19 (#1796): a `publish`ed integration event is a contract LEAVING the context, not an
+        // intra-aggregate domain event. Same chip vocabulary, different word — the distinction is
+        // carried by the tag's own text (`published` vs `event`) and its title, so it survives a
+        // monochrome theme, a colour-blind reader and a screen reader; the colour only reinforces it.
+        if (step.published) {
+          const chip = tag('published');
+          chip.title =
+            `${step.event} is an integration event: the command publishes it as part of this ` +
+            'context’s published language, so it crosses the context boundary to its subscribers.';
+          li.classList.add('is-published');
+          li.append(chip, text);
+        } else {
+          li.append(tag('event'), text);
+        }
         const argEntries = Object.entries(step.args);
         if (argEntries.length > 0) {
           const chips = h('span', 'koi-scenario-args');

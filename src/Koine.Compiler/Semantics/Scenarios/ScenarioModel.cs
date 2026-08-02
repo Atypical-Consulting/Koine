@@ -136,10 +136,24 @@ internal abstract record ScenarioStep
         public override string Kind => "transition";
     }
 
-    /// <summary>An emitted domain event with its evaluated payload.</summary>
+    /// <summary>A recorded event with its evaluated payload: an <c>emit</c>'s domain event, or — when
+    /// <see cref="Published"/> — a <c>publish</c>'s integration event.</summary>
     public sealed record Emit(string EventName, IReadOnlyDictionary<string, string> Args) : ScenarioStep
     {
         public override string Kind => "emit";
+
+        /// <summary>
+        /// True when this step is a <c>publish</c> (R19, #1796) rather than an <c>emit</c>: a
+        /// published-language contract LEAVING the bounded context, not an intra-aggregate domain event.
+        /// The two are recorded on separate lists by the emitted code and mean different things to a
+        /// reader, so the timeline has to be able to tell them apart.
+        /// <para>Carried as an additive flag rather than a fourth <see cref="Kind"/>: <c>kind</c> is the
+        /// wire's discriminated union and the Studio panel's <c>switch</c> has no default arm, so a new
+        /// kind would render a published event as an EMPTY row on any client not upgraded in lockstep,
+        /// while an unread flag just degrades to the pre-#1796 rendering. Same reasoning — and same
+        /// write-only-when-set wire treatment — as <see cref="ScenarioStep.Aggregate"/>.</para>
+        /// </summary>
+        public bool Published { get; init; }
     }
 
     /// <summary>A command's <c>result</c> value.</summary>

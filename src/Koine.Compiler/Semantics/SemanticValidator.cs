@@ -612,7 +612,10 @@ public sealed class SemanticValidator
                 EntityBehaviorValidator.ValidateStates(e, index, resolver, enumMembers, diagnostics);
                 // Events may be emitted only from a standalone entity or the aggregate root.
                 var emitAllowed = aggregateRoot is null || aggregateRoot == e.Name;
-                EntityBehaviorValidator.ValidateCommands(e, index, resolver, enumMembers, diagnostics, emitAllowed, entitySpecs);
+                // `publish` is deliberately STRICTER than `emit` (R19): the enclosing aggregate root
+                // is passed through so KOI1422 can also reject a standalone entity, which has no
+                // Unit of Work to drain `_integrationEvents` into the outbox — see ValidateCommands.
+                EntityBehaviorValidator.ValidateCommands(e, index, resolver, enumMembers, diagnostics, emitAllowed, aggregateRoot, entitySpecs);
                 EntityBehaviorValidator.ValidateFactories(e, index, resolver, enumMembers, diagnostics, emitAllowed);
                 break;
             case AggregateDecl agg:

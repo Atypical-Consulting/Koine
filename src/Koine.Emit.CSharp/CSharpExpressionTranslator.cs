@@ -329,6 +329,15 @@ internal sealed class CSharpExpressionTranslator
 
     private static readonly IReadOnlyDictionary<string, DerivedMember> EmptyDerived = new Dictionary<string, DerivedMember>();
 
+    /// <summary>
+    /// The bounded context this translator resolves type names within (null = global/legacy mode),
+    /// mirroring the property the Python/PHP/Java/Kotlin translators already expose. Emitter code that
+    /// has to resolve a NAME to a declaration — not just render an expression — must go through it, so
+    /// the emitter resolves the same declaration the validator validated against (R13.2 lets two
+    /// contexts declare the same simple name, and the flat view is last-write-wins).
+    /// </summary>
+    internal string? Context => _resolver.Context;
+
     public string Translate(Expr expr, NameMode mode, string? expectedEnum = null)
     {
         _expectedEnum = expectedEnum;

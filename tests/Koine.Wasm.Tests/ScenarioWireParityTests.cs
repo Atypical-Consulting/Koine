@@ -45,6 +45,28 @@ public class ScenarioWireParityTests
         }
         """;
 
+    /// <summary>The same command recording BOTH kinds of event (R19, #1796): an intra-aggregate
+    /// <c>emit</c> and a published-language <c>publish</c>, so the discriminator that tells them apart
+    /// on the wire is exercised across both backends.</summary>
+    private const string PublishingFixture = """
+        context Ordering {
+          publishes OrderPlaced
+          integration event OrderPlaced { orderId: OrderId  lineCount: Int }
+
+          aggregate Sales root Order {
+            event OrderDrafted { orderId: OrderId }
+            entity Order identified by OrderId {
+              lineCount: Int = 0
+              command place {
+                lineCount -> 1
+                emit OrderDrafted(orderId: id)
+                publish OrderPlaced(orderId: id, lineCount: lineCount)
+              }
+            }
+          }
+        }
+        """;
+
     private static string FilesJson(string text = Fixture) =>
         JsonSerializer.Serialize(new[] { new { uri = "file:///t.koi", text } });
 
@@ -142,6 +164,39 @@ public class ScenarioWireParityTests
         plain.AsObject().Remove("notes");
         asked.AsObject().Remove("notes");
         Canonical(asked).ShouldBe(Canonical(plain));
+    }
+
+    /// <summary>
+    /// R19 (#1796): a <c>publish</c> must be distinguishable from an <c>emit</c> on the wire, identically
+    /// on both backends. It stays <c>kind: "emit"</c> — the shape every existing client switches on — and
+    /// carries a <c>published: true</c> flag written ONLY when it is one, so a domain event's step object
+    /// is byte-identical to what it was before the clause existed.
+    /// </summary>
+    [Fact]
+    public void A_published_integration_event_is_flagged_identically_across_backends()
+    {
+        object given = new { lineCount = 0 };
+        object args = new { };
+
+        JsonNode lsp = WireParityHarness.LspResult(
+            "file:///t.koi", PublishingFixture, "koine/runScenario",
+            new { target = "Order", operation = "place", given, args })!;
+        JsonNode wasm = JsonNode.Parse(WasmRunScenario("Order", "place", given, args, text: PublishingFixture))!;
+
+        Canonical(lsp).ShouldBe(Canonical(wasm));
+
+        JsonArray steps = wasm["steps"]!.AsArray();
+        JsonNode[] recorded = steps.Where(s => s!["kind"]!.GetValue<string>() == "emit").Select(s => s!).ToArray();
+        recorded.Length.ShouldBe(2);
+
+        // The domain event keeps exactly its pre-#1796 shape: no `published` key at all, not `false`.
+        recorded[0]["event"]!.GetValue<string>().ShouldBe("OrderDrafted");
+        recorded[0]!.AsObject().ContainsKey("published").ShouldBeFalse();
+
+        // The publication is the same `emit` kind, flagged.
+        recorded[1]["event"]!.GetValue<string>().ShouldBe("OrderPlaced");
+        recorded[1]["kind"]!.GetValue<string>().ShouldBe("emit");
+        recorded[1]["published"]!.GetValue<bool>().ShouldBeTrue();
     }
 
     // ---- LSP driving (domain-specific; the plumbing lives in WireParityHarness) ----

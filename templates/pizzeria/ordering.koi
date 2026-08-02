@@ -111,14 +111,19 @@ context Ordering version 1 {
         Cancelled
       }
 
-      /// Place a drafted order for processing, stamping the time and recording
-      /// a domain event. The cross-context announcement is `OrderPlaced`.
+      /// Place a drafted order for processing, stamping the time and announcing it
+      /// twice — deliberately, because the two verbs are not interchangeable.
+      /// `emit` records an INTERNAL domain event on this aggregate's own stream;
+      /// `publish` hands over the `OrderPlaced` contract the context declares with
+      /// `publishes`, whose primitive payload leaves the context through the
+      /// outbox for Kitchen, Delivery and Payment to consume.
       command place {
         requires status == Draft   "only a draft order can be placed"
         requires !lines.isEmpty    "cannot place an empty order"
         status   -> Placed
         placedAt -> now
         emit OrderPlacedInternally(orderId: id, lineCount: lines.count)
+        publish OrderPlaced(orderId: id, customer: customer, fulfillment: fulfillment, total: total.amount, placedAt: now)
       }
 
       /// Cancel an order that has not yet gone out for delivery.

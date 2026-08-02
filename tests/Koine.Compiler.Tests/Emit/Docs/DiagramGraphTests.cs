@@ -574,6 +574,69 @@ public class DiagramGraphTests
         return new DocsEmitter().EmitDiagrams(model!)["docs/Payment.md"].First(d => d.Kind == "context").Graph;
     }
 
+    /// <summary>
+    /// R19 — a <c>publish</c> joins the event-flow chain as a visibly DIFFERENT edge from an
+    /// <c>emit</c>: the target is an <c>integration-event</c> node (a domain event's is <c>event</c>)
+    /// and the label is <c>publishes</c>, so the graph shows the contract leaving the context rather
+    /// than another intra-aggregate event. Integration events are not class nodes, so the node is
+    /// materialized by the chain itself.
+    /// </summary>
+    [Fact]
+    public void A_published_integration_event_joins_the_chain_as_a_publishes_edge()
+    {
+        const string source = """
+            context Shipping {
+              publishes ParcelDispatched
+
+              integration event ParcelDispatched {
+                parcel:  String
+                carrier: String
+              }
+
+              aggregate Deliveries root Parcel {
+                event ParcelPacked { parcel: ParcelId }
+
+                entity Parcel identified by ParcelId {
+                  carrier: String
+
+                  command dispatch {
+                    emit ParcelPacked(parcel: id)
+                    publish ParcelDispatched(parcel: id.value, carrier: carrier)
+                  }
+                }
+              }
+            }
+            """;
+
+        var (model, diagnostics) = new KoineCompiler().Parse(new[] { new SourceFile("shipping.koi", source) });
+        diagnostics.ShouldBeEmpty();
+        DiagramGraph graph = new DocsEmitter().EmitDiagrams(model!)["docs/Shipping.md"]
+            .First(d => d.Kind == "context").Graph;
+
+        DiagramNode dispatch = graph.Nodes.First(n => n.Kind == "command" && n.Label == "dispatch");
+        DiagramNode packed = graph.Nodes.First(n => n.Kind == "event" && n.Label == "ParcelPacked");
+
+        // The integration event is its OWN node kind — not folded in with the domain events.
+        DiagramNode published = graph.Nodes.First(n => n.Label == "ParcelDispatched");
+        published.Kind.ShouldBe("integration-event");
+        published.QualifiedName.ShouldBe("Shipping.ParcelDispatched");
+        published.Span.ShouldNotBeNull();
+        published.Span!.Value.IsNone.ShouldBeFalse();
+
+        graph.Edges.ShouldContain(e => e.From == dispatch.Id && e.To == packed.Id && e.Label == "emits");
+        graph.Edges.ShouldContain(e => e.From == dispatch.Id && e.To == published.Id && e.Label == "publishes");
+
+        // Every edge still resolves inside this graph and every node id is unique.
+        var ids = graph.Nodes.Select(n => n.Id).ToList();
+        ids.Distinct(StringComparer.Ordinal).Count().ShouldBe(ids.Count, "duplicate node ids in the chain");
+        var idSet = ids.ToHashSet(StringComparer.Ordinal);
+        foreach (DiagramEdge edge in graph.Edges)
+        {
+            idSet.ShouldContain(edge.From, $"edge {edge.From}->{edge.To} has an unknown source");
+            idSet.ShouldContain(edge.To, $"edge {edge.From}->{edge.To} has an unknown target");
+        }
+    }
+
     /// <summary>The Ordering context's class-diagram graph from the fixture.</summary>
     private static DiagramGraph ContextGraph() =>
         Descriptors()["docs/Ordering.md"].First(d => d.Kind == "context").Graph;

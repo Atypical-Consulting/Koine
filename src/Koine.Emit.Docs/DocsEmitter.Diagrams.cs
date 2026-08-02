@@ -278,6 +278,31 @@ public sealed partial class DocsEmitter
                         edges.Add(new DiagramEdge(id, emit.EventName, "emits", ArrowKind: "flow"));
                     }
                 }
+
+                // command --publishes--> integration event(s) (R19). Unlike a domain event, an
+                // integration event is NOT a class node in this diagram (ContextClassModel skips it), so
+                // the target node is materialized here — with its own `integration-event` kind and a
+                // `publishes` (not `emits`) label, so the chain shows the contract LEAVING the context
+                // rather than another intra-aggregate event.
+                foreach (PublishClause publish in body.OfType<PublishClause>())
+                {
+                    if (ctx.AllTypeDecls().OfType<IntegrationEventDecl>()
+                            .FirstOrDefault(ie => string.Equals(ie.Name, publish.EventName, StringComparison.Ordinal))
+                        is not { } published)
+                    {
+                        continue; // KOI1420 rejects this at validation; a broken model still draws cleanly
+                    }
+
+                    if (nodeIds.Add(published.Name))
+                    {
+                        nodes.Add(new DiagramNode(
+                            published.Name, published.Name, "integration-event",
+                            $"{ctx.Name}.{published.Name}", PreferName(published, ctx),
+                            Doc: NormalizeDoc(published.Doc)));
+                    }
+
+                    edges.Add(new DiagramEdge(id, published.Name, "publishes", ArrowKind: "flow"));
+                }
             }
 
             foreach (CommandDecl cmd in entity.Commands)

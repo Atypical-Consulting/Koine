@@ -75,6 +75,11 @@ PUBLISHED_LANGUAGE : 'published-language' ;
 ACL                : 'acl' ;
 // R14.3 — integration events (the 'event' word reuses the existing EVENT token).
 INTEGRATION        : 'integration' ;
+// R19 — `publish X(...)` is the command-body verb form of the context-level
+// `publishes X` declaration. Declared adjacent to PUBLISHES for readability;
+// ordering is not load-bearing (ANTLR's maximal munch still lexes 'publishes'
+// as PUBLISHES because it is the longer match).
+PUBLISH            : 'publish' ;
 PUBLISHES          : 'publishes' ;
 SUBSCRIBES         : 'subscribes' ;
 WHEN       : 'when' ;

@@ -269,6 +269,9 @@ public static class ScenarioService
     /// one: a primary-aggregate step — which is every step interpreted mode ever produces, and every step
     /// executed mode produced before fan-out — keeps exactly the wire shape it had, rather than gaining a
     /// null-valued <c>"aggregate"</c> key that would churn every existing result.
+    /// <para>The published discriminator (R19, #1796) is written the same way: <c>"published": true</c>
+    /// appears only on a step a <c>publish</c> produced, so an <c>emit</c> step is byte-identical to
+    /// before and a client that never reads the key still renders every timeline it used to.</para>
     /// </summary>
     private static object ShapeStep(ScenarioStep step)
     {
@@ -302,6 +305,14 @@ public static class ScenarioService
             },
             _ => new Dictionary<string, object?> { ["kind"] = "unknown" }
         };
+
+        // R19: a `publish` is an emit-SHAPED step that crosses a context boundary. It keeps
+        // `kind: "emit"` (the wire's discriminated union stays closed, so no consumer has to grow an arm
+        // before it can render the timeline at all) and carries the distinction as a flag instead.
+        if (step is ScenarioStep.Emit { Published: true })
+        {
+            shaped["published"] = true;
+        }
 
         if (step.Aggregate is { } aggregate)
         {

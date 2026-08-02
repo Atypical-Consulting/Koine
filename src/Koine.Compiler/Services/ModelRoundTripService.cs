@@ -341,7 +341,13 @@ public static partial class ModelRoundTripService
         RequiresClause requires => new ModelMember(
             "requires", ExprDescriber.Describe(requires.Condition), null, requires.Message),
 
-        EmitClause emit => new ModelMember("emit", emit.EventName, null, DescribeEmitArgs(emit)),
+        EmitClause emit => new ModelMember("emit", emit.EventName, null, DescribeEmitArgs(emit.Args)),
+
+        // R19 — a published integration event gets its OWN kind rather than folding into "emit": the
+        // two clauses mean different things (intra-aggregate domain event vs. a published-language
+        // contract leaving the context), and an editor must be able to tell them apart. Without this
+        // arm the `_ => null` fallthrough silently dropped every `publish` from the projection.
+        PublishClause publish => new ModelMember("publish", publish.EventName, null, DescribeEmitArgs(publish.Args)),
 
         _ => null,
     };
@@ -355,11 +361,15 @@ public static partial class ModelRoundTripService
             ? null
             : string.Join(", ", parameters.Select(p => $"{p.Name}: {FormatType(p.Type)}"));
 
-    /// <summary>Renders an emitted event's payload in canonical <c>.koi</c> syntax (<c>field: value, ...</c>); null when empty.</summary>
-    private static string? DescribeEmitArgs(EmitClause emit) =>
-        emit.Args.Count == 0
+    /// <summary>
+    /// Renders an emitted or published event's payload in canonical <c>.koi</c> syntax
+    /// (<c>field: value, ...</c>); null when empty. Shared by <c>emit</c> and <c>publish</c>, whose
+    /// payloads are the same <see cref="EmitArg"/> list.
+    /// </summary>
+    private static string? DescribeEmitArgs(IReadOnlyList<EmitArg> args) =>
+        args.Count == 0
             ? null
-            : string.Join(", ", emit.Args.Select(a => $"{a.Field}: {ExprDescriber.Describe(a.Value)}"));
+            : string.Join(", ", args.Select(a => $"{a.Field}: {ExprDescriber.Describe(a.Value)}"));
 
     /// <summary>
     /// A policy (R10.3): one <c>reaction</c> member correlating the triggering event with the command

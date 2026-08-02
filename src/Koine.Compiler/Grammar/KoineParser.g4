@@ -168,6 +168,7 @@ param          : softName COLON typeRef ;
 commandStmt    : requiresClause
                | transition
                | emitClause
+               | publishClause
                | resultClause
                ;
 
@@ -178,6 +179,11 @@ resultClause   : RESULT expression ;                          // `result Voucher
 transition     : softName RARROW expression ;                  // `status -> Placed`
 
 emitClause     : EMIT Identifier ( LPAREN emitArgList? RPAREN )? ;   // `emit OrderPlaced(orderId: id)`
+
+// R19 — the verb form of the context-level `publishes X`: publishes an INTEGRATION event
+// (a published-language contract leaving the context), where `emit` records an intra-aggregate
+// DOMAIN event. Reuses emitArgList: the payload syntax is identical.
+publishClause  : PUBLISH Identifier ( LPAREN emitArgList? RPAREN )? ;  // `publish OrderPlaced(orderId: id)`
 
 emitArgList    : emitArg ( COMMA emitArg )* ;
 
@@ -240,7 +246,7 @@ typeRef        : ( typeName DOT )? typeName ( LT typeRef ( COMMA typeRef )? GT )
 softName       : Identifier | declKeyword | WHEN | IF | THEN | ELSE ;
 exprName       : Identifier | declKeyword | WHEN ;
 typeName       : Identifier | declKeyword ;
-declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | RESULT | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE | ACL | INTEGRATION | PUBLISHES | SUBSCRIBES | VERSION | LET | IN ;
+declKeyword    : CONTEXT | VALUE | QUANTITY | ENTITY | AGGREGATE | ENUM | IDENTIFIED | BY | ROOT | COMMAND | REQUIRES | RESULT | EVENT | EMIT | STATES | CREATE | SPEC | ON | SERVICE | OPERATION | POLICY | AS | NATURAL | SEQUENCE | GUID | VERSIONED | REPOSITORY | OPERATIONS | FIND | USECASE | READMODEL | FROM | QUERY | IMPORT | MODULE | ACL | INTEGRATION | PUBLISH | PUBLISHES | SUBSCRIBES | VERSION | LET | IN ;
 
 invariant      : INVARIANT expression StringLiteral? ;
 
