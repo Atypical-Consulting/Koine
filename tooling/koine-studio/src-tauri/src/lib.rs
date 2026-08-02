@@ -2437,7 +2437,9 @@ fn end_collab_session(state: &CollabState) {
 ///
 /// `bind_address` is the interface the session listens on AND the address advertised in the join
 /// token — it defaults to loopback, so inviting the LAN in is a deliberate act, never a side effect
-/// of clicking "start session". When `relay` is set, that relay brokers instead of this host.
+/// of clicking "start session". When `relay` is set, that relay brokers instead of this host, and it
+/// must be `host:port/<public-key>`: every connection is Noise-encrypted against a key the dialler
+/// pins, so there is no way to reach an unauthenticated broker (#1811, ADR 0017).
 #[tauri::command]
 fn collab_start(
     app: AppHandle,

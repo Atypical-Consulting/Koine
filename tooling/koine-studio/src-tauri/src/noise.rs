@@ -279,6 +279,14 @@ pub struct NoiseWriter<W: Write> {
     nonce: u64,
 }
 
+impl<W: Write> NoiseWriter<W> {
+    /// The socket underneath, for the things that are properties of the connection rather than of the
+    /// channel — hanging up on a peer, mostly.
+    pub fn get_ref(&self) -> &W {
+        &self.inner
+    }
+}
+
 impl<W: Write> Write for NoiseWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if buf.is_empty() {
@@ -320,6 +328,12 @@ pub struct NoiseReader<R: Read> {
 }
 
 impl<R: Read> NoiseReader<R> {
+    /// The socket underneath — see `NoiseWriter::get_ref`. Used to drop the handshake read deadline
+    /// once a connection has become long-lived.
+    pub fn get_ref(&self) -> &R {
+        &self.inner
+    }
+
     /// Decrypt the next chunk into `buffer`. `Ok(0)` means a clean end of stream *between* chunks —
     /// which is what lets `read_frame`'s "nothing at all yet means the peer hung up" case survive the
     /// extra layer.
