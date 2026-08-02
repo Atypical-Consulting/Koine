@@ -1525,4 +1525,223 @@ public class TypeScriptConformanceTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1875 — the #1511 fix (Rust) never ported to TypeScript: a command's <c>result</c>
+    /// expression never numerically reconciled against the command's declared return type, unlike the
+    /// identical decision already applied at factory ctor args (#1732). An <c>Int</c>-typed member
+    /// returned against a <c>: Decimal</c> return type emitted a bare <c>number</c> where the runtime
+    /// <c>Decimal</c> class is required — a real <c>tsc --strict</c> TS2322 error. Mirrors #1866's
+    /// Java/Kotlin fix (PR #1872).
+    /// </summary>
+    [Fact]
+    public void Result_expression_widens_an_int_member_to_decimal_against_a_decimal_return_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeC: Decimal {\n" +
+            "      result tax\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return Decimal.fromInt(this.tax);");
+        invoice.ShouldNotContain("return this.tax;");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
+    [Fact]
+    public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeFlat: Decimal {\n" +
+            "      result 5\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return Decimal.fromInt(5);");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1875: an <c>emit</c> payload argument never numerically reconciled against the event
+    /// member's declared type either — the payload-argument dual of the <c>result</c> gap above.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_widens_an_int_member_to_decimal_against_a_decimal_declared_field()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  event Charged { amount: Decimal }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command raiseCharge {\n" +
+            "      emit Charged(amount: tax)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("new Charged(Decimal.fromInt(this.tax))");
+        invoice.ShouldNotContain("new Charged(this.tax)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1875: the <c>publish</c> half of the payload builder gets the same widening as
+    /// <c>emit</c> above — a published integration event's <c>Decimal</c>-declared field fed an
+    /// <c>Int</c>-typed argument emitted an uncoerced value too.
+    /// </summary>
+    [Fact]
+    public void Publish_payload_argument_widens_an_int_member_to_decimal_against_a_decimal_declared_field()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  publishes ChargedOut\n" +
+            "  integration event ChargedOut { amount: Decimal }\n" +
+            "  aggregate Invoicing root Invoice {\n" +
+            "    entity Invoice identified by InvoiceId {\n" +
+            "      tax: Int\n" +
+            "      command raiseCharge {\n" +
+            "        publish ChargedOut(amount: tax)\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("new ChargedOut(Decimal.fromInt(this.tax))");
+        invoice.ShouldNotContain("new ChargedOut(this.tax)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1875, the <c>NeedsOptionalWiden</c> composition: an already-optional <c>Int?</c> member
+    /// <c>result</c>-ed into an optional-declared <c>Decimal?</c> return must widen via the null-check
+    /// shell, never a bare <c>Decimal.fromInt(...)</c> wrap around a possibly-<c>undefined</c> value —
+    /// the #1335/#1343 bug class the ctor-arg reconciler already guards.
+    /// </summary>
+    [Fact]
+    public void Result_expression_widens_an_optional_int_member_via_null_check_against_an_optional_decimal_return_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    maybeTax: Int?\n" +
+            "    command chargeOpt: Decimal? {\n" +
+            "      result maybeTax\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("Decimal.fromInt(__v)");
+        invoice.ShouldNotContain("return this.maybeTax;");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1875, the <c>CoalesceExpr</c> double-widen guard (mirrors #1762 at the ctor-arg site): a
+    /// coalesce already widened by <c>WriteCoalesce</c> must not be widened a SECOND time by this new
+    /// result-expression reconciliation — a real <c>tsc --strict</c> "not assignable" error.
+    /// </summary>
+    [Fact]
+    public void Result_expression_over_a_coalesce_widens_exactly_once()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    maybeTax: Int?\n" +
+            "    command chargeOrZero: Decimal {\n" +
+            "      result maybeTax ?? 0\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldNotContain("Decimal.fromInt(Decimal.fromInt");
+        invoice.ShouldNotContain("Decimal.fromInt((");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1875 zero-change regression guard: a matching-type <c>Decimal</c> result and a
+    /// non-numeric <c>String</c> payload argument must render byte-identical to before this fix — no
+    /// reconciliation wrap where none is needed.
+    /// </summary>
+    [Fact]
+    public void Result_and_payload_of_matching_or_non_numeric_types_are_unaffected()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  event Noted { note: String }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal\n" +
+            "    memo:  String\n" +
+            "    command grandTotal: Decimal {\n" +
+            "      result total\n" +
+            "    }\n" +
+            "    command annotate {\n" +
+            "      emit Noted(note: memo)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return this.total;");
+        invoice.ShouldContain("new Noted(this.memo)");
+        invoice.ShouldNotContain("Decimal.fromInt(this.total)");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
