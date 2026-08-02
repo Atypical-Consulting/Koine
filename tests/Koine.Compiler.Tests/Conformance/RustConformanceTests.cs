@@ -484,6 +484,11 @@ public class RustConformanceTests
         var rust = string.Join("\n", result.Files.Select(f => f.Contents));
         rust.ShouldNotContain("self.weight.clone() + self.weight.clone()");
         rust.ShouldContain("self.weight.add(&self.weight).expect(\"Money: unit mismatch\")");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
     /// <summary>
