@@ -397,6 +397,15 @@ public sealed partial class JavaEmitter
             ? translator.Translate(result.Value, JavaExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
 
+        // Widen the result expression toward the command's declared return type (#1511) — an Int-inferred
+        // `result` against a `: Decimal` return would otherwise emit an uncoerced `return this.tax;` that
+        // javac rejects. Reuses the same ReconcileAgainstDeclared decision the factory-ctor-arg (#1519) and
+        // event-payload (below, #1866) call sites already apply.
+        if (resultClause is { } widenResult && cmd.ReturnType is { } returnDecl)
+        {
+            resultExpr = ReconcileAgainstDeclared(InferReconcilableValueType(translator, widenResult.Value), returnDecl, resultExpr!, allowOptionalWrap: false);
+        }
+
         //    The statements are BUILT here and WRITTEN below: the binding has to precede the first
         //    `add(...)`, yet whether it is needed at all is only known once every payload has been
         //    rendered and compared.
@@ -595,6 +604,11 @@ public sealed partial class JavaEmitter
             var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
             var rendered = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
 
+            // Widen a payload argument toward its event member's declared type (#1511) — an Int-inferred
+            // argument against a Decimal-declared field would otherwise emit an uncoerced value that javac
+            // rejects (#1866).
+            rendered = ReconcileAgainstDeclared(InferReconcilableValueType(translator, value), m.Type, rendered, allowOptionalWrap: false);
+
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
             return hoist.Substitute(rendered, ResultHoist.LocalName);
@@ -705,7 +719,7 @@ public sealed partial class JavaEmitter
             {
                 var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var translated = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
-                args.Add(ReconcileFactoryCtorArg(InferCtorArgValueType(translator, value), m.Type, translated));
+                args.Add(ReconcileAgainstDeclared(InferReconcilableValueType(translator, value), m.Type, translated));
             }
             else if (factory.Parameters.FirstOrDefault(p => MemberAnalysis.AutoBinds(p, m)) is { } boundParam)
             {
@@ -735,7 +749,7 @@ public sealed partial class JavaEmitter
     }
 
     /// <summary>
-    /// The type <see cref="ReconcileFactoryCtorArg"/> should reconcile <paramref name="value"/>'s already-
+    /// The type <see cref="ReconcileAgainstDeclared"/> should reconcile <paramref name="value"/>'s already-
     /// translated body against. For most expressions this is just <c>translator.InferType(value)</c> — but
     /// a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c> (target-agnostic, shared
     /// across every emitter) reports the coalesce's LEFT operand's own numeric type, unwidened against the
@@ -743,12 +757,15 @@ public sealed partial class JavaEmitter
     /// <c>Int</c>/<c>Decimal</c> mismatch between the two sides (out of scope here to change — #1548 is a
     /// Java-lowering-only fix). <see cref="JavaExpressionTranslator"/>'s own <c>WriteCoalesce</c> (#1548)
     /// already widens the narrower operand's RENDERED text to match the wider one, so reconciling the outer
-    /// ctor-arg wrap against that same naive (unwidened) type would double-widen an already-widened value —
-    /// a real <c>javac</c> "no suitable method found for valueOf(BigDecimal)" error. This mirrors
+    /// wrap against that same naive (unwidened) type would double-widen an already-widened value — a real
+    /// <c>javac</c> "no suitable method found for valueOf(BigDecimal)" error. This mirrors
     /// <c>VisitConditional</c>'s own numeric widening locally, scoped to this one caller, without touching
     /// the shared resolver.
+    /// <para>Shared by every call site that reconciles a translated value against a declared type — factory
+    /// ctor args (#1519), a command's <c>result</c> expression, and an <c>emit</c>/<c>publish</c> payload
+    /// argument (#1866, the #1511 Rust fix ported here).</para>
     /// </summary>
-    private static TypeRef? InferCtorArgValueType(JavaExpressionTranslator translator, Expr value)
+    private static TypeRef? InferReconcilableValueType(JavaExpressionTranslator translator, Expr value)
     {
         if (value is not CoalesceExpr co)
         {
@@ -766,25 +783,37 @@ public sealed partial class JavaEmitter
     }
 
     /// <summary>
-    /// Reconciles an explicit-init factory ctor argument's already-translated Java expression against the
-    /// member's <paramref name="declared"/> type, reusing the same shared <see cref="BranchReconciliation"/>
-    /// decision (#1368) every code emitter's ternary-branch reconciliation already applies (#1344) rather
-    /// than a hand-rolled, narrower duplicate (#1519) — composed exactly as <c>WriteReconciledBranch</c>
-    /// does: widen inside, wrap outside. <c>NeedsWiden</c> widens a non-optional <c>Int</c> value to
-    /// <c>BigDecimal</c>; <c>NeedsOptionalWiden</c> does the same when the value is itself
-    /// <c>Optional</c>-typed, via <c>.map(BigDecimal::valueOf)</c> instead (an already-<c>Optional</c>-shaped
-    /// value can't be widened with a bare call); <c>NeedsSomeWrap</c> lifts a non-optional value into
-    /// <c>Optional.of(...)</c> against an optional-declared member (#1479). <c>NeedsWiden</c> and
-    /// <c>NeedsOptionalWiden</c> are mutually exclusive and <c>NeedsOptionalWiden</c> never composes with
-    /// <c>NeedsSomeWrap</c> (see <see cref="BranchReconciliation"/>'s own remarks), so applying all three in
-    /// sequence is safe.
+    /// Reconciles an already-translated Java expression against a <paramref name="declared"/> type, reusing
+    /// the same shared <see cref="BranchReconciliation"/> decision (#1368) every code emitter's
+    /// ternary-branch reconciliation already applies (#1344) rather than a hand-rolled, narrower duplicate
+    /// (#1519) — composed exactly as <c>WriteReconciledBranch</c> does: widen inside, wrap outside.
+    /// <c>NeedsWiden</c> widens a non-optional <c>Int</c> value to <c>BigDecimal</c>; <c>NeedsOptionalWiden</c>
+    /// does the same when the value is itself <c>Optional</c>-typed, via <c>.map(BigDecimal::valueOf)</c>
+    /// instead (an already-<c>Optional</c>-shaped value can't be widened with a bare call); <c>NeedsSomeWrap</c>
+    /// lifts a non-optional value into <c>Optional.of(...)</c> against an optional-declared target (#1479).
+    /// <c>NeedsWiden</c> and <c>NeedsOptionalWiden</c> are mutually exclusive and <c>NeedsOptionalWiden</c>
+    /// never composes with <c>NeedsSomeWrap</c> (see <see cref="BranchReconciliation"/>'s own remarks), so
+    /// applying all three in sequence is safe.
+    /// <para>Applied at three call sites: an explicit-init factory ctor argument (#1519), a command's
+    /// <c>result</c> expression, and an <c>emit</c>/<c>publish</c> payload argument (#1866) — the two call
+    /// sites the Rust emitter already closed at #1511.</para>
+    /// <para><paramref name="allowOptionalWrap"/> gates the <c>NeedsSomeWrap</c> dimension, which is
+    /// type-agnostic — it lifts ANY non-optional value into an optional-declared target, not just a
+    /// numeric one. The factory-ctor-arg call site wants that (#1479: an explicit `field &lt;- expr` init
+    /// against an optional-declared member). The <c>result</c>/payload call sites (#1866) do NOT: this
+    /// emitter does not (yet) bridge a bare non-numeric value into an <c>Optional</c>-typed return or
+    /// payload field at all (a separate, pre-existing gap — see <c>WriteBehavior</c>'s hoist-binding
+    /// comment), and applying the wrap here as a side effect of this fix would silently change that
+    /// unrelated behavior. Pass <see langword="false"/> there so only the numeric dimensions
+    /// (<c>NeedsWiden</c>/<c>NeedsOptionalWiden</c>) apply, composing with that gap's eventual fix later
+    /// rather than accidentally closing it now.</para>
     /// </summary>
-    private static string ReconcileFactoryCtorArg(TypeRef? valueType, TypeRef declared, string body)
+    private static string ReconcileAgainstDeclared(TypeRef? valueType, TypeRef declared, string body, bool allowOptionalWrap = true)
     {
         BranchReconciliation needs = BranchReconciliation.Classify(valueType, declared);
         var widened = needs.NeedsWiden ? $"java.math.BigDecimal.valueOf({body})" : body;
         var mapped = needs.NeedsOptionalWiden ? $"{widened}.map(java.math.BigDecimal::valueOf)" : widened;
-        return needs.NeedsSomeWrap ? $"java.util.Optional.of({mapped})" : mapped;
+        return allowOptionalWrap && needs.NeedsSomeWrap ? $"java.util.Optional.of({mapped})" : mapped;
     }
 
     /// <summary>Writes identity-based <c>equals</c>/<c>hashCode</c> keyed on the id field (an entity is its identity).</summary>

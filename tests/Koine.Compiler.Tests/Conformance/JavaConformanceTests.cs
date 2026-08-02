@@ -1369,8 +1369,8 @@ public class JavaConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
-        invoice.ShouldContain("return java.math.BigDecimal.valueOf(this.tax);");
-        invoice.ShouldNotContain("return this.tax;");
+        invoice.ShouldContain("public java.math.BigDecimal chargeC() {\n        return java.math.BigDecimal.valueOf(this.tax);\n    }");
+        invoice.ShouldNotContain("return java.math.BigDecimal.valueOf(java.math.BigDecimal");
 
         var r = TestSupport.CompileJava(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
@@ -1555,7 +1555,7 @@ public class JavaConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
-        invoice.ShouldContain("return this.total;");
+        invoice.ShouldContain("public java.math.BigDecimal grandTotal() {\n        return this.total;\n    }");
         invoice.ShouldContain("new Noted(this.memo)");
         invoice.ShouldNotContain("BigDecimal.valueOf(this.total)");
 
