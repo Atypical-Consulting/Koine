@@ -12,8 +12,8 @@ import { basename } from '@/shared/path';
 // --- minimal File System Access typings (not in the TS DOM lib) --------------
 interface FsWritable {
   // Accepts a string (new file contents) or a Blob/File (a faithful byte copy of an existing file).
-  write(data: string | Blob): Promise<void>;
-  close(): Promise<void>;
+  write: (data: string | Blob) => Promise<void>;
+  close: () => Promise<void>;
 }
 interface FsFileHandle {
   kind: 'file';

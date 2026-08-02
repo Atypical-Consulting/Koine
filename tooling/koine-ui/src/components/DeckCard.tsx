@@ -45,11 +45,11 @@ export interface DeckCardProps {
   /** True when this card is the selected surface (the primary). Content/aria only. */
   isSelected: boolean;
   /** Root click — the parent routes it (overview → focus this surface; 2-up → select this pane). */
-  onActivate(): void;
-  onSelectFacet(value: string): void;
-  onClose(): void;
+  onActivate: () => void;
+  onSelectFacet: (value: string) => void;
+  onClose: () => void;
   /** Collect the root element for the host's FLIP engine. */
-  rootRef(el: HTMLElement | null): void;
+  rootRef: (el: HTMLElement | null) => void;
   /** The real surface body to host (re-parented into the card). Omit and pass `children` instead. */
   hostEl?: HTMLElement;
   children?: ComponentChildren;

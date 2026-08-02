@@ -30,45 +30,45 @@ import type { GitLogEntry } from '@/host/types';
 // The actions the command surface dispatches to. Each is a thunk into an init() closure or another
 // controller, so commandWiring imports none of them directly and stays unit-testable with stubs.
 export interface CommandWiringDeps {
-  history: { undo(): void; redo(): void };
+  history: { undo: () => void; redo: () => void };
   /** Format the active document (ide.tsx's formatActive — lsp.format + editor.applyEdits). */
-  format(): void;
-  goHome(): void;
-  openFolder(): void;
-  search: { focus(): void; toggle(): void; seed(term: string): void };
-  requestNewModel(): void;
+  format: () => void;
+  goHome: () => void;
+  openFolder: () => void;
+  search: { focus: () => void; toggle: () => void; seed: (term: string) => void };
+  requestNewModel: () => void;
   // `buffers` is a THUNK, not a value: the workspace slice REPLACES its buffer Map on every mutation
   // (#982), so a value captured once at construction would freeze at the initial empty Map. Read live.
-  workspace: { saveAllDirty(): void; buffers(): ReadonlyMap<string, { uri: string; relPath: string }> };
+  workspace: { saveAllDirty: () => void; buffers: () => ReadonlyMap<string, { uri: string; relPath: string }> };
   copyShareLink(): void;
   controller: {
-    runCheck(): void;
-    selectOutput(tab: 'generated' | 'contextmap' | 'compatibility'): void;
-    selectDocsTab(tab: 'glossary' | 'adr' | 'notes', term?: string): void;
-    selectCenter(view: 'visual'): void;
-    splitCodeCanvas(): void;
-    selectTech(view: 'scenarios'): void;
-    selectRight(view: 'assistant' | 'source-control', focus?: SourceControlFocus): void;
-    selectBottomTab(tab: 'review'): void;
+    runCheck: () => void;
+    selectOutput: (tab: 'generated' | 'contextmap' | 'compatibility') => void;
+    selectDocsTab: (tab: 'glossary' | 'adr' | 'notes', term?: string) => void;
+    selectCenter: (view: 'visual') => void;
+    splitCodeCanvas: () => void;
+    selectTech: (view: 'scenarios') => void;
+    selectRight: (view: 'assistant' | 'source-control', focus?: SourceControlFocus) => void;
+    selectBottomTab: (tab: 'review') => void;
   };
-  generateProject: { open(): void };
+  generateProject: { open: () => void };
   exportSourceZip(): void;
   exportActiveDiagram(format: 'svg' | 'png' | 'plantuml'): void;
   copyActiveDiagramMermaid(): void;
-  saveProjectToDisk(): void;
+  saveProjectToDisk: () => void;
   /** platform.canSaveProjects — gates the Save-to-disk command + toolbar button. */
   canSaveProjects: boolean;
   layoutActions: LayoutActions;
-  openSettings(category?: string): void;
+  openSettings: (category?: string) => void;
   openHelp(): void;
-  toggleHelp(): void;
+  toggleHelp: () => void;
   toggleStoreInspector(): void;
-  ensureAssistant(): { explainSelection(): void };
+  ensureAssistant: () => { explainSelection(): void };
   editor: { addCommentAtSelection(): void };
-  openUri(uri: string): void;
+  openUri: (uri: string) => void;
   /** True while the palette or a modal dialog is open — global chords don't fire through an overlay. */
   overlayOpen(): boolean;
-  toggleFileTree(): void;
+  toggleFileTree: () => void;
   /**
    * True while a workspace-opening operation is queued or running (workspaceOpLock.busy, #1275). Gates
    * the `new-model` / `open-folder` / `save-project-to-disk` commands (#1404) — palette entries, chords,
@@ -82,28 +82,28 @@ export interface CommandWiringDeps {
   // injected-controller idiom as the rest of this bag), so commandWiring builds LauncherSources /
   // LauncherActionDeps without importing the LSP client or the host platform directly.
   /** The joined workspace model index (ide.tsx wires controller.ensureModelIndex). Awaited per open. */
-  modelIndex(): Promise<ModelIndex>;
+  modelIndex: () => Promise<ModelIndex>;
   /** True when the host exposes git (desktop). Gates the launcher's "Recent commits" group. */
   canUseGit: boolean;
   /** The host git log (newest first), or null when the host has no git / can't read it. */
   gitLog(): Promise<GitLogEntry[]> | null;
   /** Open a workspace file and reveal a 0-based range — the launcher's go-to-symbol/rule effect. */
-  revealLocation(uri: string, range: Range): void;
+  revealLocation: (uri: string, range: Range) => void;
   /** Activate a workspace file and surface the LSP references picker at a 0-based range — the launcher's
    * find-usages effect (reuses the editor's Shift-F12 surface at the entry's declaration). */
-  findReferences(uri: string, range: Range): void;
+  findReferences: (uri: string, range: Range) => void;
   /** Activate a workspace file and open the inline rename field at a 0-based range — the launcher's
    * rename effect (reuses the editor's F2 rename surface → lsp.rename → applyWorkspaceEdit). */
-  renameSymbol(uri: string, range: Range): void;
+  renameSymbol: (uri: string, range: Range) => void;
   /** Revert a commit by sha — the launcher's revert effect: confirms, calls the host `gitRevert`, and
    * surfaces any git error (dirty tree / conflict). Only reached when {@link canUseGit}. */
-  gitRevert(sha: string): void;
+  gitRevert: (sha: string) => void;
   /** True when the host can reveal a file in the OS file manager (desktop). Gates the launcher's
    * reveal-in-Explorer action — the browser host reports false and the action degrades. */
   canRevealInFileManager: boolean;
   /** Reveal a workspace file in the OS file manager (Finder / Explorer) — the launcher's reveal effect.
    * Only reached when {@link canRevealInFileManager}. */
-  revealPath(uri: string): void;
+  revealPath: (uri: string) => void;
 }
 
 export interface CommandWiring {
@@ -116,7 +116,7 @@ export interface CommandWiring {
    */
   run(id: string): void;
   /** Release the global keyboard-shortcut listener. */
-  dispose(): void;
+  dispose: () => void;
   /** Re-resolve the cached keybindings and repaint the toolbar's ⌘K keycap from them — call after a
    *  Settings → Keyboard commit (#1421) so neither the hot keydown listener's cache nor the keycap
    *  decoration keeps showing a stale chord. */

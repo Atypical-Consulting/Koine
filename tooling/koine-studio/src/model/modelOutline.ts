@@ -67,13 +67,13 @@ export interface ConstructCount {
 
 export interface ModelOutlineHandlers {
   /** Select an element (drives the inspector + cross-highlight). */
-  onSelect(entry: GlossaryEntry): void;
+  onSelect: (entry: GlossaryEntry) => void;
   /** Jump the editor to a 1-based line/column (same contract `loadOutline` uses). */
-  goto(line: number, col: number): void;
+  goto: (line: number, col: number) => void;
   /** Open the Context Map view (the top-level "Context Map" entry). */
-  onOpenContextMap?(): void;
+  onOpenContextMap?: () => void;
   /** Open the Glossary view (the top-level "Ubiquitous Language" entry). */
-  onOpenGlossary?(): void;
+  onOpenGlossary?: () => void;
 }
 
 /**

@@ -9,13 +9,13 @@ import { type TextEdit } from '@/lsp/lsp';
 
 export interface FormatActiveDeps {
   /** Request whole-file format edits from the language server (lsp.format). */
-  format(): Promise<TextEdit[]>;
+  format: () => Promise<TextEdit[]>;
   /** The editor's current document text. */
   getDoc(): string;
   /** Apply LSP text edits to the editor document. */
   applyEdits(edits: TextEdit[]): void;
   /** The uri of the buffer the editor currently shows. */
-  activeUri(): string;
+  activeUri: () => string;
 }
 
 /** Build the format-active-document action: format via the LSP and apply the edits, discarding a

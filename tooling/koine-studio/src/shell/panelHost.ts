@@ -26,7 +26,7 @@ export interface PanelHostDeps {
   /** The store's pending landing category (appStore.settingsCategory) for the Settings page. */
   settingsCategory(): string | undefined;
   /** Record the Settings-open intent in the store (controller.showSettings) before building the page. */
-  showSettings(category?: string): void;
+  showSettings: (category?: string) => void;
   /** Close the Settings overlay (appStore.closeSettings). Wired to the header close button (#746). */
   closeSettings(): void;
   /** The active document's text (editor.getDoc) — the assistant's source context. */
@@ -38,10 +38,10 @@ export interface PanelHostDeps {
   /** The active file's diagnostics (editorSession.diagnosticsFor) for the assistant context. */
   diagnosticsFor(uri: string): Array<{ range: { start: { line: number; character: number } }; severity?: number; message: string }>;
   workspace: {
-    activeUri(): string;
+    activeUri: () => string;
     /** Every open buffer, keyed by its file:// uri (the assistant's opaque session key, #472). */
     buffers: ReadonlyMap<string, { name?: string; relPath: string; text: string; rootToken: string }>;
-    folderRootToken(): string;
+    folderRootToken: () => string;
     /** Keyed write: an open buffer's uri, or a `new:`/`new-in:` key (#1132) creating under the
      *  primary root or an explicitly chosen one, respectively. */
     applyFileEdit(key: string, body: string): Promise<unknown>;
@@ -51,20 +51,20 @@ export interface PanelHostDeps {
   lsp: KoineLsp;
   platform: Platform;
   reviewStore: NonNullable<Parameters<typeof createReviewPanel>[0]>['store'];
-  gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
+  gotoSourceSpan: (span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>) => void;
   reviewAuthorName(): string;
 }
 
 export interface PanelHost {
   /** The ONE entry every Settings affordance routes through: record intent in the store, build/refresh the page. */
-  openSettings(category?: string): void;
+  openSettings: (category?: string) => void;
   /**
    * Close the Settings overlay and restore focus to the element that opened it. Use this instead of
    * calling `deps.closeSettings()` directly so the focus lifecycle is managed in one place (#746).
    */
   closeSettings(): void;
   /** The AI assistant panel (built lazily; the SDK loads only on send). */
-  ensureAssistant(): AssistantPanel;
+  ensureAssistant: () => AssistantPanel;
   /** The scenario-runner panel (built lazily). */
   ensureScenarios(): ScenarioPanel;
   /** The integrated terminal panel (built lazily; brokers a real PTY on desktop). */
@@ -76,7 +76,7 @@ export interface PanelHost {
   /** Stop the brokered terminal when the page goes away (pagehide) — no-op until built. */
   disposeTerminal(): void;
   /** Full teardown: dispose the terminal + Review panel + Settings page if they were built. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 export function createPanelHost(deps: PanelHostDeps): PanelHost {

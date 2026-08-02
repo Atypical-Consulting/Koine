@@ -9,7 +9,7 @@ export interface ActiveContextSlice {
   /** The active bounded-context scope (a context name, or ALL_CONTEXTS). */
   activeContext: ContextScope;
   /** Set the scope; a no-op when unchanged (so subscribers don't churn). */
-  setActiveContext(scope: ContextScope): void;
+  setActiveContext: (scope: ContextScope) => void;
   /** The Domain navigator's altitude (#453) — strategic (the context list) or tactical (one context's
    *  internals). Lives beside `activeContext` because the two move together: drilling into a context sets
    *  the scope AND descends to tactical; the breadcrumb climbs back to strategic. Defaults to strategic. */

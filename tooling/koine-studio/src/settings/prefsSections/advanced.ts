@@ -50,10 +50,10 @@ export interface AdvancedSectionDeps {
     hasIntegratedTerminal?: boolean;
 
     /** Return the remembered workspace root's display name, or null if not yet set. */
-    workspaceRootName?(): Promise<string | null>;
+    workspaceRootName?: () => Promise<string | null>;
 
     /** Re-pick the workspace root directory; returns its name, or null if dismissed. */
-    pickWorkspaceRoot?(): Promise<string | null>;
+    pickWorkspaceRoot?: () => Promise<string | null>;
 
     /** Run on a CONFIRMED (second-click) Reset — the entire cross-section reset sequence, owned by the
      *  assembler since it reaches into every other section. */
@@ -62,7 +62,7 @@ export interface AdvancedSectionDeps {
     /** Fired after a successful Apply on the raw keybindings.json editor (#434) — mirrors
      *  KeyboardSectionDeps.onKeybindingsChanged (live-applies the editor keymap). The assembler's hook
      *  additionally repaints the Keyboard panel's rows, a cross-section concern this module can't own. */
-    onKeybindingsChanged?(): void;
+    onKeybindingsChanged?: () => void;
 }
 
 export function buildAdvancedSection(

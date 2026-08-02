@@ -17,16 +17,16 @@ import { LauncherPanel } from '@/launcher/LauncherPanel';
 
 /** Imperative handle the shell drives from the ⌘K shortcut. */
 export interface LauncherHandle {
-  open(): void;
-  close(): void;
-  toggle(): void;
+  open: () => void;
+  close: () => void;
+  toggle: () => void;
   readonly isOpen: boolean;
   /** Raise the launcher's own `.lx-toast` from shell code (issue #1145 review): the binding for a
    * degraded quick-action that must honestly say "not available yet" instead of a misleading no-op. */
-  toast(message: string): void;
+  toast: (message: string) => void;
   /** Pin an entry's read-only preview into the panel's preview pane (issue #1165): the `peek` quick
    * action's non-navigating quick-look, WITHOUT touching the editor or moving the keyboard selection. */
-  peek(entry: CatalogEntry): void;
+  peek: (entry: CatalogEntry) => void;
 }
 
 /**

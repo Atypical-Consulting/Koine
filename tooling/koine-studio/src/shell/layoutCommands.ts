@@ -13,13 +13,13 @@ import type { Command } from '@atypical/koine-ui';
 /** The layout effects ide.tsx injects; each maps 1:1 to one palette command's run(). */
 export interface LayoutActions {
   /** Move the bottom panel (Problems / Events / …) between the bottom edge and the right edge. */
-  togglePanelSide(): void;
+  togglePanelSide: () => void;
   /** Move the side rail (the element inspector) between the right edge and the left edge. */
-  toggleSideRail(): void;
+  toggleSideRail: () => void;
   /** Open/close the right Properties panel — the tool-window stripe's collapse toggle (#500). */
-  toggleProperties(): void;
+  toggleProperties: () => void;
   /** Collapse/expand the left navigator rail — the morph-collapse to/from its icon spine (#730). */
-  toggleNavigator(): void;
+  toggleNavigator: () => void;
 }
 
 /**

@@ -2406,7 +2406,12 @@ describe('workspace switching around send (per-workspace transcript integrity)',
     // Spy on focus() to record the textarea's disabled state AT CALL TIME — asserting the final DOM
     // alone would be false-green, since the deferred re-render enables the textarea soon afterwards.
     const disabledAtFocus: boolean[] = [];
-    const origFocus = HTMLElement.prototype.focus;
+    // Read the base implementation through its DESCRIPTOR — `HTMLElement.prototype.focus` as a bare
+    // value is an unbound method read (the very thing unbound-method flags); the explicit `.call(this)`
+    // below is what makes detaching it safe here, and the cast restores the type the descriptor erases.
+    const origFocus = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'focus')?.value as (
+      this: HTMLElement,
+    ) => void;
     const focusSpy = vi
       .spyOn(HTMLTextAreaElement.prototype, 'focus')
       .mockImplementation(function (this: HTMLTextAreaElement) {

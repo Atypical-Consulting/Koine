@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 // Mock the heavy export/diagram collaborators so each path is asserted in isolation (no real zipping,
 // SVG serialization, URL encoding, or wizard DOM). isSafeShareRelPath + sanitizeProjectName are pure, so
@@ -51,9 +51,14 @@ function makeDeps(over: { buffers?: Buf[]; platform?: Record<string, unknown> } 
   return { deps, setStatus, platform, workspace, buffers };
 }
 
+// Kept as a handle so the assertions below read the double they installed rather than re-reading
+// `navigator.clipboard.writeText` — a re-read detaches a DOM prototype method from its receiver,
+// which is what unbound-method flags.
+let writeText: Mock<(text: string) => Promise<void>>;
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => undefined) } });
+  writeText = vi.fn(async (_text: string) => undefined);
+  vi.stubGlobal('navigator', { clipboard: { writeText } });
 });
 
 describe('exportShare', () => {
@@ -62,7 +67,7 @@ describe('exportShare', () => {
       vi.mocked(workspaceShareUrlOrNull).mockReturnValue('https://koi/#model');
       const { deps, setStatus } = makeDeps({ buffers: [{ uri: 'file:///a.koi', relPath: 'a.koi', text: 'x' }] });
       await createExportShare(deps).copyShareLink();
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('https://koi/#model');
+      expect(writeText).toHaveBeenCalledWith('https://koi/#model');
       expect(setStatus).not.toHaveBeenCalled();
     });
 
@@ -70,7 +75,7 @@ describe('exportShare', () => {
       vi.mocked(workspaceShareUrlOrNull).mockReturnValue(null);
       const { deps, setStatus } = makeDeps({ buffers: [{ uri: 'file:///a.koi', relPath: 'a.koi', text: 'x' }] });
       await createExportShare(deps).copyShareLink();
-      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
       expect(setStatus).toHaveBeenCalledWith(expect.stringContaining('too large'), 'error');
     });
   });

@@ -67,7 +67,7 @@ export type RailAxis = 'domain' | 'files';
 export interface CenterDeckControllerDeps {
   /** Persist the legacy single-key center pane on every real change (kept alongside the Deck v2
    *  persistence below for whatever still reads it). */
-  saveWorkspaceCenter(id: string): void;
+  saveWorkspaceCenter: (id: string) => void;
   /** Persist the Deck v2 center layout on every real deck change. Optional so a caller that only wires the
    *  legacy pair doesn't need updating. Restoring the deck is no longer this module's job (#1260 — see the
    *  module doc on the construction-reset block): the facade computes it and seeds the store before this
@@ -75,7 +75,7 @@ export interface CenterDeckControllerDeps {
   saveWorkspaceDeck?: (deck: DeckState) => void;
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this module DOM-infra-free
    *  beyond its own element lookups). */
-  initEdgeResizer(opts: {
+  initEdgeResizer: (opts: {
     target: HTMLElement;
     handle: HTMLElement;
     container?: HTMLElement;
@@ -84,7 +84,7 @@ export interface CenterDeckControllerDeps {
     storageKey: string;
     min: number;
     max: (size: number) => number;
-  }): void;
+  }) => void;
 }
 
 /** The cross-module effects this module needs but doesn't own — every one is either facade-private state
@@ -132,17 +132,17 @@ export interface CenterDeckControllerOptions {
 }
 
 export interface CenterDeckController {
-  selectCenter(view: CenterView): void;
+  selectCenter: (view: CenterView) => void;
   /** Show the transient, gear-launched Settings overlay (#482) over the deck. */
-  showSettings(category?: string): void;
+  showSettings: (category?: string) => void;
   /** Switch the left rail's active navigator axis (#453). */
-  setAxis(axis: RailAxis): void;
-  selectTech(view: TechView): void;
-  selectOutput(view: OutputTab): void;
-  selectDocsTab(view: DocsView): void;
-  selectBottomTab(tab: BottomTab): void;
+  setAxis: (axis: RailAxis) => void;
+  selectTech: (view: TechView) => void;
+  selectOutput: (view: OutputTab) => void;
+  selectDocsTab: (view: DocsView) => void;
+  selectBottomTab: (tab: BottomTab) => void;
   /** Reveal a right-rail view, expanding the rail first if it was collapsed. */
-  selectRight(view: RightView, focus?: SourceControlFocus): void;
+  selectRight: (view: RightView, focus?: SourceControlFocus) => void;
   /** Switch the active right view WITHOUT touching the collapsed flag — the facade's own selection
    *  subscription (#533, still facade-owned — see the module doc) uses this for its "reveal Properties
    *  only while the rail is already expanded" branch, distinct from `selectRight`'s "expand THEN switch".
@@ -154,7 +154,7 @@ export interface CenterDeckController {
    *  the same reason as `selectRightView`. */
   notifyRstripProps(): void;
   /** Apply the blessed Code ⟷ Canvas split preset. */
-  splitCodeCanvas(): void;
+  splitCodeCanvas: () => void;
   /** The center surfaces visible under the current deck state: all four in overview, else the primary
    *  (plus the secondary in a 2-up). */
   visibleCenters(): CenterView[];
@@ -164,7 +164,7 @@ export interface CenterDeckController {
   /** Boot the chrome into the restored mode (no fetch) + mount the DeckStage/DeckSpine. */
   init(): void;
   /** Cancel pending timers, drop every subscription, and unmount the deck Preact trees. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 /** The pure chrome reset this controller applies at construction: every sub-view lands back on its

@@ -82,7 +82,7 @@ export interface WorkerClient {
    */
   terminateAndRespawn(): void;
   /** Terminate the underlying worker. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 /** Boot-wait timeout (ms) — mirrors the 30 s safety-net in wasm.ts. */

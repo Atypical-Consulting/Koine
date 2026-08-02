@@ -59,13 +59,13 @@ export interface UpdateController {
   /** Mark a new version installed-and-waiting; flips canReload() true and notifies subscribers. */
   markUpdateReady(): void;
   /** Hide the affordance for this session (a new version stays applied; the reminder just stops nagging). */
-  dismiss(): void;
+  dismiss: () => void;
   /** True only when an update is ready AND the user hasn't dismissed the affordance this session. */
   canReload(): boolean;
   /** Whether an update has been detected (independent of dismissal). */
   isReady(): boolean;
   /** Subscribe to state changes (ready / dismiss). Returns an unsubscribe fn. */
-  subscribe(listener: () => void): () => void;
+  subscribe: (listener: () => void) => () => void;
 }
 
 export function createUpdateController(): UpdateController {

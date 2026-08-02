@@ -67,10 +67,10 @@ const MCP_PORT_STEP = 1;
 export interface McpSectionDeps {
     /** Resolve (and on the desktop, lazily launch) the local MCP HTTP endpoint. Optional: a caller that
      *  doesn't wire it simply never shows a live URL — the row stays on the placeholder. */
-    mcpEndpoint?(): Promise<McpEndpoint | null>;
+    mcpEndpoint?: () => Promise<McpEndpoint | null>;
     /** Stop the local MCP sidecar when the user disables it. Optional: a host that never starts one
      *  (browser) can omit it. */
-    mcpStop?(): Promise<void>;
+    mcpStop?: () => Promise<void>;
     /** Whether this host can actually run the MCP sidecar. Defaults to true when omitted. */
     mcpHostable?: boolean;
 }
@@ -81,7 +81,7 @@ export function buildMcpSection(
 ): PrefsSection & {
     showMcpOff(): void;
     syncMcpUi(enabled?: boolean): void;
-    startMcpSidecar(): void;
+    startMcpSidecar: () => void;
     destroy(): void;
 } {
     // URL shown inside HTTP recipes before a live endpoint resolves (or on the web build).

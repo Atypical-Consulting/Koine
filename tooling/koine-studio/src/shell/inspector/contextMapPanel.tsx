@@ -27,7 +27,7 @@ import { docMessage } from '@/shell/inspector/shared';
  *  facade; any object with a matching `contextMap()` (including the real `InspectorControllerLsp`)
  *  satisfies it. */
 export interface ContextMapPanelLsp {
-  contextMap(): Promise<ContextMapResult>;
+  contextMap: () => Promise<ContextMapResult>;
 }
 
 export interface ContextMapPanelDeps {
@@ -40,9 +40,9 @@ export interface ContextMapPanelDeps {
    *  reaches back into the facade's own `deps`. */
   onNavigate: {
     /** Filter the workspace to the clicked context scope. */
-    setActiveContext(scope: ContextScope): void;
+    setActiveContext: (scope: ContextScope) => void;
     /** Jump to the clicked node's `.koi` declaration (a span-less node stays inert to navigation). */
-    gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
+    gotoSourceSpan: (span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>) => void;
   };
 }
 
@@ -52,7 +52,7 @@ export interface ContextMapPanel {
   load(): Promise<void>;
   /** Dispose the mounted maxGraph handle and drop this panel's store subscriptions. Safe to call even if
    *  the panel was never loaded. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 const CONTEXT_MAP_VIEW_KEY = 'koine.studio.contextMapView';

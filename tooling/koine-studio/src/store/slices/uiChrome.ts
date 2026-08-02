@@ -220,27 +220,27 @@ export interface UiChromeSlice {
   settingsJsonScope: SettingsJsonScope;
   setCenter(v: CenterView): void;
   setTech(v: TechView): void;
-  setOutput(v: OutputTab): void;
+  setOutput: (v: OutputTab) => void;
   setDocs(v: DocsView): void;
   setBottom(t: BottomTab): void;
   setRight(v: RightView): void;
   setRightCollapsed(v: boolean): void;
-  toggleRightCollapsed(): void;
+  toggleRightCollapsed: () => void;
   setLeftCollapsed(v: boolean): void;
-  toggleLeftCollapsed(): void;
+  toggleLeftCollapsed: () => void;
   setOutlineFilter(q: string): void;
   /** Replace the Explorer filter text wholesale (#989 task 7) — mirrors {@link setOutlineFilter}. */
-  setExplorerFilter(q: string): void;
+  setExplorerFilter: (q: string) => void;
   /** Flip one token's membership in the Explorer's collapsed-directories set (#989 task 7): adds it if
    *  absent, removes it if present. What a directory row's click toggles. */
-  toggleExplorerCollapsed(token: string): void;
+  toggleExplorerCollapsed: (token: string) => void;
   /** REPLACE the whole Explorer collapsed-directories set with exactly `tokens` (#989 task 7) — used by
    *  "Collapse all" (sets every directory token at once) and by collapsed-set pruning against a fresh
    *  `liveDirs` (a directory deleted/renamed/moved away must drop out, not linger forever). */
-  setExplorerCollapsedMany(tokens: readonly string[]): void;
+  setExplorerCollapsedMany: (tokens: readonly string[]) => void;
   /** REMOVE exactly `tokens` from the Explorer's collapsed-directories set (#989 task 7) — used by
    *  "Expand all" (removes every directory token) and by reveal-by-context ancestor expansion. */
-  expandExplorerTokens(tokens: readonly string[]): void;
+  expandExplorerTokens: (tokens: readonly string[]) => void;
   setMobileZone(z: MobileZone): void;
   setRailAxis(v: RailAxis): void;
   /** Record an EXPLICIT collapse choice for the bottom strip: sets BOTH the runtime flag and the
@@ -256,7 +256,7 @@ export interface UiChromeSlice {
   setContextMapView(v: ContextMapView): void;
   setPanelSide(v: PanelSide): void;
   /** Flip the bottom panel's dock edge (bottom↔right), like `toggleRightCollapsed` flips its flag. */
-  togglePanelSide(): void;
+  togglePanelSide: () => void;
   setSideRail(v: SideRail): void;
   /** Flip the side rail's side (right↔left), like `toggleLeftCollapsed` flips its flag. */
   toggleSideRail(): void;
@@ -289,7 +289,7 @@ export interface UiChromeSlice {
   /** Show the transient Settings overlay over the deck (#482). The deck state is left untouched. Pass a
    *  category id (#731) to land the overlay on that tab; omit it to open on the last-used / default tab
    *  (which clears any previously forced category). */
-  showSettings(category?: string): void;
+  showSettings: (category?: string) => void;
   /** Hide the Settings overlay, returning to the deck as it was. */
   closeSettings(): void;
 }

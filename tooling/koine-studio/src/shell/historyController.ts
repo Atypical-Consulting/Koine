@@ -11,7 +11,7 @@ export interface HistoryControllerDeps {
    *  {@link writeBuffers}, never an in-place mutation of a Buffer read off this map. */
   buffers(): ReadonlyMap<string, Readonly<Buffer>>;
   /** The uri shown in the editor right now. */
-  activeUri(): string;
+  activeUri: () => string;
   /** The editor handle — swap the active buffer's doc. */
   editor: { getDoc(): string; setDoc(doc: string): void };
   /** The LSP client — push a restored NON-active buffer to the server. */
@@ -38,9 +38,9 @@ export interface HistoryController {
   /** Record that the code changed. `immediate` commits now (structured edits); else debounced (typing). */
   noteEdit(opts?: { immediate?: boolean }): void;
   /** Step back one snapshot (settles any pending typing first). */
-  undo(): void;
+  undo: () => void;
   /** Step forward one snapshot. */
-  redo(): void;
+  redo: () => void;
   /** Drop all history and re-baseline on the current buffers (workspace swap / structural file op). */
   reset(): void;
 }

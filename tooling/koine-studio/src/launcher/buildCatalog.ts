@@ -20,12 +20,12 @@ import { normalizeDddKind } from '@/model/dddKind';
  * all, and `canUseGit` gates the whole commits group even if a stale non-null `gitLog` were ever passed.
  */
 export interface LauncherSources {
-  modelIndex(): Promise<ModelIndex>;
+  modelIndex: () => Promise<ModelIndex>;
   commands(): Command[];
   files(): { uri: string; relPath: string }[];
   gitLog(): Promise<GitLogEntry[]> | null;
   canUseGit: boolean;
-  glossary(): GlossaryEntry[];
+  glossary: () => GlossaryEntry[];
 }
 
 // The DDD kinds (after `normalizeKind`) that read as a domain "symbol" — everything KIND has a chip

@@ -24,9 +24,9 @@ import type { Settings } from "@/settings/persistence";
  */
 export interface SectionCtx {
     /** Commit a single-field patch — same shape as prefs.ts's own `commit(patch)`. */
-    commit(patch: Partial<Settings>): void;
+    commit: (patch: Partial<Settings>) => void;
     /** Report the merged Settings back to the host directly, bypassing patchSettings. */
-    onChange(s: Settings): void;
+    onChange: (s: Settings) => void;
 }
 
 /**

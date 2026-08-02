@@ -26,18 +26,18 @@ const TOAST_DURATION_MS = 1600;
 export interface LauncherPanelProps {
   sources: LauncherSources;
   visible: boolean;
-  onClose(): void;
+  onClose: () => void;
   /** The quick-action effect seam (issue #1143, task 6) — Task 8 supplies the concrete binding to
    * `lsp`/`platform`/`openUri`/clipboard; tests pass a stub (see `LauncherPanel.test.tsx`'s `makeActionDeps`). */
   actionDeps: LauncherActionDeps;
   /** Hands the shell a callback that raises THIS panel's `.lx-toast` (issue #1145 review): commandWiring
    * binds it so a degraded action (rename/revert-commit) can honestly say "not available yet" instead of a
    * misleading silent jump. Optional so the unit tests mount the panel without it. */
-  onRegisterToast?(show: (message: string) => void): void;
+  onRegisterToast?: (show: (message: string) => void) => void;
   /** Hands the shell a callback that pins an entry's preview into THIS panel (issue #1165): commandWiring
    * binds it so the `peek` quick action surfaces a read-only quick-look WITHOUT navigating. Optional so the
    * unit tests mount the panel without it. */
-  onRegisterPeek?(peek: (entry: CatalogEntry) => void): void;
+  onRegisterPeek?: (peek: (entry: CatalogEntry) => void) => void;
 }
 
 /** The panel body. Exported for unit tests; the shell mounts it via {@link createLauncher}. */

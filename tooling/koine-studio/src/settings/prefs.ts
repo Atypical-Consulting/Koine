@@ -39,7 +39,7 @@ import { buildAdvancedSection } from "@/settings/prefsSections/advanced";
 
 export interface PrefsCallbacks {
     /** Fired after every committed change with the merged, persisted Settings. */
-    onChange(s: Settings): void;
+    onChange: (s: Settings) => void;
 
     /**
      * Resolve the local MCP HTTP endpoint to surface in the Assistant settings (so the user can paste its
@@ -47,13 +47,13 @@ export interface PrefsCallbacks {
      * the configured one was busy ({@link McpEndpoint}) — or null when the host can't serve one (the web
      * build, where the row stays hidden). Optional: a caller that doesn't wire it simply never shows the row.
      */
-    mcpEndpoint?(): Promise<McpEndpoint | null>;
+    mcpEndpoint?: () => Promise<McpEndpoint | null>;
 
     /**
      * Stop the local MCP sidecar when the user disables it. Optional: a host that never starts one
      * (browser) can omit it. Pairs with {@link mcpEndpoint}, which (re)starts it.
      */
-    mcpStop?(): Promise<void>;
+    mcpStop?: () => Promise<void>;
 
     /**
      * Whether this host can actually run the MCP sidecar — the desktop shell can, a browser tab cannot.
@@ -76,10 +76,10 @@ export interface PrefsCallbacks {
     hasIntegratedTerminal?: boolean;
 
     /** Return the remembered workspace root's display name (for Settings), or null if not yet set. */
-    workspaceRootName?(): Promise<string | null>;
+    workspaceRootName?: () => Promise<string | null>;
 
     /** Re-pick the workspace root directory; returns its name, or null if dismissed. */
-    pickWorkspaceRoot?(): Promise<string | null>;
+    pickWorkspaceRoot?: () => Promise<string | null>;
 
     /**
      * The stable storage key of the currently-open workspace, or null when no workspace is open
@@ -90,7 +90,7 @@ export interface PrefsCallbacks {
     workspaceKey?(): string | null;
 
     /** Live-apply a keybinding change: reconfigure the editor keymap. */
-    onKeybindingsChanged?(): void;
+    onKeybindingsChanged?: () => void;
 }
 
 // (Editor's own font/line-height/tab-size/canvas-zoom bounds moved with it into prefsSections/editor.ts,
@@ -129,11 +129,11 @@ interface MountedPrefsPane extends PrefsPaneHandle {
      *  (default true) focuses the active category tab; the embedded center page passes false so re-showing it
      *  never steals focus from the page. Repaint only: the MCP sidecar (re)start is the separate on-show
      *  {@link startMcpSidecar} call (issue #735). */
-    refresh(categoryId?: string, focusTab?: boolean): void;
+    refresh: (categoryId?: string, focusTab?: boolean) => void;
     /** The Settings "on show" hook: (re)start the desktop MCP sidecar when enabled and reflect it in this
      *  pane's MCP panel. The center page calls it on show / (re)show; a bare mount never does, so the opt-in
      *  server is never spawned before Settings is actually presented. */
-    startMcpSidecar(): void;
+    startMcpSidecar: () => void;
     /** Cancel any armed keybinding recorder + open conflict prompt — the disarm {@link destroy} also runs,
      *  exposed for a caller that wants to pause transient state without tearing the pane down. */
     suspend(): void;
