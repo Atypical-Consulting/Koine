@@ -704,7 +704,7 @@ public sealed partial class CSharpEmitter : IEmitter
                 continue;
             }
 
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index, translator.Context));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -769,7 +769,7 @@ public sealed partial class CSharpEmitter : IEmitter
                 continue;
             }
 
-            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            var body = translator.TranslateTopLevel(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index, translator.Context));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -915,7 +915,7 @@ public sealed partial class CSharpEmitter : IEmitter
         // A value object that itself owns a value-object collection (a nested OwnsMany, issue #171) backs
         // it with a mutable list; the backing field drives the property declarations and assignments.
         var backedListFields = storedFields
-            .Where(f => IsValueObjectList(((Member)f.Syntax).Type, index))
+            .Where(f => IsValueObjectList(((Member)f.Syntax).Type, index, translator.Context))
             .Select(f => f.Name)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -923,7 +923,7 @@ public sealed partial class CSharpEmitter : IEmitter
         // value-object collection (OwnsMany) — gains a parameterless constructor so EF can materialize it:
         // its owned navigation parameter can never bind, so EF constructs through this ctor and populates
         // members via field access (issue #276, generalizing #171's collection-only rule).
-        if (storedFields.Any(f => OwnsValueObject(((Member)f.Syntax).Type, index)))
+        if (storedFields.Any(f => OwnsValueObject(((Member)f.Syntax).Type, index, translator.Context)))
         {
             WritePersistenceConstructor(sb, typeName);
         }
@@ -984,7 +984,7 @@ public sealed partial class CSharpEmitter : IEmitter
         // materializes it through this ctor — an owned navigation can never bind as a constructor
         // parameter — then populates members from the store via field access (issue #276, generalizing
         // #171's value-object-collection rule).
-        if (NeedsPersistenceConstructor(entity, isRoot, index))
+        if (NeedsPersistenceConstructor(entity, isRoot, index, translator.Context))
         {
             WritePersistenceConstructor(sb, entity.Name);
         }
@@ -1064,15 +1064,17 @@ public sealed partial class CSharpEmitter : IEmitter
         {
             // A smart-enum value is NOT a compile-time constant, so an enum-typed
             // default can't be a parameter default; the param becomes nullable and
-            // the body coalesces to the real default (see WriteAssignment).
-            if (index.Classify(m.Type.Name) == TypeKind.Enum)
+            // the body coalesces to the real default (see WriteAssignment). Classified in the
+            // emitting context (R13.2, #1870): getting it wrong emits a non-constant parameter
+            // default, which does not compile (CS1736).
+            if (index.Classify(translator.Context, m.Type.Name) == TypeKind.Enum)
             {
                 AppendNullable(sb, csType).Append(' ').Append(paramName).Append(" = null");
                 return;
             }
 
             sb.Append(csType).Append(' ').Append(paramName).Append(" = ");
-            sb.Append(translator.Translate(m.Initializer, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index)));
+            sb.Append(translator.Translate(m.Initializer, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index, translator.Context)));
             return;
         }
 
@@ -1104,7 +1106,7 @@ public sealed partial class CSharpEmitter : IEmitter
                 break;
             case DefaultKind.ConstantDefault:
                 sb.Append(csType).Append(' ').Append(paramName).Append(" = ");
-                sb.Append(translator.Translate(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index)));
+                sb.Append(translator.Translate(m.Initializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index, translator.Context)));
                 break;
             case DefaultKind.OptionalNull:
                 sb.Append(csType).Append(' ').Append(paramName).Append(" = null");
@@ -1191,7 +1193,9 @@ public sealed partial class CSharpEmitter : IEmitter
         var any = false;
         foreach (Member m in ctorMembers)
         {
-            if (m.Initializer is null || index.Classify(m.Type.Name) != TypeKind.Enum)
+            // Context-aware (R13.2, #1870), and necessarily the SAME question AppendParam asked:
+            // the nullable parameter it emitted is only sound if this coalesce is emitted too.
+            if (m.Initializer is null || index.Classify(translator.Context, m.Type.Name) != TypeKind.Enum)
             {
                 continue;
             }
@@ -1337,11 +1341,17 @@ public sealed partial class CSharpEmitter : IEmitter
     /// a mutable private <c>List&lt;T&gt;</c> so EF can materialize owned children into it, while the
     /// public surface stays a read-only <c>IReadOnlyList&lt;T&gt;</c>. Scalar (<c>String</c>/<c>Int</c>/…)
     /// and set/map collections are deliberately excluded — they keep the read-only-copy shape.
+    /// <para><paramref name="context"/> is the bounded context the member is emitted in: the element is
+    /// classified in that context's own scope (R13.2, #1870), because two contexts may legally declare a
+    /// type with the same simple name and the flat, last-declaration-wins view would make the emitted
+    /// shape depend on <c>.koi</c> source order. Pass <c>null</c> only where the caller genuinely has no
+    /// context — <see cref="ModelIndex.Classify(string?, string)"/> then degrades to exactly the flat
+    /// answer this used to give.</para>
     /// </summary>
-    internal static bool IsValueObjectList(TypeRef type, ModelIndex index) =>
+    internal static bool IsValueObjectList(TypeRef type, ModelIndex index, string? context) =>
         CSharpTypeMapper.IsList(type)
         && type.Element is { } element
-        && index.Classify(element.Name) == TypeKind.Value;
+        && index.Classify(context, element.Name) == TypeKind.Value;
 
     /// <summary>
     /// Classifies a member's type into the single <see cref="OwnedKind"/> that drives <b>both</b> the EF
@@ -1354,12 +1364,19 @@ public sealed partial class CSharpEmitter : IEmitter
     /// an other collection; otherwise the scalar is classified by its declared kind — value object
     /// (<c>OwnsOne</c>), smart enum (<c>HasConversion</c>), foreign strongly-typed id (<c>HasConversion</c>),
     /// or plain primitive (<c>Property</c>).
+    /// <para><paramref name="context"/> is the bounded context the member is emitted in, and the type is
+    /// classified in that context's own scope (R13.2, #1870). This has to agree with
+    /// <c>CSharpEmitter.Infrastructure.CollectAggregateEnumTypes</c>, which decides WHICH smart enums get
+    /// a <c>&lt;Context&gt;ValueConverters</c> entry from the same context-aware question: classified
+    /// flat here, a sibling context declaring the same simple name made the mapping emit an empty
+    /// <c>OwnsOne</c> for a smart enum and left the emitted converter dead. Pass <c>null</c> only where
+    /// the caller genuinely has no context — the lookup then degrades to the old flat answer.</para>
     /// </summary>
-    internal static OwnedKind ClassifyMember(TypeRef type, ModelIndex index)
+    internal static OwnedKind ClassifyMember(TypeRef type, ModelIndex index, string? context)
     {
         if (CSharpTypeMapper.IsList(type))
         {
-            return IsValueObjectList(type, index) ? OwnedKind.ValueObjectCollection : OwnedKind.OtherCollection;
+            return IsValueObjectList(type, index, context) ? OwnedKind.ValueObjectCollection : OwnedKind.OtherCollection;
         }
 
         if (CSharpTypeMapper.IsSet(type) || CSharpTypeMapper.IsMap(type))
@@ -1367,7 +1384,7 @@ public sealed partial class CSharpEmitter : IEmitter
             return OwnedKind.OtherCollection;
         }
 
-        return index.Classify(type.Name) switch
+        return index.Classify(context, type.Name) switch
         {
             TypeKind.Value => OwnedKind.ScalarValueObject,
             TypeKind.Enum => OwnedKind.SmartEnum,
@@ -1381,8 +1398,8 @@ public sealed partial class CSharpEmitter : IEmitter
     /// with <c>OwnsMany</c> (issue #171). Scalars and set/map collections are deliberately excluded.
     /// Defined in terms of <see cref="ClassifyMember"/> so the ctor gate cannot diverge from the mapping.
     /// </summary>
-    private static bool OwnsValueObject(TypeRef type, ModelIndex index) =>
-        ClassifyMember(type, index) is OwnedKind.ScalarValueObject or OwnedKind.ValueObjectCollection;
+    private static bool OwnsValueObject(TypeRef type, ModelIndex index, string? context) =>
+        ClassifyMember(type, index, context) is OwnedKind.ScalarValueObject or OwnedKind.ValueObjectCollection;
 
     /// <summary>
     /// True when an entity needs the parameterless EF persistence constructor (issue #276, generalizing
@@ -1393,7 +1410,7 @@ public sealed partial class CSharpEmitter : IEmitter
     /// entity that is neither a root nor owns a value object keeps its all-args constructor alone,
     /// byte-identical to before; the #171 value-object-collection rule is now a subset of this predicate.
     /// </summary>
-    private static bool NeedsPersistenceConstructor(EntityDecl entity, bool isRoot, ModelIndex index)
+    private static bool NeedsPersistenceConstructor(EntityDecl entity, bool isRoot, ModelIndex index, string? context)
     {
         if (isRoot)
         {
@@ -1401,7 +1418,7 @@ public sealed partial class CSharpEmitter : IEmitter
         }
 
         var memberNames = new HashSet<string>(entity.Members.Select(m => m.Name), StringComparer.Ordinal);
-        return entity.Members.Any(m => !MemberAnalysis.IsDerived(m, memberNames) && OwnsValueObject(m.Type, index));
+        return entity.Members.Any(m => !MemberAnalysis.IsDerived(m, memberNames) && OwnsValueObject(m.Type, index, context));
     }
 
     /// <summary>The mutable backing field name for a value-object collection member (e.g. <c>_lines</c>).</summary>
@@ -1426,9 +1443,10 @@ public sealed partial class CSharpEmitter : IEmitter
     /// the backing field has no replace path). Classified once and shared by the property declarations,
     /// the constructor assignments, and the parameterless-ctor gate so the three never drift.
     /// </summary>
-    private static IReadOnlySet<string> BackedListMembers(IEnumerable<Member> ctorMembers, ModelIndex index, ISet<string> mutated) =>
+    private static IReadOnlySet<string> BackedListMembers(
+        IEnumerable<Member> ctorMembers, ModelIndex index, ISet<string> mutated, string? context) =>
         ctorMembers
-            .Where(m => IsValueObjectList(m.Type, index) && !mutated.Contains(m.Name))
+            .Where(m => IsValueObjectList(m.Type, index, context) && !mutated.Contains(m.Name))
             .Select(m => m.Name)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -1642,7 +1660,11 @@ public sealed partial class CSharpEmitter : IEmitter
 
         foreach (Transition tr in transitions)
         {
-            var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft) && index.Classify(ft.Name) == TypeKind.Enum
+            // Resolved in the entity's own context (R13.2, #1870): the transition target is a bare
+            // enum member, and this hint is what binds it to the FIELD's enum rather than to whichever
+            // same-named enum the flat table happened to hold.
+            var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft)
+                && index.Classify(translator.Context, ft.Name) == TypeKind.Enum
                 ? ft.Name : null;
 
             // A state machine on this field guards the (literal) target's reachability —
@@ -1926,7 +1948,8 @@ public sealed partial class CSharpEmitter : IEmitter
             var paramName = CSharpNaming.ToCamelCase(m.Name);
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                // Context-aware (R13.2, #1870), mirroring the transition path above.
+                var expectedEnum = index.Classify(translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var rhs = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
                 args.Add($"{paramName}: {rhs}");
             }
@@ -2279,9 +2302,17 @@ public sealed partial class CSharpEmitter : IEmitter
         }
     }
 
-    /// <summary>The declared enum type of an enum-typed member (hint for qualifying bare members), else null.</summary>
-    private static string? EnumExpected(Member m, ModelIndex index) =>
-        index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+    /// <summary>
+    /// The declared enum type of an enum-typed member (hint for qualifying bare members), else null.
+    /// <para>Classified in the bounded context the member is emitted in (R13.2, #1870) — the same
+    /// question, and so the same answer, as the hint <see cref="CSharpExpressionTranslator"/>'s
+    /// constructor computes for a DERIVED member. Resolved flat here, the two disagreed on the very same
+    /// member: the inlined invariant guard qualified it against one enum while the derived property body
+    /// qualified it against a same-named type in a sibling context, emitting
+    /// <c>=&gt; (Urgent ? Phase.Active : Status.Draft)</c> — CS0029, uncompilable.</para>
+    /// </summary>
+    private static string? EnumExpected(Member m, ModelIndex index, string? context) =>
+        index.Classify(context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
 
     /// <summary>True when any emitted expression for an entity (incl. commands) uses a LINQ-backed op.</summary>
     private static bool EntityUsesLinq(EntityDecl e) =>

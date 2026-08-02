@@ -134,7 +134,10 @@ public sealed partial class CSharpEmitter
             else
             {
                 csType = typeMapper.Map(f.Type!);
-                var expectedEnum = index.Classify(f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
+                // Resolved in THIS read model's own context (R13.2): a sibling context declaring the
+                // same simple name as a value object would otherwise win the flat, last-write-wins
+                // view and strip the enum hint the projection's bare members are qualified by (#1870).
+                var expectedEnum = index.Classify(context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
                 rhs = translator.TranslateTopLevel(f.Projection, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
             }
             fields.Add((csType, prop, rhs));

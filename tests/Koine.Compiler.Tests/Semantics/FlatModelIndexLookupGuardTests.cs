@@ -34,8 +34,12 @@ namespace Koine.Compiler.Tests;
 /// the same arity as the flat overloads (would show up as a spurious new site here — a false positive
 /// needing an allowlist note, not a false negative); or a caller that stores <c>ModelIndex.Classify</c>
 /// as a delegate/method-group and invokes it indirectly (no invocation syntax to see with that shape).
-/// It also does not fix anything — an allowlisted site with an available context it doesn't use stays
-/// a latent bug until someone fixes it (tracked for ~15 such sites in #1870). The robust, complete fix
+/// It also does not fix anything — an allowlisted site with an available context it doesn't use stays a
+/// latent bug until someone fixes it. #1870 worked that backlog down to the point where no site is left
+/// holding a bounded context in a LOCAL of the same method and ignoring it; what remains are shared or
+/// static helpers with no context parameter of their own, some of which nonetheless have a caller that
+/// does carry one (see <c>CSharpEmitter.Api.cs:205</c> below) and could be threaded by a signature
+/// refactor. Every entry below is justified by a stated reason rather than parked. The robust, complete fix
 /// is Option C from #1863's own brainstorm — renaming/obsoleting the flat overloads so the compiler
 /// enforces the distinction — deliberately deferred as a separate, larger public-API decision.
 /// </para>
@@ -132,7 +136,7 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Semantics/CqrsValidator.cs", 480, "TryGetDecl", "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
         ("src/Koine.Execution/ScenarioExecutor.cs", 1579, "TryGetDecl", "final fallback within a DeclaringContextsOf/TryGetDeclIn walk in InvariantsDeclaredOn"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Application.cs", 571, "TryGetDecl", "combined TryGetDeclIn(context,...) || TryGetDecl(...) ladder"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 281, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 284, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Behaviors.cs", 44, "TryGetDecl", "combined ladder in SpecTargetMembers"),
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 457, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 610, "TryGetDecl", "combined ladder in SpecTargetMembers"),
@@ -158,48 +162,79 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 674, "Classify", "StrongHover: workspace-wide hover, no context in the hover path"),
         ("src/Koine.Compiler/Semantics/Scenarios/ScenarioInterpreter.cs", 223, "TryGetDecl", "MembersOf: dynamic scenario interpreter, no per-entity context value carried"),
         ("src/Koine.Execution/ScenarioValueBinder.cs", 471, "TryGetDecl", "DisplayCore: reflects over an arbitrary emitted runtime object by CLR type, genuinely dynamic"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 260, "TryGetDecl", "EnumMemberIn reproduces SemanticModel.GetSymbol's legacy flat contract byte-for-byte; no context"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 281, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 300, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 306, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 583, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1344, "Classify", "IsValueObjectList: shared static classification helper, no context param"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1370, "Classify", "ClassifyMember: same shared static-helper shape as IsValueObjectList"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 2284, "Classify", "EnumExpected: same shared static-helper shape"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable's mutation-endpoint chain carries no context param; only the Enum branch is context-sensitive, and Primitive/IdValueObject are universal"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 263, "TryGetDecl", "EnumMemberIn reproduces SemanticModel.GetSymbol's legacy flat contract byte-for-byte; no context"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 284, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 303, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 309, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
+        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 608, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable: only the Enum branch is context-sensitive (Primitive/IdValueObject are universal), and the WriteMutationEndpoint chain carries no context — but NOT fully clean: WriteQueryEndpoint(sb, ContextNode ctx, ...) reaches the same helper through BuildRouteTokenBindings with ctx.Name in scope, so one of the two callers could thread a context today (out of #1870's scope; the shared helper's other caller cannot)"),
 
-        // --- Built-in-only query: ModelIndex.Classify resolves ClassifyBuiltIn (Int/String/Decimal/
-        //     Bool/Instant/List/Set/Map/Range) BEFORE ever consulting context or the flat _byName
-        //     dict, and those names are lexically reserved by the grammar — a user type can never
-        //     classify as one, so context-blindness is provably inert for these three queries only. ---
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1042, "Classify", "CheckMember queries only Primitive/Range, both builtin-only"),
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1063, "Classify", "IsCollection queries only List/Set/Map, builtin-only"),
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1067, "Classify", "IsIterable queries only List/Set, builtin-only"),
+        // --- Built-in-only query: inert by RANGE DISJOINTNESS, not by name reservation (verified for
+        //     #1870, correcting an earlier note here that claimed the built-in names are "lexically
+        //     reserved by the grammar" — they are NOT).
+        //
+        //     What is actually true: `ClassifyBuiltIn` (ModelIndex.cs:1622) is the ONLY branch of
+        //     `Classify(string)` that can ever yield Primitive/List/Set/Map/Range, and it is a pure
+        //     function of the name string, consulted BEFORE `_byName`. The only other branches return
+        //     `ClassifyDecl(decl)` — a closed switch over TypeDecl whose range is
+        //     {Value, Entity, Aggregate, Enum, Event, IntegrationEvent, ReadModel, Query, Unknown}
+        //     (ModelIndex.cs:1689) — or IdValueObject/Unknown. Those two ranges are DISJOINT from
+        //     {Primitive, Range, List, Set, Map}. So for these three queries specifically — each of
+        //     which only ever asks "is the kind one of the built-in kinds?" and only ever consumes the
+        //     answer as a local bool (the TypeKind is never stored, returned, or compared against a
+        //     user-declarable kind) — the boolean is a pure function of the type NAME. `_byName`'s
+        //     last-declaration-wins contents cannot change it, so .koi source order cannot either.
+        //
+        //     The reservation premise itself is refuted, which is exactly why disjointness is the load-
+        //     bearing argument: the lexer has no keyword token for any built-in type name (they all match
+        //     `Identifier`, KoineLexer.g4:138) and `valueDecl : … VALUE Identifier …` (KoineParser.g4:139)
+        //     happily parses `value List`/`value Int`. Only List/Set/Map/Range are reserved at all, and
+        //     by a VALIDATOR (KOI0908 ReservedTypeName, SemanticValidator.cs:312-328) — a strictly weaker
+        //     guarantee that holds only for models that pass validation. Int/String/Decimal/Bool/Instant
+        //     are not reserved anywhere: a probe declaring `value Int { x: String }` compiles CLEAN.
+        //
+        //     Do NOT "fix" these by threading `_resolver.Context` in: `Classify(context, name)` tries the
+        //     context-local decl FIRST, so on a model declaring `value List` a context-aware call would
+        //     classify List as that context's Value and SILENCE these reports — the #1715 regression
+        //     SemanticValidator.cs:1479-1487 documents and R9ValueObjectTests' two
+        //     `…_still_reports_…_alongside_KOI0908` tests pin. Built-in precedence is the intended
+        //     semantics here, and the flat overload is what implements it. ---
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1042, "Classify", "CheckMember: result only tested against Primitive/Range, kinds no ClassifyDecl branch can return"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1063, "Classify", "IsCollection: result only tested against List/Set/Map, kinds no ClassifyDecl branch can return"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1067, "Classify", "IsIterable: result only tested against List/Set, kinds no ClassifyDecl branch can return"),
 
-        // --- Context IS available and unused — genuine latent bugs in the same shape #1863 fixed,
-        //     tracked for a follow-up fix rather than fixed here (see #1870). ---
-        ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef: _enclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Ast/Bound/Lowerer.cs", 83, "Classify", "ClassifyDefault: instance field _context available, unused (#1870)"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 167, "Classify", "InternType: parameter ctxSym.Name available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 137, "Classify", "EmitReadModel: local context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpExpressionTranslator.cs", 319, "Classify", "ctor: parameter context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpExpressionTranslator.cs", 609, "Classify", "EnumTypeName: instance property Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1068, "Classify", "AppendParam: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1194, "Classify", "WriteEnumDefaultCoalesce: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1645, "Classify", "WriteCommand: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1929, "Classify", "factory ctor-arg enum check: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Behaviors.cs", 158, "Classify", "EmitService: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.ValueObjects.cs", 352, "Classify", "WriteQuantityOperators: context available only at its sole caller, not threaded in (#1870)"),
-        ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 822, "Classify", "BuildFactoryCtorArgs (required loop): translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 853, "Classify", "BuildFactoryCtorArgs (defaulted loop): translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 914, "Classify", "TransitionEnum: context available only at its sole caller, not threaded in (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Infrastructure.cs", 458, "Classify", "CollectAggregateEnumTypes: parameter context available, used two lines later at :473, unused here (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 360, "TryGetDecl", "DotCandidates' single-hop enum fallback: ctx.EnclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 407, "TryGetDecl", "BinderReceiverMembers: ctx.EnclosingContextName available; the method's own doc comment claims context-aware resolution this call doesn't perform (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 599, "TryGetDecl", "EnumMemberCandidates: ctx.EnclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 1597, "Classify", "PrepareCallHierarchy: ctx.EnclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 1787, "TryGetDecl", "FindEvent: context available at its sole caller (:1597), not threaded into this helper's own signature (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 2102, "Classify", "ItemFor: parameter context available, used two lines later for the result's Context property, unused for the Classify call itself (#1870)"),
+        // --- Provably inert despite an available context: the kind is consumed ONLY for questions whose
+        //     answer cannot differ per context. Verified against the fixtures in
+        //     AstSymbolCrossContextClassificationTests, which pin the outcome under BOTH context orders. ---
+        ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
+
+        // --- No site remains with a bounded context in a LOCAL of the same method that it then ignores:
+        //     #1870 worked through every one of those. That is the literal claim, and it is weaker than
+        //     "nothing is left to fix" — several entries above are shared/static helpers whose own
+        //     signature carries no context but whose CALLERS do (CSharpEmitter.Api.cs:205's
+        //     WriteQueryEndpoint is the clearest); threading those needs a signature refactor, which is
+        //     out of #1870's scope, not a one-line fix that was judged unnecessary.
+        //
+        //     The twelve C#-emitter sites that used to sit here are GONE: #1870's C# task confirmed nine
+        //     of them order-dependent with a two-order fixture and fixed them to Classify(context, name),
+        //     and its own code review caught three more — the shared static helpers IsValueObjectList /
+        //     ClassifyMember / EnumExpected, each of which every caller could already supply a context to.
+        //     See CSharpFlatClassifyCrossContextTests and CSharpValueConverterContextScopeTests.
+        //
+        //     The three Rust-emitter sites (RustEmitter.Entities.cs — BuildFactoryCtorArgs' required and
+        //     defaulted loops, and TransitionEnum) are GONE for the same reason: #1870's Rust task
+        //     reproduced all three, fixed them to Classify(context, name) via the shared ExpectedEnum
+        //     helper (TransitionEnum took a threaded-in context parameter), and pinned them under both
+        //     context orders in RustEntityEnumContextScopeTests.
+        //
+        //     The seven LSP/tooling-cluster sites (CSharpEmitter.Infrastructure's CollectAggregateEnumTypes,
+        //     and KoineLanguageService's DotCandidates / BinderReceiverMembers / EnumMemberCandidates /
+        //     PrepareCallHierarchy / FindEvent / ItemFor) are GONE too: each was reproduced under both
+        //     context orders through its REAL entry point — the emitted converter holder, CompleteAt,
+        //     PrepareCallHierarchy, PrepareTypeHierarchy — and fixed by threading the context already in
+        //     scope (ctx.EnclosingContextName, or the method's own `context` parameter; FindEvent took a
+        //     threaded-in one). See CSharpValueConverterContextScopeTests and
+        //     LanguageServiceFlatLookupCrossContextTests. ---
     ];
 
     [Fact]

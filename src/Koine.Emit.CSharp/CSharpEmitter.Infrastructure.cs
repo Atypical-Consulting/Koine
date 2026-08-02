@@ -269,8 +269,11 @@ public sealed partial class CSharpEmitter
 
         // One classification drives the mapping, shared with the domain persistence-ctor gate so the two
         // cannot drift (issue #344). The cases below produce exactly the same output as the previous
-        // IsList / IsValueObjectList / Classify / IdTypeNames branching.
-        switch (ClassifyMember(type, index))
+        // IsList / IsValueObjectList / Classify / IdTypeNames branching. Classified in the aggregate's own
+        // `context` (R13.2, #1870) — the SAME context CollectAggregateEnumTypes uses to decide which smart
+        // enums get a converter, so producer and consumer can never disagree and emit a dead converter
+        // alongside an empty OwnsOne.
+        switch (ClassifyMember(type, index, context))
         {
             case OwnedKind.ValueObjectCollection:
                 WriteOwned(sb, context, builderVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth: 1);
@@ -361,9 +364,10 @@ public sealed partial class CSharpEmitter
         var prop = CSharpNaming.ToPascalCase(m.Name);
         TypeRef type = m.Type;
 
-        // Same shared classification as the root mapping (issue #344). An owned member's non-value-object
-        // collection always reads "is a collection" (the "primitive collection" wording is root-only).
-        switch (ClassifyMember(type, index))
+        // Same shared classification as the root mapping (issue #344), in the same owning `context`
+        // (R13.2, #1870). An owned member's non-value-object collection always reads "is a collection"
+        // (the "primitive collection" wording is root-only).
+        switch (ClassifyMember(type, index, context))
         {
             case OwnedKind.ValueObjectCollection:
                 WriteOwned(sb, context, ownedVar, "OwnsMany", prop, type.Element!.Name, index, indentLevel, depth + 1);
@@ -455,7 +459,11 @@ public sealed partial class CSharpEmitter
                     continue;
                 }
 
-                switch (index.Classify(typeName))
+                // Classified in the OWNING context (R13.2, #1870): two contexts may legally declare the
+                // same simple name, so the flat, last-declaration-wins view would make this context's
+                // converter set depend on `.koi` source order. `context` is the same value the value-object
+                // branch below already resolves through.
+                switch (index.Classify(context, typeName))
                 {
                     // A *scalar* smart-enum member is mapped via HasConversion, so it needs a converter.
                     // A List<Enum> is emitted as a primitive collection (no HasConversion), so collecting

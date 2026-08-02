@@ -155,7 +155,9 @@ public sealed partial class CSharpEmitter
                     translator.PushLocal(p.Name, p.Type);
                 }
 
-                var expectedEnum = index.Classify(op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
+                // Resolved in the service's own context (R13.2, #1870): a same-named value object in a
+                // sibling context must not strip the hint that qualifies a bare enum member body.
+                var expectedEnum = index.Classify(translator.Context, op.ReturnType.Name) == TypeKind.Enum ? op.ReturnType.Name : null;
                 var body = translator.TranslateTopLevel(op.Body, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
                 foreach (Param p in op.Parameters)
                 {

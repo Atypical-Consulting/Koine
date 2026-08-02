@@ -1057,7 +1057,8 @@ public class R18CSharpInfrastructureTests
     {
         // Both the persistence-ctor gate and the EF infra mapping switch consume ClassifyMember, so
         // each shape must land on the OwnedKind that drives its mapping — that is what stops the two
-        // classification sites from drifting (issue #344).
+        // classification sites from drifting (issue #344). Every call passes the owning context "C",
+        // which is how the emitter itself calls it (R13.2, #1870).
         var index = new SemanticModel(new KoineCompiler().Compile("""
             context C {
               enum Status { Active, Inactive }
@@ -1072,23 +1073,23 @@ public class R18CSharpInfrastructureTests
             """, new CSharpEmitter()).Model!).Index;
 
         // Scalars.
-        CSharpEmitter.ClassifyMember(new TypeRef("String"), index).ShouldBe(OwnedKind.Primitive);
-        CSharpEmitter.ClassifyMember(new TypeRef("OrderId"), index).ShouldBe(OwnedKind.ForeignId);
-        CSharpEmitter.ClassifyMember(new TypeRef("Status"), index).ShouldBe(OwnedKind.SmartEnum);
-        CSharpEmitter.ClassifyMember(new TypeRef("Money"), index).ShouldBe(OwnedKind.ScalarValueObject);
+        CSharpEmitter.ClassifyMember(new TypeRef("String"), index, "C").ShouldBe(OwnedKind.Primitive);
+        CSharpEmitter.ClassifyMember(new TypeRef("OrderId"), index, "C").ShouldBe(OwnedKind.ForeignId);
+        CSharpEmitter.ClassifyMember(new TypeRef("Status"), index, "C").ShouldBe(OwnedKind.SmartEnum);
+        CSharpEmitter.ClassifyMember(new TypeRef("Money"), index, "C").ShouldBe(OwnedKind.ScalarValueObject);
 
         // Collections: only a List of value objects is an owned collection (OwnsMany).
-        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Money")), index)
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("Money")), index, "C")
             .ShouldBe(OwnedKind.ValueObjectCollection);
-        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("String")), index)
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.ListTypeName, Element: new TypeRef("String")), index, "C")
             .ShouldBe(OwnedKind.OtherCollection);
-        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.SetTypeName, Element: new TypeRef("String")), index)
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.SetTypeName, Element: new TypeRef("String")), index, "C")
             .ShouldBe(OwnedKind.OtherCollection);
-        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.MapTypeName, Element: new TypeRef("String"), Value: new TypeRef("Int")), index)
+        CSharpEmitter.ClassifyMember(new TypeRef(ModelIndex.MapTypeName, Element: new TypeRef("String"), Value: new TypeRef("Int")), index, "C")
             .ShouldBe(OwnedKind.OtherCollection);
 
         // Optionality is irrelevant to ownership: Money? is still an owned scalar value object.
-        CSharpEmitter.ClassifyMember(new TypeRef("Money", IsOptional: true), index).ShouldBe(OwnedKind.ScalarValueObject);
+        CSharpEmitter.ClassifyMember(new TypeRef("Money", IsOptional: true), index, "C").ShouldBe(OwnedKind.ScalarValueObject);
     }
 
     [Fact]
