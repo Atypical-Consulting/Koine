@@ -606,6 +606,7 @@ public sealed class SemanticValidator
                 break;
             case EntityDecl e:
                 EntityBehaviorValidator.ValidateIdentityStrategy(e, diagnostics);
+                EntityBehaviorValidator.ValidateIdentityHashCompatibility(e, index, resolver.Context, diagnostics);
                 ReportGeneratedMemberCollisions(e.Members, EntityGeneratedMembers, "entity", diagnostics);
                 IReadOnlySet<string> entitySpecs = SpecNames(index, e.Name);
                 ValidateMembersAndInvariants(e.Members, e.Invariants, index, resolver, enumMembers, diagnostics, entitySpecs);
