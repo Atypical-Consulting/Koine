@@ -48,6 +48,26 @@ public class LspServerTests
         output.ShouldContain("\"severity\":1"); // Error
     }
 
+    /// <summary>
+    /// #1836: a keyword used as an enum member (<c>enum Mode { publish }</c>) left
+    /// <c>BuildEnum</c> dereferencing a null <c>Identifier()</c> after ANTLR error-recovery,
+    /// throwing an unhandled <see cref="NullReferenceException"/> straight through
+    /// <see cref="KoineCompiler.Diagnose(string, string?)"/> — the exact path <c>koine lsp</c> and
+    /// the WASM playground call on every keystroke. Same family/invariant as #1749
+    /// ("<c>Diagnose()</c> must never throw"), different call site.
+    /// </summary>
+    [Fact]
+    public void Publishes_diagnostics_on_didOpen_with_a_keyword_enum_member()
+    {
+        const string badDoc = "context Ordering {\n  enum Mode { publish }\n}\n";
+        var output = RunSession(
+            Initialize(),
+            DidOpen("file:///repro.koi", badDoc));
+
+        output.ShouldContain("textDocument/publishDiagnostics");
+        output.ShouldContain("\"severity\":1"); // Error
+    }
+
     [Fact]
     public void Publishes_empty_diagnostics_for_valid_model()
     {
