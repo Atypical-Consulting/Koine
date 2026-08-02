@@ -664,6 +664,14 @@ pub fn secrets_match(a: &str, b: &str) -> bool {
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long dialling a broker may take.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a single frame may take to reach the kernel before the peer counts as wedged.
+///
+/// Without this a `write_frame` to a member that has stopped reading blocks *forever* once its
+/// receive buffer and our send buffer are both full — there is no way out of that except the peer
+/// closing the connection (#1822). A participant who cannot absorb one frame in ten seconds is not
+/// slow, it is gone (asleep laptop, yanked wifi, killed process), so the write fails and every send
+/// path here already treats a write error as "this member is gone".
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Accept-loop poll interval; the listener is non-blocking so shutdown never waits on a connection.
 const ACCEPT_POLL: Duration = Duration::from_millis(25);
 /// Ceiling on simultaneously-served connections, so a connection flood cannot spawn threads without
@@ -686,6 +694,13 @@ pub struct SessionInfo {
     pub authority: bool,
     #[serde(rename = "self")]
     pub admitted_as: Participant,
+}
+
+/// Arm `WRITE_TIMEOUT` on a collaboration socket. Called on both halves of every connection — the
+/// stream a broker accepts and the stream a participant dials — because either end can be the one
+/// that stops reading.
+fn arm_write_deadline(stream: &TcpStream) {
+    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -789,6 +804,7 @@ fn serve_connection(
     allow_create: bool,
 ) {
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+    arm_write_deadline(&stream);
 
     // Encryption comes FIRST — before the first byte of protocol is read, let alone parsed. A peer
     // that cannot complete the Noise handshake (a plain-TCP speaker, a port scanner, anyone without
@@ -1186,6 +1202,7 @@ fn handshake(
     let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
         .map_err(|e| format!("could not reach the collaboration broker at {host}:{port}: {e}"))?;
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+    arm_write_deadline(&stream);
 
     // Encrypt before saying anything. `broker_key` came from the join token (or the configured relay
     // address), so completing this handshake is also what proves the far end is the broker we were
@@ -1870,6 +1887,32 @@ mod tests {
             .chars()
             .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
         assert_ne!(a, b, "a session token must not be guessable from another");
+    }
+
+    #[test]
+    fn a_collaboration_socket_is_armed_with_a_write_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let dialled = TcpStream::connect(listener.local_addr().expect("addr")).expect("dial");
+        let (accepted, _) = listener.accept().expect("accept");
+
+        assert_eq!(
+            dialled.write_timeout().expect("write timeout"),
+            None,
+            "a bare socket blocks forever — which is the bug (#1822), so the deadline must be armed"
+        );
+
+        // Both halves: either end of a connection can be the one that stops reading.
+        arm_write_deadline(&dialled);
+        arm_write_deadline(&accepted);
+
+        assert_eq!(
+            dialled.write_timeout().expect("write timeout"),
+            Some(WRITE_TIMEOUT)
+        );
+        assert_eq!(
+            accepted.write_timeout().expect("write timeout"),
+            Some(WRITE_TIMEOUT)
+        );
     }
 
     // --- over the wire --------------------------------------------------------------------------
