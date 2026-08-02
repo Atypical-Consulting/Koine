@@ -823,6 +823,277 @@ public class ScenarioExecutionTests
     }
 
     // ------------------------------------------------------------------------
+    // #1854: a policy is matched by its trigger's resolved DECLARATION, not its bare event name — two
+    // bounded contexts may each legally declare a same-named `event` (R13.2) with a different payload,
+    // and only a coincidence in spelling should not fan out a reaction across them. Every fixture below
+    // declares the AMBIGUOUS SIBLING CONTEXT FIRST (or ships both orders), so a passing test proves the
+    // fix resolves by declaration identity rather than by which context the flat view happened to index
+    // last.
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// The #1854 repro: <c>Warehouse.ArchiveOnShip</c> reacts to <c>Warehouse</c>'s own <c>Shipped</c>,
+    /// declared first here — the order most likely to expose a fix that only works by accident of
+    /// declaration order. <c>Ordering.Order.ship</c> emits <b>its own</b> <c>Shipped</c>; nothing in the
+    /// model connects the two contexts.
+    /// </summary>
+    internal const string UnrelatedSameNamedEventWarehouseFirstFixture = """
+        context Warehouse {
+          event Shipped {
+            packageId: String
+            carrier: String
+          }
+
+          aggregate Storage root Package {
+            entity Package identified by PackageId {
+              label: String
+              archived: Bool = false
+
+              command archive(packageId: String) { archived -> true }
+            }
+          }
+
+          policy ArchiveOnShip when Shipped then Package.archive(packageId: packageId)
+        }
+
+        context Ordering {
+          event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command ship {
+                shipped -> true
+                emit Shipped(orderId: code)
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>The identical model with the two <c>context</c> blocks swapped.</summary>
+    internal const string UnrelatedSameNamedEventOrderingFirstFixture = """
+        context Ordering {
+          event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command ship {
+                shipped -> true
+                emit Shipped(orderId: code)
+              }
+            }
+          }
+        }
+
+        context Warehouse {
+          event Shipped {
+            packageId: String
+            carrier: String
+          }
+
+          aggregate Storage root Package {
+            entity Package identified by PackageId {
+              label: String
+              archived: Bool = false
+
+              command archive(packageId: String) { archived -> true }
+            }
+          }
+
+          policy ArchiveOnShip when Shipped then Package.archive(packageId: packageId)
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_same_named_policy_in_an_unrelated_context_does_not_fire(bool orderingFirst)
+    {
+        SemanticModel sema = Build(orderingFirst
+            ? UnrelatedSameNamedEventOrderingFirstFixture
+            : UnrelatedSameNamedEventWarehouseFirstFixture);
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Ordering", "Shipped");
+
+        // Warehouse.ArchiveOnShip reacts to WAREHOUSE's Shipped — a different event that merely shares
+        // the name with Ordering's. Before the fix this fired: `resolution.Executable` held a target in
+        // Warehouse for a reaction the emitted event never reached.
+        fanOut.Executable.ShouldBeEmpty();
+
+        FanOutDroppedPolicy dropped = fanOut.Dropped.ShouldHaveSingleItem();
+        dropped.Context.ShouldBe("Warehouse");
+        dropped.PolicyName.ShouldBe("ArchiveOnShip");
+        dropped.EventName.ShouldBe("Shipped");
+    }
+
+    [Fact]
+    public void A_same_named_policy_in_an_unrelated_context_does_not_fire_regardless_of_context_source_order()
+    {
+        FanOutResolution warehouseFirst = new ScenarioFanOutResolver(Build(UnrelatedSameNamedEventWarehouseFirstFixture))
+            .Resolve("Ordering", "Shipped");
+        FanOutResolution orderingFirst = new ScenarioFanOutResolver(Build(UnrelatedSameNamedEventOrderingFirstFixture))
+            .Resolve("Ordering", "Shipped");
+
+        warehouseFirst.Executable.ShouldBe(orderingFirst.Executable);
+        warehouseFirst.Dropped.ShouldBe(orderingFirst.Dropped);
+    }
+
+    /// <summary>
+    /// The companion guard: a policy genuinely reacting to an event OWNED by another context, reached
+    /// via <c>import</c>, must keep firing. <c>Warehouse</c>'s unrelated same-named <c>Shipped</c> is
+    /// declared first, so a fix that (wrongly) matched by name alone within the emitting context's
+    /// import list, or that regressed to a source-order-dependent lookup, would either drop this
+    /// reaction or fire it for the wrong payload.
+    /// </summary>
+    internal const string ImportedTriggerFixture = """
+        context Warehouse {
+          event Shipped {
+            packageId: String
+            carrier: String
+          }
+        }
+
+        context Sales {
+          event Shipped { orderId: String }
+        }
+
+        context Ordering {
+          import Sales.{ Shipped }
+
+          aggregate Fulfilment root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command note(orderId: String) { shipped -> true }
+            }
+          }
+
+          policy NoteOnShip when Shipped then Order.note(orderId: orderId)
+        }
+        """;
+
+    [Fact]
+    public void A_policy_reacting_to_an_imported_event_still_dispatches()
+    {
+        SemanticModel sema = Build(ImportedTriggerFixture);
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Sales", "Shipped");
+
+        FanOutTarget target = fanOut.Executable.ShouldHaveSingleItem();
+        target.PolicyName.ShouldBe("NoteOnShip");
+        target.Context.ShouldBe("Ordering");
+        target.MemberName.ShouldBe("note");
+        fanOut.Dropped.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The companion guard's other visibility route: <c>Ordering</c> declares no <c>Shipped</c> and
+    /// imports nothing — the context map's <c>conformist</c> relation alone makes <c>Sales.Shipped</c>
+    /// visible to its policy (R14.1). This route depends on #1853's <c>TryGetDeclIn</c> permit rung.
+    /// </summary>
+    internal const string PermitVisibleTriggerFixture = """
+        context Warehouse {
+          event Shipped {
+            packageId: String
+            carrier: String
+          }
+        }
+
+        context Sales {
+          event Shipped { orderId: String }
+        }
+
+        context Ordering {
+          aggregate Fulfilment root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command note(orderId: String) { shipped -> true }
+            }
+          }
+
+          policy NoteOnShip when Shipped then Order.note(orderId: orderId)
+        }
+
+        contextmap {
+          Sales -> Ordering : conformist
+        }
+        """;
+
+    [Fact]
+    public void A_policy_reacting_to_a_permit_visible_event_still_dispatches()
+    {
+        SemanticModel sema = Build(PermitVisibleTriggerFixture);
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Sales", "Shipped");
+
+        FanOutTarget target = fanOut.Executable.ShouldHaveSingleItem();
+        target.PolicyName.ShouldBe("NoteOnShip");
+        target.Context.ShouldBe("Ordering");
+        target.MemberName.ShouldBe("note");
+        fanOut.Dropped.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// #1854 review finding: a policy with NO local declaration, import, or context-map permit
+    /// relation to the event it names — but where the model declares that event name in exactly ONE
+    /// place — still validates today via <c>ModelIndex.TryGetDecl</c>'s flat fallback (the same ladder
+    /// <c>SemanticValidator.ValidatePolicies</c> uses). The fix must resolve through that same fallback
+    /// rather than the narrower <c>TryGetDeclIn</c> alone, or it would drop a policy the compiler itself
+    /// accepts. <c>Billing</c> has no relationship whatsoever to <c>Ordering</c>.
+    /// </summary>
+    internal const string FlatFallbackSingletonEventFixture = """
+        context Billing {
+          aggregate Books root Invoice {
+            entity Invoice identified by InvoiceId {
+              status: String
+
+              command close { status -> "Closed" }
+            }
+          }
+
+          policy CloseOnShip when Shipped then Invoice.close()
+        }
+
+        context Ordering {
+          event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command ship {
+                shipped -> true
+                emit Shipped(orderId: code)
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void A_policy_with_no_declared_relationship_still_dispatches_when_the_event_name_is_globally_unique()
+    {
+        SemanticModel sema = Build(FlatFallbackSingletonEventFixture);
+
+        FanOutResolution fanOut = new ScenarioFanOutResolver(sema).Resolve("Ordering", "Shipped");
+
+        FanOutTarget target = fanOut.Executable.ShouldHaveSingleItem();
+        target.PolicyName.ShouldBe("CloseOnShip");
+        target.Context.ShouldBe("Billing");
+        fanOut.Dropped.ShouldBeEmpty();
+    }
+
+    // ------------------------------------------------------------------------
     // The downstream aggregate's STARTING state (#1758, D2): a per-aggregate
     // `given` slice, a factory that needs no prior instance, or an honest note —
     // never an invented default instance.
