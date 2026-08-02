@@ -4776,4 +4776,95 @@ public class RustConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1838, the Rust-specific half. When a command's <c>result</c> expression is also a whole
+    /// <c>emit</c>/<c>publish</c> payload argument the emitter binds it to one <c>__result</c> local — but
+    /// Rust MOVES a non-<c>Copy</c> value on its first read, and this local is read three times here (the
+    /// domain event payload, the integration event payload, the <c>Ok(...)</c>). A bare local at every site
+    /// is <c>E0382 use of moved value</c>, so the payload reads clone and only the terminal <c>Ok</c>,
+    /// which is textually last, takes it by value.
+    /// <para>A <c>String</c> result is the case that exposes this: the parity suite's <c>now</c> lowers to
+    /// a <c>Copy</c> <c>Instant</c> and would never catch the move. The <c>cargo check</c> below is the
+    /// real assertion — the shape pins above only say what it is checking.</para>
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_from_a_non_copy_payload_is_cloned_at_each_payload_and_moved_at_the_return()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  publishes Settled\n" +
+            "  integration event Settled {\n" +
+            "    label: String\n" +
+            "  }\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    event Labelled { label: String }\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      note: String\n" +
+            "      command relabel: String {\n" +
+            "        emit Labelled(label: note)\n" +
+            "        publish Settled(label: note)\n" +
+            "        result note\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guards (no Rust toolchain required): one binding, cloned reads, a moving return.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("let __result = self.note.to_string();");
+        rust.ShouldContain("Labelled::new(__result.clone())");
+        rust.ShouldContain("Settled::new(__result.clone())");
+        rust.ShouldContain("Ok(__result)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// The <c>Copy</c> counterpart of the test above (#1838): an <c>Instant</c> result is read straight at
+    /// every site, because copying it costs nothing and a <c>.clone()</c> on a <c>Copy</c> value would be a
+    /// gratuitous <c>clippy::clone_on_copy</c> in emitted code. Guards the clone from being applied
+    /// unconditionally, which would compile and so slip past <c>cargo check</c> alone.
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_from_a_copy_payload_is_read_without_a_clone()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  publishes Settled\n" +
+            "  integration event Settled {\n" +
+            "    at: Instant\n" +
+            "  }\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    event Closed { at: Instant }\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      note: String\n" +
+            "      command close: Instant {\n" +
+            "        emit Closed(at: now)\n" +
+            "        publish Settled(at: now)\n" +
+            "        result now\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("let __result = crate::koine_runtime::now();");
+        rust.ShouldContain("Closed::new(__result)");
+        rust.ShouldContain("Settled::new(__result)");
+        rust.ShouldContain("Ok(__result)");
+        rust.ShouldNotContain("__result.clone()");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
