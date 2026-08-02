@@ -187,10 +187,13 @@ public sealed partial class TypeScriptEmitter
         var param = TypeScriptNaming.ToCamelCase(m.Name);
         var type = typeMapper.Map(m.Type, context);
 
-        // A defaulted member keeps its default; an enum default is a member-object value.
+        // A defaulted member keeps its default; an enum default is a member-object value. The default is
+        // reconciled against the member's OWN declared type (#1880) — an `Int` literal on a `Decimal`
+        // member is a real `tsc --strict` TS2322 without the widen — via the same TranslateReconciled
+        // the sibling call sites in this family already route through (#1732/#1762/#1875).
         if (m.Initializer is not null)
         {
-            return $"{param}: {type} = {translator.Translate(m.Initializer, m.Type.Name)}";
+            return $"{param}: {type} = {translator.TranslateReconciled(m.Initializer, m.Type.Name, m.Type)}";
         }
         if (m.Type.IsOptional)
         {
@@ -721,7 +724,9 @@ public sealed partial class TypeScriptEmitter
             }
             else if (m.Initializer is not null)
             {
-                args.Add(translator.Translate(m.Initializer, m.Type.Name));
+                // Reconciled against the member's declared type exactly like the explicit-init branch
+                // above (#1880) — the fallback fed a bare `number` into a `Decimal` parameter (TS2345).
+                args.Add(translator.TranslateReconciled(m.Initializer, m.Type.Name, m.Type));
             }
             else if (m.Type.IsOptional)
             {

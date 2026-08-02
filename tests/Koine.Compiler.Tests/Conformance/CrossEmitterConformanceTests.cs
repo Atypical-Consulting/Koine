@@ -634,6 +634,149 @@ public class CrossEmitterConformanceTests
         TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
     }
 
+    /// <summary>
+    /// Issue #1880 — the SAME seven-target guard as
+    /// <see cref="Result_and_payload_int_decimal_reconciliation_agrees_across_reconciled_targets"/>,
+    /// pointed at the next (and, at the time of writing, last uncovered) call site of the numeric
+    /// reconciliation family: a member's OWN default initializer (<c>total: Decimal = 5</c>). Extending
+    /// the one guard rather than adding a seventh parallel test file is deliberate — a single test that
+    /// walks every target at every call site is what stops the family reopening a ninth time (this guard
+    /// is itself how #1880 was found).
+    /// <para>The initializer renders at up to two textual sites per target: the generated
+    /// constructor/dataclass/property parameter's own DEFAULT VALUE, and — for the targets whose factory
+    /// builds an all-args constructor call — that factory's ctor-arg FALLBACK branch. Java and Kotlin
+    /// have no fallback branch (their factories pass only required members; defaults are assigned in the
+    /// constructor itself), and PHP's parameter-default site was already correct via
+    /// <c>FoldDecimalConstantDefault</c> (#1030) — so the per-target idioms below differ in WHERE they
+    /// appear, not in what they mean.</para>
+    /// <para><b>Covers all seven code emitters</b>: C# needs no widening at all (a built-in implicit
+    /// <c>long</c>-to-<c>decimal</c> conversion), Rust was fixed at #1319/#1324/#1325 (the reference
+    /// implementation for THIS call site), and TypeScript, Python, PHP, Java and Kotlin are fixed
+    /// here.</para>
+    /// </summary>
+    [Fact]
+    public void Member_default_initializer_int_decimal_reconciliation_agrees_across_reconciled_targets()
+    {
+        const string koi =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal = 5\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal = 7\n" +
+            "  }\n" +
+            "}\n";
+
+        // C#: always runs and always asserts — genuinely decimal-transparent, no widening idiom to pin.
+        CompileResult cs = new KoineCompiler().Compile(koi, new CSharpEmitter());
+        cs.Success.ShouldBeTrue("C# emit failed:\n" + string.Join("\n", cs.Diagnostics.Select(d => d.ToString())));
+        var (asm, csErrors) = TestSupport.Compile(cs.Files.ToList());
+        (asm is not null).ShouldBeTrue("C# member default-initializer model failed to compile:\n" + string.Join("\n", csErrors));
+
+        // Rust: emit + cargo check, asserted when the toolchain is present (#1319/#1324/#1325's idiom).
+        CompileResult rs = new KoineCompiler().Compile(koi, new RustEmitter());
+        rs.Success.ShouldBeTrue("Rust emit failed:\n" + string.Join("\n", rs.Diagnostics.Select(d => d.ToString())));
+        var rustBilling = rs.Files.Single(f => f.RelativePath.EndsWith("billing.rs", StringComparison.Ordinal)).Contents;
+        rustBilling.ShouldContain("unwrap_or_else(|| Decimal::from(5))");
+        rustBilling.ShouldContain("unwrap_or_else(|| Decimal::from(7))");
+        TestSupport.RustCheck rsCheck = TestSupport.CompileRust(rs.Files);
+        if (rsCheck.ToolchainAvailable)
+        {
+            rsCheck.Ok.ShouldBeTrue("Rust member default-initializer reconciliation should compile under cargo check:\n" + string.Join("\n", rsCheck.Errors));
+        }
+
+        // Java: emit + javac, asserted when the toolchain is present (#1880's widening idiom).
+        CompileResult java = new KoineCompiler().Compile(koi, new JavaEmitter());
+        java.Success.ShouldBeTrue("Java emit failed:\n" + string.Join("\n", java.Diagnostics.Select(d => d.ToString())));
+        java.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents
+            .ShouldContain("this.total = java.math.BigDecimal.valueOf(5L);");
+        java.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents
+            .ShouldContain("this(java.math.BigDecimal.valueOf(7L));");
+        TestSupport.JavaCheck javaCheck = TestSupport.CompileJava(java.Files);
+        if (javaCheck.ToolchainAvailable)
+        {
+            javaCheck.Ok.ShouldBeTrue("Java member default-initializer reconciliation should compile under javac:\n" + string.Join("\n", javaCheck.Errors));
+        }
+
+        // Kotlin: emit + kotlinc, asserted when the toolchain is present (#1880's widening idiom).
+        CompileResult kotlin = new KoineCompiler().Compile(koi, new KotlinEmitter());
+        kotlin.Success.ShouldBeTrue("Kotlin emit failed:\n" + string.Join("\n", kotlin.Diagnostics.Select(d => d.ToString())));
+        kotlin.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents
+            .ShouldContain("val total: java.math.BigDecimal = java.math.BigDecimal.valueOf(5L)");
+        kotlin.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents
+            .ShouldContain("val amount: java.math.BigDecimal = java.math.BigDecimal.valueOf(7L)");
+        TestSupport.KotlinCheck kotlinCheck = TestSupport.CompileKotlin(kotlin.Files);
+        if (kotlinCheck.ToolchainAvailable)
+        {
+            kotlinCheck.Ok.ShouldBeTrue("Kotlin member default-initializer reconciliation should compile under kotlinc:\n" + string.Join("\n", kotlinCheck.Errors));
+        }
+
+        // TypeScript: emit + tsc --strict, asserted when the toolchain is present (#1880's idiom, at
+        // BOTH the constructor-parameter default and the factory's ctor-arg fallback).
+        CompileResult ts = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
+        ts.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", ts.Diagnostics.Select(d => d.ToString())));
+        var tsInvoice = ts.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        tsInvoice.ShouldContain("total: Decimal = Decimal.fromInt(5)");
+        tsInvoice.ShouldContain("return new Invoice(id, Decimal.fromInt(5));");
+        ts.Files.Single(f => f.RelativePath.EndsWith("Money.ts", StringComparison.Ordinal)).Contents
+            .ShouldContain("amount: Decimal = Decimal.fromInt(7)");
+        TestSupport.TypeScriptCheck tsCheck = TestSupport.TypeCheckTypeScript(ts.Files);
+        if (tsCheck.ToolchainAvailable)
+        {
+            tsCheck.Ok.ShouldBeTrue("TypeScript member default-initializer reconciliation should type-check under tsc --strict:\n" + string.Join("\n", tsCheck.Errors));
+        }
+
+        // Python: emit + mypy --strict, asserted when the toolchain is present (#1880's idiom, at BOTH
+        // the dataclass-field default and the factory's ctor-arg fallback).
+        CompileResult py = new KoineCompiler().Compile(koi, new PythonEmitter());
+        py.Success.ShouldBeTrue("Python emit failed:\n" + string.Join("\n", py.Diagnostics.Select(d => d.ToString())));
+        var pyInvoice = py.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
+        pyInvoice.ShouldContain("total: Decimal = Decimal(5)");
+        pyInvoice.ShouldContain("total=Decimal(5)");
+        py.Files.Single(f => f.RelativePath.EndsWith("money.py", StringComparison.Ordinal)).Contents
+            .ShouldContain("amount: Decimal = Decimal(7)");
+        TestSupport.PythonCheck pyCheck = TestSupport.TypeCheckPython(py.Files);
+        if (pyCheck.ToolchainAvailable)
+        {
+            pyCheck.Ok.ShouldBeTrue("Python member default-initializer reconciliation should type-check under mypy --strict:\n" + string.Join("\n", pyCheck.Errors));
+        }
+
+        // PHP: emit + php -l + phpstan --level max. The parameter-default site was already correct via
+        // FoldDecimalConstantDefault (#1030); the factory's ctor-arg fallback is #1880's own gap.
+        CompileResult php = new KoineCompiler().Compile(koi, new PhpEmitter());
+        php.Success.ShouldBeTrue("PHP emit failed:\n" + string.Join("\n", php.Diagnostics.Select(d => d.ToString())));
+        var phpInvoice = php.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents;
+        phpInvoice.ShouldContain(@"\Koine\Runtime\Decimal $total = new \Koine\Runtime\Decimal('5')");
+        phpInvoice.ShouldContain(@"new self($id, (new \Koine\Runtime\Decimal('5')))");
+        php.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents
+            .ShouldContain(@"\Koine\Runtime\Decimal $amount = new \Koine\Runtime\Decimal('7')");
+        TestSupport.PhpCheck phpSyntax = TestSupport.SyntaxCheckPhp(php.Files);
+        TestSupport.PhpCheck phpCheck = TestSupport.TypeCheckPhp(php.Files);
+        if (phpSyntax.ToolchainAvailable)
+        {
+            phpSyntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", phpSyntax.Errors));
+        }
+        if (phpCheck.ToolchainAvailable)
+        {
+            phpCheck.Ok.ShouldBeTrue("PHP member default-initializer reconciliation should type-check under phpstan --level max:\n" + string.Join("\n", phpCheck.Errors));
+        }
+
+        // Same trailing gate as the sibling guard above: funnel every absent toolchain through
+        // RequireOrSkip AFTER the assertions so a missing one reports Skipped — or, under
+        // KOINE_REQUIRE_CONFORMANCE, Failed — instead of silently passing.
+        TestSupport.RequireOrSkip(rsCheck.ToolchainAvailable, NoRustToolchainNotice);
+        TestSupport.RequireOrSkip(javaCheck.ToolchainAvailable, NoJavaToolchainNotice);
+        TestSupport.RequireOrSkip(kotlinCheck.ToolchainAvailable, NoKotlinToolchainNotice);
+        TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
+        TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
+        TestSupport.RequireOrSkip(phpSyntax.ToolchainAvailable, NoPhpInterpreterNotice);
+        TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
+    }
+
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";
 
     // ---- C# side: Roslyn compile + reflective invoke --------------------------------------------

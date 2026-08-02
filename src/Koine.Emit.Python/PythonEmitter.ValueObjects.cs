@@ -507,7 +507,11 @@ public sealed partial class PythonEmitter
             // Pass the field's own declared enum type as the hint so an ambiguous member name (one
             // that exists in multiple enums) resolves to the correct owner rather than the first
             // match the translator finds in the global enum-member → type map.
-            return translator.Translate(m.Initializer, NameModeForDefault(), EnumExpected(m, index, translator.Context));
+            // Reconciled against the member's OWN declared type (#1880): an `Int` literal on a `Decimal`
+            // field emitted a bare `int` into a `Decimal`-annotated dataclass field — a real
+            // `mypy --strict` error — until this routed through the same TranslateReconciled the sibling
+            // call sites in this family already use (#1732/#1762/#1875).
+            return translator.TranslateReconciled(m.Initializer, NameModeForDefault(), EnumExpected(m, index, translator.Context), m.Type);
         }
         if (m.Type.IsOptional)
         {

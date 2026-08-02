@@ -1025,6 +1025,120 @@ public class KotlinConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1880 — a member's OWN default initializer (<c>total: Decimal = 5</c>) never numerically
+    /// reconciled against its declared type, the seventh call site of the family #1732 (factory ctor
+    /// args), #1615 (coalesce) and #1866 (result/payload) closed one by one. Kotlin renders it as the
+    /// entity's stored-property initializer and as a value object's primary-constructor parameter
+    /// default — both a hard <c>kotlinc</c> "type mismatch: inferred type is Long but BigDecimal was
+    /// expected". Routed through the same <c>TranslateReconciled</c> the sibling sites already use.
+    /// Rust closed the same site at #1319/#1324/#1325.
+    /// </summary>
+    [Fact]
+    public void Member_default_initializer_widens_an_int_to_bigdecimal_against_its_declared_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal = 5\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal = 7\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("val total: java.math.BigDecimal = java.math.BigDecimal.valueOf(5L)");
+        invoice.ShouldNotContain("val total: java.math.BigDecimal = 5L");
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("val amount: java.math.BigDecimal = java.math.BigDecimal.valueOf(7L)");
+        money.ShouldNotContain("val amount: java.math.BigDecimal = 7L");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1880 — the optional-declared half of the default-initializer fix: an <c>Int</c> default on
+    /// a <c>Decimal?</c> member still needs the widen (Kotlin nullability is subtyping, so no extra
+    /// lift), mirroring #1325's optional-constant-default fix for Rust.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_member_default_initializer_widens_an_int_to_bigdecimal()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal? = 5\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal? = 5\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("val total: java.math.BigDecimal? = java.math.BigDecimal.valueOf(5L)");
+
+        // Kotlin nullability is subtyping, so the value object's primary-constructor parameter needs the
+        // widen but never a lift — the same conclusion TypeScript/Python/PHP reach for their optionals.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("val amount: java.math.BigDecimal? = java.math.BigDecimal.valueOf(5L)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1880's zero-change guard — a matching-type (<c>Decimal</c>) default and a non-numeric
+    /// (<c>String</c>/<c>Int</c>) default must render byte-identically to before the reconciliation was
+    /// wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_member_defaults_render_unchanged()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    exact: Decimal = 2.5\n" +
+            "    label: String = \"x\"\n" +
+            "    count: Int = 3\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("val exact: java.math.BigDecimal = java.math.BigDecimal(\"2.5\")");
+        invoice.ShouldContain("val label: String = \"x\"");
+        invoice.ShouldContain("val count: Long = 3L");
+        invoice.ShouldNotContain("java.math.BigDecimal.valueOf");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Issue #1866: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_bigdecimal_against_a_decimal_return_type()

@@ -92,7 +92,11 @@ public sealed partial class KotlinEmitter
 
         foreach (Member m in defaulted)
         {
-            var value = translator.Translate(m.Initializer!, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context));
+            // Reconciled against the member's OWN declared type (#1880) via the same TranslateReconciled
+            // the sibling call sites in this family already use (#1732/#1615/#1866) — the stored property
+            // carries the declared Kotlin type, so an `Int` default on a `Decimal` member emitted
+            // `val total: java.math.BigDecimal = 5L`, a hard `kotlinc` type mismatch.
+            var value = translator.TranslateReconciled(m.Initializer!, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context), m.Type);
             WriteStoredProperty(sb, m, typeMapper, value, mutated.Contains(m.Name));
         }
 
