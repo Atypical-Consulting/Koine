@@ -44,7 +44,13 @@ public sealed partial class JavaEmitter
     private void EmitEntity(JavaEmitContext emit, List<EmittedFile> files, string context, EntityDecl entity)
     {
         files.Add(EmitEntityClass(emit, context, entity));
-        files.Add(EmitId(emit, context, entity));
+        // #1848: an identity type the model ALSO declares explicitly (`value OrderId { … }`) is
+        // already emitted via the ValueObjectDecl case elsewhere — synthesizing a second one here
+        // would duplicate it under the same RelativePath and fail to compile.
+        if (!DeclaredIdentityValueObject.IsDeclaredIn(emit.Index, context, entity.IdentityName))
+        {
+            files.Add(EmitId(emit, context, entity));
+        }
     }
 
     /// <summary>Builds the entity class file: fields, validating constructor, accessors, behaviors/factories, and identity equality.</summary>

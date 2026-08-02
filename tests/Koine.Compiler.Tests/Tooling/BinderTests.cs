@@ -243,6 +243,43 @@ public class BinderTests
     private static string? AncestorTypeName(SemanticModel sema, KoineNode node) =>
         sema.FirstAncestorOrSelf<TypeDecl>(node)?.Name;
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BuildReceiverScope_resolves_the_enclosing_type_in_its_own_context(bool swapOrder)
+    {
+        // Both contexts declare `entity Order`, with different member sets — R13.2 legality. A
+        // member-access selector inside A's `Order` invariant must resolve against A's `Order` (which
+        // has `total`), never B's (which doesn't), regardless of which context is indexed last.
+        const string a = """
+            context A {
+              value Money { amount: Decimal }
+              entity Order identified by OrderId {
+                total: Money
+                invariant total.amount > 0
+              }
+            }
+            """;
+        const string b = """
+            context B {
+              entity Order identified by OrderId {
+                weight: Decimal
+              }
+            }
+            """;
+        string src = swapOrder ? $"{b}\n{a}" : $"{a}\n{b}";
+        var sema = Build(src);
+
+        MemberAccessExpr totalAmount = Descendants(sema).OfType<MemberAccessExpr>()
+            .Single(m => m.MemberName == "amount");
+
+        var member = sema.GetSymbolInfo(totalAmount).ShouldBeOfType<MemberSymbol>();
+        member.Name.ShouldBe("amount");
+        var money = member.ContainingSymbol.ShouldBeOfType<TypeSymbol>();
+        money.Name.ShouldBe("Money");
+        ((ContextSymbol)money.ContainingSymbol!).Name.ShouldBe("A");
+    }
+
     // ----------------------------------------------------------------------
     // 4. Containment.
     // ----------------------------------------------------------------------

@@ -237,7 +237,33 @@ public sealed class KoineCompiler
         }
 
         var emitted = EmitCached(files, emitter, compilation);
+        AssertNoDuplicateEmittedPaths(emitter.TargetName, emitted);
         return new CompileResult(compilation.Model, diagnostics, emitted);
+    }
+
+    /// <summary>
+    /// Guards a bug class that a disk write silently hides (#1848): two <see cref="EmittedFile"/>
+    /// entries sharing one <see cref="EmittedFile.RelativePath"/> is ALWAYS an emitter defect — never a
+    /// legitimate output shape — because the second would silently overwrite the first on disk while
+    /// both still reach an in-memory consumer (e.g. the Roslyn meta-test harness) as if distinct. Rather
+    /// than let that divergence surface as a downstream compile error far from its cause, fail loudly
+    /// here, at the one seam every <see cref="Compile(KoineCompilation, IEmitter, DiagnosticFilterOptions)"/>
+    /// call passes through.
+    /// </summary>
+    private static void AssertNoDuplicateEmittedPaths(string targetName, IReadOnlyList<EmittedFile> files)
+    {
+        var duplicates = files
+            .GroupBy(f => f.RelativePath, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => $"{g.Key} (x{g.Count()})")
+            .ToList();
+
+        if (duplicates.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"The '{targetName}' emitter produced {duplicates.Count} duplicate output path(s), " +
+                $"which a disk write would silently mask by overwrite: {string.Join(", ", duplicates)}");
+        }
     }
 
     /// <summary>

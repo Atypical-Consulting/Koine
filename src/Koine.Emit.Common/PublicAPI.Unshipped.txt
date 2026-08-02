@@ -1,4 +1,5 @@
 #nullable enable
+Koine.Compiler.DeclaredIdentityValueObject
 Koine.Compiler.FactoryIdBinding
 Koine.Compiler.FactoryIdBinding.AliasFrom.get -> string?
 Koine.Compiler.FactoryIdBinding.AliasFrom.init -> void
@@ -46,6 +47,7 @@ Koine.Compiler.RouteTokenTarget
 Koine.Compiler.RouteTokenTarget.Identity = 2 -> Koine.Compiler.RouteTokenTarget
 Koine.Compiler.RouteTokenTarget.Member = 1 -> Koine.Compiler.RouteTokenTarget
 Koine.Compiler.RouteTokenTarget.Unbound = 0 -> Koine.Compiler.RouteTokenTarget
+static Koine.Compiler.DeclaredIdentityValueObject.IsDeclaredIn(Koine.Compiler.Ast.ModelIndex! index, string! context, string! idName) -> bool
 static Koine.Compiler.FactoryIdBinding.ResolveFactoryId(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory, System.Func<string!, string!>! emitParamName) -> Koine.Compiler.FactoryIdBinding
 static Koine.Compiler.MarkdownDoc.Cell(string? doc) -> string!
 static Koine.Compiler.MarkdownDoc.EnumValues(Koine.Compiler.Ast.EnumDecl! en) -> string!

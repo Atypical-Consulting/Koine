@@ -83,7 +83,7 @@ public sealed partial class AsyncApiEmitter
         string ownerContext,
         string indent)
     {
-        switch (index.Classify(type.Name))
+        switch (index.Classify(ownerContext, type.Name))
         {
             case TypeKind.List:
                 sb.Append(indent).Append("type: array\n");
@@ -119,7 +119,7 @@ public sealed partial class AsyncApiEmitter
 
             case TypeKind.Enum:
                 sb.Append(indent).Append("type: string\n");
-                if (index.TryGetDecl(type.Name, out TypeDecl decl) && decl is EnumDecl en)
+                if (index.TryGetDecl(ownerContext, type.Name, out TypeDecl decl) && decl is EnumDecl en)
                 {
                     sb.Append(indent).Append("enum:\n");
                     foreach (var member in en.MemberNames)
