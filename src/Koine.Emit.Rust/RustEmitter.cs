@@ -89,9 +89,18 @@ public sealed partial class RustEmitter : IEmitter
         var body = new StringBuilder();
         WriteDomainError(body);
 
+        // #1848: identity names this context's entities ADOPT from an explicitly declared `value`
+        // (rather than a synthesized wrapper) — the declared value object must then derive `Hash`
+        // too, since an entity's identity is used as a map/set key just like a synthesized one is.
+        var adoptedIdentityNames = new HashSet<string>(
+            ctx.AllEntities()
+                .Select(e => e.IdentityName)
+                .Where(idName => DeclaredIdentityValueObject.IsDeclaredIn(emit.Index, ctx.Name, idName)),
+            StringComparer.Ordinal);
+
         foreach (TypeDecl type in ctx.Types)
         {
-            EmitType(emit, body, type, ctx.Name);
+            EmitType(emit, body, type, ctx.Name, adoptedIdentityNames);
         }
 
         // The context-wide DomainEvent enum (empty when the context declares no events).
@@ -121,7 +130,7 @@ public sealed partial class RustEmitter : IEmitter
         model.Contexts.SelectMany(c => c.AllEntities()).Any(MintsUuidIdentity);
 
     /// <summary>Dispatches a single declaration to its construct emitter.</summary>
-    private void EmitType(RustEmitContext emit, StringBuilder body, TypeDecl type, string context)
+    private void EmitType(RustEmitContext emit, StringBuilder body, TypeDecl type, string context, IReadOnlySet<string> adoptedIdentityNames)
     {
         switch (type)
         {
@@ -131,12 +140,12 @@ public sealed partial class RustEmitter : IEmitter
                 break;
             case ValueObjectDecl vo:
                 body.Append('\n');
-                EmitValueObject(body, emit, vo, context);
+                EmitValueObject(body, emit, vo, context, adoptedIdentityNames.Contains(vo.Name));
                 break;
             case AggregateDecl agg:
                 foreach (TypeDecl nested in agg.Types)
                 {
-                    EmitType(emit, body, nested, context);
+                    EmitType(emit, body, nested, context, adoptedIdentityNames);
                 }
                 EmitAggregateExtras(emit, body, agg, context);
                 break;

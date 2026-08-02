@@ -18,7 +18,13 @@ public sealed partial class RustEmitter
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
 
         // The branded identity newtype — with a UUID `generate()` when a factory needs to mint ids.
-        EmitIdType(body, entity.IdentityName, IdBacking(entity), withGenerator: MintsUuidIdentity(entity));
+        // #1848: an identity type the model ALSO declares explicitly (`value OrderId { … }`) is
+        // already emitted via the ValueObjectDecl case elsewhere in this module — synthesizing a
+        // second one here would redefine the same struct in the same file and fail to compile.
+        if (!DeclaredIdentityValueObject.IsDeclaredIn(emit.Index, context, entity.IdentityName))
+        {
+            EmitIdType(body, entity.IdentityName, IdBacking(entity), withGenerator: MintsUuidIdentity(entity));
+        }
 
         var name = RustNaming.ToPascalCase(entity.Name);
         var idType = RustNaming.ToPascalCase(entity.IdentityName);

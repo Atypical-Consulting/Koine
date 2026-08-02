@@ -17,7 +17,7 @@ namespace Koine.Compiler;
 /// </summary>
 public sealed partial class RustEmitter
 {
-    private void EmitValueObject(StringBuilder sb, RustEmitContext emit, ValueObjectDecl vo, string context)
+    private void EmitValueObject(StringBuilder sb, RustEmitContext emit, ValueObjectDecl vo, string context, bool isAdoptedIdentity = false)
     {
         var name = RustNaming.ToPascalCase(vo.Name);
         var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
@@ -35,9 +35,13 @@ public sealed partial class RustEmitter
         var typeMapper = new RustTypeMapper(emit.Index, context, _options);
         var translator = new RustExpressionTranslator(emit.Index, vo.Members, emit.EnumMemberToType, emit.EnumVariants, typeMapper, context);
 
-        // The struct.
+        // The struct. An identity type — synthesized OR, per #1848, a declared `value` ADOPTED as
+        // one via `identified by` — additionally derives `Hash`: an entity's id is used as a
+        // map/set key (repositories, etc.) exactly like a synthesized identity newtype already is.
         WriteDoc(sb, vo.Doc, string.Empty);
-        sb.Append("#[derive(Debug, Clone, PartialEq, Eq)]\n");
+        sb.Append(isAdoptedIdentity
+            ? "#[derive(Debug, Clone, PartialEq, Eq, Hash)]\n"
+            : "#[derive(Debug, Clone, PartialEq, Eq)]\n");
         sb.Append("pub struct ").Append(name).Append(" {\n");
         foreach (Member m in stored)
         {
