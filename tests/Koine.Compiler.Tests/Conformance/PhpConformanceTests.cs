@@ -3160,6 +3160,114 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #1889 — a read-model PROJECTED field (<c>total: Decimal = lines</c>, projected from an
+    /// <c>Int</c>-declared source member <c>lines</c>) is never numerically reconciled against its own
+    /// declared type, unlike every sibling call site in this family: the factory ctor arg (#1732), the
+    /// <c>result</c> expression and the emit/publish payload (#1875), the member default initializer
+    /// (#1880), the derived-member body (#1888) and the command transition (#1887). PHP emitted a bare
+    /// <c>$src->lines</c> against a <c>\Koine\Runtime\Decimal</c>-typed promoted property — a real
+    /// <c>phpstan analyse --level max</c> error. Routed through the same <c>TranslateReconciled</c> the
+    /// sibling call sites already use. Rust closed this call site at #1378.
+    /// </summary>
+    [Fact]
+    public void Readmodel_projected_field_widens_an_int_value_into_a_decimal_field()
+    {
+        const string src =
+            """
+            context Sales {
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  lines: Int
+                }
+              }
+
+              readmodel OrderRow from Order {
+                id
+                total: Decimal = lines
+                totalOptional: Decimal? = lines
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow.php", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain(@"(new \Koine\Runtime\Decimal($src->lines)),");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1889 — the optional-declared variant (Rust's #1378 shape). PHP's optional is a plain
+    /// <c>?T</c> nullable, so only the NUMERIC dimension renders: the projected value still widens to a
+    /// runtime <c>Decimal</c>, with no lift on top.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_readmodel_projected_field_widens_without_a_lift()
+    {
+        const string src =
+            """
+            context Sales {
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  lines: Int
+                }
+              }
+
+              readmodel OrderRow from Order {
+                id
+                total: Decimal = lines
+                totalOptional: Decimal? = lines
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow.php", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("public ?\\Koine\\Runtime\\Decimal $totalOptional");
+        orderRow.ShouldContain(@"(new \Koine\Runtime\Decimal($src->lines)),");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1889's zero-change guard — a matching-type (<c>Decimal</c>) projected field and a
+    /// non-numeric (<c>String</c>) one must render byte-identically to before the reconciliation was
+    /// wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_readmodel_projected_fields_render_unchanged()
+    {
+        const string src =
+            """
+            context Sales {
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  price: Decimal
+                  label: String
+                }
+              }
+
+              readmodel OrderRow2 from Order {
+                id
+                exact: Decimal = price
+                tag: String = label
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow2.php", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("$src->price,");
+        orderRow.ShouldContain("$src->label,");
+        orderRow.ShouldNotContain(@"new \Koine\Runtime\Decimal($src->");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
     /// Runs the always-on <c>php -l</c> syntax gate and the <c>phpstan analyse --level max</c>
     /// type-check over the emitted tree. Skipped (not failed) when no toolchain is present; with one,
     /// BOTH must pass.

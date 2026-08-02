@@ -2087,4 +2087,115 @@ public class TypeScriptConformanceTests
 
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1889 — a read-model PROJECTED field (<c>total: Decimal = lines</c>, projected from an
+    /// <c>Int</c>-declared source member <c>lines</c>) is never numerically reconciled against its own
+    /// declared type, unlike every sibling call site in this family: the factory ctor arg (#1732), the
+    /// <c>result</c> expression and the emit/publish payload (#1875), the member default initializer
+    /// (#1880), the derived-member body (#1888) and the command transition (#1887). TypeScript emitted a
+    /// bare <c>total: src.lines</c> — a real <c>tsc --strict</c> TS2322 ("Type 'number' is not assignable
+    /// to type 'Decimal'"). Routed through the same <c>TranslateReconciled</c> the sibling call sites
+    /// already use. Rust closed this call site at #1378.
+    /// </summary>
+    [Fact]
+    public void Readmodel_projected_field_widens_an_int_value_into_a_decimal_field()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      lines: Int\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow from Order {\n" +
+            "    id\n" +
+            "    total: Decimal = lines\n" +
+            "    totalOptional: Decimal? = lines\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow.ts", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("total: Decimal.fromInt(src.lines),");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1889 — the optional-declared variant (Rust's #1378 shape). TypeScript's optional is a plain
+    /// <c>T | undefined</c> union, so only the NUMERIC dimension renders: the projected value still widens
+    /// to <c>Decimal</c>, with no lift on top.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_readmodel_projected_field_widens_without_a_lift()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      lines: Int\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow from Order {\n" +
+            "    id\n" +
+            "    total: Decimal = lines\n" +
+            "    totalOptional: Decimal? = lines\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow.ts", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("readonly totalOptional: Decimal | undefined;");
+        orderRow.ShouldContain("totalOptional: Decimal.fromInt(src.lines),");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1889's zero-change guard — a matching-type (<c>Decimal</c>) projected field and a
+    /// non-numeric (<c>String</c>) one must render byte-identically to before the reconciliation was
+    /// wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_readmodel_projected_fields_render_unchanged()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      price: Decimal\n" +
+            "      label: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow2 from Order {\n" +
+            "    id\n" +
+            "    exact: Decimal = price\n" +
+            "    tag: String = label\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow2.ts", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("exact: src.price,");
+        orderRow.ShouldContain("tag: src.label,");
+        orderRow.ShouldNotContain("Decimal.fromInt");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
 }
