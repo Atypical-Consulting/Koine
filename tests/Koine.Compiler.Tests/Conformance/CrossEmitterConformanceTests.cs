@@ -911,6 +911,128 @@ public class CrossEmitterConformanceTests
         TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
     }
 
+    /// <summary>
+    /// Issue #1887 — the SAME seven-target guard again, pointed at a command <c>transition</c>
+    /// (<c>total -&gt; amount + surcharge</c>): the call site where a value is assigned STRAIGHT INTO the
+    /// target member's declared slot, and arguably the most-used construct of the family. Every sibling
+    /// site already reconciled — factory ctor args (#1732), the <c>result</c> expression and the
+    /// emit/publish payload (#1866/#1875), coalesce (#1762/#1829), ternary (#1761), the member default
+    /// initializer (#1880) and the derived-member body (#1888) — while the transition did not, so an
+    /// <c>Int</c>-typed value on a <c>Decimal</c>-declared member emitted an unwidened integer into a
+    /// decimal slot on all five reconciled targets at once.
+    /// <para>Extending this one guard rather than adding an eighth parallel test file is deliberate: a
+    /// single test that walks every target at every call site is what stops the family reopening, and
+    /// this guard is itself how #1880 and #1888 were found.</para>
+    /// <para><b>Covers all seven code emitters</b>: C# needs no widening at all (<c>Amount + Surcharge</c>
+    /// is a <c>long</c> and C# has a built-in implicit <c>long</c>-to-<c>decimal</c> conversion — verified
+    /// by the Roslyn compile below, not assumed), Rust was fixed at #1511 (the reference implementation
+    /// for THIS call site), and TypeScript, Python, PHP, Java and Kotlin are fixed here.</para>
+    /// </summary>
+    [Fact]
+    public void Command_transition_int_decimal_reconciliation_agrees_across_reconciled_targets()
+    {
+        const string koi =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    command settle() {\n" +
+            "      total -> amount + surcharge\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        // C#: always runs and always asserts — genuinely decimal-transparent, no widening idiom to pin.
+        CompileResult cs = new KoineCompiler().Compile(koi, new CSharpEmitter());
+        cs.Success.ShouldBeTrue("C# emit failed:\n" + string.Join("\n", cs.Diagnostics.Select(d => d.ToString())));
+        var (asm, csErrors) = TestSupport.Compile(cs.Files.ToList());
+        (asm is not null).ShouldBeTrue("C# transition model failed to compile:\n" + string.Join("\n", csErrors));
+
+        // Rust: emit + cargo check, asserted when the toolchain is present (#1511's idiom).
+        CompileResult rs = new KoineCompiler().Compile(koi, new RustEmitter());
+        rs.Success.ShouldBeTrue("Rust emit failed:\n" + string.Join("\n", rs.Diagnostics.Select(d => d.ToString())));
+        rs.Files.Single(f => f.RelativePath.EndsWith("billing.rs", StringComparison.Ordinal)).Contents
+            .ShouldContain("self.total = Decimal::from(self.amount + self.surcharge);");
+        TestSupport.RustCheck rsCheck = TestSupport.CompileRust(rs.Files);
+        if (rsCheck.ToolchainAvailable)
+        {
+            rsCheck.Ok.ShouldBeTrue("Rust transition reconciliation should compile under cargo check:\n" + string.Join("\n", rsCheck.Errors));
+        }
+
+        // Java: emit + javac, asserted when the toolchain is present (#1887's widening idiom).
+        CompileResult java = new KoineCompiler().Compile(koi, new JavaEmitter());
+        java.Success.ShouldBeTrue("Java emit failed:\n" + string.Join("\n", java.Diagnostics.Select(d => d.ToString())));
+        java.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents
+            .ShouldContain("this.total = java.math.BigDecimal.valueOf(this.amount + this.surcharge);");
+        TestSupport.JavaCheck javaCheck = TestSupport.CompileJava(java.Files);
+        if (javaCheck.ToolchainAvailable)
+        {
+            javaCheck.Ok.ShouldBeTrue("Java transition reconciliation should compile under javac:\n" + string.Join("\n", javaCheck.Errors));
+        }
+
+        // Kotlin: emit + kotlinc, asserted when the toolchain is present (#1887's widening idiom).
+        CompileResult kotlin = new KoineCompiler().Compile(koi, new KotlinEmitter());
+        kotlin.Success.ShouldBeTrue("Kotlin emit failed:\n" + string.Join("\n", kotlin.Diagnostics.Select(d => d.ToString())));
+        kotlin.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents
+            .ShouldContain("this.total = java.math.BigDecimal.valueOf(this.amount + this.surcharge)");
+        TestSupport.KotlinCheck kotlinCheck = TestSupport.CompileKotlin(kotlin.Files);
+        if (kotlinCheck.ToolchainAvailable)
+        {
+            kotlinCheck.Ok.ShouldBeTrue("Kotlin transition reconciliation should compile under kotlinc:\n" + string.Join("\n", kotlinCheck.Errors));
+        }
+
+        // TypeScript: emit + tsc --strict, asserted when the toolchain is present (#1887's idiom).
+        CompileResult ts = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
+        ts.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", ts.Diagnostics.Select(d => d.ToString())));
+        ts.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents
+            .ShouldContain("this.total = Decimal.fromInt((this.amount + this.surcharge));");
+        TestSupport.TypeScriptCheck tsCheck = TestSupport.TypeCheckTypeScript(ts.Files);
+        if (tsCheck.ToolchainAvailable)
+        {
+            tsCheck.Ok.ShouldBeTrue("TypeScript transition reconciliation should type-check under tsc --strict:\n" + string.Join("\n", tsCheck.Errors));
+        }
+
+        // Python: emit + mypy --strict, asserted when the toolchain is present (#1887's idiom).
+        CompileResult py = new KoineCompiler().Compile(koi, new PythonEmitter());
+        py.Success.ShouldBeTrue("Python emit failed:\n" + string.Join("\n", py.Diagnostics.Select(d => d.ToString())));
+        py.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents
+            .ShouldContain("self.total = Decimal((self.amount + self.surcharge))");
+        TestSupport.PythonCheck pyCheck = TestSupport.TypeCheckPython(py.Files);
+        if (pyCheck.ToolchainAvailable)
+        {
+            pyCheck.Ok.ShouldBeTrue("Python transition reconciliation should type-check under mypy --strict:\n" + string.Join("\n", pyCheck.Errors));
+        }
+
+        // PHP: emit + php -l + phpstan --level max (#1887's idiom).
+        CompileResult php = new KoineCompiler().Compile(koi, new PhpEmitter());
+        php.Success.ShouldBeTrue("PHP emit failed:\n" + string.Join("\n", php.Diagnostics.Select(d => d.ToString())));
+        php.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents
+            .ShouldContain(@"$this->total = (new \Koine\Runtime\Decimal(($this->amount + $this->surcharge)));");
+        TestSupport.PhpCheck phpSyntax = TestSupport.SyntaxCheckPhp(php.Files);
+        TestSupport.PhpCheck phpCheck = TestSupport.TypeCheckPhp(php.Files);
+        if (phpSyntax.ToolchainAvailable)
+        {
+            phpSyntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", phpSyntax.Errors));
+        }
+        if (phpCheck.ToolchainAvailable)
+        {
+            phpCheck.Ok.ShouldBeTrue("PHP transition reconciliation should type-check under phpstan --level max:\n" + string.Join("\n", phpCheck.Errors));
+        }
+
+        // Same trailing gate as the sibling guards above: funnel every absent toolchain through
+        // RequireOrSkip AFTER the assertions so a missing one reports Skipped — or, under
+        // KOINE_REQUIRE_CONFORMANCE, Failed — instead of silently passing.
+        TestSupport.RequireOrSkip(rsCheck.ToolchainAvailable, NoRustToolchainNotice);
+        TestSupport.RequireOrSkip(javaCheck.ToolchainAvailable, NoJavaToolchainNotice);
+        TestSupport.RequireOrSkip(kotlinCheck.ToolchainAvailable, NoKotlinToolchainNotice);
+        TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
+        TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
+        TestSupport.RequireOrSkip(phpSyntax.ToolchainAvailable, NoPhpInterpreterNotice);
+        TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
+    }
+
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";
 
     // ---- C# side: Roslyn compile + reflective invoke --------------------------------------------
