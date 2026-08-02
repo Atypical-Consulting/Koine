@@ -293,8 +293,10 @@ internal static class CqrsValidator
     /// </summary>
     public static void ValidateApiRoutes(ContextNode ctx, List<Diagnostic> diagnostics)
     {
-        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a message.
-        var claimed = new Dictionary<(string Route, string Verb), string>();
+        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a
+        // message, plus whether IT was a factory too — the hint below needs both sides' shape, not just
+        // the reported claimant's.
+        var claimed = new Dictionary<(string Route, string Verb), (string Subject, bool ConventionalOnly)>();
 
         foreach (EntityDecl entity in ctx.AllEntities())
         {
@@ -333,19 +335,26 @@ internal static class CqrsValidator
             {
                 // A factory's route/verb has no annotation axis to move (#1747) — the generic "share a
                 // route only when their verbs differ" advice is not actionable for it, so the reported
-                // claimant gets a pointer to the only declaration that CAN move.
-                var hint = conventionalOnly
-                    ? "; a factory's route is conventional and cannot be annotated, so move the " +
-                      "@route/verb on the other declaration"
-                    : "";
+                // claimant gets a pointer to the only declaration that CAN move. When BOTH sides are
+                // factories, neither can move an annotation — the fix has to rename one declaration or
+                // its entity instead, so that gets its own hint rather than pointing at a side that is
+                // equally stuck.
+                var hint = (conventionalOnly, first.ConventionalOnly) switch
+                {
+                    (true, true) => "; two factories resolve to the same conventional route — rename one " +
+                                     "factory, or one entity, so their conventional paths differ",
+                    (true, false) => "; a factory's route is conventional and cannot be annotated, so move " +
+                                      "the @route/verb on the other declaration",
+                    _ => "",
+                };
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,
-                    $"{subject} maps '{verb} {route}', which {first} already maps; two declarations may " +
+                    $"{subject} maps '{verb} {route}', which {first.Subject} already maps; two declarations may " +
                     "share a route only when their verbs differ" + hint,
                     span));
                 return;
             }
 
-            claimed[(route, verb)] = subject;
+            claimed[(route, verb)] = (subject, conventionalOnly);
         }
     }
 

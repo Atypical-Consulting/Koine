@@ -1018,6 +1018,40 @@ public class R19ApiAnnotationsTests
             "already maps; two declarations may share a route only when their verbs differ");
     }
 
+    /// <summary>
+    /// Two factories can collide with EACH OTHER too — not just with a command/query. Type names are
+    /// unique case-<b>sensitively</b>, so <c>Order</c>/<c>ORDER</c> are distinct entities whose factories
+    /// (<c>open</c>/<c>OPEN</c>) both kebab to the same conventional route. Neither side has an
+    /// annotation axis to move, so the one-factory hint ("move the @route/verb on the other
+    /// declaration") would be actionable for neither — code-review catch on #1747: the hint must branch
+    /// on BOTH claimants' shape, not just the reported one's.
+    /// </summary>
+    [Fact]
+    public void Two_factories_colliding_on_their_conventional_route_get_a_two_factory_hint()
+    {
+        const string source = """
+            context Sales {
+              entity Order identified by OrderId {
+                create open {
+                }
+              }
+
+              entity ORDER identified by OrderTwoId {
+                create OPEN {
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldContain(
+            "two factories resolve to the same conventional route — rename one factory, or one entity, " +
+            "so their conventional paths differ");
+        collision.Message.ShouldNotContain("cannot be annotated, so move the @route/verb on the other declaration");
+    }
+
     /// <summary>The conventional route the emit side derives for <c>entity.command</c>.</summary>
     private static string ConventionalCommandRoute(string entity, string command) =>
         RouteDerivation.ForCommand(
