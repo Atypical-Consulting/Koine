@@ -1424,6 +1424,128 @@ public class JavaConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1880 — a member's OWN default initializer (<c>total: Decimal = 5</c>) never numerically
+    /// reconciled against its declared type, the seventh call site of the family #1519/#1732 (factory
+    /// ctor args), #1548 (coalesce) and #1866 (result/payload) closed one by one. Java renders it in the
+    /// entity constructor body (<c>this.total = 5L;</c>) and in a value object's defaulting convenience
+    /// constructor (<c>this(7L);</c>) — both a hard <c>javac</c> "incompatible types: long cannot be
+    /// converted to BigDecimal". Routed through the same <c>ReconcileAgainstDeclared</c> helper #1866
+    /// added. Rust closed the same site at #1319/#1324/#1325.
+    /// </summary>
+    [Fact]
+    public void Member_default_initializer_widens_an_int_to_bigdecimal_against_its_declared_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal = 5\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal = 7\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("this.total = java.math.BigDecimal.valueOf(5L);");
+        invoice.ShouldNotContain("this.total = 5L;");
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("this(java.math.BigDecimal.valueOf(7L));");
+        money.ShouldNotContain("this(7L);");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1880 — the optional-declared half. Java's optional is a real <c>java.util.Optional&lt;T&gt;</c>
+    /// field, so the shared decision's <c>NeedsSomeWrap</c> dimension applies here too and composes with
+    /// the widen exactly as <c>BranchReconciliation</c> documents (widen inside, lift outside). That also
+    /// closes the non-numeric sibling of the same defect at this one call site — a <c>String? = "hi"</c>
+    /// default previously emitted a bare <c>String</c> into an <c>Optional&lt;String&gt;</c> field.
+    /// Mirrors #1325's optional-constant-default fix for Rust.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_member_default_initializer_widens_and_lifts_into_optional()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal? = 5\n" +
+            "    note: String? = \"hi\"\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  value Money {\n" +
+            "    amount: Decimal? = 5\n" +
+            "    tag: String = \"t\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("this.total = java.util.Optional.of(java.math.BigDecimal.valueOf(5L));");
+        invoice.ShouldContain("this.note = java.util.Optional.of(\"hi\");");
+
+        // The value object's defaulting convenience constructor forwards into the canonical record
+        // constructor, whose optional components are declared `Optional<T>` — so it needs the same
+        // widen-inside/lift-outside composition, and a non-optional component must NOT be lifted.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.java", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("this(java.util.Optional.of(java.math.BigDecimal.valueOf(5L)), \"t\");");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1880's zero-change guard — a matching-type (<c>Decimal</c>) default and a non-numeric
+    /// (<c>String</c>/<c>Int</c>) default on a NON-optional member must render byte-identically to
+    /// before the reconciliation was wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_member_defaults_render_unchanged()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    exact: Decimal = 2.5\n" +
+            "    label: String = \"x\"\n" +
+            "    count: Int = 3\n" +
+            "\n" +
+            "    create make() {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("this.exact = new java.math.BigDecimal(\"2.5\");");
+        invoice.ShouldContain("this.label = \"x\";");
+        invoice.ShouldContain("this.count = 3L;");
+        invoice.ShouldNotContain("java.math.BigDecimal.valueOf");
+        invoice.ShouldNotContain("java.util.Optional.of");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Issue #1866: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_bigdecimal_against_a_decimal_return_type()

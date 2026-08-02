@@ -407,7 +407,13 @@ public sealed partial class PhpEmitter
             else if (m.Initializer is not null
                 && !MemberAnalysis.IsDerived(m, ctorMembers.Select(f => f.Name).ToHashSet()))
             {
-                args.Add(translator.Translate(m.Initializer, PhpExpressionTranslator.NameMode.Parameter, m.Type.Name));
+                // Reconciled against the member's declared type exactly like the explicit-init branch
+                // above (#1880). The constructor PARAMETER's own default is already correct — the two
+                // ctor-writing sites pre-fold an Int-kind literal on a Decimal member into a Decimal
+                // literal (FoldDecimalConstantDefault, #1030) — but this factory fallback never did, so
+                // `new self($id, 5)` fed a bare `int` into a `\Koine\Runtime\Decimal` parameter: a real
+                // `phpstan analyse --level max` argument.type error.
+                args.Add(translator.TranslateReconciled(m.Initializer, PhpExpressionTranslator.NameMode.Parameter, m.Type.Name, m.Type));
             }
             else if (m.Type.IsOptional)
             {
