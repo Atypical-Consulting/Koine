@@ -2619,6 +2619,114 @@ public class PhpConformanceTests
         AssertPhpIsWellTyped(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1880 — a member's OWN default initializer (<c>total: Decimal = 5</c>) never numerically
+    /// reconciled against its declared type, the seventh call site of the family #1732 (factory ctor
+    /// args), #1762 (coalesce), #1761 (ternary), #1875 (result/payload) closed one by one.
+    /// <para>PHP is the partially-covered target: the constructor PARAMETER default was already correct
+    /// — <c>FoldDecimalConstantDefault</c> (#1030) re-boxes an <c>Int</c>-kind literal on a
+    /// <c>Decimal</c> member as a <c>Decimal</c> literal before it renders — but the factory's ctor-arg
+    /// fallback (<c>new self($id, 5)</c>) never went through any reconciliation and emitted a bare
+    /// <c>int</c> into a <c>Decimal</c> parameter: a real <c>phpstan analyse --level max</c>
+    /// <c>argument.type</c> error. This test pins BOTH halves so the already-correct one can't
+    /// regress.</para>
+    /// </summary>
+    [Fact]
+    public void Member_default_initializer_widens_an_int_to_decimal_against_its_declared_type()
+    {
+        const string src =
+            """
+            context Billing {
+              entity Invoice identified by InvoiceId {
+                total: Decimal = 5
+
+                create make() {
+                }
+              }
+
+              value Money {
+                amount: Decimal = 7
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents;
+        // (a) the constructor parameter's own default — already correct via FoldDecimalConstantDefault.
+        invoice.ShouldContain(@"\Koine\Runtime\Decimal $total = new \Koine\Runtime\Decimal('5')");
+        // (b) the factory's ctor-arg fallback — the #1880 gap.
+        invoice.ShouldContain(@"new self($id, (new \Koine\Runtime\Decimal('5')))");
+        invoice.ShouldNotContain("new self($id, 5)");
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain(@"\Koine\Runtime\Decimal $amount = new \Koine\Runtime\Decimal('7')");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1880 — the optional-declared half of the default-initializer fix: an <c>Int</c> default on
+    /// a <c>Decimal?</c> member still needs the widen (PHP's optional is a plain <c>?T</c> nullable, so
+    /// no extra lift), mirroring #1325's optional-constant-default fix for Rust.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_member_default_initializer_widens_an_int_to_decimal()
+    {
+        const string src =
+            """
+            context Billing {
+              entity Invoice identified by InvoiceId {
+                total: Decimal? = 5
+
+                create make() {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain(@"?\Koine\Runtime\Decimal $total = new \Koine\Runtime\Decimal('5')");
+        invoice.ShouldContain(@"new self($id, (new \Koine\Runtime\Decimal('5')))");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1880's zero-change guard — a matching-type (<c>Decimal</c>) default and a non-numeric
+    /// (<c>String</c>) default must render byte-identically to before the reconciliation was wired in.
+    /// Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_member_defaults_render_unchanged()
+    {
+        const string src =
+            """
+            context Billing {
+              entity Invoice identified by InvoiceId {
+                exact: Decimal = 2.5
+                label: String = "x"
+                count: Int = 3
+
+                create make() {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain(@"\Koine\Runtime\Decimal $exact = new \Koine\Runtime\Decimal('2.5')");
+        invoice.ShouldContain("string $label = 'x'");
+        invoice.ShouldContain("int $count = 3");
+        invoice.ShouldContain(@"new self($id, new \Koine\Runtime\Decimal('2.5'), 'x', 3)");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()

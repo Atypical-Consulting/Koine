@@ -2148,6 +2148,110 @@ public class PythonConformanceTests
         AssertStrictlyTypeChecks(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1880 — a member's OWN default initializer (<c>total: Decimal = 5</c>) never numerically
+    /// reconciled against its declared type, the seventh call site of the family #1732 (factory ctor
+    /// args), #1762/#1829 (coalesce), #1761 (ternary), #1866/#1875 (result/payload) closed one by one.
+    /// It renders twice — as the dataclass field's own default AND as the factory's ctor-arg fallback —
+    /// and both emitted a bare <c>int</c> into a <c>Decimal</c> slot: a real <c>mypy --strict</c> error.
+    /// Rust closed the same site at #1319/#1324/#1325.
+    /// </summary>
+    [Fact]
+    public void Member_default_initializer_widens_an_int_to_decimal_against_its_declared_type()
+    {
+        const string src =
+            """
+            context Billing {
+              entity Invoice identified by InvoiceId {
+                total: Decimal = 5
+
+                create make() {
+                }
+              }
+
+              value Money {
+                amount: Decimal = 7
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
+        // (a) the dataclass field's own default value.
+        invoice.ShouldContain("total: Decimal = Decimal(5)");
+        // (b) the factory's ctor-arg fallback.
+        invoice.ShouldContain("total=Decimal(5)");
+        invoice.ShouldNotContain("total: Decimal = 5\n");
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("money.py", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("amount: Decimal = Decimal(7)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1880 — the optional-declared half of the default-initializer fix: an <c>Int</c> default on
+    /// a <c>Decimal?</c> member still needs the widen (Python's optional is a plain union, so no extra
+    /// lift), mirroring #1325's optional-constant-default fix for Rust.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_member_default_initializer_widens_an_int_to_decimal()
+    {
+        const string src =
+            """
+            context Billing {
+              entity Invoice identified by InvoiceId {
+                total: Decimal? = 5
+
+                create make() {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("total: Decimal | None = Decimal(5)");
+        invoice.ShouldContain("total=Decimal(5)");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1880's zero-change guard — a matching-type (<c>Decimal</c>) default and a non-numeric
+    /// (<c>String</c>) default must render byte-identically to before the reconciliation was wired in.
+    /// Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_member_defaults_render_unchanged()
+    {
+        const string src =
+            """
+            context Billing {
+              entity Invoice identified by InvoiceId {
+                exact: Decimal = 2.5
+                label: String = "x"
+                count: Int = 3
+
+                create make() {
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("exact: Decimal = Decimal(\"2.5\")");
+        invoice.ShouldContain("label: str = \"x\"");
+        invoice.ShouldContain("count: int = 3");
+        invoice.ShouldContain("exact=Decimal(\"2.5\"), label=\"x\", count=3");
+
+        AssertStrictlyTypeChecks(result.Files);
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()
