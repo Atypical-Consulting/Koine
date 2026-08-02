@@ -198,8 +198,8 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Services/KoineLanguageService.cs", 407, "TryGetDecl", "BinderReceiverMembers: ctx.EnclosingContextName available; the method's own doc comment claims context-aware resolution this call doesn't perform (#1870)"),
         ("src/Koine.Compiler/Services/KoineLanguageService.cs", 599, "TryGetDecl", "EnumMemberCandidates: ctx.EnclosingContextName available, unused (#1870)"),
         ("src/Koine.Compiler/Services/KoineLanguageService.cs", 1597, "Classify", "PrepareCallHierarchy: ctx.EnclosingContextName available, unused (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 1782, "TryGetDecl", "FindEvent: context available at its sole caller (:1597), not threaded into this helper's own signature (#1870)"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 2097, "Classify", "ItemFor: parameter context available, used two lines later for the result's Context property, unused for the Classify call itself (#1870)"),
+        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 1787, "TryGetDecl", "FindEvent: context available at its sole caller (:1597), not threaded into this helper's own signature (#1870)"),
+        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 2102, "Classify", "ItemFor: parameter context available, used two lines later for the result's Context property, unused for the Classify call itself (#1870)"),
     ];
 
     [Fact]
