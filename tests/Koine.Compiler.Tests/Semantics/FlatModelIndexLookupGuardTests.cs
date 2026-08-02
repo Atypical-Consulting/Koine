@@ -168,13 +168,39 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 2284, "Classify", "EnumExpected: same shared static-helper shape"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable's mutation-endpoint chain carries no context param; only the Enum branch is context-sensitive, and Primitive/IdValueObject are universal"),
 
-        // --- Built-in-only query: ModelIndex.Classify resolves ClassifyBuiltIn (Int/String/Decimal/
-        //     Bool/Instant/List/Set/Map/Range) BEFORE ever consulting context or the flat _byName
-        //     dict, and those names are lexically reserved by the grammar — a user type can never
-        //     classify as one, so context-blindness is provably inert for these three queries only. ---
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1042, "Classify", "CheckMember queries only Primitive/Range, both builtin-only"),
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1063, "Classify", "IsCollection queries only List/Set/Map, builtin-only"),
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1067, "Classify", "IsIterable queries only List/Set, builtin-only"),
+        // --- Built-in-only query: inert by RANGE DISJOINTNESS, not by name reservation (verified for
+        //     #1870, correcting an earlier note here that claimed the built-in names are "lexically
+        //     reserved by the grammar" — they are NOT).
+        //
+        //     What is actually true: `ClassifyBuiltIn` (ModelIndex.cs:1622) is the ONLY branch of
+        //     `Classify(string)` that can ever yield Primitive/List/Set/Map/Range, and it is a pure
+        //     function of the name string, consulted BEFORE `_byName`. The only other branches return
+        //     `ClassifyDecl(decl)` — a closed switch over TypeDecl whose range is
+        //     {Value, Entity, Aggregate, Enum, Event, IntegrationEvent, ReadModel, Query, Unknown}
+        //     (ModelIndex.cs:1689) — or IdValueObject/Unknown. Those two ranges are DISJOINT from
+        //     {Primitive, Range, List, Set, Map}. So for these three queries specifically — each of
+        //     which only ever asks "is the kind one of the built-in kinds?" and only ever consumes the
+        //     answer as a local bool (the TypeKind is never stored, returned, or compared against a
+        //     user-declarable kind) — the boolean is a pure function of the type NAME. `_byName`'s
+        //     last-declaration-wins contents cannot change it, so .koi source order cannot either.
+        //
+        //     The reservation premise itself is refuted, which is exactly why disjointness is the load-
+        //     bearing argument: the lexer has no keyword token for any built-in type name (they all match
+        //     `Identifier`, KoineLexer.g4:138) and `valueDecl : … VALUE Identifier …` (KoineParser.g4:139)
+        //     happily parses `value List`/`value Int`. Only List/Set/Map/Range are reserved at all, and
+        //     by a VALIDATOR (KOI0908 ReservedTypeName, SemanticValidator.cs:312-328) — a strictly weaker
+        //     guarantee that holds only for models that pass validation. Int/String/Decimal/Bool/Instant
+        //     are not reserved anywhere: a probe declaring `value Int { x: String }` compiles CLEAN.
+        //
+        //     Do NOT "fix" these by threading `_resolver.Context` in: `Classify(context, name)` tries the
+        //     context-local decl FIRST, so on a model declaring `value List` a context-aware call would
+        //     classify List as that context's Value and SILENCE these reports — the #1715 regression
+        //     SemanticValidator.cs:1479-1487 documents and R9ValueObjectTests' two
+        //     `…_still_reports_…_alongside_KOI0908` tests pin. Built-in precedence is the intended
+        //     semantics here, and the flat overload is what implements it. ---
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1042, "Classify", "CheckMember: result only tested against Primitive/Range, kinds no ClassifyDecl branch can return"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1063, "Classify", "IsCollection: result only tested against List/Set/Map, kinds no ClassifyDecl branch can return"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1067, "Classify", "IsIterable: result only tested against List/Set, kinds no ClassifyDecl branch can return"),
 
         // --- Provably inert despite an available context: the kind is consumed ONLY for questions whose
         //     answer cannot differ per context. Verified against the fixtures in
