@@ -679,6 +679,15 @@ internal sealed class ScenarioExecutor
                          + "handler seam), so no downstream step was run for it.");
             }
 
+            // #1854: a policy in another context can declare its own same-named event (R13.2) — that is
+            // a coincidence, not a connection, so it is reported and never dispatched.
+            foreach (FanOutDroppedPolicy droppedPolicy in resolution.Dropped)
+            {
+                NoteOnce($"Policy '{droppedPolicy.PolicyName}' in '{droppedPolicy.Context}' also reacts to an "
+                         + $"event named '{eventName}', but that context declares its own '{eventName}' — a "
+                         + "different event that merely shares the name — so it was not dispatched.");
+            }
+
             foreach (FanOutTarget target in resolution.Executable)
             {
                 if (depth >= MaxFanOutDepth)
