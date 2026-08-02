@@ -688,7 +688,9 @@ public sealed partial class PythonEmitter
         }
 
         // Computed (derived) event members as read-only @property getters (rare, but supported for
-        // parity with the value-object emitter).
+        // parity with the value-object emitter). Reconciled against the member's OWN declared type
+        // (#1888) — the third rendering of this call site, the one only Python has (the other targets do
+        // not emit a derived getter on an event at all).
         foreach (Member m in derived)
         {
             sb.Append('\n');
@@ -697,7 +699,7 @@ public sealed partial class PythonEmitter
               .Append("(self) -> ").Append(typeMapper.Map(m.Type, translator.Context)).Append(":\n");
             WriteDoc(sb, m.Doc, Indent + Indent);
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!, EnumExpected(m, emit.Index, translator.Context))).Append('\n');
+              .Append(translator.TranslateReconciled(m.Initializer!, PythonExpressionTranslator.NameMode.Property, EnumExpected(m, emit.Index, translator.Context), m.Type)).Append('\n');
         }
 
         return new EmittedFile(

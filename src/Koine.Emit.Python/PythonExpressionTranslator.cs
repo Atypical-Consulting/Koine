@@ -128,6 +128,14 @@ internal sealed class PythonExpressionTranslator
     /// <c>field -&gt; expr</c> initialization emits a <c>mypy --strict</c>-clean value instead of a bare
     /// mismatched literal (mirrors Java's #1519 <c>ReconcileFactoryCtorArg</c>/Rust's #1438/#1543 and
     /// Kotlin's/TypeScript's #1732 counterparts).
+    /// <para>It has since grown past that first caller to serve every site that reconciles a value
+    /// against a declared type — including BOTH halves of a member's own initializer: the STORED-DEFAULT
+    /// half at the dataclass field and the factory's ctor-arg fallback (#1880), and the DERIVED half at
+    /// the value object's, the entity's AND the event's <c>@property</c> getters (#1888, the site Rust
+    /// closed at #961/#1329 — the event getter is a rendering only this emitter has). Those last two are
+    /// the two arms of one <c>MemberAnalysis.IsDerived</c> branch, so they route through this one method
+    /// deliberately — reconciling them separately is exactly how they drifted apart between #1880 and
+    /// #1888.</para>
     /// </summary>
     internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
     {
