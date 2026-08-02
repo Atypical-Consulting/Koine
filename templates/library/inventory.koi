@@ -5,7 +5,6 @@
 /// its own shelf location, and its own physical lifecycle (available → on loan → returned,
 /// or lost / withdrawn).
 context Inventory version 1 {
-
   /// The physical condition of a copy. A plain enum used for weeding decisions.
   enum Condition { New, Good, Worn, Damaged }
 
@@ -19,17 +18,17 @@ context Inventory version 1 {
   /// first-class value object validated by shape (R1.2).
   value Barcode {
     code: String
-    invariant code matches /^[0-9]{8,14}$/   "a barcode must be 8-14 digits"
+    invariant code matches /^[0-9]{8,14}$/ "a barcode must be 8-14 digits"
   }
 
   /// Where the copy lives on the shelves. A small value object so a location is structured.
   value ShelfLocation {
-    section: String
-    shelf:   String
+    section:  String
+    shelf:    String
     // Derived (computed, get-only): a one-line call sign for the spine label.
     callSign: String = section + "-" + shelf
-    invariant section.trim.length > 0   "a copy needs a section"
-    invariant shelf.trim.length > 0     "a copy needs a shelf"
+    invariant section.trim.length > 0 "a copy needs a section"
+    invariant shelf.trim.length > 0 "a copy needs a shelf"
   }
 
   /// The BookCopy aggregate — a single physical item. It references the Catalog `Book` it
@@ -37,7 +36,6 @@ context Inventory version 1 {
   /// here. Being an aggregate root it gains an `IBookCopyRepository` and joins the context
   /// UoW; the repository block adds intention-revealing finders (R11.3).
   aggregate Holdings root BookCopy {
-
     repository {
       operations: getById, add, update
       // The finder behind shelf availability: which copies of a title can be lent.
@@ -59,25 +57,25 @@ context Inventory version 1 {
 
     entity BookCopy identified by BookCopyId {
       // The title this is a copy of — a reference into the Catalog context by id.
-      book:     BookId
-      barcode:  Barcode
-      location: ShelfLocation
+      book:      BookId
+      barcode:   Barcode
+      location:  ShelfLocation
       condition: Condition = Good
-      status:   CopyStatus = Available
+      status:    CopyStatus = Available
 
       // Derived (computed, get-only) read helpers (R1.1).
-      isAvailable: Bool   = status == Available
-      isOnLoan:    Bool   = status == OnLoan
+      isAvailable:   Bool = status == Available
+      isOnLoan:      Bool = status == OnLoan
       inCirculation: Bool = status != Lost && status != Withdrawn
-      callSign:    String = location.callSign
+      callSign:      String = location.callSign
 
-      invariant barcode.code.trim.length > 0   "a copy needs a barcode"
+      invariant barcode.code.trim.length > 0 "a copy needs a barcode"
 
       // The copy's physical lifecycle (R7): on the shelf, out on loan and back, or out of
       // circulation (lost / withdrawn are terminal).
       states status {
         Available -> OnLoan, Lost, Withdrawn
-        OnLoan    -> Available, Lost
+        OnLoan -> Available, Lost
         Lost
         Withdrawn
       }
@@ -86,26 +84,26 @@ context Inventory version 1 {
       /// "cannot be loaned twice" guard is the `requires status == Available` here, which
       /// the Loans context relies on.
       command checkOut {
-        requires status == Available   "only an available copy can be loaned"
+        requires status == Available "only an available copy can be loaned"
         status -> OnLoan
       }
 
       /// Shelve a returned copy back to Available (R5).
       command shelve {
-        requires status == OnLoan   "only a copy on loan can be returned to the shelf"
+        requires status == OnLoan "only a copy on loan can be returned to the shelf"
         status -> Available
       }
 
       /// Mark the copy as lost (R5/R6).
       command markLost {
-        requires status != Withdrawn   "a withdrawn copy cannot be marked lost"
+        requires status != Withdrawn "a withdrawn copy cannot be marked lost"
         status -> Lost
         emit CopyRetired(copy: id, reason: "lost")
       }
 
       /// Withdraw a copy from circulation — e.g. when it is too damaged to lend (R5/R6).
       command withdraw {
-        requires status == Available   "only an available copy can be withdrawn"
+        requires status == Available "only an available copy can be withdrawn"
         status -> Withdrawn
         emit CopyRetired(copy: id, reason: "withdrawn")
       }

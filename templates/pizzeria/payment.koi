@@ -10,7 +10,6 @@
 /// `Payment` namespace; an entity called `Payment` would collide with it, exactly
 /// as the demo avoided by pairing a `Payments` context with a `Payment` entity.
 context Payment version 1 {
-
   // React to placed orders (authorized by `Ordering -> Payment : open-host`
   // in context-map.koi). Emits an IHandleOrderPlaced seam the biller implements to
   // authorize a charge for the new order.
@@ -26,7 +25,7 @@ context Payment version 1 {
   value Money {
     amount:   Decimal
     currency: String
-    invariant amount >= 0   "an amount cannot be negative"
+    invariant amount >= 0 "an amount cannot be negative"
   }
 
   // The destination type the anti-corruption layer translates the gateway's
@@ -35,7 +34,7 @@ context Payment version 1 {
   value PaymentReceipt {
     reference: String
     amount:    Decimal
-    invariant amount >= 0   "a receipt amount cannot be negative"
+    invariant amount >= 0 "a receipt amount cannot be negative"
   }
 
   /// Recorded when a charge is captured. Triggers the ledger-posting policy.
@@ -46,7 +45,6 @@ context Payment version 1 {
 
   /// The charge aggregate — one charge against an order.
   aggregate Billing root Charge {
-
     repository {
       operations: getById, add, update
       find byOrder(order: OrderId): List<Charge>
@@ -59,31 +57,31 @@ context Payment version 1 {
     }
 
     entity Charge identified by ChargeId {
-      order:   OrderId
-      amount:  Money
-      method:  PaymentMethod
-      status:  ChargeStatus = Authorized
+      order:  OrderId
+      amount: Money
+      method: PaymentMethod
+      status: ChargeStatus = Authorized
 
       // Derived read helper.
       isSettled: Bool = status == Captured
 
       states status {
         Authorized -> Captured, Failed
-        Captured   -> Refunded
+        Captured -> Refunded
         Refunded
         Failed
       }
 
       /// Capture an authorized charge. The ledger-posting policy reacts.
       command capture {
-        requires status == Authorized   "only an authorized charge can be captured"
+        requires status == Authorized "only an authorized charge can be captured"
         status -> Captured
         emit ChargeCaptured(charge: id, capturedAmount: amount.amount)
       }
 
       /// Refund a captured charge.
       command refund {
-        requires status == Captured   "only a captured charge can be refunded"
+        requires status == Captured "only a captured charge can be refunded"
         status -> Refunded
       }
 
@@ -124,7 +122,6 @@ context Payment version 1 {
 /// control. Payment never references this directly; it goes through the generated
 /// anti-corruption translator interface (see the acl block in context-map.koi).
 context Gateway version 1 {
-
   /// The raw result the third-party gateway returns. Payment shields itself from
   /// this shape with its anti-corruption layer.
   value GatewayResult {

@@ -1,25 +1,23 @@
 context Billing {
-
   value Money {
-    amount: Decimal
+    amount:   Decimal
     currency: Currency
-    invariant amount >= 0        "a monetary amount cannot be negative"
+    invariant amount >= 0 "a monetary amount cannot be negative"
   }
 
   enum Currency { EUR, USD, GBP }
 
   value Email {
     raw: String
-    invariant raw matches /^[^@]+@[^@]+$/   "invalid email address"
+    invariant raw matches /^[^@]+@[^@]+$/ "invalid email address"
   }
 
   entity Customer identified by CustomerId {
-    name: String
+    name:  String
     email: Email
   }
 
   aggregate Sales root Order {
-
     enum OrderStatus { Draft, Placed, Shipped, Cancelled }
 
     value OrderLine {

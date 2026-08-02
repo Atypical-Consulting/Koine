@@ -3,7 +3,6 @@
 /// explicit state machine (R7), guarded by invariants (R4), advanced by commands
 /// (R5) that record domain events (R6), and opened by a factory (R8).
 context TicketManagement version 1 {
-
   /// How urgent a ticket is. `Urgent` carries the strongest service-level promise
   /// and — per the invariant below — must be justified when first raised.
   enum Priority { Low, Normal, High, Urgent }
@@ -19,7 +18,7 @@ context TicketManagement version 1 {
   /// just a bare string floating through the model.
   value AgentId {
     value: String
-    invariant value.trim.length > 0   "an agent id cannot be blank"
+    invariant value.trim.length > 0 "an agent id cannot be blank"
   }
 
   /// What was done to put the ticket to rest. A resolution is required before a
@@ -27,7 +26,7 @@ context TicketManagement version 1 {
   value Resolution {
     summary:    String
     resolvedBy: AgentId
-    invariant summary.trim.length >= 10   "a resolution must explain what was done"
+    invariant summary.trim.length >= 10 "a resolution must explain what was done"
   }
 
   /// Announced to the rest of the system when a ticket is raised (R14.3). An
@@ -52,7 +51,6 @@ context TicketManagement version 1 {
   /// and joins the context's generated `IUnitOfWork` (R11/R12); the `repository`
   /// block tunes the mutating set and adds intention-revealing finders (R11.3).
   aggregate Helpdesk root Ticket {
-
     repository {
       operations: getById, add, update
       find byAssignee(assignee: AgentId): List<Ticket>
@@ -93,10 +91,10 @@ context TicketManagement version 1 {
 
     /// The ticket a requester opens — the consistency boundary of this aggregate.
     entity Ticket identified by TicketId {
-      subject:       String
-      category:      Category
-      priority:      Priority    = Normal
-      status:        TicketStatus = Open
+      subject:  String
+      category: Category
+      priority: Priority = Normal
+      status:   TicketStatus = Open
 
       // Optional fields (R2.1): set only once the ticket reaches the relevant
       // state. Presence checks drive the lifecycle invariants below.
@@ -105,60 +103,60 @@ context TicketManagement version 1 {
       resolution:    Resolution?
 
       // Derived (computed, get-only) read helpers (R1.1 / R2.1).
-      isUrgent:      Bool = priority == Urgent
-      isAssigned:    Bool = assignee.isPresent
-      isClosed:      Bool = status == Closed
+      isUrgent:   Bool = priority == Urgent
+      isAssigned: Bool = assignee.isPresent
+      isClosed:   Bool = status == Closed
 
       // --- Lifecycle invariants (R4) ---------------------------------------
       // A subject is always required.
-      invariant subject.trim.length > 0   "a ticket needs a subject"
+      invariant subject.trim.length > 0 "a ticket needs a subject"
       // An urgent ticket must justify its urgency when it is raised.
       invariant justification.isPresent when priority == Urgent
-        "an urgent ticket requires a justification"
+      "an urgent ticket requires a justification"
       // A resolved ticket must carry a resolution.
       invariant resolution.isPresent when status == Resolved
-        "a resolved ticket must have a resolution"
+      "a resolved ticket must have a resolution"
       // A closed ticket cannot be reassigned: once closed it has no assignee.
       invariant !assignee.isPresent when status == Closed
-        "a closed ticket cannot be reassigned"
+      "a closed ticket cannot be reassigned"
 
       // The ticket's legal lifecycle (R7): only these transitions are permitted.
       states status {
-        Open      -> Assigned, Escalated, Resolved
-        Assigned  -> Escalated, Resolved
+        Open -> Assigned, Escalated, Resolved
+        Assigned -> Escalated, Resolved
         Escalated -> Assigned, Resolved
-        Resolved  -> Closed, Reopened
-        Closed    -> Reopened
-        Reopened  -> Assigned, Escalated, Resolved
+        Resolved -> Closed, Reopened
+        Closed -> Reopened
+        Reopened -> Assigned, Escalated, Resolved
       }
 
       /// Assign (or reassign) the ticket to an agent and record it (R5/R6).
       command assign(agent: AgentId) {
-        requires status != Closed   "a closed ticket cannot be reassigned"
+        requires status != Closed "a closed ticket cannot be reassigned"
         assignee -> agent
-        status   -> Assigned
+        status -> Assigned
         emit TicketAssigned(ticketId: id, assignee: agent)
       }
 
       /// Escalate the ticket, tightening its SLA. The justification explains why.
       command escalate(reason: String) {
-        requires status != Closed   "a closed ticket cannot be escalated"
+        requires status != Closed "a closed ticket cannot be escalated"
         justification -> reason
-        status        -> Escalated
+        status -> Escalated
         emit TicketEscalated(ticketId: id, justification: reason)
       }
 
       /// Resolve the ticket, attaching the resolution that the invariant demands.
       command resolve(outcome: Resolution) {
-        requires status != Closed   "a closed ticket cannot be resolved"
+        requires status != Closed "a closed ticket cannot be resolved"
         resolution -> outcome
-        status     -> Resolved
+        status -> Resolved
         emit TicketResolved(ticketId: id, resolvedBy: outcome.resolvedBy)
       }
 
       /// Close a resolved ticket, dropping the assignee so it cannot be reassigned.
       command close {
-        requires status == Resolved   "only a resolved ticket can be closed"
+        requires status == Resolved "only a resolved ticket can be closed"
         status -> Closed
         emit TicketClosed(ticketId: id)
       }
@@ -169,7 +167,7 @@ context TicketManagement version 1 {
       /// an `Urgent` ticket while satisfying the "urgent requires a justification"
       /// invariant; a non-urgent ticket may leave it null.
       create open(subject: String, category: Category, priority: Priority, justification: String?) {
-        requires subject.trim.length > 0   "a ticket needs a subject"
+        requires subject.trim.length > 0 "a ticket needs a subject"
         justification -> justification
         emit TicketRaised(ticketId: id, priority: priority)
       }
