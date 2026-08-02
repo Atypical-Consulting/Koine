@@ -557,10 +557,10 @@ public class CrossEmitterConformanceTests
         ts.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", ts.Diagnostics.Select(d => d.ToString())));
         var tsInvoice = ts.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
         tsInvoice.ShouldContain("Decimal.fromInt(this.tax)");
-        TestSupport.TypeScriptCheck tsCheck2 = TestSupport.TypeCheckTypeScript(ts.Files);
-        if (tsCheck2.ToolchainAvailable)
+        TestSupport.TypeScriptCheck tsCheck = TestSupport.TypeCheckTypeScript(ts.Files);
+        if (tsCheck.ToolchainAvailable)
         {
-            tsCheck2.Ok.ShouldBeTrue("TypeScript result/payload reconciliation should type-check under tsc --strict:\n" + string.Join("\n", tsCheck2.Errors));
+            tsCheck.Ok.ShouldBeTrue("TypeScript result/payload reconciliation should type-check under tsc --strict:\n" + string.Join("\n", tsCheck.Errors));
         }
 
         // Python: emit + mypy --strict, asserted when the toolchain is present (this issue's widening idiom).
@@ -568,10 +568,10 @@ public class CrossEmitterConformanceTests
         py.Success.ShouldBeTrue("Python emit failed:\n" + string.Join("\n", py.Diagnostics.Select(d => d.ToString())));
         var pyInvoice = py.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
         pyInvoice.ShouldContain("Decimal(self.tax)");
-        TestSupport.PythonCheck pyCheck2 = TestSupport.TypeCheckPython(py.Files);
-        if (pyCheck2.ToolchainAvailable)
+        TestSupport.PythonCheck pyCheck = TestSupport.TypeCheckPython(py.Files);
+        if (pyCheck.ToolchainAvailable)
         {
-            pyCheck2.Ok.ShouldBeTrue("Python result/payload reconciliation should type-check under mypy --strict:\n" + string.Join("\n", pyCheck2.Errors));
+            pyCheck.Ok.ShouldBeTrue("Python result/payload reconciliation should type-check under mypy --strict:\n" + string.Join("\n", pyCheck.Errors));
         }
 
         // PHP: emit + phpstan --level max, asserted when the toolchain is present (this issue's widening idiom).
@@ -595,8 +595,8 @@ public class CrossEmitterConformanceTests
         // toolchain reports Skipped — or, under KOINE_REQUIRE_CONFORMANCE, Failed — instead of
         // silently passing.
         TestSupport.RequireOrSkip(rsCheck.ToolchainAvailable, NoRustToolchainNotice);
-        TestSupport.RequireOrSkip(tsCheck2.ToolchainAvailable, NoToolchainNotice);
-        TestSupport.RequireOrSkip(pyCheck2.ToolchainAvailable, NoPythonToolchainNotice);
+        TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
+        TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
         TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
     }
 
