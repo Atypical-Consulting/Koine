@@ -105,17 +105,34 @@ public static class RouteDerivation
 
     /// <summary>
     /// A factory → <c>POST /{entity}/{factory}</c>, its parameters the request body and the created
-    /// aggregate the response. Factories carry no R19 API annotations (#1219), so verb and role are the
-    /// convention with no override axis — this is the seam where those overrides would land.
+    /// aggregate the response — unless the factory carries R19 API annotations (#1846), which override
+    /// the same three independent axes <see cref="ForCommand"/> honors.
+    ///
+    /// <para>Token resolution passes <c>entity: null</c> — deliberately, and unlike
+    /// <see cref="ForCommand"/>. A command loads an existing aggregate, so its request record carries an
+    /// identity property an <c>{id}</c> token can bind to; a factory <i>creates</i> one, and its request
+    /// record is built from <see cref="FactoryDecl.Parameters"/> alone, so there is no identity property
+    /// to rebind and an <see cref="RouteTokenTarget.Identity"/> binding would emit uncompilable C#. On a
+    /// factory <c>{id}</c> therefore binds only when the factory declares a parameter of that name (the
+    /// explicit-id opt-in for a non-Guid identity, #324) — otherwise it is an unbound token, which is
+    /// KOI1215's concern. On the default <b>Guid</b> identity that parameter cannot be declared at all
+    /// (KOI0807 reserves <c>id</c> for the generated identity local), so <c>{id}</c> on a Guid-identity
+    /// factory is always unbound: name the token after a real parameter, or take the <c>natural</c>/
+    /// <c>sequence</c> explicit-id opt-in. <c>Semantics/</c> passes a <c>null</c> identity for a factory
+    /// for the same reason, so the warning and the emitted code agree.</para>
     /// </summary>
-    public static RouteInfo ForFactory(EntityDecl entity, FactoryDecl factory) => new(
-        Verb: "POST",
-        Route: $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}",
-        OperationId: $"{entity.Name}_{factory.Name}",
-        RequestShape: factory.Parameters,
-        ResponseShape: new TypeRef(entity.Name),
-        AuthRole: null,
-        TokenBindings: []);
+    public static RouteInfo ForFactory(EntityDecl entity, FactoryDecl factory)
+    {
+        var route = factory.RouteOverride ?? $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}";
+        return new(
+            Verb: factory.VerbOverride ?? "POST",
+            Route: route,
+            OperationId: $"{entity.Name}_{factory.Name}",
+            RequestShape: factory.Parameters,
+            ResponseShape: new TypeRef(entity.Name),
+            AuthRole: factory.AuthRole,
+            TokenBindings: ResolveTokenBindings(route, factory.Parameters, entity: null));
+    }
 
     /// <summary>
     /// Resolves each <c>{token}</c> in <paramref name="route"/> against <paramref name="shape"/> (a

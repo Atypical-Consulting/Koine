@@ -14,8 +14,11 @@ namespace Koine.Compiler;
 /// <para>R19's <c>@route</c>/<c>@get</c>…<c>@patch</c>/<c>@auth</c> annotations (#1219) override the path,
 /// the verb key, and add a per-operation <c>security</c> requirement — all three read off the shared
 /// <see cref="RouteInfo"/>, so the openapi document and the C# <c>api</c> layer never disagree. A factory
-/// carries no such annotations (they stay purely conventional — #1747), so it always emits its
-/// <see cref="RouteDerivation.ForFactory"/>-derived <c>POST</c> with no <c>security</c> block.</para>
+/// carries the same three annotations since #1846 and reads them the same way; carrying none, it falls
+/// back to its <see cref="RouteDerivation.ForFactory"/>-derived <c>POST</c> with no <c>security</c> block.
+/// The one asymmetry is token binding: a factory mints the identity it creates, so its <c>{id}</c> has no
+/// aggregate-identity fallback (<see cref="RouteDerivation.ForFactory"/> resolves no
+/// <see cref="RouteTokenTarget.Identity"/> binding) and matches only a declared parameter.</para>
 /// <para>A factory's operation is a deliberate <b>superset</b> of the C# <c>api</c> layer: every entity's
 /// factory gets a path here, while <c>CSharpEmitter.Api.cs</c> additionally gates on the aggregate's
 /// repository exposing <c>add</c> — mirroring the existing command/query scope note on
@@ -212,12 +215,12 @@ public sealed partial class OpenApiEmitter
         return operation;
     }
 
-    /// <summary>A factory → a <c>POST</c> operation (#1747): its parameters a required JSON request body
-    /// (when any), <c>200</c> the created aggregate, <c>400</c> a precondition/invariant violation — the
-    /// same shape as <see cref="CommandOperation"/>, minus any R19 annotation surface (a factory carries
-    /// none). <see cref="PathParameters"/> is called for symmetry even though <paramref name="route"/>'s
-    /// template is always token-free (a derived path, never an authored one) and so always returns
-    /// <c>null</c>.</summary>
+    /// <summary>A factory → a <c>POST</c> operation (#1747) — or whatever verb its R19 annotations name
+    /// (#1846): its parameters a required JSON request body (when any), <c>200</c> the created aggregate,
+    /// <c>400</c> a precondition/invariant violation — the same shape as <see cref="CommandOperation"/>.
+    /// <see cref="PathParameters"/> and <see cref="AddSecurity"/> were already called here for symmetry
+    /// when a factory's path was always a token-free derived route; #1846 made both live, since an
+    /// authored <c>@route</c> may carry <c>{token}</c>s and an <c>@auth</c> a role.</summary>
     private static YamlObject FactoryOperation(EntityDecl entity, FactoryDecl factory, RouteInfo route, ModelIndex index, HashSet<string> emitted)
     {
         var operation = new YamlObject();

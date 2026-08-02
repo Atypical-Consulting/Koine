@@ -1,5 +1,6 @@
 #nullable enable
 *REMOVED*Koine.Compiler.Ast.CommandDecl.CommandDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, Koine.Compiler.Ast.TypeRef? ReturnType = null) -> void
+*REMOVED*Koine.Compiler.Ast.FactoryDecl.FactoryDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body) -> void
 *REMOVED*Koine.Compiler.Ast.QueryDecl.QueryDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Criteria, Koine.Compiler.Ast.TypeRef! ResultType) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false) -> void
 *REMOVED*Koine.Compiler.Emit.EmitterOptions.EmitterOptions(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! NamespaceMap, string? InstantMode = null, string? Layout = null, bool EmitSourceMaps = false, bool ReferenceOnly = false, string? Layers = null, bool ApplicationMediatr = false, string? ApplicationMapping = null) -> void
@@ -508,7 +509,16 @@ Koine.Compiler.Ast.EventDecl.Deconstruct(out string! Name, out System.Collection
 Koine.Compiler.Ast.EventDecl.Equals(Koine.Compiler.Ast.EventDecl? other) -> bool
 Koine.Compiler.Ast.Expr.Expr() -> void
 Koine.Compiler.Ast.Expr.Expr(Koine.Compiler.Ast.Expr! original) -> void
-Koine.Compiler.Ast.FactoryDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body) -> void
+Koine.Compiler.Ast.FactoryDecl.ApiAnnotations.get -> Koine.Compiler.Ast.ApiAnnotationInfo?
+Koine.Compiler.Ast.FactoryDecl.ApiAnnotations.init -> void
+Koine.Compiler.Ast.FactoryDecl.AuthRole.get -> string?
+Koine.Compiler.Ast.FactoryDecl.AuthRole.init -> void
+Koine.Compiler.Ast.FactoryDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, out string? RouteOverride, out string? VerbOverride, out string? AuthRole) -> void
+Koine.Compiler.Ast.FactoryDecl.FactoryDecl(string! Name, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.CommandStmt!>! Body, string? RouteOverride = null, string? VerbOverride = null, string? AuthRole = null) -> void
+Koine.Compiler.Ast.FactoryDecl.RouteOverride.get -> string?
+Koine.Compiler.Ast.FactoryDecl.RouteOverride.init -> void
+Koine.Compiler.Ast.FactoryDecl.VerbOverride.get -> string?
+Koine.Compiler.Ast.FactoryDecl.VerbOverride.init -> void
 Koine.Compiler.Ast.FactoryDecl.Equals(Koine.Compiler.Ast.FactoryDecl? other) -> bool
 Koine.Compiler.Ast.FinderDecl.Deconstruct(out string! Name, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Param!>! Parameters, out Koine.Compiler.Ast.TypeRef! ResultType) -> void
 Koine.Compiler.Ast.FinderDecl.Equals(Koine.Compiler.Ast.FinderDecl? other) -> bool
