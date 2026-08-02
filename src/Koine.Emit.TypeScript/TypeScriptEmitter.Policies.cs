@@ -38,12 +38,14 @@ public sealed partial class TypeScriptEmitter
         var eventType = TypeScriptNaming.ToPascalCase(policy.EventName);
 
         // The triggering event's fields are in scope for the reaction args, rooted at `event`.
+        //
+        // Context-first, flat-fallback resolution — which this emitter already did by hand, and which
+        // #1849 made uniform: the same `TryGetDecl(context, …)` overload is now used by
+        // `ValidatePolicies` and by every other policy emitter, so all six sites give one answer.
         IReadOnlyList<Member> eventMembers =
-            index.TryGetDeclIn(context, policy.EventName, out TypeDecl ed) && ed is EventDecl ev
+            index.TryGetDecl(context, policy.EventName, out TypeDecl ed) && ed is EventDecl ev
                 ? ev.Members
-                : index.TryGetDecl(policy.EventName, out TypeDecl ed2) && ed2 is EventDecl ev2
-                    ? ev2.Members
-                    : Array.Empty<Member>();
+                : Array.Empty<Member>();
 
         var translator = new TypeScriptExpressionTranslator(
             index, eventMembers, emit.EnumMemberToType, typeMapper, context, memberReceiver: "event",
