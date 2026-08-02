@@ -1309,20 +1309,24 @@ public class JavaConformanceTests
     }
 
     /// <summary>
-    /// Issue #1838 code review: the hoisted local must be declared with the RESULT EXPRESSION's own type,
-    /// never the command's declared return type. <c>command maybeStamp: Instant?</c> emitting a
-    /// NON-optional <c>Stamped.at</c> is the shape that separates them — the expression is a bare
-    /// <c>Instant</c> while the method returns <c>Optional&lt;Instant&gt;</c> — and declaring the local
-    /// <c>Optional&lt;Instant&gt;</c> broke BOTH its own initializer and the payload constructor, two
-    /// <c>javac</c> errors the hoist itself introduced.
-    /// <para>Asserted textually rather than through <c>javac</c> because this fixture does NOT compile on
-    /// either side of the fix: the Java emitter has a separate, PRE-EXISTING gap — it never bridges a
-    /// bare value into an <c>Optional</c>-typed return or payload field (already true before any hoist
-    /// existed) — which is out of scope here and tracked on its own. What this test pins is that the
-    /// hoist adds no error of its own on top of it.</para>
+    /// Issue #1838 code review, upgraded by #1865: <c>command maybeStamp: Instant?</c> emitting a
+    /// NON-optional <c>Stamped.at</c> is a MISMATCHED-optionality shape — the payload target stays bare
+    /// <c>Instant</c> while the return target is <c>Optional&lt;Instant&gt;</c>. Before #1865 neither side
+    /// bridged the mismatch at all, so both renderings were the identical unwrapped <c>now()</c> call and
+    /// the <c>#1838</c> hoist fired (this test originally pinned that its declared type followed the
+    /// value's own bare type, not blindly the return type). #1865 lifts the RETURN side into
+    /// <c>Optional.of(...)</c> while correctly leaving the non-optional-declared PAYLOAD side unwrapped
+    /// (<c>ReconcileAgainstDeclared</c> reconciles each site against its OWN declared target) — the two
+    /// renderings now genuinely differ, so the hoist correctly declines to fire at all, and each site
+    /// renders and compiles independently. <c>Optional</c>-typed hoisting itself is covered by
+    /// <see cref="Result_hoisted_into_an_optional_lifted_payload_declares_the_local_with_the_optional_type"/>,
+    /// the matching-optionality analogue of <see cref="Result_hoisted_into_a_widened_payload_declares_the_local_with_the_widened_type"/>.
+    /// <para>Was asserted textually only, because this fixture did not compile on either side of the
+    /// original hoist fix (the Java emitter's separate, pre-existing Optional-bridging gap, #1865) — that
+    /// gap is now closed, so this upgrades to a real <c>javac</c> gate.</para>
     /// </summary>
     [Fact]
-    public void Result_hoist_declares_the_expressions_own_type_not_the_declared_return_type()
+    public void Result_hoist_declines_when_the_payload_and_return_targets_disagree_on_optionality()
     {
         const string src =
             "context Sales {\n" +
@@ -1341,9 +1345,51 @@ public class JavaConformanceTests
 
         var order = result.Files
             .Single(f => f.RelativePath.EndsWith("sales/Order.java", StringComparison.Ordinal)).Contents;
-        order.ShouldContain("java.time.Instant __result = java.time.Instant.now();");
-        order.ShouldNotContain("java.util.Optional<java.time.Instant> __result");
-        order.ShouldContain("new Stamped(__result)");
+        order.ShouldNotContain("__result");
+        order.ShouldContain("new Stamped(java.time.Instant.now())");
+        order.ShouldContain("return java.util.Optional.of(java.time.Instant.now());");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865, the optional-lift analogue of
+    /// <see cref="Result_hoisted_into_a_widened_payload_declares_the_local_with_the_widened_type"/>: when
+    /// the payload target and the return target agree on optionality (both <c>Optional&lt;Instant&gt;</c>
+    /// here, matching the issue's own repro model), the two reconciled renderings are identical and the
+    /// <c>#1838</c> hoist fires — the hoisted local must then be declared with the LIFTED
+    /// <c>Optional&lt;Instant&gt;</c> type, not the value's pre-lift bare <c>Instant</c>, or its own
+    /// initializer, the payload constructor, and the <c>return</c> all fail to compile.
+    /// </summary>
+    [Fact]
+    public void Result_hoisted_into_an_optional_lifted_payload_declares_the_local_with_the_optional_type()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  event ClosedAt { at: Instant? }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command maybeStamp: Instant? {\n" +
+            "      emit ClosedAt(at: now)\n" +
+            "      result now\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("java.util.Optional<java.time.Instant> __result = java.util.Optional.of(java.time.Instant.now());");
+        order.ShouldNotContain("java.time.Instant __result = java.util.Optional");
+        order.ShouldContain("new ClosedAt(__result)");
+        order.ShouldContain("return __result;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
     /// <summary>
