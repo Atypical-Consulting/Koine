@@ -65,6 +65,10 @@ public class CrossEmitterConformanceTests
         "No phpstan toolchain available locally; the PHP half of the cross-emitter comparison was not " +
         "run. Install phpstan (or set KOINE_PHPSTAN) — CI runs the full comparison.";
 
+    private const string NoPhpInterpreterNotice =
+        "No PHP interpreter available locally; the PHP syntax check (php -l) was not run. Install PHP " +
+        "(or set KOINE_PHP) — CI runs the full comparison.";
+
     // ---- The corpus -----------------------------------------------------------------------------
 
     /// <summary>
@@ -597,6 +601,7 @@ public class CrossEmitterConformanceTests
         TestSupport.RequireOrSkip(rsCheck.ToolchainAvailable, NoRustToolchainNotice);
         TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
         TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
+        TestSupport.RequireOrSkip(phpSyntax.ToolchainAvailable, NoPhpInterpreterNotice);
         TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
     }
 
