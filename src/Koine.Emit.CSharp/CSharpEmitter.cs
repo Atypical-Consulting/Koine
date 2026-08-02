@@ -1064,8 +1064,10 @@ public sealed partial class CSharpEmitter : IEmitter
         {
             // A smart-enum value is NOT a compile-time constant, so an enum-typed
             // default can't be a parameter default; the param becomes nullable and
-            // the body coalesces to the real default (see WriteAssignment).
-            if (index.Classify(m.Type.Name) == TypeKind.Enum)
+            // the body coalesces to the real default (see WriteAssignment). Classified in the
+            // emitting context (R13.2, #1870): getting it wrong emits a non-constant parameter
+            // default, which does not compile (CS1736).
+            if (index.Classify(translator.Context, m.Type.Name) == TypeKind.Enum)
             {
                 AppendNullable(sb, csType).Append(' ').Append(paramName).Append(" = null");
                 return;
@@ -1191,7 +1193,9 @@ public sealed partial class CSharpEmitter : IEmitter
         var any = false;
         foreach (Member m in ctorMembers)
         {
-            if (m.Initializer is null || index.Classify(m.Type.Name) != TypeKind.Enum)
+            // Context-aware (R13.2, #1870), and necessarily the SAME question AppendParam asked:
+            // the nullable parameter it emitted is only sound if this coalesce is emitted too.
+            if (m.Initializer is null || index.Classify(translator.Context, m.Type.Name) != TypeKind.Enum)
             {
                 continue;
             }
@@ -1642,7 +1646,11 @@ public sealed partial class CSharpEmitter : IEmitter
 
         foreach (Transition tr in transitions)
         {
-            var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft) && index.Classify(ft.Name) == TypeKind.Enum
+            // Resolved in the entity's own context (R13.2, #1870): the transition target is a bare
+            // enum member, and this hint is what binds it to the FIELD's enum rather than to whichever
+            // same-named enum the flat table happened to hold.
+            var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft)
+                && index.Classify(translator.Context, ft.Name) == TypeKind.Enum
                 ? ft.Name : null;
 
             // A state machine on this field guards the (literal) target's reachability —
@@ -1926,7 +1934,8 @@ public sealed partial class CSharpEmitter : IEmitter
             var paramName = CSharpNaming.ToCamelCase(m.Name);
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                // Context-aware (R13.2, #1870), mirroring the transition path above.
+                var expectedEnum = index.Classify(translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 var rhs = translator.TranslateTopLevel(value, CSharpExpressionTranslator.NameMode.Property, expectedEnum);
                 args.Add($"{paramName}: {rhs}");
             }

@@ -132,7 +132,7 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Semantics/CqrsValidator.cs", 480, "TryGetDecl", "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
         ("src/Koine.Execution/ScenarioExecutor.cs", 1579, "TryGetDecl", "final fallback within a DeclaringContextsOf/TryGetDeclIn walk in InvariantsDeclaredOn"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Application.cs", 571, "TryGetDecl", "combined TryGetDeclIn(context,...) || TryGetDecl(...) ladder"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 281, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 284, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Behaviors.cs", 44, "TryGetDecl", "combined ladder in SpecTargetMembers"),
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 457, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 610, "TryGetDecl", "combined ladder in SpecTargetMembers"),
@@ -163,9 +163,9 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 303, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
         ("src/Koine.Compiler/Ast/SymbolTable.cs", 309, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
         ("src/Koine.Compiler/Services/KoineLanguageService.cs", 583, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1344, "Classify", "IsValueObjectList: shared static classification helper, no context param"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1370, "Classify", "ClassifyMember: same shared static-helper shape as IsValueObjectList"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 2284, "Classify", "EnumExpected: same shared static-helper shape"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1348, "Classify", "IsValueObjectList: shared static classification helper, no context param"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1374, "Classify", "ClassifyMember: same shared static-helper shape as IsValueObjectList"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 2293, "Classify", "EnumExpected: same shared static-helper shape"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable's mutation-endpoint chain carries no context param; only the Enum branch is context-sensitive, and Primitive/IdValueObject are universal"),
 
         // --- Built-in-only query: inert by RANGE DISJOINTNESS, not by name reservation (verified for
@@ -208,16 +208,11 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Ast/Binder.cs", 266, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
 
         // --- Context IS available and unused — genuine latent bugs in the same shape #1863 fixed,
-        //     tracked for a follow-up fix rather than fixed here (see #1870). ---
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 137, "Classify", "EmitReadModel: local context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpExpressionTranslator.cs", 319, "Classify", "ctor: parameter context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpExpressionTranslator.cs", 609, "Classify", "EnumTypeName: instance property Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1068, "Classify", "AppendParam: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1194, "Classify", "WriteEnumDefaultCoalesce: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1645, "Classify", "WriteCommand: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1929, "Classify", "factory ctor-arg enum check: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Behaviors.cs", 158, "Classify", "EmitService: translator.Context available, unused (#1870)"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.ValueObjects.cs", 352, "Classify", "WriteQuantityOperators: context available only at its sole caller, not threaded in (#1870)"),
+        //     tracked for a follow-up fix rather than fixed here (see #1870).
+        //
+        //     The nine C#-emitter sites that used to sit here are GONE: #1870's C# task confirmed every
+        //     one of them order-dependent with a two-order fixture and fixed them to
+        //     Classify(context, name). See CSharpFlatClassifyCrossContextTests. ---
         ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 822, "Classify", "BuildFactoryCtorArgs (required loop): translator.Context available, unused (#1870)"),
         ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 853, "Classify", "BuildFactoryCtorArgs (defaulted loop): translator.Context available, unused (#1870)"),
         ("src/Koine.Emit.Rust/RustEmitter.Entities.cs", 914, "Classify", "TransitionEnum: context available only at its sole caller, not threaded in (#1870)"),
