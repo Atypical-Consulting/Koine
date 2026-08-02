@@ -174,8 +174,8 @@ annotation
 An annotation is `@` followed by an ordinary identifier (so `since`/`deprecated`/`route` remain usable
 as field names). Nine names are recognized, each only where it is meaningful; any other `@name`
 parses but is silently ignored — as does a recognized name in a position that does not read it, unless
-that position diagnoses it instead (`@since`/`@deprecated` on a `command`, for one — see
-[§15.9.3](/Koine/reference/application-cqrs/#1593-rules-and-diagnostics)).
+that position diagnoses it instead (`@since`/`@deprecated` on a `command` or a `create` factory, for
+one — see [§15.9.3](/Koine/reference/application-cqrs/#1593-rules-and-diagnostics)).
 
 | Annotation | Argument | Where it is read |
 | --- | --- | --- |

@@ -274,8 +274,12 @@ internal static class EntityBehaviorValidator
             // property), so there is nothing for `{id}` to bind to. On a factory `{id}` therefore binds only
             // when the factory DECLARES a parameter named `id` (an ordinary name match; see
             // `MemberAnalysis.IdentityParameters` for the explicit-id opt-in that makes one declarable on a
-            // non-Guid identity), and is otherwise correctly an unbound token — KOI1215. This is the same
-            // story `RouteDerivation.ForFactory` tells emit-side.
+            // non-Guid identity), and is otherwise correctly an unbound token — KOI1215. Note that on the
+            // DEFAULT Guid identity that parameter cannot be declared at all — KOI0807
+            // (`ReservedFactoryParameter`, above) rejects it, since the factory mints `var id = <Id>.New();`
+            // — so `{id}` on a Guid-identity factory is a permanent KOI1215: the author must name the token
+            // after a real parameter, or move to a `natural`/`sequence` identity and take the explicit-id
+            // opt-in. This is the same story `RouteDerivation.ForFactory` tells emit-side.
             CqrsValidator.ValidateApiAnnotations(
                 factory.ApiAnnotations, factory.RouteOverride, factory.AuthRole,
                 $"factory '{factory.Name}' on '{entity.Name}'", factory.Span, diagnostics,

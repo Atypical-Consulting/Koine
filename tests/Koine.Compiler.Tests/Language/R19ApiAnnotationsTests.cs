@@ -869,6 +869,12 @@ public class R19ApiAnnotationsTests
     /// there is nothing to bind, and letting <c>{id}</c> resolve would emit
     /// <c>request with {  = id }</c>, which is not valid C#. Hence <c>identityTypeName: null</c> at the
     /// call site, and hence a warning here.
+    ///
+    /// <para>On this fixture's <b>Guid</b> identity the warning is moreover <b>permanent</b>: the factory
+    /// cannot silence it by declaring an <c>id</c> parameter, because KOI0807
+    /// <c>ReservedFactoryParameter</c> reserves that name for the synthetic <c>var id = OrderId.New();</c>
+    /// local. So the remedy the message offers must NOT name the aggregate identity — that would be the
+    /// one fix the author has no way to apply (#1846 code review).</para>
     /// </summary>
     [Fact]
     public void An_id_token_on_a_factory_is_a_KOI1215_warning_because_a_factory_mints_its_identity()
@@ -879,6 +885,7 @@ public class R19ApiAnnotationsTests
         warning.Code.ShouldBe(DiagnosticCodes.UnboundRouteToken);
         warning.Severity.ShouldBe(DiagnosticSeverity.Warning);
         warning.Message.ShouldContain("{id}");
+        warning.Message.ShouldNotContain("or 'id' for the aggregate identity");
     }
 
     /// <summary>
@@ -1157,8 +1164,8 @@ public class R19ApiAnnotationsTests
         collision.Message.ShouldContain("factory 'open' on 'Order'");
         collision.Message.ShouldContain("command 'reopen' on 'Order'");
         collision.Message.ShouldContain(
-            "this factory's route is still conventional — give it a @route/verb annotation of its own, " +
-            "or move the one on the other declaration");
+            "this factory derives both its route and its verb by convention — give it a @route or a " +
+            "verb annotation of its own to move it off this path");
     }
 
     /// <summary>
@@ -1301,9 +1308,9 @@ public class R19ApiAnnotationsTests
 
         collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
         collision.Message.ShouldContain(
-            "neither factory names a @route or a verb, so both fall on the same conventional path — " +
-            "annotate one with @route (or a different verb), or rename one factory or one entity so " +
-            "their conventional paths differ");
+            "neither factory annotates a route or a verb, so both fall on the same conventional path — " +
+            "give one a @route (or a different verb), or rename one factory or one entity so their " +
+            "conventional paths differ");
         collision.Message.ShouldNotContain("cannot be annotated");
     }
 
@@ -1378,8 +1385,8 @@ public class R19ApiAnnotationsTests
         conventionalReported.Message.ShouldBe(
             "factory 'open' on 'Order' maps 'POST /order/open', which factory 'draft' on 'Invoice' " +
             "already maps; two declarations may share a route only when their verbs differ" +
-            "; this factory's route is still conventional — give it a @route/verb annotation of its " +
-            "own, or move the one on the other declaration");
+            "; this factory derives both its route and its verb by convention — give it a @route or a " +
+            "verb annotation of its own to move it off this path");
 
         const string conventionalFirst = """
             context Sales {
@@ -1402,6 +1409,48 @@ public class R19ApiAnnotationsTests
         annotatedReported.Message.ShouldBe(
             "factory 'draft' on 'Invoice' maps 'POST /order/open', which factory 'open' on 'Order' " +
             "already maps; two declarations may share a route only when their verbs differ");
+    }
+
+    /// <summary>
+    /// The shape that forced the <c>(true, false)</c> hint to stop mentioning the OTHER declaration
+    /// (#1846 code review). <c>conventionalOnly</c> is <c>RouteOverride is null &amp;&amp; VerbOverride is
+    /// null</c>, so a <b>redundant</b> <c>@post</c> — one that merely restates the verb the convention
+    /// would have derived anyway — already takes its factory out of <c>conventionalOnly</c> without moving
+    /// it off the colliding pair by one inch. Declared first, that factory is the un-reported side, and
+    /// the fully conventional factory reported against it therefore lands in <c>(true, false)</c>. The old
+    /// wording told the author to "move the one on the other declaration" — here that is a dead end
+    /// (removing or re-adding <c>@post</c> changes nothing, since POST is the convention), which is why
+    /// both hints now advise the REPORTED declaration alone. Asserted whole, and guarded against the
+    /// other-declaration advice creeping back.
+    /// </summary>
+    [Fact]
+    public void A_redundant_verb_on_the_other_factory_still_hints_only_at_the_reported_one()
+    {
+        const string source = """
+            context Sales {
+              entity Order identified by OrderId {
+                @post
+                create open {
+                }
+              }
+
+              entity ORDER identified by OrderTwoId {
+                create open {
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldBe(
+            "factory 'open' on 'ORDER' maps 'POST /order/open', which factory 'open' on 'Order' " +
+            "already maps; two declarations may share a route only when their verbs differ" +
+            "; this factory derives both its route and its verb by convention — give it a @route or a " +
+            "verb annotation of its own to move it off this path");
+        collision.Message.ShouldNotContain("the other declaration");
+        collision.Message.ShouldNotContain("cannot be annotated");
     }
 
     /// <summary>
@@ -1470,8 +1519,8 @@ public class R19ApiAnnotationsTests
         collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
         collision.Message.ShouldContain("factory 'open' on 'Order'");
         collision.Message.ShouldEndWith(
-            "; this factory's route is still conventional — give it a @route/verb annotation of its " +
-            "own, or move the one on the other declaration");
+            "; this factory derives both its route and its verb by convention — give it a @route or a " +
+            "verb annotation of its own to move it off this path");
     }
 
     /// <summary>The conventional route the emit side derives for <c>entity.command</c>.</summary>
@@ -1702,6 +1751,56 @@ public class R19ApiAnnotationsTests
 
         endpoints.ShouldContain($"[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"{token}\")] string @{token}");
         endpoints.ShouldContain($"request with {{ {property} = @{token} }}");
+    }
+
+    /// <summary>
+    /// The ONE shape in which a factory's <c>{id}</c> token binds (#1846) — proven end-to-end through a
+    /// real Roslyn compile, not just through <c>Diagnose</c>. A factory gets no aggregate-identity
+    /// fallback (see
+    /// <see cref="An_id_token_on_a_factory_is_a_KOI1215_warning_because_a_factory_mints_its_identity"/>):
+    /// <c>{id}</c> binds by an ORDINARY NAME MATCH against a declared parameter or not at all. And on the
+    /// default <b>Guid</b> identity a factory may not declare a parameter named <c>id</c> in the first
+    /// place — KOI0807 <c>ReservedFactoryParameter</c> reserves the name for the synthetic
+    /// <c>var id = &lt;Id&gt;.New();</c> local — so there <c>@route("/…/{id}")</c> is a permanent KOI1215
+    /// with no way to comply. Only a NON-Guid key (<c>natural(…)</c>/<c>sequence</c>, i.e. the #324
+    /// explicit-id opt-in) lets the parameter through, which is exactly this fixture's
+    /// <c>natural(String)</c>.
+    ///
+    /// <para>Asserting through <see cref="BuildApi"/> is the point: this is the only path on which a
+    /// <c>ToPascalCase</c> drift between <c>CSharpEmitter.Api.cs</c>'s <c>BuildRouteTokenBindings</c>
+    /// rebind property and <c>CSharpEmitter.Application.cs</c>'s <c>EmitFactoryHandler</c> request-record
+    /// property would emit a <c>with { … }</c> naming a member that does not exist — uncompilable C# that
+    /// a text-only assertion would happily wave through.</para>
+    /// </summary>
+    [Fact]
+    public void A_factory_declaring_an_explicit_id_parameter_binds_the_id_token_and_compiles()
+    {
+        const string src = """
+            context Catalog {
+              aggregate Books root Book {
+                entity Book identified by BookId as natural(String) {
+                  title: String
+
+                  @route("/books/{id}")
+                  create register(id: BookId, title: String) {
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnose(src).ShouldBeEmpty();
+
+        var files = BuildApi(src);
+
+        FileEndingWith(files, "BookRegisterRequest.cs")
+            .ShouldContain("public sealed record BookRegisterRequest(BookId Id, string Title);");
+
+        var endpoints = FileEndingWith(files, "CatalogEndpoints.cs");
+
+        endpoints.ShouldContain(
+            "endpoints.MapPost(\"/books/{id}\", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = \"id\")] BookId id,");
+        endpoints.ShouldContain("request with { Id = id }");
     }
 
     // ---- @route token binding into the C# api layer — queries (#1748) -------

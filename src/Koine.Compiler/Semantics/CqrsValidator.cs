@@ -267,9 +267,16 @@ internal static class CqrsValidator
                 continue;
             }
 
+            // Only offer the 'id' remedy where it actually exists. A query has no aggregate identity, and
+            // a factory MINTS the one it creates — and on a Guid identity it may not even declare an 'id'
+            // parameter (KOI0807 reserves the name), so advising 'id' there would name the one fix the
+            // author cannot apply (#1846).
+            var remedy = identityTypeName is not null
+                ? "name it after a parameter of the declaration, or 'id' for the aggregate identity"
+                : "name it after a parameter of the declaration";
             diagnostics.Add(Diagnostic.Warning(DiagnosticCodes.UnboundRouteToken,
                 $"route override '{route}' on {subject} names a token '{{{token}}}' that binds to nothing; " +
-                "name it after a parameter of the declaration, or 'id' for the aggregate identity",
+                remedy,
                 span));
         }
     }
@@ -343,18 +350,21 @@ internal static class CqrsValidator
                 // — since #1846 gave factories an annotation axis of their own it no longer means "can
                 // never be annotated". Only factories pass it (a command/query keeps the `false` default),
                 // so the generic "share a route only when their verbs differ" advice, which assumes the
-                // reported claimant already names its own route/verb, is the one that needs supplementing:
-                // the hint points at the annotation the author can NOW add to the reported factory. The
-                // both-conventional case still gets its own wording, because pointing one un-annotated
-                // factory at another un-annotated one is not actionable — either side may take the
-                // annotation, or a rename can separate their conventional paths.
+                // reported claimant already names its own route/verb, is the one that needs supplementing.
+                //
+                // Both hints deliberately advise the REPORTED declaration only, never the other side: the
+                // reported one is always fixable (it can take a @route or a verb of its own), whereas
+                // `first` may itself be un-annotated — an ordinary conventional command, or a factory that
+                // annotates nothing — in which case telling the author to "move" an annotation that does
+                // not exist would be a dead end. The both-conventional case keeps its own wording because
+                // a rename is the other real fix there.
                 var hint = (conventionalOnly, first.ConventionalOnly) switch
                 {
-                    (true, true) => "; neither factory names a @route or a verb, so both fall on the same conventional " +
-                                     "path — annotate one with @route (or a different verb), or rename one factory or one " +
-                                     "entity so their conventional paths differ",
-                    (true, false) => "; this factory's route is still conventional — give it a @route/verb annotation of " +
-                                      "its own, or move the one on the other declaration",
+                    (true, true) => "; neither factory annotates a route or a verb, so both fall on the same " +
+                                     "conventional path — give one a @route (or a different verb), or rename one " +
+                                     "factory or one entity so their conventional paths differ",
+                    (true, false) => "; this factory derives both its route and its verb by convention — give it a " +
+                                      "@route or a verb annotation of its own to move it off this path",
                     _ => "",
                 };
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,

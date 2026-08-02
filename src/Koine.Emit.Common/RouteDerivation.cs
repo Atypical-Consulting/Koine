@@ -115,8 +115,11 @@ public static class RouteDerivation
     /// to rebind and an <see cref="RouteTokenTarget.Identity"/> binding would emit uncompilable C#. On a
     /// factory <c>{id}</c> therefore binds only when the factory declares a parameter of that name (the
     /// explicit-id opt-in for a non-Guid identity, #324) — otherwise it is an unbound token, which is
-    /// KOI1215's concern. <c>Semantics/</c> passes a <c>null</c> identity for a factory for the same
-    /// reason, so the warning and the emitted code agree.</para>
+    /// KOI1215's concern. On the default <b>Guid</b> identity that parameter cannot be declared at all
+    /// (KOI0807 reserves <c>id</c> for the generated identity local), so <c>{id}</c> on a Guid-identity
+    /// factory is always unbound: name the token after a real parameter, or take the <c>natural</c>/
+    /// <c>sequence</c> explicit-id opt-in. <c>Semantics/</c> passes a <c>null</c> identity for a factory
+    /// for the same reason, so the warning and the emitted code agree.</para>
     /// </summary>
     public static RouteInfo ForFactory(EntityDecl entity, FactoryDecl factory)
     {
