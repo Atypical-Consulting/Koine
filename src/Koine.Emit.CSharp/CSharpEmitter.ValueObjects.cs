@@ -25,7 +25,8 @@ public sealed partial class CSharpEmitter
         CSharpTypeMapper typeMapper,
         IReadOnlyDictionary<string, string> enumMemberToType)
     {
-        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index), context: ContextOf(ns), options: _options);
+        var context = ContextOf(ns);
+        var translator = new CSharpExpressionTranslator(index, vo.Members, enumMemberToType, SpecBodiesFor(vo.Name, index), context: context, options: _options);
         // Value objects DECLARE the [GeneratedRegex] methods + stamp the type `partial`, so they opt into the
         // source-generated `matches` form (issue #795); translators that don't (specs/services) keep inline.
         translator.EnableGeneratedRegexForm();
@@ -55,7 +56,7 @@ public sealed partial class CSharpEmitter
             // A nested value-object collection is backed by a mutable private List<T> so the EF Core
             // infrastructure layer can materialize the owned children of a nested OwnsMany (issue #171);
             // the public surface stays a read-only IReadOnlyList<T>.
-            if (IsValueObjectList(m.Type, index))
+            if (IsValueObjectList(m.Type, index, context))
             {
                 var elem = typeMapper.Map(m.Type.Element ?? ObjectType);
                 var field = BackingFieldName(f.Name);
@@ -103,7 +104,7 @@ public sealed partial class CSharpEmitter
 
             // Render the derived body from its LOWERED bound initializer (Commit 6): resolved types come
             // from the bound tree rather than being re-inferred by the translator.
-            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index));
+            var body = translator.TranslateTopLevelBound(f.DerivedInitializer!, CSharpExpressionTranslator.NameMode.Property, EnumExpected(m, index, translator.Context));
             sb.Append(Indent).Append(Indent).Append("=> ").Append(body).Append(";\n");
         }
 
@@ -112,7 +113,7 @@ public sealed partial class CSharpEmitter
         // avoid emitting a duplicate operator).
         if (vo.IsQuantity)
         {
-            WriteQuantityOperators(sb, vo, bound, index);
+            WriteQuantityOperators(sb, vo, bound, index, context);
         }
         else
         {
@@ -344,12 +345,20 @@ public sealed partial class CSharpEmitter
     /// units are runtime enum values) and scalar <c>*</c>/<c>/</c> by <c>int</c>/<c>decimal</c>
     /// scale the amount and preserve the unit. Operators are emitted in a fixed order
     /// for byte-identical determinism.
+    /// <para>
+    /// <paramref name="context"/> is the quantity's own bounded context, threaded in from
+    /// <see cref="EmitValueObject"/> so the unit field is identified by classifying its type THERE
+    /// (R13.2, #1870). Through the flat, last-declaration-wins view a sibling context declaring the
+    /// same simple name as a value object made the unit unrecognizable and this method silently
+    /// emitted NO arithmetic at all — an operator set that appeared or vanished with <c>.koi</c>
+    /// source order.
+    /// </para>
     /// </summary>
-    private void WriteQuantityOperators(StringBuilder sb, ValueObjectDecl vo, BoundValueObject bound, ModelIndex index)
+    private void WriteQuantityOperators(StringBuilder sb, ValueObjectDecl vo, BoundValueObject bound, ModelIndex index, string? context)
     {
         var nonDerived = bound.StoredFields.Select(f => (Member)f.Syntax).ToList();
         Member? amount = nonDerived.FirstOrDefault(m => m.Type.Name == "Decimal" && !m.Type.IsOptional);
-        Member? unit = nonDerived.FirstOrDefault(m => index.Classify(m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
+        Member? unit = nonDerived.FirstOrDefault(m => index.Classify(context, m.Type.Name) == TypeKind.Enum && !m.Type.IsOptional);
         if (amount is null || unit is null)
         {
             return; // a malformed quantity is already a validation error; emit no operators

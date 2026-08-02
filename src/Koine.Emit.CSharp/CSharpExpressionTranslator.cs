@@ -316,7 +316,10 @@ internal sealed class CSharpExpressionTranslator
         {
             if (m.Initializer is not null && MemberAnalysis.IsDerived(m, memberNames))
             {
-                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                // Classified in the bounded context this translator resolves within (R13.2): a
+                // same-named type in a sibling context must not decide whether THIS member is an
+                // enum, which is what the flat, last-declaration-wins overload let it do (#1870).
+                var expectedEnum = index.Classify(context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 (derived ??= new Dictionary<string, DerivedMember>(StringComparer.Ordinal))[m.Name] =
                     new DerivedMember(m.Initializer, expectedEnum);
             }
@@ -606,7 +609,9 @@ internal sealed class CSharpExpressionTranslator
     private string? EnumTypeName(Expr expr)
     {
         TypeRef? type = InferType(expr);
-        return type is not null && _index.Classify(type.Name) == TypeKind.Enum ? type.Name : null;
+        // Context-aware (R13.2, #1870): the hint decides how the OTHER operand's bare enum member is
+        // qualified, so a same-named value object in an unrelated context must not erase it.
+        return type is not null && _index.Classify(Context, type.Name) == TypeKind.Enum ? type.Name : null;
     }
 
     private string Render(Expr expr, NameMode mode)

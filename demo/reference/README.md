@@ -21,6 +21,12 @@ Regenerate any of them from the repo root:
 The `.cs.txt` files use a `.txt` suffix on purpose so the demo project does
 **not** compile them as duplicate copies of the live `Generated/` types.
 
+**This folder is test-guarded** (issue #1841):
+`Koine.Compiler.Tests.DemoReferenceGuardTests` regenerates every file above in-process and asserts
+it is byte-identical (line-ending-normalized) to what's committed here. A red run means the
+emitter's output has moved — run that test's regeneration command (in its failure message) and
+commit the result; it does **not** mean the emitter is wrong.
+
 > This folder covers only the **C#** (pizzeria) demo. Each polyglot demo — `demo/typescript`,
 > `demo/python`, `demo/php`, `demo/rust` (issue #1073) — has its own equivalent `reference/`
 > folder of committed emitted-source snapshots from `templates/starters/ordering`; see e.g.

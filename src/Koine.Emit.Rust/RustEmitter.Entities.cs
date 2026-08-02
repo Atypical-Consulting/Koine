@@ -271,7 +271,7 @@ public sealed partial class RustEmitter
             // Own the RHS so a non-Copy place (another field) or a String accessor/literal is moved
             // by value into the field rather than borrowed from `&mut self`.
             var value = RustExpressionTranslator.StripOuterParens(
-                translator.TranslateOwned(t.Value, TransitionEnum(field, emit.Index)));
+                translator.TranslateOwned(t.Value, TransitionEnum(field, emit.Index, translator.Context)));
 
             // Widen an Int-inferred RHS toward a Decimal-declared field, mirroring the smart
             // constructor's default path (CoercedDefaultValue) and BuildFactoryCtorArgs (#1511) — Rust
@@ -819,7 +819,7 @@ public sealed partial class RustEmitter
         {
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                var expectedEnum = ExpectedEnum(m.Type, index, translator.Context);
                 var owned = translator.TranslateOwned(value, expectedEnum);
                 TypeRef? valueType = translator.InferType(value);
                 args.Add(ReconcileFactoryCtorArg(valueType, m.Type, owned));
@@ -850,7 +850,7 @@ public sealed partial class RustEmitter
         {
             if (initByField.TryGetValue(m.Name, out Expr? value))
             {
-                var expectedEnum = index.Classify(m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
+                var expectedEnum = ExpectedEnum(m.Type, index, translator.Context);
                 var owned = translator.TranslateOwned(value, expectedEnum);
                 TypeRef? valueType = translator.InferType(value);
 
@@ -909,9 +909,35 @@ public sealed partial class RustEmitter
         return needs.NeedsSomeWrap ? $"Some({coerced})" : coerced;
     }
 
+    /// <summary>
+    /// The enum type name a declared position expects, or <c>null</c> when it is not enum-typed — the
+    /// hint <see cref="RustExpressionTranslator"/> uses to bind a bare variant reference shared by two
+    /// enums to the right one.
+    /// <para>Resolved context-aware (#1870), exactly like the event-payload site above (#1834) and
+    /// <see cref="RustTypeMapper.IsEnum"/>: an explicit <c>Context.Type</c> qualifier wins, else the
+    /// enclosing bounded context. The flat lookup this replaces was decided by whichever context
+    /// declared a type of that simple name LAST in source order (R13.2 lets two contexts legally share
+    /// one), so an unrelated <c>value Kind</c> in a sibling context suppressed the hint and the bare
+    /// variant bound to the wrong enum — on this target a hard <c>rustc</c> E0308, since the emitted
+    /// path names a variant of the wrong enum type.</para>
+    /// <para>This is NOT "strictly additive", and must not be justified that way:
+    /// <see cref="ModelIndex.Classify(string?, string)"/> consults the CONTEXT-LOCAL declaration BEFORE
+    /// <c>ClassifyBuiltIn</c>, so on a model declaring <c>value List</c> a context-aware call answers
+    /// <c>Value</c> where the flat one answered <c>List</c>. That inversion is precisely why
+    /// <c>ExpressionChecker</c>'s built-in-only queries must NOT be threaded with a context (see the
+    /// allowlist note in <c>FlatModelIndexLookupGuardTests</c>, and the #1715 regression it cites).</para>
+    /// <para>What is true for THESE sites is narrower: the result is only ever compared against
+    /// <see cref="TypeKind.Enum"/> — a kind <c>ClassifyBuiltIn</c> can never return — so the answer is
+    /// never consumed as "is this a built-in?", and resolving the context-local declaration first can only
+    /// move the hint towards the declaration the reference site actually sees. Safe here; do not copy this
+    /// justification to a site that asks a built-in-only question.</para>
+    /// </summary>
+    private static string? ExpectedEnum(TypeRef type, ModelIndex index, string? context) =>
+        index.Classify(type.Qualifier ?? context, type.Name) == TypeKind.Enum ? type.Name : null;
+
     /// <summary>The enum type expected on the RHS of a transition (so a bare enum member qualifies).</summary>
-    private static string? TransitionEnum(Member? field, ModelIndex index) =>
-        field is not null && index.Classify(field.Type.Name) == TypeKind.Enum ? field.Type.Name : null;
+    private static string? TransitionEnum(Member? field, ModelIndex index, string? context) =>
+        field is not null ? ExpectedEnum(field.Type, index, context) : null;
 
     // ----------------------------------------------------------------------
     // Identity newtype
