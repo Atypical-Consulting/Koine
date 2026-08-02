@@ -117,11 +117,16 @@ internal sealed class KotlinExpressionTranslator
     /// <see cref="WriteReconciledBranch"/> (#1344), reusing the same shared
     /// <see cref="BranchReconciliation.Classify"/> decision (#1368) and the same target-local widen
     /// renderings (mirrors Java's <c>ReconcileAgainstDeclared</c>/Rust's <c>CoerceNumericBody</c>).
-    /// Applied at five call sites: a factory's explicit <c>field -&gt; expr</c> initialization (#1732), a
+    /// Applied at seven call sites: a factory's explicit <c>field -&gt; expr</c> initialization (#1732), a
     /// command's <c>result</c> expression, an <c>emit</c>/<c>publish</c> payload argument (#1866) — the
-    /// two call sites the Rust emitter already closed at #1511 — and a member's own default initializer,
-    /// rendered both as an entity's stored property and as a value object's primary-constructor parameter
-    /// (#1880, the site Rust closed at #1319/#1324/#1325). Only the NUMERIC dimensions
+    /// two call sites the Rust emitter already closed at #1511 — and both halves of a member's own
+    /// initializer: the STORED-DEFAULT half, rendered as an entity's stored property and as a value
+    /// object's primary-constructor parameter (#1880, the site Rust closed at #1319/#1324/#1325), and the
+    /// DERIVED half, rendered as the entity's and the value object's get-only <c>val … get()</c>
+    /// properties (#1888, the site Rust closed at #961/#1329). Those last two are the two arms of one
+    /// <c>MemberAnalysis.IsDerived</c> branch, so they route through this one method deliberately —
+    /// reconciling them separately is exactly how they drifted apart between #1880 and #1888. Only the
+    /// NUMERIC dimensions
     /// (<c>NeedsWiden</c>/<c>NeedsOptionalWiden</c>) ever render here — <c>NeedsSomeWrap</c> (a bare value
     /// into an optional-declared target) is a Java-only concern; Kotlin nullability is subtyping, so a
     /// non-optional value already flows into a nullable-declared target unchanged, and this method never
