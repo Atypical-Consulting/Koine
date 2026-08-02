@@ -104,6 +104,20 @@ public static class RouteDerivation
     }
 
     /// <summary>
+    /// A factory → <c>POST /{entity}/{factory}</c>, its parameters the request body and the created
+    /// aggregate the response. Factories carry no R19 API annotations (#1219), so verb and role are the
+    /// convention with no override axis — this is the seam where those overrides would land.
+    /// </summary>
+    public static RouteInfo ForFactory(EntityDecl entity, FactoryDecl factory) => new(
+        Verb: "POST",
+        Route: $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}",
+        OperationId: $"{entity.Name}_{factory.Name}",
+        RequestShape: factory.Parameters,
+        ResponseShape: new TypeRef(entity.Name),
+        AuthRole: null,
+        TokenBindings: []);
+
+    /// <summary>
     /// Resolves each <c>{token}</c> in <paramref name="route"/> against <paramref name="shape"/> (a
     /// command's parameters or a query's criteria) — #1748. Resolution order: a member of
     /// <paramref name="shape"/> whose name matches the token (<see cref="StringComparison.OrdinalIgnoreCase"/>,

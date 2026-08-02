@@ -280,10 +280,11 @@ internal static class CqrsValidator
     /// second (and each later) colliding declaration, so the first one — the one already "holding" the
     /// route — stays clean.
     ///
-    /// <para>Scope: every entity's commands (top-level and aggregate-nested) and every query, i.e. the
-    /// superset the <c>openapi</c> emitter maps. The C# <c>api</c> layer maps a narrower set (aggregate
-    /// roots whose repository exposes <c>getById</c>, top-level queries), so a collision this reports is
-    /// always real for at least one HTTP target.</para>
+    /// <para>Scope: every entity's commands and factories (top-level and aggregate-nested) and every
+    /// query, i.e. the superset the <c>openapi</c> emitter maps (#1747). The C# <c>api</c> layer maps a
+    /// narrower set (a command needs its aggregate's repository to expose <c>getById</c>, a factory
+    /// <c>add</c>, and only top-level queries), so a collision this reports is always real for at least
+    /// one HTTP target.</para>
     ///
     /// <para>Routes are compared <b>ordinally</b> — exactly the criterion that makes an OpenAPI mapping key
     /// a duplicate. Two templates that differ only in letter case, or only in the <i>name</i> of a route
@@ -292,8 +293,10 @@ internal static class CqrsValidator
     /// </summary>
     public static void ValidateApiRoutes(ContextNode ctx, List<Diagnostic> diagnostics)
     {
-        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a message.
-        var claimed = new Dictionary<(string Route, string Verb), string>();
+        // First-wins: the value is how the declaration that claimed the (route, verb) pair reads in a
+        // message, plus whether IT was a factory too — the hint below needs both sides' shape, not just
+        // the reported claimant's.
+        var claimed = new Dictionary<(string Route, string Verb), (string Subject, bool ConventionalOnly)>();
 
         foreach (EntityDecl entity in ctx.AllEntities())
         {
@@ -304,6 +307,16 @@ internal static class CqrsValidator
                     command.VerbOverride ?? "POST",
                     $"command '{command.Name}' on '{entity.Name}'",
                     command.Span);
+            }
+
+            foreach (FactoryDecl factory in entity.Factories)
+            {
+                Claim(
+                    $"/{Kebab(entity.Name)}/{Kebab(factory.Name)}",
+                    "POST",
+                    $"factory '{factory.Name}' on '{entity.Name}'",
+                    factory.Span,
+                    conventionalOnly: true);
             }
         }
 
@@ -316,18 +329,32 @@ internal static class CqrsValidator
                 query.Span);
         }
 
-        void Claim(string route, string verb, string subject, SourceSpan span)
+        void Claim(string route, string verb, string subject, SourceSpan span, bool conventionalOnly = false)
         {
             if (claimed.TryGetValue((route, verb), out var first))
             {
+                // A factory's route/verb has no annotation axis to move (#1747) — the generic "share a
+                // route only when their verbs differ" advice is not actionable for it, so the reported
+                // claimant gets a pointer to the only declaration that CAN move. When BOTH sides are
+                // factories, neither can move an annotation — the fix has to rename one declaration or
+                // its entity instead, so that gets its own hint rather than pointing at a side that is
+                // equally stuck.
+                var hint = (conventionalOnly, first.ConventionalOnly) switch
+                {
+                    (true, true) => "; two factories resolve to the same conventional route — rename one " +
+                                     "factory, or one entity, so their conventional paths differ",
+                    (true, false) => "; a factory's route is conventional and cannot be annotated, so move " +
+                                      "the @route/verb on the other declaration",
+                    _ => "",
+                };
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute,
-                    $"{subject} maps '{verb} {route}', which {first} already maps; two declarations may " +
-                    "share a route only when their verbs differ",
+                    $"{subject} maps '{verb} {route}', which {first.Subject} already maps; two declarations may " +
+                    "share a route only when their verbs differ" + hint,
                     span));
                 return;
             }
 
-            claimed[(route, verb)] = subject;
+            claimed[(route, verb)] = (subject, conventionalOnly);
         }
     }
 
