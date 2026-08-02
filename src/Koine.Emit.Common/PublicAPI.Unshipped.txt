@@ -40,6 +40,7 @@ Koine.Compiler.RouteTokenBinding.Token.get -> string!
 Koine.Compiler.RouteTokenBinding.Token.init -> void
 Koine.Compiler.RouteTokenBinding.Type.get -> Koine.Compiler.Ast.TypeRef?
 Koine.Compiler.RouteTokenBinding.Type.init -> void
+Koine.Compiler.ResultHoist
 Koine.Compiler.RouteTokenTarget
 Koine.Compiler.RouteTokenTarget.Identity = 2 -> Koine.Compiler.RouteTokenTarget
 Koine.Compiler.RouteTokenTarget.Member = 1 -> Koine.Compiler.RouteTokenTarget
@@ -54,6 +55,8 @@ static Koine.Compiler.MarkdownDoc.Tag(int? since, string? deprecated) -> string!
 static Koine.Compiler.MarkdownDoc.Tag(Koine.Compiler.Ast.TypeDecl! t) -> string!
 static Koine.Compiler.MarkdownDoc.WriteFields(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Member!>! members) -> void
 static Koine.Compiler.MarkdownDoc.WriteRules(System.Text.StringBuilder! sb, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.Invariant!>! invariants) -> void
+const Koine.Compiler.ResultHoist.LocalName = "__result" -> string!
+static Koine.Compiler.ResultHoist.ShouldSubstitute(string! renderedArgument, string? renderedResultExpr) -> bool
 static Koine.Compiler.RouteDerivation.ForCommand(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.CommandDecl! command) -> Koine.Compiler.RouteInfo
 static Koine.Compiler.RouteDerivation.ForFactory(Koine.Compiler.Ast.EntityDecl! entity, Koine.Compiler.Ast.FactoryDecl! factory) -> Koine.Compiler.RouteInfo
 static Koine.Compiler.RouteDerivation.ForQuery(Koine.Compiler.Ast.QueryDecl! query) -> Koine.Compiler.RouteInfo

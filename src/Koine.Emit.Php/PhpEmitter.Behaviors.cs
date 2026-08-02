@@ -220,16 +220,25 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append(Indent).Append("$this->").Append(prop).Append(" = ").Append(value).Append(";\n");
         }
 
-        // Translate emit payloads and result while parameters are still in scope. A command is an
-        // instance method, so member references render as `$this->member` (Property mode).
-        var emitStatements = emits.Select(e =>
-            BuildEmitStatement(e, translator, index, "$this->", PhpExpressionTranslator.NameMode.Property)).ToList();
-        // Publish payloads translate in the SAME scope, for the same reason (R19).
-        var publishStatements = publishes.Select(p =>
-            BuildPublishStatement(p, translator, index, PhpExpressionTranslator.NameMode.Property)).ToList();
+        // Translate the result FIRST, in the same scope as the emit payloads, so the statement
+        // builders can substitute it. A command is an instance method, so member references render as
+        // `$this->member` (Property mode). If the same value is also a WHOLE payload argument it is
+        // hoisted into a single `$__result` computed once — mirroring the C#/TS emitters. The
+        // whole-argument rule is <see cref="ResultHoist.ShouldSubstitute"/>'s — exact, never a
+        // substring — so a sibling argument sharing a prefix (`$this->taxRate` vs a `$this->tax`
+        // result) is left intact.
         string? resultExpr = result is not null
             ? translator.Translate(result.Value, PhpExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
+
+        var emitStatements = emits.Select(e =>
+            BuildEmitStatement(e, translator, index, "$this->", PhpExpressionTranslator.NameMode.Property, resultExpr)).ToList();
+        // Publish payloads translate in the SAME scope, for the same reason (R19), and join the SAME
+        // `$__result` hoist: a non-deterministic expression such as `now` must be evaluated ONCE per
+        // command, so an `emit` and a `publish` of it record the identical instant.
+        var publishStatements = publishes.Select(p =>
+            BuildPublishStatement(p, translator, index, PhpExpressionTranslator.NameMode.Property, resultExpr)).ToList();
+        var hoistResult = emitStatements.Any(s => s.Hoisted) || publishStatements.Any(s => s.Hoisted);
 
         // Parameters leave scope BEFORE the re-check.
         foreach (Param p in cmd.Parameters)
@@ -243,22 +252,32 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append(Indent).Append("$this->checkInvariants();\n");
         }
 
-        // 4. Record events: the intra-aggregate domain events first, then the integration events
+        // 4. Compute the hoisted result (once) BEFORE the events so a payload can carry the same
+        //    value without recomputing it — but AFTER the re-check, so an invalid post-state still
+        //    throws before anything is computed or recorded.
+        if (hoistResult)
+        {
+            sb.Append(Indent).Append(Indent).Append('$').Append(ResultHoist.LocalName)
+              .Append(" = ").Append(resultExpr).Append(";\n");
+        }
+
+        // 5. Record events: the intra-aggregate domain events first, then the integration events
         //    leaving the context (R19), so the recording order reads inside-out.
         foreach (var stmt in emitStatements)
         {
-            sb.Append(Indent).Append(Indent).Append(stmt).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append(stmt.Text).Append(";\n");
         }
 
         foreach (var stmt in publishStatements)
         {
-            sb.Append(Indent).Append(Indent).Append(stmt).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append(stmt.Text).Append(";\n");
         }
 
-        // 5. Return the result value.
+        // 6. Return the result value.
         if (resultExpr is not null)
         {
-            sb.Append(Indent).Append(Indent).Append("return ").Append(resultExpr).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append("return ")
+              .Append(hoistResult ? "$" + ResultHoist.LocalName : resultExpr).Append(";\n");
         }
 
         sb.Append(Indent).Append("}\n");
@@ -393,9 +412,10 @@ public sealed partial class PhpEmitter
           .Append(string.Join(", ", args)).Append(");\n");
 
         // 4. Record creation events (payloads may reference `id` and parameters). A factory is a
-        // static method, so use Parameter mode (no `$this->`); `id`/params are locals anyway.
+        // static method, so use Parameter mode (no `$this->`); `id`/params are locals anyway. A
+        // factory has no `result` clause, so no hoist ever applies here — take the text only.
         var emitStatements = emits.Select(e =>
-            BuildEmitStatement(e, translator, index, "$instance->", PhpExpressionTranslator.NameMode.Parameter)).ToList();
+            BuildEmitStatement(e, translator, index, "$instance->", PhpExpressionTranslator.NameMode.Parameter).Text).ToList();
 
         foreach (Param p in factory.Parameters)
         {
@@ -515,17 +535,22 @@ public sealed partial class PhpEmitter
     /// Builds the <c>&lt;prefix&gt;domainEvents[] = new Ev(&lt;field&gt;: &lt;value&gt;, …)</c>
     /// statement for an <c>emit</c> clause. Arguments are positional-ordered per the event's
     /// declared fields and translated in the surrounding scope.
+    /// <para>When <paramref name="hoistedResultExpr"/> is supplied, an argument whose WHOLE rendered
+    /// form equals it becomes the <c>$__result</c> local and <c>Hoisted</c> is returned true, so the
+    /// caller knows to bind it (#1838) — a non-deterministic expression such as <c>now</c> must be
+    /// evaluated once, or the recorded payload and the returned value disagree.</para>
     /// </summary>
-    private string BuildEmitStatement(
+    private (string Text, bool Hoisted) BuildEmitStatement(
         EmitClause emit,
         PhpExpressionTranslator translator,
         ModelIndex index,
         string targetPrefix,
-        PhpExpressionTranslator.NameMode mode)
+        PhpExpressionTranslator.NameMode mode,
+        string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(emit.EventName, out TypeDecl decl) || decl is not EventDecl ev)
         {
-            return $"/* unknown event '{emit.EventName}' */";
+            return ($"/* unknown event '{emit.EventName}' */", false);
         }
 
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
@@ -534,16 +559,27 @@ public sealed partial class PhpEmitter
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
         var argByField = emit.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
+        var hoisted = false;
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
             {
                 var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
-                return translator.Translate(argByField[f.Name], mode, expectedEnum);
-            });
+                var rendered = translator.Translate(argByField[f.Name], mode, expectedEnum);
+                // Substitute the hoisted local only when the WHOLE argument is the result expression;
+                // a substring match (a sibling argument sharing a prefix) must NOT be rewritten.
+                if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
+                {
+                    hoisted = true;
+                    return "$" + ResultHoist.LocalName;
+                }
+
+                return rendered;
+            })
+            .ToList();
 
         var eventName = PhpNaming.ClassName(ev.Name);
-        return $"{targetPrefix}domainEvents[] = new {eventName}({string.Join(", ", args)})";
+        return ($"{targetPrefix}domainEvents[] = new {eventName}({string.Join(", ", args)})", hoisted);
     }
 
     /// <summary>
@@ -555,32 +591,47 @@ public sealed partial class PhpEmitter
     /// <para>Resolution is CONTEXT-AWARE, exactly as <c>EntityBehaviorValidator.ValidatePublish</c>
     /// resolves it: two contexts may each legally publish a same-named integration event with DIFFERENT
     /// payloads (R14), and the flat <see cref="ModelIndex"/> view is last-write-wins (#1796 review).</para>
+    /// <para>A publish argument takes part in the SAME <c>$__result</c> hoist as an emit one (#1838):
+    /// rendering a non-deterministic expression inline here would be a SECOND evaluation, so the
+    /// published contract would stop mirroring the domain event it accompanies.</para>
     /// </summary>
-    private string BuildPublishStatement(
+    private (string Text, bool Hoisted) BuildPublishStatement(
         PublishClause publish,
         PhpExpressionTranslator translator,
         ModelIndex index,
-        PhpExpressionTranslator.NameMode mode)
+        PhpExpressionTranslator.NameMode mode,
+        string? hoistedResultExpr = null)
     {
         if (!index.TryGetDecl(translator.Context, publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
         {
-            return $"/* unknown integration event '{publish.EventName}' */";
+            return ($"/* unknown integration event '{publish.EventName}' */", false);
         }
 
         var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
         var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
         var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
 
+        var hoisted = false;
         var args = ctorFields
             .Where(f => argByField.ContainsKey(f.Name))
             .Select(f =>
             {
                 var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
-                return translator.Translate(argByField[f.Name], mode, expectedEnum);
-            });
+                var rendered = translator.Translate(argByField[f.Name], mode, expectedEnum);
+                // Substitute the hoisted local only when the WHOLE argument is the result expression;
+                // a substring match (a sibling argument sharing a prefix) must NOT be rewritten.
+                if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
+                {
+                    hoisted = true;
+                    return "$" + ResultHoist.LocalName;
+                }
+
+                return rendered;
+            })
+            .ToList();
 
         var eventName = PhpNaming.ClassName(ev.Name);
-        return $"$this->integrationEvents[] = new {eventName}({string.Join(", ", args)})";
+        return ($"$this->integrationEvents[] = new {eventName}({string.Join(", ", args)})", hoisted);
     }
 
     // -----------------------------------------------------------------------

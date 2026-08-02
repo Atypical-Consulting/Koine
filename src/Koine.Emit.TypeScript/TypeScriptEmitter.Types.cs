@@ -586,9 +586,10 @@ public sealed partial class TypeScriptEmitter
 
         // Translate the result FIRST, in the same scope as the emit payloads, so the emit builder
         // can substitute it. If the same value also appears as a WHOLE emit argument it is hoisted
-        // into a single `const __result` computed once — mirroring the C# emitter. The match is
-        // per-argument and exact (not a substring of the rendered statement), so a sibling argument
-        // that merely shares a prefix — e.g. `this.taxRate` vs a `this.tax` result — is left intact.
+        // into a single `const __result` computed once — mirroring the C# emitter. The whole-argument
+        // rule is <see cref="ResultHoist.ShouldSubstitute"/>'s — exact, not a substring of the
+        // rendered statement — so a sibling argument that merely shares a prefix (e.g. `this.taxRate`
+        // vs a `this.tax` result) is left intact.
         string? resultExpr = result is not null ? translator.Translate(result.Value, cmd.ReturnType?.Name) : null;
 
         // Domain events are recorded while parameters are still in scope (their payloads may
@@ -617,7 +618,8 @@ public sealed partial class TypeScriptEmitter
         // same value without recomputing it.
         if (hoistResult)
         {
-            sb.Append(Indent).Append(Indent).Append("const __result = ").Append(resultExpr).Append(";\n");
+            sb.Append(Indent).Append(Indent).Append("const ").Append(ResultHoist.LocalName)
+              .Append(" = ").Append(resultExpr).Append(";\n");
         }
 
         foreach (var stmt in emitStatements)
@@ -634,7 +636,7 @@ public sealed partial class TypeScriptEmitter
         if (resultExpr is not null)
         {
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(hoistResult ? "__result" : resultExpr).Append(";\n");
+              .Append(hoistResult ? ResultHoist.LocalName : resultExpr).Append(";\n");
         }
 
         sb.Append(Indent).Append("}\n");
@@ -935,10 +937,10 @@ public sealed partial class TypeScriptEmitter
             var rendered = translator.Translate(value, EnumExpected(f, index, context));
             // Substitute the hoisted local only on a WHOLE-argument match; a sibling argument that
             // merely shares a prefix must NOT be rewritten.
-            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
+            if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
             {
                 hoisted = true;
-                return "__result";
+                return ResultHoist.LocalName;
             }
 
             return rendered;
@@ -981,10 +983,10 @@ public sealed partial class TypeScriptEmitter
             var rendered = translator.Translate(value, EnumExpected(f, index, context));
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
-            if (hoistedResultExpr is not null && string.Equals(rendered, hoistedResultExpr, StringComparison.Ordinal))
+            if (ResultHoist.ShouldSubstitute(rendered, hoistedResultExpr))
             {
                 hoisted = true;
-                return "__result";
+                return ResultHoist.LocalName;
             }
             return rendered;
         }).ToList();
