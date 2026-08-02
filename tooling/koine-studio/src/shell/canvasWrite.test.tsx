@@ -75,14 +75,14 @@ describe('canvasWrite', () => {
       (e) => seen.push((e as CustomEvent<DiagramAnnotationCreateDetail>).detail.kind),
       { once: true },
     );
-    cw.createCanvasAnnotation('note' as never);
+    cw.createCanvasAnnotation('note');
     expect(seen).toEqual(['note']);
   });
 
   it('applyDiagramAddType reads activeContext off the injected store, not the global appStore singleton (#1351)', async () => {
     const store = createAppStore();
     store.getState().setActiveContext('Ordering');
-    const { cw, deps } = build({ store, prompt: { ask: vi.fn(async () => null) } as never });
+    const { cw, deps } = build({ store, prompt: { ask: vi.fn(async () => null) } });
 
     await cw.applyDiagramAddType({ kind: 'value' } as never);
 
@@ -101,7 +101,7 @@ describe('canvasWrite', () => {
         uri: 'file:///a.koi',
         edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: 'x' }],
       });
-      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' } as never);
+      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' });
       expect(ok).toBe(true);
       expect(deps.workspace.applyWorkspaceEdit).toHaveBeenCalledOnce();
       expect(deps.setStatus).not.toHaveBeenCalled();
@@ -114,7 +114,7 @@ describe('canvasWrite', () => {
         uri: null,
         edits: [],
       });
-      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' } as never);
+      const ok = await cw.applyStructuredEdit({ kind: 'addType', target: 'C', name: 'V', type: 'value' });
       expect(ok).toBe(false);
       expect(deps.workspace.applyWorkspaceEdit).not.toHaveBeenCalled();
       expect(deps.setStatus).toHaveBeenCalledWith('KOI1234: nope', 'error');
@@ -122,7 +122,7 @@ describe('canvasWrite', () => {
   });
 
   it('seeds a starter into a pristine doc on an empty-canvas pick (EMPTY_STATE_PICK round-trip)', () => {
-    const { deps } = build({ editor: { getDoc: vi.fn(() => ''), setDoc: vi.fn() } as never });
+    const { deps } = build({ editor: { getDoc: vi.fn(() => ''), setDoc: vi.fn() } });
     const canvas = document.getElementById('center-visual') as HTMLElement;
     canvas.dispatchEvent(new CustomEvent(EMPTY_STATE_PICK_EVENT, { detail: { kind: 'aggregate' } }));
     expect(deps.editor.setDoc).toHaveBeenCalledOnce();

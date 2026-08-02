@@ -10,8 +10,8 @@ import { isCompileInFlight, markCompileEnd, markCompileStart } from '@/host/brow
 
 const DEBOUNCE_MS = 150;
 // The visual pulsing pill (shown/hidden), and the separate always-present polite live region.
-const indicator = (c: Element) => c.querySelector('[data-role="compiling"]') as HTMLElement | null;
-const liveRegion = (c: Element) => c.querySelector('[data-role="compiling-status"]') as HTMLElement | null;
+const indicator = (c: Element) => c.querySelector<HTMLElement>('[data-role="compiling"]');
+const liveRegion = (c: Element) => c.querySelector<HTMLElement>('[data-role="compiling-status"]');
 const isShown = (el: HTMLElement | null) => el != null && !el.hasAttribute('hidden');
 
 describe('CompilingIndicator (#516)', () => {

@@ -104,7 +104,7 @@ export function createScopeKit(deps: ScopeKitDeps): ScopeKit {
                 saveWorkspaceOverride(key, field, value);
                 deps.onChange(loadSettings());
             } else {
-                deps.commit({ [field]: value } as Partial<Settings>);
+                deps.commit({ [field]: value });
             }
         }
 

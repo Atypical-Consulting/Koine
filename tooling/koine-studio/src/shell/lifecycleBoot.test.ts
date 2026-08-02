@@ -43,7 +43,7 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
     lsp: {
       onServerRestart: vi.fn(),
       start: vi.fn(() => Promise.resolve()),
-      emitTargets: vi.fn(() => Promise.resolve([])) as never,
+      emitTargets: vi.fn(() => Promise.resolve([])),
     },
     shared: null,
     legacyScratch: null,
@@ -92,7 +92,7 @@ function makeDeps(over: Partial<LifecycleBootDeps> = {}): LifecycleBootDeps {
     // expose the order array + the store's unsub spy for the teardown test
     ...({ _order: order, _storeUnsub: storeUnsub } as object),
     ...over,
-  } as LifecycleBootDeps;
+  };
 }
 
 beforeEach(() => {
@@ -323,7 +323,7 @@ describe('lifecycleBoot', () => {
         lsp: {
           onServerRestart: vi.fn(),
           start: vi.fn(() => Promise.reject(new Error('spawn ENOENT'))),
-          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+          emitTargets: vi.fn(() => Promise.resolve([])),
         },
         ...over,
       });
@@ -366,7 +366,7 @@ describe('lifecycleBoot', () => {
         lsp: {
           onServerRestart: vi.fn(),
           start: vi.fn(() => Promise.reject(new Error('spawn ENOENT'))),
-          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+          emitTargets: vi.fn(() => Promise.resolve([])),
         },
         ...over,
       });
@@ -563,7 +563,7 @@ describe('lifecycleBoot', () => {
         lsp: {
           onServerRestart: vi.fn(),
           start: vi.fn(() => startPromise),
-          emitTargets: vi.fn(() => Promise.resolve([])) as never,
+          emitTargets: vi.fn(() => Promise.resolve([])),
         },
         hasOpenWorkspace: vi.fn(() => workspaceOpen),
         newModelUnlocked: vi.fn(async () => {

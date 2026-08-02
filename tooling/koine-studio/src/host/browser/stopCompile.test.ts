@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // getWasmWorkerClient() is the seam (wasm.ts) the handler reads. Default null → main-thread/pre-boot.
-const wasmState = vi.hoisted(() => ({ workerClient: null as unknown }));
+const wasmState = vi.hoisted((): { workerClient: unknown } => ({ workerClient: null }));
 vi.mock('@/host/browser/wasm', () => ({
   getWasmWorkerClient: () => wasmState.workerClient,
 }));

@@ -84,7 +84,7 @@ function NewTitleForm(props: { placeholder: string; onSubmit: (title: string) =>
         placeholder={props.placeholder}
         aria-label={props.placeholder}
         value={title}
-        onInput={(e) => setTitle((e.currentTarget as HTMLInputElement).value)}
+        onInput={(e) => setTitle((e.currentTarget).value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
@@ -220,7 +220,7 @@ function AdrRow(props: {
                 rows={16}
                 aria-label={`Markdown for ADR ${file.number}: ${adr.title}`}
                 value={draft}
-                onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
+                onInput={(e) => setDraft((e.currentTarget).value)}
                 // Escape → the hook's cancel: revert-and-close, same path as the Cancel button.
                 onKeyDown={editorOnKeyDown}
               />
@@ -373,7 +373,7 @@ function NoteRow(props: {
                   rows={16}
                   aria-label={`Markdown for note: ${file.title}`}
                   value={draft}
-                  onInput={(e) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
+                  onInput={(e) => setDraft((e.currentTarget).value)}
                   // Escape → the hook's cancel: revert-and-close, same path as the Cancel button.
                   onKeyDown={editorOnKeyDown}
                 />

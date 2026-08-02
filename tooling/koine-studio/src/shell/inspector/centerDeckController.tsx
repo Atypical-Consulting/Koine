@@ -265,10 +265,10 @@ export function createCenterDeckController(options: CenterDeckControllerOptions)
   });
 
   // --- center chrome -----------------------------------------------------------
-  const activeCenter = (): CenterView => store.getState().center as CenterView;
-  const activeTech = (): TechView => store.getState().tech as TechView;
-  const activeDocs = (): DocsView => store.getState().docs as DocsView;
-  const activeOutput = (): OutputTab => store.getState().output as OutputTab;
+  const activeCenter = (): CenterView => store.getState().center;
+  const activeTech = (): TechView => store.getState().tech;
+  const activeDocs = (): DocsView => store.getState().docs;
+  const activeOutput = (): OutputTab => store.getState().output;
   const activeBottomTab = (): BottomTab => store.getState().bottom;
 
   // The center surfaces visible under the current deck state — the shared pure `deck` read (#1262,

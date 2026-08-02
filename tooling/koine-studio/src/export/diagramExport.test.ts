@@ -13,7 +13,7 @@ vi.mock('@atypical/koine-ui', () => ({ koiPrompt: vi.fn(), koiConfirm: vi.fn() }
 // so the graph constructs with a sane size (mirrors diagrams-maxgraph.test.ts) and assert on the STRING.
 beforeAll(() => {
   Element.prototype.getBoundingClientRect = () =>
-    ({ x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} }) as DOMRect;
+    ({ x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} });
 });
 
 // --- fixture builders --------------------------------------------------------
@@ -532,7 +532,7 @@ describe('svgToPng', () => {
   });
 
   it('rasterizes an SVG string to a non-empty PNG byte array (stubbed raster)', async () => {
-    vi.stubGlobal('Image', StubImage as unknown as typeof Image);
+    vi.stubGlobal('Image', StubImage);
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
       scale() {},
       drawImage() {},
@@ -556,7 +556,7 @@ describe('svgToPng', () => {
         queueMicrotask(() => this.onerror?.(new Error('boom')));
       }
     }
-    vi.stubGlobal('Image', FailImage as unknown as typeof Image);
+    vi.stubGlobal('Image', FailImage);
     await expect(svgToPng('<svg/>')).rejects.toThrow();
   });
 });

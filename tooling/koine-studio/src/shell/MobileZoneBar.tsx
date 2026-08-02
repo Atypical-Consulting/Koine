@@ -41,7 +41,7 @@ export function MobileZoneBar(props: { store: StoreApi<AppState>; onSelect: (z: 
           aria-selected={active === z.zone}
           tabIndex={active === z.zone ? 0 : -1}
           onClick={() => props.onSelect(z.zone)}
-          onKeyDown={(e) => onKeyDown(e as unknown as KeyboardEvent, i)}
+          onKeyDown={(e) => onKeyDown(e, i)}
         >
           {z.label}
         </button>

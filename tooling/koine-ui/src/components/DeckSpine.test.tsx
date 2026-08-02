@@ -41,9 +41,9 @@ describe('DeckSpine', () => {
     const { container } = render(
       <DeckSpine mode="focus" primary="visual" secondary={null} {...base} {...noop} onFocus={onFocus} onOpenBeside={onOpenBeside} />,
     );
-    fireEvent.click(container.querySelectorAll('.fx-tab')[1] as HTMLButtonElement); // Code
+    fireEvent.click(container.querySelectorAll('.fx-tab')[1]); // Code
     expect(onFocus).toHaveBeenCalledWith('technical');
-    fireEvent.click(container.querySelectorAll('.fx-beside')[0] as HTMLButtonElement);
+    fireEvent.click(container.querySelectorAll('.fx-beside')[0]);
     expect(onOpenBeside).toHaveBeenCalled();
   });
 
@@ -83,7 +83,7 @@ describe('DeckSpine', () => {
     // The primary (technical) is the selected pane.
     expect(container.querySelectorAll('.fx-half.sel')).toHaveLength(1);
     // Closing a pane routes its id.
-    fireEvent.click(container.querySelectorAll('.fx-hclose')[0] as HTMLButtonElement);
+    fireEvent.click(container.querySelectorAll('.fx-hclose')[0]);
     expect(onClose).toHaveBeenCalled();
     // A compact Overview affordance is present (icon-only, `.mini`).
     expect(container.querySelector('.fx-act.mini')).not.toBeNull();

@@ -916,7 +916,7 @@ describe('Output / previewTarget setting', () => {
   });
 
   test('coerces a bogus stored target back to the default', () => {
-    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'cobol' as never });
+    saveSettings({ ...DEFAULT_SETTINGS, previewTarget: 'cobol' });
     expect(loadSettings().previewTarget).toBe('csharp');
   });
 

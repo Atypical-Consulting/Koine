@@ -945,7 +945,7 @@ async function idbKeys(): Promise<string[]> {
     return await new Promise<string[]>((resolve) => {
       const tx = db.transaction(STORE, 'readonly');
       const req = tx.objectStore(STORE).getAllKeys();
-      req.onsuccess = () => resolve((req.result as IDBValidKey[]).map(String));
+      req.onsuccess = () => resolve((req.result).map(String));
       req.onerror = () => resolve([]);
     });
   } catch {

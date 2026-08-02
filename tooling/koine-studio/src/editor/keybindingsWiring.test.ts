@@ -77,8 +77,8 @@ describe('editor keybinding wiring', () => {
     const ed = createKoineEditor({
       parent,
       doc: 'value Money {}',
-      onPrepareCallHierarchy: onPrepareCallHierarchy as never,
-      onIncomingCalls: (async () => []) as never,
+      onPrepareCallHierarchy: onPrepareCallHierarchy,
+      onIncomingCalls: (async () => []),
       onNavigateLocation: () => {},
     });
     editors.push(ed);

@@ -333,10 +333,10 @@ function findCanvasSvg(handle: CanvasHandle): SVGSVGElement {
   const view = handle.graph.getView();
   const pane = view.getCanvas?.() as Element | undefined;
   const owner = (pane as SVGElement | undefined)?.ownerSVGElement ?? null;
-  if (owner) return owner as SVGSVGElement;
+  if (owner) return owner;
   const container = handle.graph.container as HTMLElement | undefined;
   const found = container?.querySelector('svg');
-  if (found) return found as SVGSVGElement;
+  if (found) return found;
   throw new Error('canvasToSvg: no <svg> drawing surface found on the canvas handle');
 }
 
@@ -384,8 +384,8 @@ export function canvasToSvg(handle: CanvasHandle): string {
   const h = dim(bounds?.height ?? 0, 600);
   clone.setAttribute('width', String(w));
   clone.setAttribute('height', String(h));
-  const bx = Number.isFinite(bounds?.x) ? Math.floor(bounds!.x) : 0;
-  const by = Number.isFinite(bounds?.y) ? Math.floor(bounds!.y) : 0;
+  const bx = Number.isFinite(bounds?.x) ? Math.floor(bounds.x) : 0;
+  const by = Number.isFinite(bounds?.y) ? Math.floor(bounds.y) : 0;
   clone.setAttribute('viewBox', `${bx} ${by} ${w} ${h}`);
 
   // Inline the DDD palette: define the custom properties (so var() resolves where supported) AND rewrite any
@@ -453,7 +453,7 @@ export function svgToPng(svg: string, scale = 2): Promise<Uint8Array> {
           return;
         }
         ctx.scale(scale, scale);
-        ctx.drawImage(img as unknown as CanvasImageSource, 0, 0);
+        ctx.drawImage(img, 0, 0);
         resolve(dataUrlToBytes(canvas.toDataURL('image/png')));
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));

@@ -155,7 +155,7 @@ function makeDiag(
     },
     message: `diag @${startLine}:${startChar}`,
     severity: 1,
-  } as LspDiagnostic;
+  };
 }
 
 describe('diagnosticsInRange', () => {

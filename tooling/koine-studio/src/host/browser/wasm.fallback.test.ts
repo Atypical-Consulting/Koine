@@ -333,7 +333,7 @@ describe.skipIf(diskConstrained)('loadWasmApi — main-thread fallback (issue #3
         const handle = realSetTimeout(fn as never, ms as never, ...(rest as never[]));
         if (ms === 8_000) safetyNetHandle = handle;
         return handle;
-      }) as never);
+      }));
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
 
     // happy-dom does not execute the injected module script — drive the success bridge the browser would.

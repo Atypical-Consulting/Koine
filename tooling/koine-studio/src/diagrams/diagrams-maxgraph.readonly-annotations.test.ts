@@ -25,7 +25,7 @@ import type { DiagramGraph, DiagramNode } from '@/lsp/lsp';
 // happy-dom returns 0 from getBoundingClientRect; maxGraph reads the container rect on construction.
 beforeAll(() => {
   Element.prototype.getBoundingClientRect = () =>
-    ({ x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} }) as DOMRect;
+    ({ x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} });
 });
 
 afterEach(() => {

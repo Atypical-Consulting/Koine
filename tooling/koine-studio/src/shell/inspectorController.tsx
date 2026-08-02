@@ -824,7 +824,7 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
       const seq = modelIndexGen.next();
       indexPromise = Promise.all([
         fetchGlossaryModel(),
-        lsp.livingDocs().catch(() => ({ files: [] }) as DocsResult),
+        lsp.livingDocs().catch(() => ({ files: [] })),
         fetchStructuredModel(),
       ])
         .then(([glossary, docs, model]) => {

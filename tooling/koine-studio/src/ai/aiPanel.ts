@@ -99,7 +99,7 @@ export function inferNewFileRoot(staged: StagedEdit[], rootOf: Record<string, st
     if (root === undefined) continue;
     roots.add(root);
   }
-  return roots.size === 1 ? [...roots][0]! : null;
+  return roots.size === 1 ? [...roots][0] : null;
 }
 
 export interface AssistantPanelOptions {

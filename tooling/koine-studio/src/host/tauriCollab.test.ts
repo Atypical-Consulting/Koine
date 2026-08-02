@@ -18,7 +18,7 @@ import type { CollabParticipant, CollabPresence, CollabTransport, Platform } fro
 const { listenMock, invokeMock, settingsOverride } = vi.hoisted(() => ({
   listenMock: vi.fn(),
   invokeMock: vi.fn(),
-  settingsOverride: { current: {} as Record<string, unknown> },
+  settingsOverride: { current: {} },
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }));
@@ -140,7 +140,7 @@ describe('Platform.canCollaborate once the broker has shipped (#481 Task 5)', ()
 
 describe('TauriCollabTransport — the wire contract with the Rust broker', () => {
   it('subscribes to every collab:// event BEFORE opening the session', async () => {
-    const transport = new TauriPlatform().createCollabTransport!();
+    const transport = new TauriPlatform().createCollabTransport();
     await transport.start({ mode: 'create', identity: ADA });
 
     for (const event of ['collab://update', 'collab://presence', 'collab://peer-join', 'collab://peer-leave']) {
@@ -154,7 +154,7 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
 
   it('passes the configured bind address and relay through to collab_start', async () => {
     settingsOverride.current = { collabBindAddress: '192.168.1.42', collabRelayUrl: 'relay.example:4321' };
-    const transport = new TauriPlatform().createCollabTransport!();
+    const transport = new TauriPlatform().createCollabTransport();
     await transport.start({ mode: 'create', identity: ADA });
 
     expect(invokeMock).toHaveBeenCalledWith('collab_start', {
@@ -167,10 +167,10 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
   });
 
   it('forwards the join token on a join, and defaults to loopback with no relay', async () => {
-    const host = new TauriPlatform().createCollabTransport!();
+    const host = new TauriPlatform().createCollabTransport();
     const created = await as('ada', () => host.start({ mode: 'create', identity: ADA }));
 
-    const guest = new TauriPlatform().createCollabTransport!();
+    const guest = new TauriPlatform().createCollabTransport();
     await as('grace', () => guest.start({ mode: 'join', token: created.token, identity: GRACE }));
 
     expect(invokeMock).toHaveBeenLastCalledWith('collab_start', {
@@ -183,7 +183,7 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
   });
 
   it('encodes an update as a JSON number array, which is what Tauri IPC can carry', async () => {
-    const transport = new TauriPlatform().createCollabTransport!();
+    const transport = new TauriPlatform().createCollabTransport();
     await transport.start({ mode: 'create', identity: ADA });
     await transport.send(Uint8Array.from([0, 255, 17]));
 
@@ -191,7 +191,7 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
   });
 
   it('detaches its listeners and leaves the session on stop', async () => {
-    const transport = new TauriPlatform().createCollabTransport!();
+    const transport = new TauriPlatform().createCollabTransport();
     await transport.start({ mode: 'create', identity: ADA });
     expect(peerOf('ada').handlers.size).toBe(4);
 
@@ -205,7 +205,7 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
     invokeMock.mockImplementationOnce(async () => {
       throw new Error('unknown or expired collaboration session token');
     });
-    const transport = new TauriPlatform().createCollabTransport!();
+    const transport = new TauriPlatform().createCollabTransport();
 
     await expect(transport.start({ mode: 'join', token: 'nope', identity: GRACE })).rejects.toThrow(
       /unknown or expired/,
@@ -217,8 +217,8 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
 describe('TauriCollabTransport — round trip between two participants', () => {
   /** Two bridged transports on one broker: the creator (authority) and a joiner. */
   async function pair() {
-    const host = new TauriPlatform().createCollabTransport!();
-    const guest = new TauriPlatform().createCollabTransport!();
+    const host = new TauriPlatform().createCollabTransport();
+    const guest = new TauriPlatform().createCollabTransport();
     const hostSeen = { updates: [] as Uint8Array[], presence: [] as CollabPresence[], peers: [] as CollabParticipant[], left: [] as string[] };
     const guestSeen = { updates: [] as Uint8Array[], presence: [] as CollabPresence[], peers: [] as CollabParticipant[], left: [] as string[] };
 

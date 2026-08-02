@@ -560,7 +560,7 @@ async function boot(opts: {
   const realAdd = window.addEventListener.bind(window);
   const spy = vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
     if (type === 'beforeunload' && typeof listener === 'function') {
-      beforeUnload = listener as (e: Event) => void;
+      beforeUnload = listener;
     }
     return realAdd(type as never, listener as never, options as never);
   });
@@ -1193,14 +1193,14 @@ describe('ide init() — close/unload guard', () => {
     const { beforeUnload } = await boot();
 
     // A clean workspace: the guard does not cancel the unload (returnValue stays unset).
-    const clean = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+    const clean = new Event('beforeunload', { cancelable: true });
     beforeUnload(clean);
     expect(clean.defaultPrevented).toBe(false);
     expect(clean.returnValue).toBeFalsy();
 
     // Dirty the workspace, then the guard cancels the unload (preventDefault + legacy returnValue).
     typeIntoEditor('\n// unsaved work\n');
-    const dirty = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+    const dirty = new Event('beforeunload', { cancelable: true });
     beforeUnload(dirty);
     expect(dirty.defaultPrevented).toBe(true);
     expect(dirty.returnValue).toBeTruthy();
@@ -1640,7 +1640,7 @@ describe('ide init() — editor keydown listeners are disposed on teardown (#789
     const addSpy = vi.spyOn(window, 'addEventListener').mockImplementation(
       (type: string, listener: EventListenerOrEventListenerObject | null, opts?: boolean | AddEventListenerOptions) => {
         if (type === 'keydown' && typeof listener === 'function') {
-          keydownListeners.push(listener as EventListener);
+          keydownListeners.push(listener);
         }
         return realAdd(type as never, listener as never, opts as never);
       },
@@ -1661,7 +1661,7 @@ describe('ide init() — editor keydown listeners are disposed on teardown (#789
     const removeSpy = vi.spyOn(window, 'removeEventListener').mockImplementation(
       (type: string, listener: EventListenerOrEventListenerObject | null, opts?: boolean | EventListenerOptions) => {
         if (type === 'keydown' && typeof listener === 'function') {
-          removedListeners.push(listener as EventListener);
+          removedListeners.push(listener);
         }
         return realRemove(type as never, listener as never, opts as never);
       },

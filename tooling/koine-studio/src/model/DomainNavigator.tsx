@@ -418,7 +418,7 @@ function TacticalLeaf({ node, handlers }: { node: ModelNode; handlers: TacticalH
         aria-expanded="false"
         onClick={(ev) => {
           ev.stopPropagation();
-          openLeafMenu(ev.currentTarget as HTMLElement, node, handlers);
+          openLeafMenu(ev.currentTarget, node, handlers);
         }}
       >
         ⋯
@@ -983,7 +983,7 @@ export function DomainNavigator({
         spellcheck={false}
         hidden={filterHidden}
         value={outlineFilter}
-        onInput={(e) => store.getState().setOutlineFilter((e.currentTarget as HTMLInputElement).value)}
+        onInput={(e) => store.getState().setOutlineFilter((e.currentTarget).value)}
       />
       <div class="koi-domain-body">{level}</div>
     </>

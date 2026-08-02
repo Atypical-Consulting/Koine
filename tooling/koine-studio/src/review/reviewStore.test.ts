@@ -184,7 +184,7 @@ describe('reviewStore — persistence', () => {
     platform.createFile = ((folderToken: string, relPath: string) => {
       files.set(`${folderToken}/${relPath}`, JSON.stringify({ version: 1, threads: [] }));
       return Promise.reject(new Error('already exists (raced)'));
-    }) as Platform['createFile'];
+    });
 
     const t = store.add('model.koi', span('model.koi'), 'raced', 'alice');
     await flushPersist();
@@ -286,7 +286,7 @@ describe('reviewStore — remapSpans (pure re-anchoring)', () => {
 
     const out = remapSpans([input], change, after, 'model.koi');
 
-    expect(out).not.toBe(input as unknown); // a fresh array
+    expect(out).not.toBe(input); // a fresh array
     expect(out[0]).not.toBe(input); // a fresh thread (purity)
     expect(out[0].span.offset).toBe(8); // 6 + 2 inserted
     expect(out[0].span.length).toBe(5); // unchanged

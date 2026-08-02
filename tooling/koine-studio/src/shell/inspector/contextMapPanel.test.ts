@@ -129,22 +129,22 @@ describe('createContextMapPanel — superseded paint bails via the render seq', 
     void panel.load(); // fetch -> paintContextMap (seq 1) -> renderContextMapGraph call #1, left pending
     await flush();
     expect(captured).toHaveLength(1);
-    expect(captured[0]!.isCurrent()).toBe(true); // sanity: current before any toggle
+    expect(captured[0].isCurrent()).toBe(true); // sanity: current before any toggle
 
     tableTab(host).click(); // paintContextMap (seq 2): table branch, no new renderContextMapGraph call
     await flush();
-    expect(captured[0]!.isCurrent()).toBe(false); // call #1 is now superseded — the render-seq gate bailed it
+    expect(captured[0].isCurrent()).toBe(false); // call #1 is now superseded — the render-seq gate bailed it
 
     graphTab(host).click(); // paintContextMap (seq 3): graph branch again — renderContextMapGraph call #2
     await flush();
     expect(captured).toHaveLength(2);
-    expect(captured[1]!.isCurrent()).toBe(true); // the latest toggle is current
-    expect(captured[0]!.isCurrent()).toBe(false); // the stale call #1 stays bailed, even after a later toggle
+    expect(captured[1].isCurrent()).toBe(true); // the latest toggle is current
+    expect(captured[0].isCurrent()).toBe(false); // the stale call #1 stays bailed, even after a later toggle
 
     // Resolve both (mirroring what the real renderContextMapGraph does: a superseded caller gets null,
     // the current one gets a real handle) so no promise is left dangling past the test.
-    captured[0]!.resolve(null);
-    captured[1]!.resolve({ dispose: vi.fn() });
+    captured[0].resolve(null);
+    captured[1].resolve({ dispose: vi.fn() });
     await flush();
 
     panel.dispose();

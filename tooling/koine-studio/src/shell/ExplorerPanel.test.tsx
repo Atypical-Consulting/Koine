@@ -135,7 +135,7 @@ describe('ExplorerPanel', () => {
 
     const trees = container.querySelectorAll('ul[role="tree"]');
     expect(trees.length).toBe(1);
-    const tree = trees[0]!;
+    const tree = trees[0];
 
     const salesGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/sales"]');
     const billingGroup = tree.querySelector<HTMLElement>(':scope > .explorer-group[data-root="/home/me/billing"]');

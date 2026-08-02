@@ -12,7 +12,6 @@ import {
   createInspectorController,
   type InspectorAssistant,
   type InspectorControllerDeps,
-  type InspectorControllerLsp,
 } from '@/shell/inspectorController';
 import { createElement, render } from 'preact';
 import { LeftRail, RightStrip } from '@atypical/koine-ui';
@@ -255,7 +254,7 @@ function makeAssistant(): InspectorAssistant & { syncWorkspace: ReturnType<typeo
 
 function makeDeps(lsp: Lsp, over: Partial<InspectorControllerDeps> = {}): InspectorControllerDeps {
   return {
-    lsp: lsp as unknown as InspectorControllerLsp,
+    lsp: lsp,
     editor: fakeEditor(),
     output: fakeOutput(),
     platform: fakePlatform(),

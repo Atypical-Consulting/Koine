@@ -542,7 +542,7 @@ async function bootMainThread(): Promise<KoineWasmApi> {
     }, MAIN_THREAD_BOOT_TIMEOUT_MS);
     // Prevent Node.js from keeping the process alive during tests (mirrors workerClient.ts's boot timer).
     if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
-      (timer as NodeJS.Timeout).unref();
+      (timer).unref();
     }
   });
   const boot = bootMainThreadRuntime();

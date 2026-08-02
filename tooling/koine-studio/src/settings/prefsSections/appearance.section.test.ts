@@ -98,7 +98,7 @@ describe("buildAppearanceSection — Theme's special commit path", () => {
         expect(document.documentElement.dataset.theme).toBe("light"); // applied live
         expect(ctx.commit).not.toHaveBeenCalled();
         expect(ctx.onChange).toHaveBeenCalledTimes(1);
-        expect(ctx.onChange.mock.calls[0]![0].theme).toBe("light");
+        expect(ctx.onChange.mock.calls[0][0].theme).toBe("light");
     });
 });
 
