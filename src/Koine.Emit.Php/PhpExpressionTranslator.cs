@@ -158,17 +158,19 @@ internal sealed class PhpExpressionTranslator
 
     /// <summary>
     /// Writes <paramref name="expr"/> widened to a runtime <c>Decimal</c> as <paramref name="needs"/>
-    /// dictates — the single rendering half PHP's two reconciliation sites share
+    /// dictates — the single rendering half PHP's three reconciliation sites share
     /// (<see cref="TranslateReconciled"/>'s factory ctor arg, #1732; <see cref="WriteCoalesce"/>'s
-    /// operands, #1762). <c>NeedsWiden</c> reuses the existing <see cref="WriteAsDecimal"/>
-    /// arithmetic-operand primitive (its int-literal and generic fallthrough arms already produce
-    /// exactly this widening, PHP-8.1-floor-safe parenthesisation included); <c>NeedsOptionalWiden</c>
-    /// uses the null-check-and-widen arrow-function shell #1732 introduced — PHP has no
-    /// <c>Option.map</c> and <c>??</c> cannot itself transform a present value, so this follows the same
-    /// immediately-invoked-closure idiom <see cref="WriteLet"/> already uses. The shell parenthesises
-    /// its own argument slot, so a compound operand (a nested coalesce) composes safely.
-    /// <c>NeedsSomeWrap</c> is ignored: PHP's optional is a plain <c>?T</c> nullable, which needs no
-    /// lift (the same conclusion TypeScript/Kotlin/Python reach for their union-shaped optionals).
+    /// operands, #1762; the <c>ConditionalExpr</c> ternary branches in <see cref="Write"/>, #1761 — the
+    /// #1344 fix the other four code emitters already had). <c>NeedsWiden</c> reuses the existing
+    /// <see cref="WriteAsDecimal"/> arithmetic-operand primitive (its int-literal and generic fallthrough
+    /// arms already produce exactly this widening, PHP-8.1-floor-safe parenthesisation included);
+    /// <c>NeedsOptionalWiden</c> uses the null-check-and-widen arrow-function shell #1732 introduced —
+    /// PHP has no <c>Option.map</c> and <c>??</c> cannot itself transform a present value, so this
+    /// follows the same immediately-invoked-closure idiom <see cref="WriteLet"/> already uses. The shell
+    /// parenthesises its own argument slot, so a compound operand (a nested coalesce or ternary)
+    /// composes safely. <c>NeedsSomeWrap</c> is ignored: PHP's optional is a plain <c>?T</c> nullable,
+    /// which needs no lift (the same conclusion TypeScript/Kotlin/Python reach for their union-shaped
+    /// optionals).
     /// </summary>
     private void WriteReconciled(Expr expr, BranchReconciliation needs, StringBuilder sb)
     {
@@ -352,13 +354,16 @@ internal sealed class PhpExpressionTranslator
                 }
                 break;
             case ConditionalExpr cond:
-                // PHP ternary: `(cond ? then : else)`.
+                // PHP ternary: `(cond ? then : else)`, each branch numerically reconciled against its
+                // sibling (#1761, the #1344 counterpart the other four code emitters already had).
+                TypeRef? thenType = InferType(cond.Then);
+                TypeRef? elseType = InferType(cond.Else);
                 sb.Append('(');
                 Write(cond.Condition, sb);
                 sb.Append(" ? ");
-                Write(cond.Then, sb);
+                WriteReconciled(cond.Then, BranchReconciliation.Classify(thenType, elseType), sb);
                 sb.Append(" : ");
-                Write(cond.Else, sb);
+                WriteReconciled(cond.Else, BranchReconciliation.Classify(elseType, thenType), sb);
                 sb.Append(')');
                 break;
             case CoalesceExpr co:
