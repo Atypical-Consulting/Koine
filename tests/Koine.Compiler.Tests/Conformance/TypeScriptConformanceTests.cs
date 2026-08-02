@@ -1788,6 +1788,117 @@ public class TypeScriptConformanceTests
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
 
+    /// <summary>
+    /// Issue #1887 — a command-body state transition (<c>amount -&gt; 5</c>) assigns STRAIGHT INTO the
+    /// target member's declared slot, but that value was never reconciled against the member's declared
+    /// type, unlike every sibling call site in this family: the factory's explicit <c>field -&gt; expr</c>
+    /// initialization (#1732), the <c>result</c> expression and the emit/publish payload (#1875), the
+    /// member default initializer (#1880) and the derived-member body (#1888). Before the fix TypeScript
+    /// emitted a bare <c>this.amount = 5;</c> into an <c>amount: Decimal</c> field — a real
+    /// <c>tsc --strict</c> TS2322 ("Type 'number' is not assignable to type 'Decimal'"). Routed through
+    /// the same <c>TranslateReconciled</c> the sibling call sites already use. Rust closed this same site
+    /// at #1511.
+    /// </summary>
+    [Fact]
+    public void Command_transition_widens_an_int_value_into_a_decimal_member()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    qty: Int\n" +
+            "    amount: Decimal\n" +
+            "\n" +
+            "    command bump() {\n" +
+            "      amount -> 5\n" +
+            "    }\n" +
+            "\n" +
+            "    command scale() {\n" +
+            "      amount -> qty * 2\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.amount = Decimal.fromInt(5);");
+        product.ShouldContain("this.amount = Decimal.fromInt((this.qty * 2));");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887 — the optional-declared variant (Rust's #1511 shape). TypeScript's optional is a plain
+    /// <c>T | undefined</c> union, so only the NUMERIC dimension renders: the transitioned value still
+    /// widens to <c>Decimal</c>, with no <c>NeedsSomeWrap</c> lift on top.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_command_transition_widens_without_a_lift()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    qty: Int\n" +
+            "    amount: Decimal\n" +
+            "    note: Decimal?\n" +
+            "\n" +
+            "    command annotate() {\n" +
+            "      note -> 7\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.note = Decimal.fromInt(7);");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887's zero-change guard — a matching-type (<c>Decimal</c>) transition and a non-numeric
+    /// (<c>String</c>) one must render byte-identically to before the reconciliation was wired in. Every
+    /// sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_command_transitions_render_unchanged()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    label: String\n" +
+            "\n" +
+            "    command hold(d: Decimal) {\n" +
+            "      amount -> d\n" +
+            "    }\n" +
+            "\n" +
+            "    command retitle(t: String) {\n" +
+            "      label -> t\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("entities/Product.ts", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.amount = d;");
+        product.ShouldContain("this.label = t;");
+        product.ShouldNotContain("Decimal.fromInt");
+
+        TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
+
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()

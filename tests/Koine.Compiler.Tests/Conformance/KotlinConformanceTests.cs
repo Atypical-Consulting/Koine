@@ -1258,6 +1258,114 @@ public class KotlinConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1887 — a command <c>transition</c> (<c>amount -&gt; 5</c>) is never numerically reconciled
+    /// against the target member's declared type. Kotlin emitted a bare <c>this.amount = 5L</c> into a
+    /// <c>java.math.BigDecimal</c>-typed property — a hard <c>kotlinc</c> type mismatch. Routed through
+    /// the very same <c>TranslateReconciled</c> the derived-member body (#1888) and member-default
+    /// (#1880) halves already use. Rust closed this call site at #1511.
+    /// </summary>
+    [Fact]
+    public void Command_transition_widens_an_int_value_into_a_decimal_member()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    qty: Int\n" +
+            "    amount: Decimal\n" +
+            "\n" +
+            "    command bump() {\n" +
+            "      amount -> 5\n" +
+            "    }\n" +
+            "\n" +
+            "    command scale() {\n" +
+            "      amount -> qty * 2\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.amount = java.math.BigDecimal.valueOf(5L)");
+        product.ShouldContain("this.amount = java.math.BigDecimal.valueOf(this.qty * 2L)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887 — the optional-declared variant (Rust's #1511 shape). Kotlin nullability is
+    /// subtyping, so only the NUMERIC dimension renders: the transitioned value still widens to
+    /// <c>BigDecimal</c>, and flows into the nullable-declared property unchanged (no <c>NeedsSomeWrap</c>
+    /// lift — the same conclusion the #1888 derived-member-body sibling test reaches).
+    /// </summary>
+    [Fact]
+    public void Optional_declared_command_transition_widens_without_a_lift()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    qty: Int\n" +
+            "    amount: Decimal\n" +
+            "    note: Decimal?\n" +
+            "\n" +
+            "    command annotate() {\n" +
+            "      note -> 7\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.note = java.math.BigDecimal.valueOf(7L)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1887's zero-change guard — a matching-type (<c>Decimal</c>) command transition and a
+    /// non-numeric (<c>String</c>) one must render byte-identically to before the reconciliation was
+    /// wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_command_transitions_render_unchanged()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    amount: Decimal\n" +
+            "    label: String\n" +
+            "\n" +
+            "    command hold(d: Decimal) {\n" +
+            "      amount -> d\n" +
+            "    }\n" +
+            "\n" +
+            "    command retitle(t: String) {\n" +
+            "      label -> t\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.kt", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("this.amount = d");
+        product.ShouldContain("this.label = t");
+        product.ShouldNotContain("java.math.BigDecimal.valueOf");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Issue #1866: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_bigdecimal_against_a_decimal_return_type()

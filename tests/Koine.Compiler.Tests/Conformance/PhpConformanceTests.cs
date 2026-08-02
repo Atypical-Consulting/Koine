@@ -2868,6 +2868,117 @@ public class PhpConformanceTests
         AssertPhpIsWellTyped(result.Files);
     }
 
+    /// <summary>
+    /// Issue #1887 — a command <c>transition</c> (<c>amount -&gt; 5</c>) is never numerically reconciled
+    /// against the target member's declared type. PHP emitted a bare <c>$this->amount = 5;</c> into a
+    /// <c>\Koine\Runtime\Decimal</c>-typed property — a real <c>phpstan analyse --level max</c>
+    /// <c>assign.propertyType</c> error. Routed through the very same <c>TranslateReconciled</c> the
+    /// derived-member body (#1888) and member-default (#1880) halves already use. Rust closed this call
+    /// site at #1511.
+    /// </summary>
+    [Fact]
+    public void Command_transition_widens_an_int_value_into_a_decimal_member()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                qty: Int
+                amount: Decimal
+
+                command bump() {
+                  amount -> 5
+                }
+
+                command scale() {
+                  amount -> qty * 2
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"$this->amount = (new \Koine\Runtime\Decimal('5'));");
+        product.ShouldContain(@"$this->amount = (new \Koine\Runtime\Decimal(($this->qty * 2)));");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1887 — the optional-declared variant (Rust's #1511 shape). PHP's optional is a plain
+    /// <c>?T</c> nullable, so only the NUMERIC dimension renders: the transitioned value still widens to
+    /// a runtime <c>Decimal</c>, with no lift on top (<c>NeedsSomeWrap</c> is ignored for PHP — the same
+    /// conclusion the #1888 derived-member-body sibling test reaches).
+    /// <para>Unlike that sibling test, a command transition's target is always a plain STORED property —
+    /// <see cref="EmitEntityClass"/> only emits a getter method (with its own declared return type) for a
+    /// DERIVED member, never for a stored one — so there is no accessor here for #1895's
+    /// <c>return.unusedType</c> nullability noise to attach to. This gates on the full clean
+    /// <see cref="AssertPhpIsWellTyped"/> run rather than the sibling's precise gate for that reason.</para>
+    /// </summary>
+    [Fact]
+    public void Optional_declared_command_transition_widens_without_a_lift()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                qty: Int
+                amount: Decimal
+                note: Decimal?
+
+                command annotate() {
+                  note -> 7
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain(@"$this->note = (new \Koine\Runtime\Decimal('7'));");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1887's zero-change guard — a matching-type (<c>Decimal</c>) command transition and a
+    /// non-numeric (<c>String</c>) one must render byte-identically to before the reconciliation was
+    /// wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_command_transitions_render_unchanged()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                amount: Decimal
+                label: String
+
+                command hold(d: Decimal) {
+                  amount -> d
+                }
+
+                command retitle(t: String) {
+                  label -> t
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("$this->amount = $d;");
+        product.ShouldContain("$this->label = $t;");
+        product.ShouldNotContain(@"new \Koine\Runtime\Decimal");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
     /// <summary>Issue #1875: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_decimal_against_a_decimal_return_type()
