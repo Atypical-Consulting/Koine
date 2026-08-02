@@ -241,16 +241,7 @@ internal sealed class RustExpressionTranslator
                 sb.Append(" }");
                 break;
             case CoalesceExpr co:
-                // `l ?? r` -> `l.clone().unwrap_or_else(|| r)` (l is an Option<T>; result is T) when `r`
-                // is non-optional, or `l.clone().or_else(|| r)` (result stays Option<T>) when `r` is
-                // itself optional — force-unwrapping there would lose the "still absent" case and fail a
-                // real `cargo check` E0308 (#1333). Infer `r`'s type once and hand it to
-                // WriteOperandValue, which would otherwise re-infer the same node.
-                WriteOperandValue(co.Left, sb);
-                TypeRef? rightType = _resolver.Infer(co.Right, EffectiveScope());
-                sb.Append(rightType?.IsOptional == true ? ".or_else(|| " : ".unwrap_or_else(|| ");
-                WriteOperandValue(co.Right, sb, rightType);
-                sb.Append(')');
+                WriteCoalesce(co, sb);
                 break;
             case MemberAccessExpr ma:
                 WriteMemberAccess(ma, sb);
@@ -274,6 +265,83 @@ internal sealed class RustExpressionTranslator
                 sb.Append("/* unsupported expression */ false");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Issue #1829: renders <c>l ?? r</c> with each operand numerically reconciled against the OTHER'S
+    /// type, mirroring Kotlin's <c>WriteCoalesce</c> (#1615), Java's <c>Optional.or</c>/<c>.orElse</c>
+    /// widening (#1548), and TypeScript's/Python's/PHP's #1762 — the one target this reconciliation
+    /// family had never reached. <c>l</c> is always <c>Option</c>-shaped (that is what makes <c>??</c>
+    /// meaningful), so its widen composes as an <c>Option::map</c> ahead of the combinator call
+    /// (<c>NeedsWiden</c> structurally never applies to the left operand — only
+    /// <see cref="BranchReconciliation.NeedsOptionalWiden"/> can, since <c>l</c>'s own inferred type is
+    /// always optional). The combinator choice itself is unchanged from #1333:
+    /// <c>.unwrap_or_else(...)</c> (closure returns a bare value) when the right operand is non-optional,
+    /// <c>.or_else(...)</c> (closure returns <c>Option&lt;T&gt;</c>) when it is itself optional — the
+    /// right operand's OWN widen composes inside whichever closure shape that picks: a bare
+    /// <c>Decimal::from(...)</c> wrap for <c>NeedsWiden</c>, or a <c>.map(Decimal::from)</c> for
+    /// <c>NeedsOptionalWiden</c> (so a still-<c>None</c> optional fallback stays <c>None</c> rather than
+    /// widening a value that isn't there).
+    /// </summary>
+    private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
+    {
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
+        BranchReconciliation leftNeeds = BranchReconciliation.Classify(leftType, rightType);
+        BranchReconciliation rightNeeds = BranchReconciliation.Classify(rightType, leftType);
+
+        WriteOperandValue(co.Left, sb);
+        if (leftNeeds.NeedsOptionalWiden)
+        {
+            sb.Append(".map(Decimal::from)");
+        }
+
+        sb.Append(rightType?.IsOptional == true ? ".or_else(|| " : ".unwrap_or_else(|| ");
+        if (rightNeeds.NeedsWiden)
+        {
+            sb.Append("Decimal::from(");
+            WriteOperandValue(co.Right, sb, rightType);
+            sb.Append(')');
+        }
+        else
+        {
+            WriteOperandValue(co.Right, sb, rightType);
+            if (rightNeeds.NeedsOptionalWiden)
+            {
+                sb.Append(".map(Decimal::from)");
+            }
+        }
+
+        sb.Append(')');
+    }
+
+    /// <summary>
+    /// An expression's type AS THIS TRANSLATOR RENDERS IT — the type <see cref="WriteCoalesce"/>'s
+    /// per-operand widen must classify against. For most expressions this is just
+    /// <see cref="InferType"/> — but a <see cref="CoalesceExpr"/> is special: <c>TypeResolver.VisitCoalesce</c>
+    /// (target-agnostic, shared across every emitter) reports the coalesce's LEFT operand's own numeric
+    /// type, unreconciled against the right, whereas <see cref="WriteCoalesce"/> widens the narrower
+    /// operand's RENDERED text to match the wider one (mirrors PHP's/TypeScript's own #1762 guard).
+    /// Classifying against the raw resolver type would therefore be wrong for a NESTED coalesce operand:
+    /// it would under-widen (an <c>Int?</c>-reported nested coalesce that in fact renders as
+    /// <c>Decimal?</c> once its own operands are reconciled). Recursive for exactly that reason — a
+    /// nested coalesce's own effective type is the join of ITS operands, not its leftmost leaf's.
+    /// </summary>
+    private TypeRef? InferRenderedType(Expr value)
+    {
+        if (value is not CoalesceExpr co)
+        {
+            return InferType(value);
+        }
+
+        TypeRef? leftType = InferRenderedType(co.Left);
+        TypeRef? rightType = InferRenderedType(co.Right);
+
+        // Matches this translator's own combinator choice: the coalesce stays optional only when the
+        // right (fallback) operand is itself optional (#1333).
+        var isOptional = rightType?.IsOptional == true;
+        var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
+        return name is null ? null : new TypeRef(name, IsOptional: isOptional);
     }
 
     /// <summary>
