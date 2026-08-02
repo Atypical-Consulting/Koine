@@ -57,6 +57,14 @@ public class CrossEmitterConformanceTests
         "run. The C# (and, where available, TypeScript/Python) outcomes were still asserted. Install kotlinc " +
         "(or set KOINE_KOTLINC) — CI runs the full comparison.";
 
+    private const string NoRustToolchainNotice =
+        "No cargo toolchain available locally; the Rust half of the cross-emitter comparison was not " +
+        "run. Install a Rust toolchain (or set KOINE_CARGO) — CI runs the full comparison.";
+
+    private const string NoPhpToolchainNotice =
+        "No phpstan toolchain available locally; the PHP half of the cross-emitter comparison was not " +
+        "run. Install phpstan (or set KOINE_PHPSTAN) — CI runs the full comparison.";
+
     // ---- The corpus -----------------------------------------------------------------------------
 
     /// <summary>
@@ -491,6 +499,105 @@ public class CrossEmitterConformanceTests
         TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
         TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
         TestSupport.RequireOrSkip(ktCheck.ToolchainAvailable, NoKotlinToolchainNotice);
+    }
+
+    /// <summary>
+    /// Issue #1875, Task 5 — the cross-target guard against the next target drifting out of the
+    /// numeric-reconciliation family again (the exact failure mode #1344 → #1732 → #1548/#1615 →
+    /// #1761 → #1762 → #1829 → #1511 → #1866 → #1875 kept repeating). Compiles ONE Int-into-Decimal
+    /// <c>result</c>/payload model through every code emitter that reconciles this pair of call sites
+    /// TODAY, asserting each one's own widening idiom is present and, where a toolchain is available,
+    /// that the emitted code actually compiles/type-checks.
+    /// <para><b>Scoped to C#, Rust, TypeScript, Python, and PHP</b> — the five targets confirmed to
+    /// reconcile a command's <c>result</c> expression and an event-payload argument against their
+    /// declared type as of this issue: C# needs no widening at all (a built-in implicit <c>long</c>-
+    /// to-<c>decimal</c> conversion makes it genuinely decimal-transparent), Rust was fixed at #1511
+    /// (the reference implementation), and TypeScript/Python/PHP are fixed by THIS issue. Java and
+    /// Kotlin are fixed concurrently by the sibling #1866 (PR #1872) — when that lands, its own
+    /// version of this same guard method merges with this one into the full seven-target union rather
+    /// than living as two parallel tests.</para>
+    /// </summary>
+    [Fact]
+    public void Result_and_payload_int_decimal_reconciliation_agrees_across_reconciled_targets()
+    {
+        const string koi =
+            "context Billing {\n" +
+            "  event Charged { amount: Decimal }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeC: Decimal {\n" +
+            "      result tax\n" +
+            "    }\n" +
+            "    command raiseCharge {\n" +
+            "      emit Charged(amount: tax)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        // C#: always runs and always asserts — genuinely decimal-transparent, no widening idiom to pin.
+        CompileResult cs = new KoineCompiler().Compile(koi, new CSharpEmitter());
+        cs.Success.ShouldBeTrue("C# emit failed:\n" + string.Join("\n", cs.Diagnostics.Select(d => d.ToString())));
+        var (asm, csErrors) = TestSupport.Compile(cs.Files.ToList());
+        (asm is not null).ShouldBeTrue("C# result/payload reconciliation model failed to compile:\n" + string.Join("\n", csErrors));
+
+        // Rust: emit + cargo check, asserted when the toolchain is present (#1511's own widening idiom).
+        CompileResult rs = new KoineCompiler().Compile(koi, new RustEmitter());
+        rs.Success.ShouldBeTrue("Rust emit failed:\n" + string.Join("\n", rs.Diagnostics.Select(d => d.ToString())));
+        var rustInvoice = rs.Files.Single(f => f.RelativePath.EndsWith("billing.rs", StringComparison.Ordinal)).Contents;
+        rustInvoice.ShouldContain("Ok(Decimal::from(self.tax))");
+        rustInvoice.ShouldContain("Decimal::from(self.tax)");
+        TestSupport.RustCheck rsCheck = TestSupport.CompileRust(rs.Files);
+        if (rsCheck.ToolchainAvailable)
+        {
+            rsCheck.Ok.ShouldBeTrue("Rust result/payload reconciliation should compile under cargo check:\n" + string.Join("\n", rsCheck.Errors));
+        }
+
+        // TypeScript: emit + tsc --strict, asserted when the toolchain is present (this issue's widening idiom).
+        CompileResult ts = new KoineCompiler().Compile(koi, new TypeScriptEmitter());
+        ts.Success.ShouldBeTrue("TS emit failed:\n" + string.Join("\n", ts.Diagnostics.Select(d => d.ToString())));
+        var tsInvoice = ts.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        tsInvoice.ShouldContain("Decimal.fromInt(this.tax)");
+        TestSupport.TypeScriptCheck tsCheck2 = TestSupport.TypeCheckTypeScript(ts.Files);
+        if (tsCheck2.ToolchainAvailable)
+        {
+            tsCheck2.Ok.ShouldBeTrue("TypeScript result/payload reconciliation should type-check under tsc --strict:\n" + string.Join("\n", tsCheck2.Errors));
+        }
+
+        // Python: emit + mypy --strict, asserted when the toolchain is present (this issue's widening idiom).
+        CompileResult py = new KoineCompiler().Compile(koi, new PythonEmitter());
+        py.Success.ShouldBeTrue("Python emit failed:\n" + string.Join("\n", py.Diagnostics.Select(d => d.ToString())));
+        var pyInvoice = py.Files.Single(f => f.RelativePath.EndsWith("invoice.py", StringComparison.Ordinal)).Contents;
+        pyInvoice.ShouldContain("Decimal(self.tax)");
+        TestSupport.PythonCheck pyCheck2 = TestSupport.TypeCheckPython(py.Files);
+        if (pyCheck2.ToolchainAvailable)
+        {
+            pyCheck2.Ok.ShouldBeTrue("Python result/payload reconciliation should type-check under mypy --strict:\n" + string.Join("\n", pyCheck2.Errors));
+        }
+
+        // PHP: emit + phpstan --level max, asserted when the toolchain is present (this issue's widening idiom).
+        CompileResult php = new KoineCompiler().Compile(koi, new PhpEmitter());
+        php.Success.ShouldBeTrue("PHP emit failed:\n" + string.Join("\n", php.Diagnostics.Select(d => d.ToString())));
+        var phpInvoice = php.Files.Single(f => f.RelativePath.EndsWith("Invoice.php", StringComparison.Ordinal)).Contents;
+        phpInvoice.ShouldContain(@"new \Koine\Runtime\Decimal($this->tax)");
+        TestSupport.PhpCheck phpSyntax = TestSupport.SyntaxCheckPhp(php.Files);
+        TestSupport.PhpCheck phpCheck = TestSupport.TypeCheckPhp(php.Files);
+        if (phpSyntax.ToolchainAvailable)
+        {
+            phpSyntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", phpSyntax.Errors));
+        }
+        if (phpCheck.ToolchainAvailable)
+        {
+            phpCheck.Ok.ShouldBeTrue("PHP result/payload reconciliation should type-check under phpstan --level max:\n" + string.Join("\n", phpCheck.Errors));
+        }
+
+        // The C# half always asserts above; Rust/TypeScript/Python/PHP only assert when their
+        // toolchain ran. Funnel each absence through RequireOrSkip AFTER the assertions so a missing
+        // toolchain reports Skipped — or, under KOINE_REQUIRE_CONFORMANCE, Failed — instead of
+        // silently passing.
+        TestSupport.RequireOrSkip(rsCheck.ToolchainAvailable, NoRustToolchainNotice);
+        TestSupport.RequireOrSkip(tsCheck2.ToolchainAvailable, NoToolchainNotice);
+        TestSupport.RequireOrSkip(pyCheck2.ToolchainAvailable, NoPythonToolchainNotice);
+        TestSupport.RequireOrSkip(phpCheck.ToolchainAvailable, NoPhpToolchainNotice);
     }
 
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";
