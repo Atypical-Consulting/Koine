@@ -14,8 +14,11 @@ namespace Koine.Compiler;
 /// <para>R19's <c>@route</c>/<c>@get</c>…<c>@patch</c>/<c>@auth</c> annotations (#1219) override the path,
 /// the verb key, and add a per-operation <c>security</c> requirement — all three read off the shared
 /// <see cref="RouteInfo"/>, so the openapi document and the C# <c>api</c> layer never disagree. A factory
-/// carries no such annotations (they stay purely conventional — #1747), so it always emits its
-/// <see cref="RouteDerivation.ForFactory"/>-derived <c>POST</c> with no <c>security</c> block.</para>
+/// carries the same three annotations since #1846 and reads them the same way; carrying none, it falls
+/// back to its <see cref="RouteDerivation.ForFactory"/>-derived <c>POST</c> with no <c>security</c> block.
+/// The one asymmetry is token binding: a factory mints the identity it creates, so its <c>{id}</c> has no
+/// aggregate-identity fallback (<see cref="RouteDerivation.ForFactory"/> resolves no
+/// <see cref="RouteTokenTarget.Identity"/> binding) and matches only a declared parameter.</para>
 /// <para>A factory's operation is a deliberate <b>superset</b> of the C# <c>api</c> layer: every entity's
 /// factory gets a path here, while <c>CSharpEmitter.Api.cs</c> additionally gates on the aggregate's
 /// repository exposing <c>add</c> — mirroring the existing command/query scope note on

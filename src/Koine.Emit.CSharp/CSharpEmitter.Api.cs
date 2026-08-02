@@ -17,8 +17,8 @@ namespace Koine.Compiler;
 /// by <c>using</c> / fully-qualified name; the consumer supplies
 /// <c>&lt;FrameworkReference Include="Microsoft.AspNetCore.App" /&gt;</c>. Convention-first (OpenApi-style
 /// routes), with R19's <c>@route</c>/<c>@get</c>…<c>@patch</c>/<c>@auth</c> annotations as the per-operation
-/// escape hatch — an annotated command/query maps through its own verb, path and
-/// <c>.RequireAuthorization(...)</c> (#1219). Other app-specific policy (non-default status codes,
+/// escape hatch — an annotated command/query (#1219) or factory (#1846) maps through its own verb, path
+/// and <c>.RequireAuthorization(...)</c>. Other app-specific policy (non-default status codes,
 /// filters) still stays hand-written.</para>
 /// </summary>
 public sealed partial class CSharpEmitter

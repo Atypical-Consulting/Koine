@@ -181,6 +181,6 @@ that position diagnoses it instead (`@since`/`@deprecated` on a `command`, for o
 | --- | --- | --- |
 | `@since(n)` | integer | fields and type-level declarations — [Versioning (§18)](/Koine/reference/versioning/) |
 | `@deprecated("reason")` | string | fields and type-level declarations — [Versioning (§18)](/Koine/reference/versioning/) |
-| `@route("/orders/{id}")` | string | `command` and `query` — [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) |
-| `@get` `@post` `@put` `@delete` `@patch` | *(none)* | `command` and `query` — [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) |
-| `@auth("admin")` | string | `command` and `query` — [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@route("/orders/{id}")` | string | `command`, `query` and `create` — [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@get` `@post` `@put` `@delete` `@patch` | *(none)* | `command`, `query` and `create` — [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) |
+| `@auth("admin")` | string | `command`, `query` and `create` — [API annotations (§15.9)](/Koine/reference/application-cqrs/#159-api-annotations) |

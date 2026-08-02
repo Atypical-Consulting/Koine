@@ -1669,6 +1669,41 @@ public class R19ApiAnnotationsTests
         endpoints.ShouldContain("request with { Class = @class }");
     }
 
+    /// <summary>
+    /// The regression guard #1846 makes mandatory: giving a <b>factory</b> the <c>@route</c> axis put a
+    /// second declaration kind on the keyword-collision path #1748's code review found, so it gets its own
+    /// lock. The <c>[FromRoute(Name = "…")]</c> argument must stay the token's literal text — it has to
+    /// match the route template ASP.NET registers — while the identifier it binds takes the <c>@</c>
+    /// escape; getting either wrong emits C# that does not compile, which is why this asserts through
+    /// <see cref="BuildApi"/> (a real Roslyn compile of the emitted files), not just on the text.
+    /// </summary>
+    [Theory]
+    [InlineData("class", "Class")]
+    [InlineData("event", "Event")]
+    [InlineData("base", "Base")]
+    [InlineData("int", "Int")]
+    public void A_factory_route_token_spelled_like_a_csharp_keyword_still_compiles(string token, string property)
+    {
+        var src = $$"""
+            context Ordering {
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: String
+
+                  @route("/orders/{{{token}}}")
+                  create open({{token}}: String) {
+                  }
+                }
+              }
+            }
+            """;
+
+        var endpoints = FileEndingWith(BuildApi(src), "OrderingEndpoints.cs");
+
+        endpoints.ShouldContain($"[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"{token}\")] string @{token}");
+        endpoints.ShouldContain($"request with {{ {property} = @{token} }}");
+    }
+
     // ---- @route token binding into the C# api layer — queries (#1748) -------
 
     /// <summary>A query criterion named the same as the route token binds the same way a command
