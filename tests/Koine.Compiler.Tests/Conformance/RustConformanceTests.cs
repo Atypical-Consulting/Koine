@@ -443,6 +443,55 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// #1871, follow-up of #1863: <c>IsQuantityType</c> resolved its operand through the translator's
+    /// own bounded <see cref="RustExpressionTranslator.Context"/> alone, ignoring an explicit
+    /// cross-context qualifier (<c>Context.T</c>) on the operand's type — unlike its two siblings in
+    /// this file, <c>EnumTypeName</c> and <c>ProducesBorrowedStr</c>, which both resolve
+    /// <c>Qualifier ?? Context</c>. Shipping declares its own, differently-kinded <c>Money</c>, so
+    /// <c>Package.combined</c>'s explicitly-qualified <c>Billing.Money</c> operand must resolve to
+    /// Billing's <c>quantity</c> declaration, never to Shipping's own same-named <c>value</c>.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Quantity_arithmetic_resolves_via_an_explicit_cross_context_qualifier(bool swapOrder)
+    {
+        const string billing = """
+            context Billing {
+              enum Currency { EUR, USD }
+              quantity Money {
+                amount: Decimal
+                unit: Currency
+              }
+            }
+            """;
+        const string shipping = """
+            context Shipping {
+              value Money {
+                note: String
+              }
+              value Package {
+                weight: Billing.Money
+                combined: Billing.Money = weight + weight
+              }
+            }
+            """;
+        string src = swapOrder ? $"{shipping}\n{billing}" : $"{billing}\n{shipping}";
+
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldNotContain("self.weight.clone() + self.weight.clone()");
+        rust.ShouldContain("self.weight.add(&self.weight).expect(\"Money: unit mismatch\")");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1268, follow-up of #1068's Add/Sub fix: a <c>quantity</c>'s unit-checked <c>+</c>/<c>-</c>
     /// must compile via a real <c>cargo check</c> when an operand is a compound (non-place) expression
     /// such as a conditional, not just a bare identifier/field access. The #1068 guard wrote a
