@@ -65,7 +65,7 @@ Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.init -> void
 Koine.Compiler.Ast.ModelCoverage
 Koine.Compiler.Ast.ModelIndex.CommandsEmitting(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
 Koine.Compiler.Ast.ModelIndex.EventsEmittedBy(string! targetType, string! commandName) -> System.Collections.Generic.IReadOnlyList<string!>!
-Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
+Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! context, string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
 Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
 Koine.Compiler.Ast.QueryDecl.ApiAnnotations.get -> Koine.Compiler.Ast.ApiAnnotationInfo?
 Koine.Compiler.Ast.QueryDecl.ApiAnnotations.init -> void
