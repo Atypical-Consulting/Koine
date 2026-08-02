@@ -79,7 +79,10 @@ public sealed partial class JavaEmitter
     /// </summary>
     private static IReadOnlyList<Member> EventMembers(ModelIndex index, string context, string eventName)
     {
-        if (!index.TryGetDeclIn(context, eventName, out TypeDecl decl) && !index.TryGetDecl(eventName, out decl))
+        // Context-first, flat-fallback — which this emitter already did by hand, and which #1849 made
+        // uniform: the same `TryGetDecl(context, …)` overload is now used by `ValidatePolicies` and by
+        // every other policy emitter, so all six sites give one answer.
+        if (!index.TryGetDecl(context, eventName, out TypeDecl decl))
         {
             return Array.Empty<Member>();
         }
