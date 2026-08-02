@@ -112,13 +112,18 @@ internal sealed class KotlinExpressionTranslator
     }
 
     /// <summary>
-    /// Issue #1732: like <see cref="Translate"/>, but reconciles <paramref name="value"/>'s inferred type
-    /// against the <paramref name="declared"/> type of the member it initializes — the factory ctor-arg
-    /// counterpart of <see cref="WriteReconciledBranch"/> (#1344), reusing the same shared
+    /// Like <see cref="Translate"/>, but reconciles <paramref name="value"/>'s inferred type against the
+    /// <paramref name="declared"/> type of the place it flows into — the counterpart of
+    /// <see cref="WriteReconciledBranch"/> (#1344), reusing the same shared
     /// <see cref="BranchReconciliation.Classify"/> decision (#1368) and the same target-local widen
-    /// renderings, so a factory's explicit <c>field -&gt; expr</c> initialization emits a
-    /// <c>kotlinc</c>-clean value instead of a bare mismatched literal (mirrors Java's #1519
-    /// <c>ReconcileFactoryCtorArg</c>/Rust's #1438/#1543).
+    /// renderings (mirrors Java's <c>ReconcileAgainstDeclared</c>/Rust's <c>CoerceNumericBody</c>).
+    /// Applied at three call sites: a factory's explicit <c>field -&gt; expr</c> initialization (#1732), a
+    /// command's <c>result</c> expression, and an <c>emit</c>/<c>publish</c> payload argument (#1866) —
+    /// the two call sites the Rust emitter already closed at #1511. Only the NUMERIC dimensions
+    /// (<c>NeedsWiden</c>/<c>NeedsOptionalWiden</c>) ever render here — <c>NeedsSomeWrap</c> (a bare value
+    /// into an optional-declared target) is a Java-only concern; Kotlin nullability is subtyping, so a
+    /// non-optional value already flows into a nullable-declared target unchanged, and this method never
+    /// reads that dimension at all.
     /// </summary>
     internal string TranslateReconciled(Expr value, NameMode mode, string? expectedEnum, TypeRef declared)
     {
@@ -158,9 +163,15 @@ internal sealed class KotlinExpressionTranslator
     /// the outer ctor-arg wrap against that same naive (unwidened) type would double-widen an already-
     /// widened value — a real <c>kotlinc</c> "type mismatch" error. This mirrors <c>WriteCoalesce</c>'s own
     /// elvis-result-type computation locally, scoped to this one caller, without touching the shared
-    /// resolver (mirrors Java's #1519 <c>InferCtorArgValueType</c>).
+    /// resolver (mirrors Java's <c>InferReconcilableValueType</c>). Serves all three <see
+    /// cref="TranslateReconciled"/> callers, not just the factory ctor-arg one its name still reflects.
+    /// <c>internal</c> (not <c>private</c>) so <c>KotlinEmitter.Entities.cs</c>'s <c>WriteBehavior</c>
+    /// can classify a hoisted <c>result</c> local's TYPE with this exact same coalesce-aware inference
+    /// (#1866 code review) — using the naive <see cref="InferType"/> there instead would disagree with
+    /// what <see cref="TranslateReconciled"/> actually rendered for a coalesce value, and could declare
+    /// the hoisted local from a type its own initializer doesn't have.
     /// </summary>
-    private TypeRef? InferCtorArgValueType(Expr value)
+    internal TypeRef? InferCtorArgValueType(Expr value)
     {
         if (value is not CoalesceExpr co)
         {

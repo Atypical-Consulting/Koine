@@ -57,6 +57,14 @@ public class CrossEmitterConformanceTests
         "run. The C# (and, where available, TypeScript/Python) outcomes were still asserted. Install kotlinc " +
         "(or set KOINE_KOTLINC) — CI runs the full comparison.";
 
+    private const string NoJavaToolchainNotice =
+        "No usable JDK 17+ toolchain (javac >= 17) available locally; the Java half of the cross-emitter " +
+        "comparison was not run. Install a JDK 17+ (or set KOINE_JAVAC) — CI runs the full comparison.";
+
+    private const string NoRustToolchainNotice =
+        "No cargo toolchain available locally; the Rust half of the cross-emitter comparison was not " +
+        "run. Install a Rust toolchain (or set KOINE_CARGO) — CI runs the full comparison.";
+
     // ---- The corpus -----------------------------------------------------------------------------
 
     /// <summary>
@@ -491,6 +499,91 @@ public class CrossEmitterConformanceTests
         TestSupport.RequireOrSkip(tsCheck.ToolchainAvailable, NoToolchainNotice);
         TestSupport.RequireOrSkip(pyCheck.ToolchainAvailable, NoPythonToolchainNotice);
         TestSupport.RequireOrSkip(ktCheck.ToolchainAvailable, NoKotlinToolchainNotice);
+    }
+
+    /// <summary>
+    /// Issue #1866, Task 4 — the cross-target guard against the next target drifting out of the
+    /// numeric-reconciliation family again (the exact failure mode #1344 → #1732 → #1548/#1615 →
+    /// #1761 → #1762 → #1829 → #1511 → #1866 kept repeating). Compiles ONE Int-into-Decimal
+    /// <c>result</c>/payload model through every code emitter that reconciles this pair of call sites
+    /// TODAY, asserting each one's own widening idiom is present and, where a toolchain is available,
+    /// that the emitted code actually compiles.
+    /// <para><b>Deliberately scoped to C#, Rust, Java, and Kotlin</b> — the four targets confirmed to
+    /// reconcile a command's <c>result</c> expression and an event-payload argument against their
+    /// declared type: C# needs no widening at all (a built-in implicit <c>long</c>-to-<c>decimal</c>
+    /// conversion makes it genuinely decimal-transparent), Rust was fixed at #1511 (the reference
+    /// implementation), and Java/Kotlin are fixed by THIS issue. TypeScript, Python, and PHP were
+    /// found — while building this very test — to have the IDENTICAL unreconciled gap despite #1866's
+    /// own "Non-goals" section originally assuming they were "already covered, or Decimal-transparent"
+    /// (a real real-toolchain <c>tsc --strict</c> run against the emitted TypeScript proves that
+    /// assumption wrong: TS2322/TS2345 "number is not assignable to Decimal"). Rather than silently
+    /// widening this issue's scope, that gap is tracked and planned in its own follow-up, #1875 — this
+    /// test intentionally excludes those three targets until #1875 closes the gap, at which point they
+    /// should join this same guard.</para>
+    /// </summary>
+    [Fact]
+    public void Result_and_payload_int_decimal_reconciliation_agrees_across_reconciled_targets()
+    {
+        const string koi =
+            "context Billing {\n" +
+            "  event Charged { amount: Decimal }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeC: Decimal {\n" +
+            "      result tax\n" +
+            "    }\n" +
+            "    command raiseCharge {\n" +
+            "      emit Charged(amount: tax)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        // C#: always runs and always asserts — genuinely decimal-transparent, no widening idiom to pin.
+        CompileResult cs = new KoineCompiler().Compile(koi, new CSharpEmitter());
+        cs.Success.ShouldBeTrue("C# emit failed:\n" + string.Join("\n", cs.Diagnostics.Select(d => d.ToString())));
+        var (asm, csErrors) = TestSupport.Compile(cs.Files.ToList());
+        (asm is not null).ShouldBeTrue("C# result/payload reconciliation model failed to compile:\n" + string.Join("\n", csErrors));
+
+        // Rust: emit + cargo check, asserted when the toolchain is present (#1511's own widening idiom).
+        CompileResult rs = new KoineCompiler().Compile(koi, new RustEmitter());
+        rs.Success.ShouldBeTrue("Rust emit failed:\n" + string.Join("\n", rs.Diagnostics.Select(d => d.ToString())));
+        var rustInvoice = rs.Files.Single(f => f.RelativePath.EndsWith("billing.rs", StringComparison.Ordinal)).Contents;
+        rustInvoice.ShouldContain("Ok(Decimal::from(self.tax))");
+        rustInvoice.ShouldContain("Decimal::from(self.tax)");
+        TestSupport.RustCheck rsCheck = TestSupport.CompileRust(rs.Files);
+        if (rsCheck.ToolchainAvailable)
+        {
+            rsCheck.Ok.ShouldBeTrue("Rust result/payload reconciliation should compile under cargo check:\n" + string.Join("\n", rsCheck.Errors));
+        }
+
+        // Java: emit + javac, asserted when the toolchain is present (this issue's #1866 widening idiom).
+        CompileResult java = new KoineCompiler().Compile(koi, new JavaEmitter());
+        java.Success.ShouldBeTrue("Java emit failed:\n" + string.Join("\n", java.Diagnostics.Select(d => d.ToString())));
+        var javaInvoice = java.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        javaInvoice.ShouldContain("java.math.BigDecimal.valueOf(this.tax)");
+        TestSupport.JavaCheck javaCheck = TestSupport.CompileJava(java.Files);
+        if (javaCheck.ToolchainAvailable)
+        {
+            javaCheck.Ok.ShouldBeTrue("Java result/payload reconciliation should compile under javac:\n" + string.Join("\n", javaCheck.Errors));
+        }
+
+        // Kotlin: emit + kotlinc, asserted when the toolchain is present (this issue's #1866 widening idiom).
+        CompileResult kotlin = new KoineCompiler().Compile(koi, new KotlinEmitter());
+        kotlin.Success.ShouldBeTrue("Kotlin emit failed:\n" + string.Join("\n", kotlin.Diagnostics.Select(d => d.ToString())));
+        var kotlinInvoice = kotlin.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
+        kotlinInvoice.ShouldContain("java.math.BigDecimal.valueOf(this.tax)");
+        TestSupport.KotlinCheck kotlinCheck = TestSupport.CompileKotlin(kotlin.Files);
+        if (kotlinCheck.ToolchainAvailable)
+        {
+            kotlinCheck.Ok.ShouldBeTrue("Kotlin result/payload reconciliation should compile under kotlinc:\n" + string.Join("\n", kotlinCheck.Errors));
+        }
+
+        // The C# half always asserts above; Rust/Java/Kotlin only assert when their toolchain ran.
+        // Funnel each absence through RequireOrSkip AFTER the assertions so a missing toolchain reports
+        // Skipped — or, under KOINE_REQUIRE_CONFORMANCE, Failed — instead of silently passing.
+        TestSupport.RequireOrSkip(rsCheck.ToolchainAvailable, NoRustToolchainNotice);
+        TestSupport.RequireOrSkip(javaCheck.ToolchainAvailable, NoJavaToolchainNotice);
+        TestSupport.RequireOrSkip(kotlinCheck.ToolchainAvailable, NoKotlinToolchainNotice);
     }
 
     private static string Verb(bool accepted) => accepted ? "ACCEPTED" : "REJECTED";
