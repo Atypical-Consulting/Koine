@@ -47,6 +47,12 @@ public sealed partial class KotlinEmitter
         var eventsAccessor = SyntheticEventsName(entity);
         var eventsField = "_" + eventsAccessor;
 
+        // The same pair for the R19 published-language collector, seeded with `eventsAccessor` so the
+        // two synthetic members can never collide with each other either.
+        var hasPublishes = PublishesEvents(entity);
+        var integrationEventsAccessor = SyntheticIntegrationEventsName(entity, eventsAccessor);
+        var integrationEventsField = "_" + integrationEventsAccessor;
+
         // A synthetic `id` member (of the identity type) so an `id` reference in a behavior body or an `emit`
         // argument resolves to the entity's identity property (`this.id`), mirroring the other backends.
         var bodyMembers = entity.Members
@@ -89,6 +95,16 @@ public sealed partial class KotlinEmitter
               .Append(": MutableList<DomainEvent> = mutableListOf()\n");
         }
 
+        // The published-integration-events collector (R19): a SEPARATE list from the domain events
+        // above — the two have distinct delivery (in-process dispatch vs. the transactional outbox).
+        // The element type stays the per-context `DomainEvent` sealed interface, which this emitter
+        // already has every integration-event data class implement (see EmitDomainEventInterface).
+        if (hasPublishes)
+        {
+            sb.Append(Indent).Append("private val ").Append(integrationEventsField)
+              .Append(": MutableList<DomainEvent> = mutableListOf()\n");
+        }
+
         // Validating init block + the shared invariant check.
         if (entity.Invariants.Count > 0)
         {
@@ -116,11 +132,20 @@ public sealed partial class KotlinEmitter
               .Append(eventsField).Append(".toList()\n");
         }
 
+        // The published-integration-events accessor (R19), parallel to the domain-event one above.
+        if (hasPublishes)
+        {
+            sb.Append('\n');
+            WriteKdoc(sb, "The integration events published so far, as a read-only snapshot.", Indent);
+            sb.Append(Indent).Append("fun ").Append(integrationEventsAccessor).Append("(): List<DomainEvent> = this.")
+              .Append(integrationEventsField).Append(".toList()\n");
+        }
+
         // Mutating behaviors.
         foreach (CommandDecl cmd in entity.Commands)
         {
             sb.Append('\n');
-            WriteBehavior(sb, emit, entity, cmd, translator, typeMapper, eventsField);
+            WriteBehavior(sb, emit, entity, cmd, translator, typeMapper, eventsField, integrationEventsField);
         }
 
         // Identity-based equality (an entity is its identity).
@@ -207,7 +232,8 @@ public sealed partial class KotlinEmitter
     /// </summary>
     private void WriteBehavior(
         StringBuilder sb, KotlinEmitContext emit, EntityDecl entity, CommandDecl cmd,
-        KotlinExpressionTranslator translator, KotlinTypeMapper typeMapper, string eventsField)
+        KotlinExpressionTranslator translator, KotlinTypeMapper typeMapper, string eventsField,
+        string integrationEventsField)
     {
         var method = KotlinNaming.ToMemberName(cmd.Name);
         var paramList = string.Join(", ", cmd.Parameters.Select(p => KotlinNaming.ToMemberName(p.Name) + ": " + typeMapper.Map(p.Type)));
@@ -236,9 +262,16 @@ public sealed partial class KotlinEmitter
             sb.Append(Indent).Append(Indent).Append("checkInvariants()\n");
         }
 
+        // The domain events this behavior raises, then the integration events it publishes (R19) —
+        // inside-out recording order, onto their separate collectors.
         foreach (EmitClause em in cmd.Body.OfType<EmitClause>())
         {
             WriteEmitStatement(sb, emit, em, translator, eventsField, "this.", Indent + Indent);
+        }
+
+        foreach (PublishClause pub in cmd.Body.OfType<PublishClause>())
+        {
+            WritePublishStatement(sb, emit, pub, translator, integrationEventsField, Indent + Indent);
         }
 
         if (cmd.Body.OfType<ResultClause>().FirstOrDefault() is { } result)
@@ -296,9 +329,35 @@ public sealed partial class KotlinEmitter
     /// event data class's declaration order, with a bare enum member qualified; a missing field falls back to a
     /// benign type default so the emitted code still compiles.
     /// </summary>
-    private static string? BuildEmitExpression(KotlinEmitContext emit, EmitClause em, KotlinExpressionTranslator translator)
+    private static string? BuildEmitExpression(KotlinEmitContext emit, EmitClause em, KotlinExpressionTranslator translator) =>
+        BuildEventExpression(emit, em.EventName, em.Args, translator);
+
+    /// <summary>
+    /// Records a published integration event (R19):
+    /// <c>this.&lt;integrationEvents&gt;.add(EventName(args…))</c> — the published-language counterpart
+    /// of <see cref="WriteEmitStatement"/>, adding to a SEPARATE collector. No receiver parameter: the
+    /// grammar admits <c>publish</c> in a behavior body only, so it is always <c>this.</c>.
+    /// </summary>
+    private void WritePublishStatement(
+        StringBuilder sb, KotlinEmitContext emit, PublishClause pub, KotlinExpressionTranslator translator,
+        string integrationEventsField, string indent)
     {
-        if (!emit.Index.TryGetDecl(em.EventName, out TypeDecl decl))
+        if (BuildEventExpression(emit, pub.EventName, pub.Args, translator) is { } expr)
+        {
+            sb.Append(indent).Append("this.").Append(integrationEventsField).Append(".add(").Append(expr).Append(")\n");
+        }
+    }
+
+    /// <summary>
+    /// The name/payload-only core of <see cref="BuildEmitExpression"/>, shared verbatim with a
+    /// <c>publish</c> clause (R19): both clauses carry the same <see cref="EmitArg"/> payload and both
+    /// construct a data class, so the argument binding and enum-qualification rules stay identical
+    /// rather than being re-derived per clause.
+    /// </summary>
+    private static string? BuildEventExpression(
+        KotlinEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs, KotlinExpressionTranslator translator)
+    {
+        if (!emit.Index.TryGetDecl(eventName, out TypeDecl decl))
         {
             return null;
         }
@@ -310,7 +369,7 @@ public sealed partial class KotlinEmitter
             _ => Array.Empty<Member>(),
         };
 
-        var argByField = em.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+        var argByField = clauseArgs.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
         var args = members.Select(m =>
         {
             if (!argByField.TryGetValue(m.Name, out Expr? value))
@@ -322,7 +381,7 @@ public sealed partial class KotlinEmitter
             return translator.Translate(value, KotlinExpressionTranslator.NameMode.Property, expectedEnum);
         });
 
-        return KotlinNaming.ToTypeName(em.EventName) + "(" + string.Join(", ", args) + ")";
+        return KotlinNaming.ToTypeName(eventName) + "(" + string.Join(", ", args) + ")";
     }
 
     /// <summary>
@@ -478,12 +537,35 @@ public sealed partial class KotlinEmitter
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
 
     /// <summary>
+    /// True when any behavior of the entity <c>publish</c>es an integration event (R19). No factory
+    /// counterpart: the grammar admits <c>publish</c> in command bodies only.
+    /// </summary>
+    private static bool PublishesEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<PublishClause>().Any();
+
+    /// <summary>
     /// A collision-free name for the entity's recorded-events accessor (base <c>domainEvents</c>, underscore-suffixed
     /// until it clears every emitted member/behavior/factory name plus the fixed <c>id</c>) — so the accessor never
     /// collides with a user member literally named <c>domainEvents</c>. The private backing field prefixes it with
     /// <c>_</c>.
     /// </summary>
-    private static string SyntheticEventsName(EntityDecl entity)
+    private static string SyntheticEventsName(EntityDecl entity) =>
+        FreeMemberName(ReservedMemberNames(entity), "domainEvents");
+
+    /// <summary>
+    /// The same, for the entity's published-integration-events accessor (R19), base
+    /// <c>integrationEvents</c>. Seeded with the domain-event accessor's chosen name too, so the two
+    /// synthetic members can never collide with each other.
+    /// </summary>
+    private static string SyntheticIntegrationEventsName(EntityDecl entity, string eventsAccessor)
+    {
+        var used = ReservedMemberNames(entity);
+        used.Add(eventsAccessor);
+        return FreeMemberName(used, "integrationEvents");
+    }
+
+    /// <summary>Every user-visible member/behavior/factory name a synthetic member must dodge.</summary>
+    private static HashSet<string> ReservedMemberNames(EntityDecl entity)
     {
         var used = new HashSet<string>(StringComparer.Ordinal) { "id" };
         foreach (Member m in entity.Members)
@@ -501,7 +583,13 @@ public sealed partial class KotlinEmitter
             used.Add(KotlinNaming.ToMemberName(f.Name));
         }
 
-        var name = "domainEvents";
+        return used;
+    }
+
+    /// <summary><paramref name="preferred"/>, underscore-suffixed until it clears <paramref name="used"/>.</summary>
+    private static string FreeMemberName(HashSet<string> used, string preferred)
+    {
+        var name = preferred;
         while (used.Contains(name))
         {
             name += "_";

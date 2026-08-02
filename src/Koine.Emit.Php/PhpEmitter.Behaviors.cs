@@ -86,6 +86,59 @@ public sealed partial class PhpEmitter
         sb.Append(Indent).Append("}\n");
     }
 
+    /// <summary>
+    /// True when any command of the entity <c>publish</c>es an integration event (R19). No factory
+    /// counterpart: the grammar admits <c>publish</c> in command bodies only.
+    /// </summary>
+    private static bool PublishesEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<PublishClause>().Any();
+
+    /// <summary>
+    /// Emits the integration-event buffer members into the entity class body (R19): the
+    /// published-language counterpart of <see cref="WriteDomainEventsBuffer"/>, a deliberately
+    /// SEPARATE buffer — the two have distinct delivery (in-process dispatch vs. the transactional
+    /// outbox), so they are never merged. Same member set: a private
+    /// <c>$integrationEvents = []</c> property, an <c>integrationEvents(): array</c> snapshot, a
+    /// <c>releaseIntegrationEvents(): array</c> drain, and a <c>clearIntegrationEvents(): void</c>.
+    /// </summary>
+    private static void WriteIntegrationEventsBuffer(StringBuilder sb)
+    {
+        sb.Append('\n');
+        sb.Append(Indent).Append("/** @var list<object> */\n");
+        sb.Append(Indent).Append("private array $integrationEvents = [];\n");
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("/**\n");
+        sb.Append(Indent).Append(" * Returns a snapshot of published integration events (read-only).\n");
+        sb.Append(Indent).Append(" *\n");
+        sb.Append(Indent).Append(" * @return list<object>\n");
+        sb.Append(Indent).Append(" */\n");
+        sb.Append(Indent).Append("public function integrationEvents(): array\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("return $this->integrationEvents;\n");
+        sb.Append(Indent).Append("}\n");
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("/**\n");
+        sb.Append(Indent).Append(" * Returns all published integration events and clears the buffer.\n");
+        sb.Append(Indent).Append(" *\n");
+        sb.Append(Indent).Append(" * @return list<object>\n");
+        sb.Append(Indent).Append(" */\n");
+        sb.Append(Indent).Append("public function releaseIntegrationEvents(): array\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("$events = $this->integrationEvents;\n");
+        sb.Append(Indent).Append(Indent).Append("$this->integrationEvents = [];\n");
+        sb.Append(Indent).Append(Indent).Append("return $events;\n");
+        sb.Append(Indent).Append("}\n");
+
+        sb.Append('\n');
+        sb.Append(Indent).Append("/** Clears the integration event buffer without returning the events. */\n");
+        sb.Append(Indent).Append("public function clearIntegrationEvents(): void\n");
+        sb.Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append("$this->integrationEvents = [];\n");
+        sb.Append(Indent).Append("}\n");
+    }
+
     // -----------------------------------------------------------------------
     // Command — mutating instance method
     // -----------------------------------------------------------------------
@@ -148,6 +201,7 @@ public sealed partial class PhpEmitter
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
         var emits = cmd.Body.OfType<EmitClause>().ToList();
+        var publishes = cmd.Body.OfType<PublishClause>().ToList();
         ResultClause? result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
 
         // 1. Preconditions — checked before any mutation.
@@ -170,6 +224,9 @@ public sealed partial class PhpEmitter
         // instance method, so member references render as `$this->member` (Property mode).
         var emitStatements = emits.Select(e =>
             BuildEmitStatement(e, translator, index, "$this->", PhpExpressionTranslator.NameMode.Property)).ToList();
+        // Publish payloads translate in the SAME scope, for the same reason (R19).
+        var publishStatements = publishes.Select(p =>
+            BuildPublishStatement(p, translator, index, PhpExpressionTranslator.NameMode.Property)).ToList();
         string? resultExpr = result is not null
             ? translator.Translate(result.Value, PhpExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
@@ -186,8 +243,14 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append(Indent).Append("$this->checkInvariants();\n");
         }
 
-        // 4. Record domain events.
+        // 4. Record events: the intra-aggregate domain events first, then the integration events
+        //    leaving the context (R19), so the recording order reads inside-out.
         foreach (var stmt in emitStatements)
+        {
+            sb.Append(Indent).Append(Indent).Append(stmt).Append(";\n");
+        }
+
+        foreach (var stmt in publishStatements)
         {
             sb.Append(Indent).Append(Indent).Append(stmt).Append(";\n");
         }
@@ -481,6 +544,40 @@ public sealed partial class PhpEmitter
 
         var eventName = PhpNaming.ClassName(ev.Name);
         return $"{targetPrefix}domainEvents[] = new {eventName}({string.Join(", ", args)})";
+    }
+
+    /// <summary>
+    /// Builds the <c>$this-&gt;integrationEvents[] = new Ev(…)</c> statement for a <c>publish</c>
+    /// clause (R19) — the published-language counterpart of <see cref="BuildEmitStatement"/>. The name
+    /// resolves to an <see cref="IntegrationEventDecl"/> (KOI1420 guarantees it by emit time). No target
+    /// prefix parameter: the grammar admits <c>publish</c> in a command body only, so the target is
+    /// always <c>$this</c>.
+    /// </summary>
+    private string BuildPublishStatement(
+        PublishClause publish,
+        PhpExpressionTranslator translator,
+        ModelIndex index,
+        PhpExpressionTranslator.NameMode mode)
+    {
+        if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
+        {
+            return $"/* unknown integration event '{publish.EventName}' */";
+        }
+
+        var memberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, memberNames))).ToList();
+        var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+
+        var args = ctorFields
+            .Where(f => argByField.ContainsKey(f.Name))
+            .Select(f =>
+            {
+                var expectedEnum = index.Classify(f.Type.Qualifier ?? translator.Context, f.Type.Name) == TypeKind.Enum ? f.Type.Name : null;
+                return translator.Translate(argByField[f.Name], mode, expectedEnum);
+            });
+
+        var eventName = PhpNaming.ClassName(ev.Name);
+        return $"$this->integrationEvents[] = new {eventName}({string.Join(", ", args)})";
     }
 
     // -----------------------------------------------------------------------

@@ -58,9 +58,40 @@ public class OperatorNeedsAnalyzerTests
         }
         """;
 
-    private static (KoineModel Model, ModelIndex Index) Build()
+    /// <summary>
+    /// R19 — the operand expressions of a <c>publish</c> payload are a real expression site, exactly
+    /// like an <c>emit</c> payload's. A value object folded there needs its generated operator just as
+    /// much, so the analyzer has to walk <c>publish</c> args too or the emitted code calls an operator
+    /// that was never emitted.
+    /// </summary>
+    private const string PublishSource = """
+        context Shop {
+          publishes CartTotalled
+
+          value Length {
+            meters: Decimal
+          }
+
+          integration event CartTotalled {
+            total: Decimal
+          }
+
+          aggregate Carts root Cart {
+            entity Cart identified by CartId {
+              a: Length
+              b: Length
+
+              command total {
+                publish CartTotalled(total: (a + b).meters)
+              }
+            }
+          }
+        }
+        """;
+
+    private static (KoineModel Model, ModelIndex Index) Build(string source = Source)
     {
-        CompileResult result = new KoineCompiler().Compile(Source, new CSharpEmitter());
+        CompileResult result = new KoineCompiler().Compile(source, new CSharpEmitter());
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         KoineModel model = result.Model!;
@@ -121,6 +152,20 @@ public class OperatorNeedsAnalyzerTests
         // Only Length is used directly in plain binary +/-.
         needs.Where(kv => kv.Value.BinaryOps.Count > 0).Select(kv => kv.Key)
             .ShouldBe(new[] { "Length" });
+    }
+
+    [Fact]
+    public void Publish_payload_expressions_are_a_scanned_expression_site()
+    {
+        var (model, index) = Build(PublishSource);
+
+        IReadOnlyDictionary<string, OperatorNeedsAnalyzer.ValueObjectOperatorNeeds> needs =
+            OperatorNeedsAnalyzer.BuildValueObjectOperatorNeeds(model, index);
+
+        // `publish CartTotalled(total: a + b)` folds two Lengths — the analyzer must see it, or the
+        // emitted Length has no `+` for the emitted publish statement to call.
+        needs["Length"].BinaryOps.ShouldBe(new[] { BinaryOp.Add });
+        needs["Length"].NeedsAdd.ShouldBeTrue();
     }
 
     /// <summary>

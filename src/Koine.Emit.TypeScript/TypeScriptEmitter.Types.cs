@@ -483,6 +483,32 @@ public sealed partial class TypeScriptEmitter
             }
         }
 
+        // Integration-event recording (R19): a command's `publish` records a published-language
+        // contract on a SEPARATE collection from the domain events above — the two have distinct
+        // delivery (in-process dispatch vs. the transactional outbox), so they are never merged.
+        // Element type is `object`, matching this emitter's own published-language convention at the
+        // outbox seam (`enqueue(integrationEvent: object)`): TS emits no nominal integration-event
+        // marker for the event classes to declare, so a narrower annotation would be fiction.
+        if (PublishesEvents(entity))
+        {
+            sb.Append('\n');
+            sb.Append(Indent).Append("private readonly _integrationEvents: object[] = [];\n");
+            if (RefOnly)
+            {
+                WriteRefStubMethod(sb, "get integrationEvents(): readonly object[]");
+                WriteRefStubMethod(sb, "clearIntegrationEvents(): void");
+            }
+            else
+            {
+                sb.Append(Indent).Append("get integrationEvents(): readonly object[] {\n");
+                sb.Append(Indent).Append(Indent).Append("return this._integrationEvents;\n");
+                sb.Append(Indent).Append("}\n");
+                sb.Append(Indent).Append("clearIntegrationEvents(): void {\n");
+                sb.Append(Indent).Append(Indent).Append("this._integrationEvents.length = 0;\n");
+                sb.Append(Indent).Append("}\n");
+            }
+        }
+
         // Commands.
         foreach (CommandDecl cmd in entity.Commands)
         {
@@ -542,6 +568,7 @@ public sealed partial class TypeScriptEmitter
         var requires = cmd.Body.OfType<RequiresClause>().ToList();
         var transitions = cmd.Body.OfType<Transition>().ToList();
         var emits = cmd.Body.OfType<EmitClause>().ToList();
+        var publishes = cmd.Body.OfType<PublishClause>().ToList();
         ResultClause? result = cmd.Body.OfType<ResultClause>().FirstOrDefault();
 
         foreach (RequiresClause req in requires)
@@ -570,6 +597,10 @@ public sealed partial class TypeScriptEmitter
         var emitStatements = emits.Select(e => BuildEmitStatement(e, translator, index, "this.", context, resultExpr)).ToList();
         bool hoistResult = emitStatements.Any(s => s.Hoisted);
 
+        // Publish payloads translate in the SAME scope, for the same reason (they may reference the
+        // command's parameters), and render right after the emits (R19).
+        var publishStatements = publishes.Select(p => BuildPublishStatement(p, translator, index, context)).ToList();
+
         foreach (Param p in cmd.Parameters)
         {
             translator.PopLocal(p.Name);
@@ -590,6 +621,12 @@ public sealed partial class TypeScriptEmitter
         foreach (var stmt in emitStatements)
         {
             sb.Append(Indent).Append(Indent).Append(stmt.Text).Append('\n');
+        }
+
+        // …then the integration events leaving the context, so the recording order reads inside-out.
+        foreach (var stmt in publishStatements)
+        {
+            sb.Append(Indent).Append(Indent).Append(stmt).Append('\n');
         }
 
         if (resultExpr is not null)
@@ -849,6 +886,44 @@ public sealed partial class TypeScriptEmitter
     private static bool EmitsEvents(EntityDecl entity) =>
         entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
+
+    /// <summary>
+    /// True when any command of the entity <c>publish</c>es an integration event (R19). No factory
+    /// counterpart: the grammar admits <c>publish</c> in command bodies only.
+    /// </summary>
+    private static bool PublishesEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<PublishClause>().Any();
+
+    /// <summary>
+    /// Builds the <c>this._integrationEvents.push(new EventName(...));</c> statement for a
+    /// <c>publish</c> clause (R19) — the published-language counterpart of
+    /// <see cref="BuildEmitStatement"/>. The name resolves to an <see cref="IntegrationEventDecl"/>
+    /// (KOI1420 guarantees it by emit time) and the payload binds positionally through
+    /// <see cref="OrderCtorParams"/>, exactly as an emit does. No <c>__result</c> hoist and no
+    /// target prefix, for the same reasons as the C# emitter's <c>BuildPublishStatement</c>: only an
+    /// emit argument triggers the hoist, and <c>publish</c> is legal in command bodies only, so the
+    /// target is always <c>this</c>.
+    /// </summary>
+    private string BuildPublishStatement(
+        PublishClause publish, TypeScriptExpressionTranslator translator, ModelIndex index, string? context)
+    {
+        if (!index.TryGetDecl(publish.EventName, out TypeDecl decl) || decl is not IntegrationEventDecl ev)
+        {
+            return $"/* unknown integration event '{publish.EventName}' */";
+        }
+
+        var eventMemberNames = new HashSet<string>(ev.Members.Select(m => m.Name), StringComparer.Ordinal);
+        var ctorFields = OrderCtorParams(ev.Members.Where(m => !MemberAnalysis.IsDerived(m, eventMemberNames))).ToList();
+        var argByField = publish.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+
+        var args = ctorFields.Select(f =>
+            argByField.TryGetValue(f.Name, out Expr? value)
+                ? translator.Translate(value, EnumExpected(f, index, context))
+                : "undefined as never"); // validator guarantees presence; defensive
+
+        var eventName = TypeScriptNaming.ToPascalCase(ev.Name);
+        return $"this._integrationEvents.push(new {eventName}({string.Join(", ", args)}));";
+    }
 
     /// <summary>
     /// Builds the <c>&lt;prefix&gt;_domainEvents.push(new EventName(...));</c> statement for an

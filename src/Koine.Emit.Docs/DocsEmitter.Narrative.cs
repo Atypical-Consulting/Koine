@@ -272,6 +272,21 @@ public sealed partial class DocsEmitter
                   .Append(")`\n");
             }
         }
+
+        // R19 — a `publish` gets its OWN heading rather than joining **Events:** above: an `emit` stays
+        // inside the aggregate, a `publish` is a published-language contract crossing the context
+        // boundary, and a reader of the living docs has to be able to see which is which at a glance.
+        var publishes = body.OfType<PublishClause>().ToList();
+        if (publishes.Count > 0)
+        {
+            sb.Append("\n**Published — leaves the context:**\n");
+            foreach (PublishClause publish in publishes)
+            {
+                sb.Append("- `").Append(publish.EventName).Append('(')
+                  .Append(string.Join(", ", publish.Args.Select(a => $"{a.Field}: {Describe(a.Value)}")))
+                  .Append(")`\n");
+            }
+        }
     }
 
     /// <summary>

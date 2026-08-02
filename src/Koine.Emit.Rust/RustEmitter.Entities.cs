@@ -39,6 +39,11 @@ public sealed partial class RustEmitter
         // `events` fields and fail to compile (issue #314). Every reference below routes through it.
         var eventsField = SyntheticEventsFieldName(entity);
 
+        // The same treatment for the R19 published-language collector, seeded with `eventsField` so the
+        // two synthetic fields can never collide with each other either.
+        var hasPublishes = PublishesEvents(entity);
+        var integrationEventsField = SyntheticIntegrationEventsFieldName(entity, eventsField);
+
         // A synthetic `id` member (of the identity type) so an `id` reference in a command body —
         // `result id`, or an `emit` argument — resolves to the entity's identity field (`self.id`),
         // mirroring how the C#/TypeScript emitters surface the id to behavior bodies.
@@ -64,6 +69,12 @@ public sealed partial class RustEmitter
         if (hasEmits)
         {
             body.Append(Indent).Append(eventsField).Append(": Vec<DomainEvent>,\n");
+        }
+
+        // Integration events published by this aggregate's commands (R19), on their own collector.
+        if (hasPublishes)
+        {
+            body.Append(Indent).Append(integrationEventsField).Append(": Vec<DomainEvent>,\n");
         }
 
         body.Append("}\n\n");
@@ -129,6 +140,11 @@ public sealed partial class RustEmitter
             body.Append(Indent).Append(Indent).Append(Indent).Append(eventsField).Append(": Vec::new(),\n");
         }
 
+        if (hasPublishes)
+        {
+            body.Append(Indent).Append(Indent).Append(Indent).Append(integrationEventsField).Append(": Vec::new(),\n");
+        }
+
         body.Append(Indent).Append(Indent).Append("})\n");
         body.Append(Indent).Append("}\n");
 
@@ -159,11 +175,24 @@ public sealed partial class RustEmitter
                 .Append(eventsField).Append(") }\n");
         }
 
+        // Integration-event accessor + drain (R19), parallel to the domain-event pair above.
+        if (hasPublishes)
+        {
+            body.Append('\n');
+            body.Append(Indent).Append("/// The integration events published since the last drain.\n");
+            body.Append(Indent).Append("pub fn ").Append(integrationEventsField).Append("(&self) -> &[DomainEvent] { &self.")
+                .Append(integrationEventsField).Append(" }\n");
+            body.Append('\n');
+            body.Append(Indent).Append("/// Drains the published integration events, leaving the collection empty.\n");
+            body.Append(Indent).Append("pub fn drain_").Append(integrationEventsField).Append("(&mut self) -> Vec<DomainEvent> { std::mem::take(&mut self.")
+                .Append(integrationEventsField).Append(") }\n");
+        }
+
         // Commands: mutating behaviors.
         foreach (CommandDecl cmd in entity.Commands)
         {
             body.Append('\n');
-            WriteCommand(body, emit, name, entity, cmd, translator, typeMapper, eventsField);
+            WriteCommand(body, emit, name, entity, cmd, translator, typeMapper, eventsField, integrationEventsField);
         }
 
         // Factories: associated constructors that mint identity, check preconditions, build, and emit.
@@ -204,7 +233,8 @@ public sealed partial class RustEmitter
     /// <summary>Emits one command as a <c>&amp;mut self</c> method returning <c>Result</c>.</summary>
     private void WriteCommand(
         StringBuilder body, RustEmitContext emit, string typeName, EntityDecl entity, CommandDecl cmd,
-        RustExpressionTranslator translator, RustTypeMapper typeMapper, string eventsField)
+        RustExpressionTranslator translator, RustTypeMapper typeMapper, string eventsField,
+        string integrationEventsField)
     {
         var method = RustNaming.Field(cmd.Name);
         var paramList = string.Join(", ", cmd.Parameters.Select(p => RustNaming.Field(p.Name) + ": " + typeMapper.Map(p.Type)));
@@ -266,10 +296,16 @@ public sealed partial class RustEmitter
             WriteInvariantGuard(body, typeName, inv, translator, Indent + Indent, RustExpressionTranslator.NameMode.Property, typeMapper);
         }
 
-        // 3b. Record the domain events the command raises (over the valid post-transition state).
+        // 3b. Record the domain events the command raises (over the valid post-transition state),
+        //     then the integration events it publishes (R19) — inside-out recording order.
         foreach (EmitClause emitClause in cmd.Body.OfType<EmitClause>())
         {
             WriteEmitStatement(body, emit, emitClause, translator, typeMapper, eventsField);
+        }
+
+        foreach (PublishClause publish in cmd.Body.OfType<PublishClause>())
+        {
+            WritePublishStatement(body, emit, publish, translator, typeMapper, integrationEventsField);
         }
 
         // 4. Result (or unit). Widened toward the command's declared return type the same way a
@@ -328,7 +364,24 @@ public sealed partial class RustEmitter
     /// every emitted member/command/factory field-or-method name (plus the fixed <c>id</c>), so the
     /// collector never duplicates a user member literally named <c>events</c> (issue #314).
     /// </summary>
-    private static string SyntheticEventsFieldName(EntityDecl entity)
+    private static string SyntheticEventsFieldName(EntityDecl entity) =>
+        RustNaming.SyntheticEventsField(ReservedFieldNames(entity));
+
+    /// <summary>
+    /// The collision-free name for the entity's synthetic integration-event <c>Vec&lt;DomainEvent&gt;</c>
+    /// collector (R19). Seeded with the same user names as
+    /// <see cref="SyntheticEventsFieldName"/> <em>plus</em> the domain-event collector's chosen name, so
+    /// the two synthetic fields can never collide with each other.
+    /// </summary>
+    private static string SyntheticIntegrationEventsFieldName(EntityDecl entity, string eventsField)
+    {
+        var used = ReservedFieldNames(entity);
+        used.Add(eventsField);
+        return RustNaming.SyntheticIntegrationEventsField(used);
+    }
+
+    /// <summary>Every user-visible field/accessor/command/factory name a synthetic field must dodge.</summary>
+    private static HashSet<string> ReservedFieldNames(EntityDecl entity)
     {
         var used = new HashSet<string>(StringComparer.Ordinal) { "id" };
         foreach (Member m in entity.Members)
@@ -346,13 +399,40 @@ public sealed partial class RustEmitter
             used.Add(RustNaming.Field(f.Name));
         }
 
-        return RustNaming.SyntheticEventsField(used);
+        return used;
     }
 
     /// <summary>True when any command or factory of the entity raises a domain event (so it records events).</summary>
     private static bool EmitsEvents(EntityDecl entity) =>
         entity.Commands.SelectMany(c => c.Body).OfType<EmitClause>().Any()
         || entity.Factories.SelectMany(f => f.Body).OfType<EmitClause>().Any();
+
+    /// <summary>
+    /// True when any command of the entity <c>publish</c>es an integration event (R19). No factory
+    /// counterpart: the grammar admits <c>publish</c> in command bodies only.
+    /// </summary>
+    private static bool PublishesEvents(EntityDecl entity) =>
+        entity.Commands.SelectMany(c => c.Body).OfType<PublishClause>().Any();
+
+    /// <summary>
+    /// Lowers a <c>publish</c> clause in a command to
+    /// <c>self.&lt;integration_events&gt;.push(&lt;event&gt;);</c> (R19) — the published-language
+    /// counterpart of <see cref="WriteEmitStatement"/>, pushing onto a SEPARATE collector because the
+    /// two have distinct delivery (in-process dispatch vs. the transactional outbox). The variant type
+    /// is still the context-wide <c>DomainEvent</c> enum, which already carries a variant per
+    /// integration event (see <c>EmitDomainEventEnum</c>) — this emitter's own convention, so no second
+    /// enum is invented.
+    /// </summary>
+    private void WritePublishStatement(
+        StringBuilder body, RustEmitContext emit, PublishClause publish,
+        RustExpressionTranslator translator, RustTypeMapper typeMapper, string integrationEventsField)
+    {
+        if (BuildEventExpression(emit, publish.EventName, publish.Args, translator, typeMapper) is { } expr)
+        {
+            body.Append(Indent).Append(Indent).Append("self.").Append(integrationEventsField)
+                .Append(".push(").Append(expr).Append(");\n");
+        }
+    }
 
     /// <summary>Lowers an <c>emit</c> clause in a command to <c>self.&lt;events&gt;.push(&lt;event&gt;);</c>.</summary>
     private void WriteEmitStatement(
@@ -373,9 +453,20 @@ public sealed partial class RustEmitter
     /// </summary>
     private static string? BuildEmitExpression(
         RustEmitContext emit, EmitClause emitClause,
+        RustExpressionTranslator translator, RustTypeMapper typeMapper) =>
+        BuildEventExpression(emit, emitClause.EventName, emitClause.Args, translator, typeMapper);
+
+    /// <summary>
+    /// The name/payload-only core of <see cref="BuildEmitExpression"/>, shared verbatim with a
+    /// <c>publish</c> clause (R19) — the two clauses carry the same <see cref="EmitArg"/> payload shape
+    /// and both lower to a <c>DomainEvent</c> variant, so the argument binding, numeric widening, and
+    /// optional-wrapping rules must stay identical rather than be re-derived per clause.
+    /// </summary>
+    private static string? BuildEventExpression(
+        RustEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs,
         RustExpressionTranslator translator, RustTypeMapper typeMapper)
     {
-        if (!emit.Index.TryGetDecl(emitClause.EventName, out TypeDecl decl))
+        if (!emit.Index.TryGetDecl(eventName, out TypeDecl decl))
         {
             return null;
         }
@@ -387,7 +478,7 @@ public sealed partial class RustEmitter
             _ => Array.Empty<Member>(),
         };
 
-        var argByField = emitClause.Args.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+        var argByField = clauseArgs.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
         var args = members.Select(m =>
         {
             if (!argByField.TryGetValue(m.Name, out Expr? value))
@@ -416,8 +507,8 @@ public sealed partial class RustEmitter
             return owned;
         });
 
-        return $"DomainEvent::{RustNaming.ToPascalCase(emitClause.EventName)}"
-            + $"({typeMapper.QualifyTypeName(emitClause.EventName)}::new({string.Join(", ", args)}))";
+        return $"DomainEvent::{RustNaming.ToPascalCase(eventName)}"
+            + $"({typeMapper.QualifyTypeName(eventName)}::new({string.Join(", ", args)}))";
     }
 
     /// <summary>
