@@ -401,6 +401,43 @@ public class R18AsyncApiEmitterTests
         yaml.ShouldContain("$ref: '#/components/schemas/Sales_DetailPayload'");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Enum_field_resolves_to_the_payloads_owner_context(bool swapOrder)
+    {
+        // Both contexts declare `enum Status` with different members — R13.2 legality. Billing's
+        // `Invoiced` payload's `state` field is `Status`, declared bare (no qualifier) inside Billing —
+        // it must always carry Billing's members, never Shipping's, regardless of which context is
+        // indexed last.
+        const string billing = """
+            context Billing {
+              enum Status { Open, Closed }
+              integration event Invoiced {
+                state: Status
+              }
+              publishes Invoiced
+            }
+            """;
+        const string shipping = """
+            context Shipping {
+              enum Status { Packed, Dispatched, Delivered }
+            }
+            """;
+        string source = swapOrder ? $"{shipping}\n{billing}" : $"{billing}\n{shipping}";
+
+        var result = new KoineCompiler().Compile(source, new AsyncApiEmitter());
+
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("- Open");
+        yaml.ShouldContain("- Closed");
+        yaml.ShouldNotContain("- Packed");
+        yaml.ShouldNotContain("- Dispatched");
+        yaml.ShouldNotContain("- Delivered");
+    }
+
     [Fact]
     public void Emitted_yaml_is_valid_per_the_asyncapi_cli_when_enabled()
     {

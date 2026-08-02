@@ -400,6 +400,49 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// #1863: <c>IsQuantityType</c> resolved its operand's declaration through <c>ModelIndex</c>'s flat,
+    /// last-declaration-wins view, ignoring the translator's own <see cref="RustExpressionTranslator.Context"/>.
+    /// Two contexts here each declare a type named <c>Weight</c> — Shop's is a <c>quantity</c>, Other's a
+    /// plain <c>value</c> — so the answer must depend on which context <c>base + base</c> is written in,
+    /// never on which context happened to be indexed last.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Quantity_arithmetic_resolves_in_its_own_context(bool swapOrder)
+    {
+        const string shop = """
+            context Shop {
+              enum MassUnit { Grams, Kilograms }
+              quantity Weight {
+                amount: Decimal
+                unit: MassUnit
+                invariant amount >= 0 "a weight cannot be negative"
+              }
+              value Box {
+                base: Weight
+                combined: Weight = base + base
+              }
+            }
+            """;
+        const string other = """
+            context Other {
+              value Weight {
+                label: String
+              }
+            }
+            """;
+        string src = swapOrder ? $"{other}\n{shop}" : $"{shop}\n{other}";
+
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldNotContain("self.base.clone() + self.base.clone()");
+        rust.ShouldContain("self.base.add(&self.base).expect(\"Weight: unit mismatch\")");
+    }
+
+    /// <summary>
     /// Issue #1268, follow-up of #1068's Add/Sub fix: a <c>quantity</c>'s unit-checked <c>+</c>/<c>-</c>
     /// must compile via a real <c>cargo check</c> when an operand is a compound (non-place) expression
     /// such as a conditional, not just a bare identifier/field access. The #1068 guard wrote a
