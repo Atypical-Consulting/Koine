@@ -124,8 +124,12 @@ public sealed partial class KotlinEmitter
         sb.Append(KotlinNaming.ToMemberName(m.Name)).Append(": ").Append(typeMapper.Map(m.Type));
         if (m.Initializer is not null)
         {
-            sb.Append(" = ").Append(translator.Translate(
-                m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context)));
+            // Reconciled against the member's OWN declared type (#1880) — the primary-constructor
+            // parameter is annotated with that type, so an unwidened `Int` default on a `Decimal`
+            // component was a hard `kotlinc` type mismatch. Same TranslateReconciled as every sibling
+            // call site in this family.
+            sb.Append(" = ").Append(translator.TranslateReconciled(
+                m.Initializer, KotlinExpressionTranslator.NameMode.Parameter, EnumExpected(m, emit.Index, translator.Context), m.Type));
         }
 
         sb.Append(",\n");
