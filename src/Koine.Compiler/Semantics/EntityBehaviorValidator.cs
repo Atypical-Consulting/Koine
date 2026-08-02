@@ -18,6 +18,14 @@ internal static class EntityBehaviorValidator
     /// mutable, non-derived member; value must be type-compatible). Scope for
     /// expressions is the entity's members plus the command's parameters.
     /// </summary>
+    /// <param name="emitAllowed">
+    /// Whether <c>emit</c> is legal here: true for a standalone entity or the aggregate root.
+    /// </param>
+    /// <param name="aggregateRoot">
+    /// The root name of the enclosing aggregate, or <see langword="null"/> when the entity stands
+    /// alone. Distinct from <paramref name="emitAllowed"/> because <c>publish</c> (R19) is stricter:
+    /// it needs a REAL aggregate root, so the standalone case must be told apart from the root case.
+    /// </param>
     public static void ValidateCommands(
         EntityDecl entity,
         ModelIndex index,
@@ -25,8 +33,17 @@ internal static class EntityBehaviorValidator
         IReadOnlySet<string> enumMembers,
         List<Diagnostic> diagnostics,
         bool emitAllowed,
+        string? aggregateRoot = null,
         IReadOnlySet<string>? specNames = null)
     {
+        // R19 — `publish` is confined to the aggregate ROOT, and unlike `emit` a standalone entity is
+        // NOT an acceptable stand-in. An emitted domain event is still observable on the entity that
+        // recorded it, so a standalone `emit` is meaningful; a published integration event only ever
+        // leaves the context when the aggregate's Unit of Work drains `_integrationEvents` into the
+        // outbox at commit. With no aggregate there is no Unit of Work, no application handler, and
+        // therefore no drain — the contract would silently never reach a subscriber.
+        var publishAllowed = aggregateRoot is not null && aggregateRoot == entity.Name;
+
         var memberNames = SemanticValidator.MemberNameSet(entity.Members);
         var memberByName = new Dictionary<string, Member>(entity.Members.Count, StringComparer.Ordinal);
         foreach (var m in entity.Members)
@@ -124,6 +141,22 @@ internal static class EntityBehaviorValidator
                         ValidateEmit(emit, index, checker, scope, diagnostics);
                         break;
 
+                    // R19 — `publish` leaves the context, so it is the aggregate ROOT's prerogative:
+                    // an inner entity has no business speaking for the whole aggregate, and an entity
+                    // with no aggregate at all has no outbox seam to speak through.
+                    case PublishClause published:
+                        if (!publishAllowed)
+                        {
+                            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PublishOutsideRoot,
+                                aggregateRoot is null
+                                    ? $"integration events may only be published from an aggregate root; entity '{entity.Name}' does not belong to an aggregate"
+                                    : $"integration events may only be published from the aggregate root, not from '{entity.Name}'",
+                                published.Span));
+                        }
+
+                        ValidatePublish(published, resolver.Context, index, checker, scope, diagnostics);
+                        break;
+
                     case ResultClause res:
                         // A `result` clause only makes sense when the command declares a
                         // return type; its value must be assignable to that type.
@@ -199,11 +232,14 @@ internal static class EntityBehaviorValidator
 
         // A factory emits a `public static` method; its name must not collide (case-
         // insensitively) with a property, a command (instance method), another factory,
-        // or an always-generated member (Id, the domain-event API, the value-equality
-        // members) — any of which would yield uncompilable C# (CS0102/CS0111).
-        var reserved = new HashSet<string>(entity.Members.Count + 5, StringComparer.OrdinalIgnoreCase)
+        // or an always-generated member (Id, the domain-event API, the integration-event
+        // API a publishing root carries (R19), the value-equality members) — any of which
+        // would yield uncompilable C# (CS0102/CS0111).
+        var reserved = new HashSet<string>(entity.Members.Count + 7, StringComparer.OrdinalIgnoreCase)
         {
-            "Id", "DomainEvents", "ClearDomainEvents", "Equals", "GetHashCode"
+            "Id", "DomainEvents", "ClearDomainEvents",
+            "IntegrationEvents", "ClearIntegrationEvents",
+            "Equals", "GetHashCode"
         };
         foreach (var m in entity.Members)
         {
@@ -746,6 +782,92 @@ internal static class EntityBehaviorValidator
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitPayloadMismatch,
                     $"emit of '{ev.Name}' is missing field '{field.Name}'", emit.Span));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates a <c>publish EventName(field: value, …)</c> — the verb form of the context-level
+    /// <c>publishes</c> (R19). Modelled on <see cref="ValidateEmit"/>, but the name must resolve to an
+    /// <see cref="IntegrationEventDecl"/> of the ENCLOSING context (KOI1420) that the context actually
+    /// puts in its published language with a <c>publishes</c> declaration (KOI1421); the payload rules
+    /// are then identical to <c>emit</c>'s and reuse <see cref="DiagnosticCodes.EmitPayloadMismatch"/>.
+    /// Only ONE of the two name diagnostics is reported per clause: an unresolvable name cannot have a
+    /// meaningful <c>publishes</c> or payload check, so it bails exactly as <c>emit</c> does.
+    /// </summary>
+    public static void ValidatePublish(
+        PublishClause publish,
+        string? context,
+        ModelIndex index,
+        ExpressionChecker checker,
+        TypeScope scope,
+        List<Diagnostic> diagnostics)
+    {
+        // The enclosing bounded context. It is always set on the per-context validation path; the
+        // empty fallback only guards a context-less (global) resolver, where nothing can be published.
+        var contextName = context ?? string.Empty;
+
+        // Context-aware resolution (#1711): a same-named, differently-kinded type in another context
+        // must not satisfy `publish` here, which is why IsIntegrationEventIn gates the flat lookup.
+        if (!index.TryGetDecl(context, publish.EventName, out var decl)
+            || decl is not IntegrationEventDecl ev
+            || !index.IsIntegrationEventIn(contextName, publish.EventName))
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PublishUnknownIntegrationEvent,
+                $"'{publish.EventName}' is not an integration event of context '{contextName}'", publish.Span));
+            foreach (var arg in publish.Args)
+            {
+                checker.Check(arg.Value, scope);
+            }
+
+            return;
+        }
+
+        // Declaring the event is not enough: `publishes X` is what puts X in the published language,
+        // and it is what the subscribers, the context map, and the AsyncAPI emitter read.
+        if (!index.PublishesEvent(contextName, ev.Name))
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PublishNotDeclared,
+                $"context '{contextName}' does not declare 'publishes {ev.Name}'", publish.Span));
+            return;
+        }
+
+        // A duplicate event field name is reported as KOI0103 yet both members are kept, so build the
+        // lookup defensively (last-wins) rather than ToDictionary — a collision here would otherwise throw
+        // and abort the whole validate pass, swallowing that very diagnostic. Mirrors ValidateEmit.
+        var eventFields = new Dictionary<string, TypeRef>(ev.Members.Count, StringComparer.Ordinal);
+        foreach (var m in ev.Members)
+        {
+            eventFields[m.Name] = m.Type;
+        }
+
+        var provided = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var arg in publish.Args)
+        {
+            if (!provided.Add(arg.Field))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitPayloadMismatch,
+                    $"duplicate field '{arg.Field}' in publish of '{ev.Name}'", arg.Span));
+            }
+
+            if (eventFields.TryGetValue(arg.Field, out var fieldType))
+            {
+                checker.CheckEmitArg(arg.Value, fieldType, ev.Name, arg.Field, scope);
+            }
+            else
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitPayloadMismatch,
+                    $"integration event '{ev.Name}' has no field '{arg.Field}'", arg.Span));
+            }
+        }
+
+        foreach (var field in ev.Members)
+        {
+            if (!provided.Contains(field.Name))
+            {
+                diagnostics.Add(Diagnostic.Error(DiagnosticCodes.EmitPayloadMismatch,
+                    $"publish of '{ev.Name}' is missing field '{field.Name}'", publish.Span));
             }
         }
     }

@@ -548,13 +548,25 @@ public sealed record Initialization(string Field, Expr Value) : CommandStmt;
 public sealed record EmitClause(string EventName, IReadOnlyList<EmitArg> Args) : CommandStmt;
 
 /// <summary>
+/// A command's cross-boundary publication: <c>publish OrderPlaced(orderId: id, ...)</c>.
+/// The verb form of the context-level <c>publishes</c> declaration — where
+/// <see cref="EmitClause"/> records an intra-aggregate DOMAIN event, this publishes a
+/// published-language contract leaving the context, so the named type must be an
+/// integration event the enclosing context publishes. TARGET-AGNOSTIC.
+/// </summary>
+public sealed record PublishClause(string EventName, IReadOnlyList<EmitArg> Args) : CommandStmt;
+
+/// <summary>
 /// A command's return value: <c>result &lt;expr&gt;</c>. Only valid when the command
 /// declares a return type; the expression is the terminal statement of the emitted
 /// method and is evaluated over the post-mutation state.
 /// </summary>
 public sealed record ResultClause(Expr Value) : CommandStmt;
 
-/// <summary>A named payload argument of an <see cref="EmitClause"/>: <c>field: value</c>.</summary>
+/// <summary>
+/// A named payload argument of an <see cref="EmitClause"/> or a
+/// <see cref="PublishClause"/>: <c>field: value</c>.
+/// </summary>
 public sealed record EmitArg(string Field, Expr Value) : KoineNode;
 
 // ----------------------------------------------------------------------------

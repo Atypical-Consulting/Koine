@@ -36,6 +36,7 @@ commandStmt
     : requiresClause
     | transition
     | emitClause
+    | publishClause
     | resultClause
     ;
 
@@ -49,6 +50,10 @@ transition
 
 emitClause
     : 'emit' Identifier ( '(' emitArgList? ')' )?
+    ;
+
+publishClause
+    : 'publish' Identifier ( '(' emitArgList? ')' )?
     ;
 
 emitArgList
@@ -83,6 +88,10 @@ HTTP surface (`@route`, a verb, `@auth` — see [§11.3.4](#1134-api-annotations
 - **`requiresClause`** — a precondition guard (`requires <expr> "message"`).
 - **`transition`** — a field assignment (`field -> value`).
 - **`emitClause`** — appends a domain-event instance (`emit EventName(field: expr, …)`).
+- **`publishClause`** — appends an *integration*-event instance (`publish EventName(field: expr, …)`), the
+  cross-context counterpart of `emit`, legal only in an aggregate root's commands. Same payload syntax; the full
+  rules, diagnostics and outbox path live with integration events in
+  [§17.7.3](/Koine/reference/context-maps-integration/#1773-producing-the-event-the-publish-clause).
 - **`resultClause`** — hands a value back to the caller (`result <expr>`), only when the command has a declared return type.
 
 An `eventDecl` is a peer of the entity declaration inside the aggregate and holds only `member` fields. A
@@ -110,7 +119,8 @@ The body of a command runs in a fixed order:
    your message *before* any mutation.
 2. **`field -> value` transitions** — straight assignments. Assigning a field that an enum `states` block
    governs also injects the legal-transition guard.
-3. **`emit Evt(...)`** — records a domain event (see [§11.5](#115-domain-events)).
+3. **`emit Evt(...)`** — records a domain event (see [§11.5](#115-domain-events)); **`publish Evt(...)`** records
+   an integration event on the root's separate `IntegrationEvents` collection instead.
 4. **Post-transition invariant re-check** — every aggregate invariant is evaluated again, so a command can
    never leave the aggregate in a state its `invariant`s forbid.
 

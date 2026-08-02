@@ -298,11 +298,12 @@ kind*:
 - **`publishes E` / `subscribes Publisher.E`** — cross-context. Every emitter produces only a bodiless
   handler seam (C#: `IHandle<E>`), so there is nothing to run. The subscribing contexts are **resolved and
   named in `notes`** ("the model declares a subscription and no executable handler"), never fabricated
-  into steps. As the language stands this branch is also unreachable from a *recorded* event —
-  `emit X` resolves `X` to an `EventDecl`, so emitting an integration event is a hard validator error
-  (`KOI0601`, "unknown event") — which is why the pizzeria publishes `OrderPlaced` and emits
-  `OrderPlacedInternally`. The resolver answers the question anyway, so the day `emit` accepts an
-  integration event the runner reports it honestly instead of pretending the boundary was crossed.
+  into steps. Since [#1796](https://github.com/Atypical-Consulting/Koine/issues/1796) this fires from a
+  real run: `publish X(…)` records the published contract into the root's own `_integrationEvents` list,
+  which the dispatcher reads beside `_domainEvents` — so running the pizzeria's `Order.place` reports
+  `OrderPlaced` crossing to Delivery, Kitchen and Payment, and runs nothing for it. (`emit` still takes a
+  domain event only; the two verbs stay distinct — [ADR
+  0017](../../../adr/0019-publish-is-a-distinct-clause-from-emit.md).)
 
 **Attribution.** Steps gained one additive, optional property: `aggregate`. It is written **only** on a
 fanned-out step — a primary-aggregate step (i.e. every step interpreted mode ever produces, and every step

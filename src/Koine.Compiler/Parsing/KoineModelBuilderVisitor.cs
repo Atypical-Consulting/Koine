@@ -908,6 +908,32 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         return new EmitClause(NameOf(emit.Identifier()), args) { Span = SpanOf(emit) };
     }
 
+    /// <summary>
+    /// Builds a <see cref="PublishClause"/> from <c>publish Event(field: value, ...)</c> — the verb
+    /// form of the context-level <c>publishes</c> declaration. Mirrors <see cref="BuildEmitClause"/>
+    /// exactly, including the same tolerance for a recovered (error) parse where the event name or an
+    /// argument's field name is a missing/absent token: an empty name is yielded rather than throwing,
+    /// because the syntax error itself is reported by the parser's error listener.
+    /// </summary>
+    private PublishClause BuildPublishClause(KoineParser.PublishClauseContext publish)
+    {
+        List<EmitArg> args;
+        if (publish.emitArgList() is { } al)
+        {
+            KoineParser.EmitArgContext[] argCtxs = al.emitArg();
+            args = new List<EmitArg>(argCtxs.Length);
+            foreach (KoineParser.EmitArgContext a in argCtxs)
+            {
+                args.Add(new EmitArg(a.softName()?.GetText() ?? string.Empty, BuildExpression(a.expression())) { Span = SpanOf(a) });
+            }
+        }
+        else
+        {
+            args = new List<EmitArg>();
+        }
+        return new PublishClause(NameOf(publish.Identifier()), args) { Span = SpanOf(publish) };
+    }
+
     private CommandStmt BuildCommandStmt(KoineParser.CommandStmtContext ctx)
     {
         if (ctx.requiresClause() is { } req)
@@ -921,6 +947,11 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         if (ctx.emitClause() is { } emit)
         {
             return BuildEmitClause(emit);
+        }
+
+        if (ctx.publishClause() is { } publish)
+        {
+            return BuildPublishClause(publish);
         }
 
         if (ctx.resultClause() is { } res)

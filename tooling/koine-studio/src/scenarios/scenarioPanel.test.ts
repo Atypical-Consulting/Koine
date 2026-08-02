@@ -417,4 +417,76 @@ describe('scenarioPanel', () => {
       container.remove();
     });
   });
+
+  // --- published integration events (#1796): does this event LEAVE the context? -----------
+  describe('published integration events', () => {
+    // The same emit-shaped step, flagged: `publish OrderPlaced(...)` records a published-language
+    // contract that crosses the boundary, while `emit OrderDrafted(...)` stays intra-aggregate.
+    const PUBLISHING: ScenarioResult = {
+      ...PLACED,
+      steps: [
+        { kind: 'emit', event: 'OrderDrafted', args: { orderId: '<OrderId>' } },
+        { kind: 'emit', event: 'OrderPlaced', args: { total: '20' }, published: true },
+      ],
+      notes: ["'OrderPlaced' crosses a context boundary to Kitchen, which the model declares a subscription for."],
+    };
+
+    it('marks a published event as crossing the boundary and leaves a domain emit alone', async () => {
+      const container = document.createElement('div');
+      const lsp = mockLsp({ runScenario: vi.fn(async () => PUBLISHING) });
+      const panel = createScenarioPanel({ container, lsp, platform: NO_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      const steps = Array.from(container.querySelectorAll('.koi-scenario-step'));
+      expect(steps).toHaveLength(2);
+
+      // The domain event keeps the `event` chip and gains no modifier.
+      expect(steps[0].querySelector('.koi-scenario-tag')!.textContent).toBe('event');
+      expect(steps[0].classList.contains('is-published')).toBe(false);
+
+      // The publication says so in TEXT, not by colour alone, and explains the crossing on hover.
+      const chip = steps[1].querySelector('.koi-scenario-tag')!;
+      expect(chip.textContent).toBe('published');
+      expect(chip.classList.contains('koi-scenario-tag-published')).toBe(true);
+      expect(chip.getAttribute('title')).toContain('crosses the context boundary');
+      expect(steps[1].classList.contains('is-published')).toBe(true);
+
+      // Everything else about the step is unchanged — same name, same payload chips.
+      expect(steps[1].querySelector('.koi-scenario-step-text')!.textContent).toBe('OrderPlaced');
+      expect(steps[1].querySelector('.koi-scenario-chip')!.textContent).toBe('total: 20');
+    });
+
+    it('renders an emit step from a payload with no `published` key exactly as before', async () => {
+      // Backward compatibility: the flag is absent, never `false`, on every pre-#1796 result.
+      const container = document.createElement('div');
+      const panel = createScenarioPanel({ container, lsp: mockLsp(), platform: NO_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      expect(container.querySelector('.koi-scenario-tag-published')).toBeNull();
+      expect(container.querySelector('.koi-scenario-step.is-published')).toBeNull();
+      const emit = container.querySelectorAll('.koi-scenario-step')[2];
+      expect(emit.querySelector('.koi-scenario-tag')!.textContent).toBe('event');
+    });
+
+    it('has no axe violations on a timeline carrying a published event', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const lsp = mockLsp({ runScenario: vi.fn(async () => PUBLISHING) });
+      const panel = createScenarioPanel({ container, lsp, platform: NO_EXEC });
+      await panel.refresh();
+
+      container.querySelector<HTMLButtonElement>('.koi-scenario-run')!.click();
+      await flush();
+
+      expect(container.querySelectorAll('.koi-scenario-step.is-published')).toHaveLength(1);
+      expect(await axe(container)).toHaveNoViolations();
+      container.remove();
+    });
+  });
 });

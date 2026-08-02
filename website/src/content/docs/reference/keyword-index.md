@@ -54,6 +54,7 @@ This index is complete and covers all construct chapters (§3–§18).
 | `operations` | soft (repository operations block) | [§14.3.1](/Koine/reference/repositories-concurrency/#1431-the-operations-clause) |
 | `partnership` | contextual (hyphenated role) | [§3.5.3](/Koine/reference/lexical-structure/#353-contextual-hyphenated-role-keywords), [§17.3.2](/Koine/reference/context-maps-integration/#1732-the-seven-roles) |
 | `policy` | soft (declaration) | [§13.3.3](/Koine/reference/specs-services-policies/#1333-policy-semantics) |
+| `publish` | soft (integration-event publication) | [§17.7.3](/Koine/reference/context-maps-integration/#1773-producing-the-event-the-publish-clause) |
 | `publishes` | soft (publish declaration) | [§17.2.3](/Koine/reference/context-maps-integration/#1723-publish-and-subscribe-declarations) |
 | `published-language` | contextual (hyphenated role) | [§3.5.3](/Koine/reference/lexical-structure/#353-contextual-hyphenated-role-keywords), [§17.3.2](/Koine/reference/context-maps-integration/#1732-the-seven-roles) |
 | `quantity` | soft (declaration) | [§5.5](/Koine/reference/value-objects/#55-quantities) |

@@ -1289,6 +1289,54 @@ public class LspServerTests
         executed.ShouldContain("\"id\":36");
     }
 
+    /// <summary>A command that records BOTH kinds of event (R19, #1796) — an intra-aggregate
+    /// <c>emit</c> and a published-language <c>publish</c>.</summary>
+    private const string ScenarioPublishDoc = """
+        context Ordering {
+          publishes OrderPlaced
+          integration event OrderPlaced { orderId: OrderId  lineCount: Int }
+
+          aggregate Sales root Order {
+            event OrderDrafted { orderId: OrderId }
+            entity Order identified by OrderId {
+              lineCount: Int = 0
+              command place {
+                lineCount -> 1
+                emit OrderDrafted(orderId: id)
+                publish OrderPlaced(orderId: id, lineCount: lineCount)
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// R19 (#1796): the published discriminator has to survive the SANDBOX CHILD's JSON round-trip, which
+    /// the in-process executor tests never exercise — the child writes the tree and the host reads it back
+    /// before the LSP response is built, so a key dropped at either end would silently make a published
+    /// contract read as an ordinary domain event on exactly the path Studio uses.
+    /// </summary>
+    [Fact]
+    public void RunScenario_with_execute_marks_a_published_integration_event_through_the_sandbox_child()
+    {
+        var output = RunSession(
+            Initialize(), DidOpen("file:///t.koi", ScenarioPublishDoc),
+            RunScenarioExecuted("file:///t.koi", "Order", "place", new { lineCount = 0 }, new { }, ExecuteBudgetMs, id: 37));
+
+        output.ShouldContain("\"mode\":\"executed\"");
+        output.ShouldContain("\"ok\":true");
+
+        // Both events are recorded, both keep `kind: "emit"` (the closed wire union), and exactly ONE of
+        // them — the later, published one — carries the flag.
+        var drafted = output.IndexOf("\"event\":\"OrderDrafted\"", StringComparison.Ordinal);
+        var placed = output.IndexOf("\"event\":\"OrderPlaced\"", StringComparison.Ordinal);
+        var flag = output.IndexOf("\"published\":true", StringComparison.Ordinal);
+        drafted.ShouldBeGreaterThan(-1);
+        placed.ShouldBeGreaterThan(drafted);
+        flag.ShouldBeGreaterThan(placed);
+        (output.Split("\"published\":true").Length - 1).ShouldBe(1);
+    }
+
     [Fact]
     public void RunScenario_that_blows_its_deadline_is_reported_and_the_server_survives()
     {

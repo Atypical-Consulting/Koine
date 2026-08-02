@@ -181,6 +181,10 @@ public sealed partial class CSharpEmitter
         files.Add(EmitRequestRecord(emit, ns, requestType, fields, effectiveResult));
 
         var dispatches = DispatchesInHandler(root);
+        // R19 — the root records published integration events; this handler is what hands them to the
+        // unit of work's outbox seam. Gated on the ROOT publishing (not merely on the context doing so),
+        // because only a publishing root has the IntegrationEvents/ClearIntegrationEvents members.
+        var relaysPublished = PublishesEvents(root);
 
         var sb = new StringBuilder();
         WriteHandlerHeader(sb, handlerType, requestType, effectiveResult,
@@ -212,6 +216,7 @@ public sealed partial class CSharpEmitter
         if (plainResult is not null)
         {
             sb.Append(Indent).Append(Indent).Append("var result = aggregate.").Append(method).Append('(').Append(args).Append(");\n");
+            WritePublishRelay(sb, relaysPublished);
             WriteCommit(sb);
             WriteDispatchEvents(sb, dispatches);
             sb.Append(Indent).Append(Indent).Append("return ").Append(Ok("result")).Append(";\n");
@@ -219,6 +224,7 @@ public sealed partial class CSharpEmitter
         else if (returnsValue)
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
+            WritePublishRelay(sb, relaysPublished);
             WriteCommit(sb);
             WriteDispatchEvents(sb, dispatches);
             sb.Append(Indent).Append(Indent).Append("return ").Append(Ok(successExpr)).Append(";\n");
@@ -226,6 +232,7 @@ public sealed partial class CSharpEmitter
         else
         {
             sb.Append(Indent).Append(Indent).Append("aggregate.").Append(method).Append('(').Append(args).Append(");\n");
+            WritePublishRelay(sb, relaysPublished);
             WriteCommit(sb);
             WriteDispatchEvents(sb, dispatches);
             WriteVoidReturn(sb);
@@ -399,6 +406,29 @@ public sealed partial class CSharpEmitter
         }
 
         sb.Append(Indent).Append(Indent).Append("aggregate.ClearDomainEvents();\n");
+    }
+
+    /// <summary>
+    /// Writes the handler's integration-event relay, or nothing when the root never publishes —
+    /// self-guarding like <see cref="WriteCommit"/>, so the call sites stay one line. This is the
+    /// closing half of R19's outbox path: what the root recorded via <c>publish</c> is handed to the
+    /// unit of work's enqueue seam BEFORE the commit, so <c>SaveChangesAsync</c> writes the outbox
+    /// rows in the SAME transaction as the aggregate change and an event can never be lost on commit.
+    /// Deliberately distinct from <see cref="WriteDispatchEvents"/>: a domain event is dispatched
+    /// in-process AFTER the commit, an integration event is persisted transactionally BEFORE it.
+    /// </summary>
+    private static void WritePublishRelay(StringBuilder sb, bool relaysPublished)
+    {
+        if (!relaysPublished)
+        {
+            return;
+        }
+
+        sb.Append(Indent).Append(Indent).Append("foreach (var integrationEvent in aggregate.IntegrationEvents)\n");
+        sb.Append(Indent).Append(Indent).Append("{\n");
+        sb.Append(Indent).Append(Indent).Append(Indent).Append("_unitOfWork.Enqueue(integrationEvent);\n");
+        sb.Append(Indent).Append(Indent).Append("}\n\n");
+        sb.Append(Indent).Append(Indent).Append("aggregate.ClearIntegrationEvents();\n");
     }
 
     /// <summary>The handler method signature: plain <c>HandleAsync</c> or MediatR <c>Handle</c>.</summary>

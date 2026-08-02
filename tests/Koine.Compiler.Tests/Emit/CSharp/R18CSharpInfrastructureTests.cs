@@ -291,6 +291,11 @@ public class R18CSharpInfrastructureTests
         uow.ShouldContain("public void Enqueue(IIntegrationEvent integrationEvent)");
         uow.ShouldContain("_context.Set<OutboxMessage>().Add(OutboxMessage.From(integrationEvent));");
 
+        // The seam is on the CONTRACT too (R19), so an application handler holding IUnitOfWork can
+        // reach it; both members are gated on the same `publishes` condition and cannot drift apart.
+        File(files, "Sales/Abstractions/IUnitOfWork.cs").Contents
+            .ShouldContain("void Enqueue(IIntegrationEvent integrationEvent);");
+
         // The dispatcher drains unprocessed rows and hands each to the delivery seam.
         var dispatcher = File(files, "Sales/Infrastructure/IntegrationEventDispatcher.cs").Contents;
         dispatcher.ShouldContain("public sealed class IntegrationEventDispatcher");
@@ -311,6 +316,8 @@ public class R18CSharpInfrastructureTests
         File(files, "Shipping/Infrastructure/ShippingDbContext.cs").Contents
             .ShouldNotContain("OutboxMessage");
         File(files, "Shipping/Infrastructure/UnitOfWork.cs").Contents
+            .ShouldNotContain("Enqueue");
+        File(files, "Shipping/Abstractions/IUnitOfWork.cs").Contents
             .ShouldNotContain("Enqueue");
     }
 
