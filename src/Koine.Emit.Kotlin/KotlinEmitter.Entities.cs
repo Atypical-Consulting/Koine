@@ -277,7 +277,7 @@ public sealed partial class KotlinEmitter
         // drift from the one the behavior RETURNS.
         ResultClause? resultClause = cmd.Body.OfType<ResultClause>().FirstOrDefault();
         string? resultExpr = resultClause is { } result
-            ? translator.Translate(result.Value, KotlinExpressionTranslator.NameMode.Property)
+            ? translator.Translate(result.Value, KotlinExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
 
         // The statements are BUILT here and WRITTEN below: the binding has to precede the first

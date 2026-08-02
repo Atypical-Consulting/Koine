@@ -649,4 +649,234 @@ public class EnumMemberContextScopeEmitterTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1860 — a command's <c>result</c> clause is a call site that #1771/#1793/#1799/#1802 never
+    /// reached: C#/TypeScript/Python/PHP already pass the command's declared return type down as the
+    /// expected-enum hint (<c>cmd.ReturnType?.Name</c>), but Java/Kotlin/Rust did not, so a bare enum
+    /// member in a <c>result</c> clause fell through to the context-blind <c>_enumMemberToType</c>
+    /// last-write-wins fallback and could resolve to the WRONG enum — silently, since the emitted code
+    /// still compiles (it just returns the wrong type... or, as here, doesn't compile at all because the
+    /// wrong enum is a different type entirely). <c>Billing</c> is declared FIRST, so it wins that
+    /// fallback pre-fix, exactly matching directory-mode's alphabetical ordering.
+    /// <c>activate</c>'s <c>result Active</c> also shares its rendering with the <c>emit</c> payload
+    /// argument, so post-fix (once both sides render the SAME correct enum) this fixture doubles as a
+    /// regression guard for #1838's hoist: pre-#1860-fix the two renderings disagreed (<c>OrderStatus</c>
+    /// vs <c>SubStatus</c>) and the hoist silently never fired on these three targets.
+    /// <c>relabel</c> is the control — its result is a PARAMETER, never a bare enum member, so it must
+    /// keep working unmodified. <c>close</c> is the second control — no declared return type at all, so
+    /// <c>cmd.ReturnType</c> is null and the hint path is never even reached.
+    /// </summary>
+    private const string AmbiguousEnumResultClause = """
+        context Billing {
+          enum SubStatus { Active, Suspended }
+
+          aggregate Subs root Sub {
+            entity Sub identified by SubId {
+              state: SubStatus = Suspended
+            }
+          }
+        }
+
+        context Sales {
+          import Billing.{ SubStatus }
+
+          enum OrderStatus { Draft, Active, Closed }
+
+          event Activated { status: OrderStatus }
+
+          aggregate Book root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              command activate(): OrderStatus {
+                status -> Active
+                emit Activated(status: Active)
+                result Active
+              }
+
+              command relabel(next: OrderStatus): OrderStatus {
+                status -> next
+                result next
+              }
+
+              command close() {
+                status -> Closed
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Every_target_resolves_a_result_clauses_bare_enum_member_against_the_declared_return_type()
+    {
+        const string source = AmbiguousEnumResultClause;
+
+        // (emitter, file the `activate` command lands in, the return-type owner that must win, the
+        // wrong owner — Billing's SubStatus — that must not appear anywhere in the file).
+        (IEmitter Emitter, string File, string Expected, string Forbidden)[] targets =
+        [
+            (new CSharpEmitter(), "Order.cs", "OrderStatus.Active", "SubStatus"),
+            (new TypeScriptEmitter(), "Order.ts", "OrderStatus.Active", "SubStatus"),
+            (new PythonEmitter(), "order.py", "OrderStatus.ACTIVE", "SubStatus"),
+            (new PhpEmitter(), "Order.php", "OrderStatus::ACTIVE", "SubStatus"),
+            (new RustEmitter(), "sales.rs", "OrderStatus::Active", "SubStatus"),
+            (new JavaEmitter(), "Order.java", "OrderStatus.Active", "SubStatus"),
+            (new KotlinEmitter(), "Order.kt", "OrderStatus.Active", "SubStatus"),
+        ];
+
+        foreach ((IEmitter emitter, var file, var expected, var forbidden) in targets)
+        {
+            var result = new KoineCompiler().Compile(source, emitter);
+            result.Success.ShouldBeTrue($"{file}: " + string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+            var contents = result.Files
+                .Single(f => f.RelativePath.EndsWith(file, StringComparison.OrdinalIgnoreCase)).Contents;
+            contents.ShouldContain(expected, customMessage: $"{file} should resolve the result clause's bare enum member against the declared return type");
+            contents.ShouldNotContain(forbidden, customMessage: $"{file} must not resolve the result clause against the wrong (last-indexed) enum");
+        }
+    }
+
+    [Fact]
+    public void CSharp_compiles_the_ambiguous_enum_result_model()
+    {
+        var result = new KoineCompiler().Compile(AmbiguousEnumResultClause, new CSharpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        (System.Reflection.Assembly? assembly, IReadOnlyList<string> errors) = TestSupport.Compile(result.Files);
+        assembly.ShouldNotBeNull(string.Join("\n", errors));
+    }
+
+    [Fact]
+    public void TypeScript_compiles_the_ambiguous_enum_result_model()
+    {
+        var result = new KoineCompiler().Compile(AmbiguousEnumResultClause, new TypeScriptEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.TypeCheckTypeScript(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable tsc toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Python_compiles_the_ambiguous_enum_result_model()
+    {
+        var result = new KoineCompiler().Compile(AmbiguousEnumResultClause, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.TypeCheckPython(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable python toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Php_compiles_the_ambiguous_enum_result_model()
+    {
+        var result = new KoineCompiler().Compile(AmbiguousEnumResultClause, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable php toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Java_compiles_the_ambiguous_enum_result_model()
+    {
+        var result = new KoineCompiler().Compile(AmbiguousEnumResultClause, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable javac toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Kotlin_compiles_the_ambiguous_enum_result_model()
+    {
+        var result = new KoineCompiler().Compile(AmbiguousEnumResultClause, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable kotlinc toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    [Fact]
+    public void Rust_compiles_the_ambiguous_enum_result_model()
+    {
+        var result = new KoineCompiler().Compile(AmbiguousEnumResultClause, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var check = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable cargo toolchain available; skipping.");
+        check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1860, Task 5 — the edge case the primary fixture cannot exercise: an EXPLICITLY qualified
+    /// return type (<c>Billing.SubStatus</c>), where the bare result member <c>Active</c> is ambiguous
+    /// against the REFERENCING context's own <c>OrderStatus.Active</c> too. <c>cmd.ReturnType?.Name</c>
+    /// is only ever the bare simple name ("SubStatus"), so this checks the hint still resolves correctly
+    /// against a FOREIGN owner and not just a same-context one (the only shape the primary fixture
+    /// covers). A separate, standalone model — folding this into <see cref="AmbiguousEnumResultClause"/>
+    /// would make "SubStatus" a legitimately expected substring there too, weakening that fixture's own
+    /// negative assertion.
+    /// </summary>
+    private const string QualifiedReturnTypeAmbiguousResult = """
+        context Billing {
+          enum SubStatus { Active, Suspended }
+
+          aggregate Subs root Sub {
+            entity Sub identified by SubId {
+              state: SubStatus = Suspended
+            }
+          }
+        }
+
+        context Sales {
+          import Billing.{ SubStatus }
+
+          enum OrderStatus { Draft, Active, Closed }
+
+          aggregate Book root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              command reopenAsSub(): Billing.SubStatus {
+                result Active
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Every_target_resolves_a_result_clause_against_an_explicitly_qualified_foreign_return_type()
+    {
+        const string source = QualifiedReturnTypeAmbiguousResult;
+
+        // (emitter, file the `reopenAsSub` command lands in, the qualified owner that must win).
+        (IEmitter Emitter, string File, string Expected)[] targets =
+        [
+            (new CSharpEmitter(), "Order.cs", "Billing.SubStatus.Active"),
+            (new TypeScriptEmitter(), "Order.ts", "SubStatus.Active"),
+            (new PythonEmitter(), "order.py", "SubStatus.ACTIVE"),
+            (new PhpEmitter(), "Order.php", "SubStatus::ACTIVE"),
+            (new RustEmitter(), "sales.rs", "crate::billing::SubStatus::Active"),
+            (new JavaEmitter(), "Order.java", "koine.generated.billing.SubStatus.Active"),
+            (new KotlinEmitter(), "Order.kt", "koine.generated.billing.SubStatus.Active"),
+        ];
+
+        foreach ((IEmitter emitter, var file, var expected) in targets)
+        {
+            var result = new KoineCompiler().Compile(source, emitter);
+            result.Success.ShouldBeTrue($"{file}: " + string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+            var contents = result.Files
+                .Single(f => f.RelativePath.EndsWith(file, StringComparison.OrdinalIgnoreCase)).Contents;
+            contents.ShouldContain(expected, customMessage: $"{file} should resolve the result clause against the explicitly qualified foreign return type");
+        }
+    }
 }

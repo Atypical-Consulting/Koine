@@ -432,7 +432,7 @@ public sealed partial class RustEmitter
             return null;
         }
 
-        var inner = RustExpressionTranslator.StripOuterParens(translator.TranslateOwned(result.Value));
+        var inner = RustExpressionTranslator.StripOuterParens(translator.TranslateOwned(result.Value, cmd.ReturnType?.Name));
         TypeRef? valueType = translator.InferType(result.Value);
 
         // The return site's own two coercions, applied identically to the inline rendering and to a bare
