@@ -926,21 +926,30 @@ fn serve_connection(
 
     let hello: Option<ClientFrame> = read_frame(&mut reader).ok().flatten();
 
+    // The broker lock is taken here and held until this member's link is published, because those
+    // two facts have to become true together. A member exists in the session the instant `join`
+    // returns, so another thread's `update`/`presence` could produce a delivery addressed to it
+    // before it has anywhere to be delivered — and `dispatch` drops a delivery with no link
+    // silently. Every other producer of deliveries goes through this same lock first, so holding it
+    // across the publish is what closes that window.
+    //
+    // LOCK ORDER — broker, then links. This is the only place the two nest, and nothing in this
+    // module ever takes `links` and then `broker`. Keep it that way.
+    let mut broker = lock(&hub.broker);
+
     let (admitted, secret) = match hello {
-        Some(ClientFrame::Join { secret, identity }) => {
-            (lock(&hub.broker).join(&secret, identity), None)
-        }
+        Some(ClientFrame::Join { secret, identity }) => (broker.join(&secret, identity), None),
         // Only a relay lets a caller open a session over the wire. In the desktop shell this arm is
         // off, so a peer that reaches the listener can join the session the user started and nothing
         // else.
         Some(ClientFrame::Create { identity }) if allow_create => {
             let secret = new_secret();
-            (
-                lock(&hub.broker).create(identity, secret.clone()),
-                Some(secret),
-            )
+            (broker.create(identity, secret.clone()), Some(secret))
         }
         _ => {
+            // Released before the socket write: a refusal must never be one more thing the rest of
+            // the session waits behind (#1822).
+            drop(broker);
             let _ = write_frame(
                 &mut writer,
                 &ServerFrame::Rejected {
@@ -954,6 +963,7 @@ fn serve_connection(
     let admission = match admitted {
         Ok(admission) => admission,
         Err(err) => {
+            drop(broker);
             let _ = write_frame(
                 &mut writer,
                 &ServerFrame::Rejected {
@@ -977,20 +987,20 @@ fn serve_connection(
     // The link needs a handle on the socket to hang up with, separate from the one the writer thread
     // is about to take ownership of.
     let Ok(hangup) = writer.get_ref().try_clone() else {
+        drop(broker);
         hub.depart(member);
         return;
     };
-    // Enqueue and publish under ONE hold of the links lock. `dispatch` takes the same lock per
-    // delivery, so this is what orders the protocol: a `PeerJoin` that another thread produced for
-    // this member while we were still publishing waits here and lands *after* the admission, instead
-    // of finding no link and being dropped — or, worse, overtaking the frame the client is blocked
-    // reading.
+    // Enqueue and publish under ONE hold of the links lock too, still inside the broker's. The
+    // admission is therefore the first thing in this member's queue, so nothing can overtake the
+    // frame the client is blocked reading.
     {
         let mut links = lock(&hub.links);
         let link = Outbound::spawn(writer, hangup);
         let _ = link.enqueue(admitted_frame);
         links.insert(member, link);
     }
+    drop(broker);
     // A failed admission write is no longer this thread's problem: the writer thread hangs up, the
     // read below fails, and the loop falls through to the same `hub.depart(member)` as any other
     // disconnect.
