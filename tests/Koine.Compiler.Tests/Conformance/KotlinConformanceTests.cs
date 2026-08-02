@@ -1139,6 +1139,125 @@ public class KotlinConformanceTests
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
 
+    /// <summary>
+    /// Issue #1888 — the SIBLING HALF of the <c>if</c> #1880 fixed. <c>MemberAnalysis.IsDerived</c> splits
+    /// <c>total: Decimal = amount + surcharge</c> (references siblings → a get-only property) from
+    /// <c>total: Decimal = 5</c> (a constant → a stored default); #1880 reconciled only the stored half,
+    /// leaving the derived property's BODY unreconciled against its own declared type. Kotlin emitted
+    /// <c>val total: java.math.BigDecimal get() = this.amount + this.surcharge</c> — a <c>Long</c> body
+    /// under a <c>BigDecimal</c> declaration, a hard <c>kotlinc</c> type mismatch. Routed through the very
+    /// same <c>TranslateReconciled</c> the stored half uses, so the two halves cannot drift apart. Rust
+    /// closed this site at #961 (and #1329 for the optional variant).
+    /// </summary>
+    [Fact]
+    public void Derived_member_body_widens_an_int_to_bigdecimal_against_its_declared_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Decimal = amount + surcharge\n" +
+            "  }\n" +
+            "\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Decimal = amount + surcharge\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("val total: java.math.BigDecimal get() = java.math.BigDecimal.valueOf(this.amount + this.surcharge)");
+        money.ShouldNotContain("val total: java.math.BigDecimal get() = this.amount + this.surcharge");
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("val total: java.math.BigDecimal get() = java.math.BigDecimal.valueOf(this.amount + this.surcharge)");
+        invoice.ShouldNotContain("val total: java.math.BigDecimal get() = this.amount + this.surcharge");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1888 — the optional-declared variant (Rust's #1329 shape). Kotlin nullability is subtyping,
+    /// so only the NUMERIC dimension renders: the body still widens to <c>BigDecimal</c>, and a
+    /// non-optional value flows into a nullable-declared property unchanged (no <c>NeedsSomeWrap</c> lift,
+    /// which is why the <c>String? = tag</c> member stays byte-identical here while Java's lifts).
+    /// </summary>
+    [Fact]
+    public void Optional_declared_derived_member_body_widens_without_a_lift()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  value Money {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    tag: String\n" +
+            "    total: Decimal? = amount + surcharge\n" +
+            "    label: String? = tag\n" +
+            "  }\n" +
+            "\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    amount: Int\n" +
+            "    surcharge: Int\n" +
+            "    total: Decimal? = amount + surcharge\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("val total: java.math.BigDecimal? get() = java.math.BigDecimal.valueOf(this.amount + this.surcharge)");
+        money.ShouldContain("val label: String? get() = this.tag");
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.kt", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("val total: java.math.BigDecimal? get() = java.math.BigDecimal.valueOf(this.amount + this.surcharge)");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1888's zero-change guard — a matching-type (<c>Decimal</c>) derived body and non-numeric
+    /// (<c>String</c>/<c>Int</c>) ones must render byte-identically to before the reconciliation was wired
+    /// in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_derived_member_bodies_render_unchanged()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  value Money {\n" +
+            "    price: Decimal\n" +
+            "    qty: Int\n" +
+            "    tag: String\n" +
+            "    exact: Decimal = price\n" +
+            "    label: String = tag\n" +
+            "    count: Int = qty\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new KotlinEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.kt", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("val exact: java.math.BigDecimal get() = this.price");
+        money.ShouldContain("val label: String get() = this.tag");
+        money.ShouldContain("val count: Long get() = this.qty");
+        money.ShouldNotContain("java.math.BigDecimal.valueOf");
+
+        var r = TestSupport.CompileKotlin(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
     /// <summary>Issue #1866: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
     [Fact]
     public void Result_expression_widens_an_int_literal_to_bigdecimal_against_a_decimal_return_type()
