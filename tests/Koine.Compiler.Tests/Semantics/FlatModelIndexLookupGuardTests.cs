@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Koine.Compiler.Tests;
 
 /// <summary>
+/// <para>
 /// Guards against a defect family this repo has now hit close to twenty times (#1632 … #1863):
 /// <c>ModelIndex</c> exposes a FLAT, last-declaration-wins lookup (<c>Classify(string)</c>,
 /// <c>TryGetDecl(string, out TypeDecl)</c>) alongside a context-aware sibling
