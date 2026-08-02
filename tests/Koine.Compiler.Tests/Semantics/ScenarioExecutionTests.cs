@@ -216,12 +216,15 @@ public class ScenarioExecutionTests
                 .Select(t => (t.Field, t.From, t.IsInitialization)));
         executed.Steps.OfType<ScenarioStep.Transition>().First(t => t.Field == "status").To.ShouldBe("Placed");
 
-        // The emitted event and its payload keys match; `lineCount` is the real computed count.
-        ScenarioStep.Emit executedEmit = executed.Steps.OfType<ScenarioStep.Emit>().ShouldHaveSingleItem();
-        ScenarioStep.Emit interpretedEmit = interpreted.Steps.OfType<ScenarioStep.Emit>().ShouldHaveSingleItem();
-        executedEmit.EventName.ShouldBe(interpretedEmit.EventName);
-        executedEmit.Args.Keys.ShouldBe(interpretedEmit.Args.Keys);
-        executedEmit.Args["lineCount"].ShouldBe("1");
+        // Both recorded events — the `emit`ted domain event and the `publish`ed integration event (#1796)
+        // — and their payload keys match, in order; `lineCount` is the real computed count.
+        List<ScenarioStep.Emit> executedEmits = executed.Steps.OfType<ScenarioStep.Emit>().ToList();
+        List<ScenarioStep.Emit> interpretedEmits = interpreted.Steps.OfType<ScenarioStep.Emit>().ToList();
+        executedEmits.Select(e => e.EventName).ShouldBe(interpretedEmits.Select(e => e.EventName));
+        executedEmits.Select(e => e.Args.Keys).ShouldBe(interpretedEmits.Select(e => e.Args.Keys));
+        executedEmits[0].EventName.ShouldBe("OrderPlacedInternally");
+        executedEmits[0].Args["lineCount"].ShouldBe("1");
+        executedEmits[1].EventName.ShouldBe("OrderPlaced");
 
         // Invariants and resulting-state keys are identical.
         executed.Invariants.Select(i => (i.Message, i.Condition, i.Outcome))
@@ -1362,11 +1365,108 @@ public class ScenarioExecutionTests
         executed.ResultingState["LedgerEntry.balance"].ShouldBe("17");
     }
 
-    // D1's declared-only surface has NO executed-mode test on purpose: a command cannot `emit` an
-    // integration event at all today — `EntityBehaviorValidator.ValidateEmit` resolves the name to an
-    // `EventDecl`, and `integration event X` builds an `IntegrationEventDecl`, so `emit X` is the hard
-    // error KOI0601 "unknown event". A published event therefore never reaches the runner as a RECORDED
-    // runtime event, and the dispatcher's declared-only branch cannot fire from one. The resolution
-    // itself is covered directly, above, by
-    // <see cref="A_published_integration_event_resolves_to_its_subscribers_and_to_no_executable_target"/>.
+    // ------------------------------------------------------------------------
+    // D1's declared-only surface, END TO END (#1796). `publish X(…)` gives a command a way to record a
+    // published integration event, so the resolution covered above by
+    // A_published_integration_event_resolves_to_its_subscribers_and_to_no_executable_target now really
+    // fires from an EXECUTED run: the emitted root keeps `_integrationEvents` beside `_domainEvents`,
+    // and the dispatcher reads both.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void A_published_integration_event_is_reported_as_declared_only_by_an_executed_run()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        Scenario scenario = OrderScenario("place", "Draft", Line("MARG", 2, 10m));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+
+        // The published event crosses a boundary to the three contexts that `subscribes
+        // Ordering.OrderPlaced` — said exactly once, however many recorded events resolve to it.
+        string crossing = executed.Notes
+            .Where(n => n.Contains("crosses a context boundary", StringComparison.Ordinal))
+            .ShouldHaveSingleItem(string.Join(" | ", executed.Notes));
+        crossing.ShouldContain("'OrderPlaced'");
+        crossing.ShouldContain("Delivery, Kitchen and Payment");
+        crossing.ShouldContain("no downstream step was run for it");
+
+        // `command place` records BOTH lists: the internal domain event, and the published contract —
+        // whose payload is read off the REAL recorded integration event (10 x 2 = 20, a figure the
+        // interpreter can only report as `?` because `total` is a derived value-object sum).
+        List<ScenarioStep.Emit> recorded = executed.Steps.OfType<ScenarioStep.Emit>().ToList();
+        recorded.Select(e => e.EventName).ShouldBe(new[] { "OrderPlacedInternally", "OrderPlaced" });
+        recorded[1].Args["total"].ShouldBe("20");
+
+        // …and nothing was FABRICATED for it: a subscriber is a bodiless handler seam, so no downstream
+        // step and no downstream state may appear (ADR 0014 D1/D7).
+        executed.Steps.ShouldAllBe(s => s.Aggregate == null);
+        executed.ResultingState.Keys.ShouldNotContain(k => k.Contains('.', StringComparison.Ordinal));
+
+        // The INTERNAL event is not mistaken for a boundary crossing: it is nobody's published contract.
+        executed.Notes.ShouldNotContain(n => n.Contains("OrderPlacedInternally", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The regression half: widening the recorded-event source must be INERT for every model that
+    /// publishes nothing. The pizzeria's `Payment` context declares no `publishes`, so the emitted
+    /// `Charge` root has no `IntegrationEvents` property at all — and this run must report exactly the
+    /// notes it reported before the widening.
+    /// </summary>
+    [Fact]
+    public void A_root_that_publishes_nothing_reports_exactly_the_notes_it_reported_before()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        var scenario = new Scenario(
+            "Charge",
+            "capture",
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal)
+            {
+                ["order"] = ScenarioValue.FromString("22222222-2222-2222-2222-222222222222"),
+                ["amount"] = ScenarioValue.RecordOf(
+                    ("amount", ScenarioValue.FromDecimal(10m)),
+                    ("currency", ScenarioValue.FromString("EUR"))),
+                ["method"] = ScenarioValue.Enum("Card"),
+                ["status"] = ScenarioValue.Enum("Authorized"),
+            },
+            new Dictionary<string, ScenarioValue>(StringComparer.Ordinal));
+
+        ScenarioResult executed = ScenarioExecutor.Run(sema, scenario);
+
+        executed.Ok.ShouldBeTrue(string.Join(" | ", executed.Notes));
+        executed.Steps.OfType<ScenarioStep.Emit>().Select(e => e.EventName).ShouldBe(new[] { "ChargeCaptured" });
+
+        // Exactly the one note the un-widened runner produced: the LedgerEntry state it refused to invent.
+        executed.Notes.ShouldHaveSingleItem()
+            .ShouldStartWith("No state was established for LedgerEntry");
+    }
+
+    /// <summary>
+    /// The interpreted (Approach B) arm of the same clause. It reports the publication the way it reports
+    /// an emitted event and stops there — ADR 0014 D7 keeps `ScenarioInterpreter` single-aggregate, so it
+    /// constructs no downstream aggregate and dispatches no fan-out.
+    /// </summary>
+    [Fact]
+    public void The_interpreter_reports_a_publication_the_way_it_reports_an_emitted_event()
+    {
+        SemanticModel sema = Pizzeria.Value;
+        Scenario scenario = OrderScenario("place", "Draft", Line("MARG", 2, 10m));
+
+        ScenarioResult interpreted = ScenarioInterpreter.Run(sema, scenario);
+
+        interpreted.Steps.OfType<ScenarioStep.Emit>().Select(e => e.EventName)
+            .ShouldBe(new[] { "OrderPlacedInternally", "OrderPlaced" });
+
+        ScenarioStep.Emit published = interpreted.Steps.OfType<ScenarioStep.Emit>().Last();
+        published.Args.Keys.OrderBy(k => k, StringComparer.Ordinal)
+            .ShouldBe(new[] { "customer", "fulfillment", "orderId", "placedAt", "total" });
+        published.Args["fulfillment"].ShouldBe("Delivery");
+
+        // D7: no attribution, no downstream state, no fan-out note — the interpreter did not grow a
+        // second execution engine.
+        interpreted.Steps.ShouldAllBe(s => s.Aggregate == null);
+        interpreted.ResultingState.Keys.ShouldNotContain(k => k.Contains('.', StringComparison.Ordinal));
+        interpreted.Notes.ShouldNotContain(n => n.Contains("crosses a context boundary", StringComparison.Ordinal));
+    }
 }

@@ -277,16 +277,16 @@ internal sealed class ScenarioInterpreter
                     }
 
                 case EmitClause emit:
-                    {
-                        var args = new Dictionary<string, string>(StringComparer.Ordinal);
-                        foreach (EmitArg arg in emit.Args)
-                        {
-                            args[arg.Field] = Eval(arg.Value, env).Display();
-                        }
+                    steps.Add(RecordedStep(emit.EventName, emit.Args, env));
+                    break;
 
-                        steps.Add(new ScenarioStep.Emit(emit.EventName, args));
-                        break;
-                    }
+                // A `publish` is announced on the same timeline as an `emit` (#1796): both are payloads the
+                // command records, and the step contract has one shape for a recorded event. What the
+                // interpreter deliberately does NOT do is follow it — ADR 0014 D7 keeps Approach B
+                // single-aggregate, so no subscriber is constructed and no fan-out is dispatched here.
+                case PublishClause publish:
+                    steps.Add(RecordedStep(publish.EventName, publish.Args, env));
+                    break;
 
                 case ResultClause res:
                     result = Eval(res.Value, env).Display();
@@ -296,6 +296,22 @@ internal sealed class ScenarioInterpreter
         }
 
         return true;
+    }
+
+    /// <summary>One recorded event — an <c>emit</c>'s domain event or a <c>publish</c>'s integration event
+    /// — with its payload evaluated against the current environment.</summary>
+    private ScenarioStep.Emit RecordedStep(
+        string eventName,
+        IReadOnlyList<EmitArg> clauseArgs,
+        Dictionary<string, ScenarioValue> env)
+    {
+        var args = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (EmitArg arg in clauseArgs)
+        {
+            args[arg.Field] = Eval(arg.Value, env).Display();
+        }
+
+        return new ScenarioStep.Emit(eventName, args);
     }
 
     private IReadOnlyDictionary<string, string> SnapshotState(EntityDecl entity, Dictionary<string, ScenarioValue> env)

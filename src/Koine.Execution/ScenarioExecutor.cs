@@ -625,7 +625,7 @@ internal sealed class ScenarioExecutor
     /// the key space is still finite (a model has finitely many policies), and every dispatch consumes a
     /// key that is never released.</para>
     ///
-    /// <para><paramref name="alreadyRecorded"/> is how many events <paramref name="subject"/> carried
+    /// <para><paramref name="already"/> is how many events <paramref name="subject"/> carried
     /// BEFORE the invocation this call follows: an aggregate reached twice keeps its earlier events, and
     /// re-reading them would re-resolve a cascade that already happened.</para>
     /// </summary>
@@ -638,17 +638,20 @@ internal sealed class ScenarioExecutor
         Dictionary<string, string> state,
         HashSet<(string Aggregate, string Member, string Policy, string Event)> visited,
         int depth,
-        int alreadyRecorded = 0)
+        RecordedCount already = default)
     {
-        List<object> events = DomainEventsOf(subject);
-        if (events.Count <= alreadyRecorded)
+        // BOTH recorded lists (#1796): an `emit` records a domain event, a `publish` records an integration
+        // event, and the resolver answers for either — the executable policy reactions come off the first,
+        // the cross-context subscriptions off the second.
+        List<object> events = RecordedEventsSince(subject, already);
+        if (events.Count == 0)
         {
             return;
         }
 
         string context = ContextOf(subjectEntity.Name) ?? string.Empty;
 
-        foreach (object recorded in events.Skip(alreadyRecorded))
+        foreach (object recorded in events)
         {
             // The RUNTIME event object's type name, not a re-reading of the body's `emit` clauses: an
             // event the emitted code really recorded is higher fidelity than one the model merely says
@@ -663,19 +666,17 @@ internal sealed class ScenarioExecutor
             // D1: a cross-context subscription is DECLARED and not executable — every emitter gives it
             // only a bodiless handler seam — so it is said out loud and never fabricated into a step.
             //
-            // Unreachable from a RECORDED event as the language stands: `emit X` resolves X to an
-            // `EventDecl` (EntityBehaviorValidator.ValidateEmit), and `integration event X` builds an
-            // `IntegrationEventDecl`, so no command can emit a published event today — which is why the
-            // shipped templates publish `OrderPlaced` and emit `OrderPlacedInternally`. Kept because the
-            // resolver answers this question either way (and is tested doing so): the day `emit` accepts
-            // an integration event, the runner already reports it honestly instead of silently pretending
-            // the boundary was crossed.
+            // Reached from a real run since `publish X(…)` (#1796, ADR 0017): the emitted root records the
+            // published contract into its own `_integrationEvents` list, which RecordedEventsSince reads
+            // beside `_domainEvents`. Said ONCE per event: a command publishing the same contract twice
+            // makes the same statement about the same boundary, and repeating it would read as two
+            // crossings.
             if (resolution.DeclaredOnly.Count > 0)
             {
-                _notes.Add($"'{eventName}' crosses a context boundary to "
-                           + $"{Join(resolution.DeclaredOnly.Select(sub => sub.Context).ToList())}, which the model "
-                           + "declares a subscription for and no executable handler (the emitter produces only a "
-                           + "handler seam), so no downstream step was run for it.");
+                NoteOnce($"'{eventName}' crosses a context boundary to "
+                         + $"{Join(resolution.DeclaredOnly.Select(sub => sub.Context).ToList())}, which the model "
+                         + "declares a subscription for and no executable handler (the emitter produces only a "
+                         + "handler seam), so no downstream step was run for it.");
             }
 
             foreach (FanOutTarget target in resolution.Executable)
@@ -812,10 +813,10 @@ internal sealed class ScenarioExecutor
         IReadOnlyDictionary<string, string> before =
             instance is null ? NoState : Snapshot(entity, instance, recordNotes: false);
 
-        // What this aggregate had already recorded before this reaction ran. An aggregate reached twice
-        // keeps its earlier events, so both the `emit` step payloads below and the recursion after them
-        // must read only the ones THIS invocation added.
-        int alreadyRecorded = instance is null ? 0 : DomainEventsOf(instance).Count;
+        // What this aggregate had already recorded before this reaction ran, per list. An aggregate reached
+        // twice keeps its earlier events, so both the `emit`/`publish` step payloads below and the
+        // recursion after them must read only the ones THIS invocation added.
+        RecordedCount alreadyRecorded = RecordedCountOf(instance);
 
         object? returned;
         try
@@ -1116,9 +1117,9 @@ internal sealed class ScenarioExecutor
     // ------------------------------------------------------------------------
 
     /// <summary><paramref name="fromEvent"/> is where this invocation's own events start on
-    /// <paramref name="subject"/>: an aggregate a second reaction reached still carries the first
-    /// reaction's events, and matching an <c>emit</c> clause against one of those would report a
-    /// stale payload as if this command had just produced it.</summary>
+    /// <paramref name="subject"/>, in each recorded list: an aggregate a second reaction reached still
+    /// carries the first reaction's events, and matching an <c>emit</c> or <c>publish</c> clause against
+    /// one of those would report a stale payload as if this command had just produced it.</summary>
     private List<ScenarioStep> SuccessSteps(
         IReadOnlyList<CommandStmt> body,
         IReadOnlyDictionary<string, string> before,
@@ -1126,11 +1127,13 @@ internal sealed class ScenarioExecutor
         object subject,
         object? returned,
         ref string? result,
-        int fromEvent = 0)
+        RecordedCount fromEvent = default)
     {
         var steps = new List<ScenarioStep>();
         List<object> events = DomainEventsOf(subject);
-        int cursor = fromEvent;
+        List<object> published = IntegrationEventsOf(subject);
+        int cursor = fromEvent.Domain;
+        int publishedCursor = fromEvent.Integration;
 
         foreach (CommandStmt stmt in body)
         {
@@ -1155,7 +1158,14 @@ internal sealed class ScenarioExecutor
                     break;
 
                 case EmitClause emit:
-                    steps.Add(EmitStep(emit, events, ref cursor));
+                    steps.Add(RecordedStep(emit.EventName, emit.Args, "emitted", events, ref cursor));
+                    break;
+
+                // A publication is the command's own recorded action, exactly like an emit — it is read
+                // off the OTHER list (#1796) and rendered on the same timeline. What it does NOT do is
+                // reach a subscriber: that stays a declared-only note (ADR 0014 D1).
+                case PublishClause publish:
+                    steps.Add(RecordedStep(publish.EventName, publish.Args, "published", published, ref publishedCursor));
                     break;
 
                 case ResultClause:
@@ -1168,46 +1178,95 @@ internal sealed class ScenarioExecutor
         return steps;
     }
 
-    /// <summary>Reads the payload of the REAL domain event the emitted operation recorded, matching each
-    /// <c>emit</c> statement to the next recorded event of that name.</summary>
-    private ScenarioStep.Emit EmitStep(EmitClause emit, List<object> events, ref int cursor)
+    /// <summary>Reads the payload of the REAL event the emitted operation recorded, matching each
+    /// <c>emit</c> / <c>publish</c> statement to the next recorded event of that name in the list that
+    /// clause writes to (<paramref name="recorded"/>). <paramref name="verb"/> only shapes the note when
+    /// nothing was recorded, so each clause is reported in its own words.</summary>
+    private ScenarioStep.Emit RecordedStep(
+        string eventName,
+        IReadOnlyList<EmitArg> clauseArgs,
+        string verb,
+        List<object> recorded,
+        ref int cursor)
     {
-        string clrName = ScenarioValueBinder.Pascal(emit.EventName);
+        string clrName = ScenarioValueBinder.Pascal(eventName);
         var args = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        int index = events.FindIndex(cursor, e => e.GetType().Name == clrName);
+        int index = recorded.FindIndex(cursor, e => e.GetType().Name == clrName);
         if (index < 0)
         {
-            _notes.Add($"'{emit.EventName}' is declared as emitted but no such event was recorded on the "
+            _notes.Add($"'{eventName}' is declared as {verb} but no such event was recorded on the "
                        + "aggregate; its payload could not be read.");
-            return new ScenarioStep.Emit(emit.EventName, args);
+            return new ScenarioStep.Emit(eventName, args);
         }
 
         cursor = index + 1;
-        foreach (EmitArg arg in emit.Args)
+        foreach (EmitArg arg in clauseArgs)
         {
             try
             {
                 args[arg.Field] = _binder.Display(
-                    ScenarioValueBinder.ReadProperty(events[index], ScenarioValueBinder.Pascal(arg.Field)));
+                    ScenarioValueBinder.ReadProperty(recorded[index], ScenarioValueBinder.Pascal(arg.Field)));
             }
             catch (Exception ex)
             {
                 args[arg.Field] = "⚠";
-                _notes.Add($"Reading '{arg.Field}' off '{emit.EventName}' threw: {Describe(Unwrap(ex))}.");
+                _notes.Add($"Reading '{arg.Field}' off '{eventName}' threw: {Describe(Unwrap(ex))}.");
             }
         }
 
-        return new ScenarioStep.Emit(emit.EventName, args);
+        return new ScenarioStep.Emit(eventName, args);
     }
 
-    private static List<object> DomainEventsOf(object subject)
+    /// <summary>The intra-aggregate domain events an <c>emit</c> recorded (the emitted
+    /// <c>_domainEvents</c> list).</summary>
+    private static List<object> DomainEventsOf(object subject) => RecordedList(subject, "DomainEvents");
+
+    /// <summary>
+    /// The published integration events a <c>publish</c> recorded (#1796): the emitted
+    /// <c>_integrationEvents</c> list, which a root gains only when a command of its aggregate publishes.
+    /// A root that publishes nothing has no such property at all, and reads as the empty list — the same
+    /// answer it gave before this second list existed.
+    /// </summary>
+    private static List<object> IntegrationEventsOf(object subject) => RecordedList(subject, "IntegrationEvents");
+
+    /// <summary>Reflects one recorded-event list off the live aggregate. An absent property, a null
+    /// property and a non-sequence all read as empty — never a throw.</summary>
+    private static List<object> RecordedList(object subject, string property)
     {
-        object? recorded = ScenarioValueBinder.ReadProperty(subject, "DomainEvents");
+        object? recorded = ScenarioValueBinder.ReadProperty(subject, property);
         return recorded is IEnumerable sequence
             ? sequence.Cast<object?>().Where(e => e is not null).Select(e => e!).ToList()
             : [];
     }
+
+    /// <summary>
+    /// Everything an aggregate recorded, in the order the emitted code records it: the domain events an
+    /// <c>emit</c> appended first, then the integration events a <c>publish</c> appended — the two are
+    /// SEPARATE emitted lists (<c>IDomainEvent</c> and <c>IIntegrationEvent</c> are distinct markers with
+    /// distinct delivery), so one flat reading has to choose an order, and domain-then-integration is the
+    /// one the emitter's own recording follows.
+    ///
+    /// <para><paramref name="already"/> is counted PER LIST rather than as one total, because the two grow
+    /// independently: an aggregate that had 2 domain + 1 integration events and gained one of each cannot
+    /// be resumed from a single "3", which would re-read the old integration event and miss the new
+    /// domain one.</para>
+    /// </summary>
+    private static List<object> RecordedEventsSince(object subject, RecordedCount already) =>
+    [
+        .. DomainEventsOf(subject).Skip(already.Domain),
+        .. IntegrationEventsOf(subject).Skip(already.Integration),
+    ];
+
+    /// <summary>How many events an aggregate had recorded in each emitted list at a point in time.</summary>
+    private static RecordedCount RecordedCountOf(object? subject) =>
+        subject is null
+            ? default
+            : new RecordedCount(DomainEventsOf(subject).Count, IntegrationEventsOf(subject).Count);
+
+    /// <summary>A cursor into the two recorded-event lists an aggregate keeps
+    /// (<c>_domainEvents</c> / <c>_integrationEvents</c>).</summary>
+    private readonly record struct RecordedCount(int Domain, int Integration);
 
     /// <summary>Reads every member declared on <paramref name="entity"/> off the live instance — including
     /// the DERIVED ones, whose values the emitted code actually computed (gap #1). The entity is a
