@@ -38,9 +38,10 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use crate::noise::PUBLIC_KEY_HEX_LEN;
@@ -664,11 +665,31 @@ pub fn secrets_match(a: &str, b: &str) -> bool {
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long dialling a broker may take.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a single frame may take to reach the kernel before the peer counts as wedged.
+///
+/// Without this a `write_frame` to a member that has stopped reading blocks *forever* once its
+/// receive buffer and our send buffer are both full — there is no way out of that except the peer
+/// closing the connection (#1822). A participant who cannot absorb one frame in ten seconds is not
+/// slow, it is gone (asleep laptop, yanked wifi, killed process), so the write fails and every send
+/// path here already treats a write error as "this member is gone".
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Accept-loop poll interval; the listener is non-blocking so shutdown never waits on a connection.
 const ACCEPT_POLL: Duration = Duration::from_millis(25);
 /// Ceiling on simultaneously-served connections, so a connection flood cannot spawn threads without
 /// bound. Sized to every session being full at once, plus room for handshakes in flight.
 pub const MAX_CONNECTIONS: usize = MAX_SESSIONS * MAX_MEMBERS_PER_SESSION + 16;
+/// How much traffic one member may have queued but not yet on the wire before it is disconnected.
+///
+/// Handing each connection its own queue is what stops a slow peer stalling the broker, but an
+/// *unbounded* queue would only trade the stall for a memory exhaustion — the same member, the same
+/// denial of service, a different resource. So the backlog is charged in bytes and capped here.
+///
+/// An empty queue always admits, whatever the size, so this is not the "largest frame" bound —
+/// nobody is ever dropped for one large update they could have absorbed. It is the "how far behind
+/// may you fall" bound, and a Yjs update is kilobytes, so 4 MiB is hundreds of edits of slack for a
+/// peer on bad wifi. Multiply it out before changing it: a full session is
+/// `MAX_MEMBERS_PER_SESSION` of these, and a relay `MAX_SESSIONS` of those.
+pub const MAX_OUTBOUND_BACKLOG_BYTES: usize = 4 * 1024 * 1024;
 
 /// Where the frames addressed to *this* machine's participant go — Tauri events in the app, a
 /// channel in tests. Keeps this module free of any Tauri dependency.
@@ -688,18 +709,151 @@ pub struct SessionInfo {
     pub admitted_as: Participant,
 }
 
+/// Arm `WRITE_TIMEOUT` on a collaboration socket. Called on both halves of every connection — the
+/// stream a broker accepts and the stream a participant dials — because either end can be the one
+/// that stops reading.
+fn arm_write_deadline(stream: &TcpStream) {
+    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     // A panicking connection thread must not wedge the whole session; the broker's invariants are
     // re-established by the next call either way.
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// What a queued frame is charged against a member's backlog.
+///
+/// Only `Update` carries a payload the sender chose the size of; every other frame is identity-sized
+/// and already bounded by `MAX_IDENTITY_FIELD_LEN`/`MAX_SELECTION_RANGES` on the way in. The flat
+/// overhead is what keeps a flood of small frames from being free to queue — it is a budget, not an
+/// attempt to predict the serialized size.
+fn backlog_weight(frame: &ServerFrame) -> usize {
+    /// Generous stand-in for a small frame's JSON envelope.
+    const FRAME_OVERHEAD: usize = 512;
+    match frame {
+        ServerFrame::Update { update } => FRAME_OVERHEAD + update.len(),
+        _ => FRAME_OVERHEAD,
+    }
+}
+
+/// One connection's sending side: a bounded queue, and the single thread that owns its writer.
+///
+/// **Why a thread and not a shared writer.** Exactly one `NoiseWriter` may exist per connection and
+/// exactly one thread may drive it — a Noise channel counts its own messages per direction, so a
+/// second writer would restart the nonce run and every frame after it would fail to authenticate
+/// (#1811, ADR 0017). That rules out "lock the writer and write" as a way to fan out, because the
+/// lock would then have to be held across a *blocking socket write*: one member that stops reading
+/// fills its send buffer, parks that write forever, and stalls every other participant behind it
+/// (#1822). So the writer moves into a thread of its own, and everyone else enqueues.
+struct Outbound {
+    frames: Sender<(ServerFrame, usize)>,
+    /// Bytes accepted into the queue and not yet handed to the socket. This counter, not the
+    /// channel, is what makes the queue bounded.
+    queued: Arc<AtomicUsize>,
+    /// A clone of this connection's socket, kept for one purpose: hanging up on it.
+    socket: TcpStream,
+}
+
+impl Outbound {
+    /// Take ownership of a connection's writer and start the thread that drains its queue.
+    ///
+    /// Generic over the writer rather than fixed to `NoiseWriter<TcpStream>`: in production there is
+    /// only ever the one, but a test cannot make a real socket stop accepting bytes portably — how
+    /// much a loopback connection will absorb before it blocks is a property of the platform, and on
+    /// Windows it is tens of megabytes. Being able to hand this a writer that simply does not
+    /// complete is what makes the back-pressure behaviour testable at all.
+    fn spawn<W: Write + Send + 'static>(mut writer: W, socket: TcpStream) -> Self {
+        let (frames, inbox) = mpsc::channel::<(ServerFrame, usize)>();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let drained = Arc::clone(&queued);
+        let hangup = socket.try_clone().ok();
+        thread::spawn(move || {
+            while let Ok((frame, weight)) = inbox.recv() {
+                let wrote = write_frame(&mut writer, &frame).is_ok();
+                drained.fetch_sub(weight, Ordering::SeqCst);
+                if !wrote {
+                    // The peer is gone, or missed `WRITE_TIMEOUT`. Hang up, which wakes its
+                    // connection thread out of `read_frame` so the member departs the ordinary way
+                    // and the rest of the session is told.
+                    if let Some(socket) = &hangup {
+                        let _ = socket.shutdown(Shutdown::Both);
+                    }
+                    break;
+                }
+            }
+        });
+        Outbound {
+            frames,
+            queued,
+            socket,
+        }
+    }
+
+    /// Whether anything this member was sent is still waiting to go out.
+    fn pending(&self) -> bool {
+        self.queued.load(Ordering::SeqCst) > 0
+    }
+
+    /// Queue a frame for this member. Never blocks, and never touches a socket.
+    ///
+    /// `false` means the member has fallen further behind than `MAX_OUTBOUND_BACKLOG_BYTES` (or its
+    /// writer thread has already given up): it is not catching up, so the caller disconnects it.
+    fn enqueue(&self, frame: ServerFrame) -> bool {
+        let weight = backlog_weight(&frame);
+        // An empty queue admits whatever the size — a member is never dropped for one frame it
+        // could have absorbed. See `MAX_OUTBOUND_BACKLOG_BYTES`.
+        let charged = self
+            .queued
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |queued| {
+                (queued == 0 || queued + weight <= MAX_OUTBOUND_BACKLOG_BYTES)
+                    .then_some(queued + weight)
+            });
+        if charged.is_err() {
+            return false;
+        }
+        if self.frames.send((frame, weight)).is_err() {
+            self.queued.fetch_sub(weight, Ordering::SeqCst);
+            return false;
+        }
+        true
+    }
+}
+
+/// Let the writer threads put what is already queued on the wire, then let the caller hang up.
+///
+/// Needed because delivery became asynchronous: when a session closes, the broker queues the closing
+/// frames and then shuts the sockets down, and without this the shutdown would routinely overtake the
+/// frames — peers would learn the session ended only from their connection dying, which is the
+/// ungraceful path this module keeps as a fallback, not the one it should take on purpose.
+///
+/// The budget is shared across every link and deliberately short: these are small frames on an
+/// otherwise idle connection. A peer that cannot take one in this long is the wedged peer this whole
+/// change is about, and it gets hung up on regardless.
+fn drain_briefly(links: &[Outbound]) {
+    const GRACE: Duration = Duration::from_millis(500);
+    let deadline = Instant::now() + GRACE;
+    while links.iter().any(Outbound::pending) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+impl Drop for Outbound {
+    /// Dropping a member's link IS disconnecting it. Hanging up does two jobs: it unblocks the
+    /// writer thread, which may be parked in a write that will never complete, and it wakes the
+    /// connection thread out of `read_frame` so the departure is announced to everyone else. That is
+    /// what makes a dropped peer loud rather than a caret that quietly stops moving.
+    fn drop(&mut self) {
+        let _ = self.socket.shutdown(Shutdown::Both);
+    }
+}
+
 /// The broker plus the sockets its deliveries travel over.
 struct Hub {
     broker: Mutex<Broker>,
-    /// One encrypted sending half per connected member. There is no plaintext variant: a connection
-    /// only reaches this table after its Noise handshake completed (#1811).
-    writers: Mutex<HashMap<MemberId, NoiseWriter<TcpStream>>>,
+    /// One outbound queue per connected member. There is no plaintext variant: a connection only
+    /// reaches this table after its Noise handshake completed (#1811).
+    links: Mutex<HashMap<MemberId, Outbound>>,
     sink: Arc<dyn LocalSink>,
     /// This broker's X25519 identity — a session's, or a relay's. Its public half is what a joiner
     /// pins, so a machine in the middle cannot answer in its place.
@@ -716,16 +870,22 @@ impl Hub {
                 self.sink.deliver(frame);
                 continue;
             }
-            let mut writers = lock(&self.writers);
-            let broken = match writers.get_mut(&target) {
-                Some(writer) => write_frame(writer, &frame).is_err(),
+            // The lock covers a queue hand-off and NEVER a socket write. That is the whole fix for
+            // #1822: a member that has stopped reading backs up in its own queue instead of parking
+            // this thread inside `write_frame` with the lock held — which used to stall every other
+            // participant's deliveries and the local user's own `send_update`/`send_presence`
+            // behind one slow peer.
+            let mut links = lock(&self.links);
+            let stalled = match links.get(&target) {
+                Some(link) => !link.enqueue(frame),
                 None => false,
             };
-            // A peer we can no longer write to is gone; drop it now rather than retrying forever.
-            if broken {
-                if let Some(writer) = writers.remove(&target) {
-                    let _ = writer.get_ref().shutdown(Shutdown::Both);
-                }
+            // A member that outran its backlog is not coming back. Dropping its link hangs up on
+            // it, which wakes its connection thread into the ordinary `depart` path — so the rest
+            // of the session gets a `PeerLeave` and the dropped peer's own `read_loop` announces
+            // the peers it lost. It fails loudly; it never silently stops receiving.
+            if stalled {
+                links.remove(&target);
             }
         }
     }
@@ -735,23 +895,30 @@ impl Hub {
         let departure = lock(&self.broker).leave(member);
         self.dispatch(departure.deliveries);
 
-        let mut writers = lock(&self.writers);
-        if let Some(writer) = writers.remove(&member) {
-            let _ = writer.get_ref().shutdown(Shutdown::Both);
-        }
-        if departure.session_closed {
-            for stranded in departure.remaining {
-                if let Some(writer) = writers.remove(&stranded) {
-                    let _ = writer.get_ref().shutdown(Shutdown::Both);
-                }
+        // Removing a link hangs up on it — see `Drop for Outbound`. The leaver has nothing left to
+        // hear, so it goes immediately; the peers it stranded were just told the session closed, so
+        // they are held out of the map (which is what stops any further delivery) and hung up on
+        // only once that frame has had a chance to reach them.
+        let stranded: Vec<Outbound> = {
+            let mut links = lock(&self.links);
+            links.remove(&member);
+            if departure.session_closed {
+                departure
+                    .remaining
+                    .iter()
+                    .filter_map(|id| links.remove(id))
+                    .collect()
+            } else {
+                Vec::new()
             }
-        }
+        };
+        // Outside the links lock, so a graceful close never stalls another thread's dispatch.
+        drain_briefly(&stranded);
     }
 
     fn close_all(&self) {
-        for (_, writer) in lock(&self.writers).drain() {
-            let _ = writer.get_ref().shutdown(Shutdown::Both);
-        }
+        let links: Vec<Outbound> = lock(&self.links).drain().map(|(_, link)| link).collect();
+        drain_briefly(&links);
     }
 }
 
@@ -789,6 +956,7 @@ fn serve_connection(
     allow_create: bool,
 ) {
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+    arm_write_deadline(&stream);
 
     // Encryption comes FIRST — before the first byte of protocol is read, let alone parsed. A peer
     // that cannot complete the Noise handshake (a plain-TCP speaker, a port scanner, anyone without
@@ -804,21 +972,30 @@ fn serve_connection(
 
     let hello: Option<ClientFrame> = read_frame(&mut reader).ok().flatten();
 
+    // The broker lock is taken here and held until this member's link is published, because those
+    // two facts have to become true together. A member exists in the session the instant `join`
+    // returns, so another thread's `update`/`presence` could produce a delivery addressed to it
+    // before it has anywhere to be delivered — and `dispatch` drops a delivery with no link
+    // silently. Every other producer of deliveries goes through this same lock first, so holding it
+    // across the publish is what closes that window.
+    //
+    // LOCK ORDER — broker, then links. This is the only place the two nest, and nothing in this
+    // module ever takes `links` and then `broker`. Keep it that way.
+    let mut broker = lock(&hub.broker);
+
     let (admitted, secret) = match hello {
-        Some(ClientFrame::Join { secret, identity }) => {
-            (lock(&hub.broker).join(&secret, identity), None)
-        }
+        Some(ClientFrame::Join { secret, identity }) => (broker.join(&secret, identity), None),
         // Only a relay lets a caller open a session over the wire. In the desktop shell this arm is
         // off, so a peer that reaches the listener can join the session the user started and nothing
         // else.
         Some(ClientFrame::Create { identity }) if allow_create => {
             let secret = new_secret();
-            (
-                lock(&hub.broker).create(identity, secret.clone()),
-                Some(secret),
-            )
+            (broker.create(identity, secret.clone()), Some(secret))
         }
         _ => {
+            // Released before the socket write: a refusal must never be one more thing the rest of
+            // the session waits behind (#1822).
+            drop(broker);
             let _ = write_frame(
                 &mut writer,
                 &ServerFrame::Rejected {
@@ -832,6 +1009,7 @@ fn serve_connection(
     let admission = match admitted {
         Ok(admission) => admission,
         Err(err) => {
+            drop(broker);
             let _ = write_frame(
                 &mut writer,
                 &ServerFrame::Rejected {
@@ -843,33 +1021,35 @@ fn serve_connection(
     };
     let member = admission.member;
 
-    // The admission goes out through the very writer the table will hold, because a Noise channel
+    // The admission goes out through the very writer the queue will own, because a Noise channel
     // counts its own messages: two writers over one connection would each start from nonce zero and
     // the second frame either way would fail to authenticate.
-    //
-    // Write and publish under ONE hold of the writers lock. `dispatch` takes the same lock per
-    // delivery, so this is what orders the protocol: a `PeerJoin` that another thread produced for
-    // this member while we were still writing waits here and lands *after* the admission, instead of
-    // finding no writer and being dropped — or, worse, overtaking the frame the client is blocked
-    // reading.
     let admitted_frame = ServerFrame::Admitted {
         session_id: admission.session_id.clone(),
         authority: admission.authority,
         admitted_as: admission.admitted_as.clone(),
         secret,
     };
-    let admitted_ok = {
-        let mut writers = lock(&hub.writers);
-        let ok = write_frame(&mut writer, &admitted_frame).is_ok();
-        if ok {
-            writers.insert(member, writer);
-        }
-        ok
-    };
-    if !admitted_ok {
+    // The link needs a handle on the socket to hang up with, separate from the one the writer thread
+    // is about to take ownership of.
+    let Ok(hangup) = writer.get_ref().try_clone() else {
+        drop(broker);
         hub.depart(member);
         return;
+    };
+    // Enqueue and publish under ONE hold of the links lock too, still inside the broker's. The
+    // admission is therefore the first thing in this member's queue, so nothing can overtake the
+    // frame the client is blocked reading.
+    {
+        let mut links = lock(&hub.links);
+        let link = Outbound::spawn(writer, hangup);
+        let _ = link.enqueue(admitted_frame);
+        links.insert(member, link);
     }
+    drop(broker);
+    // A failed admission write is no longer this thread's problem: the writer thread hangs up, the
+    // read below fails, and the loop falls through to the same `hub.depart(member)` as any other
+    // disconnect.
     hub.dispatch(admission.deliveries);
 
     // Admitted: the connection is now long-lived, so the handshake deadline no longer applies.
@@ -963,7 +1143,7 @@ pub fn host_session(
 
     let hub = Arc::new(Hub {
         broker: Mutex::new(broker),
-        writers: Mutex::new(HashMap::new()),
+        links: Mutex::new(HashMap::new()),
         sink,
         keypair,
         local_member: Some(admission.member),
@@ -1025,7 +1205,7 @@ pub fn run_relay(bind_host: &str) -> Result<Relay, String> {
 
     let hub = Arc::new(Hub {
         broker: Mutex::new(Broker::new()),
-        writers: Mutex::new(HashMap::new()),
+        links: Mutex::new(HashMap::new()),
         sink: Arc::new(DiscardSink),
         keypair,
         local_member: None,
@@ -1084,9 +1264,19 @@ impl RemoteSession {
     }
 
     fn send(&self, frame: &ClientFrame) {
-        // Best effort by design: the CRDT replica is the source of truth and re-merges on reconnect,
-        // so a dropped frame costs a round trip, not an edit.
-        let _ = write_frame(&mut *lock(&self.writer), frame);
+        // A frame the broker never asked for is best effort — the CRDT replica is the source of
+        // truth and re-merges on reconnect, so a lost one costs a round trip, not an edit. A frame
+        // that *fails to write* is a different thing entirely: with `WRITE_TIMEOUT` armed this is
+        // what a wedged or vanished broker looks like, and swallowing it would leave the editor
+        // believing it is still in the session while every edit it makes goes nowhere — a
+        // collaborator silently desynced from a document that still looks shared (#1822).
+        //
+        // So hang up. `read_loop` ends, and announces every peer this session knew as having left,
+        // which is the one contract event that says "you are on your own now".
+        let mut writer = lock(&self.writer);
+        if write_frame(&mut *writer, frame).is_err() {
+            let _ = writer.get_ref().shutdown(Shutdown::Both);
+        }
     }
 
     pub fn stop(&mut self) {
@@ -1186,6 +1376,7 @@ fn handshake(
     let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
         .map_err(|e| format!("could not reach the collaboration broker at {host}:{port}: {e}"))?;
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+    arm_write_deadline(&stream);
 
     // Encrypt before saying anything. `broker_key` came from the join token (or the configured relay
     // address), so completing this handshake is also what proves the far end is the broker we were
@@ -1872,6 +2063,32 @@ mod tests {
         assert_ne!(a, b, "a session token must not be guessable from another");
     }
 
+    #[test]
+    fn a_collaboration_socket_is_armed_with_a_write_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let dialled = TcpStream::connect(listener.local_addr().expect("addr")).expect("dial");
+        let (accepted, _) = listener.accept().expect("accept");
+
+        assert_eq!(
+            dialled.write_timeout().expect("write timeout"),
+            None,
+            "a bare socket blocks forever — which is the bug (#1822), so the deadline must be armed"
+        );
+
+        // Both halves: either end of a connection can be the one that stops reading.
+        arm_write_deadline(&dialled);
+        arm_write_deadline(&accepted);
+
+        assert_eq!(
+            dialled.write_timeout().expect("write timeout"),
+            Some(WRITE_TIMEOUT)
+        );
+        assert_eq!(
+            accepted.write_timeout().expect("write timeout"),
+            Some(WRITE_TIMEOUT)
+        );
+    }
+
     // --- over the wire --------------------------------------------------------------------------
 
     struct ChannelSink(Mutex<Sender<ServerFrame>>);
@@ -2386,5 +2603,210 @@ mod tests {
             &format!("{}b", "a".repeat(SECRET_HEX_LEN - 1))
         ));
         assert!(!secrets_match("", ""), "an empty secret never matches");
+    }
+
+    // --- back-pressure: a slow peer is one peer's problem (#1822) --------------------------------
+
+    /// A participant that really joins — Noise handshake, `Join`, admitted — and then reads only
+    /// when the test tells it to.
+    ///
+    /// Both halves of the return matter. Hold the reader and never poll it and you have the laptop
+    /// that went to sleep mid-session; poll it and you see *what actually arrived on the wire*,
+    /// which `RemoteSession` cannot show you because its `read_loop` manufactures peer departures
+    /// from a disconnect. The socket is the connection's lifetime — drop it and the peer is merely
+    /// gone rather than wedged.
+    fn raw_peer(token: &str, identity: Participant) -> (NoiseReader<TcpStream>, TcpStream) {
+        let (host, port, secret, broker_key) = parse_token(token).expect("token");
+        let addr = (host.as_str(), port)
+            .to_socket_addrs()
+            .expect("resolve")
+            .next()
+            .expect("addr");
+        let mut stream = TcpStream::connect(addr).expect("connect");
+        let transport = handshake_initiator(&mut stream, &broker_key).expect("noise handshake");
+        let (mut reader, mut writer) = split(
+            &transport,
+            stream.try_clone().expect("clone"),
+            stream.try_clone().expect("clone"),
+        );
+        write_frame(&mut writer, &ClientFrame::Join { secret, identity }).expect("join");
+
+        let admitted: Option<ServerFrame> = read_frame(&mut reader).expect("admission");
+        assert!(
+            matches!(admitted, Some(ServerFrame::Admitted { .. })),
+            "a raw peer has to be a real admitted member, not a stranger on the listener"
+        );
+        (reader, stream)
+    }
+
+    #[test]
+    fn a_closing_session_tells_its_peers_before_it_hangs_up_on_them() {
+        let (host_sink, _host_rx) = sink();
+        let mut hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
+        let (mut peer, _socket) = raw_peer(&hosted.info.token, participant("grace"));
+        // The incumbent replay a joiner is owed, read off so the next frame is the one under test.
+        let replay: Option<ServerFrame> = read_frame(&mut peer).expect("peer replay");
+        assert_eq!(
+            replay,
+            Some(ServerFrame::PeerJoin {
+                peer: participant("ada")
+            })
+        );
+
+        hosted.stop();
+
+        // Delivery is asynchronous now, so a session that closes queues this frame and then shuts
+        // the socket down. If the shutdown wins, the peer sees a bare EOF and has to *infer* the
+        // departure — the ungraceful fallback, taken on purpose. It must not be.
+        let frame: Option<ServerFrame> = read_frame(&mut peer).expect("a frame, not a broken pipe");
+        assert_eq!(
+            frame,
+            Some(ServerFrame::PeerLeave {
+                participant_id: "ada".into()
+            }),
+            "the closing session hung up before its own goodbye reached the wire"
+        );
+    }
+
+    /// A peer whose receive window never opens: every write parks until the test lets go.
+    ///
+    /// This exists because the realistic version — a real socket nobody reads from — is not portable.
+    /// How much a loopback connection absorbs before it blocks is a platform property, and on Windows
+    /// CI tens of megabytes went through without ever wedging, so a test built on filling it proves
+    /// nothing there. Blocking the writer outright is the same condition, deterministically.
+    struct StalledWriter(Receiver<()>);
+
+    impl Write for StalledWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            // Returns once the test drops the sender, so the thread can be cleaned up.
+            let _ = self.0.recv();
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A peer that takes everything, and remembers how much.
+    struct SpyWriter(Arc<AtomicUsize>);
+
+    impl Write for SpyWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.fetch_add(buf.len(), Ordering::SeqCst);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn socket_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let near = TcpStream::connect(listener.local_addr().expect("addr")).expect("connect");
+        let (far, _) = listener.accept().expect("accept");
+        (near, far)
+    }
+
+    #[test]
+    fn a_member_that_stops_reading_is_dropped_without_ever_making_the_others_wait() {
+        let (broker, _secret, authority, joiners) = with_session(&["grace", "hopper"]);
+        let (stalled, healthy) = (joiners[0], joiners[1]);
+
+        let (stalled_socket, mut stalled_peer) = socket_pair();
+        let (healthy_socket, _healthy_peer) = socket_pair();
+        let (release, blocked) = mpsc::channel::<()>();
+        let delivered = Arc::new(AtomicUsize::new(0));
+
+        let mut links = HashMap::new();
+        links.insert(
+            stalled,
+            Outbound::spawn(StalledWriter(blocked), stalled_socket),
+        );
+        links.insert(
+            healthy,
+            Outbound::spawn(SpyWriter(Arc::clone(&delivered)), healthy_socket),
+        );
+
+        let hub = Hub {
+            broker: Mutex::new(broker),
+            links: Mutex::new(links),
+            sink: Arc::new(DiscardSink),
+            keypair: StaticKeypair::generate().expect("keypair"),
+            local_member: None,
+            connections: Arc::new(AtomicUsize::new(0)),
+        };
+
+        let chunk = vec![9u8; 64 * 1024];
+        let mut dropped_after = None;
+        for round in 0usize..512 {
+            let started = Instant::now();
+            let deliveries = lock(&hub.broker).update(authority, chunk.clone());
+            hub.dispatch(deliveries);
+            // THE bug (#1822): `dispatch` used to write to the socket with the writers mutex held, so
+            // one member that stopped reading parked every other member's deliveries — and the local
+            // user's own edits, which take this same path — behind it, indefinitely.
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "round {round}: dispatch waited {:?} on a member that is not reading",
+                started.elapsed()
+            );
+
+            // The healthy member is drained by its own thread, so wait for it to actually take the
+            // frame. That wait IS the second half of the assertion — it is being served, promptly,
+            // while its neighbour is not being served at all.
+            let handoff = Instant::now();
+            while lock(&hub.links)
+                .get(&healthy)
+                .is_some_and(Outbound::pending)
+            {
+                assert!(
+                    handoff.elapsed() < Duration::from_secs(5),
+                    "round {round}: a healthy member stopped draining behind a stalled one"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+
+            if !lock(&hub.links).contains_key(&stalled) {
+                dropped_after = Some(round);
+                break;
+            }
+        }
+
+        // Bounded, so an unreadable member costs a fixed amount of memory rather than growing a
+        // queue until the process dies — the memory-exhaustion version of the same denial of service.
+        let dropped_after = dropped_after.expect("a member that never drains must be dropped");
+        let per_frame = 512 + chunk.len();
+        let budget = MAX_OUTBOUND_BACKLOG_BYTES / per_frame;
+        assert!(
+            dropped_after.abs_diff(budget) <= 1,
+            "dropped after {dropped_after} frames, expected about {budget} for a \
+             {MAX_OUTBOUND_BACKLOG_BYTES}-byte backlog"
+        );
+
+        // Loudly: hanging up is what wakes the member's connection thread out of `read_frame` into
+        // the ordinary departure, so the rest of the session hears about it.
+        stalled_peer
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut byte = [0u8; 1];
+        assert_eq!(
+            stalled_peer.read(&mut byte).ok(),
+            Some(0),
+            "dropping a member's link must hang up on its connection"
+        );
+
+        // And the healthy member was served throughout, not held hostage.
+        assert!(
+            lock(&hub.links).contains_key(&healthy),
+            "a healthy member must not be collateral damage"
+        );
+        assert!(
+            delivered.load(Ordering::SeqCst) > dropped_after * chunk.len(),
+            "the healthy member should have received every update the stalled one did not"
+        );
+
+        drop(release);
     }
 }
