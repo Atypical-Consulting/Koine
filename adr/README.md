@@ -27,6 +27,7 @@ the codebase survives long after the conversation or PR that produced it.
 | [0015](0015-yjs-as-the-crdt-runtime-with-a-studio-owned-codemirror-binding.md) | Yjs is the CRDT runtime, with a Studio-owned CodeMirror binding | Proposed |
 | [0016](0016-collaboration-broker-is-a-loopback-first-tcp-server-with-connection-bound-authority.md) | The collaboration broker is a loopback-first TCP server with connection-bound authority | Proposed |
 | [0017](0017-noise-encrypted-collaboration-transport-with-a-token-pinned-broker-key.md) | Collaboration traffic is Noise-encrypted with the broker's key pinned in the join token | Proposed |
+| [0018](0018-collaboration-fan-out-is-per-peer-queues-with-a-bounded-backlog.md) | Collaboration fan-out is per-peer queues with a bounded backlog | Proposed |
 
 ## When to write one
 
