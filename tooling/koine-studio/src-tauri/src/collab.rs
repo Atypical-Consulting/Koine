@@ -1456,8 +1456,8 @@ fn read_loop(
 mod tests {
     use super::*;
     use std::io::Cursor;
-    use std::time::Instant;
     use std::sync::mpsc::{self, Receiver, Sender};
+    use std::time::Instant;
 
     fn participant(id: &str) -> Participant {
         Participant {
