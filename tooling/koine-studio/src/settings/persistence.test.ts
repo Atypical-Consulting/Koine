@@ -81,6 +81,37 @@ describe('MCP settings', () => {
   });
 });
 
+describe('Collaboration transport settings (#1811)', () => {
+  beforeEach(() => localStorage.clear());
+
+  // The relay address gained a pinned public key when the transport became encrypted, so it is now
+  // 66 characters longer than it used to be. `coerceCollabHost` bounds these strings; this pins that
+  // the bound still leaves room for the shape the Rust host actually requires.
+  const RELAY_WITH_PINNED_KEY = `relay.example:4321/${'9f'.repeat(32)}`;
+
+  test('defaults keep the session on this machine', () => {
+    expect(DEFAULT_SETTINGS.collabBindAddress).toBe('127.0.0.1');
+    expect(DEFAULT_SETTINGS.collabRelayUrl).toBe('');
+  });
+
+  test('round-trips a relay address carrying its pinned public key', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, collabRelayUrl: RELAY_WITH_PINNED_KEY });
+    expect(loadSettings().collabRelayUrl).toBe(RELAY_WITH_PINNED_KEY);
+  });
+
+  test('round-trips a LAN bind address', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, collabBindAddress: '192.168.1.42' });
+    expect(loadSettings().collabBindAddress).toBe('192.168.1.42');
+  });
+
+  test('falls back to the defaults for a non-string or whitespace-bearing value', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, collabRelayUrl: 42 as never });
+    expect(loadSettings().collabRelayUrl).toBe('');
+    saveSettings({ ...DEFAULT_SETTINGS, collabBindAddress: 'a b' });
+    expect(loadSettings().collabBindAddress).toBe('127.0.0.1');
+  });
+});
+
 describe('Assistant agentic-tools setting', () => {
   beforeEach(() => localStorage.clear());
 
