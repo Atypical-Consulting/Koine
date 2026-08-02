@@ -33,6 +33,14 @@ public sealed record FormatRangeEdit(int StartLine, int StartCharacter, int EndL
 /// does not reflow), which — together with re-emitting the exact token text — makes it
 /// idempotent: <c>Format(Format(x)) == Format(x)</c>.</para>
 ///
+/// <para><b>Alignment group boundaries (#1842):</b> a <c>name: Type</c> field belongs to the
+/// same alignment group as every other field line immediately before/after it at the same
+/// brace depth, PROVIDED the run between them holds only comment lines (<c>///</c> doc or
+/// <c>//</c>/<c>/* */</c> ordinary) — comments are transparent to the scan, since hand-written
+/// sources routinely document each field with a comment between them and still mean them as one
+/// visually-aligned block. A blank line always ends the group (and starts a new one), as does
+/// any other non-field statement.</para>
+///
 /// <para><b>Role vs. <see cref="AstPrinter"/>:</b> this is the CANONICAL, file-level
 /// pretty-printer (normalizes layout). For VERBATIM AST-level round-trip / refactors that must
 /// preserve the original whitespace and comments, use <see cref="AstPrinter"/> instead (#5). Rename
@@ -196,7 +204,7 @@ public sealed class KoineFormatter
 
     // ---- A rendered logical line --------------------------------------------
 
-    private sealed record Line(int IndentDepth, bool IsBlank, bool IsField, string FieldName, string Body);
+    private sealed record Line(int IndentDepth, bool IsBlank, bool IsField, bool IsCommentOnly, string FieldName, string Body);
 
     private static string Render(IReadOnlyList<IToken> tokens)
     {
@@ -219,7 +227,7 @@ public sealed class KoineFormatter
                 var curCloses = group[0].Type == KoineLexer.RBRACE;
                 if (hadBlank && !prevOpened && !curCloses)
                 {
-                    lines.Add(new Line(0, IsBlank: true, IsField: false, "", ""));
+                    lines.Add(new Line(0, IsBlank: true, IsField: false, IsCommentOnly: false, "", ""));
                 }
             }
 
@@ -235,11 +243,11 @@ public sealed class KoineFormatter
             {
                 var name = group[0].Text;
                 var body = RenderTokens(group.Skip(2)); // tokens after `name :`
-                lines.Add(new Line(indentDepth, IsBlank: false, IsField: true, name, body));
+                lines.Add(new Line(indentDepth, IsBlank: false, IsField: true, IsCommentOnly: false, name, body));
             }
             else
             {
-                lines.Add(new Line(indentDepth, IsBlank: false, IsField: false, "", RenderTokens(group)));
+                lines.Add(new Line(indentDepth, IsBlank: false, IsField: false, IsCommentOnlyGroup(group), "", RenderTokens(group)));
             }
 
             var opens = group.Count(t => t.Type == KoineLexer.LBRACE);
@@ -283,6 +291,11 @@ public sealed class KoineFormatter
 
     private static bool IsWordStart(string? s) =>
         !string.IsNullOrEmpty(s) && (char.IsLetter(s[0]) || s[0] == '_');
+
+    /// <summary>A source line carrying nothing but comment tokens (<c>///</c> doc or <c>//</c>/<c>/* */</c>
+    /// ordinary) — transparent to alignment-group scanning (see <see cref="Emit"/>).</summary>
+    private static bool IsCommentOnlyGroup(List<IToken> group) =>
+        group.Count > 0 && group.All(t => t.Type is KoineLexer.LINE_COMMENT or KoineLexer.BLOCK_COMMENT or KoineLexer.DocComment);
 
     private static int EndLineOf(IToken t) => Parsing.TokenGeometry.EndLineOf(t);
 
@@ -369,7 +382,10 @@ public sealed class KoineFormatter
         }
 
         // Call / construction parentheses glue to the callee (foo(...), Currency("€", 2)).
-        if (c == KoineLexer.LPAREN && (p == KoineLexer.Identifier || p == KoineLexer.RPAREN || p == KoineLexer.GT))
+        // NATURAL is its own lexer token (identityStrategy: AS (GUID | SEQUENCE | NATURAL LPAREN
+        // typeName RPAREN)), not an Identifier, so it needs the same call-like glue as `natural(String)`.
+        if (c == KoineLexer.LPAREN
+            && (p == KoineLexer.Identifier || p == KoineLexer.RPAREN || p == KoineLexer.GT || p == KoineLexer.NATURAL))
         {
             return false;
         }
@@ -397,12 +413,20 @@ public sealed class KoineFormatter
                 continue;
             }
 
-            // A field is part of a contiguous alignment group: consecutive field lines at
-            // the same depth, unbroken by a blank, comment, or any non-field line. Pad the
+            // A field is part of a contiguous alignment group: consecutive field lines at the same
+            // depth, unbroken by a blank line or any other statement. Comment-only lines (`///` docs,
+            // `//`/`/* */` ordinary) at the same depth are TRANSPARENT to the scan — templates hand-align
+            // a member block straight through its doc comments (#1842), so a comment must not fragment
+            // the group into smaller, differently-padded runs. A blank line still ends the group. Pad the
             // `name:` so every type in the group starts at the same column.
             var groupMax = line.FieldName.Length;
             for (var j = i + 1; j < lines.Count; j++)
             {
+                if (IsTransparentComment(lines[j], line.IndentDepth))
+                {
+                    continue;
+                }
+
                 if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth)
                 {
                     break;
@@ -413,6 +437,11 @@ public sealed class KoineFormatter
             // Re-scan backwards too, so every member of the group shares one width.
             for (var j = i - 1; j >= 0; j--)
             {
+                if (IsTransparentComment(lines[j], line.IndentDepth))
+                {
+                    continue;
+                }
+
                 if (!lines[j].IsField || lines[j].IndentDepth != line.IndentDepth)
                 {
                     break;
@@ -433,6 +462,12 @@ public sealed class KoineFormatter
 
         return sb.ToString();
     }
+
+    /// <summary>A comment-only line at the alignment group's own depth: skip over it without ending
+    /// the group (a comment at another depth is never part of this group either way — the ordinary
+    /// field/depth check the caller applies after this still ends the scan for it).</summary>
+    private static bool IsTransparentComment(Line candidate, int groupDepth) =>
+        candidate.IsCommentOnly && candidate.IndentDepth == groupDepth;
 
     private static string Indent(int depth) => string.Concat(Enumerable.Repeat(IndentUnit, depth));
 }

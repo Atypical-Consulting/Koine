@@ -72,9 +72,12 @@ public class R19PublishEmissionTests
 
     /// <summary>
     /// A root whose command returns a NON-DETERMINISTIC value (<c>now</c>) that both an <c>emit</c>
-    /// and a <c>publish</c> payload carry. Only the C# and TypeScript emitters hoist such a value
-    /// into a single <c>__result</c> local; the other five re-render the result expression inline for
-    /// <c>emit</c> too, so there is no publish-specific asymmetry there to assert.
+    /// and a <c>publish</c> payload carry. Since #1838 ALL SEVEN code emitters hoist such a value into
+    /// a single <c>__result</c> local, so a <c>publish</c> payload can never diverge from the sibling
+    /// <c>emit</c> payload or the returned value on any target. The cross-target statement of that
+    /// contract lives in <c>ResultHoistParityTests</c> (emitted text, all seven) and
+    /// <c>Conformance/ResultHoistRuntimeTests</c> (executed code, the five targets whose harness runs
+    /// it); this fixture stays here as the publish-specific TypeScript shape pin below.
     /// </summary>
     private const string HoistingRoot = """
         context Sales {
@@ -171,9 +174,9 @@ public class R19PublishEmissionTests
     [Fact]
     public void TypeScript_publish_shares_the_hoisted_result_with_emit()
     {
-        // TypeScript is the only other target with a `__result` hoist (C# is the first), so it is the
-        // only other one where a publish payload could diverge from an emit payload of the same
-        // expression. `now` → `Instant.now()`: read twice, the two events would carry two instants.
+        // Every code target hoists since #1838; this pins TypeScript's own rendering of it around a
+        // `publish` — the one clause R19 owns. `now` → `Instant.now()`: read twice, the domain event,
+        // the integration event and the return value would carry different instants.
         var order = EmitFile(HoistingRoot, new TypeScriptEmitter(), "/Order.ts");
 
         order.ShouldContain("const __result = Instant.now();");

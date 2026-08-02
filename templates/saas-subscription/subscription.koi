@@ -5,7 +5,6 @@
 /// platform reacts to. Plan changes, payment failures and cancellations all flow from
 /// here.
 context Subscription version 1 {
-
   /// The billing cadence of a plan. A plain enum used for renewal scheduling.
   enum BillingCycle { Monthly, Annual }
 
@@ -22,22 +21,22 @@ context Subscription version 1 {
   value Money {
     amount:   Decimal
     currency: String
-    invariant amount >= 0   "an amount cannot be negative"
+    invariant amount >= 0 "an amount cannot be negative"
   }
 
   /// The plan a subscription is on: its tier, recurring price and the metered allowance
   /// it grants. A first-class value object so a "plan" is never a loose bag of fields.
   value Plan {
-    tier:           PlanTier
-    cycle:          BillingCycle
-    price:          Money
+    tier:          PlanTier
+    cycle:         BillingCycle
+    price:         Money
     /// The included allowance for the metered resource (e.g. API calls or seats).
-    includedQuota:  Int
+    includedQuota: Int
     /// What each unit over the included quota costs.
-    overageRate:    Money
+    overageRate:   Money
     // Derived (computed, get-only): whether this is a paid plan (R1.1).
-    isPaid:         Bool = price.amount > 0
-    invariant includedQuota >= 0   "an included quota cannot be negative"
+    isPaid:        Bool = price.amount > 0
+    invariant includedQuota >= 0 "an included quota cannot be negative"
   }
 
   /// Metered usage recorded against a subscription in the current billing period. THE
@@ -51,16 +50,16 @@ context Subscription version 1 {
     consumed:      Int
     // Derived (computed, get-only): units over the allowance — clamped at zero so it can
     // never go negative (R1.1, conditional expression).
-    overage:       Int  = if consumed > includedQuota then consumed - includedQuota else 0
+    overage:       Int = if consumed > includedQuota then consumed - includedQuota else 0
     // Whether the subscriber has exceeded the included allowance.
     overQuota:     Bool = consumed > includedQuota
     // How much headroom is left before overage kicks in (may be zero, never negative).
-    remaining:     Int  = if includedQuota > consumed then includedQuota - consumed else 0
+    remaining:     Int = if includedQuota > consumed then includedQuota - consumed else 0
 
-    invariant includedQuota >= 0   "an included quota cannot be negative"
-    invariant consumed >= 0        "consumed usage cannot be negative"
+    invariant includedQuota >= 0 "an included quota cannot be negative"
+    invariant consumed >= 0 "consumed usage cannot be negative"
     // The anchoring rule: derived overage is always non-negative by construction.
-    invariant overage >= 0         "overage can never be negative"
+    invariant overage >= 0 "overage can never be negative"
   }
 
   /// Announced when a tenant starts a free trial (R14.3). An integration event is a
@@ -126,7 +125,6 @@ context Subscription version 1 {
   /// usage. `versioned` adds an optimistic-concurrency token (R11.4); the repository
   /// block tunes the mutating set and adds intention-revealing finders (R11.3).
   aggregate Subscriptions root Subscription versioned {
-
     repository {
       operations: getById, add, update
       find byTenant(tenant: TenantId): List<Subscription>
@@ -160,14 +158,14 @@ context Subscription version 1 {
 
     /// The subscription a tenant holds — the consistency boundary of this aggregate.
     entity Subscription identified by SubscriptionId {
-      tenant:        TenantId
-      plan:          Plan
-      status:        SubscriptionStatus = Trialing
-      usage:         UsageMeter
+      tenant:         TenantId
+      plan:           Plan
+      status:         SubscriptionStatus = Trialing
+      usage:          UsageMeter
       // The number of consecutive failed payment attempts. Drives suspension.
-      failedAttempts: Int      = 0
-      activatedAt:   Instant?
-      cancelledAt:   Instant?
+      failedAttempts: Int = 0
+      activatedAt:    Instant?
+      cancelledAt:    Instant?
 
       // Derived (computed, get-only) read helpers (R1.1 / R2.1).
       tier:        PlanTier = plan.tier
@@ -175,26 +173,26 @@ context Subscription version 1 {
       isActive:    Bool = status == Active
       isCancelled: Bool = status == Cancelled
       // Surface the quota position for dashboards (R1.1, navigating into the meter).
-      overage:     Int  = usage.overage
+      overage:     Int = usage.overage
       overQuota:   Bool = usage.overQuota
 
       // --- The anchoring quota/overage invariants (R4) ----------------------------
       // Consumed usage and the included quota are always non-negative.
-      invariant usage.consumed >= 0      "consumed usage cannot be negative"
-      invariant plan.includedQuota >= 0  "an included quota cannot be negative"
+      invariant usage.consumed >= 0 "consumed usage cannot be negative"
+      invariant plan.includedQuota >= 0 "an included quota cannot be negative"
       // An active, paid subscription must be on a paid plan (a Free tier trials only).
       invariant plan.isPaid when status == Active
-        "an active subscription must be on a paid plan"
+      "an active subscription must be on a paid plan"
       // A cancelled subscription must record when it was cancelled.
       invariant cancelledAt.isPresent when status == Cancelled
-        "a cancelled subscription must record its cancellation time"
+      "a cancelled subscription must record its cancellation time"
 
       // The subscription lifecycle (R7): the trial → active → suspended → cancelled
       // path the brief calls for. A trial can convert or lapse; an active plan can be
       // suspended for non-payment and recovered; cancellation is terminal.
       states status {
-        Trialing  -> Active, Cancelled
-        Active    -> Suspended, Cancelled
+        Trialing -> Active, Cancelled
+        Active -> Suspended, Cancelled
         Suspended -> Active, Cancelled
         Cancelled
       }
@@ -204,10 +202,10 @@ context Subscription version 1 {
       /// `SubscriptionActivated`.
       command activate {
         requires status == Trialing || status == Suspended
-          "only a trialing or suspended subscription can be activated"
-        requires plan.isPaid   "cannot activate onto a free plan"
-        status         -> Active
-        activatedAt    -> now
+        "only a trialing or suspended subscription can be activated"
+        requires plan.isPaid "cannot activate onto a free plan"
+        status -> Active
+        activatedAt -> now
         failedAttempts -> 0
       }
 
@@ -215,7 +213,7 @@ context Subscription version 1 {
       /// tenant" rule is enforced by the application service via `activeForTenant`; the
       /// cross-context announcement is `PlanChanged`.
       command changePlan(newPlan: Plan) {
-        requires status != Cancelled   "a cancelled subscription cannot change plan"
+        requires status != Cancelled "a cancelled subscription cannot change plan"
         plan -> newPlan
       }
 
@@ -224,7 +222,7 @@ context Subscription version 1 {
       /// (which is `0` while within the included allowance) so Billing can bill any
       /// overage.
       command recordUsage(meter: UsageMeter) {
-        requires status != Cancelled   "a cancelled subscription does not accrue usage"
+        requires status != Cancelled "a cancelled subscription does not accrue usage"
         usage -> meter
         emit OverageIncurred(subscription: id, overageUnits: meter.overage)
       }
@@ -232,16 +230,16 @@ context Subscription version 1 {
       /// Suspend an active subscription after a failed payment (R5/R6), tracking the
       /// attempt count that drives downstream retries and eventual cancellation.
       command suspend(attempt: Int) {
-        requires status == Active   "only an active subscription can be suspended"
-        status         -> Suspended
+        requires status == Active "only an active subscription can be suspended"
+        status -> Suspended
         failedAttempts -> attempt
         emit SubscriptionSuspended(subscription: id, attempt: attempt)
       }
 
       /// Cancel a subscription, stamping the time the invariant demands (R5).
       command cancel {
-        requires status != Cancelled   "the subscription is already cancelled"
-        status      -> Cancelled
+        requires status != Cancelled "the subscription is already cancelled"
+        status -> Cancelled
         cancelledAt -> now
       }
 

@@ -278,6 +278,17 @@ jobs:
       - name: Verify formatting
         run: dotnet format Koine.slnx --verify-no-changes --no-restore
 
+      # Canonical `.koi` formatting gate for templates/ — the single validated source of truth
+      # (issue #101). Issue #1842: `koine fmt --check templates/` used to disagree with all 25
+      # template files (the formatter split hand-aligned member blocks at every interspersed doc
+      # comment), which made this gate impossible to add without either reformatting away the
+      # templates' deliberate alignment or running an untrusted check. Both are now fixed — the
+      # formatter preserves comment-spanning alignment groups, and the templates were reformatted
+      # to the (now-correct) canonical style — so this closes the loop and keeps templates/ from
+      # silently drifting back to unformatted.
+      - name: Verify templates/ formatting
+        run: dotnet run --project src/Koine.Cli -c Release --no-build -- fmt templates/ --check
+
       # Run the whole solution so both test projects execute: the compiler suite
       # (including every emitter's conformance harness, which now type-checks for real
       # against the toolchains installed above) and tests/Koine.Mcp.Tests.

@@ -4,7 +4,6 @@
 /// tenant. Kept in its own context so "who the customer is" evolves independently of
 /// "what plan they are on".
 context Tenant version 1 {
-
   /// The lifecycle of a tenant account. Drives the `states status { … }` machine on the
   /// entity, so only the declared transitions are legal at runtime.
   enum TenantStatus { Onboarding, Active, Locked, Closed }
@@ -14,8 +13,8 @@ context Tenant version 1 {
   value Email {
     address:    String
     normalized: String = address.trim.lower
-    invariant address.trim.length > 0                         "an email cannot be blank"
-    invariant address matches /^[^@\s]+@[^@\s]+\.[^@\s]+$/    "not a valid email address"
+    invariant address.trim.length > 0 "an email cannot be blank"
+    invariant address matches /^[^@\s]+@[^@\s]+\.[^@\s]+$/ "not a valid email address"
   }
 
   /// The publicly visible name of a tenant's workspace, used in URLs and the UI. A small
@@ -23,15 +22,14 @@ context Tenant version 1 {
   value Workspace {
     slug:        String
     displayName: String
-    invariant slug matches /^[a-z][a-z0-9-]{2,38}$/   "a workspace slug must be 3-39 lowercase chars"
-    invariant displayName.trim.length > 0             "a workspace needs a display name"
+    invariant slug matches /^[a-z][a-z0-9-]{2,38}$/ "a workspace slug must be 3-39 lowercase chars"
+    invariant displayName.trim.length > 0 "a workspace needs a display name"
   }
 
   /// The tenant aggregate — one organisation on the platform. Being an aggregate root it
   /// gains an `ITenantRepository` and joins the context's generated `IUnitOfWork`; the
   /// repository block tunes the mutating set and adds intention-revealing finders (R11.3).
   aggregate Account root Tenant {
-
     repository {
       operations: getById, add, update
       find bySlug(workspace: Workspace): Tenant
@@ -56,49 +54,49 @@ context Tenant version 1 {
     }
 
     entity Tenant identified by TenantId {
-      workspace:   Workspace
+      workspace:    Workspace
       billingEmail: Email
-      status:      TenantStatus = Onboarding
+      status:       TenantStatus = Onboarding
 
       // Derived (computed, get-only) read helpers (R1.1).
-      isActive:  Bool   = status == Active
-      isLocked:  Bool   = status == Locked
-      slug:      String = workspace.slug
+      isActive: Bool = status == Active
+      isLocked: Bool = status == Locked
+      slug:     String = workspace.slug
 
-      invariant workspace.slug.trim.length > 0   "a tenant needs a workspace"
+      invariant workspace.slug.trim.length > 0 "a tenant needs a workspace"
 
       // The tenant lifecycle (R7): onboarding to active, lockable for non-payment, and
       // ultimately closed. A closed account is terminal.
       states status {
         Onboarding -> Active, Closed
-        Active     -> Locked, Closed
-        Locked     -> Active, Closed
+        Active -> Locked, Closed
+        Locked -> Active, Closed
         Closed
       }
 
       /// Activate a tenant once onboarding is complete (R5/R6).
       command activate {
-        requires status == Onboarding   "only an onboarding tenant can be activated"
+        requires status == Onboarding "only an onboarding tenant can be activated"
         status -> Active
         emit TenantActivated(tenant: id)
       }
 
       /// Lock an active tenant — typically driven by a billing failure policy (R5/R6).
       command lock(reason: String) {
-        requires status == Active   "only an active tenant can be locked"
+        requires status == Active "only an active tenant can be locked"
         status -> Locked
         emit TenantLocked(tenant: id, reason: reason)
       }
 
       /// Restore a locked tenant once payment is recovered (R5).
       command unlock {
-        requires status == Locked   "only a locked tenant can be unlocked"
+        requires status == Locked "only a locked tenant can be unlocked"
         status -> Active
       }
 
       /// Close a tenant account permanently (R5).
       command close {
-        requires status != Closed   "the tenant is already closed"
+        requires status != Closed "the tenant is already closed"
         status -> Closed
       }
 
@@ -106,7 +104,7 @@ context Tenant version 1 {
       /// makes the all-args constructor private, so callers must go through
       /// `Tenant.Register(...)`.
       create register(workspace: Workspace, billingEmail: Email) {
-        requires workspace.slug.trim.length > 0   "a tenant needs a workspace"
+        requires workspace.slug.trim.length > 0 "a tenant needs a workspace"
         emit TenantRegistered(tenant: id, workspace: workspace.slug)
       }
     }

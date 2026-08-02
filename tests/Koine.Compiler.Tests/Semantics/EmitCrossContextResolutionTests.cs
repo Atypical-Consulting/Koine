@@ -197,9 +197,9 @@ public class EmitCrossContextResolutionTests
     /// through <c>ModelIndex.TryGetDecl(context, name, out _)</c> rather than the flat overload:
     /// <c>EntityBehaviorValidator.ValidateEmit</c>, <c>CSharpEmitter.BuildEmitStatement</c>,
     /// <c>TypeScriptEmitter.BuildEmitStatement</c>, <c>PythonEmitter.BuildEmitStatement</c>,
-    /// <c>PhpEmitter.BuildEmitStatement</c>, and the <c>BuildEmitExpression</c> call sites in the
-    /// Rust, Java and Kotlin emitters (which forward the context into the <c>BuildEventExpression</c>
-    /// core #1816 already added for <c>publish</c>).</para>
+    /// <c>PhpEmitter.BuildEmitStatement</c>, and the <c>BuildEmitStatement</c>/<c>BuildEmitExpression</c>
+    /// call sites in the Rust, Java and Kotlin emitters (which forward the context into the
+    /// <c>BuildEventExpression</c> core #1816 already added for <c>publish</c>).</para>
     /// <para>Revert any ONE of them and this test fails — which is the point. #1816 (implementing
     /// #1796) closed the mirror-image hole for <c>publish</c>, and #1739 shipped the regression #1797
     /// had to fix precisely because a resolution rule was relaxed on one side without checking what

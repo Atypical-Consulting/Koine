@@ -5,7 +5,6 @@
 /// is a shelvable, loanable thing. Catalog is the upstream that publishes the title
 /// language Inventory, Loans and Reservations all reference.
 context Catalog version 1 {
-
   /// The broad subject a title is shelved under. A plain enum used for browsing.
   enum Subject { Fiction, Science, History, Children, Reference, Poetry }
 
@@ -15,14 +14,14 @@ context Catalog version 1 {
   value Isbn {
     code:       String
     normalized: String = code.trim.upper
-    invariant code.trim.length > 0                       "an ISBN cannot be blank"
-    invariant code matches /^[0-9Xx-]{10,17}$/           "not a valid ISBN"
+    invariant code.trim.length > 0 "an ISBN cannot be blank"
+    invariant code matches /^[0-9Xx-]{10,17}$/ "not a valid ISBN"
   }
 
   /// The author of a title. A small value object so an author is typed, not a loose string.
   value Author {
     name: String
-    invariant name.trim.length > 0   "an author needs a name"
+    invariant name.trim.length > 0 "an author needs a name"
   }
 
   /// The Book aggregate — the abstract *title*, NOT a physical item. Its identity is a
@@ -31,7 +30,6 @@ context Catalog version 1 {
   /// `IUnitOfWork`. The physical, loanable copies live in the Inventory context as
   /// `BookCopy` — that split is the whole point of this template.
   aggregate Bibliography root Book {
-
     repository {
       operations: getById, add, update
       find bySubject(subject: Subject): List<Book>
@@ -46,22 +44,22 @@ context Catalog version 1 {
     }
 
     entity Book identified by BookId as natural(String) {
-      isbn:        Isbn
-      title:       String
-      author:      Author
-      subject:     Subject
+      isbn:          Isbn
+      title:         String
+      author:        Author
+      subject:       Subject
       // Optional fields (R2.1) and a uniqueness Set of keywords (R2.2).
-      synopsis:    String?
-      keywords:    Set<String>
+      synopsis:      String?
+      keywords:      Set<String>
       publishedYear: Int?
 
       // Derived (computed, get-only) read helpers (R1.1 / R2.1).
       displayTitle: String = title.trim
-      hasSynopsis:  Bool   = synopsis.isPresent
-      isReference:  Bool   = subject == Reference
+      hasSynopsis:  Bool = synopsis.isPresent
+      isReference:  Bool = subject == Reference
 
-      invariant title.trim.length > 0   "a book needs a title"
-      invariant isbn.code.trim.length > 0   "a book needs an ISBN"
+      invariant title.trim.length > 0 "a book needs a title"
+      invariant isbn.code.trim.length > 0 "a book needs an ISBN"
     }
   }
 

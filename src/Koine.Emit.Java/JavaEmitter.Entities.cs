@@ -386,23 +386,73 @@ public sealed partial class JavaEmitter
             sb.Append(Indent).Append(Indent).Append("checkInvariants();\n");
         }
 
-        // 4. Record the domain events this behavior raises, then the integration events it publishes
-        //    (R19) — inside-out recording order, onto their separate collectors.
+        // 4. Translate the `result` expression FIRST, in the SAME scope as the event payloads
+        //    (parameters are still pushed as locals — they are only popped once the whole body is
+        //    written), so the payload builders below can recognise it. When the same value is ALSO a
+        //    whole payload argument it is hoisted into one `__result` binding evaluated once (#1838):
+        //    Koine's `now` reads the clock, so a second rendering is a second reading, and the instant
+        //    the event RECORDS would drift from the one the behavior RETURNS.
+        ResultClause? resultClause = cmd.Body.OfType<ResultClause>().FirstOrDefault();
+        string? resultExpr = resultClause is { } result
+            ? translator.Translate(result.Value, JavaExpressionTranslator.NameMode.Property)
+            : null;
+
+        //    The statements are BUILT here and WRITTEN below: the binding has to precede the first
+        //    `add(...)`, yet whether it is needed at all is only known once every payload has been
+        //    rendered and compared.
+        var eventStatements = new List<(string Text, bool Hoisted)>();
         foreach (EmitClause em in cmd.Body.OfType<EmitClause>())
         {
-            WriteEmitStatement(sb, emit, em, translator, eventsField, "this.");
+            if (BuildEmitStatement(emit, em, translator, eventsField, "this.", resultExpr) is { } stmt)
+            {
+                eventStatements.Add(stmt);
+            }
         }
 
+        //    The integration events the behavior publishes (R19) join the SAME hoist: `emit` and
+        //    `publish` of one expression must record one instant, or the published contract stops
+        //    mirroring the domain event it accompanies.
         foreach (PublishClause pub in cmd.Body.OfType<PublishClause>())
         {
-            WritePublishStatement(sb, emit, pub, translator, integrationEventsField);
+            if (BuildPublishStatement(emit, pub, translator, integrationEventsField, resultExpr) is { } stmt)
+            {
+                eventStatements.Add(stmt);
+            }
         }
 
-        // 5. Result (only when the behavior declares a return type).
-        if (cmd.Body.OfType<ResultClause>().FirstOrDefault() is { } result)
+        var hoistResult = eventStatements.Any(s => s.Hoisted);
+
+        // 5. Bind the hoisted local AFTER the invariant re-check above and BEFORE the first recorded
+        //    event, so an invalid post-state still throws before anything is computed or recorded.
+        //    Declared with the EXPRESSION'S OWN inferred type rather than `var`: a target-typed
+        //    expression (a generic factory call such as `List.of()`) infers a different type without a
+        //    target, and this local is both passed to a payload constructor and returned, so it must
+        //    keep exactly the typing the inline rendering had.
+        //
+        //    NOT the method's declared return type: `command maybeStamp: Instant?` maps to
+        //    `Optional<Instant>`, but the expression `now` renders as a bare `Instant`, so declaring the
+        //    local `Optional<Instant>` would fail its own initializer AND the payload constructor. This
+        //    emitter does not (yet) bridge a bare value into an `Optional` return at all — a gap that
+        //    predates the hoist — and binding the value's own type keeps the hoist from widening it.
+        if (hoistResult)
+        {
+            TypeRef? bound = resultClause is { } hoisted ? translator.InferType(hoisted.Value) : null;
+            sb.Append(Indent).Append(Indent).Append(bound is not null ? typeMapper.Map(bound) : "var")
+              .Append(' ').Append(ResultHoist.LocalName).Append(" = ").Append(resultExpr).Append(";\n");
+        }
+
+        // 6. Record the domain events this behavior raises, then the integration events it publishes
+        //    (R19) — inside-out recording order, onto their separate collectors.
+        foreach ((string text, _) in eventStatements)
+        {
+            sb.Append(text);
+        }
+
+        // 7. Result (only when the behavior declares a return type).
+        if (resultExpr is not null)
         {
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(result.Value, JavaExpressionTranslator.NameMode.Property)).Append(";\n");
+              .Append(hoistResult ? ResultHoist.LocalName : resultExpr).Append(";\n");
         }
 
         sb.Append(Indent).Append("}\n");
@@ -446,67 +496,84 @@ public sealed partial class JavaEmitter
         sb.Append(Indent).Append(Indent).Append("this.").Append(JavaNaming.Member(t.Field)).Append(" = ").Append(value).Append(";\n");
     }
 
-    /// <summary>Records a domain event: <c>&lt;receiver&gt;&lt;events&gt;.add(new EventName(args…));</c> (null-skipping for an unknown event).</summary>
-    private void WriteEmitStatement(
-        StringBuilder sb, JavaEmitContext emit, EmitClause em, JavaExpressionTranslator translator,
-        string eventsField, string receiver)
-    {
-        if (BuildEmitExpression(emit, em, translator) is { } expr)
-        {
-            sb.Append(Indent).Append(Indent).Append(receiver).Append(eventsField).Append(".add(").Append(expr).Append(");\n");
-        }
-    }
-
     /// <summary>
-    /// Builds the <c>new EventName(args…)</c> expression for an <c>emit EventName(field: value, …)</c> clause
-    /// (null for an unknown event — the validator guarantees presence). Arguments bind by field name in the
-    /// event record's declaration order, with a bare enum member qualified; a missing field falls back to a
-    /// benign type default so the emitted code still compiles.
+    /// Records a domain event: <c>&lt;receiver&gt;&lt;events&gt;.add(new EventName(args…));</c> — null for an
+    /// unknown event, so the caller skips it.
+    /// <para>Returns the rendered statement paired with whether it substituted the hoisted result local,
+    /// so the caller can decide to bind it (#1838).</para>
     /// </summary>
-    private static string? BuildEmitExpression(JavaEmitContext emit, EmitClause em, JavaExpressionTranslator translator) =>
+    private static (string Text, bool Hoisted)? BuildEmitStatement(
+        JavaEmitContext emit, EmitClause em, JavaExpressionTranslator translator,
+        string eventsField, string receiver, string? hoistedResultExpr = null)
+    {
         // Passes the context for the same reason `publish` does (#1834): `ValidateEmit` resolves the
         // event name context-aware, so this must too or it builds the payload from another context's
         // same-named declaration. The two halves are one contract.
-        BuildEventExpression(emit, em.EventName, em.Args, translator, translator.Context);
+        (var expr, var hoisted) = BuildEventExpression(
+            emit, em.EventName, em.Args, translator, translator.Context, hoistedResultExpr);
+
+        return expr is null
+            ? null
+            : ($"{Indent}{Indent}{receiver}{eventsField}.add({expr});\n", hoisted);
+    }
 
     /// <summary>
     /// Records a published integration event (R19):
     /// <c>this.&lt;integrationEvents&gt;.add(new EventName(args…));</c> — the published-language
-    /// counterpart of <see cref="WriteEmitStatement"/>, adding to a SEPARATE collector. No receiver
+    /// counterpart of <see cref="BuildEmitStatement"/>, adding to a SEPARATE collector. No receiver
     /// parameter: the grammar admits <c>publish</c> in a behavior body only, so it is always
     /// <c>this.</c>.
+    /// <para>Returns the rendered statement paired with whether it substituted the hoisted result local,
+    /// so the caller can decide to bind it (#1838); null for an unknown event.</para>
     /// </summary>
-    private void WritePublishStatement(
-        StringBuilder sb, JavaEmitContext emit, PublishClause pub, JavaExpressionTranslator translator,
-        string integrationEventsField)
+    private static (string Text, bool Hoisted)? BuildPublishStatement(
+        JavaEmitContext emit, PublishClause pub, JavaExpressionTranslator translator,
+        string integrationEventsField, string? hoistedResultExpr = null)
     {
         // Resolved CONTEXT-AWARE (unlike `emit`, whose validator is itself flat): two contexts may each
         // legally publish a same-named integration event with DIFFERENT payloads (R14), and the flat
         // ModelIndex view is last-write-wins — see BuildEventExpression's `context` parameter (#1796 review).
-        if (BuildEventExpression(emit, pub.EventName, pub.Args, translator, translator.Context) is { } expr)
-        {
-            sb.Append(Indent).Append(Indent).Append("this.").Append(integrationEventsField).Append(".add(").Append(expr).Append(");\n");
-        }
+        (var expr, var hoisted) = BuildEventExpression(
+            emit, pub.EventName, pub.Args, translator, translator.Context, hoistedResultExpr);
+
+        return expr is null
+            ? null
+            : ($"{Indent}{Indent}this.{integrationEventsField}.add({expr});\n", hoisted);
     }
 
     /// <summary>
-    /// The name/payload-only core of <see cref="BuildEmitExpression"/>, shared verbatim with a
+    /// The name/payload-only core of <see cref="BuildEmitStatement"/>, shared verbatim with a
     /// <c>publish</c> clause (R19): both clauses carry the same <see cref="EmitArg"/> payload and both
     /// construct a record, so the argument binding and enum-qualification rules stay identical rather
-    /// than being re-derived per clause.
-    /// <para><paramref name="context"/> is the bounded context the NAME resolves within. A
-    /// <c>publish</c> passes it (its validator, <c>ValidatePublish</c>, resolves context-aware, so the
-    /// emitter must too or it builds the payload from another context's same-named declaration); an
-    /// <c>emit</c> leaves it null, which falls back to the flat lookup its own flat validator agrees
-    /// with.</para>
+    /// than being re-derived per clause. Arguments bind by field name in the event record's declaration
+    /// order, with a bare enum member qualified; a missing field falls back to a benign type default so
+    /// the emitted code still compiles.
+    /// <para><paramref name="context"/> is the bounded context the NAME resolves within, and BOTH
+    /// clauses pass it: <c>ValidatePublish</c> has always resolved context-aware, and <c>ValidateEmit</c>
+    /// does since #1834, so the emitter must too or it builds the payload from another context's
+    /// same-named declaration. Null falls back to the flat, last-write-wins lookup — no caller relies on
+    /// that any more.</para>
+    /// <para><paramref name="hoistedResultExpr"/> is the behavior's rendered <c>result</c> expression,
+    /// when it has one (#1838). An argument whose WHOLE rendering equals it is replaced by
+    /// <see cref="ResultHoist.LocalName"/> and <c>Hoisted</c> comes back true, so the caller knows to
+    /// bind it. The rule is <see cref="ResultHoist.ShouldSubstitute"/>'s — exact, never a substring —
+    /// because the comparison runs on rendered source: a <c>this.taxRate</c> sibling next to a
+    /// <c>this.tax</c> result contains the result's rendering, and a substring splice would produce
+    /// <c>__resultRate</c>, which does not compile.</para>
+    /// <para>Note the two sides are not translated through identical calls: an argument passes its
+    /// field's enum type as <c>expectedEnum</c> while the caller translates the result without one. In
+    /// practice a bare enum member still qualifies on both sides (the command's declared return type
+    /// gives the translator the same frame), but nothing forces that — where two renderings of one
+    /// expression ever do diverge the argument simply fails to match and stays inline, which is the
+    /// deliberate posture: a missed hoist is safe where a wrong one is not.</para>
     /// </summary>
-    private static string? BuildEventExpression(
+    private static (string? Expr, bool Hoisted) BuildEventExpression(
         JavaEmitContext emit, string eventName, IReadOnlyList<EmitArg> clauseArgs, JavaExpressionTranslator translator,
-        string? context = null)
+        string? context = null, string? hoistedResultExpr = null)
     {
         if (!emit.Index.TryGetDecl(context, eventName, out TypeDecl decl))
         {
-            return null;
+            return (null, false);
         }
 
         IReadOnlyList<Member> members = decl switch
@@ -517,6 +584,7 @@ public sealed partial class JavaEmitter
         };
 
         var argByField = clauseArgs.ToDictionary(a => a.Field, a => a.Value, StringComparer.Ordinal);
+        var hoist = new ResultHoist.HoistTracker(hoistedResultExpr);
         var args = members.Select(m =>
         {
             if (!argByField.TryGetValue(m.Name, out Expr? value))
@@ -525,10 +593,14 @@ public sealed partial class JavaEmitter
             }
 
             var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-            return translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
-        });
+            var rendered = translator.Translate(value, JavaExpressionTranslator.NameMode.Property, expectedEnum);
 
-        return "new " + JavaNaming.Type(eventName) + "(" + string.Join(", ", args) + ")";
+            // Substitute the hoisted local only when the WHOLE argument is the result expression; a
+            // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
+            return hoist.Substitute(rendered, ResultHoist.LocalName);
+        }).ToList(); // Materialise: the tracker only latches while the sequence is enumerated.
+
+        return ("new " + JavaNaming.Type(eventName) + "(" + string.Join(", ", args) + ")", hoist.Hoisted);
     }
 
     /// <summary>
@@ -586,7 +658,11 @@ public sealed partial class JavaEmitter
               .Append('(').Append(string.Join(", ", ctorArgs)).Append(");\n");
             foreach (EmitClause em in emits)
             {
-                WriteEmitStatement(sb, emit, em, translator, eventsField, "instance.");
+                // A factory has no `result` clause, so no hoist can apply — take the text only.
+                if (BuildEmitStatement(emit, em, translator, eventsField, "instance.") is { } stmt)
+                {
+                    sb.Append(stmt.Text);
+                }
             }
 
             sb.Append(Indent).Append(Indent).Append("return instance;\n");
