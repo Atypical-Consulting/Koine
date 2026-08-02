@@ -396,7 +396,17 @@ public sealed partial class KotlinEmitter
             && emit.Index.Classify(field.Type.Qualifier ?? translator.Context, field.Type.Name) == TypeKind.Enum
                 ? field.Type.Name
                 : null;
-        var value = translator.Translate(t.Value, KotlinExpressionTranslator.NameMode.Property, expectedEnum);
+        // A transition assigns STRAIGHT INTO the target member's declared slot, so its value is
+        // reconciled against that member's declared type (#1887) through the same TranslateReconciled
+        // every sibling call site in this family already uses — the factory's explicit `field -> expr`
+        // initialization (#1732), the `result` expression and the emit/publish payload (#1875), the
+        // member default initializer (#1880) and the derived-member body (#1888). An `Int`-typed value
+        // on a `Decimal`-declared member previously emitted a bare `this.amount = 5L` into a
+        // `java.math.BigDecimal` property: a hard `kotlinc` type mismatch. Rust closed this same site
+        // at #1511.
+        var value = field is not null
+            ? translator.TranslateReconciled(t.Value, KotlinExpressionTranslator.NameMode.Property, expectedEnum, field.Type)
+            : translator.Translate(t.Value, KotlinExpressionTranslator.NameMode.Property, expectedEnum);
         sb.Append(indent).Append("this.").Append(KotlinNaming.ToMemberName(t.Field)).Append(" = ").Append(value).Append('\n');
     }
 
