@@ -1208,9 +1208,19 @@ impl RemoteSession {
     }
 
     fn send(&self, frame: &ClientFrame) {
-        // Best effort by design: the CRDT replica is the source of truth and re-merges on reconnect,
-        // so a dropped frame costs a round trip, not an edit.
-        let _ = write_frame(&mut *lock(&self.writer), frame);
+        // A frame the broker never asked for is best effort — the CRDT replica is the source of
+        // truth and re-merges on reconnect, so a lost one costs a round trip, not an edit. A frame
+        // that *fails to write* is a different thing entirely: with `WRITE_TIMEOUT` armed this is
+        // what a wedged or vanished broker looks like, and swallowing it would leave the editor
+        // believing it is still in the session while every edit it makes goes nowhere — a
+        // collaborator silently desynced from a document that still looks shared (#1822).
+        //
+        // So hang up. `read_loop` ends, and announces every peer this session knew as having left,
+        // which is the one contract event that says "you are on your own now".
+        let mut writer = lock(&self.writer);
+        if write_frame(&mut *writer, frame).is_err() {
+            let _ = writer.get_ref().shutdown(Shutdown::Both);
+        }
     }
 
     pub fn stop(&mut self) {
@@ -1436,6 +1446,7 @@ fn read_loop(
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::time::Instant;
     use std::sync::mpsc::{self, Receiver, Sender};
 
     fn participant(id: &str) -> Participant {
@@ -2537,5 +2548,225 @@ mod tests {
             &format!("{}b", "a".repeat(SECRET_HEX_LEN - 1))
         ));
         assert!(!secrets_match("", ""), "an empty secret never matches");
+    }
+
+    // --- back-pressure: a slow peer is one peer's problem (#1822) --------------------------------
+
+    /// A participant that really joins — Noise handshake, `Join`, admitted — and then stops reading.
+    /// The laptop that went to sleep mid-session.
+    ///
+    /// Returns its socket: the connection lives exactly as long as that handle, so the caller has to
+    /// hold it for the peer to stay wedged rather than merely gone.
+    fn wedged_peer(token: &str, identity: Participant) -> TcpStream {
+        let (host, port, secret, broker_key) = parse_token(token).expect("token");
+        let addr = (host.as_str(), port)
+            .to_socket_addrs()
+            .expect("resolve")
+            .next()
+            .expect("addr");
+        let mut stream = TcpStream::connect(addr).expect("connect");
+        let transport = handshake_initiator(&mut stream, &broker_key).expect("noise handshake");
+        let (mut reader, mut writer) = split(
+            &transport,
+            stream.try_clone().expect("clone"),
+            stream.try_clone().expect("clone"),
+        );
+        write_frame(&mut writer, &ClientFrame::Join { secret, identity }).expect("join");
+
+        // Read the admission and nothing ever again — from here its receive buffer only fills.
+        let admitted: Option<ServerFrame> = read_frame(&mut reader).expect("admission");
+        assert!(
+            matches!(admitted, Some(ServerFrame::Admitted { .. })),
+            "the wedged peer has to be a real admitted member, not a stranger on the listener"
+        );
+        stream
+    }
+
+    #[test]
+    fn a_peer_that_stops_reading_is_dropped_instead_of_stalling_the_session() {
+        let (host_sink, host_rx) = sink();
+        let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
+
+        let (guest_sink, guest_rx) = sink();
+        let _guest =
+            join_session(&hosted.info.token, participant("grace"), guest_sink).expect("join");
+        assert_eq!(
+            next(&host_rx),
+            ServerFrame::PeerJoin {
+                peer: participant("grace")
+            }
+        );
+        assert_eq!(
+            next(&guest_rx),
+            ServerFrame::PeerJoin {
+                peer: participant("ada")
+            },
+            "a joiner is replayed the incumbents"
+        );
+
+        let _wedged = wedged_peer(&hosted.info.token, participant("hopper"));
+        for rx in [&host_rx, &guest_rx] {
+            assert_eq!(
+                next(rx),
+                ServerFrame::PeerJoin {
+                    peer: participant("hopper")
+                }
+            );
+        }
+
+        // Enough traffic to fill the wedged peer's socket buffers and then its whole backlog.
+        let chunk = vec![7u8; 256 * 1024];
+        let rounds = MAX_OUTBOUND_BACKLOG_BYTES / chunk.len() + 16;
+
+        // THE bug: before #1822 the first write to `hopper` parked `dispatch` inside `write_frame`
+        // with the writers mutex held, and nothing in the session moved again — not grace's
+        // deliveries, not ada's own edits. So the assertion that matters is that the healthy
+        // participant keeps receiving, every round, while a wedged peer sits there.
+        //
+        // The deadline is bounded on purpose, and is what makes this a test rather than a smoke
+        // check. A generous one passes on the write deadline alone — `WRITE_TIMEOUT` caps the old
+        // stall rather than removing it — and that is a mitigation, not the fix: the broker would
+        // still go deaf every time a peer wedges. On loopback a healthy round is milliseconds, and
+        // the stalling shape measures ~25s here, so this sits an order of magnitude above the one
+        // and well below the other.
+        const PROMPTLY: Duration = Duration::from_secs(6);
+        for round in 0..rounds {
+            let started = Instant::now();
+            hosted.send_update(chunk.clone());
+            // The sharpest statement of the bug: the local user's own edit went through the same
+            // lock as the fan-out, so it queued behind a peer that was not reading.
+            assert!(
+                started.elapsed() < PROMPTLY,
+                "round {round}: the local participant's own edit blocked for {:?} on a wedged peer",
+                started.elapsed()
+            );
+            loop {
+                let frame = guest_rx.recv_timeout(PROMPTLY).unwrap_or_else(|_| {
+                    panic!("round {round}: a wedged peer stalled a healthy participant's delivery")
+                });
+                match frame {
+                    ServerFrame::Update { update } => {
+                        assert_eq!(update.len(), chunk.len(), "round {round}");
+                        break;
+                    }
+                    // The wedged peer being announced, somewhere mid-run.
+                    ServerFrame::PeerLeave { .. } => continue,
+                    other => panic!("round {round}: unexpected frame {other:?}"),
+                }
+            }
+        }
+
+        // And it is dropped LOUDLY: a participant whose caret will never move again is announced as
+        // gone, not left frozen on everyone's screen.
+        assert_eq!(
+            next(&host_rx),
+            ServerFrame::PeerLeave {
+                participant_id: "hopper".into()
+            },
+            "a peer that outran its backlog must depart the ordinary way"
+        );
+    }
+
+    /// A broker that admits a participant, tells it about a peer, and then stops reading — holding
+    /// the connection open the whole time, so nothing but the client's own writes can notice.
+    ///
+    /// It parks until `stop` is set rather than until the socket looks dead: the client hanging up
+    /// leaves this end perfectly connected as far as it can tell, which is precisely the situation
+    /// under test.
+    fn deaf_broker(stop: Arc<AtomicBool>) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let keypair = StaticKeypair::generate().expect("keypair");
+        let public_key = keypair.public_hex();
+
+        let handle = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let Ok(transport) = handshake_responder(&mut stream, &keypair) else {
+                    return;
+                };
+                let Ok(read_stream) = stream.try_clone() else {
+                    return;
+                };
+                let (mut reader, mut writer) = split(&transport, read_stream, stream);
+                let _: Option<ClientFrame> = read_frame(&mut reader).ok().flatten();
+                let _ = write_frame(
+                    &mut writer,
+                    &ServerFrame::Admitted {
+                        session_id: "s1".into(),
+                        authority: false,
+                        admitted_as: participant("grace"),
+                        secret: None,
+                    },
+                );
+                let _ = write_frame(
+                    &mut writer,
+                    &ServerFrame::PeerJoin {
+                        peer: participant("ada"),
+                    },
+                );
+                // Deaf from here: never read again, and hold the connection open by parking.
+                let _ = reader;
+                while !stop.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(25));
+                }
+            }
+        });
+        (
+            format_token("127.0.0.1", port, &"a".repeat(SECRET_HEX_LEN), &public_key),
+            handle,
+        )
+    }
+
+    /// Takes about `WRITE_TIMEOUT` to run, on purpose: it is the end-to-end proof that the deadline
+    /// is armed on a real dialled socket and that tripping it is *visible* to the user.
+    #[test]
+    fn a_broker_that_stops_reading_surfaces_as_a_disconnect_not_a_silent_desync() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let (token, broker) = deaf_broker(Arc::clone(&stop));
+        let (guest_sink, guest_rx) = sink();
+        let session = join_session(&token, participant("grace"), guest_sink).expect("join");
+        assert_eq!(
+            next(&guest_rx),
+            ServerFrame::PeerJoin {
+                peer: participant("ada")
+            }
+        );
+
+        // Push until the far end's buffers are full and the write deadline trips. How much that
+        // takes is a property of the platform's socket buffers, so send until the disconnect is
+        // observed rather than guessing a byte count (the cap is only a runaway guard — once the
+        // session hangs up, these calls fail instantly). `send_update` is best-effort by contract
+        // and cannot report the failure, so the disconnect IS the report.
+        let sending = Arc::new(AtomicBool::new(true));
+        let sender = thread::spawn({
+            let sending = Arc::clone(&sending);
+            move || {
+                for _ in 0..4096 {
+                    if !sending.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    session.send_update(vec![3u8; 256 * 1024]);
+                }
+                session
+            }
+        });
+
+        // Generous: it is a failure deadline, not a runtime. How long the far end takes to wedge is
+        // a property of the platform's socket buffers, and the passing path never waits this long.
+        let dropped = guest_rx
+            .recv_timeout(Duration::from_secs(120))
+            .expect("a wedged broker must surface as the session dropping");
+        assert_eq!(
+            dropped,
+            ServerFrame::PeerLeave {
+                participant_id: "ada".into()
+            },
+            "edits quietly going nowhere against a still-shared-looking document is the failure mode"
+        );
+
+        sending.store(false, Ordering::SeqCst);
+        stop.store(true, Ordering::SeqCst);
+        drop(sender.join());
+        let _ = broker.join();
     }
 }
