@@ -20,3 +20,10 @@ dotnet run --project src/Koine.Cli -- build templates/starters/ordering --target
 The `.php.txt` suffix is on purpose: the demo's own `php -l` / `phpstan` run only ever checks
 `demo/php/{generated,main.php}`, so these reference copies are never picked up as duplicate class
 declarations.
+
+**This folder is test-guarded** (issue #1903, the polyglot analogue of #1841):
+`Koine.Compiler.Tests.PolyglotDemoReferenceGuardTests.Php_reference_matches_committed_snapshot`
+regenerates both files above in-process and asserts they are byte-identical (line-ending-normalized)
+to what's committed here. A red run means the emitter's output has moved — run that test's
+regeneration command (in its failure message) and commit the result; it does **not** mean the
+emitter is wrong.
