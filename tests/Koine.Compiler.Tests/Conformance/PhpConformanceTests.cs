@@ -2434,6 +2434,160 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #1761 (the issue's exact repro; the PHP counterpart of Kotlin's/TypeScript's/Python's
+    /// #1344 fix): a <c>ConditionalExpr</c> derived-member body whose branches disagree ONLY in numeric
+    /// type (a non-optional <c>Int</c> branch against a <c>Decimal</c> sibling) must widen the <c>Int</c>
+    /// branch to a runtime <c>\Koine\Runtime\Decimal</c> so both ternary arms agree — before the fix PHP
+    /// emitted a bare <c>$this-&gt;amount</c> in the <c>then</c> arm, a real <c>TypeError</c> under
+    /// <c>declare(strict_types=1)</c> and a <c>phpstan analyse --level max</c> return-type mismatch.
+    /// </summary>
+    [Fact]
+    public void Ternary_reconciles_a_numeric_type_mismatch_between_non_optional_branches()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                amount: Int
+                amountDecimal: Decimal
+                total: Decimal = if amount > 0 then amount else amountDecimal
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no toolchain required): the `then` arm widens to a Decimal; the `else` arm
+        // (already Decimal) stays bare.
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain(@"new \Koine\Runtime\Decimal($this->amount)");
+        money.ShouldNotContain("? $this->amount :");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1761: a <c>ConditionalExpr</c> whose two branches ALREADY agree in numeric type (the
+    /// common, already-correct case) must keep emitting a bare ternary with no widening wrap —
+    /// byte-identical to the pre-fix output.
+    /// </summary>
+    [Fact]
+    public void Ternary_with_same_typed_branches_emits_unchanged()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                amount: Decimal
+                bonus: Decimal
+                total: Decimal = if amount > 0 then amount else bonus
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("? $this->amount : $this->bonus");
+        money.ShouldNotContain("Decimal($this->amount)");
+        money.ShouldNotContain("$__v");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1761: a <c>ConditionalExpr</c> whose branches disagree ONLY in optionality (a non-optional
+    /// branch against an optional sibling of the SAME underlying type) needs no rendering change — PHP's
+    /// optional is a plain <c>?T</c> nullable union, and a bare non-nullable <c>T</c> value is already
+    /// assignable wherever <c>?T</c> is expected, mirroring Kotlin's/TypeScript's/Python's own conclusion
+    /// for this <c>NeedsSomeWrap</c>-shaped mismatch (out of scope per the issue's spec — confirmed by a
+    /// regression test rather than assumed silently).
+    /// </summary>
+    [Fact]
+    public void Ternary_with_optionality_only_mismatch_emits_unchanged()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                amount: Int
+                bonus: Int?
+                total: Int? = if amount > 0 then amount else bonus
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain("? $this->amount : $this->bonus");
+        money.ShouldNotContain("$__v");
+        money.ShouldNotContain("Decimal(");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1761: a <c>ConditionalExpr</c> whose branches disagree in BOTH numeric type and
+    /// optionality at once — a non-optional <c>Decimal</c> branch against an optional <c>Int</c> sibling
+    /// — must null-check-and-widen the optional <c>Int</c> branch (the arrow-function shell #1732
+    /// introduced) rather than a bare <c>WriteAsDecimal</c> wrap, which would not type-check against a
+    /// possibly-null value. Mirrors Kotlin's/TypeScript's/Python's #1344 counterpart for this shape.
+    /// </summary>
+    [Fact]
+    public void Ternary_reconciles_an_optional_int_branch_against_a_non_optional_decimal_sibling()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                decimalAmount: Decimal
+                intBonus: Int?
+                total: Decimal? = if decimalAmount > 0 then decimalAmount else intBonus
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain(@"(fn($__v) => $__v === null ? null : new \Koine\Runtime\Decimal($__v))($this->intBonus)");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1761: a nested <c>ConditionalExpr</c> used as one branch of an outer conditional must
+    /// itself reconcile its own two arms BEFORE the outer branch is emitted — the inner ternary's
+    /// inferred (joined, #975) type must line up with the outer sibling's type. Here the inner ternary
+    /// widens <c>amount</c> (<c>Int</c>) against <c>bonus</c> (<c>Decimal</c>) to <c>Decimal</c>, which
+    /// already matches the outer <c>else</c> branch <c>fallback: Decimal</c> with no further outer-level
+    /// reconciliation needed. Mirrors Kotlin's/TypeScript's/Python's own nested-conditional #1344 test.
+    /// </summary>
+    [Fact]
+    public void Ternary_branch_with_nested_conditional_reconciles_its_own_arms_first()
+    {
+        const string src =
+            """
+            context Shop {
+              value Money {
+                amount: Int
+                bonus: Decimal
+                fallback: Decimal
+                total: Decimal = if amount > 0 then (if amount > 10 then amount else bonus) else fallback
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var money = result.Files.Single(f => f.RelativePath.EndsWith("Money.php", StringComparison.Ordinal)).Contents;
+        money.ShouldContain(@"new \Koine\Runtime\Decimal($this->amount)");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
     /// Runs the always-on <c>php -l</c> syntax gate and the <c>phpstan analyse --level max</c>
     /// type-check over the emitted tree. Skipped (not failed) when no toolchain is present; with one,
     /// BOTH must pass.
