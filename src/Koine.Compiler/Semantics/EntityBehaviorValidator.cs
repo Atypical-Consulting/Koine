@@ -453,6 +453,99 @@ internal static class EntityBehaviorValidator
     }
 
     /// <summary>
+    /// Validates that a DECLARED (not synthesized) identity is usable as a map/set key on every
+    /// target that needs one (issue #1873, following #1848). A synthesized <c>identified by</c>
+    /// identity is always a primitive wrapper (Guid/String/long) and never at risk, so this only
+    /// fires when <paramref name="entity"/>'s identity name resolves — via
+    /// <see cref="ModelIndex.TryGetDeclIn"/>, exactly the primitive #1848 introduced for emitters to
+    /// tell a declared identity apart from a synthesized one — to a <c>value</c> declared in the
+    /// entity's OWN context.
+    /// </summary>
+    /// <remarks>
+    /// Target-agnostic and unconditional rather than gated behind an <see cref="EmitTargetSet"/>
+    /// (#495): "an identity type must support value equality and hashing" is a DDD-shape rule, not a
+    /// Rust quirk — the other six emitters already get it for free from their runtime base
+    /// classes/structural equality, so a build committing to one of those targets loses nothing by
+    /// enforcing it too, and <see cref="EmitTargetSet"/> itself is documented as scoped to the
+    /// spec-predicate-collision check (KOI1007) alone.
+    /// </remarks>
+    public static void ValidateIdentityHashCompatibility(
+        EntityDecl entity, ModelIndex index, string? context, List<Diagnostic> diagnostics)
+    {
+        if (context is null
+            || !index.TryGetDeclIn(context, entity.IdentityName, out TypeDecl idDecl)
+            || idDecl is not ValueObjectDecl idVo)
+        {
+            return;
+        }
+
+        var visited = new HashSet<string>(StringComparer.Ordinal) { idVo.Name };
+        if (TryFindNonHashableField(idVo, context, index, visited, out Member offender, out string reason))
+        {
+            diagnostics.Add(Diagnostic.Error(DiagnosticCodes.IdentityNotHashCompatible,
+                $"identity '{entity.IdentityName}' of entity '{entity.Name}' is not hash-compatible: member '{offender.Name}' {reason}",
+                offender.Span));
+        }
+    }
+
+    /// <summary>
+    /// Walks <paramref name="vo"/>'s stored (non-derived — a derived member is a computed accessor,
+    /// never an emitted field) members looking for one that breaks hashability: a
+    /// <c>List</c>/<c>Set</c>/<c>Map</c> (Rust's <c>Vec</c>/<c>HashSet</c> don't implement <c>Hash</c>
+    /// at all, and <c>HashMap</c> never does), or a nested value object that itself fails this check.
+    /// <paramref name="visited"/> is scoped to the path currently being expanded (added on entry,
+    /// released on exit) — mirroring the derived-member substitution guard in
+    /// <c>RustExpressionTranslator.TryWriteDerivedBody</c> — so a diamond (the same nested VO reached
+    /// via two sibling fields) is checked on both, and only genuine re-entry (a self-referential or
+    /// mutually-recursive VO graph) hits the bail-out instead of recursing forever.
+    /// </summary>
+    private static bool TryFindNonHashableField(
+        ValueObjectDecl vo, string context, ModelIndex index, HashSet<string> visited,
+        out Member offender, out string reason)
+    {
+        var memberNames = SemanticValidator.MemberNameSet(vo.Members);
+        foreach (Member m in vo.Members)
+        {
+            if (MemberAnalysis.IsDerived(m, memberNames))
+            {
+                continue;
+            }
+
+            var typeName = m.Type.Name;
+            if (typeName is ModelIndex.ListTypeName or ModelIndex.SetTypeName or ModelIndex.MapTypeName)
+            {
+                offender = m;
+                reason = $"is a '{typeName}', which has no hash-compatible representation on every target";
+                return true;
+            }
+
+            if (index.TryGetDecl(context, typeName, out TypeDecl nested) && nested is ValueObjectDecl nestedVo)
+            {
+                if (!visited.Add(nestedVo.Name))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (TryFindNonHashableField(nestedVo, context, index, visited, out offender, out reason))
+                    {
+                        return true;
+                    }
+                }
+                finally
+                {
+                    visited.Remove(nestedVo.Name);
+                }
+            }
+        }
+
+        offender = null!;
+        reason = null!;
+        return false;
+    }
+
+    /// <summary>
     /// Validates a versioned aggregate (R11.4): the generated root carries a synthetic
     /// <c>Version</c> token, so the root entity must not declare a member that collides
     /// with it (which would emit a duplicate property, CS0102).

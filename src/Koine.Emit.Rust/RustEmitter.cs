@@ -92,11 +92,10 @@ public sealed partial class RustEmitter : IEmitter
         // #1848: identity names this context's entities ADOPT from an explicitly declared `value`
         // (rather than a synthesized wrapper) — the declared value object must then derive `Hash`
         // too, since an entity's identity is used as a map/set key just like a synthesized one is.
-        var adoptedIdentityNames = new HashSet<string>(
-            ctx.AllEntities()
-                .Select(e => e.IdentityName)
-                .Where(idName => DeclaredIdentityValueObject.IsDeclaredIn(emit.Index, ctx.Name, idName)),
-            StringComparer.Ordinal);
+        // #1873 extends the gate transitively: a plain nested value object referenced from one of
+        // these ALSO needs the derive, or the outer identity's own `#[derive(Hash)]` fails to compile
+        // on that field's type.
+        var adoptedIdentityNames = HashDerivingValueObjectNames(ctx, emit.Index);
 
         foreach (TypeDecl type in ctx.Types)
         {
@@ -119,6 +118,62 @@ public sealed partial class RustEmitter : IEmitter
         // EmittedFile.Kind stays null here — there is nothing additive to populate for the #1170 rail.
         var moduleDoc = $"//! The `{ctx.Name}` bounded context.";
         return new EmittedFile($"src/{ModuleNameFor(ctx.Name)}.rs", Assemble(body.ToString(), moduleDoc));
+    }
+
+    /// <summary>
+    /// The value objects that must derive <c>Hash</c> in <paramref name="ctx"/>: every entity's
+    /// adopted declared identity (#1848), plus — extending that gate (#1873) — every value object
+    /// transitively reachable from one via a non-collection stored member. Rust's derive macro
+    /// requires every field's type to itself implement <c>Hash</c>, so a plain nested value object
+    /// referenced from an identity must derive it too, or the identity's own derive fails to compile
+    /// on that field. A <c>List</c>/<c>Set</c>/<c>Map</c> member breaks the chain (Rust's
+    /// <c>Vec</c>/<c>HashSet</c>/<c>HashMap</c> never implement <c>Hash</c>) — but
+    /// <c>EntityBehaviorValidator.ValidateIdentityHashCompatibility</c> (KOI1108, Semantics/) rejects
+    /// any model whose identity graph reaches one before emission ever runs, so this closure only ever
+    /// walks a graph already proven to bottom out cleanly; it does not need to re-check for one.
+    /// </summary>
+    private static HashSet<string> HashDerivingValueObjectNames(ContextNode ctx, ModelIndex index)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>();
+
+        foreach (var idName in ctx.AllEntities().Select(e => e.IdentityName))
+        {
+            if (DeclaredIdentityValueObject.IsDeclaredIn(index, ctx.Name, idName) && result.Add(idName))
+            {
+                pending.Enqueue(idName);
+            }
+        }
+
+        while (pending.TryDequeue(out var name))
+        {
+            if (!index.TryGetDecl(ctx.Name, name, out TypeDecl decl) || decl is not ValueObjectDecl vo)
+            {
+                continue;
+            }
+
+            var memberNames = new HashSet<string>(vo.Members.Select(m => m.Name), StringComparer.Ordinal);
+            foreach (Member m in vo.Members)
+            {
+                if (MemberAnalysis.IsDerived(m, memberNames))
+                {
+                    continue;
+                }
+
+                var typeName = m.Type.Name;
+                if (typeName is ModelIndex.ListTypeName or ModelIndex.SetTypeName or ModelIndex.MapTypeName)
+                {
+                    continue;
+                }
+
+                if (index.TryGetDecl(ctx.Name, typeName, out TypeDecl nested) && nested is ValueObjectDecl && result.Add(typeName))
+                {
+                    pending.Enqueue(typeName);
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
