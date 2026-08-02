@@ -138,7 +138,7 @@ internal static class EntityBehaviorValidator
                                 emit.Span));
                         }
 
-                        ValidateEmit(emit, index, checker, scope, diagnostics);
+                        ValidateEmit(emit, resolver.Context, index, checker, scope, diagnostics);
                         break;
 
                     // R19 — `publish` leaves the context, so it is the aggregate ROOT's prerogative:
@@ -363,7 +363,7 @@ internal static class EntityBehaviorValidator
                                 emit.Span));
                         }
 
-                        ValidateEmit(emit, index, checker, scope, diagnostics);
+                        ValidateEmit(emit, resolver.Context, index, checker, scope, diagnostics);
                         break;
                 }
             }
@@ -727,14 +727,28 @@ internal static class EntityBehaviorValidator
     /// declared event, every argument must name a distinct event field with a
     /// type-compatible value, and every event field must be supplied.
     /// </summary>
+    /// <param name="context">
+    /// <para>The bounded context enclosing the <c>emit</c> — the scope the event name resolves
+    /// within. Two contexts may each declare a same-named <c>event</c> with a different payload
+    /// (R13.2/R14), and <see cref="ModelIndex"/>'s flat view keeps only whichever was indexed last, so
+    /// resolving without a context made a legal model's legality depend on the source order of its
+    /// contexts (#1834).</para>
+    /// <para><b>This is half of a contract: the emitters resolve identically.</b> #1816 (implementing
+    /// #1796) hit the mirror-image hazard on <c>publish</c> — a context-aware validator over flat
+    /// emitters, which type-checked a legal model and then built its payload from another context's
+    /// same-named declaration. Every <c>emit</c> site in <c>Koine.Emit.*</c> therefore passes its
+    /// translator's context to the same <see cref="ModelIndex.TryGetDecl(string?, string, out TypeDecl)"/>
+    /// overload used here; changing one half without the other re-opens that hole.</para>
+    /// </param>
     public static void ValidateEmit(
         EmitClause emit,
+        string? context,
         ModelIndex index,
         ExpressionChecker checker,
         TypeScope scope,
         List<Diagnostic> diagnostics)
     {
-        if (!index.TryGetDecl(emit.EventName, out var decl) || decl is not EventDecl ev)
+        if (!index.TryGetDecl(context, emit.EventName, out var decl) || decl is not EventDecl ev)
         {
             diagnostics.Add(Diagnostic.Error(DiagnosticCodes.UnknownEvent,
                 $"unknown event '{emit.EventName}'", emit.Span));
