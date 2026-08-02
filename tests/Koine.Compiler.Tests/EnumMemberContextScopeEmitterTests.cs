@@ -813,4 +813,70 @@ public class EnumMemberContextScopeEmitterTests
         TestSupport.RequireOrSkip(check.ToolchainAvailable, "No usable cargo toolchain available; skipping.");
         check.Ok.ShouldBeTrue(string.Join("\n", check.Errors));
     }
+
+    /// <summary>
+    /// Issue #1860, Task 5 — the edge case the primary fixture cannot exercise: an EXPLICITLY qualified
+    /// return type (<c>Billing.SubStatus</c>), where the bare result member <c>Active</c> is ambiguous
+    /// against the REFERENCING context's own <c>OrderStatus.Active</c> too. <c>cmd.ReturnType?.Name</c>
+    /// is only ever the bare simple name ("SubStatus"), so this checks the hint still resolves correctly
+    /// against a FOREIGN owner and not just a same-context one (the only shape the primary fixture
+    /// covers). A separate, standalone model — folding this into <see cref="AmbiguousEnumResultClause"/>
+    /// would make "SubStatus" a legitimately expected substring there too, weakening that fixture's own
+    /// negative assertion.
+    /// </summary>
+    private const string QualifiedReturnTypeAmbiguousResult = """
+        context Billing {
+          enum SubStatus { Active, Suspended }
+
+          aggregate Subs root Sub {
+            entity Sub identified by SubId {
+              state: SubStatus = Suspended
+            }
+          }
+        }
+
+        context Sales {
+          import Billing.{ SubStatus }
+
+          enum OrderStatus { Draft, Active, Closed }
+
+          aggregate Book root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+
+              command reopenAsSub(): Billing.SubStatus {
+                result Active
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Every_target_resolves_a_result_clause_against_an_explicitly_qualified_foreign_return_type()
+    {
+        const string source = QualifiedReturnTypeAmbiguousResult;
+
+        // (emitter, file the `reopenAsSub` command lands in, the qualified owner that must win).
+        (IEmitter Emitter, string File, string Expected)[] targets =
+        [
+            (new CSharpEmitter(), "Order.cs", "Billing.SubStatus.Active"),
+            (new TypeScriptEmitter(), "Order.ts", "SubStatus.Active"),
+            (new PythonEmitter(), "order.py", "SubStatus.ACTIVE"),
+            (new PhpEmitter(), "Order.php", "SubStatus::ACTIVE"),
+            (new RustEmitter(), "sales.rs", "crate::billing::SubStatus::Active"),
+            (new JavaEmitter(), "Order.java", "koine.generated.billing.SubStatus.Active"),
+            (new KotlinEmitter(), "Order.kt", "koine.generated.billing.SubStatus.Active"),
+        ];
+
+        foreach ((IEmitter emitter, var file, var expected) in targets)
+        {
+            var result = new KoineCompiler().Compile(source, emitter);
+            result.Success.ShouldBeTrue($"{file}: " + string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+            var contents = result.Files
+                .Single(f => f.RelativePath.EndsWith(file, StringComparison.OrdinalIgnoreCase)).Contents;
+            contents.ShouldContain(expected, customMessage: $"{file} should resolve the result clause against the explicitly qualified foreign return type");
+        }
+    }
 }
