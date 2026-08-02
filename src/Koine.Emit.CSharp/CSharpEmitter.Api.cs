@@ -123,17 +123,18 @@ public sealed partial class CSharpEmitter
             _options.NotFound, info.AuthRole, info.TokenBindings, CSharpNaming.CommandIdProperty(cmd), typeMapper, index);
     }
 
-    /// <summary>A factory → <c>POST /{entity}/{factory}</c>; it always returns the created aggregate. Factories
-    /// carry no API annotations (and no <c>@route</c> tokens to bind — #1748 is commands/queries only), so
-    /// this one stays purely conventional.</summary>
+    /// <summary>A factory → <c>POST /{entity}/{factory}</c> (<see cref="RouteDerivation.ForFactory"/> —
+    /// #1747), always returning the created aggregate. Factories carry no API annotations (and no
+    /// <c>@route</c> tokens to bind — #1748 is commands/queries only), so this one stays purely
+    /// conventional.</summary>
     private void WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory, CSharpTypeMapper typeMapper, ModelIndex index)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(factory.Name);
-        var route = "/" + RouteDerivation.Kebab(root.Name) + "/" + RouteDerivation.Kebab(factory.Name);
+        RouteInfo info = RouteDerivation.ForFactory(root, factory);
         // A factory creates — it has no not-found concept — so it always returns the created aggregate
         // plainly, regardless of the not-found policy.
-        WriteMutationEndpoint(body, "POST", "MapPost", route, behavior, returnsValue: true, CSharpNotFound.Throw,
-            authRole: null, bindings: [], identityProperty: "", typeMapper, index);
+        WriteMutationEndpoint(body, info.Verb, "MapPost", info.Route, behavior, returnsValue: true, CSharpNotFound.Throw,
+            info.AuthRole, info.TokenBindings, identityProperty: "", typeMapper, index);
     }
 
     /// <summary>
