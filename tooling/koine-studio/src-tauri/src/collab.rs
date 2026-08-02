@@ -846,17 +846,30 @@ fn serve_connection(
     // The admission goes out through the very writer the table will hold, because a Noise channel
     // counts its own messages: two writers over one connection would each start from nonce zero and
     // the second frame either way would fail to authenticate.
+    //
+    // Write and publish under ONE hold of the writers lock. `dispatch` takes the same lock per
+    // delivery, so this is what orders the protocol: a `PeerJoin` that another thread produced for
+    // this member while we were still writing waits here and lands *after* the admission, instead of
+    // finding no writer and being dropped — or, worse, overtaking the frame the client is blocked
+    // reading.
     let admitted_frame = ServerFrame::Admitted {
         session_id: admission.session_id.clone(),
         authority: admission.authority,
         admitted_as: admission.admitted_as.clone(),
         secret,
     };
-    if write_frame(&mut writer, &admitted_frame).is_err() {
+    let admitted_ok = {
+        let mut writers = lock(&hub.writers);
+        let ok = write_frame(&mut writer, &admitted_frame).is_ok();
+        if ok {
+            writers.insert(member, writer);
+        }
+        ok
+    };
+    if !admitted_ok {
         hub.depart(member);
         return;
     }
-    lock(&hub.writers).insert(member, writer);
     hub.dispatch(admission.deliveries);
 
     // Admitted: the connection is now long-lived, so the handshake deadline no longer applies.

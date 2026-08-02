@@ -85,7 +85,9 @@ We will therefore:
   itself.
 * **Treat the join token as a bearer credential**: 128 bits from the OS CSPRNG, compared in constant
   time, never echoed into an error message or a log line. It carries the endpoint too
-  (`koine-collab://host:port/secret`), so a joiner needs exactly one string.
+  (`koine-collab://host:port/secret` — extended to `…/secret/public-key` by
+  [ADR 0017](0017-noise-encrypted-collaboration-transport-with-a-token-pinned-broker-key.md)), so a
+  joiner needs exactly one string.
 * **Default the listener to `127.0.0.1`**, with the bind address a user setting that is also the address
   advertised in the token. Opening a session must not put a listener on the local network as a side
   effect; inviting the LAN in is a deliberate edit.
