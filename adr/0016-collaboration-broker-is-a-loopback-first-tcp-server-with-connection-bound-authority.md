@@ -8,6 +8,7 @@ links:
   [
     { type: relates-to, target: 13 },
     { type: relates-to, target: 15 },
+    { type: relates-to, target: 17 },
   ]
 ---
 
@@ -115,7 +116,12 @@ later without touching the trust model. A thread per connection is fine at works
 be at internet scale — the connection cap makes that explicit rather than implicit. Plain TCP is **not
 encrypted**: on loopback that is moot, and ADR 0013's "relay traffic should be transport-encrypted"
 remains outstanding for anyone binding a LAN address, which is why the default is loopback and why
-widening it is a deliberate act. Two people on different networks still need a relay to exist, and this
+widening it is a deliberate act. *(Closed by
+[ADR 0017](0017-noise-encrypted-collaboration-transport-with-a-token-pinned-broker-key.md): every
+connection now runs a Noise handshake against a public key pinned in the join token, so the token
+grammar gained a fourth part and there is no plaintext path left. Everything else on this page — the
+connection-bound authority, the identity rules, the bounds — is unchanged; ADR 0017 is additive, not a
+supersession.)* Two people on different networks still need a relay to exist, and this
 task ships the protocol and the client for one without shipping a service. Finally, a browser tab
 remains unable to collaborate even with a relay configured, because it cannot open a TCP socket — that
 gap closes with a WebSocket transport, not with configuration.
