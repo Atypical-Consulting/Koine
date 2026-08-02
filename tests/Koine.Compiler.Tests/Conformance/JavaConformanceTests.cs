@@ -1345,4 +1345,223 @@ public class JavaConformanceTests
         order.ShouldNotContain("java.util.Optional<java.time.Instant> __result");
         order.ShouldContain("new Stamped(__result)");
     }
+
+    /// <summary>
+    /// Issue #1866 — the #1511 fix (Rust) never ported to Java: a command's <c>result</c> expression never
+    /// numerically reconciled against the command's declared return type, unlike the identical decision
+    /// already applied at factory ctor args (#1519) and coalesce operands (#1548). An <c>Int</c>-typed
+    /// member returned against a <c>: Decimal</c> return type emitted a bare <c>long return</c> where a
+    /// <c>BigDecimal</c> is required — a real <c>javac</c> "incompatible types" error.
+    /// </summary>
+    [Fact]
+    public void Result_expression_widens_an_int_member_to_bigdecimal_against_a_decimal_return_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeC: Decimal {\n" +
+            "      result tax\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return java.math.BigDecimal.valueOf(this.tax);");
+        invoice.ShouldNotContain("return this.tax;");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>Issue #1866: the same widening applies to an <c>Int</c> literal <c>result</c> expression.</summary>
+    [Fact]
+    public void Result_expression_widens_an_int_literal_to_bigdecimal_against_a_decimal_return_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command chargeFlat: Decimal {\n" +
+            "      result 5\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return java.math.BigDecimal.valueOf(5L);");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1866: an <c>emit</c> payload argument never numerically reconciled against the event
+    /// member's declared type either — the payload-argument dual of the <c>result</c> gap above, sharing
+    /// <c>BuildEventExpression</c> with <c>publish</c>.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_widens_an_int_member_to_bigdecimal_against_a_decimal_declared_field()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  event Charged { amount: Decimal }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    tax: Int\n" +
+            "    command notify {\n" +
+            "      emit Charged(amount: tax)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("new Charged(java.math.BigDecimal.valueOf(this.tax))");
+        invoice.ShouldNotContain("new Charged(this.tax)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1866: the <c>publish</c> half of the shared <c>BuildEventExpression</c> gets the same
+    /// widening as <c>emit</c> above — a published integration event's <c>Decimal</c>-declared field fed an
+    /// <c>Int</c>-typed argument emitted an uncoerced value too.
+    /// </summary>
+    [Fact]
+    public void Publish_payload_argument_widens_an_int_member_to_bigdecimal_against_a_decimal_declared_field()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  publishes ChargedOut\n" +
+            "  integration event ChargedOut { amount: Decimal }\n" +
+            "  aggregate Invoicing root Invoice {\n" +
+            "    entity Invoice identified by InvoiceId {\n" +
+            "      tax: Int\n" +
+            "      command notify {\n" +
+            "        publish ChargedOut(amount: tax)\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("new ChargedOut(java.math.BigDecimal.valueOf(this.tax))");
+        invoice.ShouldNotContain("new ChargedOut(this.tax)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1866, the <c>NeedsOptionalWiden</c> composition: an already-<c>Optional</c>-typed
+    /// <c>Int?</c> member <c>result</c>-ed into an optional-declared <c>Decimal?</c> return must widen
+    /// via <c>.map(BigDecimal::valueOf)</c>, never a bare <c>BigDecimal.valueOf(...)</c> wrap around an
+    /// <c>Optional&lt;Long&gt;</c> — the #1335/#1343 bug class the ctor-arg reconciler already guards.
+    /// </summary>
+    [Fact]
+    public void Result_expression_widens_an_optional_int_member_via_map_against_an_optional_decimal_return_type()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    maybeTax: Int?\n" +
+            "    command chargeOpt: Decimal? {\n" +
+            "      result maybeTax\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return this.maybeTax.map(java.math.BigDecimal::valueOf);");
+        invoice.ShouldNotContain("java.math.BigDecimal.valueOf(this.maybeTax)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1866, the <c>CoalesceExpr</c> double-widen guard (mirrors #1548/#1615 at the ctor-arg site):
+    /// a coalesce already widened by <c>WriteCoalesce</c> must not be widened a SECOND time by this new
+    /// result-expression reconciliation — a real <c>javac</c> "no suitable method found for
+    /// valueOf(BigDecimal)" error.
+    /// </summary>
+    [Fact]
+    public void Result_expression_over_a_coalesce_widens_exactly_once()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    maybeTax: Int?\n" +
+            "    command chargeOrZero: Decimal {\n" +
+            "      result maybeTax ?? 0\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldNotContain("BigDecimal.valueOf(java.math.BigDecimal");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1866 zero-change regression guard: a matching-type <c>Decimal</c> result and a non-numeric
+    /// <c>String</c> payload argument must render byte-identical to before this fix — no reconciliation
+    /// wrap where none is needed.
+    /// </summary>
+    [Fact]
+    public void Result_and_payload_of_matching_or_non_numeric_types_are_unaffected()
+    {
+        const string src =
+            "context Billing {\n" +
+            "  event Noted { note: String }\n" +
+            "  entity Invoice identified by InvoiceId {\n" +
+            "    total: Decimal\n" +
+            "    memo:  String\n" +
+            "    command grandTotal: Decimal {\n" +
+            "      result total\n" +
+            "    }\n" +
+            "    command annotate {\n" +
+            "      emit Noted(note: memo)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.java", StringComparison.Ordinal)).Contents;
+        invoice.ShouldContain("return this.total;");
+        invoice.ShouldContain("new Noted(this.memo)");
+        invoice.ShouldNotContain("BigDecimal.valueOf(this.total)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
