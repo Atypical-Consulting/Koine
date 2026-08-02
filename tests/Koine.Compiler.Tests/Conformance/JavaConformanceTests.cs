@@ -1603,4 +1603,197 @@ public class JavaConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1865: a command's <c>result</c> expression never lifted a bare value into
+    /// <c>java.util.Optional.of(...)</c> against the command's <c>Optional</c>-declared return type.
+    /// <see cref="ReconcileAgainstDeclared"/> already computes this dimension via
+    /// <c>BranchReconciliation.NeedsSomeWrap</c> for the numeric call sites (#1866), but the result/payload
+    /// call sites passed <c>allowOptionalWrap: false</c> to keep the numeric fix scoped — this closes that
+    /// gate, mirroring the already-correct <c>WriteTransition</c> gate for state transitions.
+    /// </summary>
+    [Fact]
+    public void Result_expression_lifts_a_bare_value_into_optional_of_against_an_optional_declared_return_type()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command maybeStamp: Instant? {\n" +
+            "      result now\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("return java.util.Optional.of(java.time.Instant.now());");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865: an <c>emit</c> payload argument never lifted a bare value into
+    /// <c>java.util.Optional.of(...)</c> against the event member's <c>Optional</c>-declared type — the
+    /// payload-argument dual of the <c>result</c> gap above, sharing <c>BuildEventExpression</c> with
+    /// <c>publish</c>.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_argument_lifts_a_bare_value_into_optional_of_against_an_optional_declared_member()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  event ClosedAt { at: Instant? }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command close {\n" +
+            "      emit ClosedAt(at: now)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("new ClosedAt(java.util.Optional.of(java.time.Instant.now()))");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865: the <c>publish</c> half of the shared <c>BuildEventExpression</c> gets the same
+    /// optional lift as <c>emit</c> above — a published integration event's <c>Optional</c>-declared field
+    /// fed a bare argument emitted an unwrapped value too.
+    /// </summary>
+    [Fact]
+    public void Publish_payload_argument_lifts_a_bare_value_into_optional_of_against_an_optional_declared_member()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  publishes ClosedOut\n" +
+            "  integration event ClosedOut { at: Instant? }\n" +
+            "  aggregate Ordering root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      command close {\n" +
+            "        publish ClosedOut(at: now)\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("new ClosedOut(java.util.Optional.of(java.time.Instant.now()))");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865 zero-change regression guards on the <c>result</c> path: an already-<c>Optional</c>-typed
+    /// value flows into an optional-declared return unwrapped (no <c>Optional&lt;Optional&lt;T&gt;&gt;</c>
+    /// double-wrap), and a non-optional-declared return renders byte-identical to before this fix.
+    /// </summary>
+    [Fact]
+    public void Result_optional_lift_zero_change_regression_guards()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command echoStamp(at: Instant?): Instant? {\n" +
+            "      result at\n" +
+            "    }\n" +
+            "    command stamp: Instant {\n" +
+            "      result now\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("return at;");
+        order.ShouldNotContain("Optional.of(at)");
+        order.ShouldContain("return java.time.Instant.now();");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865 zero-change regression guards on the payload path: an already-<c>Optional</c>-typed
+    /// argument flows into an optional-declared member unwrapped, and a non-optional-declared member
+    /// renders byte-identical to before this fix.
+    /// </summary>
+    [Fact]
+    public void Emit_payload_optional_lift_zero_change_regression_guards()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  event ClosedAt { at: Instant? }\n" +
+            "  event Noted { note: String }\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command relay(at: Instant?) {\n" +
+            "      emit ClosedAt(at: at)\n" +
+            "    }\n" +
+            "    command note(msg: String) {\n" +
+            "      emit Noted(note: msg)\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("new ClosedAt(at)");
+        order.ShouldNotContain("Optional.of(at)");
+        order.ShouldContain("new Noted(msg)");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1865: a coalesce (<c>??</c>) whose right operand is ITSELF <c>Optional</c>-typed already
+    /// renders <c>Optional</c>-shaped via <c>.or(() -&gt; ...)</c> (#1520) — the <c>result</c> path's new
+    /// optional lift must NOT wrap that a second time into
+    /// <c>Optional&lt;Optional&lt;T&gt;&gt;</c>. <c>InferReconcilableValueType</c> already reads the
+    /// coalesce's own optionality off its right operand (mirrors <c>WriteCoalesce</c>'s own choice), so this
+    /// pins that the two stay in sync.
+    /// </summary>
+    [Fact]
+    public void Result_expression_over_an_optional_shaped_coalesce_does_not_double_wrap()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  entity Order identified by OrderId {\n" +
+            "    command combine(a: Instant?, b: Instant?): Instant? {\n" +
+            "      result a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain("a.or(() -> b)");
+        order.ShouldNotContain("Optional.of(a.or");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
