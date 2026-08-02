@@ -79,7 +79,7 @@ Identified by `DeliveryId`.
 
 ### Services
 
-- **DeliveryService** — the application service interface (IDeliveryService).
+- **DeliveryService** — The application service interface (IDeliveryService).
 
 ## Kitchen — version 1
 
@@ -243,7 +243,7 @@ Identified by `PizzaCode`.
 
 ## Ordering — version 1
 
-Ordering bounded context — taking and pricing a customer's pizza order. This is the heart of the template: the `Sales` aggregate (root `Order`) is the headline aggregate, its lifecycle is an explicit state machine, it is priced from its line items , and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
+Ordering bounded context — taking and pricing a customer's pizza order. This is the heart of the template: the `Sales` aggregate (root `Order`) is the headline aggregate, its lifecycle is an explicit state machine, it is priced from its line items, and it publishes `OrderPlaced` so Kitchen, Delivery and Payment can react.
 
 ### Fulfillment — enum
 
@@ -353,7 +353,7 @@ Identified by `OrderId`.
 
 ### Services
 
-- **OrderingService** — the application/use-case service interface (IOrderingService). Each use case maps to one async method; a context with aggregates also gets a UoW.
+- **OrderingService** — The application/use-case service interface (IOrderingService). Each use case maps to one async method; a context with aggregates also gets a UoW.
 
 ## Payment — version 1
 
@@ -438,7 +438,7 @@ Identified by `LedgerEntryId`.
 
 ### Services
 
-- **PaymentService** — the application service interface (IPaymentService).
+- **PaymentService** — The application service interface (IPaymentService).
 
 ### Policies
 
@@ -502,6 +502,6 @@ A discount applied to an order total. THE rule of this context: the discounted t
 
 ### Services
 
-- **DiscountService** — a domain service with pure operations (expression bodies). `cap` clamps a requested discount so it can never exceed the order total (the safe way to build a `Discount`); `rate` gives the percentage rate for a deal kind.
+- **DiscountService** — A domain service with pure operations (expression bodies). `cap` clamps a requested discount so it can never exceed the order total (the safe way to build a `Discount`); `rate` gives the percentage rate for a deal kind.
   - `cap(orderTotal: Decimal, requested: Decimal): Decimal`
   - `rate(kind: DealKind): Decimal`
