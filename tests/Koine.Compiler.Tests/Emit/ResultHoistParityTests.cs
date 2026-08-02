@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------------------------
 // Shared-helper decision for the result/emit hoist (issue #1838) — RECORDED, not re-litigated.
 //
-// The port in Task 2 adds a `ResultHoist` static helper to `src/Koine.Emit.Common` holding exactly
+// The port added a `ResultHoist` static helper to `src/Koine.Emit.Common` holding exactly
 // two things:
 //   (a) the `__result` local-name constant, and
 //   (b) the Ordinal WHOLE-argument matcher — a rendered argument participates in the hoist only
@@ -15,11 +15,11 @@
 // `BranchReconciliation`, `FactoryIdBinding` and `RouteDerivation` helpers in that assembly:
 // the neutral policy lives in Koine.Emit.Common, the syntax stays in Koine.Emit.<Target>.
 //
-// Caveat to verify later — PRE-EXISTING and OUT OF SCOPE here: neither the C# nor the TypeScript
-// emitter guards `__result` against colliding with a model-derived identifier. The Koine lexer
-// allows leading underscores, so a member/parameter literally named `__result` would shadow (or be
-// shadowed by) the hoisted local. That gap predates this issue, is not introduced by the port, and
-// will be filed separately rather than fixed here.
+// Caveat to verify later — PRE-EXISTING and OUT OF SCOPE here: no emitter guards `__result` against
+// colliding with a model-derived identifier (a gap the C# and TypeScript emitters already had, which
+// the port inherits rather than introduces). The Koine lexer allows leading underscores, so a
+// member/parameter literally named `__result` would shadow (or be shadowed by) the hoisted local.
+// That gap predates this issue and will be filed separately rather than fixed here.
 // ---------------------------------------------------------------------------------------------
 
 using System.Text;
@@ -37,10 +37,16 @@ namespace Koine.Compiler.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The C# and TypeScript emitters already hoist the shared expression into a single <c>__result</c>
-/// local bound after the invariant re-check and before the event recording. Python, PHP, Rust, Java
-/// and Kotlin do not — this suite is the executable statement of the contract for all seven code
-/// targets at once, so the port cannot land partially.
+/// All seven code emitters hoist the shared expression into a single <c>__result</c> local, bound after
+/// the invariant re-check and before the event recording — C# and TypeScript always did; Python, PHP,
+/// Rust, Java and Kotlin were ported in #1838. This suite is the executable statement of the contract
+/// for all seven at once, so no target can silently drop back to re-rendering the expression.
+/// </para>
+/// <para>
+/// It asserts the emitted TEXT. Its behavioral counterpart is
+/// <see cref="Conformance.ResultHoistRuntimeTests"/>, which EXECUTES the emitted code on the five
+/// targets whose conformance harness runs it and demands that the recorded event payload equal the
+/// returned value.
 /// </para>
 /// <para>The fixture below covers four sub-shapes in one model:</para>
 /// <list type="table">

@@ -183,9 +183,24 @@ command cancel(): OrderId {
 The `result` expression is evaluated over the **post-mutation** state, in the same scope as `emit` payloads, so
 it can reference parameters, `id`, and just-assigned fields. It is the **terminal** statement: the value is only
 returned from a fully-valid, fully-eventful aggregate (after the precondition guards, the post-transition
-invariant re-check, and every `emit`). When the same value is also carried by an event — the *create-and-return-id*
-idiom — Koine hoists it into a single `var __result`, computing it once. A result that no event references is
-returned inline (`return <expr>;`).
+invariant re-check, and every `emit`).
+
+**Evaluated exactly once, on every target.** When the `result` expression is *also* a whole payload argument of an `emit` **or** a `publish` — the
+*create-and-return-id* idiom — Koine **evaluates it exactly once**: it is bound to a single `__result` local
+right after the invariant re-check, and both the recorded event payload and the returned value read that one
+local. This is a guarantee of the language, not of one backend — **all seven code targets** (C#, TypeScript,
+Python, PHP, Rust, Java, Kotlin) hoist it, each in its own binding syntax (`var __result =`, `const __result =`,
+`$__result =`, `let __result =`, a bare `__result =`).
+
+It is correctness, not tidiness: a Koine expression need not be pure. `result now` beside
+`emit Closed(at: now)` would, if rendered twice, read the clock at two different instants — so the instant the
+event *records* and the instant the command *returns* would be different facts, and with an `emit` *and* a
+`publish` of the same expression the domain event and the integration event meant to mirror it would disagree
+too.
+
+Two shapes deliberately do **not** hoist: a `result` no payload argument reuses is returned inline
+(`return <expr>;`), and a sibling argument that merely shares the result's prefix (a `taxRate` next to a `tax`
+result) is left alone — the match is per *whole* argument, never a substring.
 
 Rules:
 
