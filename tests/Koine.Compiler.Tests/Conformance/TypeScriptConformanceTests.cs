@@ -1700,8 +1700,11 @@ public class TypeScriptConformanceTests
         result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
 
         var invoice = result.Files.Single(f => f.RelativePath.EndsWith("Invoice.ts", StringComparison.Ordinal)).Contents;
+        // Exactly one widen wrap around the WHOLE coalesce (its own effective type is Int, not
+        // Decimal, so this is not the ctor-arg guard's "already-widened, skip" case) — never a
+        // second, nested widen.
+        invoice.ShouldContain("return Decimal.fromInt((this.maybeTax ?? 0));");
         invoice.ShouldNotContain("Decimal.fromInt(Decimal.fromInt");
-        invoice.ShouldNotContain("Decimal.fromInt((");
 
         TestSupport.TypeScriptCheck check = TestSupport.TypeCheckTypeScript(result.Files);
         TestSupport.RequireOrSkip(check.ToolchainAvailable, NoToolchainNotice);
