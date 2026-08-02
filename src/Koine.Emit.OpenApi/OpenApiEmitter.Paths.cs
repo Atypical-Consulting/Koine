@@ -5,26 +5,35 @@ namespace Koine.Compiler;
 /// <summary>
 /// The <c>paths</c> layer of the OpenAPI emitter: the behavioral surface of a bounded context becomes
 /// HTTP operations. An entity <see cref="CommandDecl"/> maps to a <c>POST</c> whose JSON request body is
-/// built from the command's parameters (a state-changing operation); a <see cref="QueryDecl"/> maps to a
-/// <c>GET</c> whose criteria become query <c>parameters</c> and whose <c>200</c> response references the
-/// result schema (a side-effect-free read). Operation paths are kebab-cased and the whole map is emitted
-/// in a stable ordinal-by-path order so Verify snapshots are reproducible.
+/// built from the command's parameters (a state-changing operation); a <see cref="FactoryDecl"/> maps to
+/// a <c>POST</c> the same way, with the created aggregate as its <c>200</c> (#1747); a
+/// <see cref="QueryDecl"/> maps to a <c>GET</c> whose criteria become query <c>parameters</c> and whose
+/// <c>200</c> response references the result schema (a side-effect-free read). Operation paths are
+/// kebab-cased and the whole map is emitted in a stable ordinal-by-path order so Verify snapshots are
+/// reproducible.
 /// <para>R19's <c>@route</c>/<c>@get</c>…<c>@patch</c>/<c>@auth</c> annotations (#1219) override the path,
 /// the verb key, and add a per-operation <c>security</c> requirement — all three read off the shared
-/// <see cref="RouteInfo"/>, so the openapi document and the C# <c>api</c> layer never disagree.</para>
+/// <see cref="RouteInfo"/>, so the openapi document and the C# <c>api</c> layer never disagree. A factory
+/// carries no such annotations (they stay purely conventional — #1747), so it always emits its
+/// <see cref="RouteDerivation.ForFactory"/>-derived <c>POST</c> with no <c>security</c> block.</para>
+/// <para>A factory's operation is a deliberate <b>superset</b> of the C# <c>api</c> layer: every entity's
+/// factory gets a path here, while <c>CSharpEmitter.Api.cs</c> additionally gates on the aggregate's
+/// repository exposing <c>add</c> — mirroring the existing command/query scope note on
+/// <see cref="CqrsValidator.ValidateApiRoutes"/>.</para>
 /// </summary>
 public sealed partial class OpenApiEmitter
 {
     /// <summary>
-    /// Builds the <c>paths</c> object: a POST per entity command and a GET per query — or the verb an R19
-    /// annotation named — grouped by path and ordered by it.
+    /// Builds the <c>paths</c> object: a POST per entity command and factory and a GET per query — or the
+    /// verb an R19 annotation named — grouped by path and ordered by it.
     /// </summary>
     private static YamlObject BuildPaths(ContextNode ctx, ModelIndex index)
     {
         var emitted = SchemaTypeNames(ctx);
         var operations = new List<(string Path, string Verb, YamlObject Operation)>();
 
-        // Commands: state-changing operations on entities (top-level and aggregate-nested) → POST.
+        // Commands and factories: state-changing operations on entities (top-level and aggregate-nested)
+        // → POST. A factory's operation is added after its entity's commands, per #1747.
         foreach (EntityDecl entity in ctx.AllEntities())
         {
             foreach (CommandDecl command in entity.Commands)
@@ -34,6 +43,15 @@ public sealed partial class OpenApiEmitter
                     route.Route,
                     route.Verb.ToLowerInvariant(),
                     CommandOperation(entity, command, route, index, emitted)));
+            }
+
+            foreach (FactoryDecl factory in entity.Factories)
+            {
+                RouteInfo route = RouteDerivation.ForFactory(entity, factory);
+                operations.Add((
+                    route.Route,
+                    route.Verb.ToLowerInvariant(),
+                    FactoryOperation(entity, factory, route, index, emitted)));
             }
         }
 
@@ -188,6 +206,46 @@ public sealed partial class OpenApiEmitter
             responses.Add("204", new YamlObject().Add("description", "The command succeeded."));
         }
 
+        responses.Add("400", new YamlObject().Add("description", "A precondition or invariant was violated."));
+        operation.Add("responses", responses);
+        AddSecurity(operation, route);
+        return operation;
+    }
+
+    /// <summary>A factory → a <c>POST</c> operation (#1747): its parameters a required JSON request body
+    /// (when any), <c>200</c> the created aggregate, <c>400</c> a precondition/invariant violation — the
+    /// same shape as <see cref="CommandOperation"/>, minus any R19 annotation surface (a factory carries
+    /// none). <see cref="PathParameters"/> is called for symmetry even though <paramref name="route"/>'s
+    /// template is always token-free (a derived path, never an authored one) and so always returns
+    /// <c>null</c>.</summary>
+    private static YamlObject FactoryOperation(EntityDecl entity, FactoryDecl factory, RouteInfo route, ModelIndex index, HashSet<string> emitted)
+    {
+        var operation = new YamlObject();
+        operation.Add("operationId", route.OperationId);
+        operation.Add("summary", string.IsNullOrWhiteSpace(factory.Doc)
+            ? Yaml.Str($"{factory.Name} on {entity.Name}")
+            : Yaml.Str(OneLine(factory.Doc!)));
+
+        if (PathParameters(route, entity, index, emitted) is { } pathParameters)
+        {
+            operation.Add("parameters", pathParameters);
+        }
+
+        // The parameters become a required JSON request body; a no-argument factory carries none.
+        if (factory.Parameters.Count > 0)
+        {
+            var content = new YamlObject();
+            content.Add("application/json", new YamlObject().Add(
+                "schema", ParameterObjectSchema(factory.Parameters, index, emitted)));
+
+            var requestBody = new YamlObject();
+            requestBody.Add("required", Yaml.Bool(true));
+            requestBody.Add("content", content);
+            operation.Add("requestBody", requestBody);
+        }
+
+        var responses = new YamlObject();
+        responses.Add("200", JsonResponse($"The created {entity.Name}.", route.ResponseShape!, index, emitted));
         responses.Add("400", new YamlObject().Add("description", "A precondition or invariant was violated."));
         operation.Add("responses", responses);
         AddSecurity(operation, route);

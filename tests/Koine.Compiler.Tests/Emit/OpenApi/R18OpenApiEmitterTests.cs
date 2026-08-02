@@ -193,6 +193,75 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
         return Verify(TestSupport.Render(result.Files)).UseDirectory("Snapshots");
     }
 
+    /// <summary>A factory whose repository exposes <c>add</c> — the fixture the C# <c>api</c> layer would
+    /// also map (#1747).</summary>
+    private const string FactoryFixture = """
+        context Ordering {
+          aggregate Order root Order {
+            repository {
+              operations: add, getById
+            }
+
+            entity Order identified by OrderId {
+              /// Open a new order for a customer.
+              create open(customer: String) {
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Paths_map_factories_to_post_with_a_created_response()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", FactoryFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("/order/open:");
+        yaml.ShouldContain("post:");
+        yaml.ShouldContain("operationId: Order_open");
+        yaml.ShouldContain("summary: \"Open a new order for a customer.\"");
+        yaml.ShouldContain("requestBody:");
+        yaml.ShouldContain("required: true");
+        yaml.ShouldContain("\"200\":");
+        yaml.ShouldContain("description: \"The created Order.\"");
+        yaml.ShouldContain("\"400\":");
+        yaml.ShouldContain("description: \"A precondition or invariant was violated.\"");
+    }
+
+    /// <summary>The deliberate superset (#1747): a factory on an aggregate whose repository does NOT
+    /// expose <c>add</c> still gets an OpenAPI operation, even though <c>CSharpEmitter.Api.cs</c> would
+    /// emit no endpoint for it (gated on <c>repoOps.Contains("add")</c>).</summary>
+    private const string FactoryWithoutAddFixture = """
+        context Ordering {
+          aggregate Order root Order {
+            repository {
+              operations: getById
+            }
+
+            entity Order identified by OrderId {
+              create open(customer: String) {
+              }
+            }
+          }
+        }
+        """;
+
+    [Fact]
+    public void Paths_map_a_factory_even_when_the_repository_omits_add()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", FactoryWithoutAddFixture) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+        yaml.ShouldContain("/order/open:");
+        yaml.ShouldContain("operationId: Order_open");
+    }
+
     [Fact]
     public void Model_with_no_commands_or_queries_emits_an_empty_paths_object()
     {
