@@ -1,4 +1,5 @@
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Emit;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -30,28 +31,31 @@ public class EmitCrossContextResolutionTests
     /// </summary>
     internal const string OrderingFirstFixture = """
         context Ordering {
-          value OrderId { value: String }
-
-          event Shipped { orderId: OrderId }
+          event Shipped { orderId: String }
 
           aggregate Sales root Order {
             entity Order identified by OrderId {
+              code: String
               shipped: Bool = false
 
               command ship {
                 shipped -> true
-                emit Shipped(orderId: id)
+                emit Shipped(orderId: code)
               }
             }
           }
         }
 
         context Warehouse {
-          value PackageId { value: String }
-
           event Shipped {
-            packageId: PackageId
+            packageId: String
             carrier: String
+          }
+
+          aggregate Storage root Package {
+            entity Package identified by PackageId {
+              label: String
+            }
           }
         }
         """;
@@ -62,26 +66,29 @@ public class EmitCrossContextResolutionTests
     /// </summary>
     internal const string WarehouseFirstFixture = """
         context Warehouse {
-          value PackageId { value: String }
-
           event Shipped {
-            packageId: PackageId
+            packageId: String
             carrier: String
+          }
+
+          aggregate Storage root Package {
+            entity Package identified by PackageId {
+              label: String
+            }
           }
         }
 
         context Ordering {
-          value OrderId { value: String }
-
-          event Shipped { orderId: OrderId }
+          event Shipped { orderId: String }
 
           aggregate Sales root Order {
             entity Order identified by OrderId {
+              code: String
               shipped: Bool = false
 
               command ship {
                 shipped -> true
-                emit Shipped(orderId: id)
+                emit Shipped(orderId: code)
               }
             }
           }
@@ -112,5 +119,66 @@ public class EmitCrossContextResolutionTests
         Diagnose(OrderingFirstFixture)
             .Select(d => d.Code)
             .ShouldBe(Diagnose(WarehouseFirstFixture).Select(d => d.Code));
+    }
+
+    // ---- The emitter half of the contract -----------------------------------
+    //
+    // A green validator over flat emitters is NOT a fix — it is the #1797 regression shape: #1739
+    // relaxed a resolution rule without checking what the emitters then did, and shipped code built
+    // from the wrong declaration. With the validator context-aware and the emitters still flat, the
+    // fixture below type-checks and then emits `new Shipped(default!, default!)` — Warehouse's
+    // two-field payload for Ordering's one-field event, which does not compile. So every target is
+    // asserted on its own emitted payload, in BOTH context orders.
+
+    private static string EmitFile(string source, IEmitter emitter, string pathSuffix)
+    {
+        CompileResult result = new KoineCompiler().Compile(source, emitter);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files.Single(f => f.RelativePath.EndsWith(pathSuffix, StringComparison.Ordinal)).Contents;
+    }
+
+    private static IReadOnlyList<EmittedFile> EmitAll(string source, IEmitter emitter)
+    {
+        CompileResult result = new KoineCompiler().Compile(source, emitter);
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        return result.Files;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CSharp_emits_the_enclosing_context_s_event_payload(bool warehouseFirst)
+    {
+        var source = warehouseFirst ? WarehouseFirstFixture : OrderingFirstFixture;
+
+        // Ordering.Shipped takes ONE field (orderId). Warehouse's same-named event takes two.
+        EmitFile(source, new CSharpEmitter(), "/Order.cs")
+            .ShouldContain("_domainEvents.Add(new Shipped(Code));");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Emitted_cross_context_emit_output_compiles(bool warehouseFirst)
+    {
+        // The compile gate #1796/#1816 established: "it validates" and "it snapshots" both stay green
+        // while the emitted C# is uncompilable, because neither executes the generated code. Only
+        // Roslyn catches `new Shipped(default!, default!)` against a one-parameter constructor.
+        var (assembly, errors) =
+            TestSupport.Compile(EmitAll(warehouseFirst ? WarehouseFirstFixture : OrderingFirstFixture, new CSharpEmitter()));
+
+        errors.ShouldBeEmpty();
+        assembly.ShouldNotBeNull();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TypeScript_emits_the_enclosing_context_s_event_payload(bool warehouseFirst)
+    {
+        var source = warehouseFirst ? WarehouseFirstFixture : OrderingFirstFixture;
+
+        EmitFile(source, new TypeScriptEmitter(), "/Order.ts")
+            .ShouldContain("this._domainEvents.push(new Shipped(this.code));");
     }
 }
