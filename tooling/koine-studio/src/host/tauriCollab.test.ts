@@ -123,7 +123,7 @@ describe('Platform.canCollaborate once the broker has shipped (#481 Task 5)', ()
   });
 
   it('stays true on the desktop with a relay configured — the relay changes WHICH broker, not whether', () => {
-    settingsOverride.current = { collabRelayUrl: 'relay.example:4321' };
+    settingsOverride.current = { collabRelayUrl: 'relay.example:4321/9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f' };
     expect(new TauriPlatform().canCollaborate).toBe(true);
   });
 
@@ -131,7 +131,7 @@ describe('Platform.canCollaborate once the broker has shipped (#481 Task 5)', ()
   // broker-capable: reaching one from the browser needs a WebSocket relay client, which this task does
   // not ship. The gate stays honest rather than offering an affordance that cannot work.
   it('stays false in a browser tab even with a relay configured', () => {
-    settingsOverride.current = { collabRelayUrl: 'relay.example:4321' };
+    settingsOverride.current = { collabRelayUrl: 'relay.example:4321/9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f' };
     const browser: Platform = new BrowserPlatform();
     expect(browser.canCollaborate).toBe(false);
     expect(browser.createCollabTransport).toBeUndefined();
@@ -153,7 +153,7 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
   });
 
   it('passes the configured bind address and relay through to collab_start', async () => {
-    settingsOverride.current = { collabBindAddress: '192.168.1.42', collabRelayUrl: 'relay.example:4321' };
+    settingsOverride.current = { collabBindAddress: '192.168.1.42', collabRelayUrl: 'relay.example:4321/9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f' };
     const transport = new TauriPlatform().createCollabTransport();
     await transport.start({ mode: 'create', identity: ADA });
 
@@ -162,7 +162,7 @@ describe('TauriCollabTransport — the wire contract with the Rust broker', () =
       token: null,
       identity: ADA,
       bindAddress: '192.168.1.42',
-      relay: 'relay.example:4321',
+      relay: 'relay.example:4321/9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f',
     });
   });
 

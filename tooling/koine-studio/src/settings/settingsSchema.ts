@@ -188,13 +188,13 @@ const LEAF_SCHEMAS: Record<FieldDef['runtimeKey'], LeafSchema> = {
     type: 'string',
     title: 'Collaboration bind address',
     description:
-      'Address the desktop collaboration broker listens on and advertises in the join token. Loopback (127.0.0.1) keeps the session on this machine; set your LAN address to invite others.',
+      'Address the desktop collaboration broker listens on and advertises in the join token. Loopback (127.0.0.1) keeps the session on this machine; set your LAN address to invite others. Traffic is always encrypted, so widening this costs reach, not privacy — but the join token is still a bearer credential: anyone you send it to can edit the model.',
   },
   collabRelayUrl: {
     type: 'string',
     title: 'Collaboration relay',
     description:
-      'Optional host:port of a relay to broker collaboration sessions through instead of this machine. Blank hosts the session locally.',
+      'Optional relay to broker collaboration sessions through instead of this machine, as host:port/<public-key> — the key is what your session pins so nobody can answer in the relay’s place. A relay reads the session in the clear, so it is a machine you have to trust. Blank hosts the session locally.',
   },
   startupView: {
     type: 'string',
