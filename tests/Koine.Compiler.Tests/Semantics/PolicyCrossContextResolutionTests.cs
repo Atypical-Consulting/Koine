@@ -129,6 +129,123 @@ public class PolicyCrossContextResolutionTests
             .ShouldBe(Diagnose(WarehouseFirstFixture).Select(d => d.Code));
     }
 
+    // ---- The reaction TARGET, same hazard three lines over --------------------
+
+    /// <summary>
+    /// The policy's reaction target (<c>Order</c> in <c>then Order.note(…)</c>) resolved through the
+    /// same flat view as its trigger, so two contexts each declaring a same-named aggregate made the
+    /// model's legality depend on source order too. <c>Ordering</c> is declared FIRST — the rejecting
+    /// order — and <c>Warehouse.Order</c> won the flat table, so the reaction was checked against
+    /// <i>Warehouse's</i> <c>note(label: String)</c>.
+    /// </summary>
+    /// <remarks>
+    /// This is not only a false diagnostic: every emitter renders the target name textually into its
+    /// own namespace and <c>ScenarioFanOutResolver</c> resolves it declaring-context-first, so the flat
+    /// lookup let the validator check a reaction against a different entity than the generated code and
+    /// the runtime actually call.
+    /// </remarks>
+    internal const string SameNamedTargetOrderingFirstFixture = """
+        context Ordering {
+          event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command note(orderId: String) { shipped -> true }
+            }
+          }
+
+          policy NoteOnShip when Shipped then Order.note(orderId: orderId)
+        }
+
+        context Warehouse {
+          aggregate Storage root Order {
+            entity Order identified by OrderId {
+              label: String
+              stored: Bool = false
+
+              command note(label: String) { stored -> true }
+            }
+          }
+        }
+        """;
+
+    /// <summary>The same model with the two <c>context</c> blocks swapped — the order that compiled.</summary>
+    internal const string SameNamedTargetWarehouseFirstFixture = """
+        context Warehouse {
+          aggregate Storage root Order {
+            entity Order identified by OrderId {
+              label: String
+              stored: Bool = false
+
+              command note(label: String) { stored -> true }
+            }
+          }
+        }
+
+        context Ordering {
+          event Shipped { orderId: String }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              code: String
+              shipped: Bool = false
+
+              command note(orderId: String) { shipped -> true }
+            }
+          }
+
+          policy NoteOnShip when Shipped then Order.note(orderId: orderId)
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Policy_resolves_a_same_named_reaction_target_in_its_own_context(bool warehouseFirst)
+    {
+        // Before the fix, the Ordering-first order reported KOI1033 twice — "command 'note' has no
+        // parameter 'orderId'" plus a missing-argument for Warehouse's `label`.
+        Diagnose(warehouseFirst ? SameNamedTargetWarehouseFirstFixture : SameNamedTargetOrderingFirstFixture)
+            .ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The deliberate strictness increase that context-first resolution brings: a name declared
+    /// locally as something OTHER than an event now shadows a foreign same-named event, rather than
+    /// silently reaching past it through the flat view. This model compiled before #1849.
+    /// </summary>
+    [Fact]
+    public void A_local_non_event_shadows_a_foreign_same_named_event()
+    {
+        const string source = """
+            context Ordering {
+              value Shipped { at: String }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  code: String
+                  shipped: Bool = false
+
+                  command note(orderId: String) { shipped -> true }
+                }
+              }
+
+              policy NoteOnShip when Shipped then Order.note(orderId: code)
+            }
+
+            context Warehouse {
+              event Shipped { orderId: String }
+            }
+            """;
+
+        // `Ordering` owns the word `Shipped`, and there it is a value object — so the policy has no
+        // event to react to. Reaching into `Warehouse` for one would violate R13.2's whole premise.
+        Diagnose(source).Select(d => d.Code).ShouldContain(DiagnosticCodes.PolicyUnknownEvent);
+    }
+
     // ---- The emitter half of the contract -----------------------------------
     //
     // A green validator over flat emitters is NOT a fix — it is the #1797 regression shape: #1739
@@ -219,7 +336,15 @@ public class PolicyCrossContextResolutionTests
     /// <para>TypeScript and Java already resolved context-aware before #1849 — by hand, via
     /// <c>TryGetDeclIn</c> plus a flat fallback — while the other three and the validator did not.
     /// That pre-existing split is exactly the #1796 mirror-image hazard, so all six now call the one
-    /// shared overload and this test pins them to the same answer. Revert any ONE and it fails.</para>
+    /// shared overload and this test pins them to the same answer. Revert any of the four
+    /// <b>newly-converted</b> sites — validator, C#, Python, PHP — and this fails; TypeScript and Java
+    /// were already context-first, and are pinned here against a future flattening.</para>
+    /// <para><b>Scope of the guarantee.</b> "One answer" means the emit-time sites listed above. Two
+    /// known consumers stay outside it: <c>ScenarioFanOutResolver</c> matches policies model-wide by
+    /// bare event name (deliberately, and predating this rule), and <c>ModelIndex.TryGetDeclIn</c>
+    /// resolves only local declarations plus unambiguous imports — a type made visible purely by a
+    /// context-map permit (<c>conformist</c> and friends, with no <c>import</c>) still falls through to
+    /// the flat view. Both are tracked separately; neither is introduced here.</para>
     /// </remarks>
     [Theory]
     [InlineData(false)]

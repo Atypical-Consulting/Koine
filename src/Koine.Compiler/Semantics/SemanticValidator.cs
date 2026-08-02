@@ -1172,6 +1172,12 @@ public sealed class SemanticValidator
             // context-aware validator over flat emitters type-checked a legal model and then built
             // its payload from another context's same-named declaration. Moving one half without the
             // other re-opens exactly that hole.
+            //
+            // Note the residual gap this does NOT close: `TryGetDeclIn` resolves local declarations
+            // and unambiguous imports only, so a type made visible purely by a context-map permit
+            // (`conformist` and friends, with no `import`) still falls through to the flat view. That
+            // is a shared `ModelIndex` limitation — it affects `emit` and `publish` identically — and
+            // is tracked separately rather than papered over here.
             EventDecl? ev = index.TryGetDecl(ctx.Name, policy.EventName, out TypeDecl ed) && ed is EventDecl e ? e : null;
             if (ev is null)
             {
@@ -1180,7 +1186,7 @@ public sealed class SemanticValidator
             }
 
             PolicyReaction reaction = policy.Reaction;
-            EntityDecl? targetRoot = ResolveTargetRoot(reaction.TargetType, index);
+            EntityDecl? targetRoot = ResolveTargetRoot(reaction.TargetType, ctx.Name, index);
             if (targetRoot is null)
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.PolicyUnknownTarget,
@@ -1254,9 +1260,19 @@ public sealed class SemanticValidator
     }
 
     /// <summary>The root entity of a policy target (an aggregate's root, or the entity itself).</summary>
-    private static EntityDecl? ResolveTargetRoot(string targetType, ModelIndex index)
+    /// <param name="context">
+    /// The bounded context enclosing the policy — the scope the target name resolves within. The
+    /// reaction's TARGET carries the same source-order hazard as its trigger (#1849): two contexts may
+    /// each declare a same-named aggregate or entity, and the flat <see cref="ModelIndex"/> view is
+    /// last-declaration-wins, so resolving without a context bound `Order.note` to whichever `Order`
+    /// was indexed last. That is not merely a false diagnostic — every emitter renders the target name
+    /// textually into its OWN namespace, and <c>ScenarioFanOutResolver</c> resolves it
+    /// declaring-context-first, so the flat lookup let the validator check the reaction against a
+    /// different entity than the one the generated code and the runtime actually call.
+    /// </param>
+    private static EntityDecl? ResolveTargetRoot(string targetType, string? context, ModelIndex index)
     {
-        if (!index.TryGetDecl(targetType, out TypeDecl decl))
+        if (!index.TryGetDecl(context, targetType, out TypeDecl decl))
         {
             return null;
         }

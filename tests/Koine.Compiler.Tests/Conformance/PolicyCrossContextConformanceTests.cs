@@ -67,16 +67,9 @@ public class PolicyCrossContextConformanceTests
         return result.Files;
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Emitted_csharp_compiles_under_roslyn(bool warehouseFirst)
-    {
-        var (assembly, errors) = TestSupport.Compile(Emit(Fixture(warehouseFirst), new CSharpEmitter()));
-
-        errors.ShouldBeEmpty();
-        assembly.ShouldNotBeNull();
-    }
+    // C#/Roslyn is deliberately NOT re-run here: PolicyCrossContextResolutionTests already compiles
+    // this same fixture through TestSupport.Compile in both orders, and this class exists for the
+    // toolchains a string assertion cannot reach.
 
     /// <summary>
     /// The one target whose policy reaction is executable rather than documentary — see the class
