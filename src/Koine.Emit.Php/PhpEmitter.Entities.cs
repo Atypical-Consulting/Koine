@@ -135,7 +135,10 @@ public sealed partial class PhpEmitter
         // Constructor: accepts id + all stored fields, assigns properties, checks invariants.
         WriteEntityConstructor(sb, name, idTypeName, fields, entity.Invariants, translator, typeMapper);
 
-        // Derived (computed) members as public getter methods.
+        // Derived (computed) members as public getter methods. Reconciled against the member's OWN
+        // declared type (#1888) — the entity half of the same fix applied to a value object's derived
+        // getter in PhpEmitter.ValueObjects.cs, and the sibling half of the `MemberAnalysis.IsDerived`
+        // split whose stored-default arm #1880 closed.
         foreach (Member m in derived)
         {
             sb.Append('\n');
@@ -145,7 +148,7 @@ public sealed partial class PhpEmitter
             sb.Append(Indent).Append("public function ").Append(methodName).Append("(): ").Append(returnType).Append('\n');
             sb.Append(Indent).Append("{\n");
             sb.Append(Indent).Append(Indent).Append("return ")
-              .Append(translator.Translate(m.Initializer!)).Append(";\n");
+              .Append(translator.TranslateReconciled(m.Initializer!, PhpExpressionTranslator.NameMode.Property, expectedEnum: null, m.Type)).Append(";\n");
             sb.Append(Indent).Append("}\n");
         }
 
