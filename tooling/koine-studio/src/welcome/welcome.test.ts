@@ -1070,7 +1070,9 @@ describe('mountHome — resume session card', () => {
   test('prefers-reduced-motion suppresses the ping animation (no is-live class)', () => {
     seedLastSession({ project: 'billing', editedAt: Date.now() });
     const el = document.createElement('div');
-    const original = window.matchMedia;
+    // Descriptor round-trip rather than a method-value read (unbound-method): happy-dom's
+    // matchMedia is a prototype method, and re-assigning a detached reference is what the rule warns about.
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: query.includes('prefers-reduced-motion'),
       media: query,
@@ -1088,7 +1090,8 @@ describe('mountHome — resume session card', () => {
       expect(ping).not.toBeNull();
       expect(ping!.classList.contains('is-live')).toBe(false);
     } finally {
-      window.matchMedia = original;
+      if (original) Object.defineProperty(window, 'matchMedia', original);
+      else delete (window as Partial<Window>).matchMedia;
     }
   });
 });

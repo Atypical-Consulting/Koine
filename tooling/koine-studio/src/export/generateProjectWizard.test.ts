@@ -176,7 +176,10 @@ describe('generate-project wizard', () => {
 
   it('switches to TypeScript, recompiles, and omits the csproj', async () => {
     const deps = makeDeps({
-      emitPreview: vi.fn(async (t: 'csharp' | 'typescript') => previewOk(t, t === 'csharp' ? 'cs' : 'ts')),
+      // `target` is `string` in the contract, not the two values this test drives — a narrower mock
+      // parameter type-checked only under method-signature bivariance (#998 unbound-method ratchet
+      // turned these into function-typed properties, which check parameters contravariantly).
+      emitPreview: vi.fn(async (t: string) => previewOk(t, t === 'csharp' ? 'cs' : 'ts')),
     });
     openWizard(deps);
     await clickNext(); // compile C# → Artifacts
@@ -207,7 +210,7 @@ describe('generate-project wizard', () => {
 
   it('switches to Rust, recompiles, and bundles the .rs files (no csproj)', async () => {
     const deps = makeDeps({
-      emitPreview: vi.fn(async (t: 'csharp' | 'rust') => previewOk(t, t === 'csharp' ? 'cs' : 'rs')),
+      emitPreview: vi.fn(async (t: string) => previewOk(t, t === 'csharp' ? 'cs' : 'rs')),
     });
     openWizard(deps);
     await clickNext(); // compile C# → Artifacts

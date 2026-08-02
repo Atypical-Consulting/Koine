@@ -13,7 +13,7 @@ export interface OverlaysDeps {
   /** Whether any open buffer is dirty — the unsaved-work check the New/replace guard branches on. */
   anyDirty(): boolean;
   /** Reset to a fresh blank model (the raw reset; the confirm guard lives here). */
-  newModel(): Promise<void>;
+  newModel: () => Promise<void>;
 }
 
 export interface Overlays {
@@ -25,16 +25,16 @@ export interface Overlays {
   /** True when the palette or a modal dialog is open, so global shortcuts don't fire through it. */
   overlayOpen(): boolean;
   /** User-initiated New: confirm before discarding unsaved work, then reset to a blank model. */
-  requestNewModel(): Promise<void>;
+  requestNewModel: () => Promise<void>;
   /** Confirm before an action that would replace the model and lose unsaved work (New + start-screen swaps). */
-  confirmReplaceWork(title: string, confirmLabel: string): Promise<boolean>;
+  confirmReplaceWork: (title: string, confirmLabel: string) => Promise<boolean>;
   /** A one-time, dismissible banner shown when the workspace is memory-only (no OPFS). */
   showMemoryOnlyBanner(): void;
   /** Open the keyboard-shortcuts help overlay. */
   openHelp(): void;
   /** Toggle the keyboard-shortcuts help overlay (F1). */
-  toggleHelp(): void;
-  dispose(): void;
+  toggleHelp: () => void;
+  dispose: () => void;
 }
 
 export function createOverlays(deps: OverlaysDeps): Overlays {

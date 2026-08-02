@@ -73,8 +73,11 @@ describe('GlossaryPanel', () => {
   test('scrolls the targeted term into view when a scroll target is given (#1165)', () => {
     const store = createTestReadableStore<GlossaryPanelSlice>(sliceOf(twoContexts));
     const scrolled: Element[] = [];
-    const orig = Element.prototype.scrollIntoView;
-    // happy-dom doesn't implement scrollIntoView; install a spy that records the element it lands on.
+    // Save/restore the DESCRIPTOR rather than the method value: happy-dom doesn't implement
+    // scrollIntoView, so reading `Element.prototype.scrollIntoView` yields undefined (and reading a
+    // prototype method as a value is what unbound-method flags). The descriptor round-trips the
+    // not-implemented case honestly — absent before, absent after.
+    const orig = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
     Element.prototype.scrollIntoView = function (this: Element) {
       scrolled.push(this);
     };
@@ -83,7 +86,8 @@ describe('GlossaryPanel', () => {
       // The Order entry (data-qn="Sales.Order") is the one scrolled into view — not the whole panel.
       expect(scrolled.some((e) => e.getAttribute('data-qn') === 'Sales.Order')).toBe(true);
     } finally {
-      Element.prototype.scrollIntoView = orig;
+      if (orig) Object.defineProperty(Element.prototype, 'scrollIntoView', orig);
+      else delete (Element.prototype as Partial<Element>).scrollIntoView;
     }
   });
 

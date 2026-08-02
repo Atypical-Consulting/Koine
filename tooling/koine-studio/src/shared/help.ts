@@ -16,9 +16,9 @@ export interface ShortcutRow {
 }
 
 export interface HelpHandle {
-  open(): void;
-  close(): void;
-  toggle(): void;
+  open: () => void;
+  close: () => void;
+  toggle: () => void;
 }
 
 /** Build the help overlay (once) and return a handle. `getRows` is called fresh on every open so a

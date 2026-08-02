@@ -40,14 +40,14 @@ export interface GeneratedFileTree {
   /** The root element to mount — wraps the `<ul role="tree">`. */
   element: HTMLElement;
   /** Rebuild the tree from a fresh flat file list (via `buildFileTree`). Drops any prior selection. */
-  setFiles(files: EmitFile[]): void;
+  setFiles: (files: EmitFile[]) => void;
   /**
    * Mark the file at `path` selected (expanding its ancestor folders so it stays visible) WITHOUT
    * firing `onSelect` — for a caller reconciling external state (e.g. re-selecting the previously
    * active file after a recompile). Returns `false` — a no-op — when `path` doesn't name a FILE node
    * in the current tree (absent entirely, or a folder path).
    */
-  selectPath(path: string): boolean;
+  selectPath: (path: string) => boolean;
   /**
    * Apply ADR-0009 scope emphasis to the tree's TOP-LEVEL rows (the bounded-context folders/files,
    * matched by path): the row whose path matches `activeContext` is marked `.on` and every other
@@ -64,7 +64,7 @@ export interface GeneratedFileTree {
    * here). Owned by the tree itself (#1363) — it used to live in outputRail.ts, reaching into this
    * widget's rendered DOM from outside.
    */
-  emphasizeTopLevel(activeContext: string | null): void;
+  emphasizeTopLevel: (activeContext: string | null) => void;
 }
 
 /**

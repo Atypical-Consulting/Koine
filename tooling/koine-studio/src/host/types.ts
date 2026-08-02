@@ -63,7 +63,7 @@ export interface McpEndpoint {
  */
 export interface LspTransport {
   /** Bring the server up. Resolves once it is ready to receive `send`. */
-  start(): Promise<void>;
+  start: () => Promise<void>;
   /** Send one framed JSON-RPC message (already serialized) to the server. */
   send(message: string): Promise<void>;
   /** Register the handler for every server→client message (JSON string). Call before `start`. */
@@ -73,7 +73,7 @@ export interface LspTransport {
   /** Register the handler for a server restart (the client re-handshakes + re-opens docs). */
   onRestart(cb: () => void): void;
   /** Tear the server down. */
-  stop(): Promise<void>;
+  stop: () => Promise<void>;
 }
 
 /**
@@ -88,23 +88,23 @@ export interface TerminalTransport {
   /** Spawn the shell, rooted at `cwd` when given (null lets the host pick the default). `shellArgs`
    *  overrides the shell's arguments (the Studio `terminal.shellArgs` setting, #467); an omitted, null,
    *  or empty value keeps the host's built-in default (a `-l` login shell). */
-  start(cwd: string | null, shellArgs?: string[] | null): Promise<void>;
+  start: (cwd: string | null, shellArgs?: string[] | null) => Promise<void>;
   /** Feed keystrokes / pasted text to the shell. */
-  write(data: string): Promise<void>;
+  write: (data: string) => Promise<void>;
   /** Tell the shell the viewport changed so it (and full-screen TUIs) re-flow. */
-  resize(cols: number, rows: number): Promise<void>;
+  resize: (cols: number, rows: number) => Promise<void>;
   /** Backpressure (#441): stop the host draining the PTY so the kernel buffer fills and the shell
    *  blocks on write — called when xterm's unparsed backlog crosses the high-water mark. */
-  pause(): Promise<void>;
+  pause: () => Promise<void>;
   /** Backpressure (#441): resume draining the PTY once the renderer has caught up (the backlog drains
    *  below the low-water mark). Safe to call when not paused. */
-  resume(): Promise<void>;
+  resume: () => Promise<void>;
   /** Register the handler for a chunk of shell output. Call before `start`. */
   onData(cb: (data: string) => void): void;
   /** Register the handler for the shell exiting (its exit code). Call before `start`. */
   onExit(cb: (code: number) => void): void;
   /** Kill the shell and detach listeners. */
-  stop(): Promise<void>;
+  stop: () => Promise<void>;
 }
 
 /**
@@ -179,7 +179,7 @@ export interface CollabSessionInfo {
 export interface CollabTransport {
   /** Create or join the session, resolving once connected. Rejects on an unknown/expired join token.
    *  Leaves any session this transport is already in first, so a reconnect can simply `start` again. */
-  start(request: CollabSessionRequest): Promise<CollabSessionInfo>;
+  start: (request: CollabSessionRequest) => Promise<CollabSessionInfo>;
   /** Broadcast an opaque CRDT update to the other participants (never echoed back to the sender). */
   send(update: Uint8Array): Promise<void>;
   /** Broadcast this participant's cursor/selection on the presence channel (also never echoed back). */
@@ -195,7 +195,7 @@ export interface CollabTransport {
   /** Leave the session: peers are notified and nothing further is delivered. The `on*` handlers stay
    *  registered so a reconnect can `start` again without re-attaching them. Idempotent; a send after
    *  leaving is inert, never a throw. */
-  stop(): Promise<void>;
+  stop: () => Promise<void>;
 }
 
 /**
@@ -299,7 +299,7 @@ export interface Platform {
    * browser host omits it entirely, so callers must guard on `canRunShell` (or the optional chain)
    * before invoking it.
    */
-  createTerminal?(): TerminalTransport;
+  createTerminal?: () => TerminalTransport;
 
   /**
    * Whether this host can broker a real-time co-editing session (issue #481) — true iff it can relay
@@ -315,7 +315,7 @@ export interface Platform {
    * Create a collaboration transport (one per session) for hosts that {@link canCollaborate}. Hosts that
    * can't broker omit it entirely, so callers must guard on the flag (or the optional chain) first.
    */
-  createCollabTransport?(): CollabTransport;
+  createCollabTransport?: () => CollabTransport;
 
   /**
    * Whether the scenario runner may offer EXECUTED mode (#236) — running the model's own emitted code
@@ -338,14 +338,14 @@ export interface Platform {
    * `mcpPort` (falling back to an OS-assigned port if it is busy) and returns what it bound; a browser tab
    * cannot listen as a server, so it returns null and the UI hides the affordance.
    */
-  mcpEndpoint(): Promise<McpEndpoint | null>;
+  mcpEndpoint: () => Promise<McpEndpoint | null>;
 
   /**
    * Stop the local MCP sidecar if one is running and forget its endpoint, so the next
    * {@link mcpEndpoint} re-launches a fresh server. On the desktop this kills the `koine mcp --http`
    * child; in the browser, where nothing is hosted, it is a no-op. Idempotent.
    */
-  mcpStop(): Promise<void>;
+  mcpStop: () => Promise<void>;
 
   /**
    * Execute a Koine compiler tool (`koine_validate` / `koine_compile` / `koine_format`) by name with a
@@ -405,7 +405,7 @@ export interface Platform {
    * (Finder / Explorer). Desktop only; the browser host is a graceful no-op (it resolves without doing
    * anything). Callers must check {@link canRevealInFileManager} first.
    */
-  revealPath(path: string): Promise<void>;
+  revealPath: (path: string) => Promise<void>;
 
   /** Prompt for a folder. Resolves to its opaque token, or null when cancelled/unsupported. */
   pickFolder(title: string): Promise<string | null>;
@@ -433,10 +433,10 @@ export interface Platform {
   saveProjectToRoot(name: string, files: { relPath: string; contents: string }[]): Promise<string | null>;
 
   /** The remembered workspace root's display name (for Settings), or null before one is picked. */
-  workspaceRootName(): Promise<string | null>;
+  workspaceRootName: () => Promise<string | null>;
 
   /** Re-pick the workspace root (Settings → Change…); returns its name, or null if dismissed/unsupported. */
-  pickWorkspaceRoot(): Promise<string | null>;
+  pickWorkspaceRoot: () => Promise<string | null>;
 
   /**
    * Materialize a set of in-memory files into a real, openable workspace folder and return its
@@ -475,7 +475,7 @@ export interface Platform {
    * browser uses `example-*` slugs, the desktop uses absolute `<appData>` paths, and only the host
    * knows which of its own tokens are safe to restore. Never throws.
    */
-  isAutoRestorableToken(token: string): Promise<boolean>;
+  isAutoRestorableToken: (token: string) => Promise<boolean>;
 
   /** A human-readable display name for a folder token (the last path segment). */
   folderName(token: string): string;
@@ -615,7 +615,7 @@ export interface Platform {
    * surfaces that message rather than swallowing it. Desktop only; the browser stub rejects. Callers
    * must check {@link canUseGit} first.
    */
-  gitRevert(folderToken: string, sha: string): Promise<void>;
+  gitRevert: (folderToken: string, sha: string) => Promise<void>;
 
   /**
    * The local branch names of the workspace folder. The currently checked-out branch is reported by
@@ -665,7 +665,7 @@ export interface Platform {
    * suggested file name (e.g. `Shop.zip`). Resolves `true` once the bytes are delivered, or `false`
    * when the user cancels a native save dialog (so callers don't report a false success).
    */
-  saveZip(defaultName: string, data: Uint8Array): Promise<boolean>;
+  saveZip: (defaultName: string, data: Uint8Array) => Promise<boolean>;
 
   /**
    * Read every `.koi` source under an opened folder as `{uri,text}`. Used by the browser

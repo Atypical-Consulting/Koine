@@ -25,9 +25,9 @@ export interface SearchPanelOptions {
   /** Every searchable .koi uri under the open folder (skip-list applied); `[]` when no folder is open. */
   listFiles(glob?: string): Promise<string[]>;
   /** A closed file's on-disk text by uri, or null when it can't be read. */
-  readFile(uri: string): Promise<string | null>;
+  readFile: (uri: string) => Promise<string | null>;
   /** Open the file (if needed), make it active, and select the match's range in the editor. */
-  openAndReveal(uri: string, match: Match): void | Promise<void>;
+  openAndReveal: (uri: string, match: Match) => void | Promise<void>;
   /** Snapshot of every open buffer's live text, keyed by uri (so unsaved edits are searched). */
   getActiveBuffers(): Map<string, string>;
   /** A short display label for a uri (the workspace-relative path), for the results tree. */
@@ -36,27 +36,27 @@ export interface SearchPanelOptions {
    * Apply replaced text to an OPEN buffer through the dirty/save pipeline: the active buffer goes
    * through the editor (so it is undoable), other open buffers are patched + marked dirty + synced.
    */
-  replaceInBuffer(uri: string, newText: string): void;
+  replaceInBuffer: (uri: string, newText: string) => void;
   /** Write replaced text for a CLOSED file straight to disk through the host fs. */
-  writeFile(uri: string, newText: string): Promise<void>;
+  writeFile: (uri: string, newText: string) => Promise<void>;
 }
 
 /** Imperative handle the shell wires to the Mod-Shift-F shortcut / command palette. */
 export interface SearchPanelHandle {
-  open(): void;
-  close(): void;
-  toggle(): void;
+  open: () => void;
+  close: () => void;
+  toggle: () => void;
   /** Open the panel and move focus into the query field. */
-  focus(): void;
+  focus: () => void;
   /** Open the panel with `term` pre-filled and the search run (issue #1165): the launcher's
    * "Find in model" seeds the ubiquitous-language term instead of leaving the box empty. */
-  seed(term: string): void;
+  seed: (term: string) => void;
   readonly isOpen: boolean;
 }
 
 interface SearchPanelProps extends SearchPanelOptions {
   visible: boolean;
-  onClose(): void;
+  onClose: () => void;
   /** Hands the shell a callback that sets THIS panel's query (issue #1165), so `handle.seed(term)` can
    * pre-fill + run a search. Optional so the unit tests mount the panel without it. */
   onRegisterSeed?(seed: (term: string) => void): void;

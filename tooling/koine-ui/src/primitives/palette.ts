@@ -12,9 +12,9 @@ import type { Command } from './commandRegistry';
 export type { Command };
 
 export interface PaletteHandle {
-  open(): void;
-  close(): void;
-  toggle(): void;
+  open: () => void;
+  close: () => void;
+  toggle: () => void;
   readonly isOpen: boolean;
 }
 

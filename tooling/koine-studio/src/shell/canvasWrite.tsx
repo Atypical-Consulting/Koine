@@ -118,25 +118,25 @@ const ADD_DEFAULT_NAME: Record<AddNodeKind, string> = {
 export interface CanvasWriteDeps {
   /** The app store, injected (issue #1351) — the composition root passes the singleton. */
   store: AppStore;
-  editor: { getDoc(): string; setDoc(doc: string): void };
+  editor: { getDoc: () => string; setDoc: (doc: string) => void };
   workspace: Pick<WorkspaceController, 'activeUri' | 'applyWorkspaceEdit'>;
   lsp: Pick<KoineLsp, 'applyModelEdit' | 'rename'>;
   controller: {
-    loadDiagrams(): Promise<unknown> | void;
-    ensureModelIndex(): Promise<Parameters<typeof resolveInspectableQn>[0]>;
-    selectBottomTab(tab: 'review'): void;
-    selectCenter(view: 'visual' | 'technical'): void;
+    loadDiagrams: () => Promise<unknown> | void;
+    ensureModelIndex: () => Promise<Parameters<typeof resolveInspectableQn>[0]>;
+    selectBottomTab: (tab: 'review') => void;
+    selectCenter: (view: 'visual' | 'technical') => void;
   };
-  setStatus(text: string, kind: 'error'): void;
+  setStatus: (text: string, kind: 'error') => void;
   prompt: Pick<PromptDialog, 'ask'>;
   confirm: Pick<ConfirmDialog, 'ask'>;
-  reviewStore: { add(file: string, span: SourceSpan, text: string, author: string): void };
+  reviewStore: { add: (file: string, span: SourceSpan, text: string, author: string) => void };
   /** Repaint the editors' review marks after a comment lands (editorSession.refreshReviewDecorations). */
-  refreshReviewDecorations(): void;
+  refreshReviewDecorations: () => void;
   reviewAuthorName(): string;
   /** Jump the editor to a RAW 1-based source span (the shared gotoSourceSpan). Returns the underlying
    *  promise so navigateToDiagramNode's `await` waits on the buffer-open + caret-move, as it did inline. */
-  gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): Promise<void> | void;
+  gotoSourceSpan: (span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>) => Promise<void> | void;
   /** The #split grid host whose data-mobile-zone attribute mirrors the active mobile zone. */
   splitEl: HTMLElement;
   /** The default canvas zoom seeded from settings (#762). */
@@ -156,7 +156,7 @@ export interface CanvasWrite {
   applyDiagramAddAggregateMember(kind: AggregateMemberKind, aggregateQn: string): Promise<void>;
   /** The shared write path for a canvas authoring gesture — apply a StructuredEdit through #91. */
   applyStructuredEdit(edit: StructuredEdit): Promise<boolean>;
-  dispose(): void;
+  dispose: () => void;
 }
 
 export function createCanvasWrite(deps: CanvasWriteDeps): CanvasWrite {

@@ -16,8 +16,8 @@ export { wizardTargets } from '@/export/GenerateProjectWizard.tsx';
 export type { GenerateProjectDeps, Target } from '@/export/GenerateProjectWizard.tsx';
 
 export interface GenerateProjectHandle {
-  open(): void;
-  close(): void;
+  open: () => void;
+  close: () => void;
 }
 
 /** Build the Generate-Project wizard once and return an imperative `{ open, close }` handle. */

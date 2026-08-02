@@ -92,10 +92,10 @@ export interface InspectorControllerLsp {
   glossaryModel(): Promise<GlossaryModel>;
   livingDocs(): Promise<DocsResult>;
   model(qualifiedName?: string): Promise<ModelNode>;
-  contextMap(): Promise<ContextMapResult>;
-  emitPreview(target: PreviewTarget): Promise<EmitPreviewResult>;
+  contextMap: () => Promise<ContextMapResult>;
+  emitPreview: (target: PreviewTarget) => Promise<EmitPreviewResult>;
   check(baseline: string, baselineSources?: { uri: string; text: string }[]): Promise<CheckResult>;
-  setDoc(id: string, text: string): Promise<SetDocResult>;
+  setDoc: (id: string, text: string) => Promise<SetDocResult>;
   documentSymbols(): Promise<DocumentSymbol[]>;
   /** The active document's raw syntax tree (#890) — pulled by the self-fetching Syntax Tree panel; null on
    *  an unknown/absent active uri. Structurally satisfies the panel's SyntaxTreeSource. */
@@ -104,8 +104,8 @@ export interface InspectorControllerLsp {
 
 /** A minimal assistant handle (ide.ts owns the panel's lifecycle; the controller only nudges its tab). */
 export interface InspectorAssistant {
-  syncWorkspace(): void;
-  focusInput(): void;
+  syncWorkspace: () => void;
+  focusInput: () => void;
 }
 
 export interface InspectorControllerDeps {
@@ -125,32 +125,32 @@ export interface InspectorControllerDeps {
   store: StoreApi<AppState>;
 
   /** The uri the editor currently shows (read live from ide.ts). */
-  activeUri(): string;
+  activeUri: () => string;
   /** The opened-folder token (or '' in no-folder mode) — keys the per-workspace scope + diagram layout. */
-  folderRootToken(): string;
+  folderRootToken: () => string;
 
   /** The destination language for the Generated preview on boot (Settings → Output). */
   initialTarget: PreviewTarget;
 
   // --- store seams (persist/restore the per-workspace center pane + scope) ---
-  saveWorkspaceCenter(id: string): void;
+  saveWorkspaceCenter: (id: string) => void;
   loadWorkspaceCenter(): string | null;
   /** Persist/restore the Deck v2 center layout. Optional so callers that only wire the legacy
    *  center-pane pair don't need to be updated. */
   saveWorkspaceDeck?: (deck: DeckState) => void;
   loadWorkspaceDeck?: () => DeckState;
-  saveActiveContext(workspaceKey: string, scope: string): void;
-  loadActiveContext(workspaceKey: string): string | null;
+  saveActiveContext: (workspaceKey: string, scope: string) => void;
+  loadActiveContext: (workspaceKey: string) => string | null;
 
   /**
    * Persist every dirty editor buffer (#109's Save-all), passed to the Source Control panel's
    * save-all-before-commit prompt (#470). ide.ts wires this to `workspace.saveAllDirty`.
    */
-  saveAllDirty(): Promise<void>;
+  saveAllDirty: () => Promise<void>;
 
   // --- write-path callbacks ide.ts owns (the controller triggers, never owns, these) ---
   /** Write the action-feedback pill (errors route here from the loaders that surface their own failures). */
-  setStatus(text: string, kind: 'error'): void;
+  setStatus: (text: string, kind: 'error') => void;
   /** Rename the selected element (LSP rename refactor, applied across ide.ts's buffers). */
   onRenameElement(element: InspectorElement, newName: string): void;
   /** Persist the selected element's `///` description (setDoc → apply across buffers). */
@@ -159,7 +159,7 @@ export interface InspectorControllerDeps {
    * Persist a glossary concept's `///` description (setDoc → apply across buffers). Returns a promise
    * so the controller can surface a failure in the glossary pane (the original error home).
    */
-  onSaveGlossaryDescription(entry: GlossaryEntry, text: string): Promise<void>;
+  onSaveGlossaryDescription: (entry: GlossaryEntry, text: string) => Promise<void>;
   /** Apply a structured model edit (the #91 round-trip) for a Properties-panel field change. */
   onApplyStructuredEdit(edit: StructuredEdit): void;
   /** Insert a new DDD construct of the given kind into the active context (the palette's add path). */
@@ -173,23 +173,23 @@ export interface InspectorControllerDeps {
   /** Copy the current diagram's Mermaid source to the clipboard (#271). */
   onCopyDiagramMermaid(): void;
   /** Jump to a RAW 1-based source span (opens the owning file if needed) — the bottom tables' row click. */
-  gotoSourceSpan(span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>): void;
+  gotoSourceSpan: (span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>) => void;
   /**
    * Reveal a bounded context's `.koi` in the Files axis (the tactical "Reveal in Files" target, #453).
    * ide.ts owns the explorer instance, so it forwards to `explorer.revealByContext`; the tactical leaf
    * has already switched the rail to the Files axis (setAxis) before this fires.
    */
-  revealInFiles(context: string): void;
+  revealInFiles: (context: string) => void;
   /**
    * Emphasise the active bounded-context scope in the Files tree (ADR 0009 / #1188) — the source-side
    * arm of the scope fan-out (`rerenderScopedSurfaces`), the Files counterpart of the Output rail's
    * emphasis. ide.ts owns the explorer, so it forwards to `explorer.setActiveContext`; `null` (the *All
    * contexts* view) clears the emphasis. Emphasis, never hiding — every file op keeps working.
    */
-  scopeFiles(context: string | null): void;
+  scopeFiles: (context: string | null) => void;
 
   /** The assistant panel, created lazily by ide.ts the first time its tab is shown. */
-  ensureAssistant(): InspectorAssistant;
+  ensureAssistant: () => InspectorAssistant;
 
   /** The scenario-runner panel (#149), created lazily by ide.ts the first time its tab is shown. */
   ensureScenarios?(): { refresh(): void };
@@ -205,7 +205,7 @@ export interface InspectorControllerDeps {
   ensureReview?(): void;
 
   /** Bind a fixed-height resizer to a panel (ide.ts's resize.ts, injected to keep this DOM-infra-free). */
-  initEdgeResizer(opts: {
+  initEdgeResizer: (opts: {
     target: HTMLElement;
     handle: HTMLElement;
     container?: HTMLElement;
@@ -214,7 +214,7 @@ export interface InspectorControllerDeps {
     storageKey: string;
     min: number;
     max: (size: number) => number;
-  }): void;
+  }) => void;
 }
 
 /** A thin read/write shim over the app store's `selection` slice (#142) — ide.ts's diagram write-path
@@ -237,47 +237,47 @@ export interface InspectorController {
   readonly activeContext: ActiveContextHandle;
 
   // View selection (palette commands + toolbar/tab clicks route here).
-  selectCenter(view: CenterView): void;
+  selectCenter: (view: CenterView) => void;
   /** Show the transient, gear-launched Settings overlay (#482) over the deck (not a deck surface). Pass a
    *  category id (#731) to land the overlay on that tab (the About command deep-links to `about`); omit it
    *  to open on the last-used / default tab. */
-  showSettings(category?: string): void;
+  showSettings: (category?: string) => void;
   /**
    * Switch the left rail's active navigator axis (#453): show the Domain pane (the strategic/tactical DDD
    * navigator) or the Files pane (the workspace `.koi` tree), hiding the other, and persist the choice.
    * ide.ts's ⌘B drives this so the file tree and the Domain view never both claim the rail.
    */
-  setAxis(axis: 'domain' | 'files'): void;
-  selectTech(view: TechView): void;
-  selectOutput(view: OutputTab): void;
-  selectDocsTab(view: DocsView, term?: string): void;
-  selectBottomTab(tab: BottomTab): void;
+  setAxis: (axis: 'domain' | 'files') => void;
+  selectTech: (view: TechView) => void;
+  selectOutput: (view: OutputTab) => void;
+  selectDocsTab: (view: DocsView, term?: string) => void;
+  selectBottomTab: (tab: BottomTab) => void;
   /** Reveal a right-rail view (Properties / AI Chat / Rules / Notes / Source Control), expanding the rail
    *  if collapsed. Palette commands (Show AI Chat, Explain this construct) route through here. A
    *  `focus` (issue #1165) reveals a specific target inside Source Control (a file's diff / a commit). */
-  selectRight(view: RightView, focus?: SourceControlFocus): void;
+  selectRight: (view: RightView, focus?: SourceControlFocus) => void;
   /** Apply the blessed Code ⟷ Canvas split preset (the .koi text and the live diagram side by side). */
-  splitCodeCanvas(): void;
+  splitCodeCanvas: () => void;
 
   // Loaders + lifecycle ide.ts still triggers (theme flip, prefs target change, boot, server restart).
-  loadPreview(): Promise<void>;
-  loadDiagrams(): Promise<void>;
-  setTarget(target: PreviewTarget): void;
+  loadPreview: () => Promise<void>;
+  loadDiagrams: () => Promise<void>;
+  setTarget: (target: PreviewTarget) => void;
   /**
    * Adopt a destination-language change from Settings → Output: relabel the Generated tab, mark the
    * preview stale, and re-emit it when the Generated sub-view is the one showing (else it reloads on
    * next open). A no-op when the target is unchanged.
    */
-  onPreviewTargetChanged(target: PreviewTarget): void;
-  runCheck(): Promise<void>;
-  onDocEdited(): void;
-  invalidateDocViews(): void;
+  onPreviewTargetChanged: (target: PreviewTarget) => void;
+  runCheck: () => Promise<void>;
+  onDocEdited: () => void;
+  invalidateDocViews: () => void;
   /**
    * Mark the folder-derived ADR/Notes Docs panel stale (a workspace folder switch). Unlike the
    * model-derived views, an edit never invalidates it — only a folder change does, so this is
    * separate from invalidateDocViews().
    */
-  invalidateDocsPanel(): void;
+  invalidateDocsPanel: () => void;
   /**
    * Live refresh-on-save (#470): re-fetch git status in the Source Control panel when it's the active
    * right view (reusing the `sourceControlRefresh` nonce, so the commit-message draft survives the
@@ -285,23 +285,23 @@ export interface InspectorController {
    * this from the editor's save-completion path so a save while the tab is open repaints the changed
    * files without a manual Refresh.
    */
-  refreshSourceControl(): void;
+  refreshSourceControl: () => void;
   /** A theme flip: the Mermaid palette changed, so mark the diagram stale + re-render it if it's showing. */
-  onThemeChanged(): void;
-  refreshActiveSurfaces(): void;
-  refreshContextList(): Promise<void>;
-  restoreActiveContext(): void;
-  followActiveFileContext(): Promise<void>;
+  onThemeChanged: () => void;
+  refreshActiveSurfaces: () => void;
+  refreshContextList: () => Promise<void>;
+  restoreActiveContext: () => void;
+  followActiveFileContext: () => Promise<void>;
 
   /** Build (or reuse) the joined model index — ide.ts's diagram-click selection resolves names through it. */
-  ensureModelIndex(): Promise<ModelIndex>;
+  ensureModelIndex: () => Promise<ModelIndex>;
   /** The assistant's domain index, built lazily from the compiled model and cached until the next edit. */
   getCachedDomainIndex(): Promise<DomainIndex | undefined>;
 
   /** Boot the chrome into the restored mode (no fetch) + label the Generated tab. Called from ide.ts's boot. */
   init(): void;
   /** Cancel pending debounce/reset timers so a deferred repaint can't fire after the host is torn down. */
-  dispose(): void;
+  dispose: () => void;
 }
 
 export function createInspectorController(deps: InspectorControllerDeps): InspectorController {

@@ -23,11 +23,11 @@ export interface InlineStateOptions<Ctx> {
 
 export interface InlineState<Ctx> {
   /** Call on every edit with the current context; (re)starts the debounce or clears, per the gates. */
-  onType(ctx: Ctx): void;
+  onType: (ctx: Ctx) => void;
   /** Accept the shown suggestion: returns its text and clears, or null when nothing is shown. */
-  accept(): string | null;
+  accept: () => string | null;
   /** Drop any pending/shown suggestion and abort an in-flight request. */
-  dismiss(): void;
+  dismiss: () => void;
   readonly status: InlineStatus;
   readonly suggestion: string | null;
   /** The context the shown suggestion was computed for (null while idle/pending). */

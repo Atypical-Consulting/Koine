@@ -35,13 +35,13 @@ import { MOD } from '@/shared/platform';
 
 /** What the welcome actions delegate to; the host (main.ts) performs the real work. */
 export interface WelcomeCallbacks {
-  onNewModel(): void;
-  onOpenFolder(): void;
-  onOpenRecent(path: string): void;
+  onNewModel: () => void;
+  onOpenFolder: () => void;
+  onOpenRecent: (path: string) => void;
   /** Open one of the starter templates as a workspace. */
-  onOpenExample(template: Template): void;
+  onOpenExample: (template: Template) => void;
   /** Return to the user's editor session — fired by the resume-session card (#1005 / #392 / #766). */
-  onResume?(): void;
+  onResume?: () => void;
   /** Open the Settings surface — fired by the top bar's gear button. */
   onOpenSettings?(): void;
   /** Clone the git repository at `url` — fired by the inline clone form (#1005). A rejection is surfaced

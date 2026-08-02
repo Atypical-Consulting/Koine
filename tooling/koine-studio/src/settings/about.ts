@@ -23,7 +23,7 @@ export interface AboutPanel {
   /** The panel content, to drop into a Settings tab panel. */
   readonly el: HTMLElement;
   /** Re-fetch the app version and (re)fill or hide the build chip. Safe to call on every open. */
-  refresh(): void;
+  refresh: () => void;
 }
 
 /** Build the About panel content (once) and return it with a version-refresh hook. */

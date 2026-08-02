@@ -20,7 +20,7 @@ export interface StatusBarDeps {
 /** Teardown seam for the status bar (#980): release the folder-token subscription and unmount the two
  *  Preact panels so nothing the bar created survives a shell teardown. */
 export interface StatusBarHandle {
-  dispose(): void;
+  dispose: () => void;
 }
 
 // The status-bar reactive wiring (chrome v2, #923), extracted so init() stays thin (#757). It mounts the

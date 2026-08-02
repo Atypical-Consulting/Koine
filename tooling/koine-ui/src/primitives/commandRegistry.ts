@@ -14,7 +14,7 @@ export interface Command {
   /** Human-readable label shown in the palette. */
   title: string;
   /** The effect to invoke when the command runs. */
-  run(): void;
+  run: () => void;
   /** Optional keyboard-chord hint displayed alongside the title. */
   hint?: string;
   /** Optional palette grouping label. */
@@ -35,7 +35,7 @@ export interface Command {
    * greyed-out row instead of vanishing. Evaluated on every isActivatable() / run()
    * call (dynamic).
    */
-  enabled?(): boolean;
+  enabled?: () => boolean;
 }
 
 // ---------------------------------------------------------------------------

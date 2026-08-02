@@ -49,9 +49,9 @@ export interface StrategicHandlers {
   onOpenContext(ctx: string): void;
   /** Open the Context Map view (the cross-context relationship graph) — the navigator's own graph level
    *  when the model declares relationships, else the caller's docs hand-off (#483). */
-  onOpenContextMap(): void;
+  onOpenContextMap: () => void;
   /** Open the Glossary (the ubiquitous language) view. */
-  onOpenGlossary(): void;
+  onOpenGlossary: () => void;
 }
 
 /** A bounded context's total construct count — the sum of its present construct buckets. Reuses
@@ -331,7 +331,7 @@ export function StrategicLevel({
  * and a test stub both satisfy it without coupling to the full class. */
 export interface DomainNavigatorLsp {
   glossaryModel(): Promise<GlossaryModel>;
-  contextMap(): Promise<ContextMapResult>;
+  contextMap: () => Promise<ContextMapResult>;
   /** The whole structured model graph (root `kind: 'model'` → bounded-context children) — the tactical tree's source. */
   model(): Promise<ModelNode>;
 }
@@ -342,13 +342,13 @@ export interface DomainNavigatorLsp {
  * rail controller, which owns the inspector / editor / Files-axis seams. */
 export interface TacticalHandlers {
   /** Select a tactical node — drives the inspector + cross-highlight. */
-  onSelect(node: ModelNode): void;
+  onSelect: (node: ModelNode) => void;
   /** Jump to a node's declaration (the controller resolves the node → 1-based source position). */
-  goto(node: ModelNode): void;
+  goto: (node: ModelNode) => void;
   /** Reveal the node's bounded context in the Files axis (the leaf calls {@link setAxis} first). */
   reveal(node: ModelNode): void;
   /** Switch the rail's active navigator axis (the DDD Domain view vs the workspace Files tree). */
-  setAxis(axis: 'domain' | 'files'): void;
+  setAxis: (axis: 'domain' | 'files') => void;
 }
 
 /** A harmless no-op handler set, so a bare {@link mountDomainNavigator} (the unit test) does nothing. */
@@ -594,12 +594,12 @@ export interface ContextMapHandlers {
   /** Jump the editor to a 1-based line/column: the navigator's EXISTING jump-to-declaration seam
    *  ({@link ModelOutlineHandlers.goto}, already wired to `editor.goto`), fed from the context's
    *  declaration span in `contextSpans` (#290). A span-less context stays inert. */
-  goto(line: number, column: number): void;
+  goto: (line: number, column: number) => void;
   /** Hand off to the caller's FULL Context Map view — the center-deck destination
    *  ({@link StrategicHandlers.onOpenContextMap}) with the maxGraph canvas, the Graph/Table toggle and
    *  the shared-types / anti-corruption detail strip this 260px rail level deliberately summarizes away.
    *  Wired to the level's own `Open full Context Map` row, so the richer view stays one step from here. */
-  openFullMap(): void;
+  openFullMap: () => void;
 }
 
 /** One bounded-context node. The whole row IS the button (and the treeitem), like {@link ContextRow};

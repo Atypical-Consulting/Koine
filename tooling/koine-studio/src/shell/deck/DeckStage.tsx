@@ -17,11 +17,11 @@ export interface DeckStageProps {
   /** Real surface bodies to host (app). Omit and pass `mockBody` in Storybook. */
   surfaces?: Partial<Record<CenterView, HTMLElement>>;
   /** Mock body renderer for Storybook (used when `surfaces` is absent). */
-  mockBody?(view: CenterView): ComponentChildren;
+  mockBody?: (view: CenterView) => ComponentChildren;
   /** Wire the global 1–4 / ⇧+1–4 / Esc shortcuts (default true; stories pass false). */
   enableKeyboard?: boolean;
   /** Called after each layout with the surfaces currently visible (lazy-load + re-measure hook). */
-  onVisibleSurfacesChange?(views: CenterView[]): void;
+  onVisibleSurfacesChange?: (views: CenterView[]) => void;
 }
 
 /** The surfaces visible under a deck state: all four in overview, else primary (+ secondary). */

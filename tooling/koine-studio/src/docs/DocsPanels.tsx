@@ -28,15 +28,15 @@ export interface DocsPanelData {
 
 export interface DocsPanelHandlers {
   /** Create a new ADR from the template with this title (then the panel is reloaded by the host). */
-  onCreateAdr(title: string): void;
+  onCreateAdr: (title: string) => void;
   /** Persist an edited ADR back to its file. */
-  onSaveAdr(file: AdrFile, adr: Adr): void;
+  onSaveAdr: (file: AdrFile, adr: Adr) => void;
   /** Create a new note with this title. */
-  onCreateNote(title: string): void;
+  onCreateNote: (title: string) => void;
   /** Read a note's raw Markdown (lazily, on open). */
-  onReadNote(file: NoteFile): Promise<string>;
+  onReadNote: (file: NoteFile) => Promise<string>;
   /** Persist an edited note's raw Markdown. */
-  onSaveNote(file: NoteFile, markdown: string): void;
+  onSaveNote: (file: NoteFile, markdown: string) => void;
 }
 
 /** The shared `.koi-docs` shell + an optional read-only banner — the common frame for both pages. */

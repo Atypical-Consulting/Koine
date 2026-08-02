@@ -43,7 +43,7 @@ export interface TableHandlers {
 /** A table column: its header text, the cell text for a row, and an optional per-cell class. */
 export interface SortableTableColumn<T> {
   header: string;
-  get(row: T): string;
+  get: (row: T) => string;
   cellClass?(row: T): string | undefined;
 }
 

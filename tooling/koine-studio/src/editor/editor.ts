@@ -423,12 +423,12 @@ export interface KoineEditorOptions {
 export interface KoineEditor {
   view: EditorView;
   getDoc(): string;
-  setDoc(doc: string): void;
-  goto(line: number, col: number): void;
+  setDoc: (doc: string) => void;
+  goto: (line: number, col: number) => void;
   /** Jump to (and select through) a 0-based LSP range in the current document. */
-  gotoRange(start: { line: number; character: number }, end: { line: number; character: number }): void;
+  gotoRange: (start: { line: number; character: number }, end: { line: number; character: number }) => void;
   /** Resolve the definition for the symbol at a CodeMirror offset (delegates navigation to onNavigate). */
-  gotoDefinition(pos: number): Promise<void>;
+  gotoDefinition: (pos: number) => Promise<void>;
   /** Move the cursor to a 0-based LSP position and open the references picker there — the same Shift-F12
    * surface, driven from outside the editor (the launcher's find-usages action, issue #1165). */
   showReferences(line: number, character: number): void;
@@ -452,7 +452,7 @@ export interface KoineEditor {
    */
   addCommentAtSelection(): void;
   /** Repaint the review-thread decorations after the store changed (dispatches the refresh effect). */
-  refreshReviewDecorations(): void;
+  refreshReviewDecorations: () => void;
   /**
    * Attach or detach the collaboration presence layer (#481): remote participants' carets and
    * selections. Reconfigures a compartment, so a session can start and end mid-edit with no state loss

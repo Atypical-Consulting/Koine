@@ -29,15 +29,15 @@ type StatusKind = 'info' | 'error' | 'success';
 /** Everything the wizard needs from the rest of the app, injected so it can be wired to any host. */
 export interface GenerateProjectDeps {
   /** Compile the active model to the given target and return its emitted files / diagnostics. */
-  emitPreview(target: Target): Promise<EmitPreviewResult>;
+  emitPreview: (target: Target) => Promise<EmitPreviewResult>;
   /** The ubiquitous-language glossary for the active model, as markdown. */
-  glossary(): Promise<{ markdown: string }>;
+  glossary: () => Promise<{ markdown: string }>;
   /**
    * Save the generated archive bytes to a host destination (download / native save dialog).
    * Resolves `true` when the bytes were delivered and `false` when the user cancelled a native
    * save dialog, so the wizard only reports success on a real save.
    */
-  saveZip(defaultName: string, data: Uint8Array): Promise<boolean>;
+  saveZip: (defaultName: string, data: Uint8Array) => Promise<boolean>;
 }
 
 // Steps, named so the navigation/render logic never hinges on bare magic numbers.

@@ -297,7 +297,7 @@ export interface CanvasHandle {
   noteCells: Map<string, MxCell>;
   /** Group-id → group cell (#255). */
   groupCells: Map<string, MxCell>;
-  dispose(): void;
+  dispose: () => void;
 }
 
 /** The bounded context of a `Context.Name` qualified name (everything before the first dot); '' if none. */
@@ -1424,13 +1424,13 @@ export interface ContextMapGraphHooks {
   /** A relation edge was selected, or selection cleared (`null`) — the inspector shows its shared types / ACL. */
   onRelationSelect?(edge: DiagramEdge | null): void;
   /** Hover-tooltip text (plain string) for a cell value (a context node or a relation edge), or null for none. */
-  tooltip?(value: DiagramNode | DiagramEdge): string | null;
+  tooltip?: (value: DiagramNode | DiagramEdge) => string | null;
   /** The view re-rendered its cell states (zoom, pan, or any other scale/translate change) AFTER the
    *  initial mount — maxGraph recreates each cell's HTML label DOM on a view refresh, discarding any
    *  DOM-level marks a caller applied post-paint (`.is-scoped` / `aria-current`, #1210). The caller
    *  re-applies those marks here; NOT called for the initial render (the caller does that itself once
    *  {@link renderContextMapGraph} resolves). */
-  onAfterRender?(): void;
+  onAfterRender?: () => void;
 }
 
 /** A teardown handle for a mounted context-map graph. `graph` is exposed (optional: existing mocks in
@@ -1439,7 +1439,7 @@ export interface ContextMapGraphHooks {
  *  ever use `dispose()`. */
 export interface ContextMapGraphHandle {
   graph?: MxGraph;
-  dispose(): void;
+  dispose: () => void;
 }
 
 /** Route a clicked cell value to the right hook: a context node (has a `qualifiedName`) filters to that
@@ -1784,7 +1784,7 @@ export function buildEventFlowCanvas(
 
 /** A teardown handle for a mounted event-flow canvas (mirrors {@link ContextMapGraphHandle}). */
 export interface EventFlowGraphHandle {
-  dispose(): void;
+  dispose: () => void;
 }
 
 /**

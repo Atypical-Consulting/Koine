@@ -62,9 +62,9 @@ export interface InspectorElement {
 
 export interface InspectorHandlers {
   /** Jump the editor to the element's declaration. */
-  onGoto(range: Range): void;
+  onGoto: (range: Range) => void;
   /** Commit a new name for the element (a rename across the workspace). Optional — read-only without it. */
-  onRename?(element: InspectorElement, newName: string): void;
+  onRename?: (element: InspectorElement, newName: string) => void;
   /** Persist the element's description as a `///` doc comment. Optional — read-only without it. */
   onSaveDescription?(element: InspectorElement, text: string): void;
   // --- property editing (authoring) — each maps to a structured edit; absent ⇒ read-only Properties ---
@@ -81,7 +81,7 @@ export interface InspectorHandlers {
    * its declaration, newest first. Resolves `null` when history is unavailable (browser host, not a git
    * repo), so the "Change history" section stays hidden. Optional — absent ⇒ no history section.
    */
-  loadHistory?(element: InspectorElement): Promise<ChangeEntry[] | null>;
+  loadHistory?: (element: InspectorElement) => Promise<ChangeEntry[] | null>;
 }
 
 /**

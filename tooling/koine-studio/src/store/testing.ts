@@ -18,7 +18,7 @@ import { createAppStore, type AppState } from '@/store/index';
  * `src/**\/*.test.ts` include glob in `vitest.config.ts` — it is a shared helper,
  * not a suite.
  */
-export function createCountingStore(): { store: StoreApi<AppState>; active(): number } {
+export function createCountingStore(): { store: StoreApi<AppState>; active: () => number } {
   const store = createAppStore();
   let count = 0;
   const rawSubscribe = store.subscribe.bind(store);
