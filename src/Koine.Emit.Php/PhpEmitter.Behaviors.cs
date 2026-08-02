@@ -215,7 +215,18 @@ public sealed partial class PhpEmitter
         {
             var expectedEnum = memberTypes.TryGetValue(tr.Field, out TypeRef? ft)
                 && index.Classify(ft.Qualifier ?? translator.Context, ft.Name) == TypeKind.Enum ? ft.Name : null;
-            var value = translator.Translate(tr.Value, PhpExpressionTranslator.NameMode.Property, expectedEnum);
+            // A transition assigns STRAIGHT INTO the target member's declared slot, so its value is
+            // reconciled against that member's declared type (#1887) through the same
+            // TranslateReconciled every sibling call site in this family already uses — the factory's
+            // explicit `field -> expr` initialization (#1732), the `result` expression and the
+            // emit/publish payload (#1875), the member default initializer (#1880) and the
+            // derived-member body (#1888). An `Int`-typed value on a `Decimal`-declared member
+            // previously emitted a bare `$this->amount = 5;` into a `\Koine\Runtime\Decimal` property:
+            // a real `phpstan analyse --level max` assign.propertyType error. Rust closed this same
+            // site at #1511.
+            var value = ft is not null
+                ? translator.TranslateReconciled(tr.Value, PhpExpressionTranslator.NameMode.Property, expectedEnum, ft)
+                : translator.Translate(tr.Value, PhpExpressionTranslator.NameMode.Property, expectedEnum);
             var prop = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(tr.Field));
             sb.Append(Indent).Append(Indent).Append("$this->").Append(prop).Append(" = ").Append(value).Append(";\n");
         }
