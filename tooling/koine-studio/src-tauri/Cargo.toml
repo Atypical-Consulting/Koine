@@ -38,6 +38,22 @@ getrandom = "0.3"
 # platform-agnostic.
 portable-pty = "0.9.0"
 
+# Transport encryption for the collaboration broker (#1811, ADR 0017). `snow` is the Noise Protocol
+# Framework in Rust; we speak `Noise_NK_25519_ChaChaPoly_BLAKE2s` over the same blocking sockets the
+# broker already uses, which keeps ADR 0016's "no async runtime" property. Only the primitives that
+# pattern actually names are enabled — `default-features = false` drops `aes-gcm` and `sha2`, and the
+# pure-Rust default resolver keeps `cargo build --locked` free of a C toolchain on all three CI legs.
+# `std` is deliberately absent: snow declares it as `ring/std` rather than `ring?/std`, so enabling it
+# silently pulls `ring` — a C-compiled crate — into the lock for primitives this pattern never uses.
+# Nothing here needs `snow::Error: std::error::Error`; every failure is flattened to an `io::Error`.
+snow = { version = "0.10.0", default-features = false, features = [
+    "default-resolver",
+    "use-curve25519",
+    "use-chacha20poly1305",
+    "use-blake2",
+    "use-getrandom",
+] }
+
 # macOS only: set the Dock icon at runtime (see `set_macos_dock_icon` in lib.rs).
 # A bundled `.app` gets its Dock icon from Info.plist/icon.icns, but `tauri dev`
 # runs the bare executable with no bundle, so the Dock would otherwise show a

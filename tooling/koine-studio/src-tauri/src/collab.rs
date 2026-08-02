@@ -12,6 +12,13 @@
 //
 // TRUST MODEL — this is network-facing code, so state it plainly:
 //
+//   0. **Every connection is encrypted, before a byte of protocol is read.** One Noise handshake
+//      (`Noise_NK_25519_ChaChaPoly_BLAKE2s`, see `noise.rs`) per connection, with the broker's static
+//      public key pinned by the dialler from the join token. There is no plaintext code path and no
+//      negotiation, so there is nothing to downgrade and nothing for a user to remember (#1811,
+//      ADR 0017). What that buys and what it does NOT — peers are authenticated only by the bearer
+//      token, and a relay terminates the encryption — is ADR 0017's threat model.
+//
 //   1. **Authority is a property of the CONNECTION, never of a claimed identity.** A session's
 //      authority is the `MemberId` the broker minted for the creating connection. `join` can never
 //      return `authority: true`, whatever identity it presents — a joiner echoing the creator's
@@ -35,6 +42,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+#[cfg(test)]
+use crate::noise::PUBLIC_KEY_HEX_LEN;
+use crate::noise::{
+    decode_public_key, encode_hex, handshake_initiator, handshake_responder, split, NoiseReader,
+    NoiseWriter, StaticKeypair, PUBLIC_KEY_BYTES,
+};
+
 // --- limits (every one of these bounds something an unauthenticated peer controls) --------------
 
 /// Largest accepted wire frame. A `.koi` model is kilobytes and a Yjs update smaller still; the
@@ -50,7 +64,7 @@ pub const MAX_IDENTITY_FIELD_LEN: usize = 64;
 pub const MAX_SELECTION_RANGES: usize = 64;
 /// Length of the hex-encoded session secret (32 hex chars = 128 bits).
 pub const SECRET_HEX_LEN: usize = 32;
-/// Scheme prefix of a join token: `koine-collab://<host>:<port>/<secret>`.
+/// Scheme prefix of a join token: `koine-collab://<host>:<port>/<secret>/<public-key>`.
 pub const TOKEN_SCHEME: &str = "koine-collab://";
 
 /// Broker-minted handle for one connection. NOT the client's participant id — see the trust model.
@@ -588,14 +602,21 @@ pub fn new_secret() -> String {
     })
 }
 
-pub fn format_token(host: &str, port: u16, secret: &str) -> String {
-    format!("{TOKEN_SCHEME}{host}:{port}/{secret}")
+pub fn format_token(host: &str, port: u16, secret: &str, public_key: &str) -> String {
+    format!("{TOKEN_SCHEME}{host}:{port}/{secret}/{public_key}")
 }
 
-/// Parse `koine-collab://<host>:<port>/<secret>` into its parts. Strict: anything else is `None`.
-pub fn parse_token(token: &str) -> Option<(String, u16, String)> {
+/// Parse `koine-collab://<host>:<port>/<secret>/<public-key>` into its parts. Strict: anything else
+/// is `None`.
+///
+/// The public key is the broker's X25519 static key, and it is what makes the token more than a
+/// password: the joiner pins it through the Noise handshake (#1811, ADR 0017), so a machine in the
+/// middle cannot answer for a broker whose key it does not hold. A token without one is refused
+/// rather than dialled unencrypted — there is no downgrade path.
+pub fn parse_token(token: &str) -> Option<(String, u16, String, [u8; PUBLIC_KEY_BYTES])> {
     let rest = token.trim().strip_prefix(TOKEN_SCHEME)?;
-    let (authority, secret) = rest.split_once('/')?;
+    let (authority, rest) = rest.split_once('/')?;
+    let (secret, public_key) = rest.split_once('/')?;
     if secret.len() != SECRET_HEX_LEN
         || !secret
             .chars()
@@ -603,13 +624,14 @@ pub fn parse_token(token: &str) -> Option<(String, u16, String)> {
     {
         return None;
     }
+    let public_key = decode_public_key(public_key)?;
     // `rsplit_once` so a bracketed IPv6 literal (`[::1]:4321`) keeps its colons.
     let (host, port) = authority.rsplit_once(':')?;
     let port: u16 = port.parse().ok()?;
     if host.is_empty() || port == 0 {
         return None;
     }
-    Some((host.to_string(), port, secret.to_string()))
+    Some((host.to_string(), port, secret.to_string(), public_key))
 }
 
 /// Constant-time secret comparison — no early exit on the first differing byte.
@@ -675,8 +697,13 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// The broker plus the sockets its deliveries travel over.
 struct Hub {
     broker: Mutex<Broker>,
-    writers: Mutex<HashMap<MemberId, TcpStream>>,
+    /// One encrypted sending half per connected member. There is no plaintext variant: a connection
+    /// only reaches this table after its Noise handshake completed (#1811).
+    writers: Mutex<HashMap<MemberId, NoiseWriter<TcpStream>>>,
     sink: Arc<dyn LocalSink>,
+    /// This broker's X25519 identity — a session's, or a relay's. Its public half is what a joiner
+    /// pins, so a machine in the middle cannot answer in its place.
+    keypair: StaticKeypair,
     /// The participant running in this process, if any. A relay has none.
     local_member: Option<MemberId>,
     connections: Arc<AtomicUsize>,
@@ -691,13 +718,13 @@ impl Hub {
             }
             let mut writers = lock(&self.writers);
             let broken = match writers.get_mut(&target) {
-                Some(stream) => write_frame(stream, &frame).is_err(),
+                Some(writer) => write_frame(writer, &frame).is_err(),
                 None => false,
             };
             // A peer we can no longer write to is gone; drop it now rather than retrying forever.
             if broken {
-                if let Some(stream) = writers.remove(&target) {
-                    let _ = stream.shutdown(Shutdown::Both);
+                if let Some(writer) = writers.remove(&target) {
+                    let _ = writer.get_ref().shutdown(Shutdown::Both);
                 }
             }
         }
@@ -709,21 +736,21 @@ impl Hub {
         self.dispatch(departure.deliveries);
 
         let mut writers = lock(&self.writers);
-        if let Some(stream) = writers.remove(&member) {
-            let _ = stream.shutdown(Shutdown::Both);
+        if let Some(writer) = writers.remove(&member) {
+            let _ = writer.get_ref().shutdown(Shutdown::Both);
         }
         if departure.session_closed {
             for stranded in departure.remaining {
-                if let Some(stream) = writers.remove(&stranded) {
-                    let _ = stream.shutdown(Shutdown::Both);
+                if let Some(writer) = writers.remove(&stranded) {
+                    let _ = writer.get_ref().shutdown(Shutdown::Both);
                 }
             }
         }
     }
 
     fn close_all(&self) {
-        for (_, stream) in lock(&self.writers).drain() {
-            let _ = stream.shutdown(Shutdown::Both);
+        for (_, writer) in lock(&self.writers).drain() {
+            let _ = writer.get_ref().shutdown(Shutdown::Both);
         }
     }
 }
@@ -762,7 +789,20 @@ fn serve_connection(
     allow_create: bool,
 ) {
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
-    let hello: Option<ClientFrame> = read_frame(&mut stream).ok().flatten();
+
+    // Encryption comes FIRST — before the first byte of protocol is read, let alone parsed. A peer
+    // that cannot complete the Noise handshake (a plain-TCP speaker, a port scanner, anyone without
+    // this broker's public key) is dropped here without an answer, so the join secret it would have
+    // presented never crosses the network in the clear (#1811, ADR 0017).
+    let Ok(transport) = handshake_responder(&mut stream, &hub.keypair) else {
+        return;
+    };
+    let Ok(writer_stream) = stream.try_clone() else {
+        return;
+    };
+    let (mut reader, mut writer) = split(&transport, stream, writer_stream);
+
+    let hello: Option<ClientFrame> = read_frame(&mut reader).ok().flatten();
 
     let (admitted, secret) = match hello {
         Some(ClientFrame::Join { secret, identity }) => {
@@ -780,7 +820,7 @@ fn serve_connection(
         }
         _ => {
             let _ = write_frame(
-                &mut stream,
+                &mut writer,
                 &ServerFrame::Rejected {
                     reason: "expected a join frame".to_string(),
                 },
@@ -793,7 +833,7 @@ fn serve_connection(
         Ok(admission) => admission,
         Err(err) => {
             let _ = write_frame(
-                &mut stream,
+                &mut writer,
                 &ServerFrame::Rejected {
                     reason: err.message().to_string(),
                 },
@@ -803,34 +843,42 @@ fn serve_connection(
     };
     let member = admission.member;
 
-    let registered = stream
-        .try_clone()
-        .map(|writer| lock(&hub.writers).insert(member, writer))
-        .is_ok();
-    if !registered {
-        hub.depart(member);
-        return;
-    }
-
+    // The admission goes out through the very writer the table will hold, because a Noise channel
+    // counts its own messages: two writers over one connection would each start from nonce zero and
+    // the second frame either way would fail to authenticate.
+    //
+    // Write and publish under ONE hold of the writers lock. `dispatch` takes the same lock per
+    // delivery, so this is what orders the protocol: a `PeerJoin` that another thread produced for
+    // this member while we were still writing waits here and lands *after* the admission, instead of
+    // finding no writer and being dropped — or, worse, overtaking the frame the client is blocked
+    // reading.
     let admitted_frame = ServerFrame::Admitted {
         session_id: admission.session_id.clone(),
         authority: admission.authority,
         admitted_as: admission.admitted_as.clone(),
         secret,
     };
-    if write_frame(&mut stream, &admitted_frame).is_err() {
+    let admitted_ok = {
+        let mut writers = lock(&hub.writers);
+        let ok = write_frame(&mut writer, &admitted_frame).is_ok();
+        if ok {
+            writers.insert(member, writer);
+        }
+        ok
+    };
+    if !admitted_ok {
         hub.depart(member);
         return;
     }
     hub.dispatch(admission.deliveries);
 
     // Admitted: the connection is now long-lived, so the handshake deadline no longer applies.
-    let _ = stream.set_read_timeout(None);
+    let _ = reader.get_ref().set_read_timeout(None);
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
-        match read_frame::<_, ClientFrame>(&mut stream) {
+        match read_frame::<_, ClientFrame>(&mut reader) {
             Ok(Some(ClientFrame::Update { update })) => {
                 let deliveries = lock(&hub.broker).update(member, update);
                 hub.dispatch(deliveries);
@@ -904,16 +952,20 @@ pub fn host_session(
         .port();
 
     let secret = new_secret();
+    // One X25519 identity per session, minted here and published in the token. Nothing persists it,
+    // so there is no key to protect between sessions and a joiner's pin is scoped to this one.
+    let keypair = StaticKeypair::generate().map_err(|e| e.to_string())?;
     let mut broker = Broker::new();
     let admission = broker
         .create(identity, secret.clone())
         .map_err(|e| e.message().to_string())?;
-    let token = format_token(bind_host, port, &secret);
+    let token = format_token(bind_host, port, &secret, &keypair.public_hex());
 
     let hub = Arc::new(Hub {
         broker: Mutex::new(broker),
         writers: Mutex::new(HashMap::new()),
         sink,
+        keypair,
         local_member: Some(admission.member),
         connections: Arc::new(AtomicUsize::new(0)),
     });
@@ -966,11 +1018,16 @@ pub fn run_relay(bind_host: &str) -> Result<Relay, String> {
     let addr: SocketAddr = listener
         .local_addr()
         .map_err(|e| format!("could not read the relay address: {e}"))?;
+    // A relay's key is minted once at startup and published in its endpoint, because that endpoint is
+    // what an operator hands out and what a participant pins in `collab.relayUrl`.
+    let keypair = StaticKeypair::generate().map_err(|e| e.to_string())?;
+    let endpoint = format!("{bind_host}:{}/{}", addr.port(), keypair.public_hex());
 
     let hub = Arc::new(Hub {
         broker: Mutex::new(Broker::new()),
         writers: Mutex::new(HashMap::new()),
         sink: Arc::new(DiscardSink),
+        keypair,
         local_member: None,
         connections: Arc::new(AtomicUsize::new(0)),
     });
@@ -985,7 +1042,7 @@ pub fn run_relay(bind_host: &str) -> Result<Relay, String> {
         hub,
         shutdown,
         accept: Some(accept),
-        endpoint: format!("{bind_host}:{}", addr.port()),
+        endpoint,
     })
 }
 
@@ -1009,7 +1066,9 @@ impl Drop for Relay {
 /// A session brokered elsewhere — joined by token, or created through a configured relay.
 #[derive(Debug)]
 pub struct RemoteSession {
-    stream: Mutex<TcpStream>,
+    /// The encrypted sending half. One writer for the whole connection: a Noise channel counts its
+    /// own messages, so a second one would restart the nonce run and desynchronise the peer.
+    writer: Mutex<NoiseWriter<TcpStream>>,
     shutdown: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
     pub info: SessionInfo,
@@ -1027,15 +1086,15 @@ impl RemoteSession {
     fn send(&self, frame: &ClientFrame) {
         // Best effort by design: the CRDT replica is the source of truth and re-merges on reconnect,
         // so a dropped frame costs a round trip, not an edit.
-        let _ = write_frame(&mut *lock(&self.stream), frame);
+        let _ = write_frame(&mut *lock(&self.writer), frame);
     }
 
     pub fn stop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
         {
-            let mut stream = lock(&self.stream);
-            let _ = write_frame(&mut *stream, &ClientFrame::Leave);
-            let _ = stream.shutdown(Shutdown::Both);
+            let mut writer = lock(&self.writer);
+            let _ = write_frame(&mut *writer, &ClientFrame::Leave);
+            let _ = writer.get_ref().shutdown(Shutdown::Both);
         }
         if let Some(handle) = self.reader.take() {
             let _ = handle.join();
@@ -1055,39 +1114,45 @@ pub fn join_session(
     identity: Participant,
     sink: Arc<dyn LocalSink>,
 ) -> Result<RemoteSession, String> {
-    let (host, port, secret) =
+    let (host, port, secret, broker_key) =
         parse_token(token).ok_or_else(|| "that is not a valid join token".to_string())?;
     let hello = ClientFrame::Join {
         secret,
         identity: identity.clone(),
     };
-    handshake(&host, port, hello, token.to_string(), sink)
+    handshake(&host, port, broker_key, hello, token.to_string(), sink)
 }
 
 /// Open a session on a user-configured relay: same protocol, `Create` instead of `Join`.
-/// `relay` is `host:port`, optionally with the `koine-collab://` scheme.
+/// `relay` is `host:port/<public-key>`, optionally with the `koine-collab://` scheme.
+///
+/// The key is not optional. A relay is a machine belonging to neither participant, so dialling one
+/// without pinning its key would be exactly the "looks encrypted, authenticates nobody" transport this
+/// change exists to avoid — the relay you reached would be whoever answered.
 pub fn create_via_relay(
     relay: &str,
     identity: Participant,
     sink: Arc<dyn LocalSink>,
 ) -> Result<RemoteSession, String> {
-    let authority = relay
+    const SHAPE: &str = "the collaboration relay must be host:port/<public-key>";
+    let trimmed = relay
         .trim()
         .trim_start_matches(TOKEN_SCHEME)
         .trim_end_matches('/');
+    let (authority, key_hex) = trimmed.split_once('/').ok_or_else(|| SHAPE.to_string())?;
+    let broker_key = decode_public_key(key_hex).ok_or_else(|| SHAPE.to_string())?;
     let (host, port) = authority
         .rsplit_once(':')
-        .ok_or_else(|| "the collaboration relay must be host:port".to_string())?;
-    let port: u16 = port
-        .parse()
-        .map_err(|_| "the collaboration relay must be host:port".to_string())?;
+        .ok_or_else(|| SHAPE.to_string())?;
+    let port: u16 = port.parse().map_err(|_| SHAPE.to_string())?;
     if host.is_empty() || port == 0 {
-        return Err("the collaboration relay must be host:port".to_string());
+        return Err(SHAPE.to_string());
     }
     // The token is composed below, once the relay has minted the secret.
     handshake(
         host,
         port,
+        broker_key,
         ClientFrame::Create { identity },
         String::new(),
         sink,
@@ -1097,6 +1162,7 @@ pub fn create_via_relay(
 fn handshake(
     host: &str,
     port: u16,
+    broker_key: [u8; PUBLIC_KEY_BYTES],
     hello: ClientFrame,
     token: String,
     sink: Arc<dyn LocalSink>,
@@ -1121,10 +1187,21 @@ fn handshake(
         .map_err(|e| format!("could not reach the collaboration broker at {host}:{port}: {e}"))?;
     let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
 
-    write_frame(&mut stream, &hello)
+    // Encrypt before saying anything. `broker_key` came from the join token (or the configured relay
+    // address), so completing this handshake is also what proves the far end is the broker we were
+    // invited to and not whoever intercepted the connection.
+    let transport = handshake_initiator(&mut stream, &broker_key).map_err(|_| {
+        format!("could not open an encrypted channel to the collaboration broker at {host}:{port}")
+    })?;
+    let read_stream = stream
+        .try_clone()
+        .map_err(|e| format!("could not listen to the collaboration broker: {e}"))?;
+    let (mut reader, mut writer) = split(&transport, read_stream, stream);
+
+    write_frame(&mut writer, &hello)
         .map_err(|e| format!("could not greet the collaboration broker: {e}"))?;
 
-    let reply: Option<ServerFrame> = read_frame(&mut stream)
+    let reply: Option<ServerFrame> = read_frame(&mut reader)
         .map_err(|e| format!("the collaboration broker did not answer: {e}"))?;
     let (session_id, authority, admitted_as, secret) = match reply {
         Some(ServerFrame::Admitted {
@@ -1142,25 +1219,23 @@ fn handshake(
         let secret = secret.ok_or_else(|| {
             "the collaboration relay admitted the session without a token".to_string()
         })?;
-        format_token(host, port, &secret)
+        // The invitee has to pin the same relay key we just pinned, so it travels in the token.
+        format_token(host, port, &secret, &encode_hex(&broker_key))
     } else {
         token
     };
 
     let authority = authority && may_be_authority;
 
-    let _ = stream.set_read_timeout(None);
+    let _ = reader.get_ref().set_read_timeout(None);
     let shutdown = Arc::new(AtomicBool::new(false));
-    let reader = stream
-        .try_clone()
-        .map_err(|e| format!("could not listen to the collaboration broker: {e}"))?;
     let handle = thread::spawn({
         let shutdown = Arc::clone(&shutdown);
         move || read_loop(reader, sink, shutdown)
     });
 
     Ok(RemoteSession {
-        stream: Mutex::new(stream),
+        writer: Mutex::new(writer),
         shutdown,
         reader: Some(handle),
         info: SessionInfo {
@@ -1199,10 +1274,14 @@ fn is_deliverable(frame: &ServerFrame) -> bool {
     }
 }
 
-fn read_loop(mut stream: TcpStream, sink: Arc<dyn LocalSink>, shutdown: Arc<AtomicBool>) {
+fn read_loop(
+    mut reader: NoiseReader<TcpStream>,
+    sink: Arc<dyn LocalSink>,
+    shutdown: Arc<AtomicBool>,
+) {
     let mut peers: Vec<String> = Vec::new();
     loop {
-        match read_frame::<_, ServerFrame>(&mut stream) {
+        match read_frame::<_, ServerFrame>(&mut reader) {
             Ok(Some(frame)) if !is_deliverable(&frame) => continue,
             Ok(Some(frame)) => {
                 match &frame {
@@ -1690,31 +1769,96 @@ mod tests {
     #[test]
     fn a_token_round_trips_through_format_and_parse() {
         let secret = "a".repeat(SECRET_HEX_LEN);
-        let token = format_token("127.0.0.1", 4321, &secret);
-        assert_eq!(token, format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}"));
+        let key_hex = "b".repeat(PUBLIC_KEY_HEX_LEN);
+        let token = format_token("127.0.0.1", 4321, &secret, &key_hex);
+        assert_eq!(
+            token,
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{key_hex}")
+        );
         assert_eq!(
             parse_token(&token),
-            Some(("127.0.0.1".to_string(), 4321, secret))
+            Some((
+                "127.0.0.1".to_string(),
+                4321,
+                secret,
+                decode_public_key(&key_hex).expect("key")
+            ))
         );
     }
 
     #[test]
     fn parse_token_is_strict() {
         let secret = "a".repeat(SECRET_HEX_LEN);
+        let key = "b".repeat(PUBLIC_KEY_HEX_LEN);
         for bad in [
-            "".to_string(),
-            "127.0.0.1:4321/".to_string() + &secret,
-            format!("{TOKEN_SCHEME}127.0.0.1/{secret}"),
-            format!("{TOKEN_SCHEME}127.0.0.1:99999/{secret}"),
-            format!("{TOKEN_SCHEME}127.0.0.1:4321/short"),
+            String::new(),
+            format!("127.0.0.1:4321/{secret}/{key}"),
+            format!("{TOKEN_SCHEME}127.0.0.1/{secret}/{key}"),
+            format!("{TOKEN_SCHEME}127.0.0.1:99999/{secret}/{key}"),
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/short/{key}"),
             format!(
-                "{TOKEN_SCHEME}127.0.0.1:4321/{}",
+                "{TOKEN_SCHEME}127.0.0.1:4321/{}/{key}",
                 "z".repeat(SECRET_HEX_LEN)
             ),
-            format!("{TOKEN_SCHEME}:4321/{secret}"),
+            format!("{TOKEN_SCHEME}:4321/{secret}/{key}"),
+            // The pinned key is what stops a machine in the middle answering for the broker, so a
+            // token missing or mangling it is refused outright — never dialled unencrypted (#1811).
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}"),
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}/"),
+            format!(
+                "{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{}",
+                "b".repeat(PUBLIC_KEY_HEX_LEN - 1)
+            ),
+            format!("{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{key}/extra"),
+            format!(
+                "{TOKEN_SCHEME}127.0.0.1:4321/{secret}/{}",
+                "Z".repeat(PUBLIC_KEY_HEX_LEN)
+            ),
         ] {
             assert_eq!(parse_token(&bad), None, "must reject {bad:?}");
         }
+    }
+
+    #[test]
+    fn a_hosted_session_publishes_a_fresh_public_key_in_its_token() {
+        let (sink_a, _rx_a) = sink();
+        let (sink_b, _rx_b) = sink();
+        let first = host_session("127.0.0.1", participant("ada"), sink_a).expect("host");
+        let second = host_session("127.0.0.1", participant("ada"), sink_b).expect("host");
+
+        let (_, _, _, key_a) = parse_token(&first.info.token).expect("token");
+        let (_, _, _, key_b) = parse_token(&second.info.token).expect("token");
+        assert_ne!(
+            key_a, key_b,
+            "a session key is scoped to its session, so one token never speaks for another"
+        );
+    }
+
+    #[test]
+    fn a_relay_publishes_its_public_key_in_its_endpoint() {
+        let relay = run_relay("127.0.0.1").expect("relay");
+        let (_, key_hex) = relay
+            .endpoint
+            .split_once('/')
+            .expect("endpoint carries a key");
+        assert!(
+            decode_public_key(key_hex).is_some(),
+            "an operator hands this string out; it has to carry what a participant must pin: {}",
+            relay.endpoint
+        );
+    }
+
+    #[test]
+    fn a_relay_address_without_a_pinned_key_is_refused() {
+        let relay = run_relay("127.0.0.1").expect("relay");
+        let (authority, _) = relay.endpoint.split_once('/').expect("endpoint");
+
+        let (guest_sink, _rx) = sink();
+        let err = create_via_relay(authority, participant("ada"), guest_sink).unwrap_err();
+        assert!(
+            err.contains("public-key"),
+            "an unpinned relay is whoever answered, so it is refused rather than dialled: {err}"
+        );
     }
 
     #[test]
@@ -1822,10 +1966,15 @@ mod tests {
     fn a_join_with_the_wrong_token_is_refused() {
         let (host_sink, _host_rx) = sink();
         let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
-        let (_, port, _) = parse_token(&hosted.info.token).expect("token");
+        let (_, port, _, broker_key) = parse_token(&hosted.info.token).expect("token");
 
         let (guest_sink, _guest_rx) = sink();
-        let wrong = format_token("127.0.0.1", port, &"b".repeat(SECRET_HEX_LEN));
+        let wrong = format_token(
+            "127.0.0.1",
+            port,
+            &"b".repeat(SECRET_HEX_LEN),
+            &encode_hex(&broker_key),
+        );
         let err = join_session(&wrong, participant("grace"), guest_sink).unwrap_err();
 
         assert_eq!(err, BrokerError::UnknownSession.message());
@@ -1835,24 +1984,192 @@ mod tests {
     fn a_hosted_session_refuses_a_create_frame_from_the_wire() {
         let (host_sink, _host_rx) = sink();
         let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
-        let (_, port, _) = parse_token(&hosted.info.token).expect("token");
+        let (_, port, _, broker_key) = parse_token(&hosted.info.token).expect("token");
 
         // Reaching someone's listener must not let you open a session on their machine — only a
-        // relay honours `Create`.
+        // relay honours `Create`. The attacker here holds the token, so it gets through the Noise
+        // handshake: encryption keeps strangers out, not invitees.
         let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+        let transport = handshake_initiator(&mut stream, &broker_key).expect("handshake");
+        let read_stream = stream.try_clone().expect("clone");
+        let (mut reader, mut writer) = split(&transport, read_stream, stream);
         write_frame(
-            &mut stream,
+            &mut writer,
             &ClientFrame::Create {
                 identity: participant("mallory"),
             },
         )
         .expect("write");
 
-        let reply: Option<ServerFrame> = read_frame(&mut stream).expect("read");
+        let reply: Option<ServerFrame> = read_frame(&mut reader).expect("read");
         assert!(
             matches!(reply, Some(ServerFrame::Rejected { .. })),
             "expected a rejection, got {reply:?}"
         );
+    }
+
+    #[test]
+    fn a_peer_that_cannot_complete_the_handshake_never_reaches_the_broker() {
+        let (host_sink, _host_rx) = sink();
+        let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
+        let (_, port, secret, _) = parse_token(&hosted.info.token).expect("token");
+
+        // Exactly what a pre-#1811 client did: a length-prefixed JSON join frame straight onto the
+        // socket, secret and all. There is no longer anything at the other end that will read it.
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+        write_frame(
+            &mut stream,
+            &ClientFrame::Join {
+                secret: secret.clone(),
+                identity: participant("grace"),
+            },
+        )
+        .expect("write");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("timeout");
+
+        let mut byte = [0u8; 1];
+        assert!(
+            matches!(stream.read(&mut byte), Ok(0) | Err(_)),
+            "an unencrypted peer is hung up on without an answer"
+        );
+        assert_eq!(
+            lock(&hosted.hub.broker).member_count(&secret),
+            1,
+            "and it was never admitted to the session"
+        );
+    }
+
+    #[test]
+    fn a_joiner_whose_token_pins_the_wrong_key_cannot_connect() {
+        let (host_sink, _host_rx) = sink();
+        let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
+        let (_, port, secret, _) = parse_token(&hosted.info.token).expect("token");
+
+        // The shape of a machine-in-the-middle: right endpoint, right secret, somebody else's key.
+        let impostor = StaticKeypair::generate().expect("keypair");
+        let forged = format_token("127.0.0.1", port, &secret, &impostor.public_hex());
+
+        let (guest_sink, _guest_rx) = sink();
+        let err = join_session(&forged, participant("grace"), guest_sink).unwrap_err();
+
+        assert!(
+            err.contains("encrypted channel"),
+            "the pin is what makes the token more than a password: {err}"
+        );
+        assert_eq!(
+            lock(&hosted.hub.broker).member_count(&secret),
+            1,
+            "and nobody was admitted"
+        );
+    }
+
+    /// Does `haystack` contain `needle` anywhere?
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        !needle.is_empty()
+            && haystack.len() >= needle.len()
+            && haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    fn pump(mut from: TcpStream, mut to: TcpStream, seen: Arc<Mutex<Vec<u8>>>) {
+        let mut buf = [0u8; 4096];
+        loop {
+            match from.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    lock(&seen).extend_from_slice(&buf[..n]);
+                    if to.write_all(&buf[..n]).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = to.shutdown(Shutdown::Both);
+    }
+
+    /// A tap on the wire: it forwards every byte between a joiner and the broker and keeps a copy.
+    /// This is the person on the workshop wifi that ADR 0016 could only mitigate by defaulting to
+    /// loopback. Returns the port to dial and the bytes it collected.
+    fn tapped_path(target_port: u16) -> (u16, Arc<Mutex<Vec<u8>>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+
+        let recorded = Arc::clone(&seen);
+        thread::spawn(move || {
+            let Ok((client, _)) = listener.accept() else {
+                return;
+            };
+            let Ok(upstream) = TcpStream::connect(("127.0.0.1", target_port)) else {
+                return;
+            };
+            let (Ok(client_read), Ok(upstream_write)) = (client.try_clone(), upstream.try_clone())
+            else {
+                return;
+            };
+            let outbound = {
+                let recorded = Arc::clone(&recorded);
+                thread::spawn(move || pump(client_read, upstream_write, recorded))
+            };
+            pump(upstream, client, recorded);
+            let _ = outbound.join();
+        });
+
+        (port, seen)
+    }
+
+    #[test]
+    fn an_eavesdropper_on_the_path_reads_neither_the_join_secret_nor_the_document() {
+        let (host_sink, host_rx) = sink();
+        let hosted = host_session("127.0.0.1", participant("ada"), host_sink).expect("host");
+        let (_, port, secret, broker_key) = parse_token(&hosted.info.token).expect("token");
+
+        // The joiner dials the tap while still pinning the real broker's key — passing bytes through
+        // unchanged is precisely what an attacker on the path can do without being noticed.
+        let (tap_port, tapped) = tapped_path(port);
+        let token = format_token("127.0.0.1", tap_port, &secret, &encode_hex(&broker_key));
+        let (guest_sink, guest_rx) = sink();
+        let guest = join_session(&token, participant("grace"), guest_sink).expect("join");
+
+        assert_eq!(
+            next(&guest_rx),
+            ServerFrame::PeerJoin {
+                peer: participant("ada")
+            }
+        );
+        assert_eq!(
+            next(&host_rx),
+            ServerFrame::PeerJoin {
+                peer: participant("grace")
+            }
+        );
+        let model = b"aggregate Order { invariant total_is_positive: total > 0 }".to_vec();
+        hosted.send_update(model.clone());
+        assert_eq!(
+            next(&guest_rx),
+            ServerFrame::Update {
+                update: model.clone()
+            },
+            "the session works through the tap, so everything below really did cross it"
+        );
+
+        let seen = lock(&tapped).clone();
+        assert!(
+            seen.len() > 100,
+            "the tap recorded the conversation: {} bytes",
+            seen.len()
+        );
+        assert!(
+            !contains(&seen, secret.as_bytes()),
+            "the join token grants edit access to the model — lifting it off the wire must not work"
+        );
+        assert!(
+            !contains(&seen, &model),
+            "the domain model must not be readable by whoever shares the wifi"
+        );
+        assert!(!contains(&seen, b"grace display"), "nor who is in the room");
+        drop(guest);
     }
 
     #[test]
@@ -1911,23 +2228,38 @@ mod tests {
         );
     }
 
-    /// A broker under the attacker's control: it answers the handshake however the test says, then
+    /// A broker under the attacker's control: it answers the admission however the test says, then
     /// pushes whatever follow-up frames it likes. This is the threat model of an invitation link.
+    ///
+    /// Note what encryption does NOT do here, and why the client-side checks these tests pin are
+    /// still load-bearing: this broker mints its own keypair and puts it in the token it hands out,
+    /// so the Noise handshake completes perfectly. Pinning proves you reached *the broker named in
+    /// the token* — it says nothing about whether the person who sent you that token is honest.
     fn hostile_broker(reply: ServerFrame, follow_up: Vec<ServerFrame>) -> (String, JoinHandle<()>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let port = listener.local_addr().expect("addr").port();
+        let keypair = StaticKeypair::generate().expect("keypair");
+        let public_key = keypair.public_hex();
+
         let handle = thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
-                let _: Option<ClientFrame> = read_frame(&mut stream).ok().flatten();
-                let _ = write_frame(&mut stream, &reply);
+                let Ok(transport) = handshake_responder(&mut stream, &keypair) else {
+                    return;
+                };
+                let Ok(read_stream) = stream.try_clone() else {
+                    return;
+                };
+                let (mut reader, mut writer) = split(&transport, read_stream, stream);
+                let _: Option<ClientFrame> = read_frame(&mut reader).ok().flatten();
+                let _ = write_frame(&mut writer, &reply);
                 for frame in &follow_up {
-                    let _ = write_frame(&mut stream, frame);
+                    let _ = write_frame(&mut writer, frame);
                 }
                 thread::sleep(Duration::from_millis(250));
             }
         });
         (
-            format_token("127.0.0.1", port, &"a".repeat(SECRET_HEX_LEN)),
+            format_token("127.0.0.1", port, &"a".repeat(SECRET_HEX_LEN), &public_key),
             handle,
         )
     }
@@ -2001,7 +2333,7 @@ mod tests {
             "whoever opened the session owns the document, even on a relay"
         );
         assert_eq!(
-            parse_token(&creator.info.token).map(|(_, _, s)| s.len()),
+            parse_token(&creator.info.token).map(|(_, _, s, _)| s.len()),
             Some(SECRET_HEX_LEN),
             "the relay minted a real join token: {}",
             creator.info.session_id
