@@ -108,7 +108,7 @@ function selectorsExcept(...excluded) {
 // (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table (now
 // EMPTY: with `unbound-method` enforced, that package is at the full preset with no overrides at all).
 //
-// `require-await` is the LAST entry, and it is not a cheap one — see #1824 for the measurement. Its 490
+// `require-await` is the LAST entry, and it is not a cheap one — see #1827 for the measurement. Its 490
 // findings were classified and essentially none is a forgotten `await`: 322 are `vi.fn(async …)` /
 // `mockImplementation(async …)` doubles, 43 are methods with an explicit `Promise<T>` return type, 113
 // are async callbacks passed where an async signature is expected, and only 4 are `test(…, async () =>`
@@ -117,9 +117,9 @@ function selectorsExcept(...excluded) {
 // rule exists to catch is already covered here by `no-floating-promises` + `no-misused-promises`, both
 // enforced at `error` including in tests (#997). So clearing it means rewriting ~486 deliberate `async`
 // bodies to `Promise.resolve(…)`, which also converts every `throw` in them from a REJECTION into a
-// synchronous throw — a real behaviour change. #1824 decides that trade before this entry moves.
+// synchronous throw — a real behaviour change. #1827 decides that trade before this entry moves.
 const RATCHET_PENDING = {
-  '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files — see #1824
+  '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files — see #1827
 };
 
 export default tseslint.config(
