@@ -1416,7 +1416,7 @@ public class JavaConformanceTests
             "  event Charged { amount: Decimal }\n" +
             "  entity Invoice identified by InvoiceId {\n" +
             "    tax: Int\n" +
-            "    command notify {\n" +
+            "    command raiseCharge {\n" +
             "      emit Charged(amount: tax)\n" +
             "    }\n" +
             "  }\n" +
@@ -1449,7 +1449,7 @@ public class JavaConformanceTests
             "  aggregate Invoicing root Invoice {\n" +
             "    entity Invoice identified by InvoiceId {\n" +
             "      tax: Int\n" +
-            "      command notify {\n" +
+            "      command raiseCharge {\n" +
             "        publish ChargedOut(amount: tax)\n" +
             "      }\n" +
             "    }\n" +

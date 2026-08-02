@@ -268,9 +268,15 @@ public sealed partial class KotlinEmitter
         // it is hoisted into one `__result` binding evaluated once (#1838): Koine's `now` reads the
         // clock, so a second rendering is a second reading, and the instant the event RECORDS would
         // drift from the one the behavior RETURNS.
+        // Widen the result expression toward the command's declared return type (#1511) — an Int-inferred
+        // `result` against a `: Decimal` return would otherwise emit an uncoerced `return this.tax` that
+        // kotlinc rejects. Reuses the same TranslateReconciled decision the factory-ctor-arg (#1732) and
+        // event-payload (below, #1866) call sites already apply.
         ResultClause? resultClause = cmd.Body.OfType<ResultClause>().FirstOrDefault();
         string? resultExpr = resultClause is { } result
-            ? translator.Translate(result.Value, KotlinExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
+            ? cmd.ReturnType is { } returnDecl
+                ? translator.TranslateReconciled(result.Value, KotlinExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name, returnDecl)
+                : translator.Translate(result.Value, KotlinExpressionTranslator.NameMode.Property, cmd.ReturnType?.Name)
             : null;
 
         // The statements are BUILT here and WRITTEN below: the binding has to precede the first
@@ -459,8 +465,11 @@ public sealed partial class KotlinEmitter
                 return KotlinTypeDefault(m.Type);
             }
 
+            // Widen a payload argument toward its event member's declared type (#1511) — an Int-inferred
+            // argument against a Decimal-declared field would otherwise emit an uncoerced value that
+            // kotlinc rejects (#1866).
             var expectedEnum = emit.Index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
-            var rendered = translator.Translate(value, KotlinExpressionTranslator.NameMode.Property, expectedEnum);
+            var rendered = translator.TranslateReconciled(value, KotlinExpressionTranslator.NameMode.Property, expectedEnum, m.Type);
 
             // Substitute the hoisted local only when the WHOLE argument is the result expression; a
             // substring match (a sibling argument sharing a prefix) must NOT be rewritten.
