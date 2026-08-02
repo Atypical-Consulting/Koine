@@ -12,8 +12,9 @@ cross-context references are allowed, where shared types live, which translator 
 emit, and which subscriptions are authorized.
 
 This chapter covers the map block itself, the seven relationship roles, the `shared-kernel` and
-`anti-corruption-layer` sub-blocks, the `integration event` type declaration, and the
-`publishes` / `subscribes` pub/sub seam.
+`anti-corruption-layer` sub-blocks, the `integration event` type declaration, the
+`publishes` / `subscribes` pub/sub seam, and the `publish` command clause that actually produces
+a published event.
 
 ## 17.2 Syntax
 
@@ -413,6 +414,125 @@ public interface IHandleOrderPlaced
 The event type is **fully qualified** with the publisher's namespace; the subscriber never
 re-emits the publisher's record. A publish-only context (one that only `publishes`) gets no
 handler interface.
+
+### 17.7.3 Producing the event: the `publish` clause
+
+`publishes X` declares the contract; it does not, on its own, ever produce one. The verb that
+does is the **`publish` clause** — a command-body statement, a peer of `requires`, `->` and
+`emit`, written in the aggregate **root**'s commands:
+
+```ebnf
+publishClause
+    : 'publish' Identifier ( '(' emitArgList? ')' )?
+    ;
+```
+
+The payload grammar is `emit`'s, so the same `field: expression` pairs apply, evaluated in the
+same scope and at the same point in the body:
+
+```koine
+command place {
+  requires status == Draft   "only a draft order can be placed"
+  requires !lines.isEmpty    "cannot place an empty order"
+  status   -> Placed
+  placedAt -> now
+  emit OrderPlacedInternally(orderId: id, lineCount: lines.count)
+  publish OrderPlaced(orderId: id, customer: customer, fulfillment: fulfillment,
+                      total: total.amount, placedAt: now)
+}
+```
+
+The two verbs in that body are deliberate, not redundant — they are the *only* place the model
+draws the internal/external line:
+
+| | `emit E(…)` | `publish X(…)` |
+| --- | --- | --- |
+| Names | a domain `event` of this aggregate | an `integration event` of this context |
+| Audience | in-process, inside the boundary | other bounded contexts |
+| Payload | may carry your value objects | primitive only ([§17.3.4](#1734-integration-event-field-rules)) |
+| Recorded on | `DomainEvents` | `IntegrationEvents` |
+| Delivered | dispatched in-process **after** the commit | persisted to the outbox **before** it |
+
+The payload must be **complete**: every field the integration event declares needs a binding, and
+each is type-checked against it — the same `EmitPayloadMismatch` (KOI0602) that guards `emit`
+reports a missing, unknown, duplicated or ill-typed field. A `placedAt: Instant` field will not
+accept an `Instant?` member, which is why the example binds the built-in `now` rather than the
+just-assigned optional `placedAt`.
+
+Three diagnostics are specific to the clause:
+
+| Statement | Requirement | Diagnostic if violated |
+| --- | --- | --- |
+| `publish X(…)` | `X` is an integration event of the **enclosing** context | `PublishUnknownIntegrationEvent` (KOI1420) |
+| `publish X(…)` | That context also declares `publishes X` | `PublishNotDeclared` (KOI1421) |
+| `publish X(…)` | The command belongs to the aggregate **root** | `PublishOutsideRoot` (KOI1422) |
+
+:::caution
+`publishes X` stays **required**. A producer does not auto-declare its own published language:
+`publishes` is what the subscribers, the context map, the AsyncAPI operations and the docs graph
+read, so a `publish X(…)` in a context that never declared `publishes X` is KOI1421, not an
+implicit declaration. Only the first name diagnostic that applies is reported — an unresolvable
+name gets KOI1420 and the payload is not checked further.
+:::
+
+:::note
+A non-root entity may still declare and `emit` its own domain events; only leaving the context is
+reserved to the root. The rationale — why `publish` is a distinct keyword rather than `emit`
+inferring the event kind from its name — is recorded in
+[ADR 0017 — `publish` is a distinct clause from `emit`](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0017-publish-is-a-distinct-clause-from-emit.md).
+:::
+
+### 17.7.4 Translation to C# (the outbox path)
+
+A root that publishes gains a second event collection alongside `DomainEvents`, generated the
+first time any of its commands carries a `publish`:
+
+```csharp
+private readonly List<IIntegrationEvent> _integrationEvents = new();
+public IReadOnlyList<IIntegrationEvent> IntegrationEvents
+    => _integrationEvents;
+public void ClearIntegrationEvents()
+    => _integrationEvents.Clear();
+
+public void Place()
+{
+    // guards, transitions, invariant re-check …
+    _domainEvents.Add(new OrderPlacedInternally(Id, Lines.Count));
+    _integrationEvents.Add(new OrderPlaced(Id, Customer, Fulfillment, Total.Amount, DateTimeOffset.UtcNow));
+}
+```
+
+The domain layer only *records* — it never dispatches, so it stays persistence- and
+transport-ignorant. The rest of the path is picked up by the opt-in layers
+([§15](/Koine/reference/application-cqrs/)). The generated handler relays what the root recorded
+to the unit of work's enqueue seam **before** it commits:
+
+```csharp
+public async Task HandleAsync(OrderPlaceRequest request, CancellationToken ct = default)
+{
+    var aggregate = await _unitOfWork.Orders.GetByIdAsync(request.Id, ct)
+        ?? throw new InvalidOperationException($"Order '{request.Id}' was not found.");
+    aggregate.Place();
+    foreach (var integrationEvent in aggregate.IntegrationEvents)
+    {
+        _unitOfWork.Enqueue(integrationEvent);
+    }
+
+    aggregate.ClearIntegrationEvents();
+    await _unitOfWork.SaveChangesAsync(ct);
+}
+```
+
+`IUnitOfWork` grows its `void Enqueue(IIntegrationEvent integrationEvent)` member for exactly the
+contexts whose roots publish. With `--layers infrastructure`, the EF Core `UnitOfWork` turns each
+enqueued event into an `OutboxMessage` row inside `SaveChangesAsync`, so the outbox is written in
+the **same transaction** as the aggregate change — an event can never be lost on commit — and the
+generated `IntegrationEventDispatcher` drains those rows afterwards.
+
+The other targets follow the same shape: TypeScript, Python, PHP, Rust, Java and Kotlin each
+record the published event into a second, integration-event collection on the root, distinct from
+the domain-event one. The `docs` target renders a **Published — leaves the context** list under
+the command, next to its **Events** list.
 
 ## 17.8 Example: the Shop demo map
 
