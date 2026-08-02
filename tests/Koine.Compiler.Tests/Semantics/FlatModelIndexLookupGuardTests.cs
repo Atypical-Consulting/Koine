@@ -17,23 +17,66 @@ namespace Koine.Compiler.Tests;
 /// </para>
 /// <para>
 /// <b>What this test catches:</b> a Roslyn syntax parse (not a line-based text scan) of every
-/// <c>.cs</c> file under <c>src/</c> finds every invocation of a method named <c>Classify</c> with
-/// exactly 1 argument, or <c>TryGetDecl</c> with exactly 2 arguments — the flat overloads'
-/// unambiguous arity (their context-aware siblings take one more argument). This works regardless of
-/// formatting, line-wrapping, or how the argument expression is written, because it inspects the
-/// parsed syntax tree, not the source text. Method-name + arity is enough to identify these two
-/// specific overloads without full semantic binding <i>in this codebase specifically</i> — verified by
-/// auditing every existing call site: no other type exposes a 1-arg <c>Classify</c> or a 2-arg
-/// <c>TryGetDecl</c> with an <c>out</c> parameter (<c>BranchReconciliation.Classify</c> is the one
-/// unrelated same-named method in the tree, and it always takes 2 args, so it can never collide with
-/// the 1-arg flat bucket).
+/// <c>.cs</c> file under <c>src/</c> finds every invocation of one of the SIX flat seams below, keyed
+/// by method name + argument count — the flat overloads' unambiguous arity (each context-aware sibling
+/// takes one more argument). This works regardless of formatting, line-wrapping, or how the argument
+/// expression is written, because it inspects the parsed syntax tree, not the source text.
+/// </para>
+/// <para>
+/// <b>The scanned seams, and why exactly these six (#1897).</b> The scan originally covered only
+/// <c>Classify</c>/<c>TryGetDecl</c>, which under-reported: #1870 found two LSP sites that routed
+/// through <c>IsEnumType(receiver)</c> <i>as well as</i> the flagged <c>TryGetDecl</c>, so fixing only
+/// the flagged half would have left both sites order-dependent behind a GREEN guard. #1897 therefore
+/// re-derived the seam set from the source rather than adding the two names by hand: every member of
+/// <c>ModelIndex</c> that reads the <c>_byName</c> dictionary, plus every thin wrapper over one of
+/// those. That enumeration is exhaustive and mechanical — <c>_byName</c> is read at exactly six places
+/// in <c>ModelIndex.cs</c> — and it yields:
+/// <list type="table">
+///   <item><term><c>Classify(string)</c> — 1 arg</term>
+///     <description>reads <c>_byName</c>; sibling <c>Classify(string?, string)</c>.</description></item>
+///   <item><term><c>TryGetDecl(string, out TypeDecl)</c> — 2 args</term>
+///     <description>reads <c>_byName</c>; sibling <c>TryGetDecl(string?, string, out TypeDecl)</c>.</description></item>
+///   <item><term><c>TryGetMemberType(string, string, out TypeRef)</c> — 3 args</term>
+///     <description>reads <c>_byName</c>; sibling <c>TryGetMemberType(string?, string, string, out TypeRef)</c>.</description></item>
+///   <item><term><c>MemberNames(string)</c> — 1 arg</term>
+///     <description>reads <c>_byName</c>; has NO context-aware sibling, so every call is flat by
+///     construction.</description></item>
+///   <item><term><c>IsEnumType(string)</c> — 1 arg</term>
+///     <description>thin wrapper: <c>Classify(name) == TypeKind.Enum</c>. No sibling — a context-aware
+///     caller must spell out <c>Classify(context, name) == TypeKind.Enum</c>.</description></item>
+///   <item><term><c>IsKnownType(string)</c> — 1 arg</term>
+///     <description>thin wrapper: <c>Classify(name) != TypeKind.Unknown</c>; sibling
+///     <c>IsKnownType(string?, string)</c>.</description></item>
+/// </list>
+/// The two remaining <c>_byName</c> readers are deliberately NOT scanned because they are provably
+/// order-independent rather than merely unaudited: <c>AllTypes()</c> iterates <c>_byName.Values</c>
+/// only as an additive second pass over a <c>seen</c> set (it can only ever ADD visibility, never
+/// shadow), and <c>CandidateTypeNames</c> unions <c>_byName.Keys</c> into a name list where a name
+/// shadowed in the dictionary is still present in the union. Neither can return a different answer
+/// under a different <c>.koi</c> declaration order. <c>ModelIndex</c>'s other last-write-wins map,
+/// <c>_enumMemberToType</c> (and its <c>EnumsDeclaring</c> reader), is a distinct seam tracked by
+/// #1886 and #1739, not part of the <c>_byName</c> family this guard polices.
+/// </para>
+/// <para>
+/// Method-name + arity is enough to identify these six specific overloads without full semantic
+/// binding <i>in this codebase specifically</i> — re-verified for #1897 by grepping every declaration
+/// of each name in <c>src/</c>, <c>tests/</c> and <c>tooling/</c>: <c>IsEnumType</c>,
+/// <c>TryGetMemberType</c> and the method <c>MemberNames</c> are declared ONLY on <c>ModelIndex</c>,
+/// and <c>IsKnownType</c>'s only other declaration is its own context-aware 2-arg sibling.
+/// (<c>EnumDecl.MemberNames</c> shares the name but is a PROPERTY, so it never produces invocation
+/// syntax — <c>decl.MemberNames.Contains(x)</c> parses with <c>Contains</c>, not <c>MemberNames</c>, as
+/// the invoked name.) <c>BranchReconciliation.Classify</c> is the one unrelated same-named method in
+/// the tree, and it always takes 2 args, so it can never collide with the 1-arg flat bucket.
 /// </para>
 /// <para>
 /// <b>What this test does NOT catch:</b> a caller that reaches the flat behavior another way — a new
-/// helper method on a THIRD type that happens to also be named <c>Classify</c>/<c>TryGetDecl</c> with
-/// the same arity as the flat overloads (would show up as a spurious new site here — a false positive
-/// needing an allowlist note, not a false negative); or a caller that stores <c>ModelIndex.Classify</c>
+/// helper method on a THIRD type that happens to also carry one of the six scanned names with the same
+/// arity as the flat overload (would show up as a spurious new site here — a false positive needing an
+/// allowlist note, not a false negative); or a caller that stores <c>ModelIndex.Classify</c>
 /// as a delegate/method-group and invokes it indirectly (no invocation syntax to see with that shape).
+/// A NEW flat member added to <c>ModelIndex</c> tomorrow is also invisible until its name is added
+/// here — the enumeration above is a snapshot of the type, re-derive it when <c>ModelIndex</c> grows a
+/// <c>_byName</c> reader (the principled fix, scanning by semantic binding, is #1863's Option C).
 /// It also does not fix anything — an allowlisted site with an available context it doesn't use stays a
 /// latent bug until someone fixes it. #1870 worked that backlog down to the point where no site is left
 /// holding a bounded context in a LOCAL of the same method and ignoring it; what remains are shared or
@@ -91,7 +134,11 @@ public class FlatModelIndexLookupGuardTests
 
             foreach (InvocationExpressionSyntax invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
-                if (invocation.Expression is not MemberAccessExpressionSyntax { Name.Identifier.Text: "Classify" or "TryGetDecl" } member)
+                if (invocation.Expression is not MemberAccessExpressionSyntax
+                    {
+                        Name.Identifier.Text: "Classify" or "TryGetDecl" or "IsEnumType" or "IsKnownType"
+                            or "TryGetMemberType" or "MemberNames"
+                    } member)
                 {
                     continue;
                 }
@@ -102,6 +149,10 @@ public class FlatModelIndexLookupGuardTests
                 {
                     "Classify" => argCount == 1,
                     "TryGetDecl" => argCount == 2,
+                    "IsEnumType" => argCount == 1,
+                    "IsKnownType" => argCount == 1,
+                    "TryGetMemberType" => argCount == 3,
+                    "MemberNames" => argCount == 1,
                     _ => false
                 };
 
@@ -246,13 +297,19 @@ public class FlatModelIndexLookupGuardTests
         List<FlatCallSite> unlisted = actual.Where(s => !allowed.Contains((s.RelativePath, s.Line, s.Method))).ToList();
 
         unlisted.ShouldBeEmpty(
-            "New call site(s) to ModelIndex's flat, last-declaration-wins overload — Classify(string) " +
-            "or TryGetDecl(string, out TypeDecl). R13.2 lets two bounded contexts legally declare a " +
-            "type with the same simple name, so a context-blind lookup silently depends on .koi source " +
-            "order (the defect family behind #1632 through #1863). If the caller has a bounded-context " +
-            "value in scope, route through ModelIndex.TryGetDeclIn(context, name, out decl) — or the " +
-            "Classify(context, name) / TryGetDecl(context, name, out decl) overloads — instead. If it " +
-            "is genuinely context-less, add it to this test's Allowlist with a real one-line reason.\n\n" +
+            "New call site(s) to one of ModelIndex's flat, last-declaration-wins seams — Classify(string), " +
+            "TryGetDecl(string, out TypeDecl), TryGetMemberType(string, string, out TypeRef), " +
+            "MemberNames(string), IsEnumType(string) or IsKnownType(string). R13.2 lets two bounded " +
+            "contexts legally declare a type with the same simple name, so a context-blind lookup " +
+            "silently depends on .koi source order (the defect family behind #1632 through #1897). If " +
+            "the caller has a bounded-context value in scope, route through " +
+            "ModelIndex.TryGetDeclIn(context, name, out decl) — or the context-aware sibling overload: " +
+            "Classify(context, name), TryGetDecl(context, name, out decl), " +
+            "TryGetMemberType(context, name, member, out type), IsKnownType(context, name), and for " +
+            "IsEnumType (which has no sibling) spell out Classify(context, name) == TypeKind.Enum. " +
+            "MemberNames(string) has no sibling either — resolve the decl with TryGetDeclIn(context, ...) " +
+            "first and read its members off that. If the site is genuinely context-less, add it to this " +
+            "test's Allowlist with a real one-line reason.\n\n" +
             string.Join("\n", unlisted));
     }
 
