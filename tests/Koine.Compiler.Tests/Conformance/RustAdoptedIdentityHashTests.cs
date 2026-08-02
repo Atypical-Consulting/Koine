@@ -53,6 +53,22 @@ public class RustAdoptedIdentityHashTests
         }
         """;
 
+    // Two levels of nesting: the Hash-deriving closure must propagate past ProductCode to Note too,
+    // not just one hop from the identity itself.
+    private const string TwoLevelNestedHashableIdentityModel = """
+        context Ordering {
+          value Note { text: String }
+          value ProductCode { note: Note }
+          value OrderId { code: ProductCode }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              shipped: Bool = false
+            }
+          }
+        }
+        """;
+
     /// <summary>
     /// Task 3 — Green: a declared identity whose nested value object is itself built only from
     /// hashable primitives must emit Rust that actually compiles (a real <c>cargo check</c>), not
@@ -70,6 +86,29 @@ public class RustAdoptedIdentityHashTests
         var noteStruct = result.Files.Single(f => f.RelativePath == "src/ordering.rs").Contents;
         noteStruct.ShouldContain("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub struct Note {");
         noteStruct.ShouldContain("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub struct OrderId {");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Same as <see cref="Nested_hashable_value_object_identity_emits_and_compiles"/> but two hops
+    /// deep, so the fix is proven against <see cref="RustEmitter"/>'s Hash-deriving closure actually
+    /// propagating past an intermediate value object (<c>ProductCode</c>) rather than stopping after
+    /// one hop from the identity itself.
+    /// </summary>
+    [Fact]
+    public void Two_level_nested_hashable_value_object_identity_emits_and_compiles()
+    {
+        var result = new KoineCompiler().Compile(TwoLevelNestedHashableIdentityModel, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var contents = result.Files.Single(f => f.RelativePath == "src/ordering.rs").Contents;
+        contents.ShouldContain("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub struct Note {");
+        contents.ShouldContain("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub struct ProductCode {");
+        contents.ShouldContain("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub struct OrderId {");
 
         var r = TestSupport.CompileRust(result.Files);
         TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
