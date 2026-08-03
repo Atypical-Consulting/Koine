@@ -228,7 +228,7 @@ Create `tooling/koine-studio/src-tauri/Entitlements.plist`:
 <plist version="1.0">
 <dict>
     <!-- The bundled `koine` sidecar is a self-contained .NET application. Tauri signs it
-         with `--options runtime` (bundle.macOS.hardenedRuntime defaults to true, and
+         under the hardened runtime (bundle.macOS.hardenedRuntime defaults to true, and
          hardened runtime is mandatory for notarization). Without this entitlement CoreCLR
          cannot allocate executable memory for its JIT, and the process is SIGKILLed with
          "Failed to create CoreCLR, HRESULT: 0x80070008" — while the code signature itself
@@ -243,6 +243,14 @@ Create `tooling/koine-studio/src-tauri/Entitlements.plist`:
 </dict>
 </plist>
 ```
+
+⛔ **Never write a double hyphen inside that comment.** XML forbids `--` within a comment, and
+`codesign`'s entitlements parser enforces it — an earlier revision of this plan wrote
+``with `--options runtime` `` there and the build died with
+`Failed to parse entitlements: AMFIUnserializeXML: syntax error near line 6`, after signing had
+already begun. The failure names a line number inside the comment and says nothing about
+hyphens, so it reads like a plist-structure problem. Check any edit to this file with
+`xmllint --noout Entitlements.plist` before building.
 
 - [ ] **Step 2: Wire it into the bundle config**
 
