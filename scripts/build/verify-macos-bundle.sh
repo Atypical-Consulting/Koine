@@ -51,12 +51,17 @@ else
   fi
 
   # 4. The sidecar must still RUN after signing. This is the hardened-runtime trap.
-  if out=$("$sidecar" --version 2>&1); then
+  # Run the sidecar with a bounded wait. `timeout` is not on stock macOS, and this
+  # gate runs in CI where an unbounded hang would burn the whole job budget.
+  sidecar_timeout="${KOINE_SIDECAR_TIMEOUT_SECS:-60}"
+  if out=$(perl -e 'alarm shift; exec @ARGV or exit 127' "$sidecar_timeout" "$sidecar" --version 2>&1); then
     note "sidecar executes after signing (--version -> ${out%%$'\n'*})"
   else
     rc=$?
-    if [ "$rc" -gt 128 ]; then
-      bad "sidecar died from signal $((rc-128)) after signing (no output captured — check quarantine/Gatekeeper first, then entitlements)"
+    if [ "$rc" -eq 142 ]; then
+      bad "sidecar did not return within ${sidecar_timeout}s (set KOINE_SIDECAR_TIMEOUT_SECS to override)"
+    elif [ "$rc" -gt 128 ]; then
+      bad "sidecar died from signal $((rc-128)) after signing (no output captured)"
     else
       bad "sidecar failed to execute after signing (exit $rc): ${out:-<no output>}"
       case "$out" in
