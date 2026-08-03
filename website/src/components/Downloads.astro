@@ -28,6 +28,27 @@ function mb(bytes: number): string {
 // uploading — the ~45-minute window described in scripts/build-downloads.mjs.
 const primaryPlatform = platforms.find((p) => p.id === 'macos-arm64') ?? platforms[0] ?? null;
 const primaryAsset = primaryPlatform ? (primaryPlatform.app ?? primaryPlatform.cli) : null;
+
+// Everything the inline script needs, pre-rendered here so it holds no formatting logic of its own
+// — one `mb()` in the whole component, no chance of the button's size label drifting from the
+// table's. Also keeps the inlined payload to three small entries instead of the full manifest,
+// which the markup below already carries.
+const detect = Object.fromEntries(
+  platforms.flatMap((p) => {
+    const asset = p.app ?? p.cli;
+    if (!asset) return [];
+    return [
+      [
+        p.id,
+        {
+          url: asset.url,
+          label: `⬇ Download for ${p.label} · ${p.arch}`,
+          meta: `.${asset.kind} · ${mb(asset.size)}`,
+        },
+      ],
+    ];
+  }),
+);
 ---
 
 <div class="dl">
@@ -49,7 +70,6 @@ const primaryAsset = primaryPlatform ? (primaryPlatform.app ?? primaryPlatform.c
           class="btn btn--primary dl__primary"
           id="dl-primary"
           href={primaryAsset.url}
-          data-default-label={`Download for ${primaryPlatform.label} · ${primaryPlatform.arch}`}
         >
           ⬇ Download for {primaryPlatform.label} · {primaryPlatform.arch}
         </a>
@@ -125,10 +145,9 @@ const primaryAsset = primaryPlatform ? (primaryPlatform.app ?? primaryPlatform.c
     than implying the binary suits every Mac. */}
 {
   hasDownloads && (
-    <script is:inline define:vars={{ platforms }}>
+    <script is:inline define:vars={{ detect }}>
       (() => {
         const btn = document.getElementById('dl-primary');
-        const meta = document.getElementById('dl-primary-meta');
         if (!btn) return;
 
         const ua = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
@@ -139,15 +158,14 @@ const primaryAsset = primaryPlatform ? (primaryPlatform.app ?? primaryPlatform.c
             : /linux|x11|android/i.test(ua)
               ? 'linux-x64'
               : null;
-        if (!id) return;
 
-        const target = platforms.find((p) => p.id === id);
-        const asset = target && (target.app || target.cli);
-        if (!target || !asset) return;
+        const target = id && detect[id];
+        if (!target) return;
 
-        btn.href = asset.url;
-        btn.textContent = `⬇ Download for ${target.label} · ${target.arch}`;
-        if (meta) meta.textContent = `.${asset.kind} · ${(asset.size / 1024 / 1024).toFixed(1)} MB`;
+        btn.href = target.url;
+        btn.textContent = target.label;
+        const meta = document.getElementById('dl-primary-meta');
+        if (meta) meta.textContent = target.meta;
       })();
     </script>
   )
