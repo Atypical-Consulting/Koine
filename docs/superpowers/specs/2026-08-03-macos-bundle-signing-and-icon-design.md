@@ -73,6 +73,24 @@ $ "Koine Studio.app/Contents/MacOS/koine" --version
 0.251.0
 ```
 
+**Hardened runtime kills the .NET sidecar, and the minimal fix is one entitlement.**
+Measured after the initial draft of this design, and it changes the ordering below.
+`bundle.macOS.hardenedRuntime` defaults to **`true`** in Tauri v2 (confirmed against
+`https://schema.tauri.app/config/2`), so any signing configuration inherits it:
+
+| Signing of `Contents/MacOS/koine` | Result |
+|---|---|
+| ad-hoc, no hardened runtime | `0.251.0`, exit 0 |
+| ad-hoc + `--options runtime` | `Failed to create CoreCLR, HRESULT: 0x80070008`, SIGKILL |
+| + `com.apple.security.cs.allow-jit` | `0.251.0`, exit 0 |
+| + `com.apple.security.cs.allow-unsigned-executable-memory` (alone) | `0.251.0`, exit 0 |
+| + `com.apple.security.cs.disable-library-validation` (alone) | still fails |
+
+`allow-jit` alone is sufficient; `disable-library-validation` is neither sufficient nor
+necessary and should not be granted. Note the failure leaves the code signature perfectly
+valid — a signature-only check cannot catch it, so the verification must actually *run* the
+sidecar.
+
 **The app icon is Tauri's default.** All 16 files in `tooling/koine-studio/src-tauri/icons/`
 are stock Tauri assets; `icon.png` was rendered and confirmed to be the double-circle mark.
 Issue #1141 ("Adopt the new Koine hexagon-κ logo across the app, README, and website")
@@ -128,19 +146,29 @@ recoverable Gatekeeper prompt instead of a dead end.
 **Non-goals.** Removing the Gatekeeper prompt entirely (that is #1137); Windows Authenticode;
 Linux packaging.
 
-**Change.** In `.github/workflows/studio-build.yml`, ad-hoc sign the bundle on the macOS leg
-when Developer ID secrets are absent. This is not a temporary shim — it is the permanent
-fallback for forks and PR builds, which will never hold signing secrets.
+**Change.** Set `bundle.macOS.signingIdentity` to `"-"` (Tauri's ad-hoc pseudo-identity) in
+`tauri.conf.json`, **together with** an `Entitlements.plist` granting
+`com.apple.security.cs.allow-jit`. This is not a temporary shim — it is the permanent fallback
+for forks and PR builds, which will never hold signing secrets.
 
-Signing is inside-out: the sidecar `Contents/MacOS/koine` must be sealed before the outer
-bundle. `codesign --deep` does this, but Apple discourages `--deep`, so the explicit
-inside-out form is preferred and will matter more once #1137 lands on the same code path.
+The open question in the first draft of this design — where signing sits relative to DMG
+assembly — is resolved: Tauri v2 supports `"signingIdentity": "-"` natively and signs
+inside-out (sidecar first, then bundle) *before* assembling the DMG, so no post-build
+`codesign` step is needed and Apple's discouraged `--deep` is avoided. The
+`APPLE_SIGNING_IDENTITY` environment variable overrides the config value, which is the seam
+#1137 uses to upgrade ad-hoc to Developer ID without further config change.
 
-Re-signing must happen **before** the `.dmg` is assembled, or the DMG will package the
-unsigned bundle. Where exactly this sits relative to Tauri's bundling step needs to be
-established during implementation — Tauri produces `.app` and `.dmg` in one `tauri build`
-invocation, so this may require either Tauri-native configuration
-(`bundle.macOS.signingIdentity`) or splitting the bundle targets.
+**The entitlements file is a prerequisite of this item, not a #1137 concern.** Because
+`hardenedRuntime` defaults to `true`, setting `signingIdentity` alone would sign the sidecar
+with `--options runtime` and kill it — trading "the app won't open" for "the app opens but
+cannot compile anything", a worse and far less obvious failure. Shipping the entitlement here
+also makes the ad-hoc build a faithful rehearsal of the notarized build, so the only
+difference at #1137 time is the identity itself.
+
+**A verification step must accompany the fix.** This bug shipped a full release because
+nothing built the artifact and inspected it. The check has to assert both that the signature
+is valid *and* that the sidecar still executes, since the hardened-runtime failure leaves the
+signature valid.
 
 **Docs correction** (in the same change):
 
@@ -158,9 +186,16 @@ scripted alternative.
 
 1. `codesign --verify --verbose=2` passes on the built `.app`.
 2. `Contents/_CodeSignature/` exists.
-3. The `.app` extracted from the built `.dmg` also passes (1) and (2).
-4. A quarantined copy reaches the "unidentified developer" prompt, not "damaged", and Open
+3. `Contents/MacOS/koine --version` still prints the version after signing — the check that
+   catches a missing or mis-wired entitlement, which leaves (1) and (2) passing.
+4. The `.app` extracted from the built `.dmg` passes (1) through (3). The original bug was
+   only observable in the shipped DMG, so verifying the intermediate `.app` alone is not
+   sufficient.
+5. A quarantined copy reaches the "unidentified developer" prompt, not "damaged", and Open
    Anyway launches it. This is a manual check on a real machine.
+
+Checks 1-4 belong in CI, not in a runbook. The defect reached users because the release
+pipeline built an artifact and uploaded it without ever inspecting it.
 
 **Assumption to verify, not assert.** That macOS 15+ removed the right-click → Open bypass is
 stated from knowledge, not measured here. Confirm behaviourally before publishing the docs
@@ -205,13 +240,12 @@ been established.
 - **Record the real blocker.** Not "obtain an Apple Developer Program membership" — that
   exists, under Atypical Consulting, team `U27M99ZACQ`. The blocker is creating a **Developer
   ID Application** certificate, which only the team's Account Holder can do.
-- **Add the hardened-runtime risk.** Notarization requires hardened runtime. The sidecar
-  `koine` is a self-contained .NET binary, and .NET's JIT typically needs
-  `com.apple.security.cs.allow-jit`, possibly also
-  `com.apple.security.cs.allow-unsigned-executable-memory`, under hardened runtime. Without
-  the right entitlements the sidecar fails at launch *after* signing and notarization both
-  succeed — a failure mode invisible to CI, which never runs the app. This must be validated
-  with a real local signed build before the CI wiring is trusted.
+- **Record that hardened runtime is already solved.** Notarization requires hardened runtime,
+  and the self-contained .NET sidecar dies under it with `Failed to create CoreCLR` unless
+  granted `com.apple.security.cs.allow-jit`. That entitlement ships with Item A and is
+  exercised on every ad-hoc build, so notarization inherits a working configuration instead of
+  discovering this late. Record that `com.apple.security.cs.disable-library-validation` was
+  measured and is *not* required, so nobody adds it defensively.
 - **Prefer App Store Connect API key credentials.** `APPLE_API_KEY` / `APPLE_API_ISSUER` /
   `APPLE_API_KEY_PATH` over `APPLE_ID` + `APPLE_PASSWORD`: app-specific passwords expire and
   rotate poorly in CI.
