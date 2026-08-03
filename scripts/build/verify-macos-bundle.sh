@@ -68,7 +68,12 @@ else
   #     spawned — rather than leaving orphans running past the deadline.
   # A separate flag file (existence, not content) distinguishes "the watchdog
   # killed it for running too long" from a same-exit-code coincidence like the
-  # process signalling itself.
+  # process signalling itself. The flag alone is NOT authoritative, though: the
+  # watchdog's `kill -0 "$run_pid"` liveness probe can observe a zombie — the
+  # sidecar has already exited but this script's own `wait` below hasn't reaped
+  # it yet — and wrongly conclude it's still running, setting the flag on a run
+  # that in fact succeeded cleanly. So the reaped exit status is authoritative:
+  # a clean `rc -eq 0` always wins over the flag, even if the flag got set.
   sidecar_timeout="${KOINE_SIDECAR_TIMEOUT_SECS:-60}"
   sidecar_out="$(mktemp "${TMPDIR:-/tmp}/koine-verify-sidecar.XXXXXX")"
   sidecar_timed_out="$(mktemp "${TMPDIR:-/tmp}/koine-verify-timeout.XXXXXX")"
@@ -98,12 +103,16 @@ else
   rc=$?
   out=$(cat "$sidecar_out" 2>/dev/null)
 
-  if [ -e "$sidecar_timed_out" ]; then
+  if [ -e "$sidecar_timed_out" ] && [ "$rc" -ne 0 ]; then
     bad "sidecar did not return within ${sidecar_timeout}s (set KOINE_SIDECAR_TIMEOUT_SECS to override)"
   elif [ "$rc" -eq 0 ]; then
     note "sidecar executes after signing (--version -> ${out%%$'\n'*})"
   elif [ "$rc" -gt 128 ]; then
-    bad "sidecar died from signal $((rc-128)) after signing (no output captured)"
+    if [ -n "$out" ]; then
+      bad "sidecar died from signal $((rc-128)) after signing (output before death: ${out%%$'\n'*})"
+    else
+      bad "sidecar died from signal $((rc-128)) after signing (no output captured)"
+    fi
   else
     bad "sidecar failed to execute after signing (exit $rc): ${out:-<no output>}"
     case "$out" in
