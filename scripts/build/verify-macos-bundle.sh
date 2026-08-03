@@ -56,12 +56,14 @@ else
   else
     rc=$?
     if [ "$rc" -gt 128 ]; then
-      bad "sidecar died from signal $((rc-128)) after signing (no output captured)"
+      bad "sidecar died from signal $((rc-128)) after signing (no output captured — check quarantine/Gatekeeper first, then entitlements)"
     else
       bad "sidecar failed to execute after signing (exit $rc): ${out:-<no output>}"
+      case "$out" in
+        *"Failed to create CoreCLR"*)
+          bad "  Entitlements.plist is missing or not wired into bundle.macOS.entitlements — see Task 2" ;;
+      esac
     fi
-    bad "  (signal death here usually means Entitlements.plist is missing or"
-    bad "   not wired into bundle.macOS.entitlements — see Task 2)"
   fi
 fi
 
