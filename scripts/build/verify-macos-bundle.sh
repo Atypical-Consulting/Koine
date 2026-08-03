@@ -74,6 +74,15 @@ else
   # it yet — and wrongly conclude it's still running, setting the flag on a run
   # that in fact succeeded cleanly. So the reaped exit status is authoritative:
   # a clean `rc -eq 0` always wins over the flag, even if the flag got set.
+  #
+  # That precedence rests on an assumption OUTSIDE this file: `Koine.Cli --version`
+  # installs no SIGTERM handler, so a killed sidecar cannot exit 0 — under the
+  # watchdog's TERM it dies with 143. If Koine.Cli ever gains graceful shutdown, a
+  # timed-out run could exit 0 and this branch would report PASS on a hang: the one
+  # direction a release gate must never fail in. Revisit here if that changes.
+  # (Reconciling on wall-clock instead is NOT the fix — the zombie misreport happens
+  # when elapsed is already ~= the bound, so `elapsed >= bound` is true exactly in
+  # the case it is meant to exclude.)
   sidecar_timeout="${KOINE_SIDECAR_TIMEOUT_SECS:-60}"
   sidecar_out="$(mktemp "${TMPDIR:-/tmp}/koine-verify-sidecar.XXXXXX")"
   sidecar_timed_out="$(mktemp "${TMPDIR:-/tmp}/koine-verify-timeout.XXXXXX")"
