@@ -51,25 +51,68 @@ else
   fi
 
   # 4. The sidecar must still RUN after signing. This is the hardened-runtime trap.
-  # Run the sidecar with a bounded wait. `timeout` is not on stock macOS, and this
-  # gate runs in CI where an unbounded hang would burn the whole job budget.
+  #
+  # Bound the wait to real wall-clock time. `timeout`/`gtimeout` are not on stock
+  # macOS, and a naive `perl -e 'alarm ...; exec ...'` wrapped in `out=$(...)` does
+  # NOT bound wall-clock time: command substitution reads a pipe until every
+  # process holding its write end closes it, and an orphaned grandchild the
+  # sidecar spawned (it is a self-contained .NET app; assume it may fork children)
+  # inherits that pipe and keeps the substitution blocked long after the alarm
+  # has killed only the direct child. Two changes fix that:
+  #   - capture output via a temp file instead of `$(...)` — a file has no such
+  #     "wait for every writer to close" behaviour, so waiting on the direct
+  #     child's exit is enough;
+  #   - run the sidecar in its own process group (bash job control, `set -m`,
+  #     inside a subshell so it doesn't affect the rest of this script) so the
+  #     watchdog can SIGTERM/SIGKILL the *group* — sidecar plus anything it
+  #     spawned — rather than leaving orphans running past the deadline.
+  # A separate flag file (existence, not content) distinguishes "the watchdog
+  # killed it for running too long" from a same-exit-code coincidence like the
+  # process signalling itself.
   sidecar_timeout="${KOINE_SIDECAR_TIMEOUT_SECS:-60}"
-  if out=$(perl -e 'alarm shift; exec @ARGV or exit 127' "$sidecar_timeout" "$sidecar" --version 2>&1); then
+  sidecar_out="$(mktemp "${TMPDIR:-/tmp}/koine-verify-sidecar.XXXXXX")"
+  sidecar_timed_out="$(mktemp "${TMPDIR:-/tmp}/koine-verify-timeout.XXXXXX")"
+  rm -f "$sidecar_timed_out"  # existence (not content) is the timeout signal
+  trap 'rm -f "$sidecar_out" "$sidecar_timed_out"' EXIT
+
+  (
+    set -m
+    "$sidecar" --version >"$sidecar_out" 2>&1 &
+    run_pid=$!
+    (
+      sleep "$sidecar_timeout"
+      if kill -0 "$run_pid" 2>/dev/null; then
+        : >"$sidecar_timed_out"
+        kill -TERM -- -"$run_pid" 2>/dev/null
+        sleep 1
+        kill -KILL -- -"$run_pid" 2>/dev/null
+      fi
+    ) &
+    watchdog_pid=$!
+    wait "$run_pid"
+    run_rc=$?
+    kill -- -"$watchdog_pid" 2>/dev/null   # stop the watchdog's own group (incl. its sleep)
+    wait "$watchdog_pid" 2>/dev/null
+    exit "$run_rc"
+  ) 2>/dev/null   # swallow bash's job-control "Killed: N" notice; real diagnostics are in $sidecar_out
+  rc=$?
+  out=$(cat "$sidecar_out" 2>/dev/null)
+
+  if [ -e "$sidecar_timed_out" ]; then
+    bad "sidecar did not return within ${sidecar_timeout}s (set KOINE_SIDECAR_TIMEOUT_SECS to override)"
+  elif [ "$rc" -eq 0 ]; then
     note "sidecar executes after signing (--version -> ${out%%$'\n'*})"
+  elif [ "$rc" -gt 128 ]; then
+    bad "sidecar died from signal $((rc-128)) after signing (no output captured)"
   else
-    rc=$?
-    if [ "$rc" -eq 142 ]; then
-      bad "sidecar did not return within ${sidecar_timeout}s (set KOINE_SIDECAR_TIMEOUT_SECS to override)"
-    elif [ "$rc" -gt 128 ]; then
-      bad "sidecar died from signal $((rc-128)) after signing (no output captured)"
-    else
-      bad "sidecar failed to execute after signing (exit $rc): ${out:-<no output>}"
-      case "$out" in
-        *"Failed to create CoreCLR"*)
-          bad "  Entitlements.plist is missing or not wired into bundle.macOS.entitlements — see Task 2" ;;
-      esac
-    fi
+    bad "sidecar failed to execute after signing (exit $rc): ${out:-<no output>}"
+    case "$out" in
+      *"Failed to create CoreCLR"*)
+        bad "  Entitlements.plist is missing or not wired into bundle.macOS.entitlements — see Task 2" ;;
+    esac
   fi
+  rm -f "$sidecar_out" "$sidecar_timed_out"
+  trap - EXIT
 fi
 
 if [ "$fail" -ne 0 ]; then
