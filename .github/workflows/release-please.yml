@@ -222,8 +222,10 @@ jobs:
         if: ${{ needs.release-please.outputs.release_created == 'true' && env.NUGET_USER != '' }}
         run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
-  # Studio desktop installers (.dmg/.msi or NSIS .exe/.AppImage/.deb), UNSIGNED, attached to the
-  # release. Reuses the same build as CI via the reusable workflow; publish only on a real release.
+  # Studio desktop installers (.dmg/.msi or NSIS .exe/.AppImage/.deb) attached to the release.
+  # macOS is ad-hoc signed (VALID but not TRUSTED until #1137 provisions a Developer ID);
+  # Windows/Linux remain unsigned. See the signing comment in studio-build.yml.
+  # Reuses the same build as CI via the reusable workflow; publish only on a real release.
   studio-desktop:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}

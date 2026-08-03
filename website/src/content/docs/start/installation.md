@@ -15,9 +15,22 @@ a `.dmg`, an `.exe`/`.msi`, and an `.AppImage`/`.deb`/`.rpm`. Grab them from the
 section on the [home page](/Koine/). Nothing else is required — the binaries carry their own runtime.
 
 :::caution
-The Studio desktop installers are **unsigned**. On macOS, right-click the app ▸ **Open** the first
-time (or run `xattr -d com.apple.quarantine "/Applications/Koine Studio.app"`); Windows SmartScreen
-needs *More info ▸ Run anyway*. Code-signing is tracked in
+**macOS** — first open the `.dmg` and drag **Koine Studio** to Applications, then launch it from
+there. Everything below acts on the copy in `/Applications`; approving or de-quarantining the copy
+still inside the mounted disk image does not carry over to the one you keep.
+
+Koine Studio is signed, but not with a certificate Apple recognises, so the first launch is blocked
+with *"Apple could not verify … is free of malware that may harm your Mac or compromise your
+privacy"*. Click **Done**, then go to **System Settings ▸ Privacy & Security**, scroll to *Security*,
+and click **Open Anyway**. The app opens normally from then on.
+
+Right-clicking the app ▸ **Open** produces the same block on macOS 15 and later — Apple removed that
+bypass, so it is no longer a workaround. If you prefer the terminal, `xattr -dr
+com.apple.quarantine "/Applications/Koine Studio.app"` clears the download flag outright.
+
+**Windows** — the installers are unsigned; SmartScreen needs *More info ▸ Run anyway*.
+
+Developer ID signing and notarization (macOS) and Authenticode signing (Windows) are tracked in
 [issue #1137](https://github.com/Atypical-Consulting/Koine/issues/1137).
 :::
 

@@ -291,11 +291,30 @@ jobs:
       # --- Release-only: build the distributable installers and upload them. ---
       # `tauri build` runs beforeBuildCommand (npm run build) then a cargo release build + bundles
       # for this OS (tauri.conf.json bundle.targets = "all"). The `-- ` forwards `build` to the
-      # local tauri CLI. Installers are UNSIGNED (no signing secrets configured).
+      # local tauri CLI.
+      # macOS bundles are ad-hoc signed (tauri.conf.json bundle.macOS.signingIdentity "-"),
+      # which makes the signature VALID but not TRUSTED — users still see a Gatekeeper
+      # prompt until #1137 provisions a Developer ID. Windows/Linux remain unsigned.
       - name: Build Tauri installers
         if: ${{ inputs.bundle }}
         working-directory: tooling/koine-studio
         run: npm run tauri -- build
+
+      # The 0.251.0 macOS artifact shipped with a declared-but-absent bundle seal and
+      # nothing noticed, because nothing looked. This looks. It also runs the sidecar,
+      # which is the only way to catch a hardened-runtime entitlements regression — that
+      # failure leaves the signature valid.
+      - name: Verify macOS bundle is shippable
+        if: ${{ inputs.bundle && runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="tooling/koine-studio/src-tauri/target/release/bundle/macos/Koine Studio.app"
+          if [ ! -d "$app" ]; then
+            echo "::error::Expected bundle not found at $app" >&2
+            exit 1
+          fi
+          scripts/build/verify-macos-bundle.sh "$app"
 
       - name: Collect installers
         if: ${{ inputs.bundle }}

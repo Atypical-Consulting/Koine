@@ -105,10 +105,16 @@ const detect = Object.fromEntries(
             </div>
             {p.id === 'macos-arm64' && (
               <p class="dl__note">
-                <strong>Apple Silicon only</strong> — there is no Intel-Mac build. The installer is
-                unsigned, so on first launch right-click the app ▸ <strong>Open</strong> (or run
-                <code>xattr -d com.apple.quarantine "/Applications/Koine Studio.app"</code>).
-                Signing is tracked in
+                <strong>Apple Silicon only</strong> — there is no Intel-Mac build. Drag the app to
+                Applications and launch it from there; the steps below act on that copy, not the one
+                in the mounted disk image. Koine Studio is signed, but not with a certificate Apple
+                recognises, so the first launch is blocked with “Apple could not verify … is free of
+                malware”. Click <strong>Done</strong>, then open{' '}
+                <strong>System Settings ▸ Privacy &amp; Security</strong> and click{' '}
+                <strong>Open Anyway</strong> (or run{' '}
+                <code>xattr -dr com.apple.quarantine "/Applications/Koine Studio.app"</code>).
+                Right-clicking the app ▸ Open shows the same block on macOS 15 and later — it is no
+                longer a bypass. Developer ID signing and notarization are tracked in{' '}
                 <a href="https://github.com/Atypical-Consulting/Koine/issues/1137">#1137</a>.
               </p>
             )}
