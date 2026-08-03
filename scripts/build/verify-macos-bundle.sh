@@ -54,8 +54,13 @@ else
   if out=$("$sidecar" --version 2>&1); then
     note "sidecar executes after signing (--version -> ${out%%$'\n'*})"
   else
-    bad "sidecar failed to execute after signing: ${out%%$'\n'*}"
-    bad "  (if this says 'Failed to create CoreCLR', Entitlements.plist is missing or"
+    rc=$?
+    if [ "$rc" -gt 128 ]; then
+      bad "sidecar died from signal $((rc-128)) after signing (no output captured)"
+    else
+      bad "sidecar failed to execute after signing (exit $rc): ${out:-<no output>}"
+    fi
+    bad "  (signal death here usually means Entitlements.plist is missing or"
     bad "   not wired into bundle.macOS.entitlements — see Task 2)"
   fi
 fi
