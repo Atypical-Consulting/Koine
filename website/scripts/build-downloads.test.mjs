@@ -10,7 +10,7 @@
  * Run:  npx vitest run scripts/build-downloads.test.mjs   (or just: npm test)
  */
 import { describe, test, expect } from 'vitest';
-import { classifyAsset, buildManifest } from './build-downloads.mjs';
+import { classifyAsset, buildManifest, fallbackManifest } from './build-downloads.mjs';
 
 // The REAL v0.251.0 asset list. All three of Koine's stamping conventions appear here — the CLI's
 // tag form (`koine-v0.251.0-…`), the Tauri bundler's version form (`Koine.Studio_0.251.0_…`), and
@@ -77,5 +77,15 @@ describe('buildManifest', () => {
     const m = buildManifest({ tag: 'v0.251.0', assets: [] });
     expect(m.platforms).toEqual([]);
     expect(m.releaseUrl).toContain('v0.251.0');
+  });
+});
+
+describe('fallbackManifest — the no-network path', () => {
+  test('is never marked verified and offers no asset URLs', () => {
+    const m = fallbackManifest('0.251.0');
+    expect(m.verified).toBe(false);
+    expect(m.platforms).toEqual([]);
+    expect(m.version).toBe('0.251.0');
+    expect(m.releaseUrl).toBe('https://github.com/Atypical-Consulting/Koine/releases/latest');
   });
 });
