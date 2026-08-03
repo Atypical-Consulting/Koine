@@ -65,15 +65,27 @@ Koine Studio.app: satisfies its Designated Requirement
 Developer ID. The change that matters is invalid → valid, which moves the user from an
 unrecoverable error to a recoverable prompt.
 
-⛔ **Signing must be inside-out; `--deep` destroys the sidecar.** An earlier draft of this
-document used `codesign --force --deep --sign -`, and executing it proved that wrong.
-`--deep` re-signs nested binaries, replacing the sidecar's `Koine.Cli` identifier with a
-generated `koine-<hash>`, after which the .NET single-file binary produces no output and does
-not terminate (>60 s). The bundle seal, the bundle signature and the sidecar signature all still
-verify — **only actually running the sidecar detects it.** Leave the sidecar's own signature
-intact and sign the bundle alone. This independently corroborates the choice of Tauri-native
-signing over a post-build `codesign` step: `tauri-bundler` signs external binaries individually
-(`sign_macos_binary()`) and never uses `--deep`, which Apple deprecates.
+**Prefer inside-out signing over `--deep`.** `codesign --force --deep --sign -` re-signs nested
+binaries, replacing the sidecar's `Koine.Cli` identifier with a generated `koine-<hash>`
+(reproducible). Apple deprecates `--deep`; `tauri-bundler` signs external binaries individually
+via `sign_macos_binary()` and never uses it. Signing the bundle alone and leaving the sidecar's
+signature intact is the closer analogue of what the real build does.
+
+⚠️ **A retracted claim, kept visible on purpose.** A previous revision of this document stated
+that `--deep` *destroys* the sidecar. That came from one observation — an `/Applications`
+bundle whose sidecar stopped returning after a `--deep` sign — and **it did not reproduce**:
+fresh copies signed with the identical command returned in 1 second. The hang was real; the
+attribution to `--deep` was not established. It is retracted rather than quietly deleted because
+this document's whole method is measurement over plausibility, and the error made here is the
+same one it criticises elsewhere — naming a plausible cause without isolating it.
+
+Two things survive that episode, both useful:
+
+- **Check 4 needs a bounded wait.** Whatever caused the hang, a release gate that can block
+  indefinitely will consume the CI job's entire 45-minute budget and report nothing.
+- **Check 4 earns its place regardless.** A sidecar can be validly signed and still not run;
+  the bundle seal, the bundle signature and the sidecar signature can all verify while the
+  binary does not execute. Only running it detects that class of failure.
 
 **Stripping quarantine also works, and is the only currently-documented step that does.**
 

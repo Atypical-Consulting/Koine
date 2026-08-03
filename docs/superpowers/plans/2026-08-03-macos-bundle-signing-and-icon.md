@@ -29,7 +29,8 @@ All measured 2026-08-03 on macOS 26.5.1 (Darwin 25.5.0) against the shipped
 | Its signature is therefore *invalid*, not merely untrusted | `codesign --verify` → `code has no resources but signature indicates they must be present` |
 | This ships in the DMG (not install-time corruption) | Same failure on the `.app` inside the mounted DMG |
 | Ad-hoc signing the bundle repairs it | `codesign --force --sign -` (no `--deep`) → `valid on disk; satisfies its Designated Requirement` |
-| **`--deep` destroys the .NET sidecar** | after `--deep`, `Contents/MacOS/koine` is re-signed `Koine.Cli` → `koine-<hash>`, then produces no output and never terminates. Checks 1-3 still `ok`; only check 4 catches it |
+| `--deep` rewrites the sidecar's signing identity | after `--deep`, `Contents/MacOS/koine` is re-signed `Koine.Cli` → `koine-<hash>`. Reproducible. Prefer inside-out signing — Apple deprecates `--deep` and Tauri never uses it |
+| **Check 4 can hang.** One observed sidecar invocation did not return for >2 min | cause NOT isolated — reproduction attempts on fresh copies returned in 1 s. Unexplained, therefore the check needs a bounded wait |
 | Tauri v2 supports `"signingIdentity": "-"` for ad-hoc | Tauri v2 docs, `distribute/Sign/macos.mdx` |
 | `APPLE_SIGNING_IDENTITY` env overrides the config value | Tauri v2 docs, `reference/environment-variables.mdx` |
 | **`hardenedRuntime` defaults to `true`** | `https://schema.tauri.app/config/2` → `MacConfig.hardenedRuntime.default = true` |
@@ -173,14 +174,24 @@ Expected: exit 0, `==> shippable`. This proves the script distinguishes good fro
 than always failing. (Quarantine is stripped because a quarantined copy is SIGKILLed on exec
 regardless of signature — that would make check 4 fail for an unrelated reason.)
 
-⛔ **Do NOT add `--deep` here, and do not add it later "to be thorough."** Measured 2026-08-03:
+**Prefer inside-out signing; don't reach for `--deep`.** Measured 2026-08-03:
 `codesign --force --deep --sign -` re-signs the nested sidecar, replacing its `Koine.Cli`
-identifier with a generated `koine-<hash>`, after which the .NET single-file binary produces no
-output and does not terminate (>60s). Checks 1-3 all still report `ok` — **only check 4 catches
-it**, which is the clearest possible argument for keeping check 4. Sign inside-out instead: leave
-the sidecar's own signature intact and sign only the bundle. Tauri's bundler works the same way
-(`sign_macos_binary()` per binary, never `--deep`), and Apple deprecates `--deep`. This is also
-why Task 2 uses Tauri-native signing rather than a post-build `codesign` step.
+identifier with a generated `koine-<hash>`. That rewrite is reproducible. Apple deprecates
+`--deep`, and Tauri's bundler never uses it — it signs external binaries individually
+(`sign_macos_binary()`), which is also why Task 2 uses Tauri-native signing rather than a
+post-build `codesign` step. Leaving the sidecar's own signature intact and signing only the
+bundle is the closer analogue of what the real build does, so the fixture better matches
+production.
+
+⚠️ **An honest note on a claim this plan previously made.** An earlier revision asserted that
+`--deep` *destroys* the sidecar, after one `/Applications` bundle's sidecar failed to return for
+over two minutes following a `--deep` sign. **That causal claim did not survive testing** —
+fresh copies signed with the identical command returned in 1 second, first run and every run.
+The hang was real but its cause was never isolated, and attributing it to `--deep` was
+unjustified. It is recorded here as an open question rather than a settled fact, because the
+same mistake (naming a plausible cause without isolating it) is exactly what this plan already
+caught in an implementer's report. What the hang does justify is bounding check 4's wait: a
+release gate that can hang indefinitely will burn the CI job's 45-minute budget.
 
 - [ ] **Step 5: Commit**
 
