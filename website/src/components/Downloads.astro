@@ -1,0 +1,258 @@
+---
+// The homepage Downloads section (issue #1909).
+//
+// Renders src/generated/downloads.json, produced at build time by scripts/build-downloads.mjs from
+// the GitHub release's REAL asset list. Two invariants this component exists to hold:
+//
+//   * Never link an asset the generator did not observe. `verified: false` (the no-network
+//     fallback) renders the releases-page link and the `dotnet tool` line ONLY — both correct
+//     unconditionally — rather than synthesised URLs that might 404.
+//   * Work with JavaScript disabled. Every platform is server-rendered; the inline script only
+//     PROMOTES the visitor's platform into the primary button. Nothing is JS-gated.
+import manifest from '../generated/downloads.json';
+import { basePath } from '../lib/base';
+
+const base = basePath();
+
+const { version, verified, releaseUrl, platforms } = manifest;
+const hasDownloads = verified && platforms.length > 0;
+
+/** Bytes → a short human size. Release assets are tens of MB, so one decimal is the useful grain. */
+function mb(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// The server-rendered primary target. macOS is Koine's only desktop-native architecture (there is
+// no Intel-Mac build), so it leads; the inline script re-points this for Windows/Linux visitors.
+// Falling back to the CLI keeps the button meaningful on a release whose installers are still
+// uploading — the ~45-minute window described in scripts/build-downloads.mjs.
+const primaryPlatform = platforms.find((p) => p.id === 'macos-arm64') ?? platforms[0] ?? null;
+const primaryAsset = primaryPlatform ? (primaryPlatform.app ?? primaryPlatform.cli) : null;
+---
+
+<div class="dl">
+  <div class="band__head">
+    <h2>Get Koine on your machine</h2>
+    <p>
+      {
+        hasDownloads
+          ? `Koine Studio ${version} — the desktop IDE — plus the standalone koine compiler. Or keep using the browser edition above; nothing here is required.`
+          : 'Koine Studio and the standalone koine compiler ship as prebuilt binaries on every release.'
+      }
+    </p>
+  </div>
+
+  {
+    hasDownloads && primaryPlatform && primaryAsset && (
+      <div class="dl__lead">
+        <a
+          class="btn btn--primary dl__primary"
+          id="dl-primary"
+          href={primaryAsset.url}
+          data-default-label={`Download for ${primaryPlatform.label} · ${primaryPlatform.arch}`}
+        >
+          ⬇ Download for {primaryPlatform.label} · {primaryPlatform.arch}
+        </a>
+        <span class="dl__meta" id="dl-primary-meta">
+          .{primaryAsset.kind} · {mb(primaryAsset.size)}
+        </span>
+      </div>
+    )
+  }
+
+  {
+    hasDownloads && (
+      <ul class="dl__grid">
+        {platforms.map((p) => (
+          <li class="dl__row">
+            <div class="dl__plat">
+              <span class="dl__os">{p.label}</span>
+              <span class="dl__arch">{p.arch}</span>
+            </div>
+            <div class="dl__links">
+              {p.app && (
+                <a href={p.app.url} aria-label={`Download Koine Studio for ${p.label} ${p.arch} (.${p.app.kind}, ${mb(p.app.size)})`}>
+                  Studio <span class="dl__kind">.{p.app.kind}</span>
+                  <span class="dl__size">{mb(p.app.size)}</span>
+                </a>
+              )}
+              {p.cli && (
+                <a href={p.cli.url} aria-label={`Download the koine CLI for ${p.label} ${p.arch} (.${p.cli.kind}, ${mb(p.cli.size)})`}>
+                  CLI <span class="dl__kind">.{p.cli.kind}</span>
+                  <span class="dl__size">{mb(p.cli.size)}</span>
+                </a>
+              )}
+            </div>
+            {p.id === 'macos-arm64' && (
+              <p class="dl__note">
+                <strong>Apple Silicon only</strong> — there is no Intel-Mac build. The installer is
+                unsigned, so on first launch right-click the app ▸ <strong>Open</strong> (or run
+                <code>xattr -d com.apple.quarantine "/Applications/Koine Studio.app"</code>).
+                Signing is tracked in
+                <a href="https://github.com/Atypical-Consulting/Koine/issues/1137">#1137</a>.
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
+  <div class="dl__alt">
+    <p>
+      Prefer the .NET toolchain? <code>dotnet tool install --global Koine.Cli</code>
+    </p>
+    <p>
+      <a href={releaseUrl}>All downloads on GitHub ▸</a>
+      <span class="dl__sep">·</span>
+      <a href={`${base}/start/installation/`}>Installation guide</a>
+    </p>
+    {
+      !hasDownloads && (
+        <p class="dl__warn">
+          Per-platform links are unavailable for this build of the site — the release could not be
+          read when it was generated. The GitHub releases page above always has every asset.
+        </p>
+      )
+    }
+  </div>
+</div>
+
+{/* Progressive enhancement only: promote the visitor's platform into the primary button. Every
+    platform stays listed above, so a visitor without JS loses nothing. Note that Apple Silicon is
+    NOT reliably distinguishable from Intel via the UA (Safari and Chrome both report "MacIntel" on
+    ARM Macs) — which is why the button and the macOS row both say "Apple Silicon" outright rather
+    than implying the binary suits every Mac. */}
+{
+  hasDownloads && (
+    <script is:inline define:vars={{ platforms }}>
+      (() => {
+        const btn = document.getElementById('dl-primary');
+        const meta = document.getElementById('dl-primary-meta');
+        if (!btn) return;
+
+        const ua = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+        const id = /mac/i.test(ua)
+          ? 'macos-arm64'
+          : /win/i.test(ua)
+            ? 'windows-x64'
+            : /linux|x11|android/i.test(ua)
+              ? 'linux-x64'
+              : null;
+        if (!id) return;
+
+        const target = platforms.find((p) => p.id === id);
+        const asset = target && (target.app || target.cli);
+        if (!target || !asset) return;
+
+        btn.href = asset.url;
+        btn.textContent = `⬇ Download for ${target.label} · ${target.arch}`;
+        if (meta) meta.textContent = `.${asset.kind} · ${(asset.size / 1024 / 1024).toFixed(1)} MB`;
+      })();
+    </script>
+  )
+}
+
+<style>
+  .dl__lead {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+  }
+  .dl__primary {
+    font-size: 1.02rem;
+    padding: 0.95rem 1.6rem;
+  }
+  .dl__meta {
+    font-family: var(--koi-font-mono);
+    font-size: 0.85rem;
+    color: var(--koi-muted);
+  }
+
+  .dl__grid {
+    list-style: none;
+    margin: 0 0 1.8rem;
+    padding: 0;
+    display: grid;
+    gap: 0.9rem;
+  }
+  .dl__row {
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius);
+    background: var(--koi-surface);
+    padding: 1.1rem 1.3rem;
+    display: grid;
+    grid-template-columns: minmax(9rem, 14rem) 1fr;
+    gap: 0.6rem 1.5rem;
+    align-items: center;
+  }
+  @media (max-width: 680px) {
+    .dl__row { grid-template-columns: 1fr; }
+  }
+
+  .dl__plat { display: flex; flex-direction: column; gap: 0.15rem; }
+  .dl__os {
+    font-family: var(--koi-font-display);
+    font-weight: 700;
+    font-size: 1.1rem;
+    letter-spacing: -0.01em;
+  }
+  .dl__arch {
+    font-family: var(--koi-font-mono);
+    font-size: 0.78rem;
+    color: var(--koi-muted);
+  }
+
+  .dl__links { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .dl__links a {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font: 600 0.92rem/1 var(--koi-font-body);
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    color: var(--koi-fg);
+    text-decoration: none;
+    transition: border-color 0.12s, transform 0.12s;
+  }
+  .dl__links a:hover {
+    border-color: var(--koi-accent);
+    transform: translateY(-1px);
+  }
+  .dl__kind { font-family: var(--koi-font-mono); font-size: 0.8rem; color: var(--koi-accent); }
+  .dl__size { font-family: var(--koi-font-mono); font-size: 0.75rem; color: var(--koi-muted); }
+
+  .dl__note {
+    grid-column: 1 / -1;
+    margin: 0.3rem 0 0;
+    font-size: 0.87rem;
+    line-height: 1.5;
+    color: var(--koi-muted);
+    border-top: 1px dashed var(--koi-line);
+    padding-top: 0.7rem;
+  }
+  .dl__note code {
+    font-family: var(--koi-font-mono);
+    font-size: 0.82em;
+    word-break: break-all;
+  }
+  .dl__note a { color: var(--koi-accent); }
+
+  .dl__alt { color: var(--koi-muted); font-size: 0.95rem; }
+  .dl__alt p { margin: 0 0 0.5rem; }
+  .dl__alt code {
+    font-family: var(--koi-font-mono);
+    font-size: 0.87em;
+    background: var(--koi-surface);
+    border: 1px solid var(--koi-line);
+    border-radius: var(--koi-radius-sm);
+    padding: 0.15rem 0.45rem;
+  }
+  .dl__alt a { color: var(--koi-accent); font-weight: 600; text-decoration: none; }
+  .dl__alt a:hover { text-decoration: underline; }
+  .dl__sep { margin: 0 0.6rem; }
+  .dl__warn { color: var(--koi-fg); }
+</style>
