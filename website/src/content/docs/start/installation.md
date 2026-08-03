@@ -3,11 +3,34 @@ title: "Installation"
 description: "Get the Koine compiler building and run it from the .NET CLI."
 ---
 
-Koine ships as source. You clone the repository and build it with the .NET SDK; the CLI is packaged
-as a [.NET tool](#install-as-a-global-tool), so you can also install a short `koine` command instead
-of typing `dotnet run` each time — see [Install the `koine` command](#install-the-koine-command) below.
+There are three ways to get Koine. Pick whichever suits you — none of them is a prerequisite for the
+others, and the [browser edition](/Koine/studio/) needs no install at all.
+
+## Pick your install
+
+**1 · Download a prebuilt binary.** Every release attaches a self-contained `koine` compiler for
+macOS (Apple Silicon), Windows (x64), and Linux (x64), plus **Koine Studio** desktop installers —
+a `.dmg`, an `.exe`/`.msi`, and an `.AppImage`/`.deb`/`.rpm`. Grab them from the
+[latest release](https://github.com/Atypical-Consulting/Koine/releases/latest) or from the download
+section on the [home page](/Koine/). Nothing else is required — the binaries carry their own runtime.
+
+:::caution
+The Studio desktop installers are **unsigned**. On macOS, right-click the app ▸ **Open** the first
+time (or run `xattr -d com.apple.quarantine "/Applications/Koine Studio.app"`); Windows SmartScreen
+needs *More info ▸ Run anyway*. Code-signing is tracked in
+[issue #1137](https://github.com/Atypical-Consulting/Koine/issues/1137).
+:::
+
+**2 · Install the .NET tool.** If you already have the .NET SDK, the CLI is packaged as a
+[.NET tool](#install-as-a-global-tool) — a short `koine` command, installable in one line. See
+[Install the `koine` command](#install-the-koine-command) below.
+
+**3 · Build from source.** Clone the repository and build it with the .NET SDK — the rest of this
+page. This is what you want if you intend to work *on* Koine rather than only with it.
 
 ## Prerequisites
+
+These apply to options 2 and 3; a downloaded binary needs none of them.
 
 - **.NET 10 SDK** or newer. The whole solution targets `net10.0`. Check what you have:
 
