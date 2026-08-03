@@ -268,13 +268,32 @@ with:
 and PR builds, which will never hold signing secrets; `APPLE_SIGNING_IDENTITY` overrides it
 when #1137 provisions a Developer ID.
 
-- [ ] **Step 3: Build the bundle locally**
+- [ ] **Step 3: Stage the sidecar, then build the bundle locally**
+
+⚠️ **`tauri build` fails without the staged sidecar.** `bundle.externalBin` declares
+`binaries/koine`, and Tauri resolves that to a target-triple-suffixed file
+(`binaries/koine-aarch64-apple-darwin` on Apple Silicon). The directory is git-ignored and
+ships empty, so a fresh clone has nothing there. CI stages it in a dedicated step
+(`studio-build.yml`, "Publish LSP sidecar" then "Stage sidecar for Tauri (externalBin)"); a
+local build must do the same:
 
 ```bash
+# 1. Publish the CLI for this RID. -nodereuse:false per the repo's MSBuild guidance (issue #1552).
+MSBUILDDISABLENODEREUSE=1 dotnet publish src/Koine.Cli -p:PublishProfile=osx-arm64 -nodereuse:false
+
+# 2. Stage it under the name Tauri expects.
+mkdir -p tooling/koine-studio/src-tauri/binaries
+cp src/Koine.Cli/bin/publish/osx-arm64/koine \
+   tooling/koine-studio/src-tauri/binaries/koine-aarch64-apple-darwin
+
+# 3. Build.
 cd tooling/koine-studio
 npm ci
 npm run tauri -- build --bundles app
 ```
+
+On an Intel Mac the RID is `osx-x64` and the triple `x86_64-apple-darwin`; derive the triple
+from `rustc -vV | grep host` rather than assuming.
 
 Expected: a release build (slow — a cold cargo release build is several minutes) producing
 `src-tauri/target/release/bundle/macos/Koine Studio.app`. `--bundles app` skips DMG assembly
