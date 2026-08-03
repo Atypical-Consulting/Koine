@@ -55,7 +55,7 @@ signature yields "damaged", which is a dead end.
 **Ad-hoc signing the bundle repairs it.** Verified on a copy:
 
 ```
-$ codesign --force --deep --sign - "Koine Studio.app"
+$ codesign --force --sign - "Koine Studio.app"
 $ codesign --verify --verbose=2 "Koine Studio.app"
 Koine Studio.app: valid on disk
 Koine Studio.app: satisfies its Designated Requirement
@@ -64,6 +64,16 @@ Koine Studio.app: satisfies its Designated Requirement
 `spctl` still reports `rejected` after this, which is correct and expected — ad-hoc is not a
 Developer ID. The change that matters is invalid → valid, which moves the user from an
 unrecoverable error to a recoverable prompt.
+
+⛔ **Signing must be inside-out; `--deep` destroys the sidecar.** An earlier draft of this
+document used `codesign --force --deep --sign -`, and executing it proved that wrong.
+`--deep` re-signs nested binaries, replacing the sidecar's `Koine.Cli` identifier with a
+generated `koine-<hash>`, after which the .NET single-file binary produces no output and does
+not terminate (>60 s). The bundle seal, the bundle signature and the sidecar signature all still
+verify — **only actually running the sidecar detects it.** Leave the sidecar's own signature
+intact and sign the bundle alone. This independently corroborates the choice of Tauri-native
+signing over a post-build `codesign` step: `tauri-bundler` signs external binaries individually
+(`sign_macos_binary()`) and never uses `--deep`, which Apple deprecates.
 
 **Stripping quarantine also works, and is the only currently-documented step that does.**
 
