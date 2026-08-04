@@ -1,0 +1,320 @@
+{
+  "linterOptions": {
+    "reportUnusedDisableDirectives": 1
+  },
+  "language": "@/js",
+  "languageOptions": {
+    "sourceType": "module",
+    "ecmaVersion": 2026,
+    "parser": "typescript-eslint/parser",
+    "parserOptions": {
+      "projectService": true,
+      "tsconfigRootDir": "<package-root>"
+    }
+  },
+  "plugins": [
+    "@",
+    "@typescript-eslint:@typescript-eslint/eslint-plugin",
+    "react-hooks:eslint-plugin-react-hooks"
+  ],
+  "rules": {
+    "@typescript-eslint/await-thenable": [
+      2
+    ],
+    "@typescript-eslint/ban-ts-comment": [
+      2
+    ],
+    "@typescript-eslint/no-array-constructor": [
+      2
+    ],
+    "@typescript-eslint/no-array-delete": [
+      2
+    ],
+    "@typescript-eslint/no-base-to-string": [
+      2
+    ],
+    "@typescript-eslint/no-duplicate-enum-values": [
+      2
+    ],
+    "@typescript-eslint/no-duplicate-type-constituents": [
+      2
+    ],
+    "@typescript-eslint/no-empty-object-type": [
+      2,
+      {
+        "allowInterfaces": "with-single-extends"
+      }
+    ],
+    "@typescript-eslint/no-explicit-any": [
+      2
+    ],
+    "@typescript-eslint/no-extra-non-null-assertion": [
+      2
+    ],
+    "@typescript-eslint/no-floating-promises": [
+      2
+    ],
+    "@typescript-eslint/no-for-in-array": [
+      2
+    ],
+    "@typescript-eslint/no-implied-eval": [
+      2
+    ],
+    "@typescript-eslint/no-misused-new": [
+      2
+    ],
+    "@typescript-eslint/no-misused-promises": [
+      2
+    ],
+    "@typescript-eslint/no-namespace": [
+      2
+    ],
+    "@typescript-eslint/no-non-null-asserted-optional-chain": [
+      2
+    ],
+    "@typescript-eslint/no-redundant-type-constituents": [
+      2
+    ],
+    "@typescript-eslint/no-require-imports": [
+      2
+    ],
+    "@typescript-eslint/no-this-alias": [
+      2
+    ],
+    "@typescript-eslint/no-unnecessary-type-assertion": [
+      2
+    ],
+    "@typescript-eslint/no-unnecessary-type-constraint": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-argument": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-assignment": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-call": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-declaration-merging": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-enum-comparison": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-function-type": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-member-access": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-return": [
+      2
+    ],
+    "@typescript-eslint/no-unsafe-unary-minus": [
+      2
+    ],
+    "@typescript-eslint/no-unused-expressions": [
+      2,
+      {
+        "allowShortCircuit": false,
+        "allowTaggedTemplates": false,
+        "allowTernary": false
+      }
+    ],
+    "@typescript-eslint/no-unused-vars": [
+      2,
+      {
+        "args": "after-used",
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_",
+        "destructuredArrayIgnorePattern": "^_"
+      }
+    ],
+    "@typescript-eslint/no-wrapper-object-types": [
+      2
+    ],
+    "@typescript-eslint/only-throw-error": [
+      2
+    ],
+    "@typescript-eslint/prefer-as-const": [
+      2
+    ],
+    "@typescript-eslint/prefer-namespace-keyword": [
+      2
+    ],
+    "@typescript-eslint/prefer-promise-reject-errors": [
+      2
+    ],
+    "@typescript-eslint/require-await": [
+      0
+    ],
+    "@typescript-eslint/restrict-plus-operands": [
+      2
+    ],
+    "@typescript-eslint/restrict-template-expressions": [
+      2
+    ],
+    "@typescript-eslint/triple-slash-reference": [
+      2
+    ],
+    "@typescript-eslint/unbound-method": [
+      2
+    ],
+    "constructor-super": [
+      0
+    ],
+    "getter-return": [
+      0,
+      {
+        "allowImplicit": false
+      }
+    ],
+    "no-array-constructor": [
+      0
+    ],
+    "no-class-assign": [
+      0
+    ],
+    "no-const-assign": [
+      0
+    ],
+    "no-dupe-args": [
+      0
+    ],
+    "no-dupe-class-members": [
+      0
+    ],
+    "no-dupe-keys": [
+      0
+    ],
+    "no-func-assign": [
+      0
+    ],
+    "no-implied-eval": [
+      0
+    ],
+    "no-import-assign": [
+      0
+    ],
+    "no-new-native-nonconstructor": [
+      0
+    ],
+    "no-new-symbol": [
+      0
+    ],
+    "no-obj-calls": [
+      0
+    ],
+    "no-redeclare": [
+      0,
+      {
+        "builtinGlobals": true
+      }
+    ],
+    "no-restricted-properties": [
+      0,
+      {
+        "object": "document",
+        "property": "getElementById",
+        "message": "Use domById (src/shared/domById.ts) so a missing #id throws loudly instead of a silent null."
+      }
+    ],
+    "no-restricted-syntax": [
+      0,
+      {
+        "selector": "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+        "message": "dangerouslySetInnerHTML is an XSS sink. Compose the sanctioned MdHtml component (src/docs/MdHtml.tsx or src/ai/components/MdHtml.tsx) instead of adding a new raw-HTML site."
+      },
+      {
+        "selector": "VariableDeclarator[id.name='disposed'][init.value=false]",
+        "message": "Hand-rolled `let disposed = false` is banned (#1352). Use createLifecycleGuard() from @/shared/lifecycleGuard instead."
+      },
+      {
+        "selector": "VariableDeclarator[id.name=/Seq$/][init.value=0]",
+        "message": "Hand-rolled `let xSeq = 0` sequence counter is banned (#1352). Use createLifecycleGuard() from @/shared/lifecycleGuard instead."
+      }
+    ],
+    "no-setter-return": [
+      0
+    ],
+    "no-this-before-super": [
+      0
+    ],
+    "no-throw-literal": [
+      0
+    ],
+    "no-undef": [
+      0,
+      {
+        "typeof": false
+      }
+    ],
+    "no-unreachable": [
+      0
+    ],
+    "no-unsafe-negation": [
+      0,
+      {
+        "enforceForOrderingRelations": false
+      }
+    ],
+    "no-unused-expressions": [
+      0,
+      {
+        "allowShortCircuit": false,
+        "allowTernary": false,
+        "allowTaggedTemplates": false,
+        "enforceForJSX": false,
+        "ignoreDirectives": false
+      }
+    ],
+    "no-unused-vars": [
+      0,
+      {
+        "vars": "all",
+        "args": "after-used",
+        "ignoreRestSiblings": false,
+        "caughtErrors": "all",
+        "ignoreClassWithStaticInitBlock": false,
+        "ignoreUsingDeclarations": false,
+        "reportUsedIgnorePattern": false
+      }
+    ],
+    "no-var": [
+      2
+    ],
+    "no-with": [
+      0
+    ],
+    "prefer-const": [
+      2,
+      {
+        "destructuring": "any",
+        "ignoreReadBeforeAssign": true
+      }
+    ],
+    "prefer-promise-reject-errors": [
+      0,
+      {
+        "allowEmptyReject": false
+      }
+    ],
+    "prefer-rest-params": [
+      2
+    ],
+    "prefer-spread": [
+      2
+    ],
+    "react-hooks/exhaustive-deps": [
+      2
+    ],
+    "react-hooks/rules-of-hooks": [
+      2
+    ],
+    "require-await": [
+      0
+    ]
+  }
+}
