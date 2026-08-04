@@ -19,6 +19,10 @@
 //   2. PARITY — for the rules both packages have agreed to decide together (SHARED_RULES below), the
 //      two packages resolve to the SAME setting for equivalent files. This is the #998 invariant
 //      itself, checked directly rather than inferred from the snapshots.
+//   3. CONTRACT — tooling/eslint-config's exports load and refuse to be called without the consuming
+//      package's `tsconfigRootDir`. That parameter cannot be defaulted inside the shared module (it
+//      would resolve to the module's own directory and silently point type-aware linting at the wrong
+//      TypeScript program), so the guard that enforces it is worth a test of its own.
 //
 // Run:
 //   node scripts/ci/check-eslint-config-parity.mjs            # verify (CI); non-zero exit on drift
@@ -224,8 +228,51 @@ for (const key of PARITY_KEYS) {
   }
 }
 
+// ── 3. Shared-module contract ─────────────────────────────────────────────────────────────────────
+{
+  const shared = await import('@atypical/eslint-config');
+  const exports_ = ['typeCheckedPreset', 'promiseSafetyGate', 'reactHooksGate'];
+  for (const name of exports_) {
+    if (typeof shared[name] !== 'function') {
+      failures.push(`contract: @atypical/eslint-config does not export a "${name}" function.`);
+      continue;
+    }
+    // Every export must REFUSE a missing tsconfigRootDir rather than quietly defaulting it.
+    for (const bad of [undefined, '', null, 42]) {
+      let threw = false;
+      try {
+        shared[name](bad);
+      } catch {
+        threw = true;
+      }
+      if (!threw) {
+        failures.push(
+          `contract: ${name}(${JSON.stringify(bad)}) did not throw — tsconfigRootDir must be required, ` +
+            'never defaulted, or type-aware linting silently targets the wrong program.',
+        );
+      }
+    }
+    const blocks = shared[name]('/tmp/some-consumer');
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+      failures.push(`contract: ${name}() must return a non-empty flat-config array to be spread.`);
+      continue;
+    }
+    for (const block of blocks) {
+      const root = block.languageOptions?.parserOptions?.tsconfigRootDir;
+      if (root !== '/tmp/some-consumer') {
+        failures.push(`contract: ${name}() ignored the caller's tsconfigRootDir (got ${String(root)}).`);
+      }
+    }
+  }
+}
+
 if (update) {
   console.log(`Recorded ESLint config baseline under ${BASELINE_DIR.replace(`${REPO_ROOT}/`, '')}.`);
+  if (failures.length) {
+    console.error('\nBaseline recorded, but the shared-module contract check FAILED:\n');
+    for (const f of failures) console.error(`  - ${f}\n`);
+    process.exit(1);
+  }
   process.exit(0);
 }
 if (failures.length) {
