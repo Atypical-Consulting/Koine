@@ -67,7 +67,7 @@ function selectorsExcept(...excluded) {
 // a fresh 2026-07-31 measurement) because adopting it wholesale would have been an unreviewable PR.
 // #998 adopted it as an INVERTED ALLOW-LIST instead — the whole preset on, every still-noisy rule
 // listed here as 'off' with its live count, one rule fixed and DELETED per PR — and that table is now
-// GONE. Of the preset's 47 rules, **46 are enforced at 'error'**; the 47th, `require-await`, is EXEMPT
+// GONE. Of the preset's 47 rules, 46 ARE ENFORCED AT 'error'; the 47th, `require-await`, is EXEMPT
 // BY DECISION (below), not deferred. There is no unfinished work left in this block: an 'off' entry
 // here now means an ADR says why, and nothing else may be added without one.
 //
@@ -98,8 +98,9 @@ function selectorsExcept(...excluded) {
 // Standing invariants (they outlive the ratchet): never re-add a burned-down rule as 'off'; never clear
 // a finding with a blanket `eslint-disable`; and change a rule across BOTH front-end packages in the
 // same PR, so it is never half-enforced across the tree (the per-directory ratchet #998 considered and
-// rejected). koine-ui's config mirrors this block. A preset upgrade that lands new findings gets fixed,
-// or — if it earns one, on the evidence bar below — an ADR addendum.
+// rejected). koine-ui's config mirrors this block. A preset upgrade that lands new findings gets fixed
+// — or, if it clears the evidence bar the exemption below sets (findings classified one by one, and a
+// named reason the rule doesn't earn its keep here), recorded as its own ADR addendum.
 
 // ── The one recorded exemption (ADR 0005 close-out addendum, #1827) ──────────────────────────────
 // NOT a ratchet entry. `require-await` was measured and classified finding-by-finding TWICE (490/63 at
