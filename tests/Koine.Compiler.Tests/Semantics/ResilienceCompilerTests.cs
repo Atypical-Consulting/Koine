@@ -165,4 +165,64 @@ public class ResilienceCompilerTests
 
         diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
     }
+
+    // ---- generative sweep: truncated/mangled real templates must never crash Diagnose/
+    // DiagnoseWorkspace (#1749) ---------------------------------------------------------------
+
+    private static readonly (string Label, string RelativePath)[] SweepTemplates =
+    [
+        ("billing", "templates/starters/billing/billing.koi"),
+        ("values", "templates/starters/values/values.koi"),
+        ("pizzeria-menu", "templates/pizzeria/menu.koi"),
+    ];
+
+    /// <summary>
+    /// Deterministic corpus over a handful of real templates: every offset of a fixed stride
+    /// truncation, plus a few hand-picked manglings (dropped closing brace, a stray token spliced
+    /// in, a decapitated declaration keyword). Pure offset stepping — no <see cref="Random"/> — so a
+    /// failing case is reproducible from its label alone, and the stride keeps the case count
+    /// bounded rather than sweeping every single offset.
+    /// </summary>
+    public static IEnumerable<object[]> TruncatedAndMangledTemplates()
+    {
+        const int Stride = 41;
+        foreach ((string label, string relativePath) in SweepTemplates)
+        {
+            string source = File.ReadAllText(TestSupport.RepoPath(relativePath));
+
+            for (var offset = 1; offset < source.Length; offset += Stride)
+            {
+                yield return [$"{label}:truncate@{offset}", source[..offset]];
+            }
+
+            yield return [$"{label}:dropped-closing-brace", source[..source.LastIndexOf('}')]];
+            yield return [$"{label}:stray-token", source.Insert(source.IndexOf('{') + 1, " @@@ ")];
+            yield return [$"{label}:decapitated-value-keyword", source.Replace("value ", "alue ", StringComparison.Ordinal)];
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(TruncatedAndMangledTemplates))]
+    public void Diagnose_over_truncated_or_mangled_templates_does_not_throw(string label, string source)
+    {
+        _ = label; // surfaced only in the theory-case name for a reproducible failure label
+        Should.NotThrow(() => new KoineCompiler().Diagnose(source, "repro.koi"));
+    }
+
+    [Fact]
+    public void DiagnoseWorkspace_with_one_truncated_template_alongside_an_intact_one_does_not_throw()
+    {
+        string billing = File.ReadAllText(TestSupport.RepoPath("templates/starters/billing/billing.koi"));
+        string values = File.ReadAllText(TestSupport.RepoPath("templates/starters/values/values.koi"));
+
+        var files = new[]
+        {
+            new SourceFile("billing.koi", billing[..(billing.Length / 2)]),
+            new SourceFile("values.koi", values),
+        };
+
+        var diagnostics = Should.NotThrow(() => new KoineCompiler().DiagnoseWorkspace(files));
+
+        diagnostics.ShouldContain(d => d.Severity == DiagnosticSeverity.Error);
+    }
 }
