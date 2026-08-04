@@ -3174,4 +3174,138 @@ public class PhpConformanceTests
         TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
         types.Ok.ShouldBeTrue("emitted PHP should type-check under phpstan --level max:\n" + string.Join("\n", types.Errors));
     }
+
+    /// <summary>
+    /// Issue #1733: a factory that leaves a required member unsourced must NOT omit its positional
+    /// constructor argument — <c>WriteFactory</c>'s ctor-args loop builds a POSITIONAL
+    /// <c>new self(...)</c> call, so omitting one argument shifts every later one a slot left and
+    /// lands <c>$label</c> in the <c>$sku</c> parameter. The fix switches the WHOLE call to PHP 8
+    /// named arguments once any member hits this branch — an omission is positionally inert for a
+    /// named call — and drops just that one slot. A <c>throw</c>-expression placeholder (the Rust
+    /// <c>todo!()</c> analogue) was tried first but rejected: phpstan flags the statements after it
+    /// as <c>deadCode.unreachable</c> since a <c>never</c>-typed argument always terminates the call.
+    /// So this fixture no longer type-checks clean — it now carries the honest, precise
+    /// <c>Missing parameter $sku</c> diagnostic instead of either a silent shift or a misleading
+    /// arity-count error. The arity-lines-up variant, where no toolchain reports anything even
+    /// pre-fix, is covered separately.
+    /// </summary>
+    [Fact]
+    public void Factory_with_an_unsourced_required_field_does_not_shift_positional_ctor_args()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    sku: String\n" +
+            "    label: String\n" +
+            "\n" +
+            "    create make(label: String) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+
+        // Always-on guard (runs with no PHP toolchain): $label must never occupy the $sku slot.
+        product.ShouldNotContain("new self($id, $label)");
+        product.ShouldContain("new self(id: $id, label: $label)");
+
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        // The named-argument call is honest about the gap: phpstan reports a precise missing-parameter
+        // diagnostic naming the exact field, rather than either silently mis-binding it or reporting a
+        // misleading arity count.
+        var types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeFalse();
+        types.Errors.ShouldContain(e => e.Contains("$sku", StringComparison.Ordinal) && e.Contains("Missing parameter", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The dangerous variant of the same bug (#1733): a trailing <em>defaulted</em> member
+    /// (<c>note</c>) absorbs the shift, so — <b>pre-fix</b> — the positional call's argument count
+    /// still matched the constructor (PHP lets a trailing defaulted parameter be omitted) and NO
+    /// toolchain, not phpstan, not <c>php -l</c>, reported anything wrong: <c>new self($id, $label,
+    /// 'n/a')</c> silently put <c>$label</c> in the <c>sku</c> slot and the literal <c>'n/a'</c> (meant
+    /// as <c>note</c>'s default) in the <c>label</c> slot, while <c>note</c> quietly fell back to its
+    /// own default. A textual guard is the only thing that can catch this — confirmed by checking out
+    /// the pre-fix emitter for this exact fixture, which produces precisely that string. Post-fix, the
+    /// same named-argument call as the simpler fixture applies (any required+unset member switches the
+    /// whole call), so this is a regression guard rather than a second bug hunt.
+    /// </summary>
+    [Fact]
+    public void Factory_with_an_unsourced_required_field_does_not_misbind_when_arity_lines_up()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    sku: String\n" +
+            "    label: String\n" +
+            "    note: String = \"n/a\"\n" +
+            "\n" +
+            "    create make(label: String) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+
+        // Pre-fix this emitted `new self($id, $label, 'n/a')` — three args for three (of four)
+        // parameters, every type matching (PHP lets a trailing default be omitted), so nothing flagged
+        // it while `$label` sat in the `$sku` slot and `'n/a'` sat in the `$label` slot.
+        product.ShouldNotContain("new self($id, $label, 'n/a')");
+        product.ShouldContain("new self(id: $id, label: $label, note: 'n/a')");
+
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+    }
+
+    /// <summary>
+    /// Generalization guard for #1733: the fix must handle MULTIPLE required-and-unset members in
+    /// one factory, not just a single one — each is independently dropped from the named-argument
+    /// call, and the count of surviving named args still matches, so no value ever shifts into a
+    /// wrong slot regardless of how many members are unsourced.
+    /// </summary>
+    [Fact]
+    public void Factory_with_multiple_unsourced_required_fields_omits_each_without_shifting_the_rest()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    sku: String\n" +
+            "    label: String\n" +
+            "    origin: String\n" +
+            "\n" +
+            "    create make(label: String) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+
+        // Both `sku` and `origin` are required-and-unset; only `label` has a source. Named arguments
+        // make each omission independent — there is no positional slot for a shift to land in.
+        product.ShouldContain("new self(id: $id, label: $label)");
+
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        var types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeFalse();
+        types.Errors.ShouldContain(e => e.Contains("$sku", StringComparison.Ordinal) && e.Contains("Missing parameter", StringComparison.Ordinal));
+        types.Errors.ShouldContain(e => e.Contains("$origin", StringComparison.Ordinal) && e.Contains("Missing parameter", StringComparison.Ordinal));
+    }
 }

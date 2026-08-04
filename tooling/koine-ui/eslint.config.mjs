@@ -6,17 +6,37 @@ import reactHooks from 'eslint-plugin-react-hooks';
 // rules (the package ships Preact components) — minus the studio-specific imperative-island allow-list.
 // Type-aware rules run against tsconfig.json (include: ["src"]) via parserOptions.projectService.
 
-// ── #998: the tseslint.configs.recommendedTypeChecked ratchet — COMPLETE for this package ────────
+// ── #998: the tseslint.configs.recommendedTypeChecked ratchet — COMPLETE ─────────────────────────
 // This was the mirror of koine-studio's inverted allow-list (see its header comment for the full
-// rationale): the whole preset on, every still-noisy rule listed here as 'off' with its live count,
-// each ratchet PR deleting one entry. The table is now EMPTY — `unbound-method` (22 findings / 5 files)
-// was the last one, so `recommendedTypeChecked` is enforced here with NO per-rule override at all.
-// `require-await` never appeared in this table: it was clean in this package on day one.
-// The invariant that got us here still binds: never re-add an entry, and never clear a rule with a
-// blanket `eslint-disable`. A future preset upgrade that lands new findings gets fixed, not deferred.
+// rationale): the whole preset on, every still-noisy rule listed in a pending map as 'off' with its
+// live count, each ratchet PR deleting one entry. That map is gone from both packages — every rule it
+// held is enforced, `unbound-method` (22 findings / 5 files here) last.
+// The invariants that got us here still bind: never re-add a burned-down rule as 'off', and never clear
+// a finding with a blanket `eslint-disable`. A preset upgrade that lands new findings gets fixed.
+
+// ── The one recorded exemption (ADR 0005 close-out addendum, #1827) ──────────────────────────────
+// NOT a ratchet entry — the ratchet is over. `require-await` never had a finding in this package; it is
+// off here because a rule is never HALF-ENFORCED across the tree (the #998 invariant, and the reason
+// the per-directory ratchet was rejected). It was measured and classified finding-by-finding twice in
+// koine-studio (492 findings / 63 files at #1920) and ZERO were a forgotten `await`: the population is
+// `vi.fn(async …)` test doubles, async callbacks conforming to async signatures, and members declaring
+// an explicit `Promise<T>` return type. The exemption is a judgement about the RULE, not about this
+// package's current count — see the ADR for the full measurement and the throw-vs-reject hazard in the
+// mechanical fix. Enforcing it only here would block the first Promise-typed seam written in this
+// package with a rule the project has formally decided does not earn its keep.
+//
+// STANDING CONDITION — the exemption rests entirely on the bug class being caught elsewhere, so it
+// holds ONLY while `no-floating-promises` and `no-misused-promises` both stay at 'error' in BOTH
+// packages, tests and stories included (they are, below and in #997). If either is relaxed, narrowed in
+// file scope, or downgraded, DELETE this block and revisit the rule. Keep it in lock-step with
+// koine-studio's copy: this rule is changed in both packages or in neither.
+const ADR_0005_EXEMPT = {
+  '@typescript-eslint/require-await': 'off', // exempt per ADR 0005 close-out addendum — see #1827
+};
+
 export default tseslint.config(
-  // The full type-checked preset. Placed first so the narrow #978 gate below stays the last word on
-  // the rules it names explicitly.
+  // The full type-checked preset, minus the one ADR-recorded exemption above. Placed first so the
+  // narrow #978 gate below stays the last word on the rules it names explicitly.
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [tseslint.configs.recommendedTypeChecked],
@@ -25,6 +45,7 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
+      ...ADR_0005_EXEMPT,
       // Same underscore-ignore config as koine-studio's (see its header comment for the rationale):
       // matches the codebase's pre-existing `_name` convention for deliberately-unused bindings.
       '@typescript-eslint/no-unused-vars': [

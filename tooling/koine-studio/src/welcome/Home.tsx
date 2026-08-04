@@ -13,7 +13,7 @@
 // IDE-wired store slice (workspace / diagnostics / docViews), which is only populated once the editor
 // boots.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { ComponentChildren, JSX } from 'preact';
+import type { JSX } from 'preact';
 import {
   getRecentFolders,
   removeRecentFolder,
@@ -23,9 +23,10 @@ import {
   type RecentFolder,
   type LastSession,
 } from '@/settings/persistence';
-import { getPlatform, type Platform } from '@/host';
+import { getPlatform } from '@/host';
 import { registerOverlay, koiConfirm } from '@atypical/koine-ui';
-import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, wireExternalLink } from '@/shared/colophon';
+import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX } from '@/shared/colophon';
+import { ExternalLink } from '@/shared/ExternalLink';
 import { type Template } from '@/welcome/templates';
 import { wrapIndex } from '@/shared/wrapIndex';
 import { basename } from '@/shared/path';
@@ -260,27 +261,6 @@ function ActionButton(props: {
       </span>
       {props.keys && <Keycap keys={props.keys} />}
     </button>
-  );
-}
-
-/** An external `<a target="_blank" rel="noopener noreferrer">` wired through `wireExternalLink` /
- *  `platform.openExternal` (so it opens in the system browser, not the webview) — the same helper the
- *  About panel uses. */
-function ExternalLink(props: {
-  class: string;
-  href: string;
-  title?: string;
-  platform: Platform;
-  children: ComponentChildren;
-}): JSX.Element {
-  const ref = useRef<HTMLAnchorElement | null>(null);
-  useEffect(() => {
-    if (ref.current) wireExternalLink(ref.current, props.href, props.platform);
-  }, [props.href, props.platform]);
-  return (
-    <a ref={ref} class={props.class} href={props.href} title={props.title} target="_blank" rel="noopener noreferrer">
-      {props.children}
-    </a>
   );
 }
 

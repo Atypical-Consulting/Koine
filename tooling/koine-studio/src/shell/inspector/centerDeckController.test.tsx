@@ -372,7 +372,7 @@ describe('createCenterDeckController — (d) dispose() detaches every subscripti
     expect(domById('split').classList.contains('left-collapsed')).toBe(false); // unchanged — no repaint
   });
 
-  test('dispose() unmounts the deck Preact trees (no leftover deck cards in #center-body)', async () => {
+  test('dispose() unmounts the deck Preact trees (no leftover deck cards in #center-body)', () => {
     const { ctl } = makeController();
     ctl.init();
     ctl.dispose();

@@ -348,6 +348,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateSelectorOptional = "KOI0404" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI0809" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DerivedMemberCycle = "KOI0110" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DivisionByZeroInConstantDefault = "KOI1606" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateApiAnnotation = "KOI1212" -> string!
