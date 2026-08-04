@@ -62,64 +62,70 @@ function selectorsExcept(...excluded) {
   return ALL_SELECTORS.filter((s) => !excluded.includes(s));
 }
 
-// ── #998: the tseslint.configs.recommendedTypeChecked ratchet ────────────────────────────────────
+// ── #998: the tseslint.configs.recommendedTypeChecked ratchet — COMPLETE ─────────────────────────
 // ADR 0005 deferred the full type-checked preset (measured at ~1,300 findings at #993 time; 1,961 on
 // a fresh 2026-07-31 measurement) because adopting it wholesale would have been an unreviewable PR.
-// #998 adopts it as an INVERTED ALLOW-LIST instead: the whole preset is on, and every rule that still
-// has findings is listed here as 'off' with its live count. Each ratchet PR fixes one rule's findings
-// and DELETES its entry — the table only ever shrinks, so the gate monotonically tightens and the
-// remaining debt is visible in the config itself rather than in a wiki nobody reads.
+// #998 adopted it as an INVERTED ALLOW-LIST instead — the whole preset on, every still-noisy rule
+// listed here as 'off' with its live count, one rule fixed and DELETED per PR — and that table is now
+// GONE. Of the preset's 47 rules, **46 are enforced at 'error'**; the 47th, `require-await`, is EXEMPT
+// BY DECISION (below), not deferred. There is no unfinished work left in this block: an 'off' entry
+// here now means an ADR says why, and nothing else may be added without one.
 //
-// Rules NOT listed here are already enforced at 'error' by the preset (30 of its 47 were clean on day
-// one; the 8 cheapest of the remaining 17 were fixed and enforced in the PR that opened this table
-// (#1720); `no-unsafe-argument` was the 9th (#1785), `no-unsafe-assignment` the 10th (#1814),
-// `no-explicit-any` the 11th (#1817), `no-unsafe-call`/`no-unsafe-member-access` the 12th/13th —
-// fixed together since #1817's `no-explicit-any`/`no-unsafe-assignment` fixes had already collapsed
-// their finding counts from the ~1,700-finding day-one measurement down to 5/32 (test-only sites: a
-// `ReturnType<typeof vi.fn>` cast that erased a mock's real parameter types, a couple of bare `vi.fn()`
-// mocks with no signature, and two unannotated `JSON.parse` results) — each fixed and enforced in its
-// own follow-up PR that removed it — and `no-unused-vars` the 14th: configured below with an
-// underscore ignore pattern (matching the codebase's pre-existing, pervasive `_name` convention for
-// deliberately-unused bindings — 71 of its 73 day-of findings were already `_`-prefixed identifiers
-// the default rule doesn't recognize) plus two genuine fixes (a dangling type-only import, and a
-// declaration-merging interface's unused type parameter renamed to match the pattern).
+// How the 17 noisy rules landed (30 of the 47 were clean on day one and went straight to 'error'):
+// #1720 fixed the 8 cheapest in the PR that opened the table (`no-empty-object-type`,
+// `no-redundant-type-constituents`, `restrict-template-expressions`, `await-thenable`, `prefer-const`,
+// `no-base-to-string`, `prefer-promise-reject-errors`, `no-unsafe-return`); then `no-unsafe-argument`
+// (#1785), `no-unsafe-assignment` (#1814), `no-explicit-any` (#1817),
+// `no-unsafe-call`/`no-unsafe-member-access` (#1818 — fixed together, since #1817's fixes had already
+// collapsed their counts from the ~1,700-finding day-one measurement down to 5/32 test-only sites),
+// `no-unused-vars` (#1821), `no-unnecessary-type-assertion` (#1823 — autofixable, but `eslint --fix`
+// alone was a FALSE green: a full `tsc --noEmit` afterward surfaced ~40 compile errors, because several
+// "unnecessary" assertions were also flowing backward as the contextual type of a generic call), and
+// `unbound-method` (#1826). ADR 0005's close-out addendum carries the same table with day-one counts.
 //
-// `unbound-method` was the 15th (570 studio + 22 koine-ui findings). Its findings were investigated
-// rather than swept: NOT ONE was a real lost-`this` bug. Every receiver is a closure-built callback bag
-// (props/deps/handlers/store slices) or a factory handle — no class instance, no `this` in any body —
-// so the rule was firing purely on DECLARATION STYLE: a member written `onCreateAdr(t: string): void`
-// is a method (detaching it may lose `this`), whereas `onCreateAdr: (t: string) => void` is a function
-// -valued property (explicitly detachable). The fix declares the truth: every type member the codebase
-// actually passes around as a VALUE became a function-typed property. That is the rule's own criterion,
-// so members that are only ever invoked deliberately stay method-shorthand. Bonus, and the reason this
-// is a safety win rather than a rename: property signatures check parameters CONTRAVARIANTLY under
-// `strictFunctionTypes` while method signatures are bivariant — the conversion immediately surfaced two
-// genuinely unsound test doubles (`emitPreview` mocks typed `(t: 'csharp' | 'typescript')` standing in
-// for a `(target: string)` contract), both widened to the real contract in the same PR. The residue the
-// conversion can't reach is DOM/lib-declared (`Element.prototype.scrollIntoView`, `HTMLElement.prototype
-// .focus`, `window.matchMedia`, `navigator.clipboard.writeText`): those sites now round-trip the
-// property DESCRIPTOR instead of reading the method as a value, and the clipboard suites assert on the
-// `vi.fn()` handle they installed instead of re-reading it off `navigator`.
+// `unbound-method` is worth remembering because it set the precedent this block rests on: its 570+22
+// findings were investigated rather than swept, and NOT ONE was a real lost-`this` bug — every receiver
+// is a closure-built callback bag or a factory handle, no class instance, no `this` in any body. The
+// rule was firing on DECLARATION STYLE (`onCreateAdr(t: string): void` is a method, detachable-and-may-
+// lose-`this`; `onCreateAdr: (t: string) => void` is an explicitly detachable function-valued property),
+// so the fix declared the truth rather than suppressing the rule — and paid off, because property
+// signatures check parameters CONTRAVARIANTLY under `strictFunctionTypes` where method signatures are
+// bivariant, which immediately surfaced two genuinely unsound `emitPreview` test doubles. The residue
+// the conversion can't reach is DOM/lib-declared (`Element.prototype.scrollIntoView`,
+// `HTMLElement.prototype.focus`, `window.matchMedia`, `navigator.clipboard.writeText`): those sites
+// round-trip the property DESCRIPTOR instead of reading the method as a value.
 //
-// Burn-down order is cheapest-first. Counts are LIVE — re-measure before editing this table, with
-// `npx eslint . -f json` under a config that adds the preset with no `off` entries, grouped by rule.
-// Invariants: never re-add an entry; never clear one with a blanket `eslint-disable`; and burn a rule
-// down across BOTH front-end packages in the same PR, so a rule is never half-enforced across the tree
-// (the per-directory ratchet #998 considered and rejected) — koine-ui carries the mirror table (now
-// EMPTY: with `unbound-method` enforced, that package is at the full preset with no overrides at all).
+// Standing invariants (they outlive the ratchet): never re-add a burned-down rule as 'off'; never clear
+// a finding with a blanket `eslint-disable`; and change a rule across BOTH front-end packages in the
+// same PR, so it is never half-enforced across the tree (the per-directory ratchet #998 considered and
+// rejected). koine-ui's config mirrors this block. A preset upgrade that lands new findings gets fixed,
+// or — if it earns one, on the evidence bar below — an ADR addendum.
+
+// ── The one recorded exemption (ADR 0005 close-out addendum, #1827) ──────────────────────────────
+// NOT a ratchet entry. `require-await` was measured and classified finding-by-finding TWICE (490/63 at
+// #1826, 492/63 on re-measure at #1920) and the rule's premise does not hold in this codebase: 339 are
+// `vi.fn(async …)`/`mockImplementation(async …)` test doubles, 111 are async callbacks passed where an
+// async signature is expected, 1 is an async generator, 37 are members with an explicit `Promise<T>`
+// return type, and 4 were `test(…, async () =>` bodies with a droppable `async` (dropped in #1920).
+// ZERO are a forgotten `await`. All 13 non-test sites implement a Promise-typed contract — `FsFileHandle`
+// / `FsDirHandle` (host/browser/fs.ts), `KoineHost` (host/browser/index.ts, host/tauri.ts),
+// `LspTransport` (host/browser/transport.ts), `runEditToolStaging` (ai/assistantTools.ts).
 //
-// `require-await` is the LAST entry, and it is not a cheap one — see #1827 for the measurement. Its 490
-// findings were classified and essentially none is a forgotten `await`: 322 are `vi.fn(async …)` /
-// `mockImplementation(async …)` doubles, 43 are methods with an explicit `Promise<T>` return type, 113
-// are async callbacks passed where an async signature is expected, and only 4 are `test(…, async () =>`
-// bodies where the `async` is genuinely droppable. All 13 non-test findings implement a Promise-typed
-// interface (`FsFileHandle`, `FsDirHandle`, `KoineHost`, `LspTransport`). The forgotten-await class the
-// rule exists to catch is already covered here by `no-floating-promises` + `no-misused-promises`, both
-// enforced at `error` including in tests (#997). So clearing it means rewriting ~486 deliberate `async`
-// bodies to `Promise.resolve(…)`, which also converts every `throw` in them from a REJECTION into a
-// synchronous throw — a real behaviour change. #1827 decides that trade before this entry moves.
-const RATCHET_PENDING = {
-  '@typescript-eslint/require-await': 'off', //                 490 findings / 63 files — see #1827
+// Two reasons, both load-bearing:
+//  1. The bug class this rule exists to catch — a promise created and never awaited — is ALREADY caught
+//     here by `no-floating-promises` AND `no-misused-promises`, both at 'error' in prod code and in
+//     tests/stories since #997. On this codebase `require-await` reports a declaration style, not a defect.
+//  2. Satisfying it is a BEHAVIOUR CHANGE, not a refactor: rewriting ~486 deliberate `async` bodies to
+//     `Promise.resolve(…)` converts every `throw` in them from a REJECTION into a SYNCHRONOUS throw, and
+//     several prod sites throw on purpose (`MemDir.getFileHandle`/`getDirectoryHandle`/`removeEntry`).
+//
+// STANDING CONDITION — this exemption depends on reason 1, so it holds ONLY while `no-floating-promises`
+// and `no-misused-promises` both stay at 'error' in BOTH packages, tests and stories included. If either
+// is relaxed, narrowed in file scope, or downgraded, DELETE this block and revisit the rule. #1827's
+// Option A specifies the honest way to enforce it instead: staged per-directory, every throwing site
+// first covered by a test asserting `await expect(...).rejects.toThrow(...)`.
+const ADR_0005_EXEMPT = {
+  '@typescript-eslint/require-await': 'off', // exempt per ADR 0005 close-out addendum — see #1827
 };
 
 export default tseslint.config(
@@ -129,8 +135,8 @@ export default tseslint.config(
   // `npm run lint` right after `npm ci`, i.e. before the file even exists, so linting it locally-only
   // would make the gate depend on build order. Excluded outright.
   { ignores: ['src/templates.generated.ts'] },
-  // The full type-checked preset, minus the still-pending rules above. Placed first so the narrow
-  // #978 gate below stays the last word on the rules it names explicitly.
+  // The full type-checked preset, minus the one ADR-recorded exemption above. Placed first so the
+  // narrow #978 gate below stays the last word on the rules it names explicitly.
   {
     files: ['src/**/*.{ts,tsx}'],
     extends: [tseslint.configs.recommendedTypeChecked],
@@ -139,7 +145,7 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
-      ...RATCHET_PENDING,
+      ...ADR_0005_EXEMPT,
       // The codebase's pre-existing convention for a deliberately-unused binding is a leading
       // underscore (`_opts`, `_files`, …) — already pervasive across the tree before this rule was
       // ever enforced. The default rule doesn't recognize that idiom, so it's configured to match it
