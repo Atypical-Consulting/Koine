@@ -34,7 +34,7 @@ Status shape: `{ branch: string, files: { relPath: string, staged: boolean, stat
 Status glyphs / labels: `M` modified · `A` added · `D` deleted · `R` renamed · `C` copied · `U` untracked · `!` conflicted.
 
 ## States (all in the real component)
-- **Browser (no git):** `git.canUseGit === false` → empty state "Source control is available in the desktop app — Git is unavailable in the browser."
+- **Browser (no git):** `git.canUseGit === false` → empty state "Source control is available in the desktop app — Git is unavailable in the browser.", followed by a primary "Download Koine Studio" link (the website's `#download` section) over a quieter "Installation guide" link (#1926). Both are real `target="_blank"` anchors whose left-click is routed through `platform.openExternal`.
 - **Not a repo:** `gitStatus` throws → empty state prompting `git init`.
 - **Loading:** status `null` → "Loading changes…".
 - **Clean tree:** no files → "No changes — the working tree is clean." (log still shown).
