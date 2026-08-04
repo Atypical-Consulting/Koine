@@ -1733,6 +1733,12 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             }
         }
 
+        // Unreachable from a recovered parse (audited for #1749): every caller's grammar rule has the
+        // flat-repetition shape `X ( OP X )*` (equalityExpr/relationalExpr/additiveExpr/
+        // multiplicativeExpr). Each loop iteration can only be entered by matching OP first, so a
+        // matched operand always has a paired operator ahead of it among ctx's children — operand
+        // count can never exceed operator count, however garbled an operand's own internal content
+        // is left by error recovery. Verified against a double/triple/mixed-operator malformed corpus.
         throw new InvalidOperationException($"No binary operator at index {index}.");
     }
 
