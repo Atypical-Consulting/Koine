@@ -39,6 +39,15 @@ export const PROJECT_LINKS: ProjectLink[] = [
   },
 ];
 
+/** The website's homepage Downloads section (issue #1909) — per-platform installers listed from a
+ *  build-time-VERIFIED release manifest (`website/scripts/build-downloads.mjs`), degrading to the
+ *  GitHub releases page when an asset can't be vouched for. Studio links here rather than deep-linking
+ *  an installer, so it never advertises a URL that 404s during the post-tag upload window. */
+export const DOWNLOADS_URL = 'https://atypical-consulting.github.io/Koine/#download';
+
+/** The long-form install guide (`website/src/content/docs/start/installation.md`). */
+export const INSTALL_GUIDE_URL = 'https://atypical-consulting.github.io/Koine/start/installation/';
+
 export const CREATOR_URL = 'https://github.com/phmatray';
 export const CREATOR_NAME = 'Philippe Matray';
 
