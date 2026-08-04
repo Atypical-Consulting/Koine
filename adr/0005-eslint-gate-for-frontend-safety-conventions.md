@@ -249,3 +249,51 @@ staged per-directory, with every throwing site covered first by a test asserting
 - The invariants that got us here still bind: never re-add a burned-down rule as `off`, never clear a
   finding with a blanket `eslint-disable`, and burn a rule down across both packages in one PR. A
   preset upgrade that lands new findings gets fixed — or, if it earns one, an addendum like this.
+
+## Addendum (2026-08-04) — shared rule decisions move into one module, guarded in CI (#1924)
+
+The close-out above left one loose end it did not name as such. Every decision the two front-end
+packages must take *together* — the `require-await` exemption and its standing condition included —
+was written into **both** `eslint.config.mjs` files, each copy carrying its own justification and a
+comment asking the next contributor to keep it in lock-step with the other. #998's load-bearing
+invariant, *a rule is never half-enforced across the tree*, was therefore enforced by discipline. An
+edit to one file and not the other violated it silently, and nothing in CI noticed.
+
+Worse, the exemption's **standing condition** — it holds only while `no-floating-promises` and
+`no-misused-promises` stay at `error` in both packages — was itself only prose. Relaxing either rule
+in one package would have invalidated a recorded decision with no signal at all.
+
+**Both are now structural.**
+
+- `tooling/eslint-config` (`@atypical/eslint-config`, private, in the existing npm workspace of ADR
+  0003) holds the shared decisions once, with one canonical justification each: the
+  `recommendedTypeChecked` wiring, the ADR-backed `require-await` exemption, the `no-unused-vars` `^_`
+  narrowing, the `no-empty-object-type` narrowing, the two promise rules the exemption depends on, and
+  the react-hooks rules. It exports flat-config arrays (`typeCheckedPreset`, `promiseSafetyGate`,
+  `reactHooksGate`), each requiring the **consumer's** `tsconfigRootDir` — that parameter cannot be
+  defaulted inside the module without silently pointing type-aware linting at the wrong TypeScript
+  program, so the guard is asserted rather than assumed.
+- Co-locating the promise rules with the exemption they justify is the point, not a tidiness win: the
+  dependency is now visible in one file instead of spanning two.
+- `scripts/ci/check-eslint-config-parity.mjs` runs in the `studio (web)` CI leg beside `npm run lint`
+  and asks ESLint what config it actually **resolves** for a representative file per config block in
+  each package. It fails on any of: drift from a committed baseline, the two packages disagreeing on a
+  shared rule, or the shared module's exports breaking their contract. `npm run lint` proves each
+  package is clean under *its own* config; only this proves the two configs still agree.
+
+**What deliberately stayed per-package**, because it is grounded in one package's own code rather than
+in a judgement about the rule: koine-studio's imperative-island allow-list, its `#1352` lifecycle
+selectors, its sanctioned `dangerouslySetInnerHTML` sites, its `src/templates.generated.ts` ignore, its
+`prefer-const` `ignoreReadBeforeAssign` narrowing (a forward-declaration idiom only its controllers
+have), and each package's `no-restricted-properties` message naming its own helper.
+
+**No rule changed.** That is the acceptance criterion, not an aspiration: the baseline was recorded
+against the pre-refactor tree and every step of the extraction had to leave all 16 resolved configs
+byte-identical. Intentional future rule changes re-record it with `--update`, and the snapshot diff is
+the review — the same discipline this repo already applies to Verify snapshots.
+
+This amends the close-out addendum above on one point of fact: the `require-await` exemption is no
+longer an `ADR_0005_EXEMPT` block in each config, and `RATCHET_PENDING`'s successor is not duplicated
+at all. It lives in `tooling/eslint-config/index.mjs`, and the "burn a rule down across both packages
+in one PR" invariant is now discharged by construction — a shared rule is changed in the shared module
+or the build fails.

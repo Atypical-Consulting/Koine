@@ -1,10 +1,27 @@
 import tseslint from 'typescript-eslint';
-import reactHooks from 'eslint-plugin-react-hooks';
+import { typeCheckedPreset, promiseSafetyGate, reactHooksGate } from '@atypical/eslint-config';
 
 // Flat-config ESLint gate for the Studio frontend (#978). Deliberately narrow: it encodes the four
 // load-bearing safety conventions (void-prefixed promises, domById, escape-before-innerHTML, and the
 // react-hooks rules) rather than a full style regime — tsc + review stay authoritative for style.
 // Type-aware rules run against tsconfig.json (include: ["src"]) via parserOptions.projectService.
+//
+// ── What lives here vs in @atypical/eslint-config (#1924) ────────────────────────────────────────
+// The rule DECISIONS this package shares with koine-ui — the `recommendedTypeChecked` preset, the ADR
+// 0005 `require-await` exemption, the `no-unused-vars` `^_` narrowing, the `no-empty-object-type`
+// narrowing, the `no-floating-promises`/`no-misused-promises` pair that ADR 0005's exemption depends
+// on, and the react-hooks rules — live ONCE in `tooling/eslint-config`, with their justifications
+// (including the #998 ratchet's full outcome), and are spread in below. They are no longer mirrored by
+// hand: `scripts/ci/check-eslint-config-parity.mjs` asserts in CI that both packages resolve to the
+// same setting for every shared rule, so #998's invariant — a rule is never half-enforced across the
+// tree — fails the build rather than review.
+//
+// What stays in this file is everything grounded in THIS package's own code: the imperative-island
+// allow-list, the #1352 lifecycle selectors, the sanctioned dangerouslySetInnerHTML sites, the
+// `src/templates.generated.ts` ignore, and the `prefer-const` narrowing (justified by a
+// forward-declaration idiom that exists only in Studio's controllers). #998's standing invariants
+// still bind: never re-add a burned-down rule as 'off', never clear a finding with a blanket
+// `eslint-disable`, and change a shared rule in the shared module — never in one package only.
 
 // Any `x.innerHTML = …` / `x.outerHTML = …` (and `+=`). The escape-before-innerHTML contract
 // (editor/markdown.ts) lives outside the type system, so these HTML-injection sinks are banned
@@ -66,10 +83,11 @@ function selectorsExcept(...excluded) {
 // ADR 0005 deferred the full type-checked preset (measured at ~1,300 findings at #993 time; 1,961 on
 // a fresh 2026-07-31 measurement) because adopting it wholesale would have been an unreviewable PR.
 // #998 adopted it as an INVERTED ALLOW-LIST instead — the whole preset on, every still-noisy rule
-// listed here as 'off' with its live count, one rule fixed and DELETED per PR — and that table is now
-// GONE. Of the preset's 47 rules, 46 ARE ENFORCED AT 'error'; the 47th, `require-await`, is EXEMPT
-// BY DECISION (below), not deferred. There is no unfinished work left in this block: an 'off' entry
-// here now means an ADR says why, and nothing else may be added without one.
+// listed as 'off' with its live count, one rule fixed and DELETED per PR — and that table is now GONE.
+// Of the preset's 47 rules, 46 ARE ENFORCED AT 'error'; the 47th, `require-await`, is EXEMPT BY
+// DECISION, not deferred. The exemption, its measurement and its standing condition now live in
+// `tooling/eslint-config` (#1924) rather than being mirrored into this file and koine-ui's — that is
+// what `typeCheckedPreset(...)` brings in below.
 //
 // How the 17 noisy rules landed (30 of the 47 were clean on day one and went straight to 'error'):
 // #1720 fixed the 8 cheapest in the PR that opened the table (`no-empty-object-type`,
@@ -83,51 +101,18 @@ function selectorsExcept(...excluded) {
 // "unnecessary" assertions were also flowing backward as the contextual type of a generic call), and
 // `unbound-method` (#1826). ADR 0005's close-out addendum carries the same table with day-one counts.
 //
-// `unbound-method` is worth remembering because it set the precedent this block rests on: its 570+22
-// findings were investigated rather than swept, and NOT ONE was a real lost-`this` bug — every receiver
-// is a closure-built callback bag or a factory handle, no class instance, no `this` in any body. The
-// rule was firing on DECLARATION STYLE (`onCreateAdr(t: string): void` is a method, detachable-and-may-
-// lose-`this`; `onCreateAdr: (t: string) => void` is an explicitly detachable function-valued property),
-// so the fix declared the truth rather than suppressing the rule — and paid off, because property
-// signatures check parameters CONTRAVARIANTLY under `strictFunctionTypes` where method signatures are
-// bivariant, which immediately surfaced two genuinely unsound `emitPreview` test doubles. The residue
-// the conversion can't reach is DOM/lib-declared (`Element.prototype.scrollIntoView`,
-// `HTMLElement.prototype.focus`, `window.matchMedia`, `navigator.clipboard.writeText`): those sites
-// round-trip the property DESCRIPTOR instead of reading the method as a value.
-//
-// Standing invariants (they outlive the ratchet): never re-add a burned-down rule as 'off'; never clear
-// a finding with a blanket `eslint-disable`; and change a rule across BOTH front-end packages in the
-// same PR, so it is never half-enforced across the tree (the per-directory ratchet #998 considered and
-// rejected). koine-ui's config mirrors this block. A preset upgrade that lands new findings gets fixed
-// — or, if it clears the evidence bar the exemption below sets (findings classified one by one, and a
-// named reason the rule doesn't earn its keep here), recorded as its own ADR addendum.
-
-// ── The one recorded exemption (ADR 0005 close-out addendum, #1827) ──────────────────────────────
-// NOT a ratchet entry. `require-await` was measured and classified finding-by-finding TWICE (490/63 at
-// #1826, 492/63 on re-measure at #1920) and the rule's premise does not hold in this codebase: 339 are
-// `vi.fn(async …)`/`mockImplementation(async …)` test doubles, 111 are async callbacks passed where an
-// async signature is expected, 1 is an async generator, 37 are members with an explicit `Promise<T>`
-// return type, and 4 were `test(…, async () =>` bodies with a droppable `async` (dropped in #1920).
-// ZERO are a forgotten `await`. All 13 non-test sites implement a Promise-typed contract — `FsFileHandle`
-// / `FsDirHandle` (host/browser/fs.ts), `KoineHost` (host/browser/index.ts, host/tauri.ts),
-// `LspTransport` (host/browser/transport.ts), `runEditToolStaging` (ai/assistantTools.ts).
-//
-// Two reasons, both load-bearing:
-//  1. The bug class this rule exists to catch — a promise created and never awaited — is ALREADY caught
-//     here by `no-floating-promises` AND `no-misused-promises`, both at 'error' in prod code and in
-//     tests/stories since #997. On this codebase `require-await` reports a declaration style, not a defect.
-//  2. Satisfying it is a BEHAVIOUR CHANGE, not a refactor: rewriting ~486 deliberate `async` bodies to
-//     `Promise.resolve(…)` converts every `throw` in them from a REJECTION into a SYNCHRONOUS throw, and
-//     several prod sites throw on purpose (`MemDir.getFileHandle`/`getDirectoryHandle`/`removeEntry`).
-//
-// STANDING CONDITION — this exemption depends on reason 1, so it holds ONLY while `no-floating-promises`
-// and `no-misused-promises` both stay at 'error' in BOTH packages, tests and stories included. If either
-// is relaxed, narrowed in file scope, or downgraded, DELETE this block and revisit the rule. #1827's
-// Option A specifies the honest way to enforce it instead: staged per-directory, every throwing site
-// first covered by a test asserting `await expect(...).rejects.toThrow(...)`.
-const ADR_0005_EXEMPT = {
-  '@typescript-eslint/require-await': 'off', // exempt per ADR 0005 close-out addendum — see #1827
-};
+// `unbound-method` is worth remembering because it set the precedent the exemption rests on: its
+// 570+22 findings were investigated rather than swept, and NOT ONE was a real lost-`this` bug — every
+// receiver is a closure-built callback bag or a factory handle, no class instance, no `this` in any
+// body. The rule was firing on DECLARATION STYLE (`onCreateAdr(t: string): void` is a method,
+// detachable-and-may-lose-`this`; `onCreateAdr: (t: string) => void` is an explicitly detachable
+// function-valued property), so the fix declared the truth rather than suppressing the rule — and paid
+// off, because property signatures check parameters CONTRAVARIANTLY under `strictFunctionTypes` where
+// method signatures are bivariant, which immediately surfaced two genuinely unsound `emitPreview` test
+// doubles. The residue the conversion can't reach is DOM/lib-declared
+// (`Element.prototype.scrollIntoView`, `HTMLElement.prototype.focus`, `window.matchMedia`,
+// `navigator.clipboard.writeText`): those sites round-trip the property DESCRIPTOR instead of reading
+// the method as a value.
 
 export default tseslint.config(
   // scripts/generate-templates.mjs writes this 180KB machine-generated module into src/ (git-ignored,
@@ -136,62 +121,27 @@ export default tseslint.config(
   // `npm run lint` right after `npm ci`, i.e. before the file even exists, so linting it locally-only
   // would make the gate depend on build order. Excluded outright.
   { ignores: ['src/templates.generated.ts'] },
-  // The full type-checked preset, minus the one ADR-recorded exemption above. Placed first so the
-  // narrow #978 gate below stays the last word on the rules it names explicitly.
+  // The full type-checked preset plus the rule decisions shared with koine-ui (see the header note).
+  // Placed first so the narrow #978 gate below stays the last word on the rules it names explicitly.
+  ...typeCheckedPreset(import.meta.dirname),
+  ...promiseSafetyGate(import.meta.dirname),
+  ...reactHooksGate(import.meta.dirname),
   {
     files: ['src/**/*.{ts,tsx}'],
-    extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
-      ...ADR_0005_EXEMPT,
-      // The codebase's pre-existing convention for a deliberately-unused binding is a leading
-      // underscore (`_opts`, `_files`, …) — already pervasive across the tree before this rule was
-      // ever enforced. The default rule doesn't recognize that idiom, so it's configured to match it
-      // rather than forcing every call site to either delete the parameter (breaking a shared
-      // signature) or grow an inline disable.
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        {
-          args: 'after-used',
-          argsIgnorePattern: '^_',
-          varsIgnorePattern: '^_',
-          caughtErrorsIgnorePattern: '^_',
-          destructuredArrayIgnorePattern: '^_',
-        },
-      ],
-      // `with-single-extends` (not the default `never`) is the rule's own sanctioned allowance for
-      // declaration-MERGING interfaces: src/vitest-axe.d.ts augments vitest's `Assertion` /
-      // `AsymmetricMatchersContaining` with the vitest-axe matchers, and augmentation only works
-      // through an interface — a type alias doesn't merge — so the body is necessarily empty. The rule
-      // stays 'error' for genuinely empty declarations; this is a narrowing, not a ratchet exemption.
-      '@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
-      // `ignoreReadBeforeAssign` (off by default) exempts the forward-declaration idiom this codebase
+      // `ignoreReadBeforeAssign` (off by default) exempts the forward-declaration idiom THIS package
       // uses for mutually-referencing controllers — `let workspace: WorkspaceController;` read by a
       // thunk defined above its single assignment (ide.tsx, inspectorController.tsx,
       // workspaceController.ts, scopeKit.ts, wasm.ts). Those CANNOT be `const`: the declaration and the
       // assignment are deliberately separated, so the default rule demands an impossible edit (and its
       // autofix would produce code that doesn't compile). Genuinely-const `let`s are still reported.
+      // Studio-only, hence not in the shared module: koine-ui has no such idiom, so narrowing the rule
+      // there would loosen it for no reason on record.
       'prefer-const': ['error', { ignoreReadBeforeAssign: true }],
-    },
-  },
-  {
-    files: ['src/**/*.{ts,tsx}'],
-    languageOptions: {
-      parser: tseslint.parser,
-      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
-    },
-    // react-hooks is registered here (not only where rules-of-hooks is added) because prod code already
-    // carries justified `react-hooks/exhaustive-deps` disable directives (DeckStage.tsx, searchController.tsx);
-    // the plugin must be known for those to resolve, and exhaustive-deps is already clean (0 unsuppressed).
-    plugins: { '@typescript-eslint': tseslint.plugin, 'react-hooks': reactHooks },
-    rules: {
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': 'error',
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'error',
       'no-restricted-properties': ['error', {
         object: 'document',
         property: 'getElementById',
