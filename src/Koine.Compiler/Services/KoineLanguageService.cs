@@ -1690,8 +1690,12 @@ public sealed class KoineLanguageService
             return calls;
         }
 
-        // A command C on type T is triggered by every event whose policy reacts with (T, C).
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // A command C on type T is triggered by every event whose policy reacts with (T, C). Keyed by
+        // (context, eventName) rather than the bare event name: R13.2 lets two bounded contexts each
+        // legally declare an event with the same simple name, so a flat key would silently collapse
+        // two distinct contexts' edges into one (#1901). policyCtx.Name is the policy's OWN declaring
+        // context, already in hand — used by reference, not re-derived from the event name.
+        var seen = new HashSet<(string Context, string EventName)>();
         foreach (var policyCtx in model.Contexts)
         {
             foreach (var policy in policyCtx.Policies)
@@ -1703,7 +1707,7 @@ public sealed class KoineLanguageService
                 }
 
                 // The event name is resolved in the context that DECLARES the policy naming it (#1870).
-                if (seen.Add(policy.EventName) && FindEvent(index, policyCtx.Name, policy.EventName) is { } ev)
+                if (seen.Add((policyCtx.Name, policy.EventName)) && FindEvent(index, policyCtx.Name, policy.EventName) is { } ev)
                 {
                     calls.Add(new CallHierarchyIncomingCall(EventItem(ev.Name, ev)));
                 }
