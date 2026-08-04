@@ -228,18 +228,13 @@ internal sealed class PhpExpressionTranslator
         TypeRef? leftType = InferRenderedType(co.Left);
         TypeRef? rightType = InferRenderedType(co.Right);
 
-        if (leftType?.IsOptional == false)
-        {
-            sb.Append('(');
-            WriteReconciled(co.Left, BranchReconciliation.Classify(leftType, rightType), sb);
-            sb.Append(')');
-            return;
-        }
-
         sb.Append('(');
         WriteReconciled(co.Left, BranchReconciliation.Classify(leftType, rightType), sb);
-        sb.Append(" ?? ");
-        WriteReconciled(co.Right, BranchReconciliation.Classify(rightType, leftType), sb);
+        if (leftType?.IsOptional != false)
+        {
+            sb.Append(" ?? ");
+            WriteReconciled(co.Right, BranchReconciliation.Classify(rightType, leftType), sb);
+        }
         sb.Append(')');
     }
 
