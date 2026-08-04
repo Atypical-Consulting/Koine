@@ -256,7 +256,7 @@ describe('createSurfaceLoaders — emitTarget: setTarget writes setEmitTarget; l
     expect(lsp.emitPreview).toHaveBeenCalledWith('python');
   });
 
-  test('onPreviewTargetChanged is a no-op when the target already matches the current emitTarget slice value', async () => {
+  test('onPreviewTargetChanged is a no-op when the target already matches the current emitTarget slice value', () => {
     const { store, lsp, loaders } = build();
     expect(store.getState().emitTarget).toBe('csharp');
 
