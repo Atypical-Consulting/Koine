@@ -70,8 +70,11 @@ export function fillVersionChip(chip: HTMLElement, platform: Platform): void {
  * handoff on desktop — instead of letting the `<a>` navigate the webview. The `href`/`target`/`rel`
  * stay real for a11y / copy-link / middle-click; only the left-click is intercepted. Shared by the
  * About panel and the Home footer so the open-in-browser contract lives in one place.
+ *
+ * `platform` is narrowed to the single method this calls so a caller holding only a slice of the
+ * platform can wire a link too (#1926) — a full {@link Platform} satisfies it structurally.
  */
-export function wireExternalLink(a: HTMLAnchorElement, href: string, platform: Platform): void {
+export function wireExternalLink(a: HTMLAnchorElement, href: string, platform: Pick<Platform, 'openExternal'>): void {
   a.addEventListener('click', (e) => {
     e.preventDefault();
     platform.openExternal(href);
