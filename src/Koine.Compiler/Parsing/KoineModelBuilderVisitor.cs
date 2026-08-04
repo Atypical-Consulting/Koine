@@ -75,7 +75,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         {
             if (member.typeDecl() is { } t)
             {
-                types.Add(BuildTypeDecl(t));
+                if (BuildTypeDecl(t) is { } typeDecl)
+                {
+                    types.Add(typeDecl);
+                }
             }
             else if (member.specDecl() is { } s)
             {
@@ -450,7 +453,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         {
             if (member.typeDecl() is { } t)
             {
-                types.Add(WithModulePath(BuildTypeDecl(t), path));
+                if (BuildTypeDecl(t) is { } typeDecl)
+                {
+                    types.Add(WithModulePath(typeDecl, path));
+                }
             }
             else if (member.moduleDecl() is { } nested)
             {
@@ -648,7 +654,7 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         };
     }
 
-    private TypeDecl BuildTypeDecl(KoineParser.TypeDeclContext ctx)
+    private TypeDecl? BuildTypeDecl(KoineParser.TypeDeclContext ctx)
     {
         if (ctx.valueDecl() is { } value)
         {
@@ -685,7 +691,11 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
             return BuildIntegrationEvent(integrationEvent);
         }
 
-        throw new InvalidOperationException("Unknown type declaration.");
+        // Recovered (error) parse: ANTLR committed to `typeDecl` (e.g. an annotation prefix that only
+        // `typeDecl`'s alternatives accept) but then couldn't match any of its own seven alternatives,
+        // leaving every accessor above null. Skip it rather than throwing — the syntax error itself is
+        // reported by the parser's error path (#1298's BuildPolicy fix established this pattern).
+        return null;
     }
 
     /// <summary>
@@ -984,7 +994,10 @@ public sealed class KoineModelBuilderVisitor : KoineParserBaseVisitor<object?>
         {
             if (member.typeDecl() is { } t)
             {
-                types.Add(BuildTypeDecl(t));
+                if (BuildTypeDecl(t) is { } typeDecl)
+                {
+                    types.Add(typeDecl);
+                }
             }
             else if (member.specDecl() is { } s)
             {
