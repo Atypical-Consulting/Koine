@@ -126,11 +126,19 @@ function normalize(config) {
 
 function printConfig(pkgDir, file) {
   const cwd = join(REPO_ROOT, pkgDir);
-  const raw = execFileSync('npx', ['eslint', '--print-config', file], {
-    cwd,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  let raw;
+  try {
+    raw = execFileSync('npx', ['eslint', '--print-config', file], {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch (err) {
+    // A config that cannot even be RESOLVED is the loudest possible failure of this check's premise,
+    // so report it as a finding rather than crashing the run with a raw stack trace.
+    const detail = (err.stderr || err.message || '').toString().trim().split('\n').slice(-3).join('\n      ');
+    throw new Error(`eslint --print-config failed in ${pkgDir} for ${file}:\n      ${detail}`);
+  }
   return normalize(JSON.parse(raw));
 }
 

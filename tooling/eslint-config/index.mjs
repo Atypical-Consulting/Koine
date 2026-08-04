@@ -23,7 +23,10 @@
 //
 // EXPORTS return flat-config ARRAYS, so callers spread them and config-block ORDER stays explicit and
 // readable at the call site. Order matters: both packages place the type-checked preset first so the
-// narrow #978 gate stays the last word on the rules it names explicitly.
+// narrow #978 gate stays the last word on the rules it names explicitly. Each export declares its OWN
+// `languageOptions` rather than relying on a sibling block to have set the parser — flat config merges
+// those per key across matching blocks, so the repetition is idempotent, and it keeps every export
+// composable on its own instead of carrying a silent ordering dependency on one of the others.
 //
 // THIS FILE IS NOT LINTED. Neither package's `files: ['src/**/*.{ts,tsx}']` glob matches it, the same
 // way neither lints its own `eslint.config.mjs`. That is deliberate and recorded here rather than left
