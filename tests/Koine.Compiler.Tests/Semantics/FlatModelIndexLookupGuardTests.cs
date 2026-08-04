@@ -192,7 +192,7 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 457, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 610, "TryGetDecl", "combined ladder in SpecTargetMembers"),
         ("src/Koine.Emit.Php/PhpEmitter.Cqrs.cs", 312, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.Php/PhpExpressionTranslator.cs", 1174, "TryGetDecl", "combined (context is null || !TryGetDeclIn(...)) && !TryGetDecl(...) ladder in IsDerivedMemberOf"),
+        ("src/Koine.Emit.Php/PhpExpressionTranslator.cs", 1190, "TryGetDecl", "combined (context is null || !TryGetDeclIn(...)) && !TryGetDecl(...) ladder in IsDerivedMemberOf"),
         ("src/Koine.Emit.Php/PhpEmitter.Services.cs", 319, "TryGetDecl", "combined ladder in SpecTargetMembers"),
         ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Cqrs.cs", 160, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Services.cs", 102, "TryGetDecl", "combined ladder in SpecTargetMembers"),
