@@ -2402,6 +2402,102 @@ public class PhpConformanceTests
     }
 
     /// <summary>
+    /// Issue #1770: a coalesce (<c>??</c>) whose LEFT operand can never be null is provably dead — PHP's
+    /// <c>??</c> always yields the left, so <c>phpstan analyse --level max</c> rejects the redundant null
+    /// check (<c>nullCoalesce.expr</c>). The fix drops the <c>?? $b</c> tail entirely and emits only the
+    /// (still numerically reconciled, #1762) left operand. This is the issue's exact repro: a non-optional
+    /// <c>Int</c> left against a <c>Decimal?</c> right, so the surviving operand must still widen to a
+    /// runtime <c>Decimal</c> — only the fallback disappears.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_when_left_operand_is_never_null()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(a: Int, b: Decimal?) {
+                  total -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no phpstan required): the dead `?? $b` tail is gone; the surviving left
+        // operand still widens to a runtime Decimal (#1762 reconciliation must survive the collapse).
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        var factory = product.Split('\n').Single(l => l.Contains("$instance = new self(", StringComparison.Ordinal));
+        factory.Trim().ShouldBe(@"$instance = new self($id, ((new \Koine\Runtime\Decimal($a))));");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1770 edge case 3 (the spec's ordinary/no-widen path): a non-optional left operand whose
+    /// type already agrees with the right — no numeric reconciliation needed — must still collapse to a
+    /// bare reference to the left operand, with no <c>??</c> and no fallback reference at all.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_non_optional_left_with_no_widen_needed()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                label: String?
+
+                create make(a: String, b: String?) {
+                  label -> a ?? b
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        var factory = product.Split('\n').Single(l => l.Contains("$instance = new self(", StringComparison.Ordinal));
+        factory.Trim().ShouldBe(@"$instance = new self($id, ($a));");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
+    /// Issue #1770 edge case 2: a NESTED coalesce as the left operand whose own rendered type is
+    /// non-optional (its own right operand is non-optional too) must collapse the OUTER <c>??</c> as
+    /// well — <see cref="InferRenderedType"/> already reports the nested coalesce's joined type
+    /// correctly, and the recursive <c>Write</c> call collapses the inner coalesce for the same reason.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_nested_non_optional_left_operand()
+    {
+        const string src =
+            """
+            context Shop {
+              entity Product identified by ProductId {
+                total: Decimal?
+
+                create make(x: Int, y: Int, z: Decimal?) {
+                  total -> (x ?? y) ?? z
+                }
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+        var factory = product.Split('\n').Single(l => l.Contains("$instance = new self(", StringComparison.Ordinal));
+        factory.Trim().ShouldBe(@"$instance = new self($id, ((new \Koine\Runtime\Decimal(($x)))));");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
+
+    /// <summary>
     /// #1762 × #1732 regression: #1732's ctor-arg guard exists so the factory wrap does NOT misfire on a
     /// coalesce. Now that the coalesce rendering itself reconciles, the guard must still see the
     /// coalesce's own (joined) type and add NO second widen on top — exactly one arrow-function shell
