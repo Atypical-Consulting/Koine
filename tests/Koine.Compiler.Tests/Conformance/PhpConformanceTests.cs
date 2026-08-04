@@ -3174,4 +3174,39 @@ public class PhpConformanceTests
         TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
         types.Ok.ShouldBeTrue("emitted PHP should type-check under phpstan --level max:\n" + string.Join("\n", types.Errors));
     }
+
+    /// <summary>
+    /// Issue #1733: a factory that leaves a required member unsourced must NOT omit its positional
+    /// constructor argument — <c>WriteFactory</c>'s ctor-args loop builds a POSITIONAL
+    /// <c>new self(...)</c> call, so omitting one argument shifts every later one a slot left and
+    /// lands <c>$label</c> in the <c>$sku</c> parameter. Every sibling emitter that also builds a
+    /// positional call (Rust <c>todo!()</c>, Kotlin/Java type default, TS <c>undefined as never</c>,
+    /// C# <c>default!</c>) fills the slot instead; PHP must too. phpstan catches the resulting arity
+    /// mismatch (<c>constructor invoked with 2 parameters, 3 required</c>) here — the arity-lines-up
+    /// variant, where no toolchain reports anything, is covered separately.
+    /// </summary>
+    [Fact]
+    public void Factory_with_an_unsourced_required_field_does_not_shift_positional_ctor_args()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    sku: String\n" +
+            "    label: String\n" +
+            "\n" +
+            "    create make(label: String) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+
+        // Always-on guard (runs with no PHP toolchain): $label must never occupy the $sku slot.
+        product.ShouldNotContain("new self($id, $label)");
+
+        AssertPhpIsWellTyped(result.Files);
+    }
 }
