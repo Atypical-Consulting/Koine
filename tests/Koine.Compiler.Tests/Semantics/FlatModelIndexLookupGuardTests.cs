@@ -203,13 +203,13 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Emit.CSharp/CSharpEmitter.Behaviors.cs", 44, "TryGetDecl", "combined ladder in SpecTargetMembers"),
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 457, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 610, "TryGetDecl", "combined ladder in SpecTargetMembers"),
-        ("src/Koine.Emit.Php/PhpEmitter.Cqrs.cs", 312, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.Php/PhpEmitter.Cqrs.cs", 317, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.Php/PhpExpressionTranslator.cs", 1185, "TryGetDecl", "combined (context is null || !TryGetDeclIn(...)) && !TryGetDecl(...) ladder in IsDerivedMemberOf"),
         ("src/Koine.Emit.Php/PhpEmitter.Services.cs", 319, "TryGetDecl", "combined ladder in SpecTargetMembers"),
-        ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Cqrs.cs", 160, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Cqrs.cs", 164, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Services.cs", 102, "TryGetDecl", "combined ladder in SpecTargetMembers"),
-        ("src/Koine.Emit.Python/PythonEmitter.Cqrs.cs", 222, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.Java/JavaEmitter.Cqrs.cs", 141, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.Python/PythonEmitter.Cqrs.cs", 227, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.Java/JavaEmitter.Cqrs.cs", 147, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
         ("src/Koine.Emit.Rust/RustEmitter.Cqrs.cs", 243, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
 
         // --- A boolean existence-only guard: any declaring context makes the check true, so it can't

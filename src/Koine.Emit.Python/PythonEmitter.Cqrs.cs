@@ -74,7 +74,12 @@ public sealed partial class PythonEmitter
             {
                 pyType = typeMapper.Map(f.Type!, context);
                 var expectedEnum = emit.Index.Classify(f.Type!.Qualifier ?? context, f.Type!.Name) == TypeKind.Enum ? f.Type!.Name : null;
-                rhs = translator.Translate(f.Projection, PythonExpressionTranslator.NameMode.Property, expectedEnum);
+                // A derived read-model field is reconciled against ITS OWN declared type (#1889),
+                // through the same TranslateReconciled every sibling call site in this family already
+                // uses. An Int-projected value on a Decimal-declared field previously emitted a bare
+                // `total: Decimal` assigned `src.lines` (an int) — a real `mypy --strict` error. Rust
+                // closed this call site at #1378.
+                rhs = translator.TranslateReconciled(f.Projection, PythonExpressionTranslator.NameMode.Property, expectedEnum, f.Type!);
             }
 
             fields.Add((pyType, attr, rhs));

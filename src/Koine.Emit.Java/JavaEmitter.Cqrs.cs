@@ -82,6 +82,12 @@ public sealed partial class JavaEmitter
                     ? f.Type!.Name
                     : null;
                 rhs = translator.Translate(f.Projection, JavaExpressionTranslator.NameMode.Property, expectedEnum);
+                // A derived read-model field is reconciled against ITS OWN declared type (#1889),
+                // through the same ReconcileAgainstDeclared every sibling call site in this family
+                // already uses. An Int-projected value on a Decimal-declared field previously emitted
+                // a bare `src.lines()` into a `java.math.BigDecimal` record component — a hard `javac`
+                // "incompatible types". Rust closed this call site at #1378.
+                rhs = ReconcileAgainstDeclared(InferReconcilableValueType(translator, f.Projection), f.Type!, rhs);
             }
 
             fields.Add((javaType, component, rhs));

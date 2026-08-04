@@ -2282,4 +2282,115 @@ public class JavaConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1889 — a read-model PROJECTED field (<c>total: Decimal = lines</c>, projected from an
+    /// <c>Int</c>-declared source member <c>lines</c>) is never numerically reconciled against its own
+    /// declared type, unlike every sibling call site in this family: the factory ctor arg (#1732), the
+    /// <c>result</c> expression and the emit/publish payload (#1866/#1865), the member default
+    /// initializer (#1880), the derived-member body (#1888) and the command transition (#1887). Java
+    /// emitted a bare <c>src.lines()</c> into a <c>java.math.BigDecimal</c> record component — a hard
+    /// <c>javac</c> "incompatible types" error. Routed through the same <c>ReconcileAgainstDeclared</c>
+    /// the sibling call sites already use. Rust closed this call site at #1378.
+    /// </summary>
+    [Fact]
+    public void Readmodel_projected_field_widens_an_int_value_into_a_decimal_field()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      lines: Int\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow from Order {\n" +
+            "    id\n" +
+            "    total: Decimal = lines\n" +
+            "    totalOptional: Decimal? = lines\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow.java", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("java.math.BigDecimal.valueOf(src.lines())");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1889 — the optional-declared variant (Rust's #1378 shape), and the important half of this
+    /// family for Java specifically: it is the only target where the widen COMPOSES with a lift. Java's
+    /// optional read-model component is a real <c>java.util.Optional&lt;T&gt;</c>, so <c>totalOptional:
+    /// Decimal? = lines</c> (<c>lines: Int</c>) must become <c>Optional.of(BigDecimal.valueOf(src.lines()))</c>,
+    /// not <c>Optional.of(src.lines())</c>.
+    /// </summary>
+    [Fact]
+    public void Optional_declared_readmodel_projected_field_composes_the_widen_with_the_lift()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      lines: Int\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow from Order {\n" +
+            "    id\n" +
+            "    total: Decimal = lines\n" +
+            "    totalOptional: Decimal? = lines\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow.java", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("java.util.Optional.of(java.math.BigDecimal.valueOf(src.lines()))");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1889's zero-change guard — a matching-type (<c>Decimal</c>) projected field and a
+    /// non-numeric (<c>String</c>) one must render byte-identically to before the reconciliation was
+    /// wired in. Every sibling fix in this family carries the same guard.
+    /// </summary>
+    [Fact]
+    public void Matching_type_and_non_numeric_readmodel_projected_fields_render_unchanged()
+    {
+        const string src =
+            "context Sales {\n" +
+            "  aggregate Sales root Order {\n" +
+            "    entity Order identified by OrderId {\n" +
+            "      price: Decimal\n" +
+            "      label: String\n" +
+            "    }\n" +
+            "  }\n" +
+            "\n" +
+            "  readmodel OrderRow2 from Order {\n" +
+            "    id\n" +
+            "    exact: Decimal = price\n" +
+            "    tag: String = label\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var orderRow = result.Files.Single(f => f.RelativePath.EndsWith("OrderRow2.java", StringComparison.Ordinal)).Contents;
+        orderRow.ShouldContain("src.price(), src.label()");
+        orderRow.ShouldNotContain("BigDecimal.valueOf");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
