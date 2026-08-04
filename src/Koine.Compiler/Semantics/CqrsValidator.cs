@@ -85,7 +85,12 @@ internal static class CqrsValidator
                 // type must be known and accept the projected value.
                 SemanticValidator.ValidateTypeRef(field.Type!, index, resolver, diagnostics);
                 checker.Check(field.Projection, scope, field.Type);
-                var inferred = resolver.Infer(field.Projection, scope);
+                // The declared type is handed to the resolver too, not just the checker: a bare enum
+                // member shared by several enums otherwise resolved through the flat, last-write-wins
+                // `EnumMemberToType`, and KOI1204 below then reported the mismatch it had just
+                // manufactured (#1886). It cannot mask a REAL mismatch — the hint is only honoured when
+                // the declared type genuinely declares that member.
+                var inferred = resolver.Infer(field.Projection, scope, field.Type);
                 if (inferred is not null && index.IsKnownType(resolver.Context, field.Type!.Name)
                     && !MemberAnalysis.IsAssignable(inferred, field.Type!))
                 {

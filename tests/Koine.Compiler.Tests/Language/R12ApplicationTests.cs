@@ -412,6 +412,133 @@ public class R12ApplicationTests
         Diagnose(ShadowedStatusMismatching).ShouldContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
     }
 
+    // ---- R12.3 — a read model's BARE ENUM MEMBER projection (#1886) --------
+
+    // `Active` is declared by TWO enums. `TypeResolver.VisitIdentifier` used to resolve a bare enum
+    // member through the flat, last-write-wins `ModelIndex.EnumMemberToType`, so whichever enum was
+    // parsed LAST owned the global `Active` slot — and the KOI1204 gate then reported the mismatch it
+    // had just manufactured. The field's own declared type (`Status`) and its bounded context both
+    // disambiguate it; every fixture below therefore ships in BOTH context declaration orders, since a
+    // single-order assertion proves luck rather than correctness.
+    private const string AlphaBareMemberProjection = """
+        context Alpha {
+          enum Status { Draft Active }
+          value Item { lifecycle: Status }
+          readmodel ItemView from Item { stage: Status = Active }
+        }
+        """;
+
+    private const string ZetaSharingActive = """
+        context Zeta {
+          enum Phase { Idle Active }
+        }
+        """;
+
+    /// <summary>Assembles the model with the colliding sibling context declared first or last.</summary>
+    private static string BareMemberModel(string alpha, bool zetaLast, string zeta = ZetaSharingActive) =>
+        zetaLast ? alpha + "\n\n" + zeta : zeta + "\n\n" + alpha;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Read_model_projecting_a_bare_enum_member_resolves_it_in_its_own_context(bool zetaLast)
+    {
+        // `Alpha.Status` declares `Active`; `Zeta.Phase` declares an unrelated `Active` in ANOTHER
+        // context, which R13.2 permits. The projection is legal under either declaration order.
+        Diagnose(BareMemberModel(AlphaBareMemberProjection, zetaLast))
+            .ShouldNotContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
+    }
+
+    // Both enums live in the SAME context, so context-scoping alone can't separate them — only the
+    // field's DECLARED type can. This is the half of #1886 that a context-scoped index does not fix.
+    private const string SameContextAmbiguousMember = """
+        context Alpha {
+          enum Status { Draft Active }
+          enum Phase { Idle Active }
+          value Item { lifecycle: Status }
+          readmodel ItemView from Item { stage: Status = Active }
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Read_model_projecting_a_bare_member_shared_within_one_context_is_disambiguated_by_the_declared_type(
+        bool zetaLast)
+    {
+        Diagnose(BareMemberModel(SameContextAmbiguousMember, zetaLast))
+            .ShouldNotContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
+    }
+
+    // Validator and EMITTER must agree, or a model the validator newly accepts emits code that does not
+    // compile — the producer/consumer split behind #1796/#1870. Two fields project the SAME bare member
+    // `Active` under DIFFERENT declared types, which no single global answer can satisfy: the flat map
+    // has one slot for `Active` and would have to name one enum for both. `Build` Roslyn-compiles the
+    // emitted C#, so this asserts the emitter reaches the same per-field answer the validator did.
+    private const string SameContextMemberProjectedUnderBothEnums = """
+        context Alpha {
+          enum Status { Draft Active }
+          enum Phase { Idle Active }
+          value Item { lifecycle: Status }
+          readmodel ItemView from Item {
+            stage: Status = Active
+            step: Phase = Active
+          }
+        }
+        """;
+
+    [Fact]
+    public void Read_model_emits_each_shared_bare_member_under_its_own_declared_enum()
+    {
+        var (_, files) = Build(SameContextMemberProjectedUnderBothEnums);
+
+        string view = FileContents(files, "Alpha/ReadModels/ItemView.cs");
+        view.ShouldContain("Status Stage");
+        view.ShouldContain("Phase Step");
+        view.ShouldContain("new ItemView(Status.Active, Phase.Active)");
+    }
+
+    // The false-NEGATIVE guard: `Busy` belongs to a sibling enum in the SAME context and `Status` does
+    // NOT declare it, so this is a genuine declared/projected mismatch. Honouring the declared type as
+    // a hint must never be allowed to launder a real mismatch into silence.
+    private const string SameContextGenuineMismatch = """
+        context Alpha {
+          enum Status { Draft Active }
+          enum Phase { Idle Busy }
+          value Item { lifecycle: Status }
+          readmodel ItemView from Item { stage: Status = Busy }
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Read_model_projecting_a_bare_member_its_declared_enum_does_not_declare_still_reports_KOI1204(
+        bool zetaLast)
+    {
+        Diagnose(BareMemberModel(SameContextGenuineMismatch, zetaLast))
+            .ShouldContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
+    }
+
+    // The cross-context false-negative guard: `Idle` is declared ONLY by `Zeta.Phase`, invisible from
+    // `Alpha`. The declared-type hint must not manufacture a match for a member `Status` never declares.
+    private const string CrossContextGenuineMismatch = """
+        context Alpha {
+          enum Status { Draft Active }
+          value Item { lifecycle: Status }
+          readmodel ItemView from Item { stage: Status = Idle }
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Read_model_projecting_a_foreign_contexts_bare_member_still_reports_KOI1204(bool zetaLast)
+    {
+        Diagnose(BareMemberModel(CrossContextGenuineMismatch, zetaLast))
+            .ShouldContain(d => d.Code == DiagnosticCodes.ReadModelFieldTypeMismatch);
+    }
+
     // ---- R12.4 — query objects --------------------------------------------
 
     [Fact]

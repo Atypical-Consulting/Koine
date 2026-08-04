@@ -430,6 +430,8 @@ Koine.Compiler.Ast.ModelIndex.Classify(string? context, string! typeName) -> Koi
 Koine.Compiler.Ast.ModelIndex.EnumsDeclaring(string? context, string! member) -> System.Collections.Generic.IReadOnlyList<string!>!
 Koine.Compiler.Ast.ModelIndex.IsKnownType(string? context, string! typeName) -> bool
 Koine.Compiler.Ast.ModelIndex.TryGetDecl(string? context, string! typeName, out Koine.Compiler.Ast.TypeDecl! decl) -> bool
+Koine.Compiler.Ast.TypeResolver.Infer(Koine.Compiler.Ast.Expr! expr, Koine.Compiler.Ast.TypeScope! scope, Koine.Compiler.Ast.TypeRef? expected) -> Koine.Compiler.Ast.TypeRef?
+Koine.Compiler.Ast.TypeResolver.TypeOf(Koine.Compiler.Ast.Expr! expr, Koine.Compiler.Ast.TypeScope! scope, Koine.Compiler.Ast.TypeRef? expected) -> Koine.Compiler.Ast.KoineType!
 Koine.Compiler.Ast.AclMapping.Deconstruct(out string! UpstreamContext, out string! UpstreamType, out string! LocalContext, out string! LocalType) -> void
 Koine.Compiler.Ast.AclMapping.Equals(Koine.Compiler.Ast.AclMapping? other) -> bool
 Koine.Compiler.Ast.AggregateDecl.Deconstruct(out string! Name, out string! RootName, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.TypeDecl!>! Types, out System.Collections.Generic.IReadOnlyList<Koine.Compiler.Ast.SpecDecl!>! Specs, out bool IsVersioned, out Koine.Compiler.Ast.RepositoryDecl? Repository) -> void
