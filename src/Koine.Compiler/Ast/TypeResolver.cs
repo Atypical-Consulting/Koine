@@ -173,6 +173,17 @@ public sealed class TypeResolver
                 return KoineType.From(new TypeRef(builtinType), Index);
             }
 
+            // #1792: prefer the owner unambiguously visible from this resolver's own Context (#1739's
+            // EnumsDeclaring(context, member)) before falling back to the flat, last-write-wins
+            // EnumMemberToType map — otherwise a bare member with no sibling-operand hint (e.g. a
+            // collection.contains(Member) call argument) can resolve against an unrelated, later-
+            // declared context's same-named enum purely by .koi source order.
+            IReadOnlyList<string> owners = Index.EnumsDeclaring(_owner.Context, n.Name);
+            if (owners.Count == 1)
+            {
+                return new NamedType(owners[0], TypeKind.Enum);
+            }
+
             return Index.EnumMemberToType.TryGetValue(n.Name, out var en)
                 ? new NamedType(en, TypeKind.Enum)
                 : ErrorType.Instance;
