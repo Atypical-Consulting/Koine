@@ -3224,4 +3224,47 @@ public class PhpConformanceTests
         types.Ok.ShouldBeFalse();
         types.Errors.ShouldContain(e => e.Contains("$sku", StringComparison.Ordinal) && e.Contains("Missing parameter", StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// The dangerous variant of the same bug (#1733): a trailing <em>defaulted</em> member
+    /// (<c>note</c>) absorbs the shift, so — <b>pre-fix</b> — the positional call's argument count
+    /// still matched the constructor (PHP lets a trailing defaulted parameter be omitted) and NO
+    /// toolchain, not phpstan, not <c>php -l</c>, reported anything wrong: <c>new self($id, $label,
+    /// 'n/a')</c> silently put <c>$label</c> in the <c>sku</c> slot and the literal <c>'n/a'</c> (meant
+    /// as <c>note</c>'s default) in the <c>label</c> slot, while <c>note</c> quietly fell back to its
+    /// own default. A textual guard is the only thing that can catch this — confirmed by checking out
+    /// the pre-fix emitter for this exact fixture, which produces precisely that string. Post-fix, the
+    /// same named-argument call as the simpler fixture applies (any required+unset member switches the
+    /// whole call), so this is a regression guard rather than a second bug hunt.
+    /// </summary>
+    [Fact]
+    public void Factory_with_an_unsourced_required_field_does_not_misbind_when_arity_lines_up()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    sku: String\n" +
+            "    label: String\n" +
+            "    note: String = \"n/a\"\n" +
+            "\n" +
+            "    create make(label: String) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+
+        // Pre-fix this emitted `new self($id, $label, 'n/a')` — three args for three (of four)
+        // parameters, every type matching (PHP lets a trailing default be omitted), so nothing flagged
+        // it while `$label` sat in the `$sku` slot and `'n/a'` sat in the `$label` slot.
+        product.ShouldNotContain("new self($id, $label, 'n/a')");
+        product.ShouldContain("new self(id: $id, label: $label, note: 'n/a')");
+
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+    }
 }
