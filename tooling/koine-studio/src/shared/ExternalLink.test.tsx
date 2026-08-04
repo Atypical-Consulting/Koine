@@ -40,4 +40,24 @@ describe('ExternalLink', () => {
     expect(openExternal).toHaveBeenCalledWith(HREF);
     expect(click.defaultPrevented).toBe(true);
   });
+
+  // A re-render with a fresh inline `platform` object re-runs the wiring effect. Without the effect's
+  // unwire cleanup the old listener survives, so one click would open the URL once PER render.
+  test('does not stack listeners when the platform identity changes across renders', () => {
+    const openExternal = vi.fn();
+    const { container, rerender } = render(
+      <ExternalLink class="koi-x" href={HREF} platform={{ openExternal }}>
+        Docs
+      </ExternalLink>,
+    );
+    rerender(
+      <ExternalLink class="koi-x" href={HREF} platform={{ openExternal }}>
+        Docs
+      </ExternalLink>,
+    );
+
+    container.querySelector('a')?.dispatchEvent(new MouseEvent('click', { cancelable: true, bubbles: true }));
+
+    expect(openExternal).toHaveBeenCalledTimes(1);
+  });
 });

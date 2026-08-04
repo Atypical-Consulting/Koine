@@ -82,10 +82,20 @@ export function fillVersionChip(chip: HTMLElement, platform: Platform): void {
  *
  * `platform` is narrowed to the single method this calls so a caller holding only a slice of the
  * platform can wire a link too (#1926) — a full {@link Platform} satisfies it structurally.
+ *
+ * Returns an UNWIRE function. Imperative callers may ignore it (the listener dies with the element),
+ * but a component re-wiring on a dependency change must call it first: this registers a fresh listener
+ * every time, so re-wiring the same anchor without unwiring would open the URL once per registration.
  */
-export function wireExternalLink(a: HTMLAnchorElement, href: string, platform: Pick<Platform, 'openExternal'>): void {
-  a.addEventListener('click', (e) => {
+export function wireExternalLink(
+  a: HTMLAnchorElement,
+  href: string,
+  platform: Pick<Platform, 'openExternal'>,
+): () => void {
+  const onClick = (e: MouseEvent): void => {
     e.preventDefault();
     platform.openExternal(href);
-  });
+  };
+  a.addEventListener('click', onClick);
+  return () => a.removeEventListener('click', onClick);
 }

@@ -17,7 +17,8 @@ import { ExternalLink } from '@/shared/ExternalLink';
 // `gitStatus` REJECT. The panel handles both: `canUseGit === false` paints a "desktop only" empty state
 // and makes NO git calls, and a rejected status paints a "not a git repository" empty state — neither
 // crashes. The desktop-only state is not a dead end (#1926): it links out to the website's downloads
-// section and install guide, routed through `openExternal` so the click leaves the app properly. After every mutation (stage / unstage / discard / commit / checkout) it RE-FETCHES status
+// section and install guide, routed through `openExternal` so the click leaves the app properly.
+// After every mutation (stage / unstage / discard / commit / checkout) it RE-FETCHES status
 // (and the log after a commit) so the groups and recent-commit list track the repository.
 
 /**

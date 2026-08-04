@@ -21,7 +21,10 @@ export function ExternalLink(props: {
 }): JSX.Element {
   const ref = useRef<HTMLAnchorElement | null>(null);
   useEffect(() => {
-    if (ref.current) wireExternalLink(ref.current, props.href, props.platform);
+    if (!ref.current) return;
+    // Unwire on cleanup: a caller passing an inline `platform` object (a fresh identity each render)
+    // would otherwise stack a listener per render and open the URL once per stacked listener.
+    return wireExternalLink(ref.current, props.href, props.platform);
   }, [props.href, props.platform]);
   return (
     <a ref={ref} class={props.class} href={props.href} title={props.title} target="_blank" rel="noopener noreferrer">
