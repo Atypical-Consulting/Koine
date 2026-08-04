@@ -3267,4 +3267,45 @@ public class PhpConformanceTests
         TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
         syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
     }
+
+    /// <summary>
+    /// Generalization guard for #1733: the fix must handle MULTIPLE required-and-unset members in
+    /// one factory, not just a single one — each is independently dropped from the named-argument
+    /// call, and the count of surviving named args still matches, so no value ever shifts into a
+    /// wrong slot regardless of how many members are unsourced.
+    /// </summary>
+    [Fact]
+    public void Factory_with_multiple_unsourced_required_fields_omits_each_without_shifting_the_rest()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    sku: String\n" +
+            "    label: String\n" +
+            "    origin: String\n" +
+            "\n" +
+            "    create make(label: String) {\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+        var result = new KoineCompiler().Compile(src, new PhpEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.php", StringComparison.Ordinal)).Contents;
+
+        // Both `sku` and `origin` are required-and-unset; only `label` has a source. Named arguments
+        // make each omission independent — there is no positional slot for a shift to land in.
+        product.ShouldContain("new self(id: $id, label: $label)");
+
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        var types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeFalse();
+        types.Errors.ShouldContain(e => e.Contains("$sku", StringComparison.Ordinal) && e.Contains("Missing parameter", StringComparison.Ordinal));
+        types.Errors.ShouldContain(e => e.Contains("$origin", StringComparison.Ordinal) && e.Contains("Missing parameter", StringComparison.Ordinal));
+    }
 }
