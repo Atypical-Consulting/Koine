@@ -2,6 +2,8 @@ import { createPortal } from 'preact/compat';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, Platform } from '@/host/types';
 import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuItem } from '@atypical/koine-ui';
+import { DOWNLOADS_URL, INSTALL_GUIDE_URL } from '@/shared/colophon';
+import { ExternalLink } from '@/shared/ExternalLink';
 
 // The Source Control panel (issue #272): the right-rail git surface — a branch header + switcher, the
 // changed files grouped into Staged / Changes / Untracked with per-row Stage/Unstage + inline diff, a
@@ -14,7 +16,9 @@ import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuIte
 // methods reject (see {@link Platform}); the desktop host runs a real `git`, but a non-repo folder makes
 // `gitStatus` REJECT. The panel handles both: `canUseGit === false` paints a "desktop only" empty state
 // and makes NO git calls, and a rejected status paints a "not a git repository" empty state — neither
-// crashes. After every mutation (stage / unstage / discard / commit / checkout) it RE-FETCHES status
+// crashes. The desktop-only state is not a dead end (#1926): it links out to the website's downloads
+// section and install guide, routed through `openExternal` so the click leaves the app properly.
+// After every mutation (stage / unstage / discard / commit / checkout) it RE-FETCHES status
 // (and the log after a commit) so the groups and recent-commit list track the repository.
 
 /**
@@ -25,6 +29,9 @@ import { koiConfirm, createFloatingMenu, type FloatingMenu, type FloatingMenuIte
 export type GitSurface = Pick<
   Platform,
   | 'canUseGit'
+  // Not a git method: the `canUseGit === false` empty state links out to the desktop downloads (#1926),
+  // and routes that click through the host rather than navigating the webview away from the app.
+  | 'openExternal'
   | 'gitStatus'
   | 'gitDiff'
   | 'gitNumstat'
@@ -519,6 +526,14 @@ export function SourceControlPanel(props: {
         <div class="koi-rview-empty">
           <h3 class="koi-rview-empty-title">Source control</h3>
           <p class="muted">Source control is available in the desktop app — Git is unavailable in the browser.</p>
+          <div class="koi-sc-empty-actions">
+            <ExternalLink class="koi-sc-act" href={DOWNLOADS_URL} platform={git}>
+              Download Koine Studio
+            </ExternalLink>
+            <ExternalLink class="koi-sc-empty-link" href={INSTALL_GUIDE_URL} platform={git}>
+              Installation guide
+            </ExternalLink>
+          </div>
         </div>
       </div>
     );

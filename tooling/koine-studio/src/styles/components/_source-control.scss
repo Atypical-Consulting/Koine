@@ -663,9 +663,15 @@
   }
 }
 
-/* The Initialize-repository call-to-action in the not-a-repo empty state. */
+/* The primary call-to-action in an empty state: the Initialize-repository BUTTON in the not-a-repo
+   state, and the Download-Koine-Studio ANCHOR in the browser/desktop-only one (#1926). The
+   inline-flex + `text-decoration: none` are what let one rule dress both element kinds identically —
+   an `<a>` would otherwise sit inline and underlined. */
 .koi-sc-act {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: 1px solid color-mix(in srgb, var(--koi-accent) 35%, transparent);
   color: var(--koi-accent);
@@ -673,6 +679,7 @@
   padding: 0.1rem 0.45rem;
   font: inherit;
   font-size: var(--koi-text-sm);
+  text-decoration: none;
   cursor: pointer;
 
   &:hover {
@@ -682,6 +689,29 @@
   &:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+}
+
+/* The desktop-only empty state's way out (#1926): a primary download link over a quieter guide link,
+   stacked and centred so they read as one call-to-action. `align-items: center` keeps each pill only as
+   wide as its label instead of stretching across a wide rail; the column wraps naturally when the rail
+   is dragged narrow. */
+.koi-sc-empty-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.koi-sc-empty-link {
+  color: var(--koi-muted);
+  font-size: var(--koi-text-sm);
+  text-decoration: none;
+
+  &:hover {
+    color: var(--koi-fg);
+    text-decoration: underline;
   }
 }
 

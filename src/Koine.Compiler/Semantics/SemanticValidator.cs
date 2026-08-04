@@ -883,6 +883,23 @@ public sealed class SemanticValidator
             }
         }
 
+        // A cyclic derived chain would emit mutually-recursive accessors in every target; reject it
+        // here (the emitters must never see it). Guarded: most declarations have no initializer at all.
+        var hasInitializer = false;
+        foreach (Member m in members)
+        {
+            if (m.Initializer is not null)
+            {
+                hasInitializer = true;
+                break;
+            }
+        }
+
+        if (hasInitializer)
+        {
+            DetectDerivedMemberCycles(members, diagnostics);
+        }
+
         foreach (Invariant inv in invariants)
         {
             checker.Check(inv.Condition, scope);
@@ -1054,6 +1071,73 @@ public sealed class SemanticValidator
             {
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.SpecCycle,
                     $"spec '{s.Name}' is part of a reference cycle", s.Span));
+            }
+        }
+    }
+
+    /// <summary>Reports every DERIVED member that participates in a reference cycle (#1767).
+    /// Mirrors <see cref="DetectSpecCycles"/>: without it, a chain like <c>a = b + 1; b = a + 1</c>
+    /// compiles green and every emitter ships mutually-recursive get-only accessors that recurse
+    /// forever at runtime. A member's own name is excluded, exactly as
+    /// <see cref="MemberAnalysis.IsDerived"/> excludes it — a self-reference is a constant default,
+    /// not a derived member, so it is not a cycle.</summary>
+    private static void DetectDerivedMemberCycles(IReadOnlyList<Member> members, List<Diagnostic> diagnostics)
+    {
+        HashSet<string> names = MemberNameSet(members);
+        var deps = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (Member m in members)
+        {
+            if (IsErrorOrMissing(m) || IsPlaceholder(m.Name) || m.Initializer is null)
+            {
+                continue;
+            }
+
+            deps[m.Name] = MemberAnalysis.ReferencedIdentifiers(m.Initializer)
+                .Where(n => !string.Equals(n, m.Name, StringComparison.Ordinal) && names.Contains(n))
+                .Distinct(StringComparer.Ordinal).ToList();
+        }
+
+        var state = new Dictionary<string, int>(StringComparer.Ordinal); // 0 unvisited, 1 visiting, 2 done
+        var stack = new List<string>();
+        var onCycle = new HashSet<string>(StringComparer.Ordinal);
+
+        void Dfs(string node)
+        {
+            state[node] = 1;
+            stack.Add(node);
+            foreach (var dep in deps.GetValueOrDefault(node, new List<string>()))
+            {
+                var st = state.GetValueOrDefault(dep, 0);
+                if (st == 0)
+                {
+                    Dfs(dep);
+                }
+                else if (st == 1)
+                {
+                    for (var i = stack.IndexOf(dep); i >= 0 && i < stack.Count; i++)
+                    {
+                        onCycle.Add(stack[i]);
+                    }
+                }
+            }
+            stack.RemoveAt(stack.Count - 1);
+            state[node] = 2;
+        }
+
+        foreach (var name in deps.Keys)
+        {
+            if (!state.ContainsKey(name))
+            {
+                Dfs(name);
+            }
+        }
+
+        foreach (Member m in members)
+        {
+            if (onCycle.Contains(m.Name))
+            {
+                diagnostics.Add(Diagnostic.FromSpan(DiagnosticCodes.DerivedMemberCycle,
+                    $"derived member '{m.Name}' is part of a reference cycle", m.Span));
             }
         }
     }

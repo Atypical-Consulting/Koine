@@ -39,6 +39,15 @@ export const PROJECT_LINKS: ProjectLink[] = [
   },
 ];
 
+/** The website's homepage Downloads section (issue #1909) — per-platform installers listed from a
+ *  build-time-VERIFIED release manifest (`website/scripts/build-downloads.mjs`), degrading to the
+ *  GitHub releases page when an asset can't be vouched for. Studio links here rather than deep-linking
+ *  an installer, so it never advertises a URL that 404s during the post-tag upload window. */
+export const DOWNLOADS_URL = 'https://atypical-consulting.github.io/Koine/#download';
+
+/** The long-form install guide (`website/src/content/docs/start/installation.md`). */
+export const INSTALL_GUIDE_URL = 'https://atypical-consulting.github.io/Koine/start/installation/';
+
 export const CREATOR_URL = 'https://github.com/phmatray';
 export const CREATOR_NAME = 'Philippe Matray';
 
@@ -70,10 +79,23 @@ export function fillVersionChip(chip: HTMLElement, platform: Platform): void {
  * handoff on desktop — instead of letting the `<a>` navigate the webview. The `href`/`target`/`rel`
  * stay real for a11y / copy-link / middle-click; only the left-click is intercepted. Shared by the
  * About panel and the Home footer so the open-in-browser contract lives in one place.
+ *
+ * `platform` is narrowed to the single method this calls so a caller holding only a slice of the
+ * platform can wire a link too (#1926) — a full {@link Platform} satisfies it structurally.
+ *
+ * Returns an UNWIRE function. Imperative callers may ignore it (the listener dies with the element),
+ * but a component re-wiring on a dependency change must call it first: this registers a fresh listener
+ * every time, so re-wiring the same anchor without unwiring would open the URL once per registration.
  */
-export function wireExternalLink(a: HTMLAnchorElement, href: string, platform: Platform): void {
-  a.addEventListener('click', (e) => {
+export function wireExternalLink(
+  a: HTMLAnchorElement,
+  href: string,
+  platform: Pick<Platform, 'openExternal'>,
+): () => void {
+  const onClick = (e: MouseEvent): void => {
     e.preventDefault();
     platform.openExternal(href);
-  });
+  };
+  a.addEventListener('click', onClick);
+  return () => a.removeEventListener('click', onClick);
 }

@@ -138,6 +138,11 @@ equality. `lineTotal` and `payable` recompute from them, so two `OrderLine`s wit
 always equal regardless of derived values.
 :::
 
+Derived fields must form an **acyclic** chain. A field may read any sibling that does not (directly
+or transitively) read it back — `a: Int = b + 1` alongside `b: Int = a + 1` is rejected with
+`KOI0110`, because the generated accessors would recurse forever. A field that references *only
+itself* (`a: Int = a + 1`) is not a derived field at all: it is a constant default, so it is allowed.
+
 ### 5.3.3 Defensive copies of collections
 
 When a value object field is a `List<T>` or `Set<T>`, the constructor takes a defensive copy and exposes
