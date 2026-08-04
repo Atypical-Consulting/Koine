@@ -214,6 +214,14 @@ internal sealed class PhpExpressionTranslator
     /// <para>Operand types come from <see cref="InferRenderedType"/>, not the raw resolver, so a NESTED
     /// coalesce operand is classified by what it actually renders as (its own joined type) rather than
     /// by its leftmost leaf.</para>
+    /// <para>Issue #1770: when the LEFT operand's rendered type is non-optional, PHP's <c>??</c> is
+    /// provably dead — it always yields the left, and the right operand was never evaluated (the
+    /// sublanguage is pure, so dropping it changes no behaviour). <c>phpstan analyse --level max</c>
+    /// rejects that redundant null check (<c>nullCoalesce.expr</c>), so the fallback is dropped and only
+    /// the (still numerically reconciled) left operand is emitted. An unknown (<see langword="null"/>)
+    /// rendered type is treated as "possibly optional" and falls through to the ordinary binary
+    /// rendering — collapsing needs proof of non-optionality, not merely the absence of proof it's
+    /// optional.</para>
     /// </summary>
     private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
     {
@@ -222,8 +230,11 @@ internal sealed class PhpExpressionTranslator
 
         sb.Append('(');
         WriteReconciled(co.Left, BranchReconciliation.Classify(leftType, rightType), sb);
-        sb.Append(" ?? ");
-        WriteReconciled(co.Right, BranchReconciliation.Classify(rightType, leftType), sb);
+        if (leftType?.IsOptional != false)
+        {
+            sb.Append(" ?? ");
+            WriteReconciled(co.Right, BranchReconciliation.Classify(rightType, leftType), sb);
+        }
         sb.Append(')');
     }
 

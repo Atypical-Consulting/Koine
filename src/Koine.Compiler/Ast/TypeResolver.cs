@@ -126,10 +126,38 @@ public sealed class TypeResolver
     public KoineType TypeOf(Expr expr, TypeScope scope) => new InferVisitor(this, scope).Visit(expr);
 
     /// <summary>
+    /// <see cref="TypeOf(Expr, TypeScope)"/> with the type the caller DECLARED for the expression as a
+    /// disambiguating hint (#1886). A bare enum member (e.g. <c>Active</c>) carries no owner of its own,
+    /// so a name declared by SEVERAL of the context's enums stayed ambiguous even after #1792 scoped the
+    /// fallback to the referencing context, and dropped through to the flat, last-write-wins
+    /// <see cref="ModelIndex.EnumMemberToType"/> — whichever enum was parsed last won, and a caller that
+    /// then compared the result against its own declaration reported the mismatch it had just
+    /// manufactured. When <paramref name="expected"/> names one of the enums that declare the member in
+    /// this context, that enum is the answer.
+    /// </summary>
+    /// <remarks>
+    /// The hint can only ever change the outcome for a member declared by MORE THAN ONE visible enum:
+    /// with a single owner the hint either names that same owner or does not match at all and #1792's
+    /// rung answers identically. So no unambiguous model can shift under it — the blast radius is
+    /// exactly the arbitrary last-write-wins case. It mirrors the disambiguation
+    /// <c>ExpressionChecker.Check(expr, scope, expected)</c> already performs on the diagnostic side, so
+    /// validator and resolver agree rather than each guessing (#1796).
+    /// </remarks>
+    public KoineType TypeOf(Expr expr, TypeScope scope, TypeRef? expected) =>
+        new InferVisitor(this, scope, expected).Visit(expr);
+
+    /// <summary>
     /// A <c>TypeRef?</c> shim over <see cref="TypeOf"/> for consumers not yet migrated to
     /// <see cref="KoineType"/>: an <see cref="ErrorType"/> result maps back to <c>null</c>.
     /// </summary>
     public TypeRef? Infer(Expr expr, TypeScope scope) => TypeOf(expr, scope).ToTypeRef();
+
+    /// <summary>
+    /// A <c>TypeRef?</c> shim over <see cref="TypeOf(Expr, TypeScope, TypeRef?)"/> — the declared-type
+    /// hint overload (#1886).
+    /// </summary>
+    public TypeRef? Infer(Expr expr, TypeScope scope, TypeRef? expected) =>
+        TypeOf(expr, scope, expected).ToTypeRef();
 
     /// <summary>
     /// The exhaustive expression-type inference. Carries the lexical <see cref="TypeScope"/> as a
@@ -140,12 +168,24 @@ public sealed class TypeResolver
     private sealed class InferVisitor : ExprVisitor<KoineType>
     {
         private readonly TypeResolver _owner;
+
+        /// <summary>
+        /// The type the caller declared for the expression, used ONLY to disambiguate a bare enum
+        /// member (#1886). Not pushed/restored like <see cref="_scope"/>: it is consulted at a single
+        /// rung of <see cref="VisitIdentifier"/> that is reached only once the name is known not to be
+        /// a scope binding or a builtin, and it can only change the answer when the member has several
+        /// owning enums — so letting it reach a nested result position (a conditional branch, a
+        /// coalesce side, a guard or let body) is exactly what the declared type should govern there.
+        /// </summary>
+        private readonly TypeRef? _expected;
+
         private TypeScope _scope;
 
-        public InferVisitor(TypeResolver owner, TypeScope scope)
+        public InferVisitor(TypeResolver owner, TypeScope scope, TypeRef? expected = null)
         {
             _owner = owner;
             _scope = scope;
+            _expected = expected;
         }
 
         private ModelIndex Index => _owner._index;
@@ -173,20 +213,44 @@ public sealed class TypeResolver
                 return KoineType.From(new TypeRef(builtinType), Index);
             }
 
-            // #1792: prefer the owner unambiguously visible from this resolver's own Context (#1739's
-            // EnumsDeclaring(context, member)) before falling back to the flat, last-write-wins
-            // EnumMemberToType map — otherwise a bare member with no sibling-operand hint (e.g. a
-            // collection.contains(Member) call argument) can resolve against an unrelated, later-
-            // declared context's same-named enum purely by .koi source order.
+            // The enums that declare this member and are visible from this resolver's own Context
+            // (#1739's context-aware overload) — the two rungs below both read it, so it is computed
+            // once.
             IReadOnlyList<string> owners = Index.EnumsDeclaring(_owner.Context, n.Name);
+
+            // #1886: a bare enum member declared by SEVERAL of this context's enums has no owner of its
+            // own to resolve to, and the flat map below would hand back whichever enum was parsed LAST.
+            // The type the caller DECLARED for this expression is the disambiguator, so prefer it — but
+            // only when it is one of those visible owners, so the hint can never manufacture a match for
+            // a member the declared enum does not actually declare.
+            if (_expected is not null && owners.Contains(_expected.Name))
+            {
+                return new NamedType(_expected.Name, TypeKind.Enum);
+            }
+
+            // #1792: with no usable hint, prefer the owner unambiguously visible from this resolver's own
+            // Context before falling back to the flat, last-write-wins EnumMemberToType map — otherwise a
+            // bare member with no sibling-operand hint (e.g. a collection.contains(Member) call argument)
+            // can resolve against an unrelated, later-declared context's same-named enum purely by .koi
+            // source order.
             if (owners.Count == 1)
             {
                 return new NamedType(owners[0], TypeKind.Enum);
             }
 
-            return Index.EnumMemberToType.TryGetValue(n.Name, out var en)
+            // Still ambiguous. Consult the flat map only as a TIE-BREAK AMONG the visible owners, then
+            // settle on the first of them — the exact ladder every code emitter's translator already
+            // runs (CSharpExpressionTranslator.WriteIdentifier and its TS/Python/Php/Rust peers). An
+            // unconstrained flat read could name an enum this context cannot even see, which is a type
+            // no emitter would ever emit here — the producer/consumer split behind #1796/#1870 (#1886).
+            if (owners.Count == 0)
+            {
+                return ErrorType.Instance;
+            }
+
+            return Index.EnumMemberToType.TryGetValue(n.Name, out var en) && owners.Contains(en)
                 ? new NamedType(en, TypeKind.Enum)
-                : ErrorType.Instance;
+                : new NamedType(owners[0], TypeKind.Enum);
         }
 
         // `Not` resolves to `Bool` only when the operand actually IS Bool/Bool?; `Negate` echoes the

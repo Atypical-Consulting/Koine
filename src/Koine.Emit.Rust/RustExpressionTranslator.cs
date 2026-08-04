@@ -1300,7 +1300,8 @@ internal sealed class RustExpressionTranslator
 
     /// <summary>
     /// The Rust closure parameter PATTERN for a collection-predicate call (<c>all</c>/<c>any</c>/
-    /// <c>none</c>): a bare escaped name when the element type is not <c>Copy</c> (left bound to the
+    /// <c>none</c>) or a fold projection (<c>sum</c>/<c>min</c>/<c>max</c>'s <see cref="MapProjection"/>,
+    /// #1931): a bare escaped name when the element type is not <c>Copy</c> (left bound to the
     /// <c>&amp;T</c> reference <c>.iter()</c> yields — member/accessor calls in the body already resolve
     /// through Rust's auto-ref/deref regardless), or a <c>&amp;name</c> deref pattern when it IS
     /// <c>Copy</c> (#1801) — binding the parameter BY VALUE so a body comparison against a bare value
@@ -1342,7 +1343,11 @@ internal sealed class RustExpressionTranslator
     /// <summary>
     /// Renders the <c>iter().map(...)</c> projection feeding a sum/min/max fold: each element is mapped
     /// through the lambda body and cloned to an owned value (so a stored value-object field projects to
-    /// an owned operand the fold can consume).
+    /// an owned operand the fold can consume). The closure parameter itself reuses <see cref="LambdaParam"/>
+    /// — the same by-reference/deref-bind decision a quantifier's lambda parameter already makes (#1801)
+    /// — so a bare-identifier body (<c>x =&gt; x</c>) over a <c>Copy</c> scalar element sees an owned
+    /// <c>T</c>, not the <c>&amp;T</c> <c>.iter()</c> yields (#1931); a value-object element still binds
+    /// by reference and the <c>.clone()</c> below makes its projected accessor result owned.
     /// </summary>
     private string MapProjection(CallExpr call, string target)
     {
@@ -1361,7 +1366,7 @@ internal sealed class RustExpressionTranslator
         // A non-Copy projection (a value object) must be owned for the fold; `.clone()` makes a
         // stored-field reference owned (and is a harmless no-op shape on an already-owned temporary).
         var owned = bodyType is { } bt && !_typeMapper.IsCopy(bt) ? ".clone()" : string.Empty;
-        return $"{target}.iter().map(|{RustNaming.Field(lambda.Parameter)}| {body}{owned})";
+        return $"{target}.iter().map(|{LambdaParam(call)}| {body}{owned})";
     }
 
     /// <summary>
