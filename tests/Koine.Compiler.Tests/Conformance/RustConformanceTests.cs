@@ -4870,6 +4870,53 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1931: the fold-path sibling of #1801/PR #1833's quantifier fix — <c>sum</c>/<c>min</c>/
+    /// <c>max</c> project through <see cref="RustExpressionTranslator"/>'s <c>MapProjection</c>, not
+    /// <c>LambdaParam</c>, so that fix never reached them. When the fold's projection lambda is the bare
+    /// element itself (<c>x =&gt; x</c>) over a <c>Copy</c> scalar element (<c>Int</c>/<c>Decimal</c>),
+    /// <c>.iter()</c> yields <c>&amp;T</c> and the bare-identifier body returns that reference straight
+    /// through — <c>koine_sum</c>/<c>koine_min</c>/<c>koine_max</c> then infer <c>T</c> as
+    /// <c>&amp;i64</c>/<c>&amp;Decimal</c>, and comparing the fold's result against a bare scalar fails to
+    /// compile (<c>E0308</c>/<c>E0271</c>).
+    /// </summary>
+    [Fact]
+    public void Fold_of_a_copy_scalar_element_with_an_identity_projection_binds_by_value()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Basket {\n" +
+            "    rate: Int\n" +
+            "    cap: Decimal\n" +
+            "    lines: List<Int>\n" +
+            "    amounts: List<Decimal>\n" +
+            "    invariant lines.sum(x => x) < rate \"sum below rate\"\n" +
+            "    invariant lines.min(x => x) < rate \"min below rate\"\n" +
+            "    invariant lines.max(x => x) < rate \"max below rate\"\n" +
+            "    invariant amounts.sum(x => x) < cap \"decimal sum below cap\"\n" +
+            "    invariant amounts.min(x => x) < cap \"decimal min below cap\"\n" +
+            "    invariant amounts.max(x => x) < cap \"decimal max below cap\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        // Always-on guard (no Rust toolchain required): the fold's projection closure must deref-bind
+        // (`|&x|`), not bind by reference (`|x|`), so `koine_sum`/`koine_min`/`koine_max` infer an owned T.
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("koine_sum(lines.iter().map(|&x| x))");
+        rust.ShouldContain("koine_min(lines.iter().map(|&x| x))");
+        rust.ShouldContain("koine_max(lines.iter().map(|&x| x))");
+        rust.ShouldContain("koine_sum(amounts.iter().map(|&x| x))");
+        rust.ShouldContain("koine_min(amounts.iter().map(|&x| x))");
+        rust.ShouldContain("koine_max(amounts.iter().map(|&x| x))");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1775's exact reproducer: a <c>List&lt;Int&gt;</c> element compared directly (no accessor
     /// call in between) against a bare scalar member inside <c>all</c>. At the time #1775 was filed this
     /// was a real <c>cargo check</c> <c>E0308</c> (<c>expected &amp;i64, found i64</c>); #1801/PR #1833

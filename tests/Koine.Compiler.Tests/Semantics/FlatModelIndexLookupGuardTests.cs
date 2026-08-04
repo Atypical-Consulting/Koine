@@ -181,7 +181,7 @@ public class FlatModelIndexLookupGuardTests
         //     context-aware overload) is tried FIRST in the same expression/method; the flat call only
         //     ever answers when that already failed, mirroring TryGetDecl(context, ...)'s own last step. ---
         ("src/Koine.Compiler/Ast/Binder.cs", 299, "TryGetDecl", "final fallback of ResolveTypeName's own ladder (TryGetDeclIn tried at :290)"),
-        ("src/Koine.Emit.Rust/RustExpressionTranslator.cs", 1464, "TryGetDecl", "final fallback of ResolveDecl's own ladder (TryGetDeclIn tried at :1459)"),
+        ("src/Koine.Emit.Rust/RustExpressionTranslator.cs", 1469, "TryGetDecl", "final fallback of ResolveDecl's own ladder (TryGetDeclIn tried at :1464)"),
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 486, "TryGetDecl", "final fallback of ResolveDecl's own ladder"),
         ("src/Koine.Compiler/Semantics/SemanticValidator.cs", 973, "TryGetDecl", "final fallback after TryGetDeclIn(ctx.Name, target, ...) in ValidateSpecs"),
         ("src/Koine.Compiler/Semantics/CqrsValidator.cs", 480, "TryGetDecl", "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
