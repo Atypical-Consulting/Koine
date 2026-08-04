@@ -63,6 +63,23 @@ public class LanguageServiceFlatLookupCrossContextTests
         return LineChar(source, index + 1);
     }
 
+    /// <summary>
+    /// Like <see cref="PosInside"/>, but the whole (anchor, needle) search starts only after the FIRST
+    /// occurrence of <paramref name="section"/> — for a fixture where <paramref name="anchor"/> itself
+    /// (e.g. <c>"command ship"</c>) is declared once per bounded context, so plain <see cref="PosInside"/>
+    /// would always land in whichever context happens to come first in <paramref name="source"/>.
+    /// </summary>
+    private static (int Line, int Character) PosInsideSection(string source, string section, string anchor, string needle)
+    {
+        var sectionStart = source.IndexOf(section, StringComparison.Ordinal);
+        sectionStart.ShouldBeGreaterThanOrEqualTo(0, $"section not found: {section}");
+        var start = source.IndexOf(anchor, sectionStart, StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0, $"anchor not found after section: {anchor}");
+        var index = source.IndexOf(needle, start, StringComparison.Ordinal);
+        index.ShouldBeGreaterThanOrEqualTo(0, $"needle not found: {needle}");
+        return LineChar(source, index + 1);
+    }
+
     private static (int Line, int Character) LineChar(string source, int offset)
     {
         var line = 0;
@@ -294,6 +311,114 @@ public class LanguageServiceFlatLookupCrossContextTests
 
         incoming.From.Name.ShouldBe("OrderPlaced");
         incoming.From.Kind.ShouldBe(CallHierarchyItemKind.Event);
+    }
+
+    // ------------------------------------------------------------------
+    // KoineLanguageService.cs IncomingCalls -> `seen` de-dup key (#1901)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Two contexts each declare their OWN <c>Shipment.ship</c> reacting to their OWN <c>OrderPlaced</c>
+    /// event (R13.2). <c>IncomingCalls</c>' <c>item.OwningType</c>/<c>item.Name</c> filter is itself
+    /// context-blind, so BOTH policies legitimately match a query anchored on either context's
+    /// <c>ship</c> — the two-edge answer is correct here. Before #1901 the `seen` de-dup keyed only on
+    /// the bare event name, so the second context's edge was silently swallowed as a "duplicate" of the
+    /// first, no matter which context is declared first.
+    /// </summary>
+    private const string ShipOnOrderAlpha = """
+        context Alpha {
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          entity Shipment identified by ShipmentId {
+            order: OrderId
+
+            command ship(order: OrderId) {
+              order -> order
+            }
+          }
+
+          policy ShipOnOrderAlpha when OrderPlaced then Shipment.ship(order: order)
+        }
+        """;
+
+    private const string ShipOnOrderZeta = """
+        context Zeta {
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          entity Shipment identified by ShipmentId {
+            order: OrderId
+
+            command ship(order: OrderId) {
+              order -> order
+            }
+          }
+
+          policy ShipOnOrderZeta when OrderPlaced then Shipment.ship(order: order)
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Incoming_calls_report_a_distinct_edge_per_context_for_a_same_named_triggering_event(bool zetaFirst)
+    {
+        var source = zetaFirst
+            ? ShipOnOrderZeta + "\n\n" + ShipOnOrderAlpha
+            : ShipOnOrderAlpha + "\n\n" + ShipOnOrderZeta;
+        var compilation = Compile(source);
+        var (line, character) = PosInsideSection(source, "context Alpha", "command ship", "ship");
+
+        var command = Svc.PrepareCallHierarchy(compilation, Uri, line, character).ShouldHaveSingleItem();
+        command.Kind.ShouldBe(CallHierarchyItemKind.Command);
+        command.OwningType.ShouldBe("Shipment");
+
+        var incoming = Svc.IncomingCalls(compilation, command);
+
+        incoming.Count.ShouldBe(2);
+        incoming.ShouldAllBe(c => c.From.Kind == CallHierarchyItemKind.Event && c.From.Name == "OrderPlaced");
+        incoming.Select(c => c.From.Span).Distinct().Count().ShouldBe(2);
+    }
+
+    /// <summary>
+    /// The de-dup set exists to collapse GENUINE repeats: two differently-named policies in the SAME
+    /// context both reacting to the same event with the same reaction target still describe a single
+    /// edge. #1901 context-qualifies the key but must not stop collapsing this case.
+    /// </summary>
+    private const string DuplicatePoliciesWithinOneContext = """
+        context Gamma {
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          entity Shipment identified by ShipmentId {
+            order: OrderId
+
+            command ship(order: OrderId) {
+              order -> order
+            }
+          }
+
+          policy ShipOnOrderFirst when OrderPlaced then Shipment.ship(order: order)
+          policy ShipOnOrderSecond when OrderPlaced then Shipment.ship(order: order)
+        }
+        """;
+
+    [Fact]
+    public void Incoming_calls_still_collapse_duplicate_policies_within_one_context()
+    {
+        var compilation = Compile(DuplicatePoliciesWithinOneContext);
+        var (line, character) = PosInside(DuplicatePoliciesWithinOneContext, "command ship", "ship");
+
+        var command = Svc.PrepareCallHierarchy(compilation, Uri, line, character).ShouldHaveSingleItem();
+
+        var incoming = Svc.IncomingCalls(compilation, command);
+
+        var single = incoming.ShouldHaveSingleItem();
+        single.From.Name.ShouldBe("OrderPlaced");
     }
 
     // ------------------------------------------------------------------
