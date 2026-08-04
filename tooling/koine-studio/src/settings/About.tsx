@@ -12,11 +12,11 @@
 // exact node identity `about.test.ts` asserts on directly (`about.el.classList.contains('koi-about')`) —
 // the same "governs a pre-classed host" shape as `CONTRIBUTING-preact-migration.md`'s `UnsavedIndicator`
 // variant, adapted for a panel that owns real children rather than driving attributes on a static node.
-import { useEffect, useRef, useState } from 'preact/hooks';
-import type { ComponentChildren } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
 import type { Platform } from '@/host';
 import { BrandMark } from '@/shared/BrandMark';
-import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, TAGLINE, wireExternalLink } from '@/shared/colophon';
+import { PROJECT_LINKS, CREATOR_URL, CREATOR_NAME, CREDIT_PREFIX, TAGLINE } from '@/shared/colophon';
+import { ExternalLink } from '@/shared/ExternalLink';
 
 export interface AboutProps {
   /** Injected (never read via `getPlatform()` internally) so stories/tests can seed a fake — mirrors
@@ -98,18 +98,3 @@ export function About({ platform, refreshToken }: AboutProps) {
   );
 }
 
-/** An external `<a target="_blank" rel="noopener noreferrer">` wired through `wireExternalLink` /
- *  `platform.openExternal` instead of a webview navigation — shared by the project-link grid and the
- *  creator credit. Wired once per (href, platform) via a ref effect, so the click handler is the exact
- *  same shared helper the Home footer (`welcome.ts`) uses, not a re-implementation. */
-function ExternalLink(props: { class: string; href: string; platform: Platform; children: ComponentChildren }) {
-  const ref = useRef<HTMLAnchorElement | null>(null);
-  useEffect(() => {
-    if (ref.current) wireExternalLink(ref.current, props.href, props.platform);
-  }, [props.href, props.platform]);
-  return (
-    <a ref={ref} class={props.class} href={props.href} target="_blank" rel="noopener noreferrer">
-      {props.children}
-    </a>
-  );
-}

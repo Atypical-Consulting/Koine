@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, type RenderResult, waitFor, within } from '@testing-library/preact';
 import { SourceControlPanel, type GitSurface } from '@/model/SourceControlPanel';
+import { DOWNLOADS_URL, INSTALL_GUIDE_URL } from '@/shared/colophon';
 import type { GitFile, GitLogEntry, GitNumstatEntry, GitStatus, GitUpstream } from '@/host/types';
 import { koiConfirm } from '@atypical/koine-ui';
 import { axe } from 'vitest-axe';
@@ -29,6 +30,7 @@ function makeGit(initial: GitFile[], upstream: GitUpstream | null = { ref: 'orig
   const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })), upstream });
   return {
     canUseGit: true,
+    openExternal: vi.fn(),
     gitStatus: vi.fn(async () => snapshot()),
     gitDiff: vi.fn(async () => 'diff --git a/x b/x\n+added line'),
     // No eager counts by default — rows fall back to the neutral `·`; a test overrides this per case.
@@ -398,6 +400,7 @@ describe('SourceControlPanel', () => {
     const gitLog = vi.fn();
     const git = {
       canUseGit: false,
+      openExternal: vi.fn(),
       gitStatus,
       gitDiff: vi.fn(),
       gitStage: vi.fn(),
@@ -418,11 +421,36 @@ describe('SourceControlPanel', () => {
     expect(gitLog).not.toHaveBeenCalled();
   });
 
+  // The empty state must not be a dead end (#1926): it names the desktop app as the remedy, so it also
+  // has to offer the way there. Both anchors stay REAL links (href intact for copy-link/middle-click/AT)
+  // while the plain left-click is handed to `openExternal` — the browser host's own new-tab handoff.
+  test('offers download + install-guide links out of the canUseGit=false empty state', async () => {
+    const openExternal = vi.fn();
+    const git = { ...makeGit([]), canUseGit: false, openExternal } satisfies GitSurface;
+
+    const view = render(<SourceControlPanel git={git} folderToken={TOKEN} />);
+
+    const download = view.getByRole('link', { name: /download koine studio/i });
+    const guide = view.getByRole('link', { name: /installation guide/i });
+    expect(download.getAttribute('href')).toBe(DOWNLOADS_URL);
+    expect(guide.getAttribute('href')).toBe(INSTALL_GUIDE_URL);
+
+    const click = new MouseEvent('click', { cancelable: true, bubbles: true });
+    download.dispatchEvent(click);
+
+    expect(openExternal).toHaveBeenCalledWith(DOWNLOADS_URL);
+    expect(click.defaultPrevented).toBe(true);
+    // Still a no-git-calls state — the links must not have woken the panel's fetch effect.
+    await Promise.resolve();
+    expect(git.gitStatus).not.toHaveBeenCalled();
+  });
+
   test('initializes a repo from the not-a-repo state and leaves the empty state', async () => {
     let statusCalls = 0;
     const gitInit = vi.fn(async () => {});
     const git = {
       canUseGit: true,
+      openExternal: vi.fn(),
       gitInit,
       // First call (the initial fetch) rejects — not a repo yet; the second (post-init reload)
       // resolves a clean status, mirroring what a real `git init` on the folder produces.

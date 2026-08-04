@@ -627,7 +627,7 @@ describe('LauncherPanel — keyboard model (issue #1143, task 7)', () => {
     expect(input.value).toBe('@Order');
   });
 
-  test('Escape clears a non-empty query before closing the launcher', async () => {
+  test('Escape clears a non-empty query before closing the launcher', () => {
     const onClose = vi.fn();
     const sources = makeKnownCatalogSources();
     const view = mount(sources, onClose);

@@ -41,6 +41,7 @@
     "preact": "^10"
   },
   "devDependencies": {
+    "@atypical/eslint-config": "*",
     "@storybook/addon-a11y": "^10.4.6",
     "@storybook/preact-vite": "^10.4.6",
     "@testing-library/preact": "^3.2.4",

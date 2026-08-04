@@ -61,6 +61,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@atypical/eslint-config": "*",
     "@storybook/addon-a11y": "^10.4.6",
     "@storybook/addon-vitest": "^10.4.6",
     "@storybook/preact-vite": "^10.4.6",

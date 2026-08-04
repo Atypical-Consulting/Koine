@@ -31,6 +31,8 @@ function makeGit(
   const snapshot = (): GitStatus => ({ branch: 'main', files: files.map((f) => ({ ...f })), upstream });
   return {
     canUseGit: true,
+    // Only the `canUseGit === false` story exercises this — the empty state's download links (#1926).
+    openExternal: () => {},
     gitStatus: async () => snapshot(),
     gitDiff: async () => 'diff --git a/x b/x\n@@ -1 +1 @@\n-old line\n+new line',
     gitNumstat: async () => numstat.map((e) => ({ ...e })),

@@ -20,6 +20,10 @@ src/content/docs/reference/domain/
 !src/generated/
 src/generated/*
 !src/generated/concept-colors.json
+# NOTE: src/generated/downloads.json (produced by scripts/build-downloads.mjs, issue #1909) is
+# covered by the `src/generated/*` line above and is deliberately NOT un-ignored — unlike the
+# palette it is regenerated from the live GitHub release on every build, so a committed copy would
+# only ever be a stale claim about which assets exist.
 
 # dependencies
 node_modules/

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The bundled `koine` sidecar is a self-contained .NET application. Tauri signs it
+         under the hardened runtime (bundle.macOS.hardenedRuntime defaults to true, and
+         hardened runtime is mandatory for notarization). Without this entitlement CoreCLR
+         cannot allocate executable memory for its JIT, and the process is SIGKILLed with
+         "Failed to create CoreCLR, HRESULT: 0x80070008" — while the code signature itself
+         remains perfectly valid, so signature checks alone will not catch it.
+
+         Measured 2026-08-03: allow-jit ALONE is sufficient.
+         com.apple.security.cs.disable-library-validation was tested and is NOT required —
+         do not add it, it weakens the runtime for no benefit and draws notarization
+         scrutiny. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>

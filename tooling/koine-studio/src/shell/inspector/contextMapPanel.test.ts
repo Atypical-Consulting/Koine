@@ -214,7 +214,7 @@ describe('createContextMapPanel — mode persistence (#983)', () => {
 });
 
 describe('createContextMapPanel — scope focus (ADR 0009 / #1188)', () => {
-  test('a live activeContext change focuses the matching node without refetching or blanking others', async () => {
+  test('a live activeContext change focuses the matching node without refetching or blanking others', () => {
     const store = createAppStore();
     const host = makeHost();
     const panel = createContextMapPanel({ store, host, lsp: makeLsp(), onNavigate: makeOnNavigate() });

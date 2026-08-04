@@ -4870,6 +4870,85 @@ public class RustConformanceTests
     }
 
     /// <summary>
+    /// Issue #1775's exact reproducer: a <c>List&lt;Int&gt;</c> element compared directly (no accessor
+    /// call in between) against a bare scalar member inside <c>all</c>. At the time #1775 was filed this
+    /// was a real <c>cargo check</c> <c>E0308</c> (<c>expected &amp;i64, found i64</c>); #1801/PR #1833
+    /// generalized <see cref="RustExpressionTranslator.LambdaParam"/>'s deref-bind fix
+    /// (<c>|&amp;line|</c>) to every <c>Copy</c> scalar element — including plain <c>Int</c> — closing
+    /// this reproducer as a side effect before this issue's own fix task ran. This locks that in with a
+    /// real <c>cargo check</c> pinned to the issue's own model, so a regression here is caught even
+    /// though #1801's own coverage (<see cref="Collection_quantifier_lambda_binder_of_a_copy_scalar_element_binds_by_value"/>)
+    /// only exercised <c>any</c>, not <c>all</c>.
+    /// </summary>
+    [Fact]
+    public void Issue_1775_a_copy_int_list_element_compared_directly_against_a_scalar_in_all_compiles()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Basket {\n" +
+            "    rate: Int\n" +
+            "    lines: List<Int>\n" +
+            "    invariant lines.all(line => line < rate) \"every line stays below rate\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("lines.iter().all(|&line| line < rate)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// Issue #1775's full matrix: the issue names <c>all</c>, <c>any</c> AND <c>none</c>, and both
+    /// <c>List&lt;Int&gt;</c> and <c>List&lt;Decimal&gt;</c> — a fix that only greens the reported
+    /// <c>all</c>/<c>Int</c> combination would leave the siblings unverified. <c>none</c> in particular
+    /// had no real-<c>cargo-check</c> coverage anywhere before this (only <c>all</c>/<c>any</c> did), and
+    /// neither did any scalar <c>List&lt;Decimal&gt;</c> quantifier. All six combinations live in one
+    /// model/one <c>cargo check</c> to keep this proportionate to a pin rather than a fix (the underlying
+    /// defect is already closed by #1801/PR #1833 — see
+    /// <see cref="Issue_1775_a_copy_int_list_element_compared_directly_against_a_scalar_in_all_compiles"/>).
+    /// </summary>
+    [Fact]
+    public void Issue_1775_all_any_none_of_copy_int_and_decimal_list_elements_compared_directly_against_a_scalar_compile()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  value Basket {\n" +
+            "    rate: Int\n" +
+            "    cap: Decimal\n" +
+            "    lines: List<Int>\n" +
+            "    amounts: List<Decimal>\n" +
+            "    invariant lines.all(line => line < rate) \"all: int elements below rate\"\n" +
+            "    invariant lines.any(line => line > rate) \"any: int elements above rate\"\n" +
+            "    invariant lines.none(line => line == rate) \"none: int elements equal rate\"\n" +
+            "    invariant amounts.all(a => a < cap) \"all: decimal elements below cap\"\n" +
+            "    invariant amounts.any(a => a > cap) \"any: decimal elements above cap\"\n" +
+            "    invariant amounts.none(a => a == cap) \"none: decimal elements equal cap\"\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new RustEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var rust = string.Join("\n", result.Files.Select(f => f.Contents));
+        rust.ShouldContain("lines.iter().all(|&line| line < rate)");
+        rust.ShouldContain("lines.iter().any(|&line| line > rate)");
+        rust.ShouldContain("lines.iter().any(|&line| line == rate)");
+        rust.ShouldContain("amounts.iter().all(|&a| a < cap)");
+        rust.ShouldContain("amounts.iter().any(|&a| a > cap)");
+        rust.ShouldContain("amounts.iter().any(|&a| a == cap)");
+
+        var r = TestSupport.CompileRust(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// Issue #1838, the Rust-specific half. When a command's <c>result</c> expression is also a whole
     /// <c>emit</c>/<c>publish</c> payload argument the emitter binds it to one <c>__result</c> local — but
     /// Rust MOVES a non-<c>Copy</c> value on its first read, and this local is read three times here (the

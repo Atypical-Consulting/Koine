@@ -1,0 +1,14 @@
+{
+  "name": "@atypical/eslint-config",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Shared ESLint flat-config building blocks for Koine's front-end packages — the rule decisions that must hold identically across the tree (#998, #1924).",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "files": [
+    "index.mjs"
+  ]
+}
