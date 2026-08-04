@@ -304,8 +304,9 @@ public class FlatModelIndexLookupGuardTests
 
         // --- The _enumMemberToType seam, read through EnumsDeclaring(member) (#1886). Newly scanned, so
         //     every entry below is a PRE-EXISTING site this guard is cataloguing for the first time — not
-        //     a site #1886 introduced. They split cleanly in two, and the split is recorded honestly
-        //     rather than rubber-stamped: the first four cannot pick a wrong owner, the last four can. ---
+        //     a site #1886 introduced. All eight are order-independent, but for two different reasons, so
+        //     they are grouped rather than given one blanket excuse: the first four never select an owner
+        //     at all, the last four are superset-only membership tests. ---
 
         // Owner-selection-free: the flat list's ORDER and EXTRA entries are both unobservable here.
         ("src/Koine.Compiler/Semantics/Scenarios/ScenarioInterpreter.cs", 439, "EnumsDeclaring", "existence only (`.Count > 0`) — asks whether the identifier is an enum member at all, then tags the value by its own NAME (ScenarioValue.EnumMember(n.Name)); it never selects an owning enum, so no order can change the answer"),
@@ -313,16 +314,33 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 689, "EnumsDeclaring", "same conservative `owners.Count == 1` shape for hover text — an ambiguous member falls through to the un-owned rendering instead of naming an arbitrary enum"),
         ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 354, "EnumsDeclaring", "already scoped by a different axis: reads `enumOwner.Index`, the index of the model that OWNS the active document, so a same-named enum in another document's context cannot drive the rename-collision decision (the surrounding comment states this intent)"),
 
-        // Genuinely context-blind: `EnumsDeclaring(member)` returns enum SIMPLE names, and `.Contains` then
-        // tests the declared field's simple name against them. Under R13.2 two contexts may both declare
-        // `Status`; if only the FOREIGN one declares the transition's target member, these read true in a
-        // context whose own `Status` does not declare it. Listed — not silently passed — and filed as a
-        // follow-up sweep rather than fixed inline, because each needs a two-order fixture through its real
-        // entry point and the four span three emitters plus a validator (#1870's cluster shape).
-        ("src/Koine.Compiler/Semantics/EntityBehaviorValidator.cs", 727, "EnumsDeclaring", "state-machine reachability: the LINE ABOVE is already context-aware (Classify(resolver.Context, ...)), so this half is a straggler, not a considered exemption — follow-up filed"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1781, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check — same straggler shape as EntityBehaviorValidator.cs:727; follow-up filed"),
-        ("src/Koine.Emit.Java/JavaEmitter.Behaviors.cs", 70, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Java peer of the C# site; follow-up filed"),
-        ("src/Koine.Emit.Python/PythonEmitter.Behaviors.cs", 329, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Python peer of the C# site; follow-up filed"),
+        // The four state-machine `.Contains(<enum name already resolved in context>)` membership tests.
+        // These LOOK like the straggler shape — EntityBehaviorValidator.cs:727 even sits one line under a
+        // context-aware Classify(resolver.Context, ...) — but switching them to the context-aware overload
+        // provably changes NOTHING, which was measured rather than assumed (#1886):
+        //
+        //   * EnumsDeclaring keys on enum SIMPLE names at every rung, and EnumsDeclaring(context, member)
+        //     filters that same name list by a set of visible enum NAMES. When the collision IS two
+        //     same-named enums in different contexts — the only case where these sites could be fooled —
+        //     both lists read ["Status"] and the filter is a no-op.
+        //   * It also widens back: the overload returns the flat list whenever the scoped set comes out
+        //     empty ("never narrower than flat"), so it cannot remove a foreign-only owner either.
+        //
+        // Verified by patching :727 to EnumsDeclaring(resolver.Context, ...) and re-running a fixture whose
+        // transition targets a member only a FOREIGN same-named `Status` declares: KOI0703 fires
+        // identically before and after. Switching them would therefore be churn — and the one direction
+        // that could differ is the wrong one, since an early return here SKIPS the reachability
+        // diagnostic (a #1797-shaped false negative), not emits one.
+        //
+        // Inertness does not depend on that argument alone: flat can only ever return a SUPERSET, so
+        // `.Contains` can only be spuriously TRUE, never spuriously FALSE. A spurious TRUE merely lets
+        // control reach a check that independently rejects the model (KOI0703 above; and the three emitter
+        // sites only ever run on a model validation already accepted, where the member genuinely is a
+        // legal state of the bound enum).
+        ("src/Koine.Compiler/Semantics/EntityBehaviorValidator.cs", 727, "EnumsDeclaring", "state-machine reachability gate: superset-only, so it can only be spuriously TRUE, which routes into the KOI0703 check that rejects the model anyway — and the context-aware overload is a measured no-op here"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1781, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, reached only for a model validation already accepted, where the target IS a legal state of the bound enum"),
+        ("src/Koine.Emit.Java/JavaEmitter.Behaviors.cs", 70, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Java peer of the C# site — same post-validation reachability"),
+        ("src/Koine.Emit.Python/PythonEmitter.Behaviors.cs", 329, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Python peer of the C# site — same post-validation reachability"),
 
         // --- No site remains with a bounded context in a LOCAL of the same method that it then ignores:
         //     #1870 worked through every one of those. That is the literal claim, and it is weaker than
