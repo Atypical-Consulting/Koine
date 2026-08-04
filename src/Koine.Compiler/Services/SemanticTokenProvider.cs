@@ -384,7 +384,12 @@ public sealed class SemanticTokenProvider
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (TypeDecl t in index.AllTypes())
         {
-            foreach (var n in index.MemberNames(t.Name))
+            // Read the members off the declaration we are already holding, NOT by re-looking its name
+            // up (#1897). AllTypes() correctly yields BOTH same-named declarations when two contexts
+            // declare one (R13.2), but MemberNames(t.Name) answered from the flat, last-declaration-
+            // wins view — so it returned the winner's members twice and the loser's fields were never
+            // collected, silently dropping their reference highlighting.
+            foreach (var n in ModelIndex.MemberNamesOf(t))
             {
                 names.Add(n);
             }

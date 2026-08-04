@@ -948,14 +948,35 @@ public sealed class ModelIndex
     /// </para>
     /// </summary>
     public IEnumerable<string> MemberNames(string typeName) => _byName.TryGetValue(typeName, out TypeDecl? decl)
-        ? decl switch
-        {
-            ValueObjectDecl v => v.Members.Select(m => m.Name),
-            EntityDecl e => e.Members.Select(m => m.Name),
-            EnumDecl en => en.Signature.Select(p => p.Name),
-            _ => Enumerable.Empty<string>()
-        }
+        ? MemberNamesOf(decl)
         : Enumerable.Empty<string>();
+
+    /// <summary>
+    /// The declared member names of a type with <paramref name="context"/>-aware type resolution
+    /// (R13.2), mirroring <see cref="Classify(string?, string)"/>: the named type is resolved in that
+    /// context's scope first (local, then an unambiguous import), falling back to the global, flat
+    /// view — so a <c>Money</c> declared in two contexts lists the members of the right one at each
+    /// reference site (#1897).
+    /// </summary>
+    public IEnumerable<string> MemberNames(string? context, string typeName) =>
+        context is not null && TryGetDeclIn(context, typeName, out TypeDecl decl)
+            ? MemberNamesOf(decl)
+            : MemberNames(typeName);
+
+    /// <summary>
+    /// The declared member names of an ALREADY-RESOLVED declaration — the name-free core both
+    /// <see cref="MemberNames(string)"/> overloads share. Prefer this when you are holding the
+    /// <see cref="TypeDecl"/> itself: re-looking the name up would push it back through the flat,
+    /// last-declaration-wins <c>_byName</c> view and silently answer for a same-named declaration in
+    /// another context (#1897).
+    /// </summary>
+    public static IEnumerable<string> MemberNamesOf(TypeDecl decl) => decl switch
+    {
+        ValueObjectDecl v => v.Members.Select(m => m.Name),
+        EntityDecl e => e.Members.Select(m => m.Name),
+        EnumDecl en => en.Signature.Select(p => p.Name),
+        _ => Enumerable.Empty<string>()
+    };
 
     // ------------------------------------------------------------------------
     // Cross-context resolution & namespaces (R13.2 / R13.3)

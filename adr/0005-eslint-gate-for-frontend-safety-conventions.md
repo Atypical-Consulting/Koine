@@ -138,5 +138,162 @@ edit that does not compile.
 machine-generated, git-ignored module, and CI runs `npm run lint` before the generator has produced it — so
 linting it would make the gate depend on build order.
 
-This addendum records the ratchet's **start**; the decision above stands unchanged until the last
-`RATCHET_PENDING` entry is gone, at which point #998's closeout amends it to record full adoption.
+This addendum records the ratchet's **start**; the closeout addendum below records where it landed.
+
+## Addendum (2026-08-04) — the `recommendedTypeChecked` ratchet is complete (#998 close-out)
+
+The ratchet opened above is finished. **`tseslint.configs.recommendedTypeChecked` is live in both
+front-end packages**, `RATCHET_PENDING` is gone from both configs, and of the preset's 47 rules **46 are
+enforced at `error`**. The 47th, `@typescript-eslint/require-await`, is **exempt by this decision** —
+not deferred. That distinction is the point of this addendum: the ratchet's end state was originally
+written as "no per-rule override survives", and it is amended here to **"no per-rule override survives
+that isn't a recorded decision"**. An `off` entry is acceptable only when an ADR says why; a bare one
+with a finding count is unfinished work.
+
+### Where the 17 noisy rules landed
+
+Counts are the ratchet-start (2026-07-31) snapshot, `koine-studio` / `koine-ui`; several moved as
+earlier increments collapsed root causes elsewhere (the live figure at pick time is in each increment's
+own PR).
+
+| Rule | studio / ui | Enforced by |
+|---|---:|---|
+| `no-empty-object-type` | 2 / 2 | #1720 (option-narrowed, see below) |
+| `no-redundant-type-constituents` | 2 / 0 | #1720 |
+| `restrict-template-expressions` | 2 / 0 | #1720 |
+| `await-thenable` | 5 / 0 | #1720 |
+| `prefer-const` | 8 / 0 | #1720 (option-narrowed, see below) |
+| `no-base-to-string` | 9 / 0 | #1720 |
+| `prefer-promise-reject-errors` | 10 / 0 | #1720 |
+| `no-unsafe-return` | 12 / 0 | #1720 |
+| `no-unsafe-argument` | 50 / 0 | #1785 |
+| `no-explicit-any` | 65 / 1 | #1817 |
+| `no-unsafe-assignment` | 68 / 0 | #1814 |
+| `no-unused-vars` | 72 / 1 | #1821 (option-narrowed, see below) |
+| `no-unsafe-call` | 129 / 0 | #1818 |
+| `no-unnecessary-type-assertion` | 221 / 15 | #1823 |
+| `no-unsafe-member-access` | 261 / 0 | #1818 |
+| `unbound-method` | 546 / 22 | #1826 |
+| `require-await` | 477 / 0 | **exempt — this addendum** (#1827, PR #1920) |
+| *(the other 30 preset rules)* | 0 / 0 | #1720 (clean on day one) |
+
+Three enforced rules carry a non-default **option** — each argued as matching a pre-existing codebase
+convention, none an exemption, all still `error`: `no-empty-object-type`'s
+`allowInterfaces: 'with-single-extends'` (a `declare module` augmentation merges only through an
+interface), `prefer-const`'s `ignoreReadBeforeAssign: true` (the forward-declaration idiom for
+mutually-referencing controllers *cannot* be `const`), and `no-unused-vars`'s `^_` ignore patterns (the
+tree's pervasive `_name` convention for a deliberately-unused binding). Narrowing a rule's options is
+acceptable **only** when it encodes an established convention and is argued as such — never to make a
+rule pass.
+
+### Why `require-await` is exempt rather than burned down
+
+It was measured and classified finding-by-finding rather than swept — twice: at #1826 (2026-08-02) and
+again on re-measure before this close-out (2026-08-04, 492 findings / 63 files in `koine-studio`,
+0 in `koine-ui`). The population is stable and its shape is unambiguous:
+
+| shape | count | is it a bug? |
+|---|---:|---|
+| `vi.fn(async …)` / `mockImplementation(async …)` test doubles | 339 | no — the double stands in for an async API |
+| async callbacks passed where an async signature is expected | 111 | no |
+| `async *[Symbol.asyncIterator]` / async generator | 1 | no |
+| members declared with an explicit `Promise<T>` return type | 37 | no |
+| `test(…, async () => …)` where the `async` is genuinely droppable | 4 | cosmetic — dropped in PR #1920 |
+
+**Not one finding is a forgotten `await`.** All 13 non-test sites implement a Promise-typed contract:
+`FsFileHandle` / `FsDirHandle` (`src/host/browser/fs.ts`), `KoineHost` (`src/host/browser/index.ts`,
+`src/host/tauri.ts`), `LspTransport` (`src/host/browser/transport.ts`), and `runEditToolStaging`
+(`src/ai/assistantTools.ts`). Two reasons follow, and both are load-bearing:
+
+1. **The safety intent is already gated, twice over.** The bug class `require-await` exists to surface —
+   a promise created and never awaited — is caught here by `@typescript-eslint/no-floating-promises`
+   **and** `no-misused-promises`, both at `error` in prod code *and* in tests and stories since #997.
+   `require-await` adds no second net over them; on this codebase it reports a **declaration style**,
+   not a defect.
+2. **Clearing it would be a behaviour change, not a refactor.** Satisfying the rule means rewriting
+   ~486 deliberate `async` bodies to return `Promise.resolve(…)`. `async` turns a `throw` in the body
+   into a **rejected promise**; a plain function returning `Promise.resolve(…)` throws
+   **synchronously**. Several prod sites throw on purpose (`MemDir.getFileHandle` /
+   `getDirectoryHandle` / `removeEntry` in `src/host/browser/fs.ts`), so a caller that only
+   `.catch()`es would start seeing an uncaught exception. That is a real regression risk bought for
+   zero measured defects.
+
+**Standing condition.** This exemption holds **only while `no-floating-promises` and
+`no-misused-promises` both stay at `error` in both packages, including in tests and stories.** Its
+entire justification is that those two rules already cover the bug class. If either is relaxed,
+narrowed in file scope, or downgraded to `warn`, `require-await` must be revisited — the exemption
+block in each `eslint.config.mjs` says so inline, next to the rule it depends on.
+
+The exemption is mirrored in **both** configs, including `koine-ui`, which has **zero** findings today
+and was therefore passing the rule implicitly. That is a deliberate, small loosening of `koine-ui`
+rather than an oversight, and it is the one place this close-out does not simply tighten: #998 adopted
+"a rule is never half-enforced across the tree" as an invariant (it considered and rejected a
+per-directory ratchet), and the reasoning above is a judgement about the *rule*, not about one
+package's current finding count. Leaving it enforced in `koine-ui` would mean the first contributor to
+write a Promise-typed seam there gets blocked by a rule this project has formally decided does not earn
+its keep — and would have to rediscover this analysis to get unblocked. The cost is bounded and
+visible: `koine-ui`'s async surface is gated by the same two promise rules that justify the exemption.
+
+If a future maintainer wants the rule regardless, the honest route is specified in #1827 as Option A —
+staged per-directory, with every throwing site covered first by a test asserting
+`await expect(...).rejects.toThrow(...)` so the throw-vs-reject change cannot pass silently.
+
+### End state
+
+- `recommendedTypeChecked` on in `tooling/koine-studio` and `tooling/koine-ui`; 46/47 rules at `error`.
+- `RATCHET_PENDING` deleted from both configs (`grep -r RATCHET_PENDING tooling/` → no match). What
+  replaces it is a named `ADR_0005_EXEMPT` block carrying the measurement and a link here, so the next
+  reader can tell "decided" from "deferred" at a glance.
+- The narrow #978 gate (the four load-bearing conventions, the HTML-injection sinks, the `#1352`
+  lifecycle selectors) is unchanged and still the last word on the rules it names explicitly.
+- The invariants that got us here still bind: never re-add a burned-down rule as `off`, never clear a
+  finding with a blanket `eslint-disable`, and burn a rule down across both packages in one PR. A
+  preset upgrade that lands new findings gets fixed — or, if it earns one, an addendum like this.
+
+## Addendum (2026-08-04) — shared rule decisions move into one module, guarded in CI (#1924)
+
+The close-out above left one loose end it did not name as such. Every decision the two front-end
+packages must take *together* — the `require-await` exemption and its standing condition included —
+was written into **both** `eslint.config.mjs` files, each copy carrying its own justification and a
+comment asking the next contributor to keep it in lock-step with the other. #998's load-bearing
+invariant, *a rule is never half-enforced across the tree*, was therefore enforced by discipline. An
+edit to one file and not the other violated it silently, and nothing in CI noticed.
+
+Worse, the exemption's **standing condition** — it holds only while `no-floating-promises` and
+`no-misused-promises` stay at `error` in both packages — was itself only prose. Relaxing either rule
+in one package would have invalidated a recorded decision with no signal at all.
+
+**Both are now structural.**
+
+- `tooling/eslint-config` (`@atypical/eslint-config`, private, in the existing npm workspace of ADR
+  0003) holds the shared decisions once, with one canonical justification each: the
+  `recommendedTypeChecked` wiring, the ADR-backed `require-await` exemption, the `no-unused-vars` `^_`
+  narrowing, the `no-empty-object-type` narrowing, the two promise rules the exemption depends on, and
+  the react-hooks rules. It exports flat-config arrays (`typeCheckedPreset`, `promiseSafetyGate`,
+  `reactHooksGate`), each requiring the **consumer's** `tsconfigRootDir` — that parameter cannot be
+  defaulted inside the module without silently pointing type-aware linting at the wrong TypeScript
+  program, so the guard is asserted rather than assumed.
+- Co-locating the promise rules with the exemption they justify is the point, not a tidiness win: the
+  dependency is now visible in one file instead of spanning two.
+- `scripts/ci/check-eslint-config-parity.mjs` runs in the `studio (web)` CI leg beside `npm run lint`
+  and asks ESLint what config it actually **resolves** for a representative file per config block in
+  each package. It fails on any of: drift from a committed baseline, the two packages disagreeing on a
+  shared rule, or the shared module's exports breaking their contract. `npm run lint` proves each
+  package is clean under *its own* config; only this proves the two configs still agree.
+
+**What deliberately stayed per-package**, because it is grounded in one package's own code rather than
+in a judgement about the rule: koine-studio's imperative-island allow-list, its `#1352` lifecycle
+selectors, its sanctioned `dangerouslySetInnerHTML` sites, its `src/templates.generated.ts` ignore, its
+`prefer-const` `ignoreReadBeforeAssign` narrowing (a forward-declaration idiom only its controllers
+have), and each package's `no-restricted-properties` message naming its own helper.
+
+**No rule changed.** That is the acceptance criterion, not an aspiration: the baseline was recorded
+against the pre-refactor tree and every step of the extraction had to leave all 16 resolved configs
+byte-identical. Intentional future rule changes re-record it with `--update`, and the snapshot diff is
+the review — the same discipline this repo already applies to Verify snapshots.
+
+This amends the close-out addendum above on one point of fact: the `require-await` exemption is no
+longer an `ADR_0005_EXEMPT` block in each config, and `RATCHET_PENDING`'s successor is not duplicated
+at all. It lives in `tooling/eslint-config/index.mjs`, and the "burn a rule down across both packages
+in one PR" invariant is now discharged by construction — a shared rule is changed in the shared module
+or the build fails.

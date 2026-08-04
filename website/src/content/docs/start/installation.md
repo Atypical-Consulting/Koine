@@ -3,11 +3,47 @@ title: "Installation"
 description: "Get the Koine compiler building and run it from the .NET CLI."
 ---
 
-Koine ships as source. You clone the repository and build it with the .NET SDK; the CLI is packaged
-as a [.NET tool](#install-as-a-global-tool), so you can also install a short `koine` command instead
-of typing `dotnet run` each time — see [Install the `koine` command](#install-the-koine-command) below.
+There are three ways to get Koine. Pick whichever suits you — none of them is a prerequisite for the
+others, and the [browser edition](/Koine/studio/) needs no install at all.
+
+## Pick your install
+
+**1 · Download a prebuilt binary.** Every release attaches a self-contained `koine` compiler for
+macOS (Apple Silicon), Windows (x64), and Linux (x64), plus **Koine Studio** desktop installers —
+a `.dmg`, an `.exe`/`.msi`, and an `.AppImage`/`.deb`/`.rpm`. Grab them from the
+[latest release](https://github.com/Atypical-Consulting/Koine/releases/latest) or from the download
+section on the [home page](/Koine/). Nothing else is required — the binaries carry their own runtime.
+
+:::caution
+**macOS** — first open the `.dmg` and drag **Koine Studio** to Applications, then launch it from
+there. Everything below acts on the copy in `/Applications`; approving or de-quarantining the copy
+still inside the mounted disk image does not carry over to the one you keep.
+
+Koine Studio is signed, but not with a certificate Apple recognises, so the first launch is blocked
+with *"Apple could not verify … is free of malware that may harm your Mac or compromise your
+privacy"*. Click **Done**, then go to **System Settings ▸ Privacy & Security**, scroll to *Security*,
+and click **Open Anyway**. The app opens normally from then on.
+
+Right-clicking the app ▸ **Open** produces the same block on macOS 15 and later — Apple removed that
+bypass, so it is no longer a workaround. If you prefer the terminal, `xattr -dr
+com.apple.quarantine "/Applications/Koine Studio.app"` clears the download flag outright.
+
+**Windows** — the installers are unsigned; SmartScreen needs *More info ▸ Run anyway*.
+
+Developer ID signing and notarization (macOS) and Authenticode signing (Windows) are tracked in
+[issue #1137](https://github.com/Atypical-Consulting/Koine/issues/1137).
+:::
+
+**2 · Install the .NET tool.** If you already have the .NET SDK, the CLI is packaged as a
+[.NET tool](#install-as-a-global-tool) — a short `koine` command, installable in one line. See
+[Install the `koine` command](#install-the-koine-command) below.
+
+**3 · Build from source.** Clone the repository and build it with the .NET SDK — the rest of this
+page. This is what you want if you intend to work *on* Koine rather than only with it.
 
 ## Prerequisites
+
+These apply to options 2 and 3; a downloaded binary needs none of them.
 
 - **.NET 10 SDK** or newer. The whole solution targets `net10.0`. Check what you have:
 

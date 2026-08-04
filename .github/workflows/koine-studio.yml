@@ -108,6 +108,17 @@ jobs:
       - name: Lint frontend (npm)
         run: npm run lint -w koine-studio -w @atypical/koine-ui
 
+      # ESLint config parity (#1924): `npm run lint` above proves each package is clean under ITS OWN
+      # config — it cannot see that the two configs still AGREE. #998's load-bearing invariant is that a
+      # shared rule is never half-enforced across the tree, and until this step that invariant was held
+      # by a comment asking the next contributor to mirror their edit into the other package. This asks
+      # ESLint what config it actually resolves for a representative file per config block, in both
+      # packages, and fails on (a) any drift from the committed baseline, (b) the two packages
+      # disagreeing on a shared rule, or (c) tooling/eslint-config's exports breaking their contract.
+      # Runs beside the lint gate for the same reason: config resolution is OS-independent.
+      - name: Check ESLint config parity (#1924)
+        run: node scripts/ci/check-eslint-config-parity.mjs
+
       # Pack verification for the extracted @atypical/koine-ui package (issue #905): proves on every
       # PR that its published tarball contains the right files (dist/ only, no source/test files).
       # `npm pack` always runs the package's own `prepack` (`npm run build`) first, so this alone

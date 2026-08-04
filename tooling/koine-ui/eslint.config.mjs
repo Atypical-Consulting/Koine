@@ -1,61 +1,37 @@
 import tseslint from 'typescript-eslint';
-import reactHooks from 'eslint-plugin-react-hooks';
+import { typeCheckedPreset, promiseSafetyGate, reactHooksGate } from '@atypical/eslint-config';
 
 // Flat-config ESLint gate for the shared UI package (#978). Same safety conventions as koine-studio —
 // void-prefixed promises, domById-over-getElementById, escape-before-innerHTML, and the react-hooks
 // rules (the package ships Preact components) — minus the studio-specific imperative-island allow-list.
 // Type-aware rules run against tsconfig.json (include: ["src"]) via parserOptions.projectService.
-
-// ── #998: the tseslint.configs.recommendedTypeChecked ratchet — COMPLETE for this package ────────
-// This was the mirror of koine-studio's inverted allow-list (see its header comment for the full
-// rationale): the whole preset on, every still-noisy rule listed here as 'off' with its live count,
-// each ratchet PR deleting one entry. The table is now EMPTY — `unbound-method` (22 findings / 5 files)
-// was the last one, so `recommendedTypeChecked` is enforced here with NO per-rule override at all.
-// `require-await` never appeared in this table: it was clean in this package on day one.
-// The invariant that got us here still binds: never re-add an entry, and never clear a rule with a
-// blanket `eslint-disable`. A future preset upgrade that lands new findings gets fixed, not deferred.
+//
+// ── What lives here vs in @atypical/eslint-config (#1924) ────────────────────────────────────────
+// The rule DECISIONS this package shares with koine-studio — the `recommendedTypeChecked` preset, the
+// ADR 0005 `require-await` exemption, the `no-unused-vars` `^_` narrowing, the `no-empty-object-type`
+// narrowing, the `no-floating-promises`/`no-misused-promises` pair that ADR 0005's exemption depends
+// on, and the react-hooks rules — live ONCE in `tooling/eslint-config`, with their justifications, and
+// are spread in below. They are no longer mirrored by hand: `scripts/ci/check-eslint-config-parity.mjs`
+// asserts in CI that both packages resolve to the same setting for every shared rule, so #998's
+// invariant (a rule is never half-enforced across the tree) fails the build rather than review.
+//
+// What stays in this file is what is grounded in THIS package's own code: the `getElementById` message
+// naming its own helper, the HTML-injection sink bans, and the tests/stories override. #998's standing
+// invariants still bind here: never re-add a burned-down rule as 'off', never clear a finding with a
+// blanket `eslint-disable`, and change a shared rule in the shared module — never in one package only.
 export default tseslint.config(
-  // The full type-checked preset. Placed first so the narrow #978 gate below stays the last word on
-  // the rules it names explicitly.
-  {
-    files: ['src/**/*.{ts,tsx}'],
-    extends: [tseslint.configs.recommendedTypeChecked],
-    languageOptions: {
-      parser: tseslint.parser,
-      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
-    },
-    rules: {
-      // Same underscore-ignore config as koine-studio's (see its header comment for the rationale):
-      // matches the codebase's pre-existing `_name` convention for deliberately-unused bindings.
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        {
-          args: 'after-used',
-          argsIgnorePattern: '^_',
-          varsIgnorePattern: '^_',
-          caughtErrorsIgnorePattern: '^_',
-          destructuredArrayIgnorePattern: '^_',
-        },
-      ],
-      // Same narrowing as koine-studio's config: `with-single-extends` is the rule's own allowance for
-      // declaration-MERGING interfaces (src/vitest-axe.d.ts augments vitest's `Assertion` /
-      // `AsymmetricMatchersContaining`), where an empty body is unavoidable — augmentation only works
-      // through an interface. Genuinely-empty declarations are still 'error'.
-      '@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
-    },
-  },
+  // The full type-checked preset plus the shared rule decisions. Placed first so the narrow #978 gate
+  // below stays the last word on the rules it names explicitly.
+  ...typeCheckedPreset(import.meta.dirname),
+  ...promiseSafetyGate(import.meta.dirname),
+  ...reactHooksGate(import.meta.dirname),
   {
     files: ['src/**/*.{ts,tsx}'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
-    plugins: { '@typescript-eslint': tseslint.plugin, 'react-hooks': reactHooks },
     rules: {
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': 'error',
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'error',
       'no-restricted-properties': ['error', {
         object: 'document',
         property: 'getElementById',

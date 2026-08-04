@@ -5,6 +5,8 @@ import {
   PROJECT_LINKS,
   CREATOR_NAME,
   CREDIT_PREFIX,
+  DOWNLOADS_URL,
+  INSTALL_GUIDE_URL,
   fillVersionChip,
   wireExternalLink,
 } from '@/shared/colophon';
@@ -44,6 +46,24 @@ describe('fillVersionChip', () => {
     fillVersionChip(chip, platformWithVersion(() => Promise.reject(new Error('no version'))));
     await flush();
     expect(chip.hidden).toBe(true);
+  });
+});
+
+describe('off-app destinations (#1926)', () => {
+  // Pinned against the Home link's own origin+base rather than a hardcoded literal: the failure this
+  // guards is a future site move that updates PROJECT_LINKS and silently leaves these two behind,
+  // which no other test would notice.
+  const base = PROJECT_LINKS.find((l) => l.label === 'Home')!.href;
+
+  it('points the downloads and install-guide URLs at the project site', () => {
+    expect(base).toMatch(/^https:\/\//);
+    expect(DOWNLOADS_URL.startsWith(base)).toBe(true);
+    expect(INSTALL_GUIDE_URL.startsWith(base)).toBe(true);
+  });
+
+  it('targets the homepage Downloads section and the installation guide', () => {
+    expect(DOWNLOADS_URL).toBe(`${base}#download`);
+    expect(INSTALL_GUIDE_URL).toBe(`${base}start/installation/`);
   });
 });
 

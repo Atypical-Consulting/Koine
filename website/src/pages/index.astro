@@ -1,6 +1,7 @@
 ---
 import BlueprintLayout from '../layouts/BlueprintLayout.astro';
 import Playground from '../components/Playground.astro';
+import Downloads from '../components/Downloads.astro';
 import { sampleById } from '../playground/samples';
 import { encodeCode } from '../playground/encode';
 import { basePath } from '../lib/base';
@@ -60,8 +61,9 @@ const pillars = [
         <div class="cta">
           <a class="btn btn--primary" href={`${base}/studio/`}>Open Koine Studio ▸</a>
           <a class="btn" href={`${base}/start/what-is-koine/`}>Get started</a>
+          <a class="btn" href="#download">Download ▸</a>
         </div>
-        <p class="hero__note">No install. The compiler runs in your browser.</p>
+        <p class="hero__note">No install for the browser edition — or download the desktop app below.</p>
       </div>
 
       <div class="hero__diagram" aria-hidden="true">
@@ -169,6 +171,11 @@ const pillars = [
         <span class="tgt">Rust</span>
       </div>
     </div>
+  </section>
+
+  <!-- Downloads -->
+  <section class="band" id="download">
+    <Downloads />
   </section>
 
   <style>

@@ -20,3 +20,10 @@ dotnet run --project src/Koine.Cli -- build templates/starters/ordering --target
 The `.py.txt` suffix is on purpose: the demo's own `mypy` run only ever type-checks
 `demo/python/{generated,main.py}`, so these reference copies are never picked up as duplicate
 modules.
+
+**This folder is test-guarded** (issue #1903, the polyglot analogue of #1841):
+`Koine.Compiler.Tests.PolyglotDemoReferenceGuardTests.Python_reference_matches_committed_snapshot`
+regenerates both files above in-process and asserts they are byte-identical (line-ending-normalized)
+to what's committed here. A red run means the emitter's output has moved — run that test's
+regeneration command (in its failure message) and commit the result; it does **not** mean the
+emitter is wrong.

@@ -65,6 +65,7 @@ Koine.Compiler.Ast.EntityDecl.IdentityStrategySpan.init -> void
 Koine.Compiler.Ast.ModelCoverage
 Koine.Compiler.Ast.ModelIndex.CommandsEmitting(string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
 Koine.Compiler.Ast.ModelIndex.EventsEmittedBy(string! targetType, string! commandName) -> System.Collections.Generic.IReadOnlyList<string!>!
+Koine.Compiler.Ast.ModelIndex.MemberNames(string? context, string! typeName) -> System.Collections.Generic.IEnumerable<string!>!
 Koine.Compiler.Ast.ModelIndex.PoliciesTriggeredByEvent(string! context, string! eventName) -> System.Collections.Generic.IReadOnlyList<(string! targetType, string! commandName)>!
 Koine.Compiler.Ast.ModelIndex.SubscriptionEventNameIsAmbiguous(string! subscriberContext, string! eventShortName) -> bool
 Koine.Compiler.Ast.QueryDecl.ApiAnnotations.get -> Koine.Compiler.Ast.ApiAnnotationInfo?
@@ -347,6 +348,7 @@ const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateNameMatchesRoot = "KOI
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AggregateSelectorOptional = "KOI0404" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.AmbiguousFactoryIdentity = "KOI0809" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.CommandParameterReferencesEntity = "KOI1603" -> string!
+const Koine.Compiler.Diagnostics.DiagnosticCodes.DerivedMemberCycle = "KOI0110" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DivisionByZeroInConstantDefault = "KOI1606" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DomainEventReferencesEntity = "KOI1604" -> string!
 const Koine.Compiler.Diagnostics.DiagnosticCodes.DuplicateApiAnnotation = "KOI1212" -> string!
@@ -396,6 +398,7 @@ static Koine.Compiler.Ast.MemberAnalysis.IdentityParameters(Koine.Compiler.Ast.E
 static Koine.Compiler.Ast.ModelCoverage.Compute(Koine.Compiler.Ast.KoineModel! model, System.Collections.Generic.IReadOnlyList<Koine.Compiler.Emit.EmittedFile!>! emitted, string! target) -> Koine.Compiler.Ast.CoverageReport!
 static Koine.Compiler.Ast.ModelCoverage.RenderText(Koine.Compiler.Ast.CoverageReport! report) -> string!
 static Koine.Compiler.Ast.ModelCoverage.ToJson(Koine.Compiler.Ast.CoverageReport! report) -> string!
+static Koine.Compiler.Ast.ModelIndex.MemberNamesOf(Koine.Compiler.Ast.TypeDecl! decl) -> System.Collections.Generic.IEnumerable<string!>!
 static Koine.Compiler.Ast.TypeResolver.IsBool(Koine.Compiler.Ast.TypeRef? t) -> bool
 static Koine.Compiler.Emit.ExprDescriber.Describe(Koine.Compiler.Ast.Expr! e) -> string!
 static Koine.Compiler.Emit.Grammar.GbnfExporter.Export() -> string!
