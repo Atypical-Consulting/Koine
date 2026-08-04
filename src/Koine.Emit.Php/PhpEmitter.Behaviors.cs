@@ -396,24 +396,35 @@ public sealed partial class PhpEmitter
             initByField.TryAdd(i.Field, i.Value);
         }
 
-        var args = new List<string> { "$id" };
         // Walk the ctor members in the SAME order the constructor signature uses (defaulted/optional
-        // last), so these positional `new self($id, …)` args line up with the reordered parameters.
+        // last), so a positional `new self($id, …)` call's args line up with the reordered
+        // parameters. A required member with no value source (the model only WARNS — KOI0806) has
+        // nothing to put in its slot; leaving it out of a POSITIONAL call would shift every
+        // following argument a slot left and land the NEXT member's value in THIS member's
+        // parameter — silent field corruption whenever the arity happens to line up (#1733). So
+        // when any member hits that branch, the WHOLE call switches to PHP 8 named arguments and
+        // simply omits that one slot — omission is positionally inert for a named call, and phpstan
+        // then reports the honest `missing parameter` instead of either a silent shift or a
+        // `never`-typed placeholder (which phpstan flags as unreachable code below it).
+        var positionalArgs = new List<string> { "$id" };
+        var namedArgs = new List<string> { "id: $id" };
+        bool hasUnsourcedRequired = false;
         foreach (Member m in OrderCtorParams(ctorMembers))
         {
             var param = PhpNaming.EscapeIdentifier(PhpNaming.PropertyName(m.Name));
-            if (initByField.TryGetValue(m.Name, out Expr? value))
+            string? value;
+            if (initByField.TryGetValue(m.Name, out Expr? initValue))
             {
                 var expectedEnum = index.Classify(m.Type.Qualifier ?? translator.Context, m.Type.Name) == TypeKind.Enum ? m.Type.Name : null;
                 // A factory is a STATIC method — Property mode would render an entity-member
                 // reference as `$this->member` ("Cannot use $this in a static method"). Use
                 // Parameter mode so a bare member renders as `$member` (the factory's params and
                 // synthetic `id` are pushed as locals and take precedence anyway).
-                args.Add(translator.TranslateReconciled(value, PhpExpressionTranslator.NameMode.Parameter, expectedEnum, m.Type));
+                value = translator.TranslateReconciled(initValue, PhpExpressionTranslator.NameMode.Parameter, expectedEnum, m.Type);
             }
             else if (factory.Parameters.Any(p => MemberAnalysis.AutoBinds(p, m)))
             {
-                args.Add("$" + param);
+                value = "$" + param;
             }
             else if (m.Initializer is not null
                 && !MemberAnalysis.IsDerived(m, ctorMembers.Select(f => f.Name).ToHashSet()))
@@ -424,17 +435,26 @@ public sealed partial class PhpEmitter
                 // literal (FoldDecimalConstantDefault, #1030) — but this factory fallback never did, so
                 // `new self($id, 5)` fed a bare `int` into a `\Koine\Runtime\Decimal` parameter: a real
                 // `phpstan analyse --level max` argument.type error.
-                args.Add(translator.TranslateReconciled(m.Initializer, PhpExpressionTranslator.NameMode.Parameter, m.Type.Name, m.Type));
+                value = translator.TranslateReconciled(m.Initializer, PhpExpressionTranslator.NameMode.Parameter, m.Type.Name, m.Type);
             }
             else if (m.Type.IsOptional)
             {
-                args.Add("null");
+                value = "null";
             }
-            // else: required + unset — omit (constructor surfaces the gap).
+            else
+            {
+                // Required + unset — no slot to fill; the named-argument call below drops it.
+                hasUnsourcedRequired = true;
+                continue;
+            }
+
+            positionalArgs.Add(value);
+            namedArgs.Add($"{param}: {value}");
         }
 
+        var callArgs = hasUnsourcedRequired ? namedArgs : positionalArgs;
         sb.Append(Indent).Append(Indent).Append("$instance = new self(")
-          .Append(string.Join(", ", args)).Append(");\n");
+          .Append(string.Join(", ", callArgs)).Append(");\n");
 
         // 4. Record creation events (payloads may reference `id` and parameters). A factory is a
         // static method, so use Parameter mode (no `$this->`); `id`/params are locals anyway. A

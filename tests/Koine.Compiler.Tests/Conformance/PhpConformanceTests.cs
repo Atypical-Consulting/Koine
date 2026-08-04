@@ -3179,11 +3179,15 @@ public class PhpConformanceTests
     /// Issue #1733: a factory that leaves a required member unsourced must NOT omit its positional
     /// constructor argument — <c>WriteFactory</c>'s ctor-args loop builds a POSITIONAL
     /// <c>new self(...)</c> call, so omitting one argument shifts every later one a slot left and
-    /// lands <c>$label</c> in the <c>$sku</c> parameter. Every sibling emitter that also builds a
-    /// positional call (Rust <c>todo!()</c>, Kotlin/Java type default, TS <c>undefined as never</c>,
-    /// C# <c>default!</c>) fills the slot instead; PHP must too. phpstan catches the resulting arity
-    /// mismatch (<c>constructor invoked with 2 parameters, 3 required</c>) here — the arity-lines-up
-    /// variant, where no toolchain reports anything, is covered separately.
+    /// lands <c>$label</c> in the <c>$sku</c> parameter. The fix switches the WHOLE call to PHP 8
+    /// named arguments once any member hits this branch — an omission is positionally inert for a
+    /// named call — and drops just that one slot. A <c>throw</c>-expression placeholder (the Rust
+    /// <c>todo!()</c> analogue) was tried first but rejected: phpstan flags the statements after it
+    /// as <c>deadCode.unreachable</c> since a <c>never</c>-typed argument always terminates the call.
+    /// So this fixture no longer type-checks clean — it now carries the honest, precise
+    /// <c>Missing parameter $sku</c> diagnostic instead of either a silent shift or a misleading
+    /// arity-count error. The arity-lines-up variant, where no toolchain reports anything even
+    /// pre-fix, is covered separately.
     /// </summary>
     [Fact]
     public void Factory_with_an_unsourced_required_field_does_not_shift_positional_ctor_args()
@@ -3206,7 +3210,18 @@ public class PhpConformanceTests
 
         // Always-on guard (runs with no PHP toolchain): $label must never occupy the $sku slot.
         product.ShouldNotContain("new self($id, $label)");
+        product.ShouldContain("new self(id: $id, label: $label)");
 
-        AssertPhpIsWellTyped(result.Files);
+        var syntax = TestSupport.SyntaxCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(syntax.ToolchainAvailable, NoInterpreterNotice);
+        syntax.Ok.ShouldBeTrue("emitted PHP should parse (php -l):\n" + string.Join("\n", syntax.Errors));
+
+        // The named-argument call is honest about the gap: phpstan reports a precise missing-parameter
+        // diagnostic naming the exact field, rather than either silently mis-binding it or reporting a
+        // misleading arity count.
+        var types = TestSupport.TypeCheckPhp(result.Files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeFalse();
+        types.Errors.ShouldContain(e => e.Contains("$sku", StringComparison.Ordinal) && e.Contains("Missing parameter", StringComparison.Ordinal));
     }
 }
