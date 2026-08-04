@@ -1342,7 +1342,11 @@ internal sealed class RustExpressionTranslator
     /// <summary>
     /// Renders the <c>iter().map(...)</c> projection feeding a sum/min/max fold: each element is mapped
     /// through the lambda body and cloned to an owned value (so a stored value-object field projects to
-    /// an owned operand the fold can consume).
+    /// an owned operand the fold can consume). The closure parameter itself reuses <see cref="LambdaParam"/>
+    /// — the same by-reference/deref-bind decision a quantifier's lambda parameter already makes (#1801)
+    /// — so a bare-identifier body (<c>x =&gt; x</c>) over a <c>Copy</c> scalar element sees an owned
+    /// <c>T</c>, not the <c>&amp;T</c> <c>.iter()</c> yields (#1931); a value-object element still binds
+    /// by reference and the <c>.clone()</c> below makes its projected accessor result owned.
     /// </summary>
     private string MapProjection(CallExpr call, string target)
     {
@@ -1361,7 +1365,7 @@ internal sealed class RustExpressionTranslator
         // A non-Copy projection (a value object) must be owned for the fold; `.clone()` makes a
         // stored-field reference owned (and is a harmless no-op shape on an already-owned temporary).
         var owned = bodyType is { } bt && !_typeMapper.IsCopy(bt) ? ".clone()" : string.Empty;
-        return $"{target}.iter().map(|{RustNaming.Field(lambda.Parameter)}| {body}{owned})";
+        return $"{target}.iter().map(|{LambdaParam(call)}| {body}{owned})";
     }
 
     /// <summary>
