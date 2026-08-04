@@ -53,9 +53,20 @@ namespace Koine.Compiler.Tests;
 /// only as an additive second pass over a <c>seen</c> set (it can only ever ADD visibility, never
 /// shadow), and <c>CandidateTypeNames</c> unions <c>_byName.Keys</c> into a name list where a name
 /// shadowed in the dictionary is still present in the union. Neither can return a different answer
-/// under a different <c>.koi</c> declaration order. <c>ModelIndex</c>'s other last-write-wins map,
-/// <c>_enumMemberToType</c> (and its <c>EnumsDeclaring</c> reader), is a distinct seam tracked by
-/// #1886 and #1739, not part of the <c>_byName</c> family this guard polices.
+/// under a different <c>.koi</c> declaration order.
+/// </para>
+/// <para>
+/// <b>The seventh seam: <c>EnumsDeclaring(string)</c> — 1 arg (#1886).</b> <c>ModelIndex</c>'s OTHER
+/// last-write-wins map, <c>_enumMemberToType</c>, is a distinct family from <c>_byName</c> and was
+/// previously left unscanned and untracked. It is now covered here through its reader
+/// <c>EnumsDeclaring(member)</c>, whose context-aware sibling <c>EnumsDeclaring(string?, string)</c>
+/// (#1739) again takes exactly one more argument, so the same name+arity discrimination applies.
+/// (<c>EnumsDeclaring</c> is declared ONLY on <c>ModelIndex</c>, in these two overloads.) The map's
+/// raw <c>EnumMemberToType</c> property is deliberately NOT scanned: it is a PROPERTY, so it yields no
+/// invocation syntax, and its ~30 references are the five code emitters threading the dictionary into
+/// their translators as a constructor argument — where every translator uses it only as a tie-break
+/// constrained to the context-scoped owner set. Pinning thirty lines of plumbing would cost churn
+/// without guarding a lookup.
 /// </para>
 /// <para>
 /// Method-name + arity is enough to identify these six specific overloads without full semantic
@@ -137,7 +148,7 @@ public class FlatModelIndexLookupGuardTests
                 if (invocation.Expression is not MemberAccessExpressionSyntax
                     {
                         Name.Identifier.Text: "Classify" or "TryGetDecl" or "IsEnumType" or "IsKnownType"
-                            or "TryGetMemberType" or "MemberNames"
+                            or "TryGetMemberType" or "MemberNames" or "EnumsDeclaring"
                     } member)
                 {
                     continue;
@@ -153,6 +164,7 @@ public class FlatModelIndexLookupGuardTests
                     "IsKnownType" => argCount == 1,
                     "TryGetMemberType" => argCount == 3,
                     "MemberNames" => argCount == 1,
+                    "EnumsDeclaring" => argCount == 1,
                     _ => false
                 };
 
@@ -184,7 +196,7 @@ public class FlatModelIndexLookupGuardTests
         ("src/Koine.Emit.Rust/RustExpressionTranslator.cs", 1464, "TryGetDecl", "final fallback of ResolveDecl's own ladder (TryGetDeclIn tried at :1459)"),
         ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 486, "TryGetDecl", "final fallback of ResolveDecl's own ladder"),
         ("src/Koine.Compiler/Semantics/SemanticValidator.cs", 973, "TryGetDecl", "final fallback after TryGetDeclIn(ctx.Name, target, ...) in ValidateSpecs"),
-        ("src/Koine.Compiler/Semantics/CqrsValidator.cs", 480, "TryGetDecl", "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
+        ("src/Koine.Compiler/Semantics/CqrsValidator.cs", 485, "TryGetDecl", "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
         ("src/Koine.Execution/ScenarioExecutor.cs", 1579, "TryGetDecl", "final fallback within a DeclaringContextsOf/TryGetDeclIn walk in InvariantsDeclaredOn"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Application.cs", 571, "TryGetDecl", "combined TryGetDeclIn(context,...) || TryGetDecl(...) ladder"),
         ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 284, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
@@ -289,6 +301,28 @@ public class FlatModelIndexLookupGuardTests
         //     answer cannot differ per context. Verified against the fixtures in
         //     AstSymbolCrossContextClassificationTests, which pin the outcome under BOTH context orders. ---
         ("src/Koine.Compiler/Ast/Binder.cs", 270, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
+
+        // --- The _enumMemberToType seam, read through EnumsDeclaring(member) (#1886). Newly scanned, so
+        //     every entry below is a PRE-EXISTING site this guard is cataloguing for the first time — not
+        //     a site #1886 introduced. They split cleanly in two, and the split is recorded honestly
+        //     rather than rubber-stamped: the first four cannot pick a wrong owner, the last four can. ---
+
+        // Owner-selection-free: the flat list's ORDER and EXTRA entries are both unobservable here.
+        ("src/Koine.Compiler/Semantics/Scenarios/ScenarioInterpreter.cs", 439, "EnumsDeclaring", "existence only (`.Count > 0`) — asks whether the identifier is an enum member at all, then tags the value by its own NAME (ScenarioValue.EnumMember(n.Name)); it never selects an owning enum, so no order can change the answer"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", 308, "EnumsDeclaring", "conservative by construction: StrongSymbol resolves ONLY when the member has exactly one owner globally (`owners.Count == 1`) and returns null otherwise, so an ambiguous member yields no symbol rather than an order-dependent one"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 689, "EnumsDeclaring", "same conservative `owners.Count == 1` shape for hover text — an ambiguous member falls through to the un-owned rendering instead of naming an arbitrary enum"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 354, "EnumsDeclaring", "already scoped by a different axis: reads `enumOwner.Index`, the index of the model that OWNS the active document, so a same-named enum in another document's context cannot drive the rename-collision decision (the surrounding comment states this intent)"),
+
+        // Genuinely context-blind: `EnumsDeclaring(member)` returns enum SIMPLE names, and `.Contains` then
+        // tests the declared field's simple name against them. Under R13.2 two contexts may both declare
+        // `Status`; if only the FOREIGN one declares the transition's target member, these read true in a
+        // context whose own `Status` does not declare it. Listed — not silently passed — and filed as a
+        // follow-up sweep rather than fixed inline, because each needs a two-order fixture through its real
+        // entry point and the four span three emitters plus a validator (#1870's cluster shape).
+        ("src/Koine.Compiler/Semantics/EntityBehaviorValidator.cs", 727, "EnumsDeclaring", "state-machine reachability: the LINE ABOVE is already context-aware (Classify(resolver.Context, ...)), so this half is a straggler, not a considered exemption — follow-up filed"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1781, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check — same straggler shape as EntityBehaviorValidator.cs:727; follow-up filed"),
+        ("src/Koine.Emit.Java/JavaEmitter.Behaviors.cs", 70, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Java peer of the C# site; follow-up filed"),
+        ("src/Koine.Emit.Python/PythonEmitter.Behaviors.cs", 329, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Python peer of the C# site; follow-up filed"),
 
         // --- No site remains with a bounded context in a LOCAL of the same method that it then ignores:
         //     #1870 worked through every one of those. That is the literal claim, and it is weaker than
