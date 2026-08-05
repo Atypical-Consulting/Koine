@@ -116,9 +116,42 @@ public class FlatModelIndexLookupGuardTests
     }
 
     /// <summary>One call site of a flat <c>ModelIndex</c> overload.</summary>
-    private sealed record FlatCallSite(string RelativePath, int Line, string Method)
+    private sealed record FlatCallSite(string RelativePath, string EnclosingSymbol, int Line, string Method)
     {
-        public override string ToString() => $"{RelativePath}:{Line} ({Method})";
+        public override string ToString() => $"{RelativePath}:{Line} ({EnclosingSymbol}, {Method})";
+    }
+
+    /// <summary>
+    /// The name of the nearest enclosing member (method, local function, constructor, property,
+    /// indexer, or operator) around <paramref name="node"/> — stable under reformatting/reordering,
+    /// unlike a line number. Falls through nodes with no name of their own (blocks, lambdas, accessor
+    /// bodies) so a call inside a lambda or a property accessor is attributed to the member that
+    /// declares it.
+    /// </summary>
+    private static string EnclosingSymbolName(SyntaxNode node)
+    {
+        for (SyntaxNode? current = node.Parent; current is not null; current = current.Parent)
+        {
+            switch (current)
+            {
+                case LocalFunctionStatementSyntax local:
+                    return local.Identifier.Text;
+                case MethodDeclarationSyntax method:
+                    return method.Identifier.Text;
+                case ConstructorDeclarationSyntax ctor:
+                    return ctor.Identifier.Text;
+                case PropertyDeclarationSyntax property:
+                    return property.Identifier.Text;
+                case IndexerDeclarationSyntax indexer:
+                    return $"this[{indexer.ParameterList.Parameters}]";
+                case OperatorDeclarationSyntax op:
+                    return $"operator {op.OperatorToken.Text}";
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"could not resolve an enclosing member name for a flat call site at "
+            + $"{node.GetLocation().GetLineSpan()} — unexpected syntax shape, extend EnclosingSymbolName");
     }
 
     /// <summary>
@@ -175,7 +208,8 @@ public class FlatModelIndexLookupGuardTests
 
                 string relativePath = Path.GetRelativePath(repoRoot, file).Replace(Path.DirectorySeparatorChar, '/');
                 int line = invocation.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-                sites.Add(new FlatCallSite(relativePath, line, methodName));
+                string enclosingSymbol = EnclosingSymbolName(invocation);
+                sites.Add(new FlatCallSite(relativePath, enclosingSymbol, line, methodName));
             }
         }
 
@@ -187,49 +221,55 @@ public class FlatModelIndexLookupGuardTests
     /// here fails <see cref="No_new_flat_ModelIndex_call_site_appears_unjustified"/> — either fix it to
     /// route through <c>TryGetDeclIn</c>/the context-aware overload, or add it here with a real reason.
     /// </summary>
-    private static readonly (string Path, int Line, string Method, string Reason)[] Allowlist =
+    /// <remarks>
+    /// Keyed by (<c>Path</c>, <c>EnclosingSymbol</c>, <c>Method</c>) rather than a line number — a line
+    /// number breaks on ANY unrelated edit that shifts lines in the file, which is mechanically
+    /// indistinguishable from a suppression (#1945). <c>ExpectedCount</c> is how many distinct flat call
+    /// sites are expected inside that one enclosing symbol (almost always 1; occasionally more, e.g.
+    /// <c>SymbolTable.StrongSymbol</c> below, which has two separate <c>TryGetDecl</c> call sites).
+    /// </remarks>
+    private static readonly (string Path, string EnclosingSymbol, string Method, int ExpectedCount, string Reason)[] Allowlist =
     [
         // --- Deliberate final-fallback step of a local context-first ladder: TryGetDeclIn (or the
         //     context-aware overload) is tried FIRST in the same expression/method; the flat call only
         //     ever answers when that already failed, mirroring TryGetDecl(context, ...)'s own last step. ---
-        ("src/Koine.Compiler/Ast/Binder.cs", 299, "TryGetDecl", "final fallback of ResolveTypeName's own ladder (TryGetDeclIn tried at :290)"),
-        ("src/Koine.Emit.Rust/RustExpressionTranslator.cs", 1508, "TryGetDecl", "final fallback of ResolveDecl's own ladder (TryGetDeclIn tried at :1503)"),
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 486, "TryGetDecl", "final fallback of ResolveDecl's own ladder"),
-        ("src/Koine.Compiler/Semantics/SemanticValidator.cs", 973, "TryGetDecl", "final fallback after TryGetDeclIn(ctx.Name, target, ...) in ValidateSpecs"),
-        ("src/Koine.Compiler/Semantics/CqrsValidator.cs", 485, "TryGetDecl", "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
-        ("src/Koine.Execution/ScenarioExecutor.cs", 1579, "TryGetDecl", "final fallback within a DeclaringContextsOf/TryGetDeclIn walk in InvariantsDeclaredOn"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Application.cs", 571, "TryGetDecl", "combined TryGetDeclIn(context,...) || TryGetDecl(...) ladder"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", 284, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Behaviors.cs", 44, "TryGetDecl", "combined ladder in SpecTargetMembers"),
-        ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 457, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", 610, "TryGetDecl", "combined ladder in SpecTargetMembers"),
-        ("src/Koine.Emit.Php/PhpEmitter.Cqrs.cs", 317, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.Php/PhpExpressionTranslator.cs", 1185, "TryGetDecl", "combined (context is null || !TryGetDeclIn(...)) && !TryGetDecl(...) ladder in IsDerivedMemberOf"),
-        ("src/Koine.Emit.Php/PhpEmitter.Services.cs", 319, "TryGetDecl", "combined ladder in SpecTargetMembers"),
-        ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Cqrs.cs", 164, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Services.cs", 102, "TryGetDecl", "combined ladder in SpecTargetMembers"),
-        ("src/Koine.Emit.Python/PythonEmitter.Cqrs.cs", 227, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.Java/JavaEmitter.Cqrs.cs", 147, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
-        ("src/Koine.Emit.Rust/RustEmitter.Cqrs.cs", 243, "TryGetDecl", "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Compiler/Ast/Binder.cs", "ResolveTypeName", "TryGetDecl", 1, "final fallback of ResolveTypeName's own ladder (TryGetDeclIn tried earlier in the same method)"),
+        ("src/Koine.Emit.Rust/RustExpressionTranslator.cs", "ResolveDecl", "TryGetDecl", 1, "final fallback of ResolveDecl's own ladder (TryGetDeclIn tried earlier in the same method)"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", "ResolveDecl", "TryGetDecl", 1, "final fallback of ResolveDecl's own ladder"),
+        ("src/Koine.Compiler/Semantics/SemanticValidator.cs", "ValidateSpecs", "TryGetDecl", 1, "final fallback after TryGetDeclIn(ctx.Name, target, ...) in ValidateSpecs"),
+        ("src/Koine.Compiler/Semantics/CqrsValidator.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "final fallback after TryGetDeclIn(context, sourceType, ...) in ReadModelSourceMembers"),
+        ("src/Koine.Execution/ScenarioExecutor.cs", "InvariantsDeclaredOn", "TryGetDecl", 1, "final fallback within a DeclaringContextsOf/TryGetDeclIn walk in InvariantsDeclaredOn"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Application.cs", "TryGetValueObject", "TryGetDecl", 1, "combined TryGetDeclIn(context,...) || TryGetDecl(...) ladder"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Cqrs.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Behaviors.cs", "SpecTargetMembers", "TryGetDecl", 1, "combined ladder in SpecTargetMembers"),
+        ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.Common/OperatorNeedsAnalyzer.cs", "SpecTargetMembers", "TryGetDecl", 1, "combined ladder in SpecTargetMembers"),
+        ("src/Koine.Emit.Php/PhpEmitter.Cqrs.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.Php/PhpExpressionTranslator.cs", "IsDerivedMemberOf", "TryGetDecl", 1, "combined (context is null || !TryGetDeclIn(...)) && !TryGetDecl(...) ladder in IsDerivedMemberOf"),
+        ("src/Koine.Emit.Php/PhpEmitter.Services.cs", "SpecTargetMembers", "TryGetDecl", 1, "combined ladder in SpecTargetMembers"),
+        ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Cqrs.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.TypeScript/TypeScriptEmitter.Services.cs", "SpecTargetMembers", "TryGetDecl", 1, "combined ladder in SpecTargetMembers"),
+        ("src/Koine.Emit.Python/PythonEmitter.Cqrs.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.Java/JavaEmitter.Cqrs.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "combined ladder in ReadModelSourceMembers"),
+        ("src/Koine.Emit.Rust/RustEmitter.Cqrs.cs", "ReadModelSourceMembers", "TryGetDecl", 1, "combined ladder in ReadModelSourceMembers"),
 
         // --- A boolean existence-only guard: any declaring context makes the check true, so it can't
         //     matter WHICH context the flat lookup's last-write-wins bias happens to surface. ---
-        ("src/Koine.Emit.Php/PhpEmitter.Support.cs", 451, "TryGetDecl", "UnownedIdNamesIn: is-this-name-undeclared-anywhere guard, immediately followed by the real per-context Classify(ctx.Name, name) on the next line"),
+        ("src/Koine.Emit.Php/PhpEmitter.Support.cs", "UnownedIdNamesIn", "TryGetDecl", 1, "UnownedIdNamesIn: is-this-name-undeclared-anywhere guard, immediately followed by the real per-context Classify(ctx.Name, name) on the next line"),
 
         // --- No context parameter/field anywhere in the call chain: a real signature-threading
         //     refactor, not a one-line fix (same category as #1863's own SymbolTable non-goal). ---
-        ("src/Koine.Emit.OpenApi/OpenApiEmitter.Schemas.cs", 266, "Classify", "static SchemaForType/Array recursion carries no context parameter"),
-        ("src/Koine.Compiler/Ast/KoineType.cs", 79, "Classify", "static From(TypeRef?, ModelIndex) has no context param; none of its ~8 call sites thread one in"),
-        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", 255, "Classify", "whole-document semantic-token coloring; no per-reference context concept"),
-        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 676, "TryGetDecl", "StrongHover: workspace-wide hover, no context in the hover path"),
-        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 679, "Classify", "StrongHover: workspace-wide hover, no context in the hover path"),
-        ("src/Koine.Execution/ScenarioValueBinder.cs", 471, "TryGetDecl", "DisplayCore: reflects over an arbitrary emitted runtime object by CLR type, genuinely dynamic"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 263, "TryGetDecl", "EnumMemberIn reproduces SemanticModel.GetSymbol's legacy flat contract byte-for-byte; no context"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 284, "TryGetDecl", "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 303, "TryGetDecl", "StrongSymbol — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 309, "TryGetDecl", "StrongSymbol's enum-member branch — same #1863 non-goal as MemberOf above"),
-        ("src/Koine.Compiler/Services/KoineLanguageService.cs", 624, "Classify", "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", 205, "Classify", "IsRouteBindable: only the Enum branch is context-sensitive (Primitive/IdValueObject are universal), and the WriteMutationEndpoint chain carries no context — but NOT fully clean: WriteQueryEndpoint(sb, ContextNode ctx, ...) reaches the same helper through BuildRouteTokenBindings with ctx.Name in scope, so one of the two callers could thread a context today (out of #1870's scope; the shared helper's other caller cannot)"),
+        ("src/Koine.Emit.OpenApi/OpenApiEmitter.Schemas.cs", "BaseSchema", "Classify", 1, "static SchemaForType/Array recursion carries no context parameter"),
+        ("src/Koine.Compiler/Ast/KoineType.cs", "From", "Classify", 1, "static From(TypeRef?, ModelIndex) has no context param; none of its ~8 call sites thread one in"),
+        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", "CollectConceptKindBits", "Classify", 1, "whole-document semantic-token coloring; no per-reference context concept"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", "StrongHover", "TryGetDecl", 1, "StrongHover: workspace-wide hover, no context in the hover path"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", "StrongHover", "Classify", 1, "StrongHover: workspace-wide hover, no context in the hover path"),
+        ("src/Koine.Execution/ScenarioValueBinder.cs", "DisplayCore", "TryGetDecl", 1, "DisplayCore: reflects over an arbitrary emitted runtime object by CLR type, genuinely dynamic"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", "EnumMemberIn", "TryGetDecl", 1, "EnumMemberIn reproduces SemanticModel.GetSymbol's legacy flat contract byte-for-byte; no context"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", "MemberOf", "TryGetDecl", 1, "MemberOf — #1863's own non-goal: signature carries no context at all, a real refactor"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", "StrongSymbol", "TryGetDecl", 2, "StrongSymbol — two TryGetDecl call sites (the direct-decl branch and the enum-member fallback branch), same #1863 non-goal as MemberOf above"),
+        ("src/Koine.Compiler/Services/KoineLanguageService.cs", "TypeCandidates", "Classify", 1, "TypeCandidates: whole-workspace type-name completion list, no TokenContext/context param in this method's own signature"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.Api.cs", "IsRouteBindable", "Classify", 1, "IsRouteBindable: only the Enum branch is context-sensitive (Primitive/IdValueObject are universal), and the WriteMutationEndpoint chain carries no context — but NOT fully clean: WriteQueryEndpoint(sb, ContextNode ctx, ...) reaches the same helper through BuildRouteTokenBindings with ctx.Name in scope, so one of the two callers could thread a context today (out of #1870's scope; the shared helper's other caller cannot)"),
 
         // --- Built-in-only query: inert by RANGE DISJOINTNESS, not by name reservation (verified for
         //     #1870, correcting an earlier note here that claimed the built-in names are "lexically
@@ -261,9 +301,9 @@ public class FlatModelIndexLookupGuardTests
         //     SemanticValidator.cs:1479-1487 documents and R9ValueObjectTests' two
         //     `…_still_reports_…_alongside_KOI0908` tests pin. Built-in precedence is the intended
         //     semantics here, and the flat overload is what implements it. ---
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1042, "Classify", "CheckMember: result only tested against Primitive/Range, kinds no ClassifyDecl branch can return"),
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1063, "Classify", "IsCollection: result only tested against List/Set/Map, kinds no ClassifyDecl branch can return"),
-        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", 1067, "Classify", "IsIterable: result only tested against List/Set, kinds no ClassifyDecl branch can return"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", "CheckMember", "Classify", 1, "CheckMember: result only tested against Primitive/Range, kinds no ClassifyDecl branch can return"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", "IsCollection", "Classify", 1, "IsCollection: result only tested against List/Set/Map, kinds no ClassifyDecl branch can return"),
+        ("src/Koine.Compiler/Semantics/ExpressionChecker.cs", "IsIterable", "Classify", 1, "IsIterable: result only tested against List/Set, kinds no ClassifyDecl branch can return"),
 
         // --- IsKnownType(string): provably EQUIVALENT to its own context-aware sibling, so these are
         //     inert by construction rather than by a per-site argument (#1897).
@@ -283,7 +323,7 @@ public class FlatModelIndexLookupGuardTests
         //     without extending ClassifyDecl and the equivalence breaks — which is what that test exists
         //     to catch. Sites that could cheaply pass a context were threaded anyway (KoineLanguageService
         //     :383/:591 now call the 2-arg overload) rather than parked here. ---
-        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", 222, "IsKnownType", "Classify(text,…): whole-document token coloring, no per-reference context concept (same method as the :217/:255 entries) — and inert regardless, per the equivalence proof above"),
+        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", "Classify", "IsKnownType", 1, "Classify(text,…): whole-document token coloring, no per-reference context concept (same Classify helper as the co-located IsEnumType entry below, and the same pattern as the CollectConceptKindBits entry above) — and inert regardless, per the equivalence proof above"),
 
         // --- IsEnumType(string) in whole-document semantic-token coloring: the one seam here that is
         //     NOT provably inert, kept flat only because the method genuinely has no context to thread.
@@ -295,12 +335,12 @@ public class FlatModelIndexLookupGuardTests
         //     source order. That is a real, if cosmetic, limitation of token colouring — filed as its own
         //     issue rather than hidden here, because giving this method a context means teaching the
         //     token pipeline an enclosing-context notion it does not have (see the follow-up on #1897). ---
-        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", 217, "IsEnumType", "same static per-token Classify as the :222/:255 entries: no enclosing-context value exists in the token-colouring pipeline to thread — a real cosmetic limitation, tracked as a follow-up on #1897, not a one-line fix"),
+        ("src/Koine.Compiler/Services/SemanticTokenProvider.cs", "Classify", "IsEnumType", 1, "same static per-token Classify helper as the co-located IsKnownType entry above, and the same CollectConceptKindBits entry: no enclosing-context value exists in the token-colouring pipeline to thread — a real cosmetic limitation, tracked as a follow-up on #1897, not a one-line fix"),
 
         // --- Provably inert despite an available context: the kind is consumed ONLY for questions whose
         //     answer cannot differ per context. Verified against the fixtures in
         //     AstSymbolCrossContextClassificationTests, which pin the outcome under BOTH context orders. ---
-        ("src/Koine.Compiler/Ast/Binder.cs", 270, "Classify", "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
+        ("src/Koine.Compiler/Ast/Binder.cs", "ResolveTypeRef", "Classify", 1, "ResolveTypeRef asks only 'built-in?' (resolved ahead of every dict) and 'IdValueObject?' (only ever returned for a name NO context declares, where the context-aware overload falls back to this same answer); every other kind falls through to the already context-aware ResolveTypeName(name, _enclosingContextName) two lines later (#1870)"),
 
         // --- The _enumMemberToType seam, read through EnumsDeclaring(member) (#1886). Newly scanned, so
         //     every entry below is a PRE-EXISTING site this guard is cataloguing for the first time — not
@@ -309,10 +349,10 @@ public class FlatModelIndexLookupGuardTests
         //     at all, the last four are superset-only membership tests. ---
 
         // Owner-selection-free: the flat list's ORDER and EXTRA entries are both unobservable here.
-        ("src/Koine.Compiler/Semantics/Scenarios/ScenarioInterpreter.cs", 439, "EnumsDeclaring", "existence only (`.Count > 0`) — asks whether the identifier is an enum member at all, then tags the value by its own NAME (ScenarioValue.EnumMember(n.Name)); it never selects an owning enum, so no order can change the answer"),
-        ("src/Koine.Compiler/Ast/SymbolTable.cs", 308, "EnumsDeclaring", "conservative by construction: StrongSymbol resolves ONLY when the member has exactly one owner globally (`owners.Count == 1`) and returns null otherwise, so an ambiguous member yields no symbol rather than an order-dependent one"),
-        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 689, "EnumsDeclaring", "same conservative `owners.Count == 1` shape for hover text — an ambiguous member falls through to the un-owned rendering instead of naming an arbitrary enum"),
-        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", 354, "EnumsDeclaring", "already scoped by a different axis: reads `enumOwner.Index`, the index of the model that OWNS the active document, so a same-named enum in another document's context cannot drive the rename-collision decision (the surrounding comment states this intent)"),
+        ("src/Koine.Compiler/Semantics/Scenarios/ScenarioInterpreter.cs", "VisitIdentifier", "EnumsDeclaring", 1, "existence only (`.Count > 0`) — asks whether the identifier is an enum member at all, then tags the value by its own NAME (ScenarioValue.EnumMember(n.Name)); it never selects an owning enum, so no order can change the answer"),
+        ("src/Koine.Compiler/Ast/SymbolTable.cs", "StrongSymbol", "EnumsDeclaring", 1, "conservative by construction: StrongSymbol resolves ONLY when the member has exactly one owner globally (`owners.Count == 1`) and returns null otherwise, so an ambiguous member yields no symbol rather than an order-dependent one"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", "StrongHover", "EnumsDeclaring", 1, "same conservative `owners.Count == 1` shape for hover text — an ambiguous member falls through to the un-owned rendering instead of naming an arbitrary enum"),
+        ("src/Koine.Compiler/Services/WorkspaceIndex.cs", "WouldCollide", "EnumsDeclaring", 1, "already scoped by a different axis: reads `enumOwner.Index`, the index of the model that OWNS the active document, so a same-named enum in another document's context cannot drive the rename-collision decision (the surrounding comment states this intent)"),
 
         // The four state-machine `.Contains(<enum name already resolved in context>)` membership tests.
         // These LOOK like the straggler shape — EntityBehaviorValidator.cs:727 even sits one line under a
@@ -337,17 +377,17 @@ public class FlatModelIndexLookupGuardTests
         // control reach a check that independently rejects the model (KOI0703 above; and the three emitter
         // sites only ever run on a model validation already accepted, where the member genuinely is a
         // legal state of the bound enum).
-        ("src/Koine.Compiler/Semantics/EntityBehaviorValidator.cs", 727, "EnumsDeclaring", "state-machine reachability gate: superset-only, so it can only be spuriously TRUE, which routes into the KOI0703 check that rejects the model anyway — and the context-aware overload is a measured no-op here"),
-        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", 1781, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, reached only for a model validation already accepted, where the target IS a legal state of the bound enum"),
-        ("src/Koine.Emit.Java/JavaEmitter.Behaviors.cs", 70, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Java peer of the C# site — same post-validation reachability"),
-        ("src/Koine.Emit.Python/PythonEmitter.Behaviors.cs", 329, "EnumsDeclaring", "BuildStateMachineConditions' literal-target check, Python peer of the C# site — same post-validation reachability"),
+        ("src/Koine.Compiler/Semantics/EntityBehaviorValidator.cs", "CheckTransitionReachable", "EnumsDeclaring", 1, "state-machine reachability gate: superset-only, so it can only be spuriously TRUE, which routes into the KOI0703 check that rejects the model anyway — and the context-aware overload is a measured no-op here"),
+        ("src/Koine.Emit.CSharp/CSharpEmitter.cs", "BuildStateMachineConditions", "EnumsDeclaring", 1, "BuildStateMachineConditions' literal-target check, reached only for a model validation already accepted, where the target IS a legal state of the bound enum"),
+        ("src/Koine.Emit.Java/JavaEmitter.Behaviors.cs", "BuildStateMachineConditions", "EnumsDeclaring", 1, "BuildStateMachineConditions' literal-target check, Java peer of the C# site — same post-validation reachability"),
+        ("src/Koine.Emit.Python/PythonEmitter.Behaviors.cs", "BuildStateMachineConditions", "EnumsDeclaring", 1, "BuildStateMachineConditions' literal-target check, Python peer of the C# site — same post-validation reachability"),
 
         // --- No site remains with a bounded context in a LOCAL of the same method that it then ignores:
         //     #1870 worked through every one of those. That is the literal claim, and it is weaker than
         //     "nothing is left to fix" — several entries above are shared/static helpers whose own
-        //     signature carries no context but whose CALLERS do (CSharpEmitter.Api.cs:205's
-        //     WriteQueryEndpoint is the clearest); threading those needs a signature refactor, which is
-        //     out of #1870's scope, not a one-line fix that was judged unnecessary.
+        //     signature carries no context but whose CALLERS do (CSharpEmitter.Api.cs's IsRouteBindable
+        //     entry above — WriteQueryEndpoint is the clearest caller); threading those needs a signature
+        //     refactor, which is out of #1870's scope, not a one-line fix that was judged unnecessary.
         //
         //     The twelve C#-emitter sites that used to sit here are GONE: #1870's C# task confirmed nine
         //     of them order-dependent with a two-order fixture and fixed them to Classify(context, name),
@@ -374,12 +414,26 @@ public class FlatModelIndexLookupGuardTests
     [Fact]
     public void No_new_flat_ModelIndex_call_site_appears_unjustified()
     {
-        var actual = FindFlatCallSites();
-        var allowed = Allowlist.Select(a => (a.Path, a.Line, a.Method)).ToHashSet();
+        var actualGroups = FindFlatCallSites()
+            .GroupBy(s => (s.RelativePath, s.EnclosingSymbol, s.Method))
+            .ToDictionary(g => g.Key, g => g.OrderBy(s => s.Line).ToList());
+        var expectedCounts = Allowlist.ToDictionary(a => (a.Path, a.EnclosingSymbol, a.Method), a => a.ExpectedCount);
 
-        List<FlatCallSite> unlisted = actual.Where(s => !allowed.Contains((s.RelativePath, s.Line, s.Method))).ToList();
+        // Any site beyond an entry's ExpectedCount — including every site of a symbol with no entry at
+        // all (ExpectedCount 0) — is unjustified. Reported with the enclosing symbol name, so a worker
+        // can tell "my edit moved a known site" (still zero unjustified sites) from "I introduced a new
+        // one" (a real, named site here) at a glance.
+        List<FlatCallSite> unjustified = [];
+        foreach ((var key, List<FlatCallSite> sites) in actualGroups)
+        {
+            expectedCounts.TryGetValue(key, out int expected);
+            if (sites.Count > expected)
+            {
+                unjustified.AddRange(sites.Skip(expected));
+            }
+        }
 
-        unlisted.ShouldBeEmpty(
+        unjustified.ShouldBeEmpty(
             "New call site(s) to one of ModelIndex's flat, last-declaration-wins seams — Classify(string), " +
             "TryGetDecl(string, out TypeDecl), TryGetMemberType(string, string, out TypeRef), " +
             "MemberNames(string), IsEnumType(string) or IsKnownType(string). R13.2 lets two bounded " +
@@ -392,22 +446,51 @@ public class FlatModelIndexLookupGuardTests
             "IsEnumType (which has no sibling) spell out Classify(context, name) == TypeKind.Enum. " +
             "MemberNames(string) has no sibling either — resolve the decl with TryGetDeclIn(context, ...) " +
             "first and read its members off that. If the site is genuinely context-less, add it to this " +
-            "test's Allowlist with a real one-line reason.\n\n" +
-            string.Join("\n", unlisted));
+            "test's Allowlist with a real reason, keyed by (path, enclosing symbol, method, expected " +
+            "count).\n\n" +
+            string.Join("\n", unjustified));
     }
 
     [Fact]
     public void Every_allowlisted_site_still_matches_a_real_flat_call_site()
     {
-        // The inverse check: an allowlist entry whose file:line:method no longer matches a real flat
-        // call site is stale — the site moved (a reformat/refactor) or was already fixed and the entry
-        // was never removed. Either way it hides nothing today, which is worth surfacing.
-        var actual = FindFlatCallSites().Select(s => (s.RelativePath, s.Line, s.Method)).ToHashSet();
-        var stale = Allowlist.Where(a => !actual.Contains((a.Path, a.Line, a.Method))).ToList();
+        // The inverse check: an allowlist entry whose (path, enclosing symbol, method) no longer has as
+        // many real flat call sites as it claims is stale — either the enclosing symbol was renamed or
+        // removed (actual count 0) or one of its flat calls was fixed/removed without updating the entry
+        // (actual count > 0 but still short). Either way the entry is obsolete and hides nothing today.
+        var actualCounts = FindFlatCallSites()
+            .GroupBy(s => (s.RelativePath, s.EnclosingSymbol, s.Method))
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        List<string> stale = [];
+        foreach (var entry in Allowlist)
+        {
+            actualCounts.TryGetValue((entry.Path, entry.EnclosingSymbol, entry.Method), out int actual);
+            if (actual < entry.ExpectedCount)
+            {
+                string why = actual == 0
+                    ? $"'{entry.EnclosingSymbol}' no longer has a matching {entry.Method} call site at all — renamed, removed, or already fixed"
+                    : $"site count dropped from {entry.ExpectedCount} to {actual} — one of the call sites was fixed or removed";
+                stale.Add($"{entry.Path} ({entry.EnclosingSymbol}, {entry.Method}) expects {entry.ExpectedCount} site(s) but found {actual} — " +
+                    $"this allowlist entry is obsolete, remove it: {why}. Reason on file: {entry.Reason}");
+            }
+        }
 
         stale.ShouldBeEmpty(
-            "Allowlist entries that no longer match a real flat call site (the site moved, was " +
-            "reformatted, or was already fixed — remove or correct the entry):\n" +
-            string.Join("\n", stale.Select(s => $"{s.Path}:{s.Line} ({s.Method}) — {s.Reason}")));
+            "Allowlist entries that no longer match their claimed number of real flat call sites:\n" +
+            string.Join("\n", stale));
+    }
+
+    [Fact]
+    public void Migrated_allowlist_preserves_every_pre_migration_entry()
+    {
+        // Before #1945, the allowlist held one physical tuple per line-pinned call site (46 total, one
+        // row per distinct (Path, Line, Method)). Re-keying on (Path, EnclosingSymbol, Method) merges
+        // rows that share an enclosing symbol into one entry with a higher ExpectedCount (the only such
+        // merge today is SymbolTable.StrongSymbol's two separate TryGetDecl call sites) — so the *tuple*
+        // count shrinks, but the sum of ExpectedCount must not: a silently-dropped count would
+        // permanently (and invisibly) excuse a real flat call site.
+        const int PreMigrationSiteCount = 46;
+        Allowlist.Sum(a => a.ExpectedCount).ShouldBe(PreMigrationSiteCount);
     }
 }
