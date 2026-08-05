@@ -1008,6 +1008,113 @@ public class JavaConformanceTests
     }
 
     /// <summary>
+    /// #1944: <c>WriteCoalesce</c> unconditionally treated a coalesce's LEFT operand as
+    /// <c>Optional</c>-typed, but Koine's <c>??</c> is legal over any left operand. Here <c>a: Int</c> is
+    /// non-optional, so Java renders it as the unboxed primitive <c>long</c> — calling <c>.or(...)</c> on it
+    /// is a hard <c>javac</c> "long cannot be dereferenced" error. Since <c>a</c> can never be null, the
+    /// <c>?? b</c> fallback is provably dead: the fix must collapse to bare <c>a</c> (widened to
+    /// <c>BigDecimal</c> against the <c>Decimal?</c> right operand) wrapped in <c>Optional.of(...)</c> at the
+    /// call site, since the declared member is optional — no <c>.or</c>/<c>.orElse</c> at all.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_when_left_operand_is_never_null()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal?\n" +
+            "\n" +
+            "    create make(a: Int, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.util.Optional.of(java.math.BigDecimal.valueOf(a)))");
+        product.ShouldNotContain(".or(");
+        product.ShouldNotContain(".orElse(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1944: the same non-optional-left collapse, but with matching non-numeric types (no widen needed) —
+    /// the declared member is still optional, so the caller-side <c>InferReconcilableValueType</c> must
+    /// still wrap the bare <c>a</c> in <c>Optional.of(...)</c> even though <c>WriteCoalesce</c> itself emits
+    /// no <c>.or</c>/<c>.orElse</c>.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_non_optional_left_with_no_widen_needed()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    label: String?\n" +
+            "\n" +
+            "    create make(a: String, b: String?) {\n" +
+            "      label -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, java.util.Optional.of(a))");
+        product.ShouldNotContain(".or(");
+        product.ShouldNotContain(".orElse(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
+    /// #1944: a non-optional left against a non-optional DECLARED target member — no wrap and no widen
+    /// needed, so the whole coalesce collapses to the bare left operand with no <c>Optional</c> involvement
+    /// at all. <c>b</c> is deliberately non-optional too (not <c>Decimal?</c> as in the issue's edge case
+    /// 3): a non-optional-left/optional-right pair here would trip a pre-existing, unrelated
+    /// <c>TypeResolver.VisitCoalesce</c> gap (it derives <c>a ?? b</c>'s optionality solely from the RIGHT
+    /// operand, so an optional right makes the whole expression look optional even though a non-optional
+    /// left already guarantees a value) and get rejected by KOI0401 before this fix's emitter code ever
+    /// runs. This still exercises the exact same <c>leftType?.IsOptional == false</c> bare-emission branch.
+    /// </summary>
+    [Fact]
+    public void Coalesce_collapses_a_non_optional_left_against_a_non_optional_declared_member()
+    {
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "\n" +
+            "    create make(a: Decimal, b: Decimal) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        var result = new KoineCompiler().Compile(src, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var product = result.Files.Single(f => f.RelativePath.EndsWith("Product.java", StringComparison.Ordinal)).Contents;
+        product.ShouldContain("new Product(id, a)");
+        product.ShouldNotContain(".or(");
+        product.ShouldNotContain(".orElse(");
+        product.ShouldNotContain("Optional.of(");
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
+
+    /// <summary>
     /// A real compile error must be reported, not silently swallowed — this proves the harness is a
     /// genuine <c>javac</c> check (the analogue of the Rust/Python negative fixtures). We take the same
     /// well-formed emit and corrupt one file's contents with a deliberate syntax error; the compile must

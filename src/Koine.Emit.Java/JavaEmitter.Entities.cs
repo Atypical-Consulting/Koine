@@ -833,9 +833,12 @@ public sealed partial class JavaEmitter
         TypeRef? leftType = translator.InferType(co.Left);
         TypeRef? rightType = translator.InferType(co.Right);
 
-        // Matches WriteCoalesce's own or-vs-orElse choice: the coalesce stays Optional-shaped only when the
-        // right (fallback) operand is itself Optional-typed.
-        var isOptional = rightType?.IsOptional == true;
+        // Matches WriteCoalesce's own rendering choice (#1944): the coalesce stays Optional-shaped only
+        // when BOTH operands are themselves Optional-typed (`.or(() -> ...)`) — a non-optional left makes
+        // WriteCoalesce collapse to the bare/widened left operand regardless of the right operand's own
+        // optionality, so the reported type must follow suit rather than staying driven by the right
+        // operand alone.
+        var isOptional = leftType?.IsOptional == true && rightType?.IsOptional == true;
         var name = leftType?.Name == "Decimal" || rightType?.Name == "Decimal" ? "Decimal" : leftType?.Name;
         return name is null ? null : new TypeRef(name, IsOptional: isOptional);
     }
