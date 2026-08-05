@@ -1594,6 +1594,191 @@ public class PythonConformanceTests
     }
 
     /// <summary>
+    /// Issue #1742 — the FIFTH call site of the #1701/#1712/#1716/#1718 qualifier-blind import gap:
+    /// <c>EmitEvent</c>, like <c>EmitRepository</c>/<c>EmitApplicationService</c>/<c>EmitDomainService</c>
+    /// (#1718), passed NO <c>symbolContext</c> to <c>Assemble</c> at all. An event member declared with
+    /// an EXPLICIT cross-context qualifier (<c>Shipping.Status</c>) must import that exact type, not a
+    /// same-named sibling from the event's own declaring context — this issue's own repro model,
+    /// verbatim.
+    /// </summary>
+    [Fact]
+    public void Event_member_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              event OrderShipped {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var ev = FileText(result.Files, "ordering/events/order_shipped.py");
+        ev.ShouldContain("from shipping.enums.status import Status");
+        ev.ShouldNotContain("from ordering.enums.status import Status");
+        ev.ShouldContain("status: Status");
+    }
+
+    /// <summary>
+    /// The mypy twin of
+    /// <see cref="Event_member_import_honors_an_explicit_qualifier_over_the_owning_context"/>: proves
+    /// the bug at the TYPE level. A synthetic downstream consumer takes an
+    /// <c>OrderShipped</c>-typed parameter and passes its <c>status</c> straight through to a function
+    /// that only accepts <c>Shipping</c>'s own <c>Status</c>. Before the fix, <c>order_shipped.py</c>'s
+    /// field annotation resolved against <c>Ordering</c>'s own (differently-cased, same-named)
+    /// <c>Status</c> class — a REAL nominal-type mismatch under <c>mypy --strict</c>. Skipped (not
+    /// failed) when no <c>mypy</c> toolchain is present locally; CI runs it for real.
+    /// </summary>
+    [Fact]
+    public void Event_member_import_qualification_typechecks_at_mypy_strict()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              event OrderShipped {
+                status: Shipping.Status
+              }
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string consumer = """
+            from shipping.enums.status import Status
+            from ordering.events.order_shipped import OrderShipped
+
+
+            def take_shipping_status(status: Status) -> None:
+                pass
+
+
+            def use_event(event: OrderShipped) -> None:
+                take_shipping_status(event.status)
+            """;
+        var files = result.Files.Append(new EmittedFile("consumer.py", consumer)).ToList();
+
+        TestSupport.PythonCheck types = TestSupport.TypeCheckPython(files);
+        TestSupport.RequireOrSkip(types.ToolchainAvailable, NoToolchainNotice);
+        types.Ok.ShouldBeTrue(
+            "OrderShipped's 'status' member must bind Shipping's own Status enum (not "
+            + "Ordering's wrongly imported, differently-cased same-named sibling enum) so a "
+            + "downstream consumer type-checks:\n" + string.Join("\n", types.Errors));
+    }
+
+    /// <summary>
+    /// The query-criteria sibling of
+    /// <see cref="Event_member_import_honors_an_explicit_qualifier_over_the_owning_context"/> (issue
+    /// #1742, the SIXTH call site): <c>EmitQuery</c> shares the exact same qualifier-blind gap for a
+    /// criteria parameter's own import.
+    /// </summary>
+    [Fact]
+    public void Query_criteria_parameter_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              enum Status {
+                Alpha
+                Beta
+                Gamma
+              }
+
+              value OrderSummary {
+                label: String
+              }
+
+              readmodel OrderSummaryView from OrderSummary {
+                label
+              }
+
+              query OrdersByShippingStatus(status: Shipping.Status): OrderSummaryView
+            }
+
+            context Shipping {
+              enum Status {
+                Active
+                Inactive
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var q = FileText(result.Files, "ordering/queries/orders_by_shipping_status.py");
+        q.ShouldContain("from shipping.enums.status import Status");
+        q.ShouldNotContain("from ordering.enums.status import Status");
+        q.ShouldContain("status: Status");
+    }
+
+    /// <summary>
+    /// The query-result-type sibling of the same gap (issue #1742): <c>EmitQuery</c>'s non-void result
+    /// type must also resolve its own explicit qualifier, not the query's own declaring context.
+    /// </summary>
+    [Fact]
+    public void Query_result_type_import_honors_an_explicit_qualifier_over_the_owning_context()
+    {
+        const string src =
+            """
+            context Ordering {
+              value LocalThing {
+                code: String
+              }
+
+              readmodel ShippingSummary from LocalThing {
+                code
+              }
+
+              query CurrentShippingSummary(orderId: String): Shipping.ShippingSummary
+            }
+
+            context Shipping {
+              value Item {
+                status: String
+              }
+
+              readmodel ShippingSummary from Item {
+                status
+              }
+            }
+            """;
+        var result = new KoineCompiler().Compile(src, new PythonEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var q = FileText(result.Files, "ordering/queries/current_shipping_summary.py");
+        q.ShouldContain("from shipping.read_models.shipping_summary import ShippingSummary");
+        q.ShouldNotContain("from ordering.read_models.shipping_summary import ShippingSummary");
+        q.ShouldContain("QueryHandler[CurrentShippingSummary, ShippingSummary]");
+    }
+
+    /// <summary>
     /// Issue #1531 (audit, Task 3) — the Rust (#1467/PR #1476) and Java (#1480/PR #1521) emitters both
     /// shipped the identical bug in their factory constructor-argument loop's auto-bound branch: a
     /// <c>required</c>-bucket member declared optional but carrying no member-level default
