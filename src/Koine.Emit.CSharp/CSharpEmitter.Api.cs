@@ -48,6 +48,14 @@ public sealed partial class CSharpEmitter
         var body = new StringBuilder();
         var any = false;
 
+        // Defensive, first-wins: two declarations resolving to the same (route, verb) is a KOI1211 error,
+        // so a valid model never reaches here — but an emitter can be driven without the validator (the
+        // MCP/Studio hosts, a plugin pipeline), and two identical Map*/... registrations would compile
+        // fine and only fail at request time with AmbiguousMatchException, rather than a build failure.
+        // Scoped to this one emitted <Context>Endpoints unit and shared by all three writers below, so a
+        // command/query/factory collision on the same pair is caught regardless of which kind declared it.
+        var seenRoutes = new HashSet<(string Route, string Verb)>();
+
         foreach (AggregateDecl agg in ctx.Types.OfType<AggregateDecl>().Where(a => a.RootEntity() is not null))
         {
             EntityDecl root = agg.RootEntity()!;
@@ -59,8 +67,7 @@ public sealed partial class CSharpEmitter
             {
                 foreach (CommandDecl cmd in root.Commands)
                 {
-                    WriteCommandEndpoint(body, root, cmd, typeMapper, index);
-                    any = true;
+                    any |= WriteCommandEndpoint(body, root, cmd, typeMapper, index, seenRoutes);
                 }
             }
 
@@ -68,16 +75,14 @@ public sealed partial class CSharpEmitter
             {
                 foreach (FactoryDecl factory in root.Factories)
                 {
-                    WriteFactoryEndpoint(body, root, factory, typeMapper, index);
-                    any = true;
+                    any |= WriteFactoryEndpoint(body, root, factory, typeMapper, index, seenRoutes);
                 }
             }
         }
 
         foreach (QueryDecl query in ctx.Types.OfType<QueryDecl>())
         {
-            WriteQueryEndpoint(body, ctx, query, typeMapper, index);
-            any = true;
+            any |= WriteQueryEndpoint(body, ctx, query, typeMapper, index, seenRoutes);
         }
 
         if (!any)
@@ -107,10 +112,14 @@ public sealed partial class CSharpEmitter
     /// verb/route/role its R19 <c>@route</c>/<c>@put</c>/<c>@auth</c> annotations named (#1219). A
     /// <c>@route</c> <c>{token}</c> that resolves to a parameter or the aggregate identity (#1748) binds
     /// into the endpoint via <see cref="RouteInfo.TokenBindings"/>.</summary>
-    private void WriteCommandEndpoint(StringBuilder body, EntityDecl root, CommandDecl cmd, CSharpTypeMapper typeMapper, ModelIndex index)
+    private bool WriteCommandEndpoint(StringBuilder body, EntityDecl root, CommandDecl cmd, CSharpTypeMapper typeMapper, ModelIndex index, HashSet<(string Route, string Verb)> seenRoutes)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(cmd.Name);
         RouteInfo info = RouteDerivation.ForCommand(root, cmd);
+        if (!seenRoutes.Add((info.Route, info.Verb)))
+        {
+            return false;
+        }
 
         // Mirror the Application layer's handler result shape (W1): the handler returns a value when the
         // command declares a return type, or --app-handler-result aggregate/readModel, or --app-not-found
@@ -121,6 +130,7 @@ public sealed partial class CSharpEmitter
             || _options.NotFound is CSharpNotFound.Nullable or CSharpNotFound.Result;
         WriteMutationEndpoint(body, info.Verb, "MapPost", info.Route, behavior, returnsValue,
             _options.NotFound, info.AuthRole, info.TokenBindings, CSharpNaming.CommandIdProperty(cmd), typeMapper, index);
+        return true;
     }
 
     /// <summary>A factory → <c>POST /{entity}/{factory}</c> (<see cref="RouteDerivation.ForFactory"/> —
@@ -133,14 +143,20 @@ public sealed partial class CSharpEmitter
     /// binding — a factory mints its identity, so its request record (built from the factory's parameters
     /// alone) has no identity property to rebind. A factory's <c>{id}</c> token binds only by ordinary
     /// name-match against an explicit <c>id</c> parameter, and is otherwise KOI1215-unbound.</para></summary>
-    private void WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory, CSharpTypeMapper typeMapper, ModelIndex index)
+    private bool WriteFactoryEndpoint(StringBuilder body, EntityDecl root, FactoryDecl factory, CSharpTypeMapper typeMapper, ModelIndex index, HashSet<(string Route, string Verb)> seenRoutes)
     {
         var behavior = root.Name + CSharpNaming.ToPascalCase(factory.Name);
         RouteInfo info = RouteDerivation.ForFactory(root, factory);
+        if (!seenRoutes.Add((info.Route, info.Verb)))
+        {
+            return false;
+        }
+
         // A factory creates — it has no not-found concept — so it always returns the created aggregate
         // plainly, regardless of the not-found policy.
         WriteMutationEndpoint(body, info.Verb, "MapPost", info.Route, behavior, returnsValue: true, CSharpNotFound.Throw,
             info.AuthRole, info.TokenBindings, identityProperty: "", typeMapper, index);
+        return true;
     }
 
     /// <summary>
@@ -253,9 +269,14 @@ public sealed partial class CSharpEmitter
 
     /// <summary>A query → <c>GET /{query}</c> bound to <c>&lt;Query&gt;Handler</c>; criteria come from the query
     /// string. Honors the same R19 verb/route/role annotations as a command (#1219).</summary>
-    private void WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query, CSharpTypeMapper typeMapper, ModelIndex index)
+    private bool WriteQueryEndpoint(StringBuilder body, ContextNode ctx, QueryDecl query, CSharpTypeMapper typeMapper, ModelIndex index, HashSet<(string Route, string Verb)> seenRoutes)
     {
         RouteInfo info = RouteDerivation.ForQuery(query);
+        if (!seenRoutes.Add((info.Route, info.Verb)))
+        {
+            return false;
+        }
+
         // Only a by-identity query returns a wrapped value (nullable/Result<T>) — a list/non-identity
         // query returns a plain value, so its endpoint stays a plain 200 regardless of the policy. Uses
         // the same resolution as the Application-layer handler, so the two never disagree.
@@ -280,6 +301,7 @@ public sealed partial class CSharpEmitter
         body.Append(i3).Append("var result = await handler.HandleAsync(").Append(queryExpr).Append(", ct);\n");
         body.Append(i3).Append(HttpResultFor(miss));
         body.Append(i2).Append("})").Append(RequireAuthorizationFor(info.AuthRole)).Append(";\n");
+        return true;
     }
 
     /// <summary>
