@@ -145,9 +145,10 @@ families — `value`, `quantity`, `entity`, `enum`, `event` — also live happil
 or `module` body.
 
 :::tip
-`List`, `Set`, `Map`, and `Range` are **reserved built-in generic type names**. You cannot declare a
-`value`/`entity`/`enum` with one of those names; you use them as wrappers in field types
-(`lines: List<OrderLine>`, `tags: Set<String>`, `window: Range<Instant>`).
+`List`, `Set`, `Map`, `Range`, and the five primitives (`Int`, `String`, `Decimal`, `Bool`,
+`Instant`) are **reserved built-in type names**. You cannot declare a `value`/`entity`/`enum` with
+one of those names; you use them as wrappers or field types instead
+(`lines: List<OrderLine>`, `tags: Set<String>`, `window: Range<Instant>`, `amount: Decimal`).
 :::
 
 ### 4.2.4 Member syntax

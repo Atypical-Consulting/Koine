@@ -38,7 +38,7 @@ Three multi-character operators — `<-` (field initialization), `->` (state tra
 
 Helpers in `Ast/` keep the model self-describing without leaking a target:
 
-- `ModelIndex` — a lookup over every declared type, used everywhere downstream to resolve a name to its declaration. It also owns the reserved built-in generic names (`List`, `Set`, `Map`, `Range`).
+- `ModelIndex` — a lookup over every declared type, used everywhere downstream to resolve a name to its declaration. It also owns the reserved built-in type names (the four generics `List`, `Set`, `Map`, `Range`, plus the five primitives `Int`, `String`, `Decimal`, `Bool`, `Instant`).
 - `TypeResolver`, `MemberAnalysis`, `BuiltinOps` — pure semantic queries (is this type orderable? is this member derived? what operators does this value object need?) that are equally true regardless of the eventual target.
 
 ### 3. Merge
