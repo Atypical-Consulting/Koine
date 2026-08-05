@@ -152,4 +152,4 @@ Prefer an **opaque handle** over a path wherever the API allows it: an extension
 consumers legitimately compute output paths from the model.
 
 The decision and its trade-offs are recorded in
-[ADR 0020](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0020-one-path-containment-primitive-per-host.md).
+[ADR 0021](https://github.com/Atypical-Consulting/Koine/blob/main/adr/0021-one-path-containment-primitive-per-host.md).

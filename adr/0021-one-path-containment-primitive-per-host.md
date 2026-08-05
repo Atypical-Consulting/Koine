@@ -1,5 +1,5 @@
 ---
-id: 0020
+id: 0021
 title: One path-containment primitive per host, enforced by a build gate
 status: proposed
 date: 2026-08-05
