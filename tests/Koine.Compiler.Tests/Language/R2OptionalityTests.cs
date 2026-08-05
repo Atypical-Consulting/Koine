@@ -254,6 +254,40 @@ public class R2OptionalityTests
     }
 
     [Fact]
+    public void Coalesce_with_non_optional_left_is_non_optional_regardless_of_fallback()
+    {
+        // #1950: `a` alone already guarantees a value, so `a ?? b` can never actually be null even
+        // though `b` (the right operand) is optional -> assigning it to non-optional `total` must not
+        // falsely trip OptionalAssignedToNonOptional (KOI0401).
+        const string src =
+            "context Shop {\n" +
+            "  entity Product identified by ProductId {\n" +
+            "    total: Decimal\n" +
+            "    create make(a: Decimal, b: Decimal?) {\n" +
+            "      total -> a ?? b\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Coalesce_with_non_optional_left_is_non_optional_for_a_derived_member()
+    {
+        // Same #1950 truth table, exercised through a computed field default -> VisitCoalesce via a
+        // different AST call site (CheckInitializationValue) than the create-transition case above.
+        const string src =
+            "context C {\n" +
+            "  entity E identified by EId {\n" +
+            "    a: Decimal\n" +
+            "    b: Decimal?\n" +
+            "    total: Decimal = a ?? b\n" +
+            "  }\n" +
+            "}\n";
+        Diagnose(src).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Conditional_with_optional_branch_stays_optional()
     {
         const string src =
