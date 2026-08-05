@@ -759,4 +759,182 @@ mod tests {
         ));
         assert!(is_contained(Path::new("/srv/root"), Path::new("/srv/root")));
     }
+
+    // --- the shared cross-language corpus -------------------------------------
+    //
+    // `tests/fixtures/path-containment/cases.json` at the repo root is the accept/reject table
+    // BOTH hosts answer to: this module and `ContainedPathTests` in the .NET suite read the same
+    // file, materialize the same fixtures, and assert the same outcomes. That is the whole point —
+    // two implementations of one security rule drift silently unless something fails when they
+    // disagree, and "we wrote similar-looking tests in each language" is not that something.
+    //
+    // The format is documented once, next to the data, in
+    // `tests/fixtures/path-containment/README.md`.
+
+    #[derive(serde::Deserialize)]
+    struct Corpus {
+        version: u32,
+        cases: Vec<CorpusCase>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CorpusCase {
+        name: String,
+        #[serde(default)]
+        setup: Vec<SetupEntry>,
+        candidate: String,
+        expect: String,
+        #[serde(default)]
+        resolves_to: Option<String>,
+        #[serde(default)]
+        reason: Option<String>,
+        platforms: Vec<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SetupEntry {
+        kind: String,
+        path: String,
+        #[serde(default)]
+        target: Option<String>,
+    }
+
+    /// Join a corpus-declared `/`-separated relative path onto a base, component by component, so
+    /// the corpus never has to know which separator the running OS uses.
+    fn join_rel(base: &Path, rel: &str) -> PathBuf {
+        let mut p = base.to_path_buf();
+        for segment in rel.split('/') {
+            if !segment.is_empty() {
+                p.push(segment);
+            }
+        }
+        p
+    }
+
+    #[cfg(windows)]
+    fn paths_eq(a: &Path, b: &Path) -> bool {
+        a.as_os_str().to_string_lossy().to_lowercase()
+            == b.as_os_str().to_string_lossy().to_lowercase()
+    }
+
+    #[cfg(not(windows))]
+    fn paths_eq(a: &Path, b: &Path) -> bool {
+        a == b
+    }
+
+    #[cfg(unix)]
+    fn make_symlink(target: &str, link: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    #[cfg(not(unix))]
+    fn make_symlink(_target: &str, _link: &Path) {
+        panic!("a corpus case with a `symlink` setup entry must list only the `unix` platform");
+    }
+
+    fn run_corpus_case(case: &CorpusCase) {
+        // The root is deliberately named `root` inside a private sandbox, so a corpus case can plant
+        // a `../rootevil` sibling whose name is a STRING prefix of the root's — the exact shape a
+        // `starts_with` on strings would wave through.
+        let sandbox = TempTree::new("corpus");
+        let root = sandbox.mkdirs("root");
+
+        for entry in &case.setup {
+            let path = join_rel(&root, &entry.path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            match entry.kind.as_str() {
+                "dir" => std::fs::create_dir_all(&path).unwrap(),
+                "file" => std::fs::write(&path, "koine").unwrap(),
+                "symlink" => {
+                    let target = entry.target.as_deref().unwrap_or_else(|| {
+                        panic!("[{}] a `symlink` entry needs a `target`", case.name)
+                    });
+                    make_symlink(target, &path);
+                }
+                other => panic!("[{}] unknown setup kind {other:?}", case.name),
+            }
+        }
+
+        let actual = contained_path(&root, Path::new(&case.candidate));
+        match case.expect.as_str() {
+            "accept" => {
+                let resolved =
+                    actual.unwrap_or_else(|e| panic!("[{}] expected accept, got: {e}", case.name));
+                // Each harness derives the canonical root from its OWN primitive (an empty candidate
+                // denotes the root), so the corpus can express `resolvesTo` machine-independently.
+                let canonical_root = contained_path(&root, Path::new("")).unwrap();
+                let expected = join_rel(&canonical_root, case.resolves_to.as_deref().unwrap_or(""));
+                assert!(
+                    paths_eq(&resolved, &expected),
+                    "[{}] resolved to {}, expected {}",
+                    case.name,
+                    resolved.display(),
+                    expected.display()
+                );
+            }
+            "reject" => {
+                let err = match actual {
+                    Ok(p) => panic!("[{}] expected reject, got {}", case.name, p.display()),
+                    Err(e) => e,
+                };
+                let reason = case
+                    .reason
+                    .as_deref()
+                    .unwrap_or_else(|| panic!("[{}] a `reject` case needs a `reason`", case.name));
+                let matched = match reason {
+                    "traversal" => matches!(err, PathEscape::Traversal(_)),
+                    "absolute" => matches!(err, PathEscape::Absolute(_)),
+                    "symlink-escape" => matches!(err, PathEscape::SymlinkEscape(_)),
+                    other => panic!("[{}] unknown reason {other:?}", case.name),
+                };
+                assert!(matched, "[{}] expected {reason}, got {err:?}", case.name);
+            }
+            other => panic!("[{}] unknown expect {other:?}", case.name),
+        }
+    }
+
+    #[test]
+    fn the_shared_corpus_agrees_with_this_implementation() {
+        let corpus_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/fixtures/path-containment/cases.json");
+
+        // Loud on absence. A corpus test that silently passes when the fixture is missing is a gate
+        // that proves nothing — and this one exists specifically to prove something.
+        let text = std::fs::read_to_string(&corpus_path).unwrap_or_else(|e| {
+            panic!(
+                "the shared path-containment corpus is missing at {}: {e}",
+                corpus_path.display()
+            )
+        });
+        let corpus: Corpus = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("{} is not valid corpus JSON: {e}", corpus_path.display()));
+
+        assert_eq!(
+            corpus.version, 1,
+            "unknown corpus schema version — update this harness before bumping it"
+        );
+        assert!(
+            !corpus.cases.is_empty(),
+            "the shared corpus has zero cases: {}",
+            corpus_path.display()
+        );
+
+        let platform = if cfg!(windows) { "windows" } else { "unix" };
+        let mut ran = 0usize;
+        for case in &corpus.cases {
+            if !case.platforms.iter().any(|p| p == platform) {
+                continue;
+            }
+            ran += 1;
+            run_corpus_case(case);
+        }
+
+        assert!(
+            ran > 0,
+            "no corpus case lists the `{platform}` platform — the corpus cannot gate this OS"
+        );
+    }
 }
