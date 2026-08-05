@@ -381,15 +381,42 @@ internal sealed class JavaExpressionTranslator
     /// receiver's own static type (here, <c>co.Left</c>'s) fixes what the argument must be, so unlike
     /// <see cref="WriteReconciledBranch"/>'s two independent branches, only ONE side's widen dimension can
     /// ever legitimately fire per position — unused here on purpose: <see cref="BranchReconciliation.NeedsSomeWrap"/>
-    /// never applies to either operand. <c>co.Left</c> is always <c>Optional</c>-typed (that's what makes
-    /// <c>??</c> meaningful), so it structurally never needs a wrap; <c>co.Right</c>'s own optionality is
-    /// what already picks <c>.or</c> vs <c>.orElse</c> above, so wrapping it in an extra <c>Optional.of(...)</c>
-    /// would corrupt the bare-value <c>.orElse</c> argument.
+    /// never applies to either operand. <c>co.Right</c>'s own optionality is what already picks <c>.or</c>
+    /// vs <c>.orElse</c> below, so wrapping it in an extra <c>Optional.of(...)</c> would corrupt the
+    /// bare-value <c>.orElse</c> argument.
     /// </summary>
+    /// <remarks>
+    /// #1944: <c>co.Left</c> is NOT always <c>Optional</c>-typed — Koine's <c>??</c> is legal over any left
+    /// operand, and a non-optional left (e.g. a plain <c>Int</c> parameter, rendered as the unboxed
+    /// primitive <c>long</c>) has no <c>.or</c>/<c>.orElse</c> method at all. When <c>leftType</c> is
+    /// KNOWN non-optional, the <c>?? co.Right</c> fallback is provably dead, so this collapses to the bare
+    /// (optionally <c>BigDecimal</c>-widened) left operand instead of calling either method.
+    /// <c>InferReconcilableValueType</c> (<c>JavaEmitter.Entities.cs</c>) handles wrapping the result in
+    /// <c>Optional.of(...)</c> when the declared target member is itself optional. An unresolved
+    /// (<c>null</c>) <c>leftType</c> falls through unchanged to the existing <c>.or</c>/<c>.orElse</c>
+    /// logic, the same conservative "treat unknown as possibly optional" default #1935's PHP sibling fix
+    /// uses.
+    /// </remarks>
     private void WriteCoalesce(CoalesceExpr co, StringBuilder sb)
     {
         TypeRef? leftType = InferType(co.Left);
         TypeRef? rightType = InferType(co.Right);
+
+        if (leftType?.IsOptional == false)
+        {
+            BranchReconciliation needs = BranchReconciliation.Classify(leftType, rightType);
+            if (needs.NeedsWiden)
+            {
+                WriteBigDecimalOperand(co.Left, leftType, sb);
+            }
+            else
+            {
+                Write(co.Left, sb);
+            }
+
+            return;
+        }
+
         bool rightIsOptional = rightType?.IsOptional == true;
 
         WriteAtom(co.Left, sb);
