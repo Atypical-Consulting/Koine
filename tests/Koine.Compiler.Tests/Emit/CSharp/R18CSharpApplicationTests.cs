@@ -2454,43 +2454,26 @@ public class R18CSharpApplicationTests
     }
 
     // ------------------------------------------------------------------
-    // Issue #1750 — Task 1: does a @post query's hardcoded [AsParameters]
-    // binding survive ASP.NET's request pipeline when a criterion is a
-    // COMPLEX type (a value object)? #1734 made the MUTATION side
-    // (WriteMutationEndpoint) verb-aware — BodylessVerbs /
-    // BodyBindingAttributeFor — but WriteQueryEndpoint was never touched and
-    // still hardcodes "[AsParameters] " regardless of verb. A compile-only
-    // assertion cannot settle this: ASP.NET resolves per-property parameter
-    // binding when it builds the request delegate for an endpoint, not at C#
-    // compile time — and #1649/#1656 showed that resolution can crash the
-    // WHOLE route table on the first incoming request, not just the one
-    // route. Only a live host, driven through TestSupport.RunApi, proves it.
+    // Issue #1750 found that a @post query's hardcoded [AsParameters]
+    // binding resolves each criteria property from its OWN independent
+    // source: a complex (value-object) property with no TryParse/BindAsync
+    // (the DateRange value object here) falls back to reading from the raw
+    // JSON request body — which POST allows (unlike GET, which is in
+    // BodylessVerbs) — while a sibling scalar/enum property (`status`) keeps
+    // binding from the query string, all under the SAME [AsParameters]
+    // parameter. That split-source binding is undocumented and unreachable
+    // from a spec-compliant OpenAPI client (confirmed live-host in #1750;
+    // #1961 is the fix).
     //
-    // VERDICT — Branch B: the live host never throws, for either fixture,
-    // neither at app.Start() nor on a request (verified below, including a
-    // same-host two-request check ruling out the #1649/#1656 "first request
-    // poisons the whole route table" failure mode). [AsParameters] is not
-    // verb-gated the way INFERRED BODY is on the mutation side: it resolves
-    // a binding source per PROPERTY, and for a property whose type has no
-    // TryParse/BindAsync (the DateRange value object here), ASP.NET Core
-    // falls back to reading that ONE property from the JSON request body —
-    // which POST allows (unlike GET, which is in BodylessVerbs) — while a
-    // sibling scalar/enum property (`status`) keeps binding from the query
-    // string, all under the SAME [AsParameters] parameter. So a `@post`
-    // query with a complex criterion DOES work, but its real wire contract
-    // is a surprising split: the complex property reads from a bare
-    // (unwrapped) JSON body, everything else from the query string — NOT
-    // "everything in the query string" the emitted `[AsParameters]` naively
-    // suggests, and NOT what `OpenApiEmitter.Paths.cs`'s `QueryOperation`
-    // documents today (every criterion, including the complex one, as an
-    // `in: query` parameter — verified directly against this issue's model:
-    // `range` is documented `in: query` with a `$ref` to the `DateRange`
-    // schema). A client built strictly from that OpenAPI document would send
-    // the complex criterion as a query parameter and get a clean 400, not
-    // the 200 the document implies. That documentation/binding mismatch is
-    // real and is Task 3's concern — but it is a DOCUMENTATION problem, not
-    // a host-crashing DEFECT, so Task 2 (making WriteQueryEndpoint
-    // verb-aware) does not apply.
+    // Issue #1961 makes WriteQueryEndpoint verb-aware
+    // (QueryBodyBindingAttributeFor, mirroring the mutation side's
+    // BodyBindingAttributeFor / #1734): a body-taking verb now binds the
+    // WHOLE criteria record with a single [Microsoft.AspNetCore.Mvc.FromBody]
+    // parameter instead of per-property [AsParameters] — one binding source
+    // for the record, matching what Koine.Emit.OpenApi's QueryOperation now
+    // documents (a requestBody) rather than the old undocumented split.
+    // Body-less verbs (GET and friends) are untouched: [AsParameters] /
+    // in: query, byte-identical to before.
     // ------------------------------------------------------------------
 
     /// <summary>The issue's minimal repro model verbatim: a `@post` query taking both a COMPLEX
@@ -2550,19 +2533,118 @@ public class R18CSharpApplicationTests
         """;
 
     [Fact]
-    public void Post_annotated_query_with_a_complex_criterion_still_emits_MapPost_with_AsParameters()
+    public void Post_annotated_query_with_a_complex_criterion_emits_MapPost_with_FromBody()
     {
         var endpoints = File(Emit(ApiOn, PostQueryComplexCriterionFixture), "OrderingEndpoints.cs").Contents;
         endpoints.ShouldContain(
-            "endpoints.MapPost(\"/orders-in-range\", async ([AsParameters] OrdersInRange query, OrdersInRangeHandler handler, CancellationToken ct) =>");
+            "endpoints.MapPost(\"/orders-in-range\", async ([Microsoft.AspNetCore.Mvc.FromBody] OrdersInRange query, OrdersInRangeHandler handler, CancellationToken ct) =>");
     }
 
+    /// <summary>The wire-contract change the fix implies (#1961's edge cases): a scalar-only `@post`
+    /// query previously bound fully from the query string via `[AsParameters]` — now it moves fully into
+    /// the JSON body, same as a complex criterion, because the binding source is chosen per VERB, not per
+    /// property.</summary>
     [Fact]
-    public void Post_annotated_query_with_only_a_scalar_criterion_still_emits_MapPost_with_AsParameters()
+    public void Post_annotated_query_with_only_a_scalar_criterion_emits_MapPost_with_FromBody()
     {
         var endpoints = File(Emit(ApiOn, PostQueryScalarOnlyCriterionFixture), "OrderingEndpoints.cs").Contents;
         endpoints.ShouldContain(
-            "endpoints.MapPost(\"/orders-in-range-scalar\", async ([AsParameters] OrdersInRangeScalar query, OrdersInRangeScalarHandler handler, CancellationToken ct) =>");
+            "endpoints.MapPost(\"/orders-in-range-scalar\", async ([Microsoft.AspNetCore.Mvc.FromBody] OrdersInRangeScalar query, OrdersInRangeScalarHandler handler, CancellationToken ct) =>");
+    }
+
+    /// <summary>An un-annotated (conventional GET) query stays byte-identical: the fix only changes
+    /// binding for a verb outside <c>BodylessVerbs</c>.</summary>
+    [Fact]
+    public void Unannotated_query_still_emits_MapGet_with_AsParameters()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted, Cancelled }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                }
+              }
+
+              readmodel OrderRow from Order {
+                status
+              }
+
+              query OrdersByStatus(status: OrderStatus): List<OrderRow>
+            }
+            """;
+
+        var endpoints = File(Emit(ApiOn, src), "OrderingEndpoints.cs").Contents;
+        endpoints.ShouldContain(
+            "endpoints.MapGet(\"/orders-by-status\", async ([AsParameters] OrdersByStatus query, OrdersByStatusHandler handler, CancellationToken ct) =>");
+    }
+
+    /// <summary>Edge case: a route-token criterion on a `@post` query (#1748's per-token lifting) still
+    /// binds from the route via its own `[FromRoute]` parameter, ahead of the (now `[FromBody]`-bound)
+    /// criteria record — the route and the body can never silently disagree, same guarantee the mutation
+    /// side already had.</summary>
+    [Fact]
+    public void Post_query_with_a_route_token_criterion_still_binds_it_from_the_route()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted, Cancelled }
+
+              value DateRange {
+                startsAt: Instant
+                endsAt:   Instant
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                }
+              }
+
+              readmodel OrderRow from Order {
+                status
+              }
+
+              @route("/orders/{status}")
+              @post
+              query OrdersInRangeByStatus(status: OrderStatus, range: DateRange): List<OrderRow>
+            }
+            """;
+
+        var endpoints = File(Emit(ApiOn, src), "OrderingEndpoints.cs").Contents;
+        endpoints.ShouldContain(
+            "endpoints.MapPost(\"/orders/{status}\", async ([Microsoft.AspNetCore.Mvc.FromRoute(Name = \"status\")] OrderStatus status, [Microsoft.AspNetCore.Mvc.FromBody] OrdersInRangeByStatus query, OrdersInRangeByStatusHandler handler, CancellationToken ct) =>");
+        endpoints.ShouldContain("query with { Status = status }");
+    }
+
+    /// <summary>Edge case: a `@post` query with zero criteria still emits a valid endpoint — an empty
+    /// criteria record bound with `[FromBody]` rather than `[AsParameters]`.</summary>
+    [Fact]
+    public void Post_query_with_zero_criteria_still_emits_MapPost_with_FromBody()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted, Cancelled }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                }
+              }
+
+              readmodel OrderRow from Order {
+                status
+              }
+
+              @post
+              query AllOrders(): List<OrderRow>
+            }
+            """;
+
+        var endpoints = File(Emit(ApiOn, src), "OrderingEndpoints.cs").Contents;
+        endpoints.ShouldContain(
+            "endpoints.MapPost(\"/all-orders\", async ([Microsoft.AspNetCore.Mvc.FromBody] AllOrders query, AllOrdersHandler handler, CancellationToken ct) =>");
     }
 
     /// <summary>
@@ -2599,14 +2681,16 @@ public class R18CSharpApplicationTests
         """;
 
     /// <summary>
-    /// Branch B, part 1 — a client that (reasonably) follows the OpenAPI document and sends the complex
-    /// `range` criterion as query-string parameters (`range.startsAt=…&amp;range.endsAt=…`) gets a
-    /// clean HTTP 400, not a host crash. <c>app.Start()</c> and the request itself both complete without
-    /// throwing — a fundamentally different, benign failure mode from #1649/#1656's
-    /// `InvalidOperationException` that poisoned the WHOLE route table on the first request.
+    /// Pre-#1961, this was the request shape the (broken) OpenAPI document described — every criterion
+    /// `in: query`. Post-fix, `[Microsoft.AspNetCore.Mvc.FromBody]` requires a JSON body, so a
+    /// query-string-only request with no body still gets a clean HTTP 400 — for a different, correct
+    /// reason (a missing required body) rather than the old per-property split-bind failure.
+    /// <c>app.Start()</c> and the request itself both complete without throwing — a fundamentally
+    /// different, benign failure mode from #1649/#1656's `InvalidOperationException` that poisoned the
+    /// WHOLE route table on the first request.
     /// </summary>
     [Fact]
-    public async Task Post_query_complex_criterion_sent_as_documented_by_openapi_gets_a_clean_400_not_a_crash()
+    public async Task Post_query_criteria_sent_via_querystring_only_still_gets_a_clean_400_not_a_crash()
     {
         using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryComplexCriterionFixture), OrderingApiHostDriver);
 
@@ -2618,52 +2702,115 @@ public class R18CSharpApplicationTests
     }
 
     /// <summary>
-    /// Branch B, part 2 — the request shape ASP.NET Core ACTUALLY expects for the complex criterion (a
-    /// bare JSON body carrying just the `DateRange`, with `status` still in the query string) binds and
-    /// dispatches successfully: it reaches <c>OrdersInRangeHandler</c>'s by-design
-    /// `NotImplementedException` stub rather than throwing an ASP.NET binding exception. Issued on the
-    /// SAME host instance right after the malformed request above, so this also rules out any
-    /// first-request poisoning of the endpoint/route table.
+    /// The request shape the OpenAPI document now describes for a `@post` query (#1961's Task 2 — a
+    /// <c>requestBody</c> matching the FULL criteria record) is correctly ROUTED and MODEL-BOUND to
+    /// <c>[Microsoft.AspNetCore.Mvc.FromBody] OrdersInRange</c> — but this particular fixture's criteria
+    /// include an enum member (`status: OrderStatus`), and Koine's emitted "smart enum" classes have no
+    /// <c>System.Text.Json</c> converter (no public constructor, no settable properties), so ANY JSON
+    /// body containing one fails to deserialize — a confirmed, separate, pre-existing gap unrelated to
+    /// this issue's binding-source fix (filed as #1966; it affects every body-taking endpoint with an
+    /// enum property, not just `@post` queries). So this still gets a 400 today, for a DIFFERENT reason
+    /// than the pre-#1961 split-bind mismatch: JSON enum deserialization, not doc/binding disagreement.
+    /// <see cref="Post_query_criteria_with_no_enum_member_binds_from_a_json_body_and_dispatches_cleanly"/>
+    /// proves the fix's actual binding mechanism (whole-record <c>[FromBody]</c>) on criteria #1966
+    /// doesn't block.
     /// </summary>
     [Fact]
-    public async Task Post_query_complex_criterion_sent_the_way_AspNetCore_actually_binds_it_dispatches_cleanly()
+    public async Task Post_query_criteria_sent_as_a_single_json_body_still_gets_a_400_pending_1966()
     {
         using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryComplexCriterionFixture), OrderingApiHostDriver);
 
-        // A malformed-per-ASP.NET-binding request first (see the sibling 400 test) — proves this second,
-        // well-formed request on the SAME host still reaches the handler cleanly.
-        await harness.Client.PostAsync(
-            "/orders-in-range?range.startsAt=2026-01-01T00:00:00Z&range.endsAt=2026-02-01T00:00:00Z&status=Draft",
-            content: null, TestContext.Current.CancellationToken);
+        var content = new StringContent(
+            """{"range":{"startsAt":"2026-01-01T00:00:00Z","endsAt":"2026-02-01T00:00:00Z"},"status":0}""",
+            System.Text.Encoding.UTF8, "application/json");
+
+        var response = await harness.Client.PostAsync("/orders-in-range", content, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
+    /// The scalar-only counterpart (<see cref="PostQueryScalarOnlyCriterionFixture"/>) hits the exact
+    /// same #1966 gap — its only criterion IS the enum, so a JSON body can never bind it today either.
+    /// The wire-contract change #1961's fix implies (a scalar-only `@post` query no longer binds from the
+    /// query string) is real, but it can't be demonstrated end-to-end with an enum-only criterion until
+    /// #1966 lands.
+    /// </summary>
+    [Fact]
+    public async Task Post_query_with_only_a_scalar_criterion_sent_as_json_still_gets_a_400_pending_1966()
+    {
+        using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryScalarOnlyCriterionFixture), OrderingApiHostDriver);
+
+        var content = new StringContent("""{"status":0}""", System.Text.Encoding.UTF8, "application/json");
+
+        var response = await harness.Client.PostAsync("/orders-in-range-scalar", content, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>Identical to <see cref="PostQueryComplexCriterionFixture"/> except the criterion is
+    /// JSON-deserializable end to end (a value object, no enum member) — isolates the fix's own binding
+    /// mechanism from the unrelated #1966 gap.</summary>
+    internal const string PostQueryDateRangeOnlyCriterionFixture = """
+        context Ordering {
+          value DateRange {
+            startsAt: Instant
+            endsAt:   Instant
+          }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              total: Int
+            }
+          }
+
+          readmodel OrderRow from Order {
+            total
+          }
+
+          @post
+          query OrdersInRangeDateOnly(range: DateRange): List<OrderRow>
+        }
+        """;
+
+    /// <summary>
+    /// The fix's whole point, proven end to end without tripping the unrelated #1966 enum-JSON gap: the
+    /// request shape the OpenAPI document now describes for a `@post` query (a single JSON body matching
+    /// the whole criteria record) binds and dispatches successfully — it reaches the handler's by-design
+    /// `NotImplementedException` stub rather than throwing an ASP.NET binding exception.
+    /// </summary>
+    [Fact]
+    public async Task Post_query_criteria_with_no_enum_member_binds_from_a_json_body_and_dispatches_cleanly()
+    {
+        using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryDateRangeOnlyCriterionFixture), OrderingApiHostDriver);
 
         var content = new StringContent(
-            """{"startsAt":"2026-01-01T00:00:00Z","endsAt":"2026-02-01T00:00:00Z"}""",
+            """{"range":{"startsAt":"2026-01-01T00:00:00Z","endsAt":"2026-02-01T00:00:00Z"}}""",
             System.Text.Encoding.UTF8, "application/json");
 
         var thrown = await Should.ThrowAsync<Exception>(() =>
-            harness.Client.PostAsync("/orders-in-range?status=Draft", content, TestContext.Current.CancellationToken));
+            harness.Client.PostAsync("/orders-in-range-date-only", content, TestContext.Current.CancellationToken));
 
         // TestServer rethrows an unhandled request-pipeline exception rather than turning it into a
         // response (see the sibling enum-criterion tests for #1656) — NotImplementedException is
-        // OrdersInRange's OWN by-design stub, not an ASP.NET binding failure, so reaching it IS the
-        // proof binding/dispatch succeeded.
+        // OrdersInRangeDateOnly's OWN by-design stub, not an ASP.NET binding failure, so reaching it IS
+        // the proof binding/dispatch succeeded.
         thrown.ShouldBeOfType<NotImplementedException>();
     }
 
     /// <summary>
-    /// The scalar-only counterpart (<see cref="PostQueryScalarOnlyCriterionFixture"/>): every criterion
-    /// is bindable from the query string, so this is the case the issue's brainstorm assumed "very
-    /// likely works fine today" — confirmed here with live-host evidence rather than assumption.
+    /// The old split-bind idiom (scalar criterion in the query string) no longer applies post-fix: with
+    /// the whole record now `[FromBody]`-bound, a query-string-only request finds no `status` and gets a
+    /// clean 400 — documenting the wire-contract change directly rather than leaving it implicit.
     /// </summary>
     [Fact]
-    public async Task Post_query_with_only_a_scalar_criterion_binds_from_the_querystring_and_dispatches_cleanly()
+    public async Task Post_query_with_only_a_scalar_criterion_sent_via_querystring_now_gets_a_400()
     {
         using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryScalarOnlyCriterionFixture), OrderingApiHostDriver);
 
-        var thrown = await Should.ThrowAsync<Exception>(() =>
-            harness.Client.PostAsync(
-                "/orders-in-range-scalar?status=Draft", content: null, TestContext.Current.CancellationToken));
+        var response = await harness.Client.PostAsync(
+            "/orders-in-range-scalar?status=Draft", content: null, TestContext.Current.CancellationToken);
 
-        thrown.ShouldBeOfType<NotImplementedException>();
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 }
