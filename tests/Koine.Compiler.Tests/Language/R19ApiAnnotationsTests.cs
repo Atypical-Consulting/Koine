@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
 using Koine.Compiler.Semantics;
@@ -2002,5 +2003,55 @@ public class R19ApiAnnotationsTests
 
         Diagnose(TwoCommandSource(["""@route("/orders/{id}/edit")""", "@put"], PutOrdersId))
             .ShouldBeEmpty();
+    }
+
+    /// <summary>The <c>{…}</c> placeholders <see cref="CqrsValidator.NormalizeRoute"/> actually emitted, read
+    /// back off its output rather than a side channel — <c>{{</c>/<c>}}</c> escapes never match (no digit
+    /// follows), so only real positional tokens count.</summary>
+    private static int PlaceholderCount(string normalizedRoute) =>
+        Regex.Matches(normalizedRoute, @"\{\*?\d+\??\}").Count;
+
+    /// <summary>
+    /// #1745 (Task 3): pins <see cref="CqrsValidator.NormalizeRoute"/>'s idea of "how many route
+    /// parameters does this template have" against <see cref="RouteTemplate.Tokens"/> — the walk
+    /// <see cref="RouteDerivation"/> uses to resolve one <c>RouteTokenBinding</c> per
+    /// token, which <c>OpenApiEmitter.Paths.PathParameters</c> then emits one OpenAPI parameter per
+    /// (#1748). <c>NormalizeRoute</c> cannot call <see cref="RouteTemplate.Tokens"/> directly — it reasons
+    /// about a token's POSITION, <c>Tokens</c> about its de-duplicated NAME — but for any template with
+    /// distinct parameter names (the only well-formed shape; ASP.NET rejects a repeated one) the two
+    /// counts must always agree, or KOI1211's idea of a route's shape would silently diverge from what
+    /// the OpenAPI document and the C# <c>api</c> layer actually bind. Covers escapes, constraints,
+    /// optionals, and single/double-star catch-alls.
+    /// </summary>
+    [Theory]
+    [InlineData("/orders")]
+    [InlineData("/orders/{id}")]
+    [InlineData("/orders/{id:int}")]
+    [InlineData("/orders/{id?}")]
+    [InlineData("/orders/{id?:int}")]
+    [InlineData("/files/{*path}")]
+    [InlineData("/files/{**path}")]
+    [InlineData("/orders/{id}/lines/{lineId}")]
+    [InlineData("/lit/{{brace}}/{id}")]
+    [InlineData("/a/{x}/b/{y}/c/{z}")]
+    public void Normalize_route_token_count_agrees_with_the_shared_route_template_walker(string route) =>
+        PlaceholderCount(CqrsValidator.NormalizeRoute(route)).ShouldBe(RouteTemplate.Tokens(route).Count);
+
+    /// <summary>
+    /// The same pin one layer further down the emit side (#1745 Task 3): a query's resolved
+    /// <c>RouteTokenBinding</c> count — what <c>OpenApiEmitter.Paths.PathParameters</c> actually turns
+    /// into OpenAPI <c>parameters</c> entries, one per binding — must match <c>NormalizeRoute</c>'s
+    /// placeholder count too. Deliberately uses a token (<c>lineId</c>) that binds to nothing, since
+    /// <see cref="RouteDerivation"/> still records one binding per token regardless of
+    /// whether it resolves (an unbound token is KOI1215's concern, not a reason to omit the OpenAPI
+    /// parameter) — so the count must not depend on binding success either.
+    /// </summary>
+    [Fact]
+    public void Normalize_route_placeholder_count_agrees_with_route_derivation_token_bindings()
+    {
+        var query = new QueryDecl("Sample", [], new TypeRef("Unused"), RouteOverride: "/orders/{id}/lines/{lineId:int}");
+        RouteInfo info = RouteDerivation.ForQuery(query);
+
+        PlaceholderCount(CqrsValidator.NormalizeRoute(info.Route)).ShouldBe(info.TokenBindings.Count);
     }
 }
