@@ -2373,6 +2373,47 @@ public class R18CSharpApplicationTests
         endpoints.ShouldNotContain("OrderAmendRequest");
     }
 
+    /// <summary>
+    /// The guard's set is shared across all three writers, not one per writer (code review, #1744) — a
+    /// command and a factory colliding on the same (route, verb) must de-duplicate exactly like two
+    /// commands do. <c>EmitApiLayer</c> walks commands before factories, so the command wins.
+    /// </summary>
+    [Fact]
+    public void A_command_and_a_factory_sharing_a_route_and_verb_only_emit_the_first_writer_reached()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted }
+
+              aggregate Order root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/orders/{id}")
+                  @put
+                  command submit(note: String) {
+                    requires status == Draft "only a draft order can be submitted"
+                    status -> Submitted
+                  }
+
+                  @route("/orders/{id}")
+                  @put
+                  create open(note: String) {}
+                }
+              }
+            }
+            """;
+
+        (KoineModel? model, IReadOnlyList<Diagnostic> diagnostics) = new KoineCompiler().Parse(src);
+        model.ShouldNotBeNull(string.Join("\n", diagnostics.Select(d => d.ToString())));
+
+        var endpoints = File(new CSharpEmitter(ApiOn).Emit(model!), "OrderingEndpoints.cs").Contents;
+
+        endpoints.Split('\n').Count(l => l.Contains("MapPut(\"/orders/{id}\"", StringComparison.Ordinal)).ShouldBe(1);
+        endpoints.ShouldContain("OrderSubmitRequest");
+        endpoints.ShouldNotContain("OrderOpenRequest");
+    }
+
     /// <summary>Companion to the guard above: it keys on (route, verb), not route alone — the same route
     /// with a different verb is a distinct pair, so both endpoints survive. This model is valid (the
     /// verbs differ, so KOI1211 never fires), so it goes through the ordinary validated Compile path.</summary>
