@@ -122,10 +122,11 @@ public class FlatModelIndexLookupGuardTests
     }
 
     /// <summary>
-    /// The name of the nearest enclosing member (method, local function, constructor, property, or
-    /// indexer) around <paramref name="node"/> — stable under reformatting/reordering, unlike a line
-    /// number. Falls through nodes with no name of their own (blocks, lambdas, accessor bodies) so a
-    /// call inside a lambda or a property accessor is attributed to the member that declares it.
+    /// The name of the nearest enclosing member (method, local function, constructor, property,
+    /// indexer, or operator) around <paramref name="node"/> — stable under reformatting/reordering,
+    /// unlike a line number. Falls through nodes with no name of their own (blocks, lambdas, accessor
+    /// bodies) so a call inside a lambda or a property accessor is attributed to the member that
+    /// declares it.
     /// </summary>
     private static string EnclosingSymbolName(SyntaxNode node)
     {
