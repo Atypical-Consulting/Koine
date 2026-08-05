@@ -209,8 +209,11 @@ public class PathSinkGuardTests
             "new_name is screened by is_safe_name (a single separator-free segment, never `.`/`..`) and joined onto the token's OWN parent, so the result cannot leave the directory the entry already lives in"),
         ("copy_recursive", RawJoin, "dst.join(entry.file_name())",
             "an internal recursion helper: it joins a file_name() read off the SOURCE tree onto a destination whose root move_entry already resolved through resolve_in — no caller string reaches it"),
-        ("caller_token", RawJoin, ".join(rel)",
-            "builds the token SHOWN to the webview, never a path anything is written to. It runs only after resolve_in already proved containment and the filesystem call already used the RESOLVED path; re-anchoring on the caller's own folder string is what keeps a returned token comparable with every other token (the frontend matches a token to its root by string prefix, and a canonical path — macOS's /private/var, Windows' \\\\?\\ — matches none)"),
+        // `caller_token` used to need a row here, for a `.join(rel)` that built the token shown to the
+        // webview. It no longer joins at all: joining the webview's forward-slashed `rel_path` whole
+        // left those slashes intact and answered C:\ws\docs/a.koi on Windows, where a listing mints
+        // C:\ws\docs\a.koi — so it now pushes `rel`'s components one at a time, which is not a join and
+        // needs no excuse. The stale-entry half of this guard is what caught the leftover row.
 
         // --- Rule 2: the opened folder itself -----------------------------------------------------
         //

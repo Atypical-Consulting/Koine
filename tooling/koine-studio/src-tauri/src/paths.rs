@@ -1316,12 +1316,11 @@ mod tests {
             "dst.join(entry.file_name())",
             "internal recursion: a file_name() off the SOURCE tree onto a destination move_entry already resolved",
         ),
-        (
-            "caller_token",
-            RAW_JOIN,
-            ".join(rel)",
-            "builds the token SHOWN to the webview, never a path written to; reached only after resolve_in already proved containment, and the write used the resolved path",
-        ),
+        // `caller_token` used to need a row here, for a `.join(rel)` that built the token shown to the
+        // webview. It no longer joins at all: joining the webview's forward-slashed `rel_path` whole
+        // left those slashes intact and answered `C:\ws\docs/a.koi` on Windows, where a listing mints
+        // `C:\ws\docs\a.koi` — so it now pushes `rel`'s components one at a time, which is not a join
+        // and needs no excuse. The stale-entry half of this guard is what caught the leftover row.
         // --- unrouted-command: the opened folder itself ---------------------------------------------
         //
         // `dir` / `parent_dir` is the workspace or repository the user opened in the OS dialog. It is

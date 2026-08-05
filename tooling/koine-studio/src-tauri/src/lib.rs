@@ -1551,11 +1551,21 @@ fn resolve_in(folder: &str, rel_path: &str) -> Result<PathBuf, String> {
 /// that decision rested on: `rel` is the same relative path the primitive accepted, and the join is
 /// purely lexical. It is emphatically NOT the `folder.join(rel_path)` that `resolve_in` warns
 /// against — that one is used to WRITE, this one is only ever shown.
+///
+/// **Push components, don't `join` the path whole.** The webview sends a forward-slashed `rel_path`
+/// on every platform. `Path::join` appends it with the *native* separator but leaves the separators
+/// *inside* it exactly as they came, so on Windows `C:\ws` + `docs/a.koi` yields the mixed
+/// `C:\ws\docs/a.koi` — while `list_entries`, which mints its tokens by walking the filesystem,
+/// yields the all-backslash `C:\ws\docs\a.koi`. Two spellings of one file is precisely the identity
+/// break this helper exists to prevent, just one level further in. Walking `rel.components()` and
+/// pushing each one re-emits every separator natively. Only `Normal` components can appear here:
+/// `is_safe_relpath` has already refused an empty, absolute, `.` or `..` candidate.
 fn caller_token(folder: &str, rel: &std::path::Path) -> String {
-    std::path::Path::new(folder)
-        .join(rel)
-        .to_string_lossy()
-        .into_owned()
+    let mut token = std::path::PathBuf::from(folder);
+    for component in rel.components() {
+        token.push(component);
+    }
+    token.to_string_lossy().into_owned()
 }
 
 /// Flatten a [`PathEscape`] into the `String` error these commands return.
@@ -3702,6 +3712,38 @@ mod tests {
                 all_tokens(children, into);
             }
         }
+    }
+
+    /// A token must be spelled with the platform's own separator throughout.
+    ///
+    /// The webview sends `rel_path` forward-slashed on every platform. `Path::join`ing it whole
+    /// leaves those inner slashes alone, so on Windows the answer came back as the mixed
+    /// `C:\ws\docs/a.koi` while `list_entries` — which walks the filesystem — minted
+    /// `C:\ws\docs\a.koi`. Two spellings of one file breaks token identity in the frontend just as
+    /// surely as the canonical-path regression did. The round-trip assertion in the test below
+    /// catches it too, but only on Windows and only by way of a listing; this one names the
+    /// invariant directly so the next failure reads as "wrong separator" rather than "not found".
+    #[test]
+    fn a_caller_token_is_spelled_with_the_native_separator_throughout() {
+        let token = caller_token("root", std::path::Path::new("docs/nested/a.koi"));
+
+        let foreign = if std::path::MAIN_SEPARATOR == '/' {
+            '\\'
+        } else {
+            '/'
+        };
+        assert!(
+            !token.contains(foreign),
+            "caller_token answered {token}, which mixes in a non-native {foreign:?} separator"
+        );
+        assert_eq!(
+            std::path::Path::new(&token)
+                .components()
+                .collect::<Vec<_>>()
+                .len(),
+            4,
+            "caller_token answered {token}, which is not root + the three relative components"
+        );
     }
 
     #[test]
