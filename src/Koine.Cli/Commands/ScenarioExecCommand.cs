@@ -63,8 +63,11 @@ internal sealed class ScenarioExecCommand : Command<ScenarioExecCommand.Settings
                     "The model has errors; fix them before running a scenario.");
             }
 
+            IReadOnlyDictionary<string, string> sourcesByFile =
+                parsed.Sources.ToDictionary(s => s.Path, s => s.Source, StringComparer.Ordinal);
             return ScenarioService.Shape(
-                ScenarioExecutor.Run(new SemanticModel(model), parsed.ToScenario()), ScenarioService.ExecutedMode);
+                ScenarioExecutor.Run(new SemanticModel(model), parsed.ToScenario(), sourcesByFile),
+                ScenarioService.ExecutedMode);
         }
         catch (OutOfMemoryException) when (ScenarioSandbox.HeapCeilingNote() is not null)
         {

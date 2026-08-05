@@ -6,6 +6,7 @@ using Koine.Compiler;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Ast.Bound;
 using Koine.Compiler.Emit;
+using Koine.Compiler.Formatting;
 using Koine.Compiler.Semantics.Scenarios;
 
 namespace Koine.Execution;
@@ -60,6 +61,7 @@ internal sealed class ScenarioExecutor
     private readonly ModelIndex _index;
     private readonly ScenarioValueBinder _binder;
     private readonly ScenarioFanOutResolver _fanOut;
+    private readonly IReadOnlyDictionary<string, AstPrinter> _printers;
     private readonly List<string> _notes = [];
 
     /// <summary>
@@ -75,19 +77,24 @@ internal sealed class ScenarioExecutor
 
     private EntityDecl _entity = null!;
 
-    private ScenarioExecutor(SemanticModel sema)
+    private ScenarioExecutor(SemanticModel sema, IReadOnlyDictionary<string, string>? sourcesByFile)
     {
         _sema = sema;
         _index = sema.Index;
         _binder = new ScenarioValueBinder(_index);
         _fanOut = new ScenarioFanOutResolver(sema);
+        _printers = ScenarioConditionRenderer.BuildPrinters(sourcesByFile);
     }
 
     /// <summary>Runs <paramref name="scenario"/> against the code <paramref name="sema"/> emits, and
-    /// returns its timeline. Never throws: every failure is an <c>Ok: false</c> result with a note.</summary>
-    public static ScenarioResult Run(SemanticModel sema, Scenario scenario)
+    /// returns its timeline. Never throws: every failure is an <c>Ok: false</c> result with a note.
+    /// <paramref name="sourcesByFile"/> (file path → source text, #1752) lets <c>requires</c>/
+    /// <c>invariant</c> condition text render with its original operators intact, matching
+    /// <see cref="ScenarioInterpreter"/>'s rendering — omit it to keep the tree-walk fallback.</summary>
+    public static ScenarioResult Run(
+        SemanticModel sema, Scenario scenario, IReadOnlyDictionary<string, string>? sourcesByFile = null)
     {
-        var executor = new ScenarioExecutor(sema);
+        var executor = new ScenarioExecutor(sema, sourcesByFile);
         try
         {
             return executor.RunCore(scenario);
@@ -265,7 +272,8 @@ internal sealed class ScenarioExecutor
         // The emitted operation ran its own CheckInvariants() and did not throw, so every declared
         // invariant holds against the post-command state — proven, not assumed.
         var invariants = _entity.Invariants
-            .Select(i => new InvariantCheck(i.Message, i.Condition.ToFullString(), CheckOutcome.Passed))
+            .Select(i => new InvariantCheck(
+                i.Message, ScenarioConditionRenderer.Render(i.Condition, _printers), CheckOutcome.Passed))
             .ToList();
 
         return new ScenarioResult(true, _entity.Name, s.Operation, steps, after, invariants, result, _notes);
@@ -1124,7 +1132,7 @@ internal sealed class ScenarioExecutor
             Invariant? violated = entity.Invariants.FirstOrDefault(i => RuleOf(i) == rule);
             walk.Steps.Add(new ScenarioStep.Precondition(
                 violated?.Message ?? rule,
-                violated?.Condition.ToFullString() ?? rule,
+                violated is null ? rule : ScenarioConditionRenderer.Render(violated.Condition, _printers),
                 CheckOutcome.Failed));
         }
 
@@ -1180,7 +1188,8 @@ internal sealed class ScenarioExecutor
             {
                 case RequiresClause req:
                     // The emitted guard did not throw, so the precondition held. Proven, never a guess.
-                    steps.Add(new ScenarioStep.Precondition(req.Message, req.Condition.ToFullString(), CheckOutcome.Passed));
+                    steps.Add(new ScenarioStep.Precondition(
+                        req.Message, ScenarioConditionRenderer.Render(req.Condition, _printers), CheckOutcome.Passed));
                     break;
 
                 case Transition t:
@@ -1446,7 +1455,7 @@ internal sealed class ScenarioExecutor
     /// declaration order.) <c>emit</c> and <c>result</c> only run after the emitted
     /// <c>CheckInvariants()</c> sweep, so nothing past a violation happened on a failing run.</para>
     /// </summary>
-    private static ViolationWalk WalkToViolation(
+    private ViolationWalk WalkToViolation(
         string rule,
         IReadOnlyList<CommandStmt> body,
         IReadOnlyDictionary<string, string> before,
@@ -1460,11 +1469,13 @@ internal sealed class ScenarioExecutor
             switch (stmt)
             {
                 case RequiresClause req when RuleOf(req) == rule:
-                    steps.Add(new ScenarioStep.Precondition(req.Message, req.Condition.ToFullString(), CheckOutcome.Failed));
+                    steps.Add(new ScenarioStep.Precondition(
+                        req.Message, ScenarioConditionRenderer.Render(req.Condition, _printers), CheckOutcome.Failed));
                     return new ViolationWalk(steps, ViolationSource.Precondition, mutated, string.Empty);
 
                 case RequiresClause req:
-                    steps.Add(new ScenarioStep.Precondition(req.Message, req.Condition.ToFullString(), CheckOutcome.Passed));
+                    steps.Add(new ScenarioStep.Precondition(
+                        req.Message, ScenarioConditionRenderer.Render(req.Condition, _printers), CheckOutcome.Passed));
                     break;
 
                 case Transition t when rule.StartsWith(IllegalTransitionPrefix + t.Field + " to ", StringComparison.Ordinal):
@@ -1507,7 +1518,8 @@ internal sealed class ScenarioExecutor
         }
 
         return _entity.Invariants
-            .Select(i => new InvariantCheck(i.Message, i.Condition.ToFullString(), CheckOutcome.Passed))
+            .Select(i => new InvariantCheck(
+                i.Message, ScenarioConditionRenderer.Render(i.Condition, _printers), CheckOutcome.Passed))
             .ToList();
     }
 
@@ -1519,7 +1531,7 @@ internal sealed class ScenarioExecutor
         var checks = new List<InvariantCheck>();
         foreach (Invariant invariant in _entity.Invariants)
         {
-            string condition = invariant.Condition.ToFullString();
+            string condition = ScenarioConditionRenderer.Render(invariant.Condition, _printers);
             if (RuleOf(invariant) == rule)
             {
                 checks.Add(new InvariantCheck(invariant.Message, condition, CheckOutcome.Failed));
@@ -1552,7 +1564,8 @@ internal sealed class ScenarioExecutor
         {
             if (RuleOf(invariant) == rule)
             {
-                return new InvariantCheck(invariant.Message, invariant.Condition.ToFullString(), CheckOutcome.Failed);
+                return new InvariantCheck(
+                    invariant.Message, ScenarioConditionRenderer.Render(invariant.Condition, _printers), CheckOutcome.Failed);
             }
         }
 
@@ -1597,12 +1610,13 @@ internal sealed class ScenarioExecutor
     /// <summary>
     /// Renders a message-less guard/invariant's condition the way the C# emitter does when it synthesizes
     /// the rule the thrown <c>DomainInvariantViolationException</c> carries — the emitter's
-    /// <c>SynthesizeMessage</c> IS <see cref="Lowerer.SourceText"/>. It must not be confused with
-    /// <see cref="KoineNode.ToFullString"/>, which concatenates child NODES only: Koine has no
-    /// <c>SyntaxToken</c> layer, so a tree walk drops every operator (<c>status == Draft</c> comes back as
-    /// <c>" status Draft"</c>, issue #1752) and could therefore never equal the emitted rule. The step's
-    /// DISPLAYED condition text stays on <c>ToFullString()</c>, which is what
-    /// <see cref="ScenarioInterpreter"/> renders — only the MATCHING moves here.
+    /// <c>SynthesizeMessage</c> IS <see cref="Lowerer.SourceText"/>. It must not be confused with the
+    /// step's DISPLAYED condition text (<see cref="ScenarioConditionRenderer.Render"/>, shared with
+    /// <see cref="ScenarioInterpreter"/>, #1752): this one exists purely to reproduce the emitter's own
+    /// (lossy, tree-only) rendering so it can be string-matched against the rule the exception carries —
+    /// swapping it for the source-backed renderer would just make the two sides of the comparison agree
+    /// for the wrong reason. Only the MATCHING stays on this tree walk; the DISPLAY moved to the shared,
+    /// source-backed renderer.
     /// </summary>
     private static string RuleTextOf(Expr condition) => Lowerer.SourceText(condition);
 

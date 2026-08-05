@@ -49,25 +49,30 @@ public static class ScenarioService
     /// Runs the scenario described by the request fields against <paramref name="semantic"/> and
     /// returns the <c>command → events → invariant-checks</c> timeline as a JSON-ready tree.
     /// <paramref name="given"/> and <paramref name="args"/> are JSON objects (field → value); a
-    /// non-object is treated as empty.
+    /// non-object is treated as empty. <paramref name="sources"/> (#1752), when supplied, lets
+    /// <c>requires</c>/<c>invariant</c> condition text render with its original operators intact
+    /// instead of a lossy tree-walk reconstruction.
     /// </summary>
     public static IReadOnlyDictionary<string, object?> Run(
-        SemanticModel semantic, string target, string operation, JsonElement given, JsonElement args) =>
-        Run(semantic, target, operation, given, args, executionRequested: false);
+        SemanticModel semantic, string target, string operation, JsonElement given, JsonElement args,
+        IReadOnlyList<SourceFile>? sources = null) =>
+        Run(semantic, target, operation, given, args, executionRequested: false, sources);
 
     /// <summary>
-    /// <see cref="Run(SemanticModel, string, string, JsonElement, JsonElement)"/>, for a host that was
-    /// asked for executed mode (<c>execute: true</c>) but cannot execute: the result is still the
-    /// interpreter's and is labelled <see cref="InterpretedMode"/>, with
+    /// <see cref="Run(SemanticModel, string, string, JsonElement, JsonElement, IReadOnlyList{SourceFile})"/>,
+    /// for a host that was asked for executed mode (<c>execute: true</c>) but cannot execute: the result
+    /// is still the interpreter's and is labelled <see cref="InterpretedMode"/>, with
     /// <see cref="ExecutionUnavailableNote"/> appended. The degraded answer is the SAME shape as any
     /// other, so the panel renders it normally — and says which engine produced it.
     /// </summary>
     internal static IReadOnlyDictionary<string, object?> Run(
         SemanticModel semantic, string target, string operation, JsonElement given, JsonElement args,
-        bool executionRequested)
+        bool executionRequested, IReadOnlyList<SourceFile>? sources = null)
     {
         var scenario = new Scenario(target, operation, ParseMap(given), ParseMap(args));
-        ScenarioResult result = ScenarioInterpreter.Run(semantic, scenario);
+        IReadOnlyDictionary<string, string>? sourcesByFile =
+            sources?.ToDictionary(s => s.Path, s => s.Source, StringComparer.Ordinal);
+        ScenarioResult result = ScenarioInterpreter.Run(semantic, scenario, sourcesByFile);
         return Shape(result, InterpretedMode, executionRequested ? ExecutionUnavailableNote : null);
     }
 

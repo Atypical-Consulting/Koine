@@ -135,6 +135,36 @@ public class ScenarioRunnerTests
         return new SemanticModel(model);
     }
 
+    /// <summary>Like <see cref="Build"/>, but also returns the file→source lookup a source-backed
+    /// condition rendering needs (#1752) — most tests don't care how a condition renders and stay on
+    /// <see cref="Build"/>; this is for the ones that assert the exact rendered text.</summary>
+    private static (SemanticModel Sema, IReadOnlyDictionary<string, string> Sources) BuildSourced(
+        string src, string file = "scenario.koi")
+    {
+        var (model, diagnostics) = new KoineCompiler().Parse(src, file);
+        diagnostics.ShouldBeEmpty();
+        model.ShouldNotBeNull();
+        return (new SemanticModel(model), new Dictionary<string, string>(StringComparer.Ordinal) { [file] = src });
+    }
+
+    // A `requires` clause and an `invariant`, both built from a binary operator — the shape that
+    // exposed #1752: `KoineNode.ToFullString()` walks NODES only, so `amount >= 0` came back as
+    // `" amount 0"` with the operator and a space silently dropped.
+    private const string MoneyGuardModel = """
+        context Billing {
+          entity Account identified by AccountId {
+            amount: Decimal
+            count:  Int
+
+            invariant amount >= 0 "amount must not be negative"
+
+            command touch {
+              requires count >= 0 "count must not be negative"
+            }
+          }
+        }
+        """;
+
     private static ScenarioValue Line(int quantity) =>
         ScenarioValue.RecordOf(("product", ScenarioValue.FromString("P1")), ("quantity", ScenarioValue.FromInt(quantity)));
 
@@ -594,5 +624,29 @@ public class ScenarioRunnerTests
         var precondition = result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem();
         precondition.Outcome.ShouldBe(CheckOutcome.Failed);
         result.Ok.ShouldBeFalse();
+    }
+
+    // ------------------------------------------------------------------------
+    // #1752: requires/invariant conditions render with their operators intact.
+    // ------------------------------------------------------------------------
+
+    [Fact]
+    public void Requires_and_invariant_conditions_render_with_their_operators_intact()
+    {
+        var (sema, sources) = BuildSourced(MoneyGuardModel);
+        var scenario = new Scenario(
+            "Account", "touch",
+            new Dictionary<string, ScenarioValue>
+            {
+                ["amount"] = ScenarioValue.FromDecimal(5m),
+                ["count"] = ScenarioValue.FromInt(3),
+            },
+            new Dictionary<string, ScenarioValue>());
+
+        var result = ScenarioInterpreter.Run(sema, scenario, sources);
+
+        result.Ok.ShouldBeTrue();
+        result.Steps.OfType<ScenarioStep.Precondition>().ShouldHaveSingleItem().Condition.ShouldBe("count >= 0");
+        result.Invariants.ShouldHaveSingleItem().Condition.ShouldBe("amount >= 0");
     }
 }
