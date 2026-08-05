@@ -8,7 +8,7 @@
 // and its `doc`. The richer-but-narrower `DiagramGraph` (members/stereotype) drives the *inspector*;
 // it is NOT the outline backbone because its aggregate diagrams only enumerate nested types, so a
 // top-level value object would be missed — the glossary lists them all.
-import type { GlossaryEntry, GlossaryModel } from '@/lsp/lsp';
+import type { GlossaryEntry, GlossaryModel, SourceSpan } from '@/lsp/lsp';
 import { groupByContext } from '@/model/glossary';
 import { normalizeDddKind } from '@/model/dddKind';
 
@@ -68,7 +68,13 @@ export interface ConstructCount {
 export interface ModelOutlineHandlers {
   /** Select an element (drives the inspector + cross-highlight). */
   onSelect: (entry: GlossaryEntry) => void;
-  /** Jump the editor to a 1-based line/column (same contract `loadOutline` uses). */
+  /** Jump the editor to a RAW 1-based source span, OPENING its `file` first when that document isn't
+   *  the active buffer (the app-wide `gotoSourceSpan`, `shell/ide.tsx`). Prefer this over {@link goto} —
+   *  it is the only jump that is correct in a multi-file workspace. */
+  gotoSourceSpan: (span: Pick<SourceSpan, 'file' | 'line' | 'column' | 'endLine' | 'endColumn'>) => void;
+  /** Jump the editor to a 1-based line/column on the ACTIVE document only — the fallback used when no
+   *  span with a `file` is available (e.g. an undrawn value object). Prefer {@link gotoSourceSpan}
+   *  whenever a span is in hand. */
   goto: (line: number, col: number) => void;
   /** Open the Context Map view (the top-level "Context Map" entry). */
   onOpenContextMap?: () => void;

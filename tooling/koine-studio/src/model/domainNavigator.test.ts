@@ -385,7 +385,7 @@ const roleAt = (edge: HTMLElement, end: 'upstream' | 'downstream') =>
 
 describe('renderContextMapLevel', () => {
   it('renders one node per context and one edge per relation, badging BOTH ends with its derived roles', () => {
-    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
+    const el = renderContextMapLevel(typedContextMap(), { gotoSourceSpan: vi.fn(), openFullMap: vi.fn() });
 
     // Nodes = contexts (declaration order), each addressable by name.
     expect(ctxmapNodes(el).map((n) => n.dataset.ctxmapNode)).toEqual(['Sales', 'Shipping', 'Legacy']);
@@ -408,7 +408,7 @@ describe('renderContextMapLevel', () => {
   });
 
   it('a symmetric relation (partnership / shared kernel) renders NO role badge at either end', () => {
-    const el = renderContextMapLevel(symmetricContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
+    const el = renderContextMapLevel(symmetricContextMap(), { gotoSourceSpan: vi.fn(), openFullMap: vi.fn() });
     const edge = ctxmapEdges(el)[0];
 
     // A null role is an ABSENT badge — not an empty pill, and never the string "null".
@@ -418,20 +418,32 @@ describe('renderContextMapLevel', () => {
     expect(edge.getAttribute('aria-label')).toBe('Sales and Support, Partnership');
   });
 
-  it('a context-node click jumps to its declaration (contextSpans); a span-less node stays inert', () => {
-    const goto = vi.fn();
-    const el = renderContextMapLevel(typedContextMap(), { goto, openFullMap: vi.fn() });
+  it('a context-node click jumps to its declaration, passing the WHOLE span (file included) — not a (line, col) pair', () => {
+    const gotoSourceSpan = vi.fn();
+    const el = renderContextMapLevel(typedContextMap(), { gotoSourceSpan, openFullMap: vi.fn() });
 
     (el.querySelector('[data-ctxmap-node="Sales"]') as HTMLButtonElement).click();
-    expect(goto).toHaveBeenCalledWith(salesSpan.line, salesSpan.column); // the raw 1-based span
+    expect(gotoSourceSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        file: salesSpan.file,
+        line: salesSpan.line,
+        column: salesSpan.column,
+        endLine: salesSpan.endLine,
+        endColumn: salesSpan.endColumn,
+      }),
+    );
+  });
 
-    goto.mockClear();
+  it('a span-less context node (a dangling relation endpoint) stays inert — no crash, no jump', () => {
+    const gotoSourceSpan = vi.fn();
+    const el = renderContextMapLevel(typedContextMap(), { gotoSourceSpan, openFullMap: vi.fn() });
+
     (el.querySelector('[data-ctxmap-node="Shipping"]') as HTMLButtonElement).click();
-    expect(goto).not.toHaveBeenCalled(); // no span (recovered parse) ⇒ inert, not a crash
+    expect(gotoSourceSpan).not.toHaveBeenCalled(); // no span (recovered parse) ⇒ inert, not a crash
   });
 
   it('an empty context map renders a quiet note, not an empty tree', () => {
-    const el = renderContextMapLevel({ contexts: [], relations: [] }, { goto: vi.fn(), openFullMap: vi.fn() });
+    const el = renderContextMapLevel({ contexts: [], relations: [] }, { gotoSourceSpan: vi.fn(), openFullMap: vi.fn() });
     expect(el.getAttribute('role')).toBe('note');
     expect(el.querySelector('[role="treeitem"]')).toBeNull();
   });
@@ -465,7 +477,7 @@ describe('renderContextMapLevel', () => {
           },
         ],
       },
-      { goto: vi.fn(), openFullMap: vi.fn() },
+      { gotoSourceSpan: vi.fn(), openFullMap: vi.fn() },
     );
     expect(ctxmapEdges(el).map((e) => e.dataset.ctxmapEdge)).toEqual(['Sales→Shipping#0', 'Sales→Shipping#1']);
   });
@@ -475,7 +487,7 @@ describe('renderContextMapLevel', () => {
   // the rail level would strand a reader away from the richer destination.
   it('closes with an "Open full Context Map" row that hands off to the caller', () => {
     const openFullMap = vi.fn();
-    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap });
+    const el = renderContextMapLevel(typedContextMap(), { gotoSourceSpan: vi.fn(), openFullMap });
 
     const door = el.querySelector<HTMLButtonElement>('[data-door="contextmap-full"]')!;
     expect(door).toBeTruthy();
@@ -503,7 +515,7 @@ describe('Domain navigator — Enter/Space activation', () => {
   };
 
   it('a relation row has nothing to activate — Space is left to the browser', () => {
-    const el = renderContextMapLevel(typedContextMap(), { goto: vi.fn(), openFullMap: vi.fn() });
+    const el = renderContextMapLevel(typedContextMap(), { gotoSourceSpan: vi.fn(), openFullMap: vi.fn() });
     document.body.appendChild(el);
     const edge = ctxmapEdges(el)[0];
     edge.focus();
@@ -634,16 +646,32 @@ describe('mountDomainNavigator', () => {
     expect(host.querySelector('[data-ctx="Ordering"]')).toBeTruthy();
   });
 
-  it('a context-node click in the graph jumps to its declaration through the navigator\'s goto seam', async () => {
+  it('a context-node click in the graph jumps to its declaring file via gotoSourceSpan — the file-blind goto seam is untouched', async () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
+    const gotoSourceSpan = vi.fn();
     const goto = vi.fn();
-    mountDomainNavigator(host, makeTestStore(), typedLsp(), { goto });
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { gotoSourceSpan, goto });
     await flush();
 
     (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
     (host.querySelector('[data-ctxmap-node="Sales"]') as HTMLButtonElement).click();
-    expect(goto).toHaveBeenCalledWith(salesSpan.line, salesSpan.column);
+    expect(gotoSourceSpan).toHaveBeenCalledWith(salesSpan);
+    expect(goto).not.toHaveBeenCalled();
+  });
+
+  it('a span-less context node (a dangling relation endpoint) fires neither gotoSourceSpan nor goto — inert, no crash', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const gotoSourceSpan = vi.fn();
+    const goto = vi.fn();
+    mountDomainNavigator(host, makeTestStore(), typedLsp(), { gotoSourceSpan, goto });
+    await flush();
+
+    (host.querySelector('[data-door="contextmap"]') as HTMLButtonElement).click();
+    (host.querySelector('[data-ctxmap-node="Shipping"]') as HTMLButtonElement).click();
+    expect(gotoSourceSpan).not.toHaveBeenCalled();
+    expect(goto).not.toHaveBeenCalled();
   });
 
   it('a model with NO relations keeps the docs hand-off — the doorway delegates to the caller', async () => {

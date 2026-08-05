@@ -229,7 +229,7 @@ function typedContextMap(): ContextMapResult {
 
 describe('Domain navigator a11y — the strategic Context Map graph', () => {
   it('the context-map graph is axe-clean and keyboard-navigable', async () => {
-    const el = renderContextMapLevel(typedContextMap(), { goto: () => {}, openFullMap: () => {} });
+    const el = renderContextMapLevel(typedContextMap(), { gotoSourceSpan: () => {}, openFullMap: () => {} });
     document.body.appendChild(el);
 
     expect(await axe(el)).toHaveNoViolations();
@@ -251,7 +251,7 @@ describe('Domain navigator a11y — the strategic Context Map graph', () => {
   });
 
   it('an empty context map renders a note, not an empty (keyboard-unreachable) tree', async () => {
-    const el = renderContextMapLevel({ contexts: [], relations: [] }, { goto: () => {}, openFullMap: () => {} });
+    const el = renderContextMapLevel({ contexts: [], relations: [] }, { gotoSourceSpan: () => {}, openFullMap: () => {} });
     document.body.appendChild(el);
 
     expect(await axe(el)).toHaveNoViolations();
