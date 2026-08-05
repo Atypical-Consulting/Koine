@@ -1984,6 +1984,47 @@ public class R19ApiAnnotationsTests
     }
 
     /// <summary>
+    /// #1745 code review: the "give it a @route/verb of its own" hint (#1846) still appears when the
+    /// colliding routes differ only by normalization, not just on the pre-existing exact-match message —
+    /// the advice is equally actionable either way, and this is the one shape where the two features
+    /// interact: a purely-conventional factory's own route (always lowercase, via <c>Kebab</c>) can only
+    /// textually differ from the first claimant's raw route when that claimant is an explicitly
+    /// <c>@route</c>-annotated declaration spelled in a different case.
+    /// </summary>
+    [Fact]
+    public void The_conventional_factory_hint_still_appears_when_the_routes_only_differ_by_case()
+    {
+        const string source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/Order/Open")
+                  @post
+                  command reopen {
+                    requires status == Placed "order is not placed"
+                    status -> Draft
+                  }
+
+                  create open {
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldContain("routes that differ only in parameter names or letter case match the same URLs");
+        collision.Message.ShouldContain(
+            "this factory derives both its route and its verb by convention — give it a @route or a " +
+            "verb annotation of its own to move it off this path");
+    }
+
+    /// <summary>
     /// #1745 (e): near misses that remain genuinely different stay clean — a catch-all is not the same
     /// match space as a plain segment, an optional token is not the same as a required one, and an
     /// extra literal segment is a real difference. (The catch-all pair's token names bind to nothing on

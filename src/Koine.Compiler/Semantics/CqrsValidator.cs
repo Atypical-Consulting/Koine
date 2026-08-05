@@ -388,11 +388,13 @@ internal static class CqrsValidator
                 // Raw routes identical (the pre-#1745 case) keeps the original wording verbatim; raw routes
                 // differing only by normalization (case-only or parameter-name-only) names BOTH spellings —
                 // otherwise the report reads as a false positive to whichever author's spelling is unquoted.
+                // Either way `hint` still applies: a conventional factory can escape either collision shape
+                // the same way, by taking a @route or verb annotation of its own.
                 var message = route == first.RawRoute
                     ? $"{subject} maps '{verb} {route}', which {first.Subject} already maps; two declarations may " +
                       "share a route only when their verbs differ" + hint
                     : $"{subject} maps '{verb} {route}', which {first.Subject} already maps as '{verb} {first.RawRoute}' " +
-                      "(routes that differ only in parameter names or letter case match the same URLs)";
+                      "(routes that differ only in parameter names or letter case match the same URLs)" + hint;
 
                 diagnostics.Add(Diagnostic.Error(DiagnosticCodes.DuplicateApiRoute, message, span));
                 return;
