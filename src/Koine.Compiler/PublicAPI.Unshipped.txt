@@ -1629,9 +1629,12 @@ static Koine.Compiler.Ast.RouteTemplate.Tokens(string! route) -> System.Collecti
 Koine.Compiler.Extensions.ContainedPath
 Koine.Compiler.Extensions.PathEscapeReason
 Koine.Compiler.Extensions.PathEscapeReason.Absolute = 2 -> Koine.Compiler.Extensions.PathEscapeReason
+Koine.Compiler.Extensions.PathEscapeReason.Malformed = 4 -> Koine.Compiler.Extensions.PathEscapeReason
 Koine.Compiler.Extensions.PathEscapeReason.None = 0 -> Koine.Compiler.Extensions.PathEscapeReason
 Koine.Compiler.Extensions.PathEscapeReason.SymlinkEscape = 3 -> Koine.Compiler.Extensions.PathEscapeReason
 Koine.Compiler.Extensions.PathEscapeReason.Traversal = 1 -> Koine.Compiler.Extensions.PathEscapeReason
+const Koine.Compiler.Extensions.ContainedPath.MaxCandidateBytes = 4096 -> int
+const Koine.Compiler.Extensions.ContainedPath.MaxCandidateComponents = 256 -> int
 static Koine.Compiler.Extensions.ContainedPath.TryResolve(string! root, string! candidate, out string! resolved, out Koine.Compiler.Extensions.PathEscapeReason reason) -> bool
 Koine.Compiler.Extensions.ArchiveKind
 Koine.Compiler.Extensions.ArchiveKind.Tar = 2 -> Koine.Compiler.Extensions.ArchiveKind

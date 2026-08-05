@@ -111,6 +111,7 @@ public class ContainedPathTests
         CorpusCase c = Corpus.Value.Cases.Single(x => x.Name == name);
 
         string sandbox = CreateSandbox();
+        List<(string Path, UnixFileMode Previous, UnixFileMode Applied)> restricted = [];
         try
         {
             // The root is deliberately named `root` inside the sandbox, so a case can plant a
@@ -118,9 +119,16 @@ public class ContainedPathTests
             // string StartsWith would wave through.
             string root = Path.Combine(sandbox, "root");
             Directory.CreateDirectory(root);
-            Materialize(root, c);
+            Materialize(root, c, restricted);
 
-            bool ok = ContainedPath.TryResolve(root, c.Candidate, out string resolved, out PathEscapeReason reason);
+            if (restricted.Count > 0 && !ModesAreEnforced(restricted))
+            {
+                // Running as root, or on a filesystem that ignores Unix modes: the row would "pass"
+                // without ever producing the denial it exists to pin, which proves nothing.
+                return;
+            }
+
+            bool ok = ContainedPath.TryResolve(root, CandidateOf(c), out string resolved, out PathEscapeReason reason);
 
             switch (c.Expect)
             {
@@ -147,6 +155,8 @@ public class ContainedPathTests
         }
         finally
         {
+            // Modes come off BEFORE the cleanup: a directory left at `000` defeats a recursive delete.
+            RestoreModes(restricted);
             Cleanup(sandbox);
         }
     }
@@ -239,6 +249,60 @@ public class ContainedPathTests
     }
 
     [Fact]
+    public void A_symlink_chain_is_followed_up_to_the_hop_budget_and_refused_past_it()
+    {
+        // The one place the two implementations cannot be held to a shared corpus row: Rust lets the
+        // OS resolve a chain (macOS refuses past 32 links, Linux past 40, Windows past 63 reparse
+        // points) while this half hand-rolls the descent with a fixed budget. The budget is set to
+        // the SMALLEST of those numbers precisely so this half can never accept a chain Rust would
+        // refuse — a false reject in the band above it is the price, and it is the safe direction.
+        // See this class's file header and the corpus README.
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string sandbox = CreateSandbox();
+        try
+        {
+            string root = Path.Combine(sandbox, "root");
+            Directory.CreateDirectory(root);
+            File.WriteAllText(Path.Combine(root, "target.txt"), "koine");
+
+            // A short chain resolves, all the way to the file it names.
+            Chain(root, "short", 8);
+            ContainedPath.TryResolve(root, "short0", out string resolved, out PathEscapeReason reason)
+                .ShouldBeTrue($"an 8-link chain is well inside the budget, got {reason}");
+            resolved.ShouldBe(Path.Combine(CanonicalRoot(root), "target.txt"));
+
+            // 33 links is past every platform's own ceiling as well as this budget, so both halves
+            // refuse it and no divergence is being pinned here — only the fail-closed behaviour.
+            Chain(root, "long", 33);
+            ContainedPath.TryResolve(root, "long0", out string overBudget, out PathEscapeReason overReason)
+                .ShouldBeFalse();
+            overReason.ShouldBe(PathEscapeReason.SymlinkEscape);
+            overBudget.ShouldBeEmpty();
+        }
+        finally
+        {
+            Cleanup(sandbox);
+        }
+    }
+
+    /// <summary>
+    /// Plants <paramref name="length"/> links named <c>&lt;prefix&gt;0 … &lt;prefix&gt;N-1</c> under
+    /// the root, each pointing at the next and the last at <c>target.txt</c>.
+    /// </summary>
+    private static void Chain(string root, string prefix, int length)
+    {
+        for (int i = 0; i < length; i++)
+        {
+            string next = i == length - 1 ? "target.txt" : $"{prefix}{i + 1}";
+            File.CreateSymbolicLink(Path.Combine(root, $"{prefix}{i}"), next);
+        }
+    }
+
+    [Fact]
     public void A_resolved_path_is_reported_under_the_canonicalized_root()
     {
         // On macOS the temp directory itself sits under a /var -> /private/var symlink, so "the root
@@ -266,6 +330,15 @@ public class ContainedPathTests
 
     // --- harness --------------------------------------------------------------
 
+    /// <summary>
+    /// The untrusted path a case hands to the primitive. <c>candidateRepeat</c> repeats
+    /// <c>candidate</c> that many times, which is the only way to state a size limit without
+    /// inlining kilobytes of filler into the fixture.
+    /// </summary>
+    private static string CandidateOf(CorpusCase c) => c.CandidateRepeat is { } times
+        ? string.Concat(Enumerable.Repeat(c.Candidate, times))
+        : c.Candidate;
+
     private static string CanonicalRoot(string root)
     {
         ContainedPath.TryResolve(root, string.Empty, out string canonical, out PathEscapeReason reason)
@@ -278,11 +351,21 @@ public class ContainedPathTests
         "traversal" => PathEscapeReason.Traversal,
         "absolute" => PathEscapeReason.Absolute,
         "symlink-escape" => PathEscapeReason.SymlinkEscape,
+        "malformed" => PathEscapeReason.Malformed,
         null => throw new InvalidDataException($"[{c.Name}] a reject case needs a reason"),
         _ => throw new InvalidDataException($"[{c.Name}] unknown reason {c.Reason}"),
     };
 
-    private static void Materialize(string root, CorpusCase c)
+    /// <summary>
+    /// Materializes a case's fixture. Any <c>mode</c> a setup entry declares is applied in a SECOND
+    /// pass, after every entry exists — a case that makes a directory unreadable still has to be able
+    /// to plant the symlink inside it first — and each one is recorded in
+    /// <paramref name="restricted"/> so the caller can put it back before deleting the sandbox.
+    /// </summary>
+    private static void Materialize(
+        string root,
+        CorpusCase c,
+        List<(string Path, UnixFileMode Previous, UnixFileMode Applied)> restricted)
     {
         foreach (SetupEntry entry in c.Setup ?? [])
         {
@@ -312,6 +395,90 @@ public class ContainedPathTests
                     break;
                 default:
                     throw new InvalidDataException($"[{c.Name}] unknown setup kind {entry.Kind}");
+            }
+        }
+
+        foreach (SetupEntry entry in c.Setup ?? [])
+        {
+            if (entry.Mode is null)
+            {
+                continue;
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                throw new InvalidDataException(
+                    $"[{c.Name}] a case with a `mode` field must list only the `unix` platform");
+            }
+
+            string full = JoinRelative(root, entry.Path);
+            var applied = (UnixFileMode)Convert.ToInt32(entry.Mode, 8);
+            restricted.Add((full, File.GetUnixFileMode(full), applied));
+            File.SetUnixFileMode(full, applied);
+        }
+    }
+
+    /// <summary>
+    /// True when the modes a case applied actually deny THIS process. A suite running as root — or on
+    /// a filesystem that ignores Unix modes — would otherwise "pass" a fail-closed row without ever
+    /// producing the denial the row exists to pin, which is worse than skipping it. A mode that still
+    /// grants read is not making an access claim, so it is taken at face value.
+    /// </summary>
+    private static bool ModesAreEnforced(
+        IReadOnlyList<(string Path, UnixFileMode Previous, UnixFileMode Applied)> restricted)
+    {
+        foreach ((string path, _, UnixFileMode applied) in restricted)
+        {
+            if ((applied & UnixFileMode.UserRead) != 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    Directory.GetFileSystemEntries(path);
+                }
+                else
+                {
+                    using FileStream _ = File.OpenRead(path);
+                }
+
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+        }
+
+        return true;
+    }
+
+    private static void RestoreModes(
+        IReadOnlyList<(string Path, UnixFileMode Previous, UnixFileMode Applied)> restricted)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // Unreachable — `Materialize` refuses a `mode` entry there — but it is what tells the
+            // platform-compatibility analyzer that the Unix-only call below cannot run on Windows.
+            return;
+        }
+
+        foreach ((string path, UnixFileMode previous, _) in restricted)
+        {
+            try
+            {
+                File.SetUnixFileMode(path, previous);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
             }
         }
     }
@@ -372,10 +539,11 @@ public class ContainedPathTests
         string Name,
         IReadOnlyList<SetupEntry>? Setup,
         string Candidate,
+        int? CandidateRepeat,
         string Expect,
         string? ResolvesTo,
         string? Reason,
         IReadOnlyList<string> Platforms);
 
-    private sealed record SetupEntry(string Kind, string Path, string? Target);
+    private sealed record SetupEntry(string Kind, string Path, string? Target, string? Mode);
 }

@@ -16,8 +16,47 @@
 // a build goes red rather than a CVE getting filed. Change the algorithm here and you must change it
 // there — the corpus makes that mechanical rather than a matter of remembering.
 //
-// It fails CLOSED. Anything it cannot prove contained is refused, and it never throws: a caller that
-// has to wrap this in a try/catch will eventually catch too much.
+// It fails CLOSED. Anything it cannot prove contained is refused — including a level of the tree it
+// could not READ, since an unreadable directory is not an absent one — and it never throws: a caller
+// that has to wrap this in a try/catch will eventually catch too much.
+//
+// WHERE THE TWO IMPLEMENTATIONS KNOWINGLY DIFFER. The corpus pins everything it can express; two
+// things it cannot, documented here and in the Rust file's twin of this header so the divergence is
+// on the record rather than discovered:
+//
+//   1. DEEP SYMLINK CHAINS. Rust resolves them with the OS (`canonicalize` is `realpath`), so its
+//      ceiling is the kernel's MAXSYMLINKS — 32 on macOS, 40 on Linux, 63 reparse points on Windows.
+//      .NET has no realpath, so `TryCanonicalize` below hand-rolls the descent with a fixed budget
+//      (`MaxSymlinkHops`). A hand-rolled counter cannot equal a per-OS kernel constant, so the budget
+//      is set to the SMALLEST of them — this half can then never accept a chain the Rust half would
+//      refuse. In the band between (a 33-40 link chain on Linux) this half refuses what Rust accepts.
+//      That is a false reject, not a containment gap, and the OS refuses the caller's subsequent open
+//      in either case. Note the budget is spent on the ROOT's own symlinks too, so the effective
+//      allowance for the candidate depends on where the root lives.
+//   2. UNICODE NORMALIZATION. Rust's `canonicalize` reads real directory entries, so it returns the
+//      ON-DISK spelling: hand it an NFC name stored on disk as NFD and NFD comes back. This half
+//      re-joins the caller's own strings and never consults a directory entry, so it hands back the
+//      CALLER's spelling. Containment here is compared with `Ordinal`, which is stricter than the
+//      filesystem's own rule (macOS compares normalization-insensitively), so the difference can only
+//      make this half REFUSE a legitimate path — never accept an escaping one. The false reject is
+//      real though: a symlink target inside the root stored in the other normalization form resolves
+//      to a path that no longer compares equal to the root's spelling. Neither half normalizes, and
+//      neither should — Unicode normalization inside a security primitive is its own correctness
+//      minefield (which form? whose table version? what about a normalization-preserving filesystem?),
+//      and getting it subtly wrong turns a comparison into a hole. A caller that de-duplicates on the
+//      returned string is comparing SPELLINGS, not files.
+//
+// And three consistent-but-unpinned behaviours worth knowing (both halves agree; no corpus row can
+// express them because they are about the ROOT, not the candidate):
+//
+//   * A root that is a regular FILE is accepted as a root. This answers "is it inside", and `<file>`
+//     is inside `<file>`; a caller that needs a directory checks that itself.
+//   * A relative root (".") is resolved against the PROCESS's current directory. That is a real
+//     boundary, just not one this primitive chose — pass an absolute root.
+//   * The root's own symlinks are resolved first, so a root reached through a link (macOS' /var ->
+//     /private/var) is compared, and reported, at its canonical location.
+
+using System.Text;
 
 namespace Koine.Compiler.Extensions;
 
@@ -48,10 +87,26 @@ public enum PathEscapeReason
 
     /// <summary>
     /// Containment could not be established once the filesystem had its say: the candidate resolves
-    /// outside the root through a symlink, the root itself cannot be canonicalized, or a component
-    /// cannot be resolved at all (a dangling symlink).
+    /// outside the root through a symlink, the root itself cannot be canonicalized, a component
+    /// cannot be resolved at all (a dangling symlink), or a level of the tree could not be READ.
     /// </summary>
     SymlinkEscape = 3,
+
+    /// <summary>
+    /// The candidate is not a usable relative path in its own right, independently of where it would
+    /// land: it is longer, or names more components, than
+    /// <see cref="ContainedPath.MaxCandidateBytes"/> /
+    /// <see cref="ContainedPath.MaxCandidateComponents"/> allow; it contains a NUL character, which
+    /// no filesystem this ships on can store; or, on Windows, it contains a component the OS would
+    /// silently REWRITE, because Win32 strips trailing dots and spaces from every path component.
+    /// Refused in the lexical step, before the filesystem is touched at all.
+    /// <para>
+    /// Distinct from <see cref="Traversal"/> and <see cref="Absolute"/> on purpose: neither of those
+    /// is what happened, and a security control that files a size limit under "traversal" teaches its
+    /// callers to distrust its own labels.
+    /// </para>
+    /// </summary>
+    Malformed = 4,
 }
 
 /// <summary>
@@ -61,13 +116,52 @@ public enum PathEscapeReason
 public static class ContainedPath
 {
     /// <summary>
-    /// A symlink chain longer than this is treated as a loop and refused. Matches the classic
-    /// <c>MAXSYMLINKS</c> budget, and exists so a link cycle costs a rejection rather than a hang.
+    /// The largest candidate this will look at, in UTF-8 bytes.
     /// </summary>
-    private const int MaxSymlinkHops = 40;
+    /// <remarks>
+    /// The reference is the filesystem's own ceiling: Linux's <c>PATH_MAX</c> is 4096 and Windows'
+    /// <c>MAX_PATH</c> is 260 (32767 only with the long-path opt-in), so no path a caller could
+    /// actually create is refused by this. What it refuses is a candidate whose only purpose is to be
+    /// <em>walked</em>: the nearest-existing-ancestor loop costs one probe per component, and a ZIP
+    /// filename may be 64 KiB — <c>SafeArchiveExtractor</c> caps member count and bytes but not name
+    /// length. Measured before this cap existed, a 50,000-component candidate cost 23 seconds of CPU
+    /// in this method alone. Counted in UTF-8 bytes because that is what the Rust half's
+    /// <c>OsStr::len()</c> counts, so the two agree on every input rather than only on ASCII.
+    /// </remarks>
+    public const int MaxCandidateBytes = 4096;
 
-    /// <summary>The reserved DOS device stems Win32 resolves in every directory.</summary>
-    private static readonly string[] ReservedDeviceNames = ["CON", "PRN", "AUX", "NUL"];
+    /// <summary>
+    /// The most components a candidate may name, counting every component AS WRITTEN — a <c>..</c>
+    /// that pops still counts, or <c>a/../a/../…</c> would buy an unbounded walk for a bounded depth.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately stricter than any filesystem: real trees are tens of levels deep, not hundreds,
+    /// and the point of a cap is to refuse hostile input rather than to describe what a filesystem
+    /// tolerates. The Rust half enforces the same number.
+    /// </remarks>
+    public const int MaxCandidateComponents = 256;
+
+    /// <summary>
+    /// A symlink chain longer than this is treated as a loop and refused, so a link cycle costs a
+    /// rejection rather than a hang.
+    /// </summary>
+    /// <remarks>
+    /// 32 is the SMALLEST <c>MAXSYMLINKS</c> among the platforms this ships on (macOS 32, Linux 40,
+    /// Windows' reparse-point limit 63), chosen deliberately rather than the classic 40: the Rust
+    /// half delegates to the OS, and a budget at the minimum is the only way a hand-rolled counter
+    /// can promise never to ACCEPT a chain the OS — and therefore the Rust half — would refuse. The
+    /// price is a false reject in the band above it on Linux and Windows; see this file's header.
+    /// </remarks>
+    private const int MaxSymlinkHops = 32;
+
+    /// <summary>
+    /// The reserved DOS device stems Win32 resolves in every directory, as Microsoft enumerates them:
+    /// the four classics, the two console handles, and the superscript spellings of the first three
+    /// serial/parallel ports. <c>COM1</c>–<c>COM9</c> and <c>LPT1</c>–<c>LPT9</c> are matched by rule
+    /// below; <c>COM0</c> and <c>LPT0</c> are NOT reserved — there is no such device.
+    /// </summary>
+    private static readonly string[] ReservedDeviceNames =
+        ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"];
 
     /// <summary>
     /// Resolves <paramref name="candidate"/> — a path chosen by someone we do not trust — to a real
@@ -104,7 +198,10 @@ public static class ContainedPath
     /// <item><description>
     /// <b>Normalize lexically, without touching the filesystem.</b> <c>.</c> is dropped and <c>..</c>
     /// pops, so <c>a/../b.json</c> legitimately means <c>&lt;root&gt;/b.json</c>; a <c>..</c> that
-    /// would pop above the root is a traversal.
+    /// would pop above the root is a traversal. This step also enforces the size caps
+    /// (<see cref="MaxCandidateBytes"/>, <see cref="MaxCandidateComponents"/>) and refuses a name no
+    /// filesystem could store, both as <see cref="PathEscapeReason.Malformed"/> — hostile input is
+    /// rejected here, before it can make the next step probe anything.
     /// </description></item>
     /// <item><description>
     /// <b>Resolve against the real filesystem.</b> The normal case is a file that does not exist yet,
@@ -123,6 +220,18 @@ public static class ContainedPath
     /// <b>A dangling symlink is refused.</b> Its target does not exist, so no containment can be
     /// proven for it; treating it as a not-yet-created name would hand back a path that writes
     /// wherever the link points. That is CVE-2026-27976 in miniature.
+    /// </para>
+    /// <para>
+    /// <b>An unreadable level is not an absent one.</b> The ancestor walk continues only past a level
+    /// the OS reported as <em>missing</em>; anything else — <c>EACCES</c> on a directory whose mode
+    /// forbids traversal, above all — is <see cref="PathEscapeReason.SymlinkEscape"/>. A walk that
+    /// treats "I could not look" as "nothing is there" sails straight past the symlink it could not
+    /// read.
+    /// </para>
+    /// <para>
+    /// <b>The two implementations knowingly differ</b> on deep symlink chains and on Unicode
+    /// normalization. Both divergences are spelled out in this file's header comment and in
+    /// <c>tests/fixtures/path-containment/README.md</c>.
     /// </para>
     /// <para>
     /// <b>TOCTOU.</b> The answer describes the filesystem at the moment of the call. An attacker who
@@ -186,49 +295,80 @@ public static class ContainedPath
             return false;
         }
 
-        string normalized = absoluteRoot;
-        foreach (string segment in relative)
+        // Build `<absoluteRoot>/<relative…>` once, remembering where each ancestor ENDS. The walk
+        // below then slices a prefix instead of calling `Path.GetDirectoryName` per level: that
+        // allocates a fresh O(n) string every iteration, which made the loop O(n²) over the
+        // candidate — 23 seconds of CPU for a 50,000-component name, from a sink (an archive member,
+        // a plugin-supplied relative path) that ships. `MaxCandidateComponents` is the real fix; this
+        // shape is what stops the next caller from re-earning the same bill under a higher cap.
+        var builder = new StringBuilder(absoluteRoot);
+        int[] ancestorEnds = new int[relative.Count + 1];
+        ancestorEnds[0] = builder.Length;
+        for (int i = 0; i < relative.Count; i++)
         {
-            // `Path.Join`, not `Path.Combine`: Combine discards everything to its left when the
-            // right-hand side looks rooted, which would turn a component into an anchor.
-            normalized = Path.Join(normalized, segment);
+            // The separator rule `Path.Join` applies, applied once per component instead of
+            // re-parsing the whole accumulated path each time.
+            if (builder.Length > 0
+                && builder[^1] != Path.DirectorySeparatorChar
+                && builder[^1] != Path.AltDirectorySeparatorChar)
+            {
+                builder.Append(Path.DirectorySeparatorChar);
+            }
+
+            builder.Append(relative[i]);
+            ancestorEnds[i + 1] = builder.Length;
         }
 
-        // (3) Walk up to the nearest ancestor that exists, remembering the tail we skipped past.
-        // The existence test must NOT follow links: a check that follows reports "missing" for a
-        // DANGLING symlink, which would let the walk sail past it and treat it as a free name inside
-        // the root.
-        var tail = new List<string>();
-        string ancestor = normalized;
-        while (!EntryExists(ancestor))
+        string joined = builder.ToString();
+
+        // (3) Walk up to the nearest ancestor that exists. The existence test must NOT follow links:
+        // a check that follows reports "missing" for a DANGLING symlink, which would let the walk
+        // sail past it and treat it as a free name inside the root. And it must distinguish "nothing
+        // is here" from "I could not look": `File.Exists`/`Directory.Exists` answer `false` to both,
+        // so a directory whose mode forbids traversal used to look exactly like a free name — the
+        // walk sailed past a symlink it could not read and handed back a path that writes through it
+        // the moment the mode is restored. `CannotTell` fails closed.
+        int depth = relative.Count;
+        while (depth >= 0)
         {
-            string? parent = Path.GetDirectoryName(ancestor);
-            string name = Path.GetFileName(ancestor);
-            if (string.IsNullOrEmpty(parent) || string.IsNullOrEmpty(name))
+            Existence existence = ProbeEntry(joined[..ancestorEnds[depth]]).Existence;
+            if (existence == Existence.Exists)
             {
-                // Ran out of ancestors without finding one that exists. Unreachable in practice (the
-                // canonicalized root above proves at least the root exists), but there is no safe
-                // guess to make here.
+                break;
+            }
+
+            if (existence == Existence.CannotTell)
+            {
                 reason = PathEscapeReason.SymlinkEscape;
                 return false;
             }
 
-            tail.Add(name);
-            ancestor = parent;
+            depth--;
+        }
+
+        if (depth < 0)
+        {
+            // Ran out of ancestors without finding one that exists. Unreachable in practice (the
+            // canonicalized root above proves at least the root exists), but there is no safe guess
+            // to make here.
+            reason = PathEscapeReason.SymlinkEscape;
+            return false;
         }
 
         // An entry that exists but cannot be canonicalized is a dangling symlink.
-        if (!TryCanonicalize(ancestor, out string resolvedPath))
+        if (!TryCanonicalize(joined[..ancestorEnds[depth]], out string resolvedPath))
         {
             reason = PathEscapeReason.SymlinkEscape;
             return false;
         }
 
-        // The tail was collected leaf-first; every segment is a plain name (step 2 removed the `.`
-        // and `..` ones), so re-appending them cannot re-introduce traversal.
-        for (int i = tail.Count - 1; i >= 0; i--)
+        // Every skipped segment is a plain name (step 2 removed the `.` and `..` ones), so
+        // re-appending them cannot re-introduce traversal. `Path.Join`, not `Path.Combine`: Combine
+        // discards everything to its left when the right-hand side looks rooted, which would turn a
+        // component into an anchor.
+        for (int i = depth; i < relative.Count; i++)
         {
-            resolvedPath = Path.Join(resolvedPath, tail[i]);
+            resolvedPath = Path.Join(resolvedPath, relative[i]);
         }
 
         // (4b)
@@ -245,7 +385,8 @@ public static class ContainedPath
 
     /// <summary>
     /// Steps 1 and 2: reject an anchored candidate, then reduce the rest to the plain components it
-    /// denotes relative to the root, rejecting any <c>..</c> that would pop above it.
+    /// denotes relative to the root, rejecting any <c>..</c> that would pop above it — and, first of
+    /// all, refusing a candidate too big to be worth walking.
     /// </summary>
     private static bool TryLexicalComponents(string candidate, out List<string> components, out PathEscapeReason reason)
     {
@@ -253,20 +394,64 @@ public static class ContainedPath
         reason = PathEscapeReason.None;
         bool windows = OperatingSystem.IsWindows();
 
+        // The size cap comes before the split, not inside the loop: the whole point is that no
+        // hostile candidate reaches the filesystem, and even splitting a 64 KiB name is work we owe
+        // nobody.
+        if (Encoding.UTF8.GetByteCount(candidate) > MaxCandidateBytes)
+        {
+            reason = PathEscapeReason.Malformed;
+            return false;
+        }
+
         if (IsAnchored(candidate, windows))
         {
             reason = PathEscapeReason.Absolute;
             return false;
         }
 
+        int seen = 0;
         foreach (string segment in SplitComponents(candidate, windows))
         {
-            if (segment == ".")
+            if (++seen > MaxCandidateComponents)
+            {
+                reason = PathEscapeReason.Malformed;
+                return false;
+            }
+
+            // A NUL cannot be stored in a name on any filesystem this ships on, and every filesystem
+            // API here rejects it with an error that is NOT "not found" — so without this screen the
+            // walk would fail closed with a `SymlinkEscape` naming a symlink nobody wrote. Say what
+            // actually happened instead.
+            if (segment.Contains('\0', StringComparison.Ordinal))
+            {
+                reason = PathEscapeReason.Malformed;
+                return false;
+            }
+
+            // On Windows the device screen runs BEFORE the `.`/`..` classification, so `CON ` stays
+            // the `Absolute` it has always been rather than being reclassified by its trailing space.
+            // It never fires on a `.`/`..` disguise: their stem — the text before the first `.` — is
+            // empty.
+            if (windows && IsWindowsReinterpreted(segment))
+            {
+                reason = PathEscapeReason.Absolute;
+                return false;
+            }
+
+            // Win32 strips trailing SPACES from every path component before resolving it, so `.. ` is
+            // a parent reference wearing a disguise — and this half hands back a NON-verbatim path
+            // that Win32 normalizes again when the caller opens it, which is how `<root>\.. \evil.txt`
+            // would otherwise become `<sandbox>\evil.txt`: Zip Slip straight past the primitive.
+            // Comparing against the exact string `".."` is what misses it. Dots are structural, so
+            // only spaces are stripped for this test: `...` is not a parent reference by any reading.
+            string classified = windows ? segment.TrimEnd(' ') : segment;
+
+            if (classified == ".")
             {
                 continue;
             }
 
-            if (segment == "..")
+            if (classified == "..")
             {
                 if (components.Count == 0)
                 {
@@ -279,9 +464,16 @@ public static class ContainedPath
                 continue;
             }
 
-            if (windows && IsWindowsReinterpreted(segment))
+            // Anything else ending in a dot or a space (`a `, `evil.txt.`, `...`, `   `) is a name
+            // Win32 will silently REWRITE. Refused rather than guessed at: a primitive whose answer
+            // means one thing to the caller and another to the filesystem is the entire bug class
+            // this file exists to close, and Microsoft's own guidance is not to end a name with a
+            // space or a period. Nothing legitimate is lost — such a name can only be created through
+            // a `\\?\` verbatim path in the first place. Off Windows they are ordinary names, which is
+            // why `.../asset.png` is accepted there and refused here.
+            if (windows && (segment[^1] == '.' || segment[^1] == ' '))
             {
-                reason = PathEscapeReason.Absolute;
+                reason = PathEscapeReason.Malformed;
                 return false;
             }
 
@@ -353,6 +545,11 @@ public static class ContainedPath
     /// with an extension (<c>NUL.txt</c>) or trailing spaces (<c>CON&#160;</c>), which Win32 strips.
     /// Off Windows these are ordinary filenames — a Unix file may legitimately be called <c>a:b</c>
     /// or <c>NUL</c> — so callers gate this on the running platform.
+    /// <para>
+    /// A trailing dot or space that does NOT make the name a device is handled by the caller, as
+    /// <see cref="PathEscapeReason.Malformed"/>: this predicate answers "is it a device or a stream",
+    /// which is a different question with a different answer.
+    /// </para>
     /// </remarks>
     private static bool IsWindowsReinterpreted(string name)
     {
@@ -373,9 +570,11 @@ public static class ContainedPath
             }
         }
 
-        // `COM<digit>` / `LPT<digit>`.
+        // `COM<1-9>` / `LPT<1-9>`. Win32 reserves neither `COM0` nor `LPT0` — there is no such
+        // device — so refusing them would cost a legitimate name for nothing.
         return stem.Length == 4
             && char.IsAsciiDigit(stem[3])
+            && stem[3] != '0'
             && (stem.AsSpan(0, 3).Equals("COM", StringComparison.OrdinalIgnoreCase)
                 || stem.AsSpan(0, 3).Equals("LPT", StringComparison.OrdinalIgnoreCase));
     }
@@ -430,9 +629,20 @@ public static class ContainedPath
             }
 
             string next = Path.Join(current, component);
-            string? target = LinkTargetOf(next);
+            EntryProbe probe = ProbeEntry(next);
+            if (probe.Existence == Existence.CannotTell)
+            {
+                // We could not read this level, so we cannot say what is at it. Fail closed rather
+                // than adopt it as a plain name — that is the same "could not look" / "nothing there"
+                // confusion the ancestor walk had.
+                return false;
+            }
+
+            string? target = probe.LinkTarget;
             if (target is null)
             {
+                // A plain entry, or a name that does not exist yet: adopt it and let the final
+                // existence check below have the last word.
                 current = next;
                 continue;
             }
@@ -481,16 +691,67 @@ public static class ContainedPath
         return string.IsNullOrEmpty(parent) ? pathRoot : parent;
     }
 
+    /// <summary>What the filesystem was able to say about a path.</summary>
+    private enum Existence
+    {
+        /// <summary>The OS said there is nothing here.</summary>
+        DoesNotExist,
+
+        /// <summary>Something is here — a file, a directory, or a symlink, dangling or not.</summary>
+        Exists,
+
+        /// <summary>
+        /// The OS refused to answer: the containing directory denies traversal, the name is too long,
+        /// the path is malformed. Never treat this as absence — the whole failure this closes is a
+        /// walk that read <c>EACCES</c> as <c>ENOENT</c> and sailed past a symlink it could not read.
+        /// </summary>
+        CannotTell,
+    }
+
+    /// <summary>What a probe found: whether anything is there, and the raw link target if it is a link.</summary>
+    private readonly record struct EntryProbe(Existence Existence, string? LinkTarget);
+
     /// <summary>
-    /// The raw target of a symbolic link, or <see langword="null"/> if the path is not a link (which
-    /// includes not existing at all). Reports the target of a DANGLING link too, which is the whole
-    /// reason this is used instead of an existence check.
+    /// Asks the filesystem about one path, without following a link out of it, and reports which of
+    /// the three answers it got.
     /// </summary>
-    private static string? LinkTargetOf(string path)
+    /// <remarks>
+    /// <see cref="File.GetAttributes(string)"/> rather than
+    /// <see cref="File.Exists(string)"/>/<see cref="Directory.Exists(string)"/> because those two
+    /// return <see langword="false"/> for BOTH "nothing is here" and "I was not allowed to look", and
+    /// this walk must not confuse them. <c>GetAttributes</c> throws distinguishably —
+    /// <see cref="FileNotFoundException"/>/<see cref="DirectoryNotFoundException"/> for the first,
+    /// <see cref="UnauthorizedAccessException"/> (and <see cref="PathTooLongException"/>,
+    /// <see cref="ArgumentException"/>, …) for the second — and it does not follow links: a dangling
+    /// symlink reports <see cref="FileAttributes.ReparsePoint"/> rather than "missing", which is what
+    /// lets the ancestor walk stop AT the link.
+    /// <para>
+    /// Note <c>ENOTDIR</c> (an intermediate component is a file) arrives as
+    /// <see cref="DirectoryNotFoundException"/>, indistinguishable from <c>ENOENT</c>. That is
+    /// deliberate on both sides: nothing can exist below a regular file either, and the Rust half
+    /// lets <c>ErrorKind::NotADirectory</c> continue its walk for the same reason.
+    /// </para>
+    /// </remarks>
+    private static EntryProbe ProbeEntry(string path)
     {
         try
         {
-            return new FileInfo(path).LinkTarget;
+            FileAttributes attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReparsePoint) == 0)
+            {
+                return new EntryProbe(Existence.Exists, null);
+            }
+
+            // A reparse point whose target cannot be read is not a plain entry and is not absent
+            // either — it is a link we cannot follow, so we cannot prove where it lands.
+            string? target = new FileInfo(path).LinkTarget;
+            return target is null
+                ? new EntryProbe(Existence.CannotTell, null)
+                : new EntryProbe(Existence.Exists, target);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new EntryProbe(Existence.DoesNotExist, null);
         }
         catch (Exception ex) when (ex is IOException
                                       or UnauthorizedAccessException
@@ -498,26 +759,21 @@ public static class ContainedPath
                                       or NotSupportedException
                                       or System.Security.SecurityException)
         {
-            return null;
+            return new EntryProbe(Existence.CannotTell, null);
         }
     }
 
     /// <summary>
-    /// Does something exist at this exact path, without following a link out of it? True for a
-    /// dangling symlink — that is the point: the ancestor walk must stop AT the link rather than
-    /// treating it as a free name inside the root.
-    /// </summary>
-    private static bool EntryExists(string path)
-        => File.Exists(path) || Directory.Exists(path) || LinkTargetOf(path) is not null;
-
-    /// <summary>
-    /// Does the fully-resolved path exist? Everything the descent touched has already had its
-    /// symlinks followed, so a plain stat is the right question — but a link is re-checked for
-    /// anyway, because <see cref="File.Exists(string)"/> reports <see langword="true"/> for a
-    /// dangling symlink on some platforms, and calling one "resolved" is exactly the hole this closes.
+    /// Does the fully-resolved path exist as something other than a link? Everything the descent
+    /// touched has already had its symlinks followed, so anything still reporting as a link here is
+    /// one the descent could not resolve — and calling that "resolved" is exactly the hole this
+    /// closes. A path the filesystem would not answer about is refused for the same reason.
     /// </summary>
     private static bool ResolvedTargetExists(string path)
-        => LinkTargetOf(path) is null && (File.Exists(path) || Directory.Exists(path));
+    {
+        EntryProbe probe = ProbeEntry(path);
+        return probe.Existence == Existence.Exists && probe.LinkTarget is null;
+    }
 
     /// <summary>
     /// True if <paramref name="path"/> is <paramref name="root"/> or lies beneath it, compared

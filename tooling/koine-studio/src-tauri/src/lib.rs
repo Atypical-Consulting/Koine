@@ -1546,6 +1546,7 @@ fn escape_message(rel_path: &str, escape: &PathEscape) -> String {
         PathEscape::Traversal(_) => "escapes the workspace folder with `..`",
         PathEscape::Absolute(_) => "must be relative to the workspace folder",
         PathEscape::SymlinkEscape(_) => "resolves outside the workspace folder",
+        PathEscape::Malformed(_) => "is not a usable relative path",
     };
     format!("invalid path: {rel_path} ({why})")
 }

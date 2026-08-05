@@ -21,11 +21,50 @@
 // write the caller did not expect and never sees.
 //
 // It fails CLOSED. Anything it cannot prove contained is refused: a root it cannot canonicalize, a
-// dangling symlink, a name Windows would reinterpret as a device or a stream. Refusing a legitimate
-// path is an annoyance; accepting a malicious one is the CVE.
+// dangling symlink, a name Windows would reinterpret as a device or a stream, a level of the tree it
+// could not READ (an unreadable directory is not an absent one — see the walk in `contained_path`).
+// Refusing a legitimate path is an annoyance; accepting a malicious one is the CVE.
+//
+// WHERE THE TWO IMPLEMENTATIONS KNOWINGLY DIFFER. The corpus pins everything it can express; three
+// things it cannot, documented here and in the .NET file's twin of this header so the divergence is
+// on the record rather than discovered:
+//
+//   1. DEEP SYMLINK CHAINS. This host lets the OS resolve them (`canonicalize` is `realpath`), so the
+//      ceiling is the kernel's `MAXSYMLINKS` — 32 on macOS, 40 on Linux, 63 reparse points on
+//      Windows. .NET has no `realpath`, so its half hand-rolls the descent with a fixed budget of 32
+//      hops, deliberately the SMALLEST of those numbers so it can never accept a chain this host
+//      would refuse. In the band between (a 33-40 link chain on Linux) .NET refuses what this host
+//      accepts. That is a false reject, not a containment gap, and the OS refuses the caller's
+//      subsequent `open` in either case.
+//   2. UNICODE NORMALIZATION. `canonicalize` reads real directory entries, so the path returned here
+//      carries the ON-DISK spelling: hand in an NFC name that exists on disk as NFD and you get NFD
+//      back. .NET's hand-rolled canonicalizer re-joins the caller's own strings and never consults a
+//      directory entry, so it hands back the CALLER's spelling. Its containment comparison is
+//      `Ordinal`, which is stricter than the filesystem's own (macOS compares
+//      normalization-insensitively), so the difference can only make .NET refuse a legitimate path —
+//      never accept an escaping one. Neither implementation normalizes, and neither should: Unicode
+//      normalization inside a security primitive is its own correctness minefield (which form? whose
+//      table version? what about a filesystem that is normalization-preserving?), and getting it
+//      subtly wrong turns a comparison into a hole. A caller that de-duplicates on the returned
+//      string is comparing SPELLINGS, not files.
+//   3. TRAILING DOTS AND SPACES ON WINDOWS. Both hosts refuse them (see `windows_name_kind`), but for
+//      the record the reason the rule has to exist here at all is asymmetric: the paths this host
+//      returns carry `canonicalize`'s `\\?\` verbatim prefix, which suppresses Win32 re-normalization,
+//      while .NET returns a plain path that Win32 normalizes AGAIN when the caller opens it.
+//
+// And three consistent-but-unpinned behaviours worth knowing (both hosts agree; no corpus row can
+// express them because they are about the ROOT, not the candidate):
+//
+//   * A root that is a regular FILE is accepted as a root. The primitive answers "is it inside", and
+//     `<file>` is inside `<file>`; a caller that needs a directory checks that itself.
+//   * A relative root (`.`) is resolved against the PROCESS's current directory. That is a real
+//     boundary, just not one this primitive chose — pass an absolute root.
+//   * The root's own symlinks are resolved before anything else, so a root reached through a link
+//     (macOS' `/var` -> `/private/var`) is compared, and reported, at its canonical location.
 
 use std::ffi::OsStr;
 use std::fmt;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
 /// Why a candidate path was refused. Each variant carries the offending path so the call site can
@@ -40,11 +79,22 @@ pub enum PathEscape {
     /// candidate as supplied.
     Absolute(PathBuf),
     /// Containment could not be established once the filesystem had its say: the candidate resolves
-    /// outside the root through a symlink, the root itself cannot be canonicalized, or a component
-    /// cannot be resolved at all (a dangling symlink). Carries the path that could not be proven
-    /// contained — the resolved path where one exists, otherwise the root or the normalized
-    /// candidate.
+    /// outside the root through a symlink, the root itself cannot be canonicalized, a component
+    /// cannot be resolved at all (a dangling symlink), or a level of the tree could not be READ.
+    /// Carries the path that could not be proven contained — the resolved path where one exists,
+    /// otherwise the root or the normalized candidate.
     SymlinkEscape(PathBuf),
+    /// The candidate is not a usable relative path in its own right, independently of where it would
+    /// land: it is longer, or names more components, than [`MAX_CANDIDATE_BYTES`] /
+    /// [`MAX_CANDIDATE_COMPONENTS`] allow; it contains a NUL byte, which no filesystem this ships on
+    /// can store; or (on Windows) it contains a component the OS would silently REWRITE, because
+    /// Win32 strips trailing dots and spaces from every path component. Refused in the lexical step,
+    /// before the filesystem is touched at all. Carries the candidate as supplied.
+    ///
+    /// Distinct from [`PathEscape::Traversal`] and [`PathEscape::Absolute`] on purpose: neither of
+    /// those is what happened, and a security control that files a size limit under "traversal"
+    /// teaches its callers to distrust its own labels.
+    Malformed(PathBuf),
 }
 
 impl fmt::Display for PathEscape {
@@ -59,11 +109,30 @@ impl fmt::Display for PathEscape {
             PathEscape::SymlinkEscape(p) => {
                 write!(f, "path resolves outside the root: {}", p.display())
             }
+            PathEscape::Malformed(p) => {
+                write!(f, "path is not a usable relative path: {}", p.display())
+            }
         }
     }
 }
 
 impl std::error::Error for PathEscape {}
+
+/// The largest candidate the primitive will look at, in bytes of its OS string.
+///
+/// The reference is the filesystem's own ceiling: Linux's `PATH_MAX` is 4096, Windows' `MAX_PATH` is
+/// 260 (32767 only with the long-path opt-in), so no path a caller could actually create is refused
+/// by this. What it refuses is a candidate whose only purpose is to be *walked*: the
+/// nearest-existing-ancestor loop below costs one `stat` per component, and a ZIP filename may be
+/// 64 KiB. The .NET half enforces the same number over the same unit (UTF-8 bytes), so the two agree.
+pub const MAX_CANDIDATE_BYTES: usize = 4096;
+
+/// The most components a candidate may name, counting every component AS WRITTEN — a `..` that pops
+/// still counts, or `a/../a/../…` would buy an unbounded walk for a bounded depth.
+///
+/// Deliberately stricter than any filesystem: real trees are tens of levels deep, not hundreds, and
+/// the point of a cap is to refuse hostile input rather than to describe what a filesystem tolerates.
+pub const MAX_CANDIDATE_COMPONENTS: usize = 256;
 
 /// Resolve `candidate` — a path chosen by someone we do not trust — to a real path under `root`,
 /// or explain why it does not belong there.
@@ -77,7 +146,10 @@ impl std::error::Error for PathEscape {}
 /// 2. **Normalize lexically, without touching the filesystem.** `.` is dropped and `..` pops, so
 ///    `a/../b.json` legitimately means `<root>/b.json`; a `..` that would pop above the root is
 ///    [`PathEscape::Traversal`]. An empty candidate, or one that is just `.`, or a `../` chain that
-///    lands exactly back on the root, all denote the root itself and are accepted as such.
+///    lands exactly back on the root, all denote the root itself and are accepted as such. This step
+///    also enforces the size caps ([`MAX_CANDIDATE_BYTES`], [`MAX_CANDIDATE_COMPONENTS`]) and rejects
+///    a name no filesystem could store, both as [`PathEscape::Malformed`] — hostile input is refused
+///    here, before it can make the next step `stat` anything.
 /// 3. **Resolve against the real filesystem.** `canonicalize` requires the path to exist, and the
 ///    normal case here is a file that does not exist yet — so this walks up to the nearest existing
 ///    ancestor, canonicalizes THAT, and re-appends the non-existing tail. This is the step a purely
@@ -105,8 +177,17 @@ impl std::error::Error for PathEscape {}
 ///   never legal in a Windows filename, and it means either a drive (`C:evil`, resolved against the
 ///   process's per-drive cwd) or an alternate data stream (`file.txt:hidden`). So is a reserved
 ///   device name (`CON`, `NUL`, `COM1`, …, with or without an extension), which Win32 resolves to a
-///   device in the global namespace regardless of the directory it appears in. Returned paths carry
-///   the `\\?\` verbatim prefix that `std::fs::canonicalize` produces.
+///   device in the global namespace regardless of the directory it appears in. A component with a
+///   trailing dot or space is [`PathEscape::Malformed`], and one that is `..` in disguise (`.. `) is
+///   the [`PathEscape::Traversal`] it really is — see [`windows_name_kind`]. Returned paths carry the
+///   `\\?\` verbatim prefix that `std::fs::canonicalize` produces.
+/// * **An unreadable level is not an absent one.** The ancestor walk continues only past a level the
+///   OS reported as *missing*; anything else (`EACCES` on a directory whose mode forbids traversal,
+///   above all) is [`PathEscape::SymlinkEscape`]. A walk that treats "I could not look" as "nothing
+///   is there" sails straight past the symlink it could not read.
+/// * **The two hosts knowingly differ** on deep symlink chains and on Unicode normalization. Both
+///   divergences are spelled out in this file's header comment, and in
+///   `tests/fixtures/path-containment/README.md`.
 /// * **TOCTOU.** The answer describes the filesystem at the moment of the call. An attacker who can
 ///   swap a directory for a symlink between this returning and the caller opening the path wins
 ///   that race — an inherent limit of path-based checks. It shrinks the window to the smallest one
@@ -130,11 +211,27 @@ pub fn contained_path(root: &Path, candidate: &Path) -> Result<PathBuf, PathEsca
     // `symlink_metadata` rather than `exists()` on purpose: `exists()` follows the link and so
     // reports `false` for a DANGLING symlink, which would let the walk sail past it and treat it as
     // a free name inside the root.
+    //
+    // And the error is CLASSIFIED rather than collapsed to "no". `is_ok()` cannot tell `ENOENT` from
+    // `EACCES`, so a directory the process may not traverse looks exactly like a free name — the walk
+    // sails past a symlink it could not read, re-appends it as an ordinary tail segment, and hands
+    // back a path that writes through it the moment the mode is restored. Only "there is nothing
+    // here" may continue the walk:
+    //
+    //   * `NotFound` — the ordinary case, a file that does not exist yet;
+    //   * `NotADirectory` — an intermediate component IS a file (`<root>/a.txt/child`). Nothing can
+    //     exist below it either, and .NET's `File.GetAttributes` reports this as the same
+    //     `DirectoryNotFoundException` it reports for `ENOENT`, so treating it as absence is also
+    //     what keeps the two hosts in agreement;
+    //   * everything else — `EACCES`, `ELOOP`, `ENAMETOOLONG` — is a level we could not read. Fail
+    //     closed.
     let mut tail: Vec<&OsStr> = Vec::new();
     let mut ancestor: &Path = normalized.as_path();
     let existing = loop {
-        if std::fs::symlink_metadata(ancestor).is_ok() {
-            break ancestor;
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) => break ancestor,
+            Err(e) if e.kind() == ErrorKind::NotFound || e.kind() == ErrorKind::NotADirectory => {}
+            Err(_) => return Err(PathEscape::SymlinkEscape(normalized.clone())),
         }
         match (ancestor.parent(), ancestor.file_name()) {
             (Some(parent), Some(name)) => {
@@ -165,11 +262,24 @@ pub fn contained_path(root: &Path, candidate: &Path) -> Result<PathBuf, PathEsca
 }
 
 /// Steps 1 and 2: reject an anchored candidate, then reduce the rest to the plain components it
-/// denotes relative to the root, rejecting any `..` that would pop above it.
+/// denotes relative to the root, rejecting any `..` that would pop above it — and, first of all,
+/// refusing a candidate too big to be worth walking.
 fn lexical_relative_components(candidate: &Path) -> Result<Vec<&OsStr>, PathEscape> {
+    // The size caps come before the loop, not inside it: the whole point is that no hostile candidate
+    // reaches the filesystem, and the loop below is already the cheap half.
+    if candidate.as_os_str().len() > MAX_CANDIDATE_BYTES {
+        return Err(PathEscape::Malformed(candidate.to_path_buf()));
+    }
+
     let mut stack: Vec<&OsStr> = Vec::new();
+    let mut seen = 0usize;
 
     for component in candidate.components() {
+        seen += 1;
+        if seen > MAX_CANDIDATE_COMPONENTS {
+            return Err(PathEscape::Malformed(candidate.to_path_buf()));
+        }
+
         match component {
             // `RootDir` covers `/etc/passwd` everywhere and `\Windows\…` on Windows; `Prefix`
             // covers `C:\…`, the drive-relative `C:evil`, `\\server\share` and `\\?\…`. Between
@@ -185,15 +295,92 @@ fn lexical_relative_components(candidate: &Path) -> Result<Vec<&OsStr>, PathEsca
                 }
             }
             Component::Normal(name) => {
+                // A NUL byte cannot be stored in a name on any filesystem this ships on, and both
+                // hosts' filesystem calls reject it with an error that is NOT "not found" — so
+                // without this screen the walk above would fail closed with a `SymlinkEscape` that
+                // names a symlink nobody wrote. Say what actually happened instead.
+                if name.to_string_lossy().contains('\0') {
+                    return Err(PathEscape::Malformed(candidate.to_path_buf()));
+                }
+
+                // The device screen runs FIRST, so `CON ` stays the `Absolute` it has always been
+                // rather than being reclassified by its trailing space. It never fires on a `.`/`..`
+                // disguise: their stem — the text before the first `.` — is empty.
                 if is_windows_reinterpreted(name) {
                     return Err(PathEscape::Absolute(candidate.to_path_buf()));
                 }
-                stack.push(name);
+
+                match windows_name_kind(name) {
+                    // `. ` and `.. ` — Win32 strips the trailing spaces, so these ARE the relative
+                    // components they are pretending not to be. Rust's own parser calls them
+                    // `Normal`, which is how `.. \evil.txt` would otherwise walk out of the root on
+                    // a host that re-normalizes the returned path (.NET's does; this one's `\\?\`
+                    // paths do not, which is exactly the asymmetry that makes this rule easy to miss).
+                    WindowsNameKind::CurDir => {}
+                    WindowsNameKind::ParentDir => {
+                        if stack.pop().is_none() {
+                            return Err(PathEscape::Traversal(candidate.to_path_buf()));
+                        }
+                    }
+                    WindowsNameKind::Plain => stack.push(name),
+                    WindowsNameKind::Rewritten => {
+                        return Err(PathEscape::Malformed(candidate.to_path_buf()))
+                    }
+                }
             }
         }
     }
 
     Ok(stack)
+}
+
+/// What Win32 will make of a `Component::Normal` name once its own normalization has had a go at it.
+///
+/// Win32 strips trailing dots and spaces from every path component, which is the same rule this file
+/// already leans on to justify catching `CON ` as a device. Applied to the RELATIVE components it
+/// says two further things, and both matter:
+///
+/// * `. ` and `.. ` are `.` and `..` in disguise. A lexical parser — Rust's `components()`, .NET's
+///   `Split` — calls them ordinary names, so a check that compares against the exact string `".."`
+///   misses them, and a host that hands back a non-verbatim path lets Win32 finish the job at open
+///   time. Dots are structural, so only trailing SPACES are stripped for this test: `...` is not a
+///   parent reference by any reading.
+/// * Anything else ending in a dot or a space (`a `, `evil.txt.`, `...`, `   `) is a name the OS will
+///   silently REWRITE. It is refused rather than guessed at: a primitive whose answer means one thing
+///   to the caller and another to the filesystem is the whole bug class this file exists to close,
+///   and Microsoft's own guidance is not to end a name with a space or a period. Nothing legitimate
+///   is lost — such a name can only be created through a `\\?\` verbatim path in the first place.
+///
+/// Off Windows every one of these is an ordinary filename (a Unix file may legitimately be called
+/// `...` or `a `), so the whole screen is `#[cfg]`-gated rather than applied everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+enum WindowsNameKind {
+    /// An ordinary name, to be kept as written.
+    Plain,
+    /// `.` wearing trailing spaces.
+    CurDir,
+    /// `..` wearing trailing spaces.
+    ParentDir,
+    /// A name Win32 would rewrite by stripping its trailing dots or spaces.
+    Rewritten,
+}
+
+#[cfg(windows)]
+fn windows_name_kind(name: &OsStr) -> WindowsNameKind {
+    // Lossy rather than `to_str()`: a name that is not valid Unicode can still end in an ASCII space
+    // or dot, and lossy conversion preserves every ASCII byte.
+    let text = name.to_string_lossy();
+    match text.trim_end_matches(' ') {
+        "." => WindowsNameKind::CurDir,
+        ".." => WindowsNameKind::ParentDir,
+        _ if text.ends_with('.') || text.ends_with(' ') => WindowsNameKind::Rewritten,
+        _ => WindowsNameKind::Plain,
+    }
+}
+
+#[cfg(not(windows))]
+fn windows_name_kind(_name: &OsStr) -> WindowsNameKind {
+    WindowsNameKind::Plain
 }
 
 /// True if Windows would read `name` as something other than a plain file in the current directory.
@@ -203,9 +390,12 @@ fn lexical_relative_components(candidate: &Path) -> Result<Vec<&OsStr>, PathEsca
 /// * a `:` makes it a drive qualifier (`C:evil`) or an alternate data stream (`file.txt:hidden`) —
 ///   and a colon is not a legal character in a Windows filename anyway, so nothing legitimate is
 ///   lost by refusing it;
-/// * a reserved DOS device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`) resolves
-///   to a device in the global namespace no matter which directory it is written in, and keeps
-///   doing so with an extension (`NUL.txt`) or trailing spaces/dots (`CON `), which Win32 strips.
+/// * a reserved DOS device name resolves to a device in the global namespace no matter which
+///   directory it is written in, and keeps doing so with an extension (`NUL.txt`) or trailing spaces
+///   (`CON `), which Win32 strips. The list is Microsoft's own, in full: `CON`, `PRN`, `AUX`, `NUL`,
+///   the console handles `CONIN$` and `CONOUT$`, and `COM1`–`COM9` / `LPT1`–`LPT9` together with
+///   their superscript spellings `COM¹`/`COM²`/`COM³` and `LPT¹`/`LPT²`/`LPT³`. `COM0` and `LPT0`
+///   are NOT on it — there is no such device — and were previously refused here for nothing.
 ///
 /// Off Windows these are ordinary filenames — a Unix file may legitimately be called `a:b` or
 /// `NUL` — so the screen is `#[cfg]`-gated rather than applied everywhere.
@@ -220,16 +410,22 @@ fn is_windows_reinterpreted(name: &OsStr) -> bool {
 
     // Win32 strips trailing spaces and dots, and looks only at the part before the first `.`.
     let stem = text.split('.').next().unwrap_or("").trim_end_matches(' ');
-    const RESERVED: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    const RESERVED: [&str; 12] = [
+        "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM¹", "COM²", "COM³", "LPT¹", "LPT²",
+        "LPT³",
+    ];
+    // `eq_ignore_ascii_case` folds only the ASCII half, which is all the folding these names need:
+    // the superscripts have no case variants.
     if RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
         return true;
     }
-    // `COM<digit>` / `LPT<digit>`. Compared as bytes so a multi-byte leading char cannot panic on a
-    // slice that is not a char boundary.
+    // `COM<1-9>` / `LPT<1-9>` — Win32 reserves neither `COM0` nor `LPT0`. Compared as bytes so a
+    // multi-byte leading char cannot panic on a slice that is not a char boundary.
     let bytes = stem.as_bytes();
     bytes.len() == 4
         && (bytes[..3].eq_ignore_ascii_case(b"COM") || bytes[..3].eq_ignore_ascii_case(b"LPT"))
         && bytes[3].is_ascii_digit()
+        && bytes[3] != b'0'
 }
 
 #[cfg(not(windows))]
@@ -784,6 +980,10 @@ mod tests {
         #[serde(default)]
         setup: Vec<SetupEntry>,
         candidate: String,
+        /// Repeat `candidate` this many times. The only way to state a size limit without inlining
+        /// kilobytes of filler into the fixture.
+        #[serde(default)]
+        candidate_repeat: Option<usize>,
         expect: String,
         #[serde(default)]
         resolves_to: Option<String>,
@@ -798,6 +998,11 @@ mod tests {
         path: String,
         #[serde(default)]
         target: Option<String>,
+        /// An octal permission mode applied AFTER every entry has been materialized, so a case can
+        /// make a directory unreadable without stopping its own fixture from being built inside it.
+        /// Unix-only, like `symlink`.
+        #[serde(default)]
+        mode: Option<String>,
     }
 
     /// Join a corpus-declared `/`-separated relative path onto a base, component by component, so
@@ -833,6 +1038,48 @@ mod tests {
         panic!("a corpus case with a `symlink` setup entry must list only the `unix` platform");
     }
 
+    /// Apply a corpus-declared octal mode, returning `(the mode it replaced, the mode applied)` — the
+    /// first so the harness can put it back before the sandbox is torn down (a directory left at
+    /// `000` defeats `remove_dir_all`), the second so it can tell whether the mode binds at all.
+    #[cfg(unix)]
+    fn set_mode(path: &Path, octal: &str) -> (u32, u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let previous = std::fs::metadata(path)
+            .unwrap_or_else(|e| panic!("cannot stat {} to remember its mode: {e}", path.display()))
+            .permissions()
+            .mode();
+        let bits = u32::from_str_radix(octal, 8)
+            .unwrap_or_else(|_| panic!("mode {octal:?} is not an octal literal"));
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(bits))
+            .unwrap_or_else(|e| panic!("cannot chmod {}: {e}", path.display()));
+        (previous, bits)
+    }
+
+    #[cfg(not(unix))]
+    fn set_mode(_path: &Path, _octal: &str) -> (u32, u32) {
+        panic!("a corpus case with a `mode` field must list only the `unix` platform");
+    }
+
+    #[cfg(unix)]
+    fn restore_mode(path: &Path, previous: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(previous));
+    }
+
+    #[cfg(not(unix))]
+    fn restore_mode(_path: &Path, _previous: u32) {}
+
+    /// True when the modes a case applied actually deny THIS process. A suite running as root — or on
+    /// a filesystem that does not honour Unix modes — would otherwise "pass" a fail-closed row
+    /// without ever producing the error the row exists to pin, which is worse than skipping it.
+    /// A mode that still grants read is not making an access claim, so it is taken at face value.
+    fn modes_are_enforced(restricted: &[(PathBuf, u32, u32)]) -> bool {
+        restricted.iter().all(|(path, _, applied)| {
+            applied & 0o400 != 0
+                || (std::fs::read_dir(path).is_err() && std::fs::File::open(path).is_err())
+        })
+    }
+
     fn run_corpus_case(case: &CorpusCase) {
         // The root is deliberately named `root` inside a private sandbox, so a corpus case can plant
         // a `../rootevil` sibling whose name is a STRING prefix of the root's — the exact shape a
@@ -858,7 +1105,35 @@ mod tests {
             }
         }
 
-        let actual = contained_path(&root, Path::new(&case.candidate));
+        // Modes go on in a SECOND pass, after every entry exists: a case that makes a directory
+        // unreadable still has to be able to plant the symlink inside it first.
+        let mut restricted: Vec<(PathBuf, u32, u32)> = Vec::new();
+        for entry in &case.setup {
+            if let Some(mode) = &entry.mode {
+                let path = join_rel(&root, &entry.path);
+                let (previous, applied) = set_mode(&path, mode);
+                restricted.push((path, previous, applied));
+            }
+        }
+        if !restricted.is_empty() && !modes_are_enforced(&restricted) {
+            for (path, previous, _) in &restricted {
+                restore_mode(path, *previous);
+            }
+            return;
+        }
+
+        let candidate = match case.candidate_repeat {
+            Some(times) => case.candidate.repeat(times),
+            None => case.candidate.clone(),
+        };
+        let actual = contained_path(&root, Path::new(&candidate));
+
+        // Undo the modes BEFORE asserting: an assertion that fires unwinds past the TempTree's own
+        // `remove_dir_all`, and a `000` directory would defeat it anyway.
+        for (path, previous, _) in &restricted {
+            restore_mode(path, *previous);
+        }
+
         match case.expect.as_str() {
             "accept" => {
                 let resolved =
@@ -888,6 +1163,7 @@ mod tests {
                     "traversal" => matches!(err, PathEscape::Traversal(_)),
                     "absolute" => matches!(err, PathEscape::Absolute(_)),
                     "symlink-escape" => matches!(err, PathEscape::SymlinkEscape(_)),
+                    "malformed" => matches!(err, PathEscape::Malformed(_)),
                     other => panic!("[{}] unknown reason {other:?}", case.name),
                 };
                 assert!(matched, "[{}] expected {reason}, got {err:?}", case.name);
