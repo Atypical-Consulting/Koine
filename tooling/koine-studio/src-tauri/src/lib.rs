@@ -16,13 +16,13 @@
 
 mod collab;
 mod noise;
-// `pub` unlike its siblings: this module is a self-contained security primitive with no call sites
-// in this file yet (the filesystem sinks adopt it as the extension surface lands), and a private
-// module of unused-but-`pub` items is a wall of `dead_code` warnings. Exporting it from the crate
-// root is also the honest description — it is the containment rule, meant to be reachable from
-// every module that touches a third-party path.
+// `pub` unlike its siblings: this module is a self-contained security primitive, and exporting it
+// from the crate root is the honest description — it is the containment rule, meant to be reachable
+// from every module that touches a third-party path. The four workspace-mutation commands below
+// (`list_dir`, `create_file`, `create_folder`, `move_entry`) are its first in-crate consumers.
 pub mod paths;
 
+use crate::paths::{contained_path, PathEscape};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -1487,15 +1487,67 @@ fn is_koi_file(path: &std::path::Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("koi"))
 }
 
-/// A caller-supplied relative path is safe only if it is non-empty, not absolute, and made entirely
-/// of normal components (no `.`, `..`, root or drive prefix) — defence in depth so a name typed in
-/// the UI can never write outside the opened workspace folder.
+/// A caller-supplied relative path is *syntactically* usable only if it is non-empty, not absolute,
+/// and made entirely of normal components (no `.`, `..`, root or drive prefix).
+///
+/// **Necessary, not sufficient — never call this on its own.** It is a purely LEXICAL screen: it
+/// never touches the filesystem, so a component that is a symlink pointing out of the workspace is
+/// one perfectly ordinary `Normal` component to it, and the `join` that follows lands outside. That
+/// is the hole CVE-2026-27976 went through. Containment is decided by [`resolve_in`], which runs
+/// this screen and then resolves the result against the real filesystem.
+///
+/// It is *kept* in front of that primitive on purpose, because it refuses two shapes the primitive
+/// deliberately accepts and these sinks must not:
+///
+/// * an **empty** or `.` candidate, which denotes the workspace root itself — a fine answer to "is
+///   it inside", a catastrophic one for `create_folder`/`move_entry`, which would then operate on
+///   the root;
+/// * an **interior `..`**, which the primitive normalizes away (`docs/../adr` means `adr`). A name
+///   arriving from the UI or an extension manifest should mean what it reads like.
+///
+/// It also keeps a hostile string from costing a single `stat`, since it decides before any
+/// filesystem access happens.
 fn is_safe_relpath(rel: &str) -> bool {
     !rel.is_empty()
         && !std::path::Path::new(rel).is_absolute()
         && std::path::Path::new(rel)
             .components()
             .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Resolve a caller-supplied RELATIVE path to a real path inside `folder`, or refuse it — the one
+/// gate every workspace-mutation command puts a third-party-influenced path through (#1942).
+///
+/// Two screens, and both are load-bearing. [`is_safe_relpath`] rejects the malformed and
+/// root-denoting shapes without touching the disk; [`contained_path`] then does the part no lexical
+/// check can, resolving symlinks against the real filesystem before deciding whether the result is
+/// still under `folder`.
+///
+/// Returns the **resolved** path, which is what the caller must then use — re-deriving
+/// `folder.join(rel_path)` afterwards would throw away exactly the symlink resolution that makes
+/// this safe.
+fn resolve_in(folder: &str, rel_path: &str) -> Result<PathBuf, String> {
+    if !is_safe_relpath(rel_path) {
+        return Err(format!("invalid path: {rel_path}"));
+    }
+    contained_path(std::path::Path::new(folder), std::path::Path::new(rel_path))
+        .map_err(|e| escape_message(rel_path, &e))
+}
+
+/// Flatten a [`PathEscape`] into the `String` error these commands return.
+///
+/// It names WHICH rule the path broke, but echoes back only the caller's own relative path — never
+/// the absolute one the candidate resolved to. That resolved path lies *outside* the workspace by
+/// construction, and the webview has no business learning the host's filesystem layout from an
+/// error string. The `invalid path: {rel_path}` prefix is the shape these commands already
+/// returned, so existing callers keep matching on it.
+fn escape_message(rel_path: &str, escape: &PathEscape) -> String {
+    let why = match escape {
+        PathEscape::Traversal(_) => "escapes the workspace folder with `..`",
+        PathEscape::Absolute(_) => "must be relative to the workspace folder",
+        PathEscape::SymlinkEscape(_) => "resolves outside the workspace folder",
+    };
+    format!("invalid path: {rel_path} ({why})")
 }
 
 /// A single entry name (for rename) is safe only if non-empty, separator-free, and not `.`/`..`.
@@ -1574,11 +1626,16 @@ fn list_entries(dir: String) -> Result<Vec<FsEntry>, String> {
 /// docs yet").
 #[tauri::command]
 fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
-    if !is_safe_relpath(&rel_path) {
-        return Err(format!("invalid path: {rel_path}"));
-    }
-    let root = std::path::Path::new(&dir);
-    let target = root.join(&rel_path);
+    let target = resolve_in(&dir, &rel_path)?;
+    // `target` is RESOLVED (symlinks followed), and every `rel_path`/skip decision below is made by
+    // stripping the root prefix off an entry — so the yardstick has to be the resolved root too, or
+    // the strip silently fails wherever the opened folder reaches through a symlink (macOS's
+    // `/tmp` -> `/private/tmp`, `/var` -> `/private/var`) and every returned `rel_path` degrades
+    // into a full absolute path. An empty candidate denotes the root itself, which is precisely how
+    // the primitive reports it.
+    let root = contained_path(std::path::Path::new(&dir), std::path::Path::new(""))
+        .map_err(|_| format!("failed to read directory {dir}"))?;
+    let root = root.as_path();
     let mut dirs: Vec<FsEntry> = Vec::new();
     let mut files: Vec<FsEntry> = Vec::new();
 
@@ -1632,10 +1689,7 @@ fn list_dir(dir: String, rel_path: String) -> Result<Vec<FsEntry>, String> {
 /// return its absolute path. Errors if the file already exists.
 #[tauri::command]
 fn create_file(folder: String, rel_path: String, contents: String) -> Result<String, String> {
-    if !is_safe_relpath(&rel_path) {
-        return Err(format!("invalid path: {rel_path}"));
-    }
-    let target = std::path::Path::new(&folder).join(&rel_path);
+    let target = resolve_in(&folder, &rel_path)?;
     if target.exists() {
         return Err(format!("already exists: {}", target.display()));
     }
@@ -1652,10 +1706,7 @@ fn create_file(folder: String, rel_path: String, contents: String) -> Result<Str
 /// its absolute path.
 #[tauri::command]
 fn create_folder(folder: String, rel_path: String) -> Result<String, String> {
-    if !is_safe_relpath(&rel_path) {
-        return Err(format!("invalid path: {rel_path}"));
-    }
-    let target = std::path::Path::new(&folder).join(&rel_path);
+    let target = resolve_in(&folder, &rel_path)?;
     std::fs::create_dir_all(&target)
         .map_err(|e| format!("failed to create {}: {e}", target.display()))?;
     Ok(target.to_string_lossy().into_owned())
@@ -1723,11 +1774,8 @@ fn move_entry(
     new_rel_path: String,
     copy: bool,
 ) -> Result<String, String> {
-    if !is_safe_relpath(&new_rel_path) {
-        return Err(format!("invalid path: {new_rel_path}"));
-    }
+    let dest = resolve_in(&dest_folder, &new_rel_path)?;
     let src = std::path::Path::new(&token);
-    let dest = std::path::Path::new(&dest_folder).join(&new_rel_path);
     // Never clobber an existing destination — mirrors create_file/rename_entry and the browser
     // backend (fs::rename would silently overwrite a file / merge a dir, diverging from them).
     if dest.exists() {
@@ -3425,6 +3473,242 @@ mod tests {
         .is_err());
         // The escaping target was never created in the parent of the workspace.
         assert!(!root.parent().unwrap().join("escape.koi").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // --- containment for the caller-supplied relative-path sinks (#1942) ------
+    //
+    // `is_safe_relpath` is purely LEXICAL: it rejects `..`, an absolute path and an empty name
+    // without ever touching the filesystem. That makes it necessary but NOT sufficient — a
+    // component that is a SYMLINK pointing out of the workspace is one perfectly ordinary
+    // `Normal` component, so it sails straight through the lexical screen and the `join` that
+    // follows lands outside the opened folder. That is exactly the shape of CVE-2026-27976 (a
+    // symlink inside a Zed extension archive turned into an arbitrary file write), and it is why
+    // all four of these sinks resolve through `crate::paths::contained_path` instead.
+    //
+    // The four tests below plant such a symlink and drive each sink through it; the positive
+    // counterparts prove this is containment, not symlink-phobia — a link that lands back INSIDE
+    // the workspace still works, and its resolved location is what gets used.
+    //
+    // Unix-gated because the setup needs `std::os::unix::fs::symlink`; the Windows CI leg still
+    // compiles (and runs) everything else in this module, including the lexical-screen test that
+    // follows them.
+
+    /// A workspace root plus a sibling directory that is OFF-LIMITS to it, both under `temp_dir()`
+    /// and removed on Drop.
+    ///
+    /// Layout:
+    /// ```text
+    /// <base>/root            the opened workspace folder
+    /// <base>/root/docs       an ordinary in-workspace directory
+    /// <base>/root/inner  ->  <base>/root/docs      a legitimate link that stays inside
+    /// <base>/root/link   ->  <base>/outside        the escape
+    /// <base>/outside         must never be read from or written to
+    /// ```
+    #[cfg(unix)]
+    struct EscapeFixture {
+        base: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl EscapeFixture {
+        fn new(tag: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let base = std::env::temp_dir().join(format!(
+                "koine_escape_{tag}_{}_{}",
+                std::process::id(),
+                n
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(base.join("root").join("docs")).unwrap();
+            std::fs::create_dir_all(base.join("outside")).unwrap();
+            let f = EscapeFixture { base };
+            std::os::unix::fs::symlink(f.outside(), f.root().join("link")).unwrap();
+            std::os::unix::fs::symlink(f.root().join("docs"), f.root().join("inner")).unwrap();
+            f
+        }
+
+        fn root(&self) -> PathBuf {
+            self.base.join("root")
+        }
+
+        fn outside(&self) -> PathBuf {
+            self.base.join("outside")
+        }
+
+        /// The opened workspace as the `String` these commands take.
+        fn folder(&self) -> String {
+            self.root().to_string_lossy().into_owned()
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for EscapeFixture {
+        fn drop(&mut self) {
+            // `remove_dir_all` unlinks symlinks rather than following them, so tearing the fixture
+            // down cannot delete whatever `link` points at.
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_dir_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("listdir");
+        std::fs::write(f.outside().join("secret.md"), "s3cret").unwrap();
+        std::fs::write(f.root().join("docs").join("note.md"), "note").unwrap();
+
+        // The escape: `link` is one ordinary component to a lexical check, but it resolves outside.
+        // (Matched rather than `unwrap_err`-ed: `FsEntry` is a serialization type with no `Debug`,
+        // and naming what leaked makes a failure here read as the security regression it is.)
+        let err = match list_dir(f.folder(), "link".to_string()) {
+            Ok(entries) => panic!(
+                "listing `link` escaped the workspace and returned {:?}",
+                entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>()
+            ),
+            Err(e) => e,
+        };
+        assert!(err.contains("invalid path: link"), "got: {err}");
+        // Nothing from outside the workspace may appear in ANY listing of it.
+        for rel in ["", "docs", "inner"] {
+            if let Ok(entries) = list_dir(f.folder(), rel.to_string()) {
+                assert!(
+                    !entries.iter().any(|e| e.name == "secret.md"),
+                    "an outside entry leaked into the listing of {rel:?}"
+                );
+            }
+        }
+
+        // Containment, not symlink-phobia: a link that lands back INSIDE still lists, and its
+        // entries are reported at their resolved, in-workspace rel_path.
+        let entries = list_dir(f.folder(), "inner".to_string()).unwrap();
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["note.md"]
+        );
+        assert_eq!(entries[0].rel_path, "docs/note.md");
+
+        // ...and an ordinary relative path is unaffected.
+        let entries = list_dir(f.folder(), "docs".to_string()).unwrap();
+        assert_eq!(entries[0].rel_path, "docs/note.md");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_file_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("createfile");
+
+        let err =
+            create_file(f.folder(), "link/pwned.koi".to_string(), "boom".to_string()).unwrap_err();
+        assert!(err.contains("invalid path: link/pwned.koi"), "got: {err}");
+        // The write did not happen THROUGH the link either.
+        assert!(!f.outside().join("pwned.koi").exists());
+
+        // The in-workspace link still works, and the returned token is the resolved location.
+        let token = create_file(
+            f.folder(),
+            "inner/ok.koi".to_string(),
+            "context Ok {}".to_string(),
+        )
+        .unwrap();
+        assert!(f.root().join("docs").join("ok.koi").is_file());
+        assert!(std::path::Path::new(&token).is_absolute());
+        assert_eq!(std::fs::read_to_string(&token).unwrap(), "context Ok {}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_folder_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("createfolder");
+
+        let err = create_folder(f.folder(), "link/pwned".to_string()).unwrap_err();
+        assert!(err.contains("invalid path: link/pwned"), "got: {err}");
+        assert!(!f.outside().join("pwned").exists());
+
+        // The in-workspace link still works.
+        let token = create_folder(f.folder(), "inner/nested".to_string()).unwrap();
+        assert!(f.root().join("docs").join("nested").is_dir());
+        assert!(std::path::Path::new(&token).is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn move_entry_refuses_a_symlink_that_leaves_the_workspace() {
+        let f = EscapeFixture::new("move");
+        let src = f.root().join("a.koi");
+        std::fs::write(&src, "context A {}").unwrap();
+
+        let err = move_entry(
+            src.to_string_lossy().into_owned(),
+            f.folder(),
+            "link/pwned.koi".to_string(),
+            true,
+        )
+        .unwrap_err();
+        assert!(err.contains("invalid path: link/pwned.koi"), "got: {err}");
+        assert!(!f.outside().join("pwned.koi").exists());
+        assert!(src.exists(), "the rejected move must not touch the source");
+
+        // The in-workspace link still works.
+        let dest = move_entry(
+            src.to_string_lossy().into_owned(),
+            f.folder(),
+            "inner/moved.koi".to_string(),
+            false,
+        )
+        .unwrap();
+        assert!(f.root().join("docs").join("moved.koi").is_file());
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "context A {}");
+        assert!(!src.exists());
+    }
+
+    #[test]
+    fn sinks_refuse_an_empty_or_absolute_rel_path() {
+        // The lexical pre-filter earns its keep on cases the containment primitive itself
+        // deliberately ACCEPTS. An empty (or `.`) candidate denotes the root — a fine answer to
+        // "is it inside", a terrible one for "create this entry": `create_folder` would silently
+        // succeed on the workspace root and `move_entry` would target it. An interior `..` is
+        // likewise normalized away by the primitive (`docs/../adr` means `adr`), but a sink that
+        // takes a name from the UI has no business accepting a path that does not mean what it
+        // reads like. Both are refused before anything touches the disk.
+        //
+        // (`docs/./adr` is NOT in this list: Rust's `Components` normalizes an interior `.` away
+        // entirely, so it is indistinguishable from `docs/adr` by the time either check sees it.)
+        let root = std::env::temp_dir().join(format!("koine_lexical_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let folder = root.to_string_lossy().into_owned();
+        let src = root.join("a.koi");
+        std::fs::write(&src, "x").unwrap();
+
+        for rel in ["", ".", "/etc/koine-pwned", "docs/../adr"] {
+            assert!(
+                list_dir(folder.clone(), rel.to_string()).is_err(),
+                "list_dir accepted {rel:?}"
+            );
+            assert!(
+                create_file(folder.clone(), rel.to_string(), "x".into()).is_err(),
+                "create_file accepted {rel:?}"
+            );
+            assert!(
+                create_folder(folder.clone(), rel.to_string()).is_err(),
+                "create_folder accepted {rel:?}"
+            );
+            assert!(
+                move_entry(
+                    src.to_string_lossy().into_owned(),
+                    folder.clone(),
+                    rel.to_string(),
+                    true
+                )
+                .is_err(),
+                "move_entry accepted {rel:?}"
+            );
+        }
+        // The source survived every rejected move.
+        assert_eq!(std::fs::read_to_string(&src).unwrap(), "x");
 
         let _ = std::fs::remove_dir_all(&root);
     }
