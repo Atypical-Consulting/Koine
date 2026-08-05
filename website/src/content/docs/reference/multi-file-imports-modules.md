@@ -285,8 +285,9 @@ reference from within one of the type's own owning contexts (it binds locally) a
 :::tip
 `import` and `module` are **soft keywords** — they are perfectly legal as field names
 (`value V { import: Int  module: Int }` compiles clean). The reserved built-in type
-names (`List<T>`, `Set<T>`, `Map<K,V>`, `Range`) still apply globally, so do not name
-a value, entity, or module any of those.
+names (`List<T>`, `Set<T>`, `Map<K,V>`, `Range`, and the primitives `Int`, `String`,
+`Decimal`, `Bool`, `Instant`) still apply globally, so do not name a value, entity, or
+module any of those.
 :::
 
 ## 16.4 Translation to C#
