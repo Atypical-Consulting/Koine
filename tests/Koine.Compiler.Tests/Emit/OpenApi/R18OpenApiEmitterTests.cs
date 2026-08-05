@@ -734,38 +734,31 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
     }
 
     // ------------------------------------------------------------------
-    // #1750 — Task 3 (Branch B). Task 1's live-host reproduction (see
-    // R18CSharpApplicationTests) found that a `@post` query's emitted C#
-    // does not crash: [AsParameters] resolves a binding source per
-    // PROPERTY rather than per verb, so a complex criterion with no
-    // TryParse/BindAsync (the `range: DateRange` here) silently falls back
-    // to being read from the raw JSON request body — which POST allows —
-    // while the sibling scalar/enum criterion (`status`) still binds from
-    // the query string, all under the SAME [AsParameters] parameter. This
-    // OpenAPI document, however, still describes EVERY criterion —
-    // including the complex one — as an unconditional `in: query`
-    // parameter, regardless of verb (QueryOperation never branches on
-    // route.Verb the way a body-taking command's CommandOperation does). So
-    // a client built strictly from this document sends `range` as query
-    // parameters and gets a clean 400; the JSON-body shape that actually
-    // succeeds isn't documented here at all. Per the issue's Branch-B
-    // scope this is a documented gap, not a bug fixed in this issue — no
-    // emitter change, only this pin of the CURRENT (misleading) shape so a
-    // future change to it is a deliberate, reviewed diff, not an accident.
+    // #1961 — Task 2. #1750 found that a `@post` query's emitted C# binds
+    // its criteria per PROPERTY (`[AsParameters]`) while this document
+    // described every criterion, including a complex one, as an
+    // unconditional `in: query` parameter — a client built strictly from
+    // this document got a clean 400, since the JSON-body shape ASP.NET
+    // actually needed for the complex criterion wasn't documented at all.
+    // #1961's Task 1 made WriteQueryEndpoint verb-aware (the WHOLE criteria
+    // record binds via a single [FromBody] for a body-taking verb, mirroring
+    // the mutation side). QueryOperation now follows the same rule: a
+    // body-taking verb's criteria document as a `requestBody` instead of
+    // `in: query` parameters — matching the new binding exactly, closing the
+    // doc/binding gap this issue exists to close.
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Pins today's <c>@post</c> query documentation: the verb follows the annotation (matching the C#
-    /// emitter's <c>MapPost</c>), but both the complex <c>range</c> criterion (a value-object schema) and
-    /// the scalar/enum <c>status</c> criterion are still documented as <c>in: query</c> parameters — the
-    /// same shape an un-annotated <c>GET</c> query gets. See the comment block above for why this is
-    /// pinned as-is rather than reconciled. An un-annotated query's document is unaffected: it is the
-    /// same <see cref="OrderingFixture"/> Verify snapshot <see cref="Paths_map_commands_to_post_and_queries_to_get"/>
-    /// already pins, and since this test makes no emitter change, that snapshot staying green across this
-    /// PR is the byte-identical guarantee.
+    /// Pins the fixed <c>@post</c> query documentation: the verb follows the annotation (matching the C#
+    /// emitter's <c>MapPost</c>), and the WHOLE criteria record — both the complex <c>range</c> criterion
+    /// and the scalar/enum <c>status</c> criterion — documents as a single <c>requestBody</c>, matching
+    /// the emitted C# <c>[Microsoft.AspNetCore.Mvc.FromBody] OrdersInRange query</c> binding exactly. An
+    /// un-annotated query's document is unaffected: it is the same <see cref="OrderingFixture"/> Verify
+    /// snapshot <see cref="Paths_map_commands_to_post_and_queries_to_get"/> already pins, and that
+    /// snapshot staying byte-identical across this PR is the un-annotated-query guarantee.
     /// </summary>
     [Fact]
-    public void A_post_querys_complex_criterion_is_still_documented_as_an_in_query_parameter()
+    public void A_post_querys_criteria_are_documented_as_a_request_body()
     {
         var result = new KoineCompiler().Compile(
             new[] { new SourceFile("ordering.koi", R18CSharpApplicationTests.PostQueryComplexCriterionFixture) },
@@ -779,9 +772,76 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
         yaml.ShouldContain("post:");
         yaml.ShouldNotContain("get:");
 
-        // Both criteria — the complex `range` (a $ref to the DateRange schema) and the scalar/enum
-        // `status` — are documented as `in: query` parameters, unconditionally.
-        yaml.ShouldContain("name: range\n          in: query\n          required: true\n          schema:\n            $ref: \"#/components/schemas/DateRange\"");
+        // No `in: query` parameters for this operation — the criteria moved into the body.
+        yaml.ShouldNotContain("in: query");
+
+        // The whole criteria record — both the complex `range` (a $ref to the DateRange schema) and the
+        // scalar/enum `status` — documents as one JSON requestBody object schema.
+        yaml.ShouldContain(
+            "requestBody:\n        required: true\n        content:\n          application/json:\n" +
+            "            schema:\n              type: object\n              properties:\n" +
+            "                range:\n                  $ref: \"#/components/schemas/DateRange\"\n" +
+            "                status:\n                  $ref: \"#/components/schemas/OrderStatus\"\n" +
+            "              required:\n                - range\n                - status");
+    }
+
+    /// <summary>
+    /// Edge case: a route-token criterion on a `@post` query stays an `in: path` parameter regardless of
+    /// verb — only the REMAINING (non-token) criteria move into the requestBody.
+    /// </summary>
+    [Fact]
+    public void A_post_querys_route_token_criterion_stays_a_path_parameter()
+    {
+        const string src = """
+            context Ordering {
+              enum OrderStatus { Draft, Submitted, Cancelled }
+
+              value DateRange {
+                startsAt: Instant
+                endsAt:   Instant
+              }
+
+              aggregate Sales root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                }
+              }
+
+              readmodel OrderRow from Order {
+                status
+              }
+
+              @route("/orders/{status}")
+              @post
+              query OrdersInRangeByStatus(status: OrderStatus, range: DateRange): List<OrderRow>
+            }
+            """;
+
+        var result = new KoineCompiler().Compile(new[] { new SourceFile("ordering.koi", src) }, new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("\"/orders/{status}\":");
+        yaml.ShouldContain("name: status\n          in: path\n          required: true");
+        yaml.ShouldContain("requestBody:");
+        yaml.ShouldNotContain("in: query");
+    }
+
+    /// <summary>An un-annotated (conventional GET) query's document stays byte-identical: only a
+    /// body-taking verb's criteria move into a requestBody.</summary>
+    [Fact]
+    public void Unannotated_querys_criteria_still_document_as_in_query_parameters()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", R18CSharpApplicationTests.PostQueryScalarOnlyCriterionFixture.Replace("@post\n", "")) },
+            new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        yaml.ShouldContain("get:");
+        yaml.ShouldNotContain("requestBody:");
         yaml.ShouldContain("name: status\n          in: query\n          required: true\n          schema:\n            $ref: \"#/components/schemas/OrderStatus\"");
     }
 }

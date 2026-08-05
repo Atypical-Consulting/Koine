@@ -255,9 +255,13 @@ public sealed partial class OpenApiEmitter
         return operation;
     }
 
-    /// <summary>A query → a <c>GET</c> operation (or its annotated verb): its route template's tokens become
-    /// path parameters and its criteria query parameters, the result a <c>200</c> body, and any <c>@auth</c>
-    /// role a security requirement.</summary>
+    /// <summary>A query → a <c>GET</c> operation (or its annotated verb): its route template's tokens
+    /// always become path parameters. For a body-less verb (<see cref="RouteDerivation.BodylessVerbs"/>)
+    /// its criteria document as <c>in: query</c> parameters, matching the emitted C# <c>[AsParameters]</c>
+    /// binding; for a body-taking verb (<c>@post</c> etc., #1219) its criteria document as a
+    /// <c>requestBody</c> instead, matching the emitted C# <c>[Microsoft.AspNetCore.Mvc.FromBody]</c>
+    /// binding (#1961) — one binding source per verb, so the document and the wire never disagree. Either
+    /// way the result is a <c>200</c> body, and any <c>@auth</c> role a security requirement.</summary>
     private static YamlObject QueryOperation(QueryDecl query, RouteInfo route, ModelIndex index, HashSet<string> emitted)
     {
         var operation = new YamlObject();
@@ -266,11 +270,14 @@ public sealed partial class OpenApiEmitter
             ? Yaml.Str(query.Name)
             : Yaml.Str(OneLine(query.Doc!)));
 
-        // Path parameters first (they are part of the URL), then the criteria as query parameters — the
-        // two live in one `parameters` array, distinguished by their `in` value.
+        // Path parameters are always part of the URL, regardless of verb.
         YamlArray? parameters = PathParameters(route, entity: null, index, emitted);
-        if (query.Criteria.Count > 0)
+        var isBodyless = RouteDerivation.BodylessVerbs.Contains(route.Verb);
+
+        if (isBodyless && query.Criteria.Count > 0)
         {
+            // Body-less verb: criteria document as `in: query` parameters, alongside any path
+            // parameters in the same array — distinguished by their `in` value.
             parameters ??= new YamlArray();
             foreach (Param criterion in query.Criteria)
             {
@@ -286,6 +293,20 @@ public sealed partial class OpenApiEmitter
         if (parameters is not null)
         {
             operation.Add("parameters", parameters);
+        }
+
+        if (!isBodyless && query.Criteria.Count > 0)
+        {
+            // Body-taking verb: the whole criteria record documents as a requestBody, mirroring how
+            // CommandOperation documents a command's request body.
+            var content = new YamlObject();
+            content.Add("application/json", new YamlObject().Add(
+                "schema", ParameterObjectSchema(query.Criteria, index, emitted)));
+
+            var requestBody = new YamlObject();
+            requestBody.Add("required", Yaml.Bool(true));
+            requestBody.Add("content", content);
+            operation.Add("requestBody", requestBody);
         }
 
         var responses = new YamlObject();

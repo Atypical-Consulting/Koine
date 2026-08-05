@@ -68,6 +68,17 @@ public readonly record struct RouteTokenBinding(
 public static class RouteDerivation
 {
     /// <summary>
+    /// The HTTP verbs ASP.NET refuses to <b>infer</b> a request body for — GET/DELETE/HEAD/OPTIONS/
+    /// TRACE/CONNECT. Shared between the C# <c>api</c> layer (which needs it to choose an explicit
+    /// <c>[FromBody]</c>/<c>[AsParameters]</c> binding attribute, #1734/#1961) and the <c>openapi</c>
+    /// emitter (which needs the same rule to decide whether a command/query's parameters document as
+    /// <c>in: query</c> parameters or a <c>requestBody</c>) — one source of truth so the emitted C# and
+    /// the document it describes can never disagree about which verbs take a body.
+    /// </summary>
+    public static readonly HashSet<string> BodylessVerbs =
+        new(StringComparer.OrdinalIgnoreCase) { "GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT" };
+
+    /// <summary>
     /// A command → <c>POST /{entity}/{command}</c>, its parameters the request body — unless the command
     /// carries R19 API annotations (#1219), in which case <c>@route</c> supplies the path verbatim and an
     /// <c>@get</c>/<c>@post</c>/… annotation the verb. The three axes (route, verb, role) are independent:

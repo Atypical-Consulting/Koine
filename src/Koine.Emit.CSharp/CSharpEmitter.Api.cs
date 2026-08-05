@@ -31,14 +31,6 @@ public sealed partial class CSharpEmitter
     };
 
     /// <summary>
-    /// The HTTP verbs ASP.NET refuses to <b>infer</b> a request body for. Mapping a complex parameter
-    /// through one of these without an explicit binding source throws at endpoint-build time — see
-    /// <see cref="BodyBindingAttributeFor"/>.
-    /// </summary>
-    private static readonly HashSet<string> BodylessVerbs =
-        new(StringComparer.OrdinalIgnoreCase) { "GET", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT" };
-
-    /// <summary>
     /// Emits one context's <c>&lt;Context&gt;Endpoints</c> extension (W2), or nothing when the context has
     /// no commands, factories or queries to map.
     /// </summary>
@@ -335,7 +327,7 @@ public sealed partial class CSharpEmitter
     /// fully-qualified name, like the rest of this layer, so no <c>using</c> is added.</para>
     /// </summary>
     private static string BodyBindingAttributeFor(string verb) =>
-        BodylessVerbs.Contains(verb) ? "[Microsoft.AspNetCore.Mvc.FromBody] " : "";
+        RouteDerivation.BodylessVerbs.Contains(verb) ? "[Microsoft.AspNetCore.Mvc.FromBody] " : "";
 
     /// <summary>
     /// The binding-source attribute for a query's criteria record — the query-side counterpart to
@@ -353,7 +345,7 @@ public sealed partial class CSharpEmitter
     /// <c>Koine.Emit.OpenApi</c>'s <c>QueryOperation</c> now documents.</para>
     /// </summary>
     private static string QueryBodyBindingAttributeFor(string verb) =>
-        BodylessVerbs.Contains(verb) ? "[AsParameters] " : "[Microsoft.AspNetCore.Mvc.FromBody] ";
+        RouteDerivation.BodylessVerbs.Contains(verb) ? "[AsParameters] " : "[Microsoft.AspNetCore.Mvc.FromBody] ";
 
     /// <summary>The <c>.RequireAuthorization("role")</c> suffix an <c>@auth</c> annotation adds to the endpoint's
     /// call chain, or the empty string when the operation carries none (#1219).</summary>
