@@ -40,8 +40,12 @@ internal sealed class ScenarioInterpreter
         _index = sema.Index;
     }
 
-    /// <summary>Runs <paramref name="scenario"/> against <paramref name="sema"/> and returns its timeline.</summary>
-    public static ScenarioResult Run(SemanticModel sema, Scenario scenario) =>
+    /// <summary>Runs <paramref name="scenario"/> against <paramref name="sema"/> and returns its timeline.
+    /// <paramref name="sourcesByFile"/> (file path → source text, #1752) lets <c>requires</c>/<c>invariant</c>
+    /// condition text render with its original operators intact; omit it to keep today's tree-walk
+    /// rendering (e.g. for a synthesized model with no source).</summary>
+    public static ScenarioResult Run(
+        SemanticModel sema, Scenario scenario, IReadOnlyDictionary<string, string>? sourcesByFile = null) =>
         new ScenarioInterpreter(sema).RunCore(scenario);
 
     private ScenarioResult RunCore(Scenario s)
