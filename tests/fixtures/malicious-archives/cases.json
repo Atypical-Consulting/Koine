@@ -1,0 +1,311 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "zip-slip-basic",
+      "kind": "zip",
+      "why": "CVE-2026-27800's canonical shape: a member name that simply walks out of the destination.",
+      "members": [
+        { "type": "file", "name": "../../evil.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-traversal",
+      "offendingMember": "../../evil.txt",
+      "mustNotExist": ["../../evil.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-slip-nested",
+      "kind": "zip",
+      "why": "The same escape, buried under plausible-looking directories and over-popped, so a check that only inspects the first component or the leaf sails past it.",
+      "members": [
+        { "type": "file", "name": "a/b/c/../../../../../evil.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-traversal",
+      "offendingMember": "a/b/c/../../../../../evil.txt",
+      "mustNotExist": ["../../evil.txt", "a", "a/b/c"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-absolute-member",
+      "kind": "zip",
+      "why": "An anchored member. Nothing is popped and no `..` appears, so a traversal-only filter waves it through and the join yields /etc/passwd.",
+      "members": [
+        { "type": "file", "name": "/etc/passwd", "text": "root::0:0::/:/bin/sh" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-anchored",
+      "offendingMember": "/etc/passwd",
+      "mustNotExist": [],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-backslash-traversal",
+      "kind": "zip",
+      "why": "A Windows-authored (spec-violating) name. On Windows it is a traversal; on Unix it is one legal filename — the exact shape that makes an extractor safe on the developer's machine and not on the user's, so it is refused on both.",
+      "members": [
+        { "type": "file", "name": "..\\..\\evil.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-backslash",
+      "offendingMember": "..\\..\\evil.txt",
+      "mustNotExist": ["../../evil.txt", "..\\..\\evil.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-drive-qualified-member",
+      "kind": "zip",
+      "why": "A drive qualifier is anchored without being rooted, and Path.Combine would discard the destination entirely when it met one.",
+      "members": [
+        { "type": "file", "name": "C:\\evil.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-anchored",
+      "offendingMember": "C:\\evil.txt",
+      "mustNotExist": [],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-verbatim-prefix-member",
+      "kind": "zip",
+      "why": "The \\\\?\\ prefix bypasses Win32 path normalization, so a name sanitized by a normalizing check can be un-sanitized by prefixing it.",
+      "members": [
+        { "type": "file", "name": "\\\\?\\C:\\evil.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-anchored",
+      "offendingMember": "\\\\?\\C:\\evil.txt",
+      "mustNotExist": [],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-dot-file-member",
+      "kind": "zip",
+      "why": "A file member whose name reduces to nothing would have to overwrite the destination root itself with a file. Contained, and still nonsense.",
+      "members": [
+        { "type": "file", "name": ".", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-invalid",
+      "offendingMember": ".",
+      "mustNotExist": [],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-duplicate-member",
+      "kind": "zip",
+      "why": "Two members at one path. The second would overwrite the first — a payload smuggled past a reviewer who read the first copy, and a write the rollback could never undo.",
+      "members": [
+        { "type": "file", "name": "config.json", "text": "{}" },
+        { "type": "file", "name": "config.json", "text": "{\"evil\":true}" }
+      ],
+      "expect": "reject",
+      "reason": "duplicate-member",
+      "offendingMember": "config.json",
+      "mustNotExist": ["config.json"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-member-count-cap",
+      "kind": "zip",
+      "why": "An archive that declares more members than the caller allows. The cap is charged per member read, so it trips on the fourth rather than after the whole archive is walked.",
+      "limits": { "maxMemberCount": 3 },
+      "members": [
+        { "type": "file", "name": "a.txt", "text": "a" },
+        { "type": "file", "name": "b.txt", "text": "b" },
+        { "type": "file", "name": "c.txt", "text": "c" },
+        { "type": "file", "name": "d.txt", "text": "d" }
+      ],
+      "expect": "reject",
+      "reason": "too-many-members",
+      "offendingMember": "d.txt",
+      "mustNotExist": ["a.txt", "b.txt", "c.txt", "d.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-bomb-member",
+      "kind": "zip",
+      "why": "32 MiB of zeros in a ~32 KiB archive, tripping the SHIPPED per-member default rather than a value the case tightened for itself. Nothing is buffered: the cap is enforced against bytes counted as they leave the decompressor.",
+      "members": [
+        { "type": "file", "name": "bomb.bin", "zeros": 33554432 }
+      ],
+      "expect": "reject",
+      "reason": "member-too-large",
+      "offendingMember": "bomb.bin",
+      "mustNotExist": ["bomb.bin"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-bomb-total",
+      "kind": "zip",
+      "why": "Every member sits comfortably under the per-member cap; together they do not. A cap on one member alone is not a cap.",
+      "limits": { "maxTotalBytes": 131072 },
+      "members": [
+        { "type": "file", "name": "one.bin", "zeros": 65536 },
+        { "type": "file", "name": "two.bin", "zeros": 65536 },
+        { "type": "file", "name": "three.bin", "zeros": 65536 }
+      ],
+      "expect": "reject",
+      "reason": "archive-too-large",
+      "offendingMember": "three.bin",
+      "mustNotExist": ["one.bin", "two.bin", "three.bin"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-partial-then-escape",
+      "kind": "zip",
+      "why": "The rollback case. Three innocent members land on disk first and a traversal follows, so a green result here means the extraction was genuinely unwound rather than merely stopped.",
+      "members": [
+        { "type": "file", "name": "plugin.json", "text": "{\"name\":\"demo\"}" },
+        { "type": "file", "name": "src/deep/nested/main.koi", "text": "context Demo {}" },
+        { "type": "dir", "name": "assets/" },
+        { "type": "file", "name": "../../evil.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-traversal",
+      "offendingMember": "../../evil.txt",
+      "mustNotExist": ["../../evil.txt", "plugin.json", "src", "src/deep/nested/main.koi", "assets"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "zip-member-under-a-pre-existing-symlink",
+      "kind": "zip",
+      "why": "CVE-2026-27976's write-through, at the filesystem level: the member name is impeccable and the link is already there. Only resolving against the live filesystem catches this, which is why the syntactic filter is a pre-filter and not the check.",
+      "setup": [
+        { "kind": "symlink", "path": "link", "target": "../../../../outside" }
+      ],
+      "members": [
+        { "type": "file", "name": "link/pwned.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-escapes-root",
+      "offendingMember": "link/pwned.txt",
+      "mustNotExist": ["{sandbox}/outside/pwned.txt"],
+      "platforms": ["unix"]
+    },
+    {
+      "name": "zip-benign",
+      "kind": "zip",
+      "why": "The gate that only ever rejects proves nothing. A plain archive must come out whole, with an implicit parent directory created for a nested member and an explicit directory member honoured.",
+      "members": [
+        { "type": "file", "name": "README.md", "text": "koine\n" },
+        { "type": "dir", "name": "assets/" },
+        { "type": "file", "name": "assets/logo.txt", "text": "logo" },
+        { "type": "file", "name": "src/main.koi", "text": "context Demo {}\n" }
+      ],
+      "expect": "accept",
+      "filesWritten": 3,
+      "directoriesCreated": 2,
+      "bytesWritten": 26,
+      "expectedFiles": [
+        { "path": "README.md", "text": "koine\n" },
+        { "path": "assets/logo.txt", "text": "logo" },
+        { "path": "src/main.koi", "text": "context Demo {}\n" }
+      ],
+      "expectedDirs": ["assets", "src"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-slip-basic",
+      "kind": "tar",
+      "why": "Zip Slip is not a zip problem. The tar reader is a second code path and gets the same filter.",
+      "members": [
+        { "type": "file", "name": "../../evil.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-traversal",
+      "offendingMember": "../../evil.txt",
+      "mustNotExist": ["../../evil.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-absolute-member",
+      "kind": "tar",
+      "why": "GNU tar strips a leading slash on write and warns; nothing obliges an attacker's tar to.",
+      "members": [
+        { "type": "file", "name": "/etc/passwd", "text": "root::0:0::/:/bin/sh" }
+      ],
+      "expect": "reject",
+      "reason": "member-name-anchored",
+      "offendingMember": "/etc/passwd",
+      "mustNotExist": [],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-symlink-escape",
+      "kind": "tar",
+      "why": "A symlink member aimed straight out of the destination. Refused as a link member before its target is ever considered, which is why this case can name /etc without depending on /etc existing.",
+      "members": [
+        { "type": "symlink", "name": "link", "linkTarget": "/etc" }
+      ],
+      "expect": "reject",
+      "reason": "link-member",
+      "offendingMember": "link",
+      "mustNotExist": ["link"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-symlink-then-write-through",
+      "kind": "tar",
+      "why": "CVE-2026-27976 itself, and the most important row here. Member 1 plants an in-root symlink pointing outside; member 2 has a blameless name and writes through it. Refusing link members kills it at member 1 — and the pre-existing-symlink case proves member 2 would have been refused too.",
+      "members": [
+        { "type": "symlink", "name": "link", "linkTarget": "{sandbox}/outside" },
+        { "type": "file", "name": "link/pwned.txt", "text": "pwned" }
+      ],
+      "expect": "reject",
+      "reason": "link-member",
+      "offendingMember": "link",
+      "mustNotExist": ["link", "{sandbox}/outside/pwned.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-hardlink-escape",
+      "kind": "tar",
+      "why": "A hard link aliases an existing inode under a second name — no symlink involved, so a symlink-only check misses it entirely.",
+      "members": [
+        { "type": "file", "name": "keep.txt", "text": "keep" },
+        { "type": "hardlink", "name": "alias.txt", "linkTarget": "../../../../outside/target" }
+      ],
+      "expect": "reject",
+      "reason": "link-member",
+      "offendingMember": "alias.txt",
+      "mustNotExist": ["keep.txt", "alias.txt"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-fifo-member",
+      "kind": "tar",
+      "why": "A member that is not a file, a directory or a link. Nothing an extension archive needs, and every one of them asks the extractor to do something other than write a file.",
+      "members": [
+        { "type": "fifo", "name": "pipe" }
+      ],
+      "expect": "reject",
+      "reason": "unsupported-member-type",
+      "offendingMember": "pipe",
+      "mustNotExist": ["pipe"],
+      "platforms": ["unix", "windows"]
+    },
+    {
+      "name": "tar-benign",
+      "kind": "tar",
+      "why": "The tar half of the must-still-work gate — including the leading `./` member `tar -cf x.tar .` emits, which denotes the destination root and must be a no-op rather than an error.",
+      "members": [
+        { "type": "dir", "name": "./" },
+        { "type": "file", "name": "./notes.txt", "text": "hi" },
+        { "type": "dir", "name": "docs/" },
+        { "type": "file", "name": "docs/a.txt", "text": "a" }
+      ],
+      "expect": "accept",
+      "filesWritten": 2,
+      "directoriesCreated": 1,
+      "bytesWritten": 3,
+      "expectedFiles": [
+        { "path": "notes.txt", "text": "hi" },
+        { "path": "docs/a.txt", "text": "a" }
+      ],
+      "expectedDirs": ["docs"],
+      "platforms": ["unix", "windows"]
+    }
+  ]
+}

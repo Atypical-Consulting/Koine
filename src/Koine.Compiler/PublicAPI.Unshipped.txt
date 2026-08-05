@@ -1633,3 +1633,48 @@ Koine.Compiler.Extensions.PathEscapeReason.None = 0 -> Koine.Compiler.Extensions
 Koine.Compiler.Extensions.PathEscapeReason.SymlinkEscape = 3 -> Koine.Compiler.Extensions.PathEscapeReason
 Koine.Compiler.Extensions.PathEscapeReason.Traversal = 1 -> Koine.Compiler.Extensions.PathEscapeReason
 static Koine.Compiler.Extensions.ContainedPath.TryResolve(string! root, string! candidate, out string! resolved, out Koine.Compiler.Extensions.PathEscapeReason reason) -> bool
+Koine.Compiler.Extensions.ArchiveKind
+Koine.Compiler.Extensions.ArchiveKind.Tar = 2 -> Koine.Compiler.Extensions.ArchiveKind
+Koine.Compiler.Extensions.ArchiveKind.Zip = 1 -> Koine.Compiler.Extensions.ArchiveKind
+Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.ArchiveTooLarge = 12 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.DestinationUnusable = 13 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.DuplicateMember = 9 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.LinkMember = 7 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.MalformedArchive = 1 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.MemberEscapesRoot = 6 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.MemberNameAnchored = 3 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.MemberNameBackslash = 4 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.MemberNameInvalid = 2 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.MemberNameTraversal = 5 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.MemberTooLarge = 11 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.None = 0 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.TooManyMembers = 10 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ArchiveRejectionReason.UnsupportedMemberType = 8 -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ExtractResult
+Koine.Compiler.Extensions.ExtractResult.<Clone>$() -> Koine.Compiler.Extensions.ExtractResult!
+Koine.Compiler.Extensions.ExtractResult.BytesWritten.get -> long
+Koine.Compiler.Extensions.ExtractResult.BytesWritten.init -> void
+Koine.Compiler.Extensions.ExtractResult.Deconstruct(out bool Succeeded, out Koine.Compiler.Extensions.ArchiveRejectionReason Reason, out string? OffendingMember, out int FilesWritten, out int DirectoriesCreated, out long BytesWritten) -> void
+Koine.Compiler.Extensions.ExtractResult.DirectoriesCreated.get -> int
+Koine.Compiler.Extensions.ExtractResult.DirectoriesCreated.init -> void
+Koine.Compiler.Extensions.ExtractResult.Equals(Koine.Compiler.Extensions.ExtractResult? other) -> bool
+Koine.Compiler.Extensions.ExtractResult.ExtractResult(bool Succeeded, Koine.Compiler.Extensions.ArchiveRejectionReason Reason, string? OffendingMember, int FilesWritten, int DirectoriesCreated, long BytesWritten) -> void
+Koine.Compiler.Extensions.ExtractResult.FilesWritten.get -> int
+Koine.Compiler.Extensions.ExtractResult.FilesWritten.init -> void
+Koine.Compiler.Extensions.ExtractResult.OffendingMember.get -> string?
+Koine.Compiler.Extensions.ExtractResult.OffendingMember.init -> void
+Koine.Compiler.Extensions.ExtractResult.Reason.get -> Koine.Compiler.Extensions.ArchiveRejectionReason
+Koine.Compiler.Extensions.ExtractResult.Reason.init -> void
+Koine.Compiler.Extensions.ExtractResult.Succeeded.get -> bool
+Koine.Compiler.Extensions.ExtractResult.Succeeded.init -> void
+Koine.Compiler.Extensions.SafeArchiveExtractor
+const Koine.Compiler.Extensions.SafeArchiveExtractor.DefaultMaxMemberBytes = 16777216 -> long
+const Koine.Compiler.Extensions.SafeArchiveExtractor.DefaultMaxMemberCount = 4096 -> int
+const Koine.Compiler.Extensions.SafeArchiveExtractor.DefaultMaxTotalBytes = 67108864 -> long
+override Koine.Compiler.Extensions.ExtractResult.Equals(object? obj) -> bool
+override Koine.Compiler.Extensions.ExtractResult.GetHashCode() -> int
+override Koine.Compiler.Extensions.ExtractResult.ToString() -> string!
+static Koine.Compiler.Extensions.ExtractResult.operator !=(Koine.Compiler.Extensions.ExtractResult? left, Koine.Compiler.Extensions.ExtractResult? right) -> bool
+static Koine.Compiler.Extensions.ExtractResult.operator ==(Koine.Compiler.Extensions.ExtractResult? left, Koine.Compiler.Extensions.ExtractResult? right) -> bool
+static Koine.Compiler.Extensions.SafeArchiveExtractor.Extract(System.IO.Stream! archive, Koine.Compiler.Extensions.ArchiveKind kind, string! destinationRoot, int maxMemberCount = 4096, long maxTotalBytes = 67108864, long maxMemberBytes = 16777216) -> Koine.Compiler.Extensions.ExtractResult!
