@@ -1029,7 +1029,7 @@ internal sealed class JavaExpressionTranslator
             // Value objects have no additive operator in Java; fold with the demand-generated `plus` method
             // (emitted on the record by the value-object slice). A seedless reduce yields Optional, so an
             // empty collection throws — matching the C#/Rust/TS `sum` semantics.
-            var voType = _typeMapper.Map(new TypeRef(selector.Name));
+            var voType = _typeMapper.Map(new TypeRef(selector.Name, Qualifier: selector.Qualifier));
             sb.Append(target).Append(".stream().map(");
             WriteLambdaHeaderAndBody(call, sb);
             sb.Append(").reduce(").Append(voType).Append("::plus).orElseThrow(() -> ")
