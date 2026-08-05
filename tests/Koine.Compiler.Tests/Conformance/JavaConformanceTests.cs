@@ -2500,4 +2500,157 @@ public class JavaConformanceTests
 
         r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
     }
+
+    /// <summary>
+    /// Issue #1727 — the whole-target audit of the explicit-qualifier / wrong-owning-context bug family
+    /// (already fixed construct-by-construct in PHP/Python: #1700, #1701, #1711, #1712, #1716, #1718)
+    /// against the Java emitter. <c>Ordering</c> declares its own <c>value Money</c> — the SAME simple
+    /// name as <c>Shipping</c>'s — so any call site that silently drops an explicit <c>Shipping.Money</c>
+    /// qualifier resolves through <see cref="Ast.ModelIndex.ResolveOwner"/>'s rule 3 ("a reference from
+    /// within one of the type's own owning contexts binds locally") straight back to <c>Ordering</c>'s
+    /// OWN same-named copy — printed bare (same package as the emitting context) instead of
+    /// package-qualified to <c>Shipping</c>. This single fixture exercises every cross-context resolution
+    /// call site the audit enumerated (entity member, factory + command parameters, repository finder
+    /// parameter, domain-service operation + application-service use-case parameters, read-model direct
+    /// and derived fields, an ACL translator endpoint, and an integration-event subscriber) plus the one
+    /// the audit found defective: <c>JavaExpressionTranslator.WriteSum</c>'s value-object fold selector.
+    /// A <c>policy</c> trigger is deliberately NOT included — <c>KoineParser.g4</c>'s <c>policyDecl</c>
+    /// takes a bare <c>Identifier</c>, so no <c>Context.Event</c> qualifier syntax reaches it at all.
+    /// </summary>
+    private const string QualifierResolutionAuditFixture = """
+        contextmap {
+          Legacy -> Billing : anti-corruption-layer
+            acl { Legacy.Account -> Billing.Customer }
+          Payments -> Notifications : open-host
+        }
+
+        context Shipping {
+          value Money {
+            amount: Decimal
+          }
+        }
+
+        context Ordering {
+          // Same simple name as Shipping.Money — the collision that exposes a dropped qualifier: a
+          // fallback that ignores an explicit Context.T qualifier binds locally to THIS copy instead.
+          value Money {
+            amount: Decimal
+          }
+
+          event OrderPlaced {
+            order: OrderId
+          }
+
+          value OrderLine {
+            unitPrice: Shipping.Money
+          }
+
+          // The WriteSum defect: the sum-fold selector's type must resolve to Shipping.Money, not
+          // Ordering's own same-named copy.
+          value Basket {
+            lines: List<OrderLine>
+            total: Shipping.Money = lines.sum(l => l.unitPrice)
+          }
+
+          aggregate Sales root Order {
+            repository {
+              operations: getById, add
+              find byMinCost(floor: Shipping.Money): List<Order>
+            }
+
+            entity Order identified by OrderId {
+              quantity: Int
+              cost:     Shipping.Money
+
+              command setShippingCost(newCost: Shipping.Money): Shipping.Money {
+                result newCost
+              }
+
+              create place(quantity: Int, cost: Shipping.Money) {
+                emit OrderPlaced(order: id)
+              }
+            }
+          }
+
+          service PricingRouter {
+            operation currentPrice(price: Shipping.Money): Shipping.Money = price
+            usecase RecordShippingCost(order: OrderId, cost: Shipping.Money)
+          }
+
+          readmodel OrderLineSummary from OrderLine {
+            unitPrice
+            doubledPrice: Shipping.Money = unitPrice
+          }
+        }
+
+        context Legacy {
+          value Account { reference: String }
+        }
+
+        context Billing {
+          value Customer { name: String }
+        }
+
+        context Payments {
+          integration event ChargeSettled {
+            reference: String
+          }
+
+          publishes ChargeSettled
+        }
+
+        context Notifications {
+          subscribes Payments.ChargeSettled
+        }
+        """;
+
+    /// <summary>
+    /// Every emitted reference to the colliding <c>Money</c> type — across every call-site family the
+    /// fixture exercises — must carry <c>Shipping</c>'s package, never <c>Ordering</c>'s own same-named
+    /// copy nor a bare (unqualified) name. The ACL translator and the integration-event handler are
+    /// asserted too, even though they carry no name collision (their qualifier is grammar-mandatory), so
+    /// a regression there fails loudly in the same fixture.
+    /// </summary>
+    [Fact]
+    public void Cross_context_qualifier_resolution_is_honored_across_every_java_call_site()
+    {
+        var result = new KoineCompiler().Compile(QualifierResolutionAuditFixture, new JavaEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        const string shippingMoney = "koine.generated.shipping.Money";
+
+        var orderLine = result.Files.Single(f => f.RelativePath.EndsWith("OrderLine.java", StringComparison.Ordinal)).Contents;
+        orderLine.ShouldContain($"{shippingMoney} unitPrice"); // member field
+
+        var basket = result.Files.Single(f => f.RelativePath.EndsWith("Basket.java", StringComparison.Ordinal)).Contents;
+        basket.ShouldContain($".reduce({shippingMoney}::plus)"); // #1727's own defect: the sum-fold selector
+        basket.ShouldNotContain(".reduce(Money::plus)");         // would print bare if it fell back to Ordering's own Money
+
+        var order = result.Files.Single(f => f.RelativePath.EndsWith("ordering/Order.java", StringComparison.Ordinal)).Contents;
+        order.ShouldContain($"{shippingMoney} cost");                          // entity member
+        order.ShouldContain($"public static Order place(long quantity, {shippingMoney} cost)"); // factory parameter
+        order.ShouldContain($"public {shippingMoney} setShippingCost({shippingMoney} newCost)"); // command parameter + return
+
+        var repository = result.Files.Single(f => f.RelativePath.EndsWith("ordering/OrderRepository.java", StringComparison.Ordinal)).Contents;
+        repository.ShouldContain($"List<Order> byMinCost({shippingMoney} floor)"); // repository finder parameter
+
+        var pricingRouter = result.Files.Single(f => f.RelativePath.EndsWith("PricingRouter.java", StringComparison.Ordinal)).Contents;
+        pricingRouter.ShouldContain($"{shippingMoney} currentPrice({shippingMoney} price)"); // domain-service operation
+        pricingRouter.ShouldContain($"recordShippingCost(OrderId order, {shippingMoney} cost)"); // application-service use case
+
+        var summary = result.Files.Single(f => f.RelativePath.EndsWith("OrderLineSummary.java", StringComparison.Ordinal)).Contents;
+        summary.ShouldContain($"{shippingMoney} unitPrice");    // read-model direct field
+        summary.ShouldContain($"{shippingMoney} doubledPrice"); // read-model derived field
+
+        var translator = result.Files.Single(f => f.RelativePath.EndsWith("billing/LegacyToBillingTranslator.java", StringComparison.Ordinal)).Contents;
+        translator.ShouldContain("Customer translateAccountToCustomer(koine.generated.legacy.Account source)"); // ACL endpoint
+
+        var handler = result.Files.Single(f => f.RelativePath.EndsWith("notifications/HandleChargeSettled.java", StringComparison.Ordinal)).Contents;
+        handler.ShouldContain("handle(koine.generated.payments.ChargeSettled event)"); // subscriber event
+
+        var r = TestSupport.CompileJava(result.Files);
+        TestSupport.RequireOrSkip(r.ToolchainAvailable, NoToolchainNotice);
+
+        r.Ok.ShouldBeTrue(string.Join("\n", r.Errors));
+    }
 }
