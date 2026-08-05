@@ -937,4 +937,450 @@ mod tests {
             "no corpus case lists the `{platform}` platform — the corpus cannot gate this OS"
         );
     }
+
+    // --- the mechanical sink guard --------------------------------------------
+    //
+    // WHY A TEST AND NOT A LINT. The plan for #1942 offered `clippy.toml` as the alternative. It was
+    // checked rather than assumed, and it does not work here for two independent reasons:
+    //
+    //   1. NOTHING RUNS CLIPPY. `.github/workflows/studio-build.yml` runs `cargo build --locked` and
+    //      `cargo test --locked`, and `ci.yml`'s only cargo use is the Rust conformance suite's
+    //      `cargo check`. No workflow in the repository invokes `cargo clippy` at all, so a
+    //      `clippy.toml` would be a file that gates nothing — the worst kind of security control,
+    //      one that looks present in a review and is absent in CI.
+    //   2. `disallowed-methods` IS TOO BLUNT ANYWAY. It keys on a method path, so banning
+    //      `std::path::Path::join` would fire on all ~90 joins in `lib.rs` — fixture setup in its
+    //      test module, the internal `copy_recursive` recursion, the `current_exe()`-derived sidecar
+    //      lookup — with no way to excuse a single one.
+    //
+    // A `#[cfg(test)]` scan over `include_str!("lib.rs")` has neither problem: it runs under
+    // `cargo test --locked` on all three OSes of the studio-build matrix, and it carries a named
+    // allowlist so an exception is a reviewed row rather than a suppressed lint.
+    //
+    // ITS TWIN, AND WHY THIS ONE IS THE LOAD-BEARING HALF. `PathSinkGuardTests` in the .NET suite
+    // enforces these same two rules over this same file (plus a third over the .NET extension layer,
+    // which cargo cannot see). But `ci.yml`'s `changes` gate sets `dotnet=false` for a PR that
+    // touches only `tooling/koine-studio/**`, which skips BOTH .NET jobs — so for a Rust-only change
+    // to `lib.rs`, the test you are reading is the only gate that runs. The allowlists are
+    // deliberately duplicated rather than shared: the two tables must AGREE, and each side fails on
+    // its own drift — an entry removed here while the site remains reddens this test; a site fixed
+    // here while the entry remains reddens the staleness check on both sides.
+
+    /// The host as text. `include_str!` resolves relative to THIS file, so this is `src/lib.rs`, and
+    /// it is embedded at compile time — the scan cannot silently pass because a working directory
+    /// was not what it expected.
+    const HOST_SOURCE: &str = include_str!("lib.rs");
+
+    /// `.join(` outside the containment primitive, in the non-test half of `lib.rs`.
+    const RAW_JOIN: &str = "raw-join";
+    /// A `#[tauri::command]` taking a caller-supplied relative path that never calls `resolve_in`.
+    const UNROUTED_COMMAND: &str = "unrouted-command";
+
+    /// A parameter carries a caller-supplied relative path when one of its underscore-separated name
+    /// segments is one of these. Segment-wise rather than substring, so `relay` is not swept in by
+    /// the `rel` in its first three letters.
+    const PATH_PARAM_SEGMENTS: [&str; 4] = ["rel", "rels", "path", "paths"];
+
+    /// `(function, kind, marker, why it is safe)` — the twin of `PathSinkGuardTests.RustAllowlist`.
+    /// The marker must appear in the reported line, so an entry pins WHICH site it excuses while
+    /// still surviving a reformat.
+    const SINK_ALLOWLIST: &[(&str, &str, &str, &str)] = &[
+        // Joins that compose no caller-supplied string.
+        (
+            "bundled_koine_path",
+            RAW_JOIN,
+            ".join(format!(\"koine{}\"",
+            "a fixed executable name onto current_exe()'s directory — the host's own layout",
+        ),
+        (
+            "git_clone",
+            RAW_JOIN,
+            ".join(&dest_name)",
+            "computes the RETURN value only, and clone_dest_name already reduced dest_name to one segment free of `/`, `\\` and `..`",
+        ),
+        (
+            "rename_entry",
+            RAW_JOIN,
+            "parent.join(&new_name)",
+            "is_safe_name screens new_name to a single separator-free segment, joined onto the token's own parent",
+        ),
+        (
+            "copy_recursive",
+            RAW_JOIN,
+            "dst.join(entry.file_name())",
+            "internal recursion: a file_name() off the SOURCE tree onto a destination move_entry already resolved",
+        ),
+        // Commands whose path parameter is a different trust class.
+        (
+            "read_text_file",
+            UNROUTED_COMMAND,
+            "path: String",
+            "an absolute path the user picked in the OS file dialog — there is no root to contain it against",
+        ),
+        (
+            "write_text_file",
+            UNROUTED_COMMAND,
+            "path: String",
+            "the save side of the same user-chosen dialog path",
+        ),
+        (
+            "write_bytes",
+            UNROUTED_COMMAND,
+            "path: String",
+            "the absolute save-zip target the user chose in the OS dialog",
+        ),
+        (
+            "git_diff",
+            UNROUTED_COMMAND,
+            "rel_path: String",
+            "a pathspec handed to the git binary via `git -C <dir> … --`, never joined by the host",
+        ),
+        (
+            "git_stage",
+            UNROUTED_COMMAND,
+            "rel_paths: Vec<String>",
+            "pathspecs handed to the git binary, never joined by the host",
+        ),
+        (
+            "git_unstage",
+            UNROUTED_COMMAND,
+            "rel_paths: Vec<String>",
+            "pathspecs handed to the git binary, never joined by the host",
+        ),
+        (
+            "git_discard",
+            UNROUTED_COMMAND,
+            "tracked_paths: Vec<String>",
+            "pathspecs handed to the git binary; the untracked half goes through the same plumbing",
+        ),
+        (
+            "git_log",
+            UNROUTED_COMMAND,
+            "rel_path: Option<String>",
+            "an optional pathspec narrowing `git -C <dir> log --`, never joined by the host",
+        ),
+    ];
+
+    /// One reported site: `(line, kind, function, text)`.
+    type Site = (usize, &'static str, String, String);
+
+    /// Blank out string literals and drop a trailing line comment, so a `//` inside a string is not
+    /// read as a comment and a `.join(` inside a doc comment is not read as code — `resolve_in`'s
+    /// own doc comment contains the text `folder.join(rel_path)` as a warning against writing it.
+    fn strip_strings_and_comments(line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let mut in_string = false;
+        let mut chars = line.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if in_string {
+                match c {
+                    '\\' => {
+                        chars.next();
+                        out.push(' ');
+                        out.push(' ');
+                    }
+                    '"' => {
+                        in_string = false;
+                        out.push('"');
+                    }
+                    _ => out.push(' '),
+                }
+                continue;
+            }
+            match c {
+                '"' => {
+                    in_string = true;
+                    out.push('"');
+                }
+                '/' if chars.peek() == Some(&'/') => break,
+                _ => out.push(c),
+            }
+        }
+
+        out
+    }
+
+    fn is_ident_byte(b: u8) -> bool {
+        b == b'_' || b.is_ascii_alphanumeric()
+    }
+
+    /// The byte offset of `word` appearing as a whole token, if it does.
+    fn find_word(haystack: &str, word: &str) -> Option<usize> {
+        let bytes = haystack.as_bytes();
+        let mut from = 0usize;
+        while let Some(pos) = haystack[from..].find(word) {
+            let i = from + pos;
+            let j = i + word.len();
+            let before_ok = i == 0 || !is_ident_byte(bytes[i - 1]);
+            let after_ok = j >= bytes.len() || !is_ident_byte(bytes[j]);
+            if before_ok && after_ok {
+                return Some(i);
+            }
+            from = j;
+        }
+        None
+    }
+
+    /// The name of the function this line declares, if it declares one. Everything before the `fn`
+    /// token must be a declaration modifier, so `let x = foo.fn_like()` and a `fn` inside an
+    /// expression cannot be mistaken for a declaration.
+    fn declared_fn_name(code: &str) -> Option<String> {
+        let trimmed = code.trim();
+        let at = find_word(trimmed, "fn")?;
+        let modifiers_only = trimmed[..at].split_whitespace().all(|w| {
+            w == "pub"
+                || w.starts_with("pub(")
+                || w == "async"
+                || w == "unsafe"
+                || w == "const"
+                || w == "extern"
+                || w.starts_with('"')
+        });
+        if !modifiers_only {
+            return None;
+        }
+
+        let name: String = trimmed[at + 2..]
+            .trim_start()
+            .chars()
+            .take_while(|c| is_ident_byte(*c as u8) && c.is_ascii())
+            .collect();
+        (!name.is_empty()).then_some(name)
+    }
+
+    /// The line index of the `#[cfg(test)] mod tests` attribute — everything below it is fixture
+    /// scaffolding, not a sink. Matched as the attribute IMMEDIATELY followed by `mod tests` rather
+    /// than the first `#[cfg(test)]` in the file, since a test-only `use` carries the same attribute.
+    fn test_module_start(lines: &[&str]) -> usize {
+        lines
+            .windows(2)
+            .position(|w| w[0].trim() == "#[cfg(test)]" && w[1].trim_start().starts_with("mod tests"))
+            .expect(
+                "lib.rs has no `#[cfg(test)] mod tests` module — this guard scans the file ABOVE that \
+                 boundary and cannot tell host code from fixture code without it",
+            )
+    }
+
+    /// Split a parameter list on top-level commas, so `HashMap<K, V>` stays whole.
+    fn split_params(params: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut current = String::new();
+        let mut depth = 0i32;
+        for c in params.chars() {
+            match c {
+                '<' | '(' | '[' => depth += 1,
+                '>' | ')' | ']' => depth -= 1,
+                ',' if depth == 0 => {
+                    out.push(current.trim().to_string());
+                    current.clear();
+                    continue;
+                }
+                _ => {}
+            }
+            current.push(c);
+        }
+        if !current.trim().is_empty() {
+            out.push(current.trim().to_string());
+        }
+        out
+    }
+
+    /// True for a parameter carrying a relative path chosen by whoever called the command: a
+    /// `rel`/`path`-segmented name over a string-or-path type. Both halves matter — the name alone
+    /// would sweep in Tauri's own state handles, the type alone every `String` in the file.
+    fn is_caller_supplied_relpath(param: &str) -> bool {
+        let Some((name, ty)) = param.split_once(':') else {
+            return false;
+        };
+        let named = name
+            .replace("mut ", "")
+            .trim()
+            .split('_')
+            .any(|segment| PATH_PARAM_SEGMENTS.contains(&segment));
+        let typed = ty.contains("String") || ty.contains("str") || ty.contains("Path");
+        named && typed
+    }
+
+    /// Every site in the non-test half of `lib.rs` that composes a filesystem path from a value the
+    /// host did not choose itself.
+    fn find_sink_sites() -> Vec<Site> {
+        let lines: Vec<&str> = HOST_SOURCE.lines().collect();
+        let limit = test_module_start(&lines);
+        let mut sites: Vec<Site> = Vec::new();
+        let mut function = String::from("<file scope>");
+
+        for i in 0..limit {
+            let code = strip_strings_and_comments(lines[i]);
+            if let Some(name) = declared_fn_name(&code) {
+                function = name;
+            }
+            if code.contains(".join(") {
+                sites.push((
+                    i + 1,
+                    RAW_JOIN,
+                    function.clone(),
+                    lines[i].trim().to_string(),
+                ));
+            }
+            if lines[i].trim_start().starts_with("#[tauri::command") {
+                if let Some(site) = inspect_command(&lines, i, limit) {
+                    sites.push(site);
+                }
+            }
+        }
+
+        sites
+    }
+
+    /// Report the `#[tauri::command]` starting at `attribute` when it declares a caller-supplied
+    /// relative-path parameter and never calls `resolve_in`.
+    fn inspect_command(lines: &[&str], attribute: usize, limit: usize) -> Option<Site> {
+        let mut i = attribute + 1;
+        while i < limit && declared_fn_name(&strip_strings_and_comments(lines[i])).is_none() {
+            i += 1;
+        }
+        if i >= limit {
+            return None;
+        }
+
+        let declaration = i;
+        let name = declared_fn_name(&strip_strings_and_comments(lines[i]))?;
+
+        // The signature: from the first `(` until the parameter list's parens balance.
+        let mut params = String::new();
+        let mut depth = 0i32;
+        let mut started = false;
+        'signature: while i < limit {
+            for c in strip_strings_and_comments(lines[i]).chars() {
+                match c {
+                    '(' => {
+                        depth += 1;
+                        started = true;
+                        if depth == 1 {
+                            continue;
+                        }
+                    }
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                if started && depth >= 1 {
+                    params.push(c);
+                }
+            }
+            if started && depth == 0 {
+                break 'signature;
+            }
+            params.push(' ');
+            i += 1;
+        }
+
+        let tainted: Vec<String> = split_params(&params)
+            .into_iter()
+            .filter(|p| is_caller_supplied_relpath(p))
+            .collect();
+        if tainted.is_empty() {
+            return None;
+        }
+
+        // The body: from the opening brace until the braces balance again.
+        let mut body = String::new();
+        depth = 0;
+        started = false;
+        while i < limit {
+            let code = strip_strings_and_comments(lines[i]);
+            body.push_str(&code);
+            body.push('\n');
+            for c in code.chars() {
+                match c {
+                    '{' => {
+                        depth += 1;
+                        started = true;
+                    }
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+            }
+            if started && depth == 0 {
+                break;
+            }
+            i += 1;
+        }
+
+        if body.contains("resolve_in(") {
+            return None;
+        }
+
+        Some((
+            declaration + 1,
+            UNROUTED_COMMAND,
+            name.clone(),
+            format!("fn {name}({}) never calls resolve_in", tainted.join(", ")),
+        ))
+    }
+
+    fn allowlisted(site: &Site) -> bool {
+        SINK_ALLOWLIST.iter().any(|(function, kind, marker, _)| {
+            *function == site.2 && *kind == site.1 && site.3.contains(marker)
+        })
+    }
+
+    #[test]
+    fn the_host_routes_every_plugin_influenced_path_through_the_primitive() {
+        let sites = find_sink_sites();
+        let unlisted: Vec<&Site> = sites.iter().filter(|s| !allowlisted(s)).collect();
+
+        assert!(
+            unlisted.is_empty(),
+            "unguarded filesystem path site(s) in lib.rs. A [{RAW_JOIN}] composes a path with \
+             `Path::join` outside the containment primitive; an [{UNROUTED_COMMAND}] takes a \
+             caller-supplied relative-path parameter and never calls `resolve_in`. Either is how \
+             CVE-2026-27800 and CVE-2026-27976 happened. Route it through `resolve_in(folder, \
+             rel_path)` and USE THE PATH IT RETURNS — re-deriving `folder.join(rel_path)` afterwards \
+             throws away the symlink resolution that makes it safe. If the site is genuinely a \
+             different trust class, add a row to SINK_ALLOWLIST here AND to \
+             PathSinkGuardTests.RustAllowlist in the .NET suite, with a real justification:\n{}",
+            unlisted
+                .iter()
+                .map(|(line, kind, function, text)| format!(
+                    "  src/lib.rs:{line} [{kind}] in `{function}` — {text}"
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    #[test]
+    fn every_sink_allowlist_entry_still_matches_a_real_site() {
+        // The inverse check: an allowlist that only ever grows stops being a list of considered
+        // exceptions and becomes a rubber stamp. An entry whose site is gone hides nothing today —
+        // say so, and delete it.
+        let sites = find_sink_sites();
+        let stale: Vec<&(&str, &str, &str, &str)> = SINK_ALLOWLIST
+            .iter()
+            .filter(|(function, kind, marker, _)| {
+                !sites
+                    .iter()
+                    .any(|s| s.2 == *function && s.1 == *kind && s.3.contains(marker))
+            })
+            .collect();
+
+        assert!(
+            stale.is_empty(),
+            "SINK_ALLOWLIST entries that no longer match a real site in lib.rs (the code was \
+             removed, renamed, or already routed through the primitive) — delete them:\n{}",
+            stale
+                .iter()
+                .map(|(function, kind, marker, reason)| format!(
+                    "  `{function}` [{kind}] marker {marker:?} — {reason}"
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
 }

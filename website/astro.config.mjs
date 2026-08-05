@@ -188,6 +188,15 @@ export default defineConfig({
 						{ label: 'Templates', slug: 'reference/templates' },
 					],
 				},
+				{
+					// The extension system (#1936) is still being built; this section documents the
+					// contracts it is being built ON, so the features that will depend on them are
+					// written against a rule that already exists rather than retrofitted onto one.
+					label: 'Extensions',
+					items: [
+						{ label: 'Path containment', slug: 'extensions/path-containment' },
+					],
+				},
 			],
 		}),
 	],

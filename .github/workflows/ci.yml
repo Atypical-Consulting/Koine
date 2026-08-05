@@ -361,21 +361,44 @@ jobs:
           dotnet publish src/Koine.Wasm -c Release
           node src/Koine.Wasm/smoke-test.mjs
 
-  # ADR 0012 records CI covering only ubuntu-latest as an accepted-but-unsolved trade-off: the macOS
-  # `sandbox-exec` path and the whole Windows Job Object path (src/Koine.Execution/WindowsJobObject.cs
-  # — kernel32 P/Invoke over three hand-mirrored ABI structs) shipped manually verified, never CI-run
-  # (issue #1782). ScenarioSandboxTests already gates itself per-mechanism (RequireUnixStubs,
-  # RequireFilesystemConfinement, RequireNetworkConfinement — the last two FAIL rather than skip on
-  # macOS, since the mechanism they need ships with the OS), so this job only has to run it, not change
-  # it. Targeted rather than a full `build-and-test` matrix, deliberately: (1) filtered to
-  # `ScenarioSandboxTests` — the rest of the suite is target-agnostic compiler work `build-and-test`
-  # already proves on Linux; (2) scoped to the TEST PROJECT, not `Koine.slnx` — the solution also
-  # carries `src/Koine.Wasm` (browser-wasm RID), which would need the wasm workloads installed on two
-  # more OSes for a project this job never touches; (3) `KOINE_REQUIRE_CONFORMANCE` is deliberately
-  # UNSET — it hard-fails on any missing target toolchain (php/phpstan/python/mypy/rust), none of which
-  # this job installs or needs. Measured cost (issue #1782 PR, second/clean run): ~76s wall-clock on
-  # macOS, ~143s on Windows — both well under the 20-minute backstop below, so no NuGet cache tuning
-  # beyond what the composite action already does.
+  # The OS-DEPENDENT slice of the test suite: everything whose behaviour is decided by the platform
+  # rather than by the compiler, run on the two operating systems `build-and-test` (ubuntu-only) cannot
+  # speak for. Three suites qualify today, and each is here for the same reason — a green Linux run
+  # says nothing about the code path that actually ships on macOS or Windows.
+  #
+  # * `ScenarioSandboxTests` (issue #1782). ADR 0012 records CI covering only ubuntu-latest as an
+  #   accepted-but-unsolved trade-off: the macOS `sandbox-exec` path and the whole Windows Job Object
+  #   path (src/Koine.Execution/WindowsJobObject.cs — kernel32 P/Invoke over three hand-mirrored ABI
+  #   structs) shipped manually verified, never CI-run. The suite already gates itself per-mechanism
+  #   (RequireUnixStubs, RequireFilesystemConfinement, RequireNetworkConfinement — the last two FAIL
+  #   rather than skip on macOS, since the mechanism they need ships with the OS), so this job only has
+  #   to run it, not change it.
+  # * `ContainedPathTests` (issue #1942). The path-containment primitive's shared accept/reject corpus
+  #   (tests/fixtures/path-containment/cases.json) carries 20 rows that only ever execute on Windows —
+  #   `\\?\` verbatim prefixes, drive-relative `C:evil`, alternate data streams (`file.txt:stream`),
+  #   reserved device names (`CON`, `NUL.txt`), backslash traversal, case-insensitive containment. Those
+  #   are precisely the semantics that differ from Unix, so a Linux-only run leaves the rows that matter
+  #   most unproven — and #1942's own Global Constraint ("Windows semantics get explicit tests") only
+  #   half-met. The Rust half of the same corpus already runs on all three OSes under `cargo test` in
+  #   studio-build.yml; this puts the .NET half on the same footing.
+  # * `SafeArchiveExtractorTests` and `PathSinkGuardTests` (issue #1942). The extractor writes real
+  #   files through the same primitive, so its rejections are as platform-dependent as the corpus rows
+  #   above; the sink guard is a source scan whose Rust half is cheap insurance that the two hosts'
+  #   allowlists have not drifted apart on a runner where only one of them is normally exercised.
+  #
+  # Targeted rather than a full `build-and-test` matrix, deliberately: (1) filtered to those four
+  # classes — the rest of the suite is target-agnostic compiler work `build-and-test` already proves on
+  # Linux; (2) scoped to the TEST PROJECT, not `Koine.slnx` — the solution also carries
+  # `src/Koine.Wasm` (browser-wasm RID), which would need the wasm workloads installed on two more OSes
+  # for a project this job never touches; (3) `KOINE_REQUIRE_CONFORMANCE` is deliberately UNSET — it
+  # hard-fails on any missing target toolchain (php/phpstan/python/mypy/rust), none of which this job
+  # installs or needs. Measured cost (issue #1782 PR, second/clean run): ~76s wall-clock on macOS, ~143s
+  # on Windows — both well under the 20-minute backstop below, and the three suites added by #1942 are
+  # sub-second, so no NuGet cache tuning beyond what the composite action already does.
+  #
+  # The job KEEPS its name: `sandbox-confinement (macos-latest)` / `(windows-latest)` are the check-run
+  # names this repo's merge tooling and .claude/skills/repo-profile.md resolve CI status by, and
+  # renaming a check-run is a silent break in tooling that never mentions the old name again.
   #
   # Carries the same `needs: changes` + draft/front-end-only `if:` shape as build-and-test, verbatim —
   # a new draft-gated job name reproduces #1481/#1486's failure modes under a new name if it doesn't.
@@ -409,8 +432,11 @@ jobs:
         with:
           install-wasm-workloads: 'false'
 
+      # `~` is a substring match and `|` is xUnit's OR, so this runs every test whose fully-qualified
+      # name contains one of the four class names. Keep the alternatives `|`-joined inside ONE quoted
+      # --filter argument: a second --filter replaces the first rather than intersecting with it.
       - name: Test
         run: >-
           dotnet test tests/Koine.Compiler.Tests/Koine.Compiler.Tests.csproj
-          --filter "FullyQualifiedName~ScenarioSandboxTests"
+          --filter "FullyQualifiedName~ScenarioSandboxTests|FullyQualifiedName~ContainedPathTests|FullyQualifiedName~SafeArchiveExtractorTests|FullyQualifiedName~PathSinkGuardTests"
           -nodereuse:false
