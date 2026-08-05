@@ -2452,4 +2452,218 @@ public class R18CSharpApplicationTests
         endpoints.ShouldContain("MapPut(\"/orders/{id}\"");
         endpoints.ShouldContain("MapGet(\"/orders/{id}\"");
     }
+
+    // ------------------------------------------------------------------
+    // Issue #1750 — Task 1: does a @post query's hardcoded [AsParameters]
+    // binding survive ASP.NET's request pipeline when a criterion is a
+    // COMPLEX type (a value object)? #1734 made the MUTATION side
+    // (WriteMutationEndpoint) verb-aware — BodylessVerbs /
+    // BodyBindingAttributeFor — but WriteQueryEndpoint was never touched and
+    // still hardcodes "[AsParameters] " regardless of verb. A compile-only
+    // assertion cannot settle this: ASP.NET resolves per-property parameter
+    // binding when it builds the request delegate for an endpoint, not at C#
+    // compile time — and #1649/#1656 showed that resolution can crash the
+    // WHOLE route table on the first incoming request, not just the one
+    // route. Only a live host, driven through TestSupport.RunApi, proves it.
+    //
+    // VERDICT — Branch B: the live host never throws, for either fixture,
+    // neither at app.Start() nor on a request (verified below, including a
+    // same-host two-request check ruling out the #1649/#1656 "first request
+    // poisons the whole route table" failure mode). [AsParameters] is not
+    // verb-gated the way INFERRED BODY is on the mutation side: it resolves
+    // a binding source per PROPERTY, and for a property whose type has no
+    // TryParse/BindAsync (the DateRange value object here), ASP.NET Core
+    // falls back to reading that ONE property from the JSON request body —
+    // which POST allows (unlike GET, which is in BodylessVerbs) — while a
+    // sibling scalar/enum property (`status`) keeps binding from the query
+    // string, all under the SAME [AsParameters] parameter. So a `@post`
+    // query with a complex criterion DOES work, but its real wire contract
+    // is a surprising split: the complex property reads from a bare
+    // (unwrapped) JSON body, everything else from the query string — NOT
+    // "everything in the query string" the emitted `[AsParameters]` naively
+    // suggests, and NOT what `OpenApiEmitter.Paths.cs`'s `QueryOperation`
+    // documents today (every criterion, including the complex one, as an
+    // `in: query` parameter — verified directly against this issue's model:
+    // `range` is documented `in: query` with a `$ref` to the `DateRange`
+    // schema). A client built strictly from that OpenAPI document would send
+    // the complex criterion as a query parameter and get a clean 400, not
+    // the 200 the document implies. That documentation/binding mismatch is
+    // real and is Task 3's concern — but it is a DOCUMENTATION problem, not
+    // a host-crashing DEFECT, so Task 2 (making WriteQueryEndpoint
+    // verb-aware) does not apply.
+    // ------------------------------------------------------------------
+
+    /// <summary>The issue's minimal repro model verbatim: a `@post` query taking both a COMPLEX
+    /// criterion (`range: DateRange`, a value object with two `Instant` fields — no `TryParse`, unlike
+    /// an identity value object) and a scalar/enum criterion (`status: OrderStatus`).
+    /// <c>OrdersInRange</c> returns a `List&lt;OrderRow&gt;`, so it is not a by-identity query and its
+    /// handler is the Application layer's by-design `NotImplementedException` stub for a
+    /// non-derivable list query (<c>CSharpEmitter.EmitQueryHandler</c>'s non-`byId` branch) — reaching
+    /// that throw over HTTP is itself proof the request bound and dispatched successfully, mirroring
+    /// the enum-criterion idiom <see cref="RunSalesApiWithAllQueries"/>'s tests already use for
+    /// #1656's regression pin.</summary>
+    internal const string PostQueryComplexCriterionFixture = """
+        context Ordering {
+          enum OrderStatus { Draft, Submitted, Cancelled }
+
+          value DateRange {
+            startsAt: Instant
+            endsAt:   Instant
+          }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+            }
+          }
+
+          readmodel OrderRow from Order {
+            status
+          }
+
+          @post
+          query OrdersInRange(range: DateRange, status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    /// <summary>Identical to <see cref="PostQueryComplexCriterionFixture"/> except the query drops the
+    /// complex `range` criterion, keeping only the scalar/enum `status` one — isolates whether a
+    /// failure (if any) needs a complex criterion or is inherent to `@post` + `[AsParameters]` at
+    /// all.</summary>
+    internal const string PostQueryScalarOnlyCriterionFixture = """
+        context Ordering {
+          enum OrderStatus { Draft, Submitted, Cancelled }
+
+          aggregate Sales root Order {
+            entity Order identified by OrderId {
+              status: OrderStatus = Draft
+            }
+          }
+
+          readmodel OrderRow from Order {
+            status
+          }
+
+          @post
+          query OrdersInRangeScalar(status: OrderStatus): List<OrderRow>
+        }
+        """;
+
+    [Fact]
+    public void Post_annotated_query_with_a_complex_criterion_still_emits_MapPost_with_AsParameters()
+    {
+        var endpoints = File(Emit(ApiOn, PostQueryComplexCriterionFixture), "OrderingEndpoints.cs").Contents;
+        endpoints.ShouldContain(
+            "endpoints.MapPost(\"/orders-in-range\", async ([AsParameters] OrdersInRange query, OrdersInRangeHandler handler, CancellationToken ct) =>");
+    }
+
+    [Fact]
+    public void Post_annotated_query_with_only_a_scalar_criterion_still_emits_MapPost_with_AsParameters()
+    {
+        var endpoints = File(Emit(ApiOn, PostQueryScalarOnlyCriterionFixture), "OrderingEndpoints.cs").Contents;
+        endpoints.ShouldContain(
+            "endpoints.MapPost(\"/orders-in-range-scalar\", async ([AsParameters] OrdersInRangeScalar query, OrdersInRangeScalarHandler handler, CancellationToken ct) =>");
+    }
+
+    /// <summary>
+    /// The <c>ApiHostDriver</c> idiom for these fixtures (mirroring <see cref="SalesApiHostDriver"/>):
+    /// neither <c>OrdersInRange</c> nor <c>OrdersInRangeScalar</c> resolves as a by-identity query
+    /// (both return a <c>List&lt;…&gt;</c>), so their handlers take NO constructor dependency — no
+    /// repository/unit-of-work fake is needed to boot this host, unlike <see cref="SalesApiHostDriver"/>'s
+    /// command/factory endpoints (verified directly: the emitted <c>OrdersInRangeHandler</c> has a
+    /// parameterless constructor).
+    /// </summary>
+    private const string OrderingApiHostDriver = """
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Hosting;
+        using Microsoft.AspNetCore.TestHost;
+        using Microsoft.Extensions.DependencyInjection;
+        using Microsoft.Extensions.Hosting;
+
+        namespace Ordering;
+
+        public static class ApiHostDriver
+        {
+            public static WebApplication Build()
+            {
+                var builder = WebApplication.CreateBuilder();
+                builder.WebHost.UseTestServer();
+                builder.Services.AddOrderingApplication();
+
+                var app = builder.Build();
+                app.MapOrderingEndpoints();
+                app.Start();
+                return app;
+            }
+        }
+        """;
+
+    /// <summary>
+    /// Branch B, part 1 — a client that (reasonably) follows the OpenAPI document and sends the complex
+    /// `range` criterion as query-string parameters (`range.startsAt=…&amp;range.endsAt=…`) gets a
+    /// clean HTTP 400, not a host crash. <c>app.Start()</c> and the request itself both complete without
+    /// throwing — a fundamentally different, benign failure mode from #1649/#1656's
+    /// `InvalidOperationException` that poisoned the WHOLE route table on the first request.
+    /// </summary>
+    [Fact]
+    public async Task Post_query_complex_criterion_sent_as_documented_by_openapi_gets_a_clean_400_not_a_crash()
+    {
+        using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryComplexCriterionFixture), OrderingApiHostDriver);
+
+        var response = await harness.Client.PostAsync(
+            "/orders-in-range?range.startsAt=2026-01-01T00:00:00Z&range.endsAt=2026-02-01T00:00:00Z&status=Draft",
+            content: null, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
+    /// Branch B, part 2 — the request shape ASP.NET Core ACTUALLY expects for the complex criterion (a
+    /// bare JSON body carrying just the `DateRange`, with `status` still in the query string) binds and
+    /// dispatches successfully: it reaches <c>OrdersInRangeHandler</c>'s by-design
+    /// `NotImplementedException` stub rather than throwing an ASP.NET binding exception. Issued on the
+    /// SAME host instance right after the malformed request above, so this also rules out any
+    /// first-request poisoning of the endpoint/route table.
+    /// </summary>
+    [Fact]
+    public async Task Post_query_complex_criterion_sent_the_way_AspNetCore_actually_binds_it_dispatches_cleanly()
+    {
+        using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryComplexCriterionFixture), OrderingApiHostDriver);
+
+        // A malformed-per-ASP.NET-binding request first (see the sibling 400 test) — proves this second,
+        // well-formed request on the SAME host still reaches the handler cleanly.
+        await harness.Client.PostAsync(
+            "/orders-in-range?range.startsAt=2026-01-01T00:00:00Z&range.endsAt=2026-02-01T00:00:00Z&status=Draft",
+            content: null, TestContext.Current.CancellationToken);
+
+        var content = new StringContent(
+            """{"startsAt":"2026-01-01T00:00:00Z","endsAt":"2026-02-01T00:00:00Z"}""",
+            System.Text.Encoding.UTF8, "application/json");
+
+        var thrown = await Should.ThrowAsync<Exception>(() =>
+            harness.Client.PostAsync("/orders-in-range?status=Draft", content, TestContext.Current.CancellationToken));
+
+        // TestServer rethrows an unhandled request-pipeline exception rather than turning it into a
+        // response (see the sibling enum-criterion tests for #1656) — NotImplementedException is
+        // OrdersInRange's OWN by-design stub, not an ASP.NET binding failure, so reaching it IS the
+        // proof binding/dispatch succeeded.
+        thrown.ShouldBeOfType<NotImplementedException>();
+    }
+
+    /// <summary>
+    /// The scalar-only counterpart (<see cref="PostQueryScalarOnlyCriterionFixture"/>): every criterion
+    /// is bindable from the query string, so this is the case the issue's brainstorm assumed "very
+    /// likely works fine today" — confirmed here with live-host evidence rather than assumption.
+    /// </summary>
+    [Fact]
+    public async Task Post_query_with_only_a_scalar_criterion_binds_from_the_querystring_and_dispatches_cleanly()
+    {
+        using var harness = TestSupport.RunApi(Emit(ApiOn, PostQueryScalarOnlyCriterionFixture), OrderingApiHostDriver);
+
+        var thrown = await Should.ThrowAsync<Exception>(() =>
+            harness.Client.PostAsync(
+                "/orders-in-range-scalar?status=Draft", content: null, TestContext.Current.CancellationToken));
+
+        thrown.ShouldBeOfType<NotImplementedException>();
+    }
 }

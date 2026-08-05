@@ -732,4 +732,56 @@ public class R18OpenApiEmitterTests(ITestOutputHelper output)
         yaml.ShouldContain("name: ref\n          in: path\n          required: true\n          schema:\n            type: string");
         yaml.ShouldNotContain("format: uuid");
     }
+
+    // ------------------------------------------------------------------
+    // #1750 — Task 3 (Branch B). Task 1's live-host reproduction (see
+    // R18CSharpApplicationTests) found that a `@post` query's emitted C#
+    // does not crash: [AsParameters] resolves a binding source per
+    // PROPERTY rather than per verb, so a complex criterion with no
+    // TryParse/BindAsync (the `range: DateRange` here) silently falls back
+    // to being read from the raw JSON request body — which POST allows —
+    // while the sibling scalar/enum criterion (`status`) still binds from
+    // the query string, all under the SAME [AsParameters] parameter. This
+    // OpenAPI document, however, still describes EVERY criterion —
+    // including the complex one — as an unconditional `in: query`
+    // parameter, regardless of verb (QueryOperation never branches on
+    // route.Verb the way a body-taking command's CommandOperation does). So
+    // a client built strictly from this document sends `range` as query
+    // parameters and gets a clean 400; the JSON-body shape that actually
+    // succeeds isn't documented here at all. Per the issue's Branch-B
+    // scope this is a documented gap, not a bug fixed in this issue — no
+    // emitter change, only this pin of the CURRENT (misleading) shape so a
+    // future change to it is a deliberate, reviewed diff, not an accident.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Pins today's <c>@post</c> query documentation: the verb follows the annotation (matching the C#
+    /// emitter's <c>MapPost</c>), but both the complex <c>range</c> criterion (a value-object schema) and
+    /// the scalar/enum <c>status</c> criterion are still documented as <c>in: query</c> parameters — the
+    /// same shape an un-annotated <c>GET</c> query gets. See the comment block above for why this is
+    /// pinned as-is rather than reconciled. An un-annotated query's document is unaffected: it is the
+    /// same <see cref="OrderingFixture"/> Verify snapshot <see cref="Paths_map_commands_to_post_and_queries_to_get"/>
+    /// already pins, and since this test makes no emitter change, that snapshot staying green across this
+    /// PR is the byte-identical guarantee.
+    /// </summary>
+    [Fact]
+    public void A_post_querys_complex_criterion_is_still_documented_as_an_in_query_parameter()
+    {
+        var result = new KoineCompiler().Compile(
+            new[] { new SourceFile("ordering.koi", R18CSharpApplicationTests.PostQueryComplexCriterionFixture) },
+            new OpenApiEmitter());
+        result.Success.ShouldBeTrue(string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var yaml = result.Files.ShouldHaveSingleItem().Contents;
+
+        // The verb follows @post — matching the C# emitter's MapPost for the same model.
+        yaml.ShouldContain("/orders-in-range:");
+        yaml.ShouldContain("post:");
+        yaml.ShouldNotContain("get:");
+
+        // Both criteria — the complex `range` (a $ref to the DateRange schema) and the scalar/enum
+        // `status` — are documented as `in: query` parameters, unconditionally.
+        yaml.ShouldContain("name: range\n          in: query\n          required: true\n          schema:\n            $ref: \"#/components/schemas/DateRange\"");
+        yaml.ShouldContain("name: status\n          in: query\n          required: true\n          schema:\n            $ref: \"#/components/schemas/OrderStatus\"");
+    }
 }

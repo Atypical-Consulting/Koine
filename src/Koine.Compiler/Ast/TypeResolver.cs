@@ -352,11 +352,12 @@ public sealed class TypeResolver
 
         protected override KoineType VisitCoalesce(CoalesceExpr n)
         {
-            // `a ?? b` is non-null only if the fallback `b` is non-null.
+            // `a ?? b` is optional only if BOTH operands could be absent — a non-optional left operand
+            // guarantees a value, so the `?? b` fallback can never actually fire regardless of `b`.
             KoineType left = Visit(n.Left);
             KoineType right = Visit(n.Right);
             KoineType result = !left.IsError ? left : right;
-            return result.IsError ? ErrorType.Instance : result.WithOptional(right.IsError || right.IsOptional);
+            return result.IsError ? ErrorType.Instance : result.WithOptional(left.IsOptional && (right.IsError || right.IsOptional));
         }
 
         protected override KoineType VisitMemberAccess(MemberAccessExpr n)
