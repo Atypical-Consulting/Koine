@@ -709,6 +709,10 @@ export function createInspectorController(deps: InspectorControllerDeps): Inspec
   // renderTactical in Task 4 of the original ide.ts decomposition).
   const modelOutlineHandlers: ModelOutlineHandlers = {
     onSelect: (entry) => selection.set({ qualifiedName: entry.qualifiedName, context: entry.context }),
+    // The multi-file-correct jump — opens `span.file` first when it isn't the active buffer. Prefer
+    // this over `goto` below whenever a span is in hand.
+    gotoSourceSpan: (span) => deps.gotoSourceSpan(span),
+    // The active-document-only fallback, for elements with no resolvable span.
     goto: (line, col) => editor.goto(line, col),
     onOpenContextMap: () => centerDeck.selectOutput('contextmap'),
     onOpenGlossary: () => centerDeck.selectDocsTab('glossary'),

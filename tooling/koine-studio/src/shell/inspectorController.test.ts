@@ -951,6 +951,70 @@ describe('createInspectorController — Domain navigator doorways + cross-axis g
   });
 });
 
+describe('createInspectorController — Domain navigator gotoSourceSpan wiring (#1737)', () => {
+  // The navigator's own in-rail Context Map graph only paints when the model declares relations
+  // (#483) — so this fixture needs a relation, plus a per-context `contextSpans` entry (#290).
+  function contextMapWithSpans(spans: Record<string, SourceSpan | null>): ContextMapResult {
+    return {
+      contexts: Object.keys(spans),
+      contextSpans: spans,
+      relations: [
+        {
+          upstream: 'Ordering',
+          downstream: 'Shipping',
+          kind: 'Customer/Supplier',
+          bidirectional: false,
+          sharedTypes: [],
+          acl: [],
+          upstreamRole: 'Supplier',
+          downstreamRole: 'Customer',
+        },
+      ],
+    };
+  }
+
+  test('a Context Map node click forwards the WHOLE span (file included) to deps.gotoSourceSpan — not deps.editor.goto', async () => {
+    const lsp = makeLsp();
+    const span: SourceSpan = { file: 'file:///shipping.koi', line: 3, column: 9, endLine: 3, endColumn: 14, offset: 20, length: 5 };
+    lsp.contextMap = vi.fn(async (): Promise<ContextMapResult> => contextMapWithSpans({ Ordering: null, Shipping: span }));
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    const doorway = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
+    doorway.click();
+    await flush();
+
+    const node = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-ctxmap-node="Shipping"]')!;
+    node.click();
+
+    expect(deps.gotoSourceSpan).toHaveBeenCalledWith(span);
+    expect(deps.editor.goto).not.toHaveBeenCalled();
+  });
+
+  test('a span-less context node reaches neither deps.gotoSourceSpan nor deps.editor.goto — inert, not a bogus jump into the active document', async () => {
+    const lsp = makeLsp();
+    lsp.contextMap = vi.fn(async (): Promise<ContextMapResult> => contextMapWithSpans({ Ordering: null, Shipping: null }));
+    const deps = makeDeps(lsp);
+    const ctl = createInspectorController(deps);
+    ctl.init();
+    ctl.refreshActiveSurfaces();
+    await flush();
+
+    const doorway = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-door="contextmap"]')!;
+    doorway.click();
+    await flush();
+
+    const node = domById('rail-domain-pane').querySelector<HTMLButtonElement>('[data-ctxmap-node="Shipping"]')!;
+    node.click();
+
+    expect(deps.gotoSourceSpan).not.toHaveBeenCalled();
+    expect(deps.editor.goto).not.toHaveBeenCalled();
+  });
+});
+
 describe('createInspectorController — loading states clear on success', () => {
   // Regression: docMessage writes a raw <p>Loading…</p> the Preact reconciler can't see, so a
   // bare render(<Panel/>, host) used to APPEND the panel beside the loading line — both showed at
