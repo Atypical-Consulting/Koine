@@ -16,6 +16,12 @@
 
 mod collab;
 mod noise;
+// `pub` unlike its siblings: this module is a self-contained security primitive with no call sites
+// in this file yet (the filesystem sinks adopt it as the extension surface lands), and a private
+// module of unused-but-`pub` items is a wall of `dead_code` warnings. Exporting it from the crate
+// root is also the honest description — it is the containment rule, meant to be reachable from
+// every module that touches a third-party path.
+pub mod paths;
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
