@@ -700,6 +700,18 @@ public sealed partial class PhpEmitter
         var memberNames = new HashSet<string>(members.Select(m => m.Name), StringComparer.Ordinal);
         var fields = members.Where(m => !MemberAnalysis.IsDerived(m, memberNames)).ToList();
 
+        // Per-member import hint for Assemble/CollectUses (issue #1742, the fifth call site of the
+        // #1701/#1712/#1716/#1718 gap): a member's own `use` import must resolve against ITS declared
+        // type's context — the member's explicit `Context.Type` qualifier when present, else this
+        // event's own context — not unconditionally this event's own context. Like a repository or
+        // service (#1718), an event isn't tied to one entity's own field set, so it gets its own
+        // dictionary built from scratch.
+        var symbolContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Member m in members)
+        {
+            CollectImportHints(m.Type, contextName, symbolContext);
+        }
+
         var translator = new PhpExpressionTranslator(emit.Index, members, emit.EnumMemberToType, context: contextName, regexMatchTimeoutMs: _options.RegexMatchTimeoutMs);
 
         var sb = new StringBuilder();
@@ -760,7 +772,7 @@ public sealed partial class PhpEmitter
 
         return new EmittedFile(
             PathFor(contextName, KindFolder.Events, rawName),
-            Assemble(contextName, KindFolder.Events, sb.ToString(), name),
+            Assemble(contextName, KindFolder.Events, sb.ToString(), name, symbolContext),
             Kind: kind);
     }
 }
