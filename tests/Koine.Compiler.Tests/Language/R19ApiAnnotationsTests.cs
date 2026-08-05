@@ -1,5 +1,7 @@
+using System.Text.RegularExpressions;
 using Koine.Compiler.Ast;
 using Koine.Compiler.Diagnostics;
+using Koine.Compiler.Semantics;
 using Koine.Compiler.Services;
 
 namespace Koine.Compiler.Tests;
@@ -1894,5 +1896,203 @@ public class R19ApiAnnotationsTests
 
         endpoints.ShouldContain("[Microsoft.AspNetCore.Mvc.FromRoute(Name = \"event\")] string @event");
         endpoints.ShouldContain("query with { Event = @event }");
+    }
+
+    // ---- KOI1211: route normalization (#1745) --------------------------------
+
+    /// <summary>
+    /// The normalized route KEY (#1745) that makes two templates differing only in letter case or
+    /// route-parameter naming compare equal: literal text lowercased, each <c>{token}</c> rewritten to
+    /// a positional placeholder (name and <c>:constraint</c> discarded, <c>*</c>/<c>**</c> catch-alls
+    /// collapsed to one <c>*</c>, a <c>?</c> anywhere in the token preserved), <c>{{</c>/<c>}}</c> escapes
+    /// left alone, and an unclosed <c>{</c> copied through verbatim rather than throwing.
+    /// </summary>
+    [Theory]
+    [InlineData("/Orders", "/orders")]
+    [InlineData("/orders/{id}", "/orders/{0}")]
+    [InlineData("/orders/{orderId}", "/orders/{0}")]
+    [InlineData("/orders/{id:int}", "/orders/{0}")]
+    [InlineData("/orders/{id?}", "/orders/{0?}")]
+    [InlineData("/orders/{id?:int}", "/orders/{0?}")]
+    [InlineData("/orders/{*path}", "/orders/{*0}")]
+    [InlineData("/orders/{**path}", "/orders/{*0}")]
+    [InlineData("/orders/{id}/lines/{lineId}", "/orders/{0}/lines/{1}")]
+    [InlineData("/lit/{{brace}}", "/lit/{{brace}}")]
+    [InlineData("/", "/")]
+    [InlineData("", "")]
+    [InlineData("/orders/{id", "/orders/{id")]
+    public void Normalize_route_rewrites_case_and_route_parameters(string route, string expected) =>
+        CqrsValidator.NormalizeRoute(route).ShouldBe(expected);
+
+    /// <summary>
+    /// #1745 (a): the issue's headline gap — two commands whose routes differ only in a route
+    /// parameter's NAME (<c>{id}</c> vs <c>{orderId}</c>) reach the same ASP.NET route table entry,
+    /// even though the raw templates were never ordinally equal. Filtered to KOI1211 specifically: a
+    /// route token named <c>orderId</c> binds to nothing on a parameterless command (KOI1215, an
+    /// unrelated pre-existing warning also present in the issue's own repro model), which is not what
+    /// this test is about.
+    /// </summary>
+    [Fact]
+    public void Commands_whose_routes_differ_only_in_parameter_name_are_rejected() =>
+        Diagnose(TwoCommandSource(PutOrdersId, ["""@route("/orders/{orderId}")""", "@put"]))
+            .Where(d => d.Code == DiagnosticCodes.DuplicateApiRoute)
+            .ShouldHaveSingleItem();
+
+    /// <summary>
+    /// #1745 (b): the issue's other headline gap — two queries whose routes differ only in letter
+    /// case (<c>/Orders</c> vs <c>/orders</c>) are the same URL space to ASP.NET's case-insensitive
+    /// router.
+    /// </summary>
+    [Fact]
+    public void Queries_whose_routes_differ_only_in_case_are_rejected()
+    {
+        var source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+                }
+              }
+
+              readmodel OrderRow from Order { status }
+
+              @route("/Orders")
+              query AllOrders(): List<OrderRow>
+
+              @route("/orders")
+              query RecentOrders(): List<OrderRow>
+            }
+            """;
+
+        Diagnose(source).ShouldHaveSingleItem().Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+    }
+
+    /// <summary>
+    /// #1745 (c): when the raw routes textually differ, the message names BOTH spellings — otherwise
+    /// it would read as a false positive to whichever author's spelling goes unquoted.
+    /// </summary>
+    [Fact]
+    public void The_collision_message_names_both_spellings_when_the_routes_differ()
+    {
+        Diagnostic collision = Diagnose(TwoCommandSource(PutOrdersId, ["""@route("/orders/{orderId}")""", "@put"]))
+            .Single(d => d.Code == DiagnosticCodes.DuplicateApiRoute);
+
+        collision.Message.ShouldContain("PUT /orders/{orderId}");
+        collision.Message.ShouldContain("PUT /orders/{id}");
+        collision.Message.ShouldContain("routes that differ only in parameter names or letter case match the same URLs");
+    }
+
+    /// <summary>
+    /// #1745 code review: the "give it a @route/verb of its own" hint (#1846) still appears when the
+    /// colliding routes differ only by normalization, not just on the pre-existing exact-match message —
+    /// the advice is equally actionable either way, and this is the one shape where the two features
+    /// interact: a purely-conventional factory's own route (always lowercase, via <c>Kebab</c>) can only
+    /// textually differ from the first claimant's raw route when that claimant is an explicitly
+    /// <c>@route</c>-annotated declaration spelled in a different case.
+    /// </summary>
+    [Fact]
+    public void The_conventional_factory_hint_still_appears_when_the_routes_only_differ_by_case()
+    {
+        const string source = """
+            context Sales {
+              enum OrderStatus { Draft, Placed }
+              aggregate Fulfilment root Order {
+                entity Order identified by OrderId {
+                  status: OrderStatus = Draft
+
+                  @route("/Order/Open")
+                  @post
+                  command reopen {
+                    requires status == Placed "order is not placed"
+                    status -> Draft
+                  }
+
+                  create open {
+                  }
+                }
+              }
+            }
+            """;
+
+        Diagnostic collision = Diagnose(source).ShouldHaveSingleItem();
+
+        collision.Code.ShouldBe(DiagnosticCodes.DuplicateApiRoute);
+        collision.Message.ShouldContain("routes that differ only in parameter names or letter case match the same URLs");
+        collision.Message.ShouldContain(
+            "this factory derives both its route and its verb by convention — give it a @route or a " +
+            "verb annotation of its own to move it off this path");
+    }
+
+    /// <summary>
+    /// #1745 (e): near misses that remain genuinely different stay clean — a catch-all is not the same
+    /// match space as a plain segment, an optional token is not the same as a required one, and an
+    /// extra literal segment is a real difference. (The catch-all pair's token names bind to nothing on
+    /// a parameterless command, so it is checked for the absence of KOI1211 specifically rather than an
+    /// empty diagnostic list, which the unrelated KOI1215 "unbound route token" warning would fail.)
+    /// </summary>
+    [Fact]
+    public void Near_miss_routes_that_are_genuinely_different_stay_clean()
+    {
+        Diagnose(TwoCommandSource(
+                ["""@route("/orders/{*path}")""", "@put"],
+                ["""@route("/orders/{name}")""", "@put"]))
+            .ShouldNotContain(d => d.Code == DiagnosticCodes.DuplicateApiRoute);
+
+        Diagnose(TwoCommandSource(["""@route("/orders/{id?}")""", "@put"], PutOrdersId))
+            .ShouldBeEmpty();
+
+        Diagnose(TwoCommandSource(["""@route("/orders/{id}/edit")""", "@put"], PutOrdersId))
+            .ShouldBeEmpty();
+    }
+
+    /// <summary>The <c>{…}</c> placeholders <see cref="CqrsValidator.NormalizeRoute"/> actually emitted, read
+    /// back off its output rather than a side channel — <c>{{</c>/<c>}}</c> escapes never match (no digit
+    /// follows), so only real positional tokens count.</summary>
+    private static int PlaceholderCount(string normalizedRoute) =>
+        Regex.Matches(normalizedRoute, @"\{\*?\d+\??\}").Count;
+
+    /// <summary>
+    /// #1745 (Task 3): pins <see cref="CqrsValidator.NormalizeRoute"/>'s idea of "how many route
+    /// parameters does this template have" against <see cref="RouteTemplate.Tokens"/> — the walk
+    /// <see cref="RouteDerivation"/> uses to resolve one <c>RouteTokenBinding</c> per
+    /// token, which <c>OpenApiEmitter.Paths.PathParameters</c> then emits one OpenAPI parameter per
+    /// (#1748). <c>NormalizeRoute</c> cannot call <see cref="RouteTemplate.Tokens"/> directly — it reasons
+    /// about a token's POSITION, <c>Tokens</c> about its de-duplicated NAME — but for any template with
+    /// distinct parameter names (the only well-formed shape; ASP.NET rejects a repeated one) the two
+    /// counts must always agree, or KOI1211's idea of a route's shape would silently diverge from what
+    /// the OpenAPI document and the C# <c>api</c> layer actually bind. Covers escapes, constraints,
+    /// optionals, and single/double-star catch-alls.
+    /// </summary>
+    [Theory]
+    [InlineData("/orders")]
+    [InlineData("/orders/{id}")]
+    [InlineData("/orders/{id:int}")]
+    [InlineData("/orders/{id?}")]
+    [InlineData("/orders/{id?:int}")]
+    [InlineData("/files/{*path}")]
+    [InlineData("/files/{**path}")]
+    [InlineData("/orders/{id}/lines/{lineId}")]
+    [InlineData("/lit/{{brace}}/{id}")]
+    [InlineData("/a/{x}/b/{y}/c/{z}")]
+    public void Normalize_route_token_count_agrees_with_the_shared_route_template_walker(string route) =>
+        PlaceholderCount(CqrsValidator.NormalizeRoute(route)).ShouldBe(RouteTemplate.Tokens(route).Count);
+
+    /// <summary>
+    /// The same pin one layer further down the emit side (#1745 Task 3): a query's resolved
+    /// <c>RouteTokenBinding</c> count — what <c>OpenApiEmitter.Paths.PathParameters</c> actually turns
+    /// into OpenAPI <c>parameters</c> entries, one per binding — must match <c>NormalizeRoute</c>'s
+    /// placeholder count too. Deliberately uses a token (<c>lineId</c>) that binds to nothing, since
+    /// <see cref="RouteDerivation"/> still records one binding per token regardless of
+    /// whether it resolves (an unbound token is KOI1215's concern, not a reason to omit the OpenAPI
+    /// parameter) — so the count must not depend on binding success either.
+    /// </summary>
+    [Fact]
+    public void Normalize_route_placeholder_count_agrees_with_route_derivation_token_bindings()
+    {
+        var query = new QueryDecl("Sample", [], new TypeRef("Unused"), RouteOverride: "/orders/{id}/lines/{lineId:int}");
+        RouteInfo info = RouteDerivation.ForQuery(query);
+
+        PlaceholderCount(CqrsValidator.NormalizeRoute(info.Route)).ShouldBe(info.TokenBindings.Count);
     }
 }
